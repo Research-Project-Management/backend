@@ -1,0 +1,47 @@
+import express from "express";
+import dotenv from "dotenv";
+import connectDB from "./app/config/db.js";
+import authRouter from "./app/route/auth.js";
+import session from "express-session";
+import passport from "passport";
+import initPassportLocal from "./app/config/passport.js";
+import flash from "express-flash";
+import cors from "cors";
+//config
+dotenv.config();
+const PORT = process.env.PORT;
+const app = express();
+connectDB(process.env.MONGODB_URI);
+
+//middleware
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(cors({ origin: "http://localhost:5173", credentials: true }));
+app.use(flash());
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      secure: false,
+      sameSite: "lax",
+    },
+  }),
+);
+app.use(passport.initialize());
+app.use(passport.session());
+
+initPassportLocal(passport);
+//route
+app.get("/", (req, res) => {
+  res.json({ message: "Hello bro" });
+});
+app.use("/auth", authRouter);
+
+//listen
+app.listen(PORT, () => {
+  console.log(`Server is running on http://localhost:${PORT}`);
+});
