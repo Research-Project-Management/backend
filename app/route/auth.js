@@ -18,12 +18,10 @@ authRouter.post("/login", (req, res, next) => {
   passport.authenticate("local", (err, user, info) => {
     console.log("Authentication attempt:", { err, user, info });
     if (err) {
-      res
-        .status(500)
-        .json({
-          type: err.type || "NULL_TYPE",
-          error: err.message || "Internal server error",
-        });
+      res.status(500).json({
+        type: err.type || "NULL_TYPE",
+        error: err.message || "Internal server error",
+      });
     }
     if (user) {
       res.json({ user });
@@ -53,7 +51,7 @@ authRouter.get(
   passport.authenticate("google", { failureRedirect: "/login" }),
   function (req, res) {
     console.log("Google authentication successful");
-    res.redirect(process.env.CLIENT_URL || "http://localhost:5173/workspace");
+    res.redirect(process.env.CLIENT_URL || "http://localhost:5173/callback");
   },
 );
 
