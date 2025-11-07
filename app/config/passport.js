@@ -3,6 +3,7 @@ import { Strategy as LocalStrategy } from "passport-local";
 import UserModel from "../schema/user.js";
 
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
+import { Strategy as GitHubStrategy } from "passport-github2";
 
 let initPassportLocal = (passport) => {
   passport.use(
@@ -13,7 +14,7 @@ let initPassportLocal = (passport) => {
         callbackURL: "http://localhost:2912/auth/google/callback",
       },
       async (accessToken, refreshToken, profile, cb) => {
-        console.log("Google profile: ", profile);
+        // console.log("Google profile: ", profile);
         let user = await UserModel.findOne({ email: profile.emails[0].value });
         if (user == null) {
           let newUser = new UserModel({
@@ -25,6 +26,27 @@ let initPassportLocal = (passport) => {
         }
         console.log("Google user authenticated: ", user.email);
         return cb(null, user);
+      },
+    ),
+  );
+
+  passport.use(
+    new GitHubStrategy(
+      {
+        clientID: process.env.GITHUB_CLIENT_ID,
+        clientSecret: process.env.GITHUB_CLIENT_SECRET,
+        callbackURL: "http://localhost:2912/auth/github/callback",
+      },
+      async function (accessToken, refreshToken, profile, done) {
+        let user = await UserModel.findOne({ gihubId: profile.id });
+        if (user == null) {
+          let newUser = new UserModel({
+            gihubId: profile.id,
+            name: profile.displayName,
+          });
+          user = await newUser.save();
+        }
+        return done(null, user);
       },
     ),
   );
@@ -47,8 +69,8 @@ let initPassportLocal = (passport) => {
           if (!user.password) {
             return done(
               {
-                type: "ONLY_LOGIN_WITH_GOOGLE",
-                message: "Please login with Google",
+                type: "ONLY_LOGIN_WITH_OAUTH",
+                message: "Please login with your OAuth provider.",
               },
               false,
               null,
