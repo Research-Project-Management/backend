@@ -75,4 +75,14 @@ authRouter.get(
   },
 );
 
+// temp
+authRouter.get("/logout", (req, res) => {
+  req.logout(() => {
+    req.session.destroy(() => {
+      res.clearCookie("connect.sid");
+      return res.status(200).json({ message: "Logged out successfully" });
+    });
+  });
+});
+
 export default authRouter;
