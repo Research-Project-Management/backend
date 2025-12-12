@@ -1,0 +1,51 @@
+import mongoose from "mongoose";
+
+const projectMemberSchema = new mongoose.Schema({
+  user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+  role: {
+    type: String,
+    enum: ["manager", "member", "viewer"],
+    default: "member",
+  },
+  joinedAt: { type: Date, default: Date.now },
+});
+
+const projectSchema = new mongoose.Schema(
+  {
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+    title: {
+      type: String,
+      required: true,
+    },
+    description: {
+      type: String,
+      default: "",
+    },
+    members: [projectMemberSchema],
+    workspace: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Workspace",
+      required: true,
+    },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+    settings: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+const ProjectModel =
+  mongoose.models.Project || mongoose.model("Project", projectSchema);
+
+export default ProjectModel;
