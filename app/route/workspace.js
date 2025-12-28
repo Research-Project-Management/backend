@@ -21,7 +21,7 @@ workspaceRouter.post("/", isAuthenticated, async (req, res) => {
   const newWorkspace = new WorkspaceModel({
     name,
     color,
-    avatar,
+    avatar: avatar || "",
     members: [{ user: req.user._id, role: "owner" }],
     createdBy: req.user._id,
   });

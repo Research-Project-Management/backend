@@ -18,6 +18,7 @@ const projectSchema = new mongoose.Schema(
       ref: "Project",
       required: false,
     },
+    metaData: { type: Object, required: false },
     uploadedAt: { type: Date, default: Date.now },
     size: { type: Number, required: true },
     mimeType: { type: String, required: true },

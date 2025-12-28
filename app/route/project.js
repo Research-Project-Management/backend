@@ -42,10 +42,11 @@ projectRouter.post(
   checkWorkspaceRole("owner", "admin"),
   async (req, res) => {
     try {
-      const { title, description } = req.body;
+      const { name, description, avatar } = req.body;
 
       const newProject = new ProjectModel({
-        title,
+        name,
+        avatar: avatar || "",
         description,
         workspace: req.params.id,
         members: [{ user: req.user._id, role: "manager" }],
@@ -82,11 +83,11 @@ projectRouter.put(
   checkProjectRole("manager"),
   async (req, res) => {
     try {
-      const { title, description } = req.body;
+      const { name, description } = req.body;
 
       const project = await ProjectModel.findByIdAndUpdate(
         req.params.projectId,
-        { title, description },
+        { name, description },
         { new: true }
       );
 

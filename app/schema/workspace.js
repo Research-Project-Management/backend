@@ -15,7 +15,7 @@ const workspaceSchema = new mongoose.Schema(
     name: { type: String, required: true },
     members: [workspaceMemberSchema],
     color: { type: String, default: "#1e2939" },
-    avatar: { type: String, default: null },
+    avatar: { type: String, default: "" },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     settings: { type: mongoose.Schema.Types.Mixed, default: {} },
   },

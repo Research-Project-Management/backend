@@ -14,79 +14,79 @@
 
 ### User Object
 
-| Field       | Type      | Description                |
-| ----------- | --------- | -------------------------- |
-| `_id`       | `ObjectId`| ID của user                |
-| `email`     | `String`  | Email (unique)             |
-| `password`  | `String`  | Password đã hash (nullable)|
-| `name`      | `String`  | Tên user (default: "User") |
-| `avatar`    | `String`  | URL avatar (nullable)      |
-| `isVerified`| `Boolean` | Đã xác thực chưa           |
-| `googleId`  | `String`  | Google OAuth ID (nullable) |
-| `githubId`  | `String`  | GitHub OAuth ID (nullable) |
-| `createdAt` | `Date`    | Ngày tạo                   |
-| `updatedAt` | `Date`    | Ngày cập nhật              |
+| Field        | Type       | Description                 |
+| ------------ | ---------- | --------------------------- |
+| `_id`        | `ObjectId` | ID của user                 |
+| `email`      | `String`   | Email (unique)              |
+| `password`   | `String`   | Password đã hash (nullable) |
+| `name`       | `String`   | Tên user (default: "User")  |
+| `avatar`     | `String`   | URL avatar (nullable)       |
+| `isVerified` | `Boolean`  | Đã xác thực chưa            |
+| `googleId`   | `String`   | Google OAuth ID (nullable)  |
+| `githubId`   | `String`   | GitHub OAuth ID (nullable)  |
+| `createdAt`  | `Date`     | Ngày tạo                    |
+| `updatedAt`  | `Date`     | Ngày cập nhật               |
 
 ### Workspace Object
 
-| Field       | Type                    | Description                    |
-| ----------- | ----------------------- | ------------------------------ |
-| `_id`       | `ObjectId`              | ID của workspace               |
-| `name`      | `String`                | Tên workspace (required)       |
-| `color`     | `String`                | Màu sắc (default: "#1e2939")   |
-| `avatar`    | `String`                | URL avatar (nullable)          |
-| `members`   | `WorkspaceMember[]`     | Danh sách member               |
-| `createdBy` | `ObjectId` (ref: User)  | User tạo workspace             |
-| `settings`  | `Mixed`                 | Cài đặt workspace (default: {})|
-| `createdAt` | `Date`                  | Ngày tạo                       |
-| `updatedAt` | `Date`                  | Ngày cập nhật                  |
+| Field       | Type                   | Description                     |
+| ----------- | ---------------------- | ------------------------------- |
+| `_id`       | `ObjectId`             | ID của workspace                |
+| `name`      | `String`               | Tên workspace (required)        |
+| `color`     | `String`               | Màu sắc (default: "#1e2939")    |
+| `avatar`    | `String`               | URL avatar (nullable)           |
+| `members`   | `WorkspaceMember[]`    | Danh sách member                |
+| `createdBy` | `ObjectId` (ref: User) | User tạo workspace              |
+| `settings`  | `Mixed`                | Cài đặt workspace (default: {}) |
+| `createdAt` | `Date`                 | Ngày tạo                        |
+| `updatedAt` | `Date`                 | Ngày cập nhật                   |
 
 ### WorkspaceMember Object
 
-| Field     | Type                   | Description                              |
-| --------- | ---------------------- | ---------------------------------------- |
-| `user`    | `ObjectId` (ref: User) | ID của user                              |
-| `role`    | `String`               | `"owner"` \| `"admin"` \| `"member"`     |
-| `joinedAt`| `Date`                 | Ngày tham gia (default: Date.now)        |
+| Field      | Type                   | Description                          |
+| ---------- | ---------------------- | ------------------------------------ |
+| `user`     | `ObjectId` (ref: User) | ID của user                          |
+| `role`     | `String`               | `"owner"` \| `"admin"` \| `"member"` |
+| `joinedAt` | `Date`                 | Ngày tham gia (default: Date.now)    |
 
 ### Project Object
 
-| Field       | Type                        | Description                    |
-| ----------- | --------------------------- | ------------------------------ |
-| `_id`       | `ObjectId`                  | ID của project                 |
-| `isActive`  | `Boolean`                   | Trạng thái (default: true)     |
-| `title`     | `String`                    | Tiêu đề project (required)     |
-| `description`| `String`                   | Mô tả (default: "")            |
-| `members`   | `ProjectMember[]`           | Danh sách member               |
-| `workspace` | `ObjectId` (ref: Workspace) | ID workspace chứa project      |
-| `createdBy` | `ObjectId` (ref: User)      | User tạo project               |
-| `settings`  | `Mixed`                     | Cài đặt project (default: {})  |
-| `createdAt` | `Date`                      | Ngày tạo                       |
-| `updatedAt` | `Date`                      | Ngày cập nhật                  |
+| Field         | Type                        | Description                   |
+| ------------- | --------------------------- | ----------------------------- |
+| `_id`         | `ObjectId`                  | ID của project                |
+| `isActive`    | `Boolean`                   | Trạng thái (default: true)    |
+| `title`       | `String`                    | Tiêu đề project (required)    |
+| `description` | `String`                    | Mô tả (default: "")           |
+| `members`     | `ProjectMember[]`           | Danh sách member              |
+| `workspace`   | `ObjectId` (ref: Workspace) | ID workspace chứa project     |
+| `createdBy`   | `ObjectId` (ref: User)      | User tạo project              |
+| `settings`    | `Mixed`                     | Cài đặt project (default: {}) |
+| `createdAt`   | `Date`                      | Ngày tạo                      |
+| `updatedAt`   | `Date`                      | Ngày cập nhật                 |
 
 ### ProjectMember Object
 
-| Field     | Type                   | Description                                   |
-| --------- | ---------------------- | --------------------------------------------- |
-| `user`    | `ObjectId` (ref: User) | ID của user                                   |
-| `role`    | `String`               | `"manager"` \| `"member"` \| `"viewer"`       |
-| `joinedAt`| `Date`                 | Ngày tham gia (default: Date.now)             |
+| Field      | Type                   | Description                             |
+| ---------- | ---------------------- | --------------------------------------- |
+| `user`     | `ObjectId` (ref: User) | ID của user                             |
+| `role`     | `String`               | `"manager"` \| `"member"` \| `"viewer"` |
+| `joinedAt` | `Date`                 | Ngày tham gia (default: Date.now)       |
 
 ### File Object
 
-| Field       | Type                        | Description                    |
-| ----------- | --------------------------- | ------------------------------ |
-| `_id`       | `ObjectId`                  | ID của file                    |
-| `filename`  | `String`                    | Tên file (required)            |
-| `author`    | `ObjectId` (ref: User)      | User upload file               |
-| `workspace` | `ObjectId` (ref: Workspace) | Workspace chứa file (nullable) |
-| `project`   | `ObjectId` (ref: Project)   | Project chứa file (nullable)   |
-| `uploadedAt`| `Date`                      | Ngày upload (default: Date.now)|
-| `size`      | `Number`                    | Kích thước file (bytes)        |
-| `mimeType`  | `String`                    | MIME type của file             |
-| `url`       | `String`                    | URL của file                   |
-| `createdAt` | `Date`                      | Ngày tạo                       |
-| `updatedAt` | `Date`                      | Ngày cập nhật                  |
+| Field        | Type                        | Description                     |
+| ------------ | --------------------------- | ------------------------------- |
+| `_id`        | `ObjectId`                  | ID của file                     |
+| `filename`   | `String`                    | Tên file (required)             |
+| `author`     | `ObjectId` (ref: User)      | User upload file                |
+| `workspace`  | `ObjectId` (ref: Workspace) | Workspace chứa file (nullable)  |
+| `project`    | `ObjectId` (ref: Project)   | Project chứa file (nullable)    |
+| `uploadedAt` | `Date`                      | Ngày upload (default: Date.now) |
+| `size`       | `Number`                    | Kích thước file (bytes)         |
+| `mimeType`   | `String`                    | MIME type của file              |
+| `url`        | `String`                    | URL của file                    |
+| `createdAt`  | `Date`                      | Ngày tạo                        |
+| `updatedAt`  | `Date`                      | Ngày cập nhật                   |
 
 ---
 
@@ -133,10 +133,10 @@ POST /auth/login
 
 **Body:**
 
-| Field      | Type     | Required | Description      |
-| ---------- | -------- | -------- | ---------------- |
-| `email`    | `String` | ✅       | Email đăng nhập  |
-| `password` | `String` | ✅       | Mật khẩu         |
+| Field      | Type     | Required | Description     |
+| ---------- | -------- | -------- | --------------- |
+| `email`    | `String` | ✅       | Email đăng nhập |
+| `password` | `String` | ✅       | Mật khẩu        |
 
 ```json
 {
@@ -179,11 +179,11 @@ POST /auth/register
 
 **Body:**
 
-| Field      | Type     | Required | Description      |
-| ---------- | -------- | -------- | ---------------- |
-| `name`     | `String` | ✅       | Tên người dùng   |
-| `email`    | `String` | ✅       | Email đăng ký    |
-| `password` | `String` | ✅       | Mật khẩu         |
+| Field      | Type     | Required | Description    |
+| ---------- | -------- | -------- | -------------- |
+| `name`     | `String` | ✅       | Tên người dùng |
+| `email`    | `String` | ✅       | Email đăng ký  |
+| `password` | `String` | ✅       | Mật khẩu       |
 
 ```json
 {
@@ -321,11 +321,11 @@ POST /api/workspace
 
 **Body:**
 
-| Field    | Type     | Required | Default       | Description         |
-| -------- | -------- | -------- | ------------- | ------------------- |
-| `name`   | `String` | ✅       | -             | Tên workspace       |
-| `color`  | `String` | ❌       | `"#1e2939"`   | Màu sắc workspace   |
-| `avatar` | `String` | ❌       | `null`        | URL avatar          |
+| Field    | Type     | Required | Default     | Description       |
+| -------- | -------- | -------- | ----------- | ----------------- |
+| `name`   | `String` | ✅       | -           | Tên workspace     |
+| `color`  | `String` | ❌       | `"#1e2939"` | Màu sắc workspace |
+| `avatar` | `String` | ❌       | `null`      | URL avatar        |
 
 ```json
 {
@@ -425,9 +425,9 @@ PUT /api/workspace/:id
 
 **Body:**
 
-| Field  | Type     | Required | Description      |
-| ------ | -------- | -------- | ---------------- |
-| `name` | `String` | ❌       | Tên workspace mới|
+| Field  | Type     | Required | Description       |
+| ------ | -------- | -------- | ----------------- |
+| `name` | `String` | ❌       | Tên workspace mới |
 
 ```json
 {
@@ -472,10 +472,10 @@ PUT /api/workspace/:id/add-member
 
 **Body:**
 
-| Field    | Type       | Required | Default    | Description                              |
-| -------- | ---------- | -------- | ---------- | ---------------------------------------- |
-| `userId` | `ObjectId` | ✅       | -          | ID của user cần thêm                     |
-| `role`   | `String`   | ❌       | `"member"` | `"owner"` \| `"admin"` \| `"member"`     |
+| Field    | Type       | Required | Default    | Description                          |
+| -------- | ---------- | -------- | ---------- | ------------------------------------ |
+| `userId` | `ObjectId` | ✅       | -          | ID của user cần thêm                 |
+| `role`   | `String`   | ❌       | `"member"` | `"owner"` \| `"admin"` \| `"member"` |
 
 ```json
 {
@@ -526,10 +526,10 @@ PUT /api/workspace/:id/update-member-role
 
 **Body:**
 
-| Field     | Type       | Required | Description                              |
-| --------- | ---------- | -------- | ---------------------------------------- |
-| `userId`  | `ObjectId` | ✅       | ID của user cần cập nhật                 |
-| `newRole` | `String`   | ✅       | `"owner"` \| `"admin"` \| `"member"`     |
+| Field     | Type       | Required | Description                          |
+| --------- | ---------- | -------- | ------------------------------------ |
+| `userId`  | `ObjectId` | ✅       | ID của user cần cập nhật             |
+| `newRole` | `String`   | ✅       | `"owner"` \| `"admin"` \| `"member"` |
 
 ```json
 {
@@ -580,9 +580,9 @@ PUT /api/workspace/:id/remove-member
 
 **Body:**
 
-| Field    | Type       | Required | Description          |
-| -------- | ---------- | -------- | -------------------- |
-| `userId` | `ObjectId` | ✅       | ID của user cần xóa  |
+| Field    | Type       | Required | Description         |
+| -------- | ---------- | -------- | ------------------- |
+| `userId` | `ObjectId` | ✅       | ID của user cần xóa |
 
 ```json
 {
@@ -726,10 +726,10 @@ POST /api/workspace/:id/projects
 
 **Body:**
 
-| Field         | Type     | Required | Default | Description       |
-| ------------- | -------- | -------- | ------- | ----------------- |
-| `title`       | `String` | ✅       | -       | Tiêu đề project   |
-| `description` | `String` | ❌       | `""`    | Mô tả project     |
+| Field         | Type     | Required | Default | Description     |
+| ------------- | -------- | -------- | ------- | --------------- |
+| `title`       | `String` | ✅       | -       | Tiêu đề project |
+| `description` | `String` | ❌       | `""`    | Mô tả project   |
 
 ```json
 {
@@ -774,9 +774,9 @@ GET /api/project/:projectId
 
 **Params:**
 
-| Param       | Type       | Description     |
-| ----------- | ---------- | --------------- |
-| `projectId` | `ObjectId` | ID của project  |
+| Param       | Type       | Description    |
+| ----------- | ---------- | -------------- |
+| `projectId` | `ObjectId` | ID của project |
 
 **Quyền:** `manager`, `member`, `viewer` của project hoặc `admin`/`owner` của workspace
 
@@ -821,18 +821,18 @@ PUT /api/project/:projectId
 
 **Params:**
 
-| Param       | Type       | Description     |
-| ----------- | ---------- | --------------- |
-| `projectId` | `ObjectId` | ID của project  |
+| Param       | Type       | Description    |
+| ----------- | ---------- | -------------- |
+| `projectId` | `ObjectId` | ID của project |
 
 **Quyền:** `manager` của project hoặc `admin`/`owner` của workspace
 
 **Body:**
 
-| Field         | Type     | Required | Description        |
-| ------------- | -------- | -------- | ------------------ |
-| `title`       | `String` | ❌       | Tiêu đề mới        |
-| `description` | `String` | ❌       | Mô tả mới          |
+| Field         | Type     | Required | Description |
+| ------------- | -------- | -------- | ----------- |
+| `title`       | `String` | ❌       | Tiêu đề mới |
+| `description` | `String` | ❌       | Mô tả mới   |
 
 ```json
 {
@@ -860,9 +860,9 @@ DELETE /api/project/:projectId
 
 **Params:**
 
-| Param       | Type       | Description     |
-| ----------- | ---------- | --------------- |
-| `projectId` | `ObjectId` | ID của project  |
+| Param       | Type       | Description    |
+| ----------- | ---------- | -------------- |
+| `projectId` | `ObjectId` | ID của project |
 
 **Quyền:** `manager` của project hoặc `admin`/`owner` của workspace
 
@@ -880,18 +880,18 @@ PUT /api/project/:projectId/add-member
 
 **Params:**
 
-| Param       | Type       | Description     |
-| ----------- | ---------- | --------------- |
-| `projectId` | `ObjectId` | ID của project  |
+| Param       | Type       | Description    |
+| ----------- | ---------- | -------------- |
+| `projectId` | `ObjectId` | ID của project |
 
 **Quyền:** `manager` của project hoặc `admin`/`owner` của workspace
 
 **Body:**
 
-| Field    | Type       | Required | Default    | Description                                 |
-| -------- | ---------- | -------- | ---------- | ------------------------------------------- |
-| `userId` | `ObjectId` | ✅       | -          | ID của user cần thêm                        |
-| `role`   | `String`   | ❌       | `"member"` | `"manager"` \| `"member"` \| `"viewer"`     |
+| Field    | Type       | Required | Default    | Description                             |
+| -------- | ---------- | -------- | ---------- | --------------------------------------- |
+| `userId` | `ObjectId` | ✅       | -          | ID của user cần thêm                    |
+| `role`   | `String`   | ❌       | `"member"` | `"manager"` \| `"member"` \| `"viewer"` |
 
 ```json
 {
@@ -934,18 +934,18 @@ PUT /api/project/:projectId/update-member-role
 
 **Params:**
 
-| Param       | Type       | Description     |
-| ----------- | ---------- | --------------- |
-| `projectId` | `ObjectId` | ID của project  |
+| Param       | Type       | Description    |
+| ----------- | ---------- | -------------- |
+| `projectId` | `ObjectId` | ID của project |
 
 **Quyền:** `manager` của project hoặc `admin`/`owner` của workspace
 
 **Body:**
 
-| Field     | Type       | Required | Description                                 |
-| --------- | ---------- | -------- | ------------------------------------------- |
-| `userId`  | `ObjectId` | ✅       | ID của user cần cập nhật                    |
-| `newRole` | `String`   | ✅       | `"manager"` \| `"member"` \| `"viewer"`     |
+| Field     | Type       | Required | Description                             |
+| --------- | ---------- | -------- | --------------------------------------- |
+| `userId`  | `ObjectId` | ✅       | ID của user cần cập nhật                |
+| `newRole` | `String`   | ✅       | `"manager"` \| `"member"` \| `"viewer"` |
 
 ```json
 {
@@ -988,17 +988,17 @@ PUT /api/project/:projectId/remove-member
 
 **Params:**
 
-| Param       | Type       | Description     |
-| ----------- | ---------- | --------------- |
-| `projectId` | `ObjectId` | ID của project  |
+| Param       | Type       | Description    |
+| ----------- | ---------- | -------------- |
+| `projectId` | `ObjectId` | ID của project |
 
 **Quyền:** `manager` của project hoặc `admin`/`owner` của workspace
 
 **Body:**
 
-| Field    | Type       | Required | Description          |
-| -------- | ---------- | -------- | -------------------- |
-| `userId` | `ObjectId` | ✅       | ID của user cần xóa  |
+| Field    | Type       | Required | Description         |
+| -------- | ---------- | -------- | ------------------- |
+| `userId` | `ObjectId` | ✅       | ID của user cần xóa |
 
 ```json
 {
@@ -1045,9 +1045,9 @@ PUT /api/project/:projectId/leave
 
 **Params:**
 
-| Param       | Type       | Description     |
-| ----------- | ---------- | --------------- |
-| `projectId` | `ObjectId` | ID của project  |
+| Param       | Type       | Description    |
+| ----------- | ---------- | -------------- |
+| `projectId` | `ObjectId` | ID của project |
 
 **Quyền:** `manager`, `member`, `viewer` của project
 
@@ -1091,10 +1091,10 @@ POST /api/files/presign
 
 **Body:**
 
-| Field         | Type     | Required | Description                   |
-| ------------- | -------- | -------- | ----------------------------- |
-| `filename`    | `String` | ✅       | Tên file cần upload           |
-| `contentType` | `String` | ✅       | MIME type của file            |
+| Field         | Type     | Required | Description         |
+| ------------- | -------- | -------- | ------------------- |
+| `filename`    | `String` | ✅       | Tên file cần upload |
+| `contentType` | `String` | ✅       | MIME type của file  |
 
 ```json
 {

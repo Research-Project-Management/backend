@@ -16,9 +16,13 @@ const projectSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
-    title: {
+    name: {
       type: String,
       required: true,
+    },
+    avatar: {
+      type: String,
+      default: "",
     },
     description: {
       type: String,
