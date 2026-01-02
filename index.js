@@ -15,7 +15,7 @@ dotenv.config();
 const PORT = process.env.PORT;
 const app = express();
 connectDB(process.env.MONGODB_URI);
-
+app.set("trust proxy", 1);
 //middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
