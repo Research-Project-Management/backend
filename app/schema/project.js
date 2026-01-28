@@ -28,6 +28,10 @@ const projectSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    modules: {
+      type: [String],
+      default: ["overview","tasks","pages", "storage"],
+    },
     members: [projectMemberSchema],
     workspace: {
       type: mongoose.Schema.Types.ObjectId,

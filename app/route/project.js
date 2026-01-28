@@ -16,17 +16,28 @@ projectRouter.get(
   checkWorkspaceRole("owner", "admin", "member"),
   async (req, res) => {
     try {
-      const projects = await ProjectModel.find({
-        workspace: req.params.id,
+      const { includeInactive } = req.query;
+      
+      const baseQuery = {
+        workspace: req.workspace._id,
         $or: [
           // Workspace owner/admin thấy tất cả project
           ...(["owner", "admin"].includes(req.workspaceRole)
-            ? [{ workspace: req.params.id }]
+            ? [{ workspace: req.workspace._id }]
             : []),
           // Member chỉ thấy project mình tham gia
           { "members.user": req.user._id },
         ],
-      }).populate("members.user", "name email");
+      };
+
+      // Chỉ admin/owner mới có thể xem inactive projects
+      if (!includeInactive || !["owner", "admin"].includes(req.workspaceRole)) {
+        baseQuery.isActive = true;
+      }
+
+      const projects = await ProjectModel.find(baseQuery)
+        .populate("members.user", "name email")
+        .populate("createdBy", "name email");
 
       res.json({ projects });
     } catch (error) {
@@ -37,24 +48,31 @@ projectRouter.get(
 
 // Tạo project mới (admin workspace trở lên)
 projectRouter.post(
-  "/workspace/:id/projects",
+  "/workspace/:id/project",
   isAuthenticated,
   checkWorkspaceRole("owner", "admin"),
   async (req, res) => {
     try {
-      const { name, description, avatar } = req.body;
+      const { name, description, avatar, modules, settings } = req.body;
 
       const newProject = new ProjectModel({
         name,
         avatar: avatar || "",
-        description,
-        workspace: req.params.id,
+        description: description || "",
+        workspace: req.workspace._id,
         members: [{ user: req.user._id, role: "manager" }],
         createdBy: req.user._id,
+        ...(modules && { modules }),
+        ...(settings && { settings }),
       });
 
       await newProject.save();
-      res.status(201).json({ project: newProject });
+      
+      const populatedProject = await ProjectModel.findById(newProject._id)
+        .populate("members.user", "name email")
+        .populate("createdBy", "name email");
+        
+      res.status(201).json({ project: populatedProject });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
@@ -68,7 +86,10 @@ projectRouter.get(
   checkProjectRole("manager", "member", "viewer"),
   async (req, res) => {
     try {
-      const project = await req.project.populate("members.user", "name email");
+      const project = await req.project.populate([
+        { path: "members.user", select: "name email" },
+        { path: "createdBy", select: "name email" },
+      ]);
       res.json({ project, yourRole: req.projectRole });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -83,13 +104,96 @@ projectRouter.put(
   checkProjectRole("manager"),
   async (req, res) => {
     try {
-      const { name, description } = req.body;
+      const { name, description, avatar, modules, settings, isActive } = req.body;
+
+      const updateData = {};
+      if (name !== undefined) updateData.name = name;
+      if (description !== undefined) updateData.description = description;
+      if (avatar !== undefined) updateData.avatar = avatar;
+      if (modules !== undefined) updateData.modules = modules;
+      if (settings !== undefined) updateData.settings = settings;
+      if (isActive !== undefined) updateData.isActive = isActive;
 
       const project = await ProjectModel.findByIdAndUpdate(
         req.params.projectId,
-        { name, description },
+        updateData,
         { new: true }
-      );
+      )
+        .populate("members.user", "name email")
+        .populate("createdBy", "name email");
+
+      res.json({ project });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+// Toggle project active status (manager project hoặc admin workspace trở lên)
+projectRouter.patch(
+  "/project/:projectId/toggle-active",
+  isAuthenticated,
+  checkProjectRole("manager"),
+  async (req, res) => {
+    try {
+      const project = req.project;
+      project.isActive = !project.isActive;
+      await project.save();
+
+      res.json({ 
+        project, 
+        message: project.isActive ? "Project activated" : "Project deactivated" 
+      });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+// Cập nhật modules của project (manager project hoặc admin workspace trở lên)
+projectRouter.patch(
+  "/project/:projectId/modules",
+  isAuthenticated,
+  checkProjectRole("manager"),
+  async (req, res) => {
+    try {
+      const { modules } = req.body;
+
+      if (!Array.isArray(modules)) {
+        return res.status(400).json({ error: "Modules must be an array" });
+      }
+
+      const project = await ProjectModel.findByIdAndUpdate(
+        req.params.projectId,
+        { modules },
+        { new: true }
+      )
+        .populate("members.user", "name email")
+        .populate("createdBy", "name email");
+
+      res.json({ project });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+// Cập nhật settings của project (manager project hoặc admin workspace trở lên)
+projectRouter.patch(
+  "/project/:projectId/settings",
+  isAuthenticated,
+  checkProjectRole("manager"),
+  async (req, res) => {
+    try {
+      const { settings } = req.body;
+
+      const project = await ProjectModel.findByIdAndUpdate(
+        req.params.projectId,
+        { settings },
+        { new: true }
+      )
+        .populate("members.user", "name email")
+        .populate("createdBy", "name email");
 
       res.json({ project });
     } catch (error) {
@@ -149,7 +253,11 @@ projectRouter.put(
       project.members.push({ user: userId, role });
       await project.save();
 
-      res.json({ project });
+      const populatedProject = await ProjectModel.findById(project._id)
+        .populate("members.user", "name email")
+        .populate("createdBy", "name email");
+
+      res.json({ project: populatedProject });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }

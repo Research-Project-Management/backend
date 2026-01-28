@@ -1,5 +1,6 @@
 import express from "express";
 import dotenv from "dotenv";
+dotenv.config();
 import connectDB from "./app/config/db.js";
 import authRouter from "./app/route/auth.js";
 import workspaceRouter from "./app/route/workspace.js";
@@ -11,7 +12,7 @@ import flash from "express-flash";
 import cors from "cors";
 import fileRouter from "./app/route/files.js";
 //config
-dotenv.config();
+
 const PORT = process.env.PORT;
 const app = express();
 connectDB(process.env.MONGODB_URI);

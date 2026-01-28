@@ -5,7 +5,7 @@ import ProjectModel from "../schema/project.js";
 export const checkWorkspaceRole = (...allowedRoles) => {
   return async (req, res, next) => {
     try {
-      const workspace = await WorkspaceModel.findById(req.params.id);
+      const workspace = await WorkspaceModel.findOne({ url: req.params.id });
       if (!workspace) {
         return res.status(404).json({ error: "Workspace not found" });
       }
