@@ -1,0 +1,158 @@
+import { Router } from "express";
+import TaskModel from "../schema/task.js";
+import ProjectModel from "../schema/project.js";
+import WorkspaceModel from "../schema/workspace.js";
+import { isAuthenticated, checkProjectRole } from "../middleware/checkWorkspaceRole.js";
+
+const taskRouter = Router();
+
+const checkTaskAccess = (requiredRoles) => {
+  return async (req, res, next) => {
+    try {
+      const task = await TaskModel.findById(req.params.taskId);
+      if (!task) return res.status(404).json({ error: "Task not found" });
+
+      const project = await ProjectModel.findById(task.project);
+      if (!project) return res.status(404).json({ error: "Project not found" });
+
+       const workspace = await WorkspaceModel.findById(project.workspace);
+       const workspaceMember = workspace.members.find(
+        (m) => m.user.toString() === req.user._id.toString()
+      );
+
+      if (workspaceMember && ["owner", "admin"].includes(workspaceMember.role)) {
+         return next();
+      }
+
+      const projectMember = project.members.find(
+        (m) => m.user.toString() === req.user._id.toString()
+      );
+
+      if (!projectMember || !requiredRoles.includes(projectMember.role)) {
+        return res.status(403).json({ error: "Insufficient permissions" });
+      }
+      next();
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  };
+};
+
+// Get Tasks and Columns
+taskRouter.get(
+  "/project/:projectId/tasks",
+  isAuthenticated,
+  checkProjectRole("manager", "member", "viewer"),
+  async (req, res) => {
+    try {
+      const { projectId } = req.params;
+      const tasks = await TaskModel.find({ project: projectId })
+        .populate("assignee", "name avatar")
+        .sort({ rank: 1 });
+      
+      const project = await ProjectModel.findById(projectId).select("taskColumns");
+
+      res.json({ tasks, columns: project.taskColumns });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+// Create Task
+taskRouter.post(
+  "/project/:projectId/tasks",
+  isAuthenticated,
+  checkProjectRole("manager", "member"),
+  async (req, res) => {
+    try {
+      const { title, columnId, content, assignee, dueDate, labels } = req.body;
+      const { projectId } = req.params;
+
+      const count = await TaskModel.countDocuments({ project: projectId, columnId });
+
+      const newTask = new TaskModel({
+        title,
+        content,
+        columnId,
+        project: projectId,
+        assignee,
+        dueDate,
+        labels,
+        rank: count + 1,
+        author: req.user._id
+      });
+
+      await newTask.save();
+      await newTask.populate("assignee", "name avatar");
+
+      res.status(201).json({ task: newTask });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+// Update Task
+taskRouter.put(
+  "/tasks/:taskId",
+  isAuthenticated,
+  checkTaskAccess(["manager", "member"]),
+  async (req, res) => {
+    try {
+      const { taskId } = req.params;
+      const updateData = req.body;
+      
+      const updatedTask = await TaskModel.findByIdAndUpdate(taskId, updateData, { new: true })
+        .populate("assignee", "name avatar");
+
+      res.json({ task: updatedTask });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+// Delete Task
+taskRouter.delete(
+  "/tasks/:taskId",
+  isAuthenticated,
+  checkTaskAccess(["manager", "member"]),
+  async (req, res) => {
+    try {
+      await TaskModel.findByIdAndDelete(req.params.taskId);
+      res.status(204).end();
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+// Create Column
+taskRouter.post(
+  "/project/:projectId/columns",
+  isAuthenticated,
+  checkProjectRole("manager"),
+  async (req, res) => {
+    try {
+      const { title, accentColor, isDefault } = req.body;
+      const project = req.project;
+      
+      const newColumn = {
+        id: `col-${Date.now()}`,
+        title,
+        isDefault: !!isDefault,
+        accentColor: accentColor || "#e2e8f0"
+      };
+
+      project.taskColumns.push(newColumn);
+      await project.save();
+
+      res.json({ columns: project.taskColumns });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+export default taskRouter;

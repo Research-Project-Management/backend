@@ -43,6 +43,21 @@ const projectSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+    taskColumns: {
+      type: [{
+        id: String,
+        title: String,
+        isDefault: Boolean,
+        accentColor: String,
+      }],
+      default: [
+        { id: "backlog", title: "Backlog", isDefault: false, accentColor: "#64748b" },
+        { id: "todo", title: "To Do", isDefault: true, accentColor: "#e2e8f0" },
+        { id: "doing", title: "Doing", isDefault: false, accentColor: "#3b82f6" },
+        { id: "review", title: "Review", isDefault: false, accentColor: "#eab308" },
+        { id: "done", title: "Done", isDefault: false, accentColor: "#22c55e" }
+      ]
+    },
     settings: {
       type: mongoose.Schema.Types.Mixed,
       default: {},

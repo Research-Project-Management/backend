@@ -4,8 +4,7 @@ import {
   isAuthenticated,
   checkWorkspaceRole,
 } from "../middleware/checkWorkspaceRole.js";
-import ProjectModel from "../schema/project.js";
-import { randomEmoji } from "../libs/randomEmoji.js";
+
 const workspaceRouter = Router();
 
 // Lấy tất cả workspace của user
@@ -18,24 +17,17 @@ workspaceRouter.get("/", isAuthenticated, async (req, res) => {
 
 // Tạo workspace mới (user tạo sẽ là owner)
 workspaceRouter.post("/", isAuthenticated, async (req, res) => {
-  const { name, url, avatar } = req.body;
+  const { name, url, color, avatar } = req.body;
   const newWorkspace = new WorkspaceModel({
     name,
     url,
+    color,
     avatar: avatar || "",
     members: [{ user: req.user._id, role: "owner" }],
     createdBy: req.user._id,
   });
-  const workspace = await newWorkspace.save();
-  await ProjectModel({
-    name: workspace.name,
-    avatar: randomEmoji(),
-    description: "This is the default project",
-    workspace: workspace._id,
-    members: [{ user: req.user._id, role: "manager" }],
-    createdBy: req.user._id,
-  }).save();
-  res.status(201).json({ workspace });
+  await newWorkspace.save();
+  res.status(201).json({ workspace: newWorkspace });
 });
 
 // Lấy chi tiết workspace (member trở lên)
@@ -55,10 +47,14 @@ workspaceRouter.put(
   isAuthenticated,
   checkWorkspaceRole("owner", "admin"),
   async (req, res) => {
-    const { name } = req.body;
+    const { name, avatar } = req.body;
+    const updateData = { name };
+    if (avatar !== undefined) {
+      updateData.avatar = avatar;
+    }
     const workspace = await WorkspaceModel.findByIdAndUpdate(
       req.params.id,
-      { name },
+      updateData,
       { new: true }
     );
     res.json({ workspace });

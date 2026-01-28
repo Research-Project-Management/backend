@@ -85,4 +85,28 @@ authRouter.get("/logout", (req, res) => {
   });
 });
 
+// Search users
+authRouter.get("/search", async (req, res) => {
+  if (!req.isAuthenticated()) return res.status(401).json({ error: "Unauthorized" });
+  
+  const { query } = req.query;
+  if (!query || query.length < 2) return res.json({ users: [] });
+
+  try {
+    const users = await UserModel.find({
+      $or: [
+        { email: { $regex: query, $options: "i" } },
+        { name: { $regex: query, $options: "i" } }
+      ],
+      _id: { $ne: req.user._id } // Exclude self
+    })
+    .select("name email avatar")
+    .limit(10);
+
+    res.json({ users });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default authRouter;

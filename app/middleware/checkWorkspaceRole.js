@@ -5,7 +5,16 @@ import ProjectModel from "../schema/project.js";
 export const checkWorkspaceRole = (...allowedRoles) => {
   return async (req, res, next) => {
     try {
-      const workspace = await WorkspaceModel.findOne({ url: req.params.id });
+      // Check if req.params.id is a MongoDB ObjectId or a URL
+      let workspace;
+      if (req.params.id.match(/^[0-9a-fA-F]{24}$/)) {
+        // It's a MongoDB ObjectId
+        workspace = await WorkspaceModel.findById(req.params.id);
+      } else {
+        // It's a URL
+        workspace = await WorkspaceModel.findOne({ url: req.params.id });
+      }
+      
       if (!workspace) {
         return res.status(404).json({ error: "Workspace not found" });
       }
