@@ -4,6 +4,46 @@ import UserModel from "../schema/user.js";
 
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import { Strategy as GitHubStrategy } from "passport-github2";
+import { PutObjectCommand } from "@aws-sdk/client-s3";
+import { r2 } from "./r2.js";
+import crypto from "crypto";
+
+// Function to download image from URL and upload to R2
+async function uploadGoogleAvatarToR2(googleAvatarUrl) {
+  try {
+    // Download image from Google
+    const response = await fetch(googleAvatarUrl);
+    if (!response.ok) {
+      console.error("Failed to download Google avatar");
+      return null;
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    // Generate unique filename
+    const hash = crypto.randomBytes(16).toString("hex");
+    const extension = googleAvatarUrl.includes(".jpg") ? "jpg" : "png";
+    const fileName = `avatars/${hash}.${extension}`;
+
+    // Upload to R2
+    const command = new PutObjectCommand({
+      Bucket: process.env.R2_BUCKET_NAME,
+      Key: fileName,
+      Body: buffer,
+      ContentType: `image/${extension}`,
+    });
+
+    await r2.send(command);
+
+    // Return proxy URL through backend
+    const proxyUrl = `${process.env.API_URL}/api/files/${fileName}`;
+    return proxyUrl;
+  } catch (error) {
+    console.error("Error uploading avatar to R2:", error);
+    return null;
+  }
+}
 
 let initPassportLocal = (passport) => {
   passport.use(
@@ -14,19 +54,45 @@ let initPassportLocal = (passport) => {
         callbackURL: process.env.API_URL + "/auth/google/callback",
       },
       async (accessToken, refreshToken, profile, cb) => {
-        // console.log("Google profile: ", profile);
-        let user = await UserModel.findOne({ email: profile.emails[0].value });
-        if (user == null) {
-          let newUser = new UserModel({
-            googleId: profile.id,
-            name: profile.displayName,
+        try {
+          let user = await UserModel.findOne({
             email: profile.emails[0].value,
-            avatar: profile.photos[0].value,
           });
-          user = await newUser.save();
+          const googleAvatarUrl = profile.photos?.[0]?.value || null;
+
+          // Upload avatar to R2
+          let r2AvatarUrl = null;
+          if (googleAvatarUrl) {
+            r2AvatarUrl = await uploadGoogleAvatarToR2(googleAvatarUrl);
+          }
+
+          if (user == null) {
+            // Tạo user mới với avatar từ R2
+            let newUser = new UserModel({
+              googleId: profile.id,
+              name: profile.displayName,
+              email: profile.emails[0].value,
+              avatar: r2AvatarUrl,
+            });
+            user = await newUser.save();
+          } else {
+            // Cập nhật avatar từ R2 nếu chưa có avatar hoặc vẫn dùng avatar của Google
+            const shouldUpdateAvatar =
+              !user.avatar ||
+              (user.avatar && user.avatar.includes("googleusercontent.com"));
+
+            if (r2AvatarUrl && shouldUpdateAvatar) {
+              user.avatar = r2AvatarUrl;
+              user.googleId = profile.id;
+              await user.save();
+            }
+          }
+
+          return cb(null, user);
+        } catch (error) {
+          console.error("Error in Google authentication:", error);
+          return cb(error, null);
         }
-        console.log("Google user authenticated: ", user.email);
-        return cb(null, user);
       },
     ),
   );
@@ -59,12 +125,9 @@ let initPassportLocal = (passport) => {
         passwordField: "password",
       },
       async (email, password, done) => {
-        //console.log(email, password);
-
         try {
           let user = await UserModel.findOne({ email });
           if (!user) {
-            console.log(email, password);
             return done(null, false);
           }
           if (!user.password) {
@@ -79,7 +142,6 @@ let initPassportLocal = (passport) => {
           }
           let checkPassword = await user.comparePassword(password);
           if (!checkPassword) {
-            console.log("Incorrect password - ", user.email);
             return done(
               { type: "INCORRECT_PASSWORD", message: "Incorrect password." },
               false,
@@ -91,7 +153,7 @@ let initPassportLocal = (passport) => {
             message: "Login successful.",
           });
         } catch (error) {
-          console.log(error);
+          console.error("Local strategy error:", error);
           return done(
             { type: "NULL_TYPE", message: "Something went wrong." },
             false,
@@ -110,7 +172,6 @@ let initPassportLocal = (passport) => {
   // used to deserialize the user
   passport.deserializeUser(async function (id, done) {
     try {
-      console.log(id);
       let user = await UserModel.findOne({ _id: id });
       done(null, user);
     } catch (error) {

@@ -7,6 +7,9 @@ import workspaceRouter from "./app/route/workspace.js";
 import projectRouter from "./app/route/project.js";
 import pageRouter from "./app/route/page.js";
 import taskRouter from "./app/route/task.js";
+import stickyRouter from "./app/route/sticky.js";
+import tagRouter from "./app/route/tag.js";
+import roleRouter from "./app/route/role.js";
 import session from "express-session";
 import passport from "passport";
 import initPassportLocal from "./app/config/passport.js";
@@ -27,7 +30,7 @@ app.use(
     origin: ["http://localhost:5173"],
     credentials: true,
     secure: false,
-  })
+  }),
 );
 app.use(flash());
 app.use(
@@ -41,7 +44,7 @@ app.use(
       secure: false,
       sameSite: "lax",
     },
-  })
+  }),
 );
 app.use(passport.initialize());
 app.use(passport.session());
@@ -56,7 +59,10 @@ app.use("/api/workspace", workspaceRouter);
 app.use("/api", projectRouter);
 app.use("/api", pageRouter);
 app.use("/api", taskRouter);
+app.use("/api", stickyRouter);
+app.use("/api", tagRouter);
 app.use("/api/files", fileRouter);
+app.use("/api/roles", roleRouter);
 //listen
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);

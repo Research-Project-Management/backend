@@ -23,7 +23,7 @@ const fileSchema = new mongoose.Schema(
     project: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Project",
-      required: false,
+      required: true,
     },
     starred: { type: Boolean, default: false },
     trashedAt: { type: Date, default: null },

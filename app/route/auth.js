@@ -16,7 +16,6 @@ authRouter.get("/user", (req, res) => {
 
 authRouter.post("/login", (req, res, next) => {
   passport.authenticate("local", (err, user, info) => {
-    console.log("Authentication attempt:", { err, user, info });
     if (err) {
       res.status(500).json({
         type: err.type || "NULL_TYPE",
@@ -87,8 +86,9 @@ authRouter.get("/logout", (req, res) => {
 
 // Search users
 authRouter.get("/search", async (req, res) => {
-  if (!req.isAuthenticated()) return res.status(401).json({ error: "Unauthorized" });
-  
+  if (!req.isAuthenticated())
+    return res.status(401).json({ error: "Unauthorized" });
+
   const { query } = req.query;
   if (!query || query.length < 2) return res.json({ users: [] });
 
@@ -96,12 +96,12 @@ authRouter.get("/search", async (req, res) => {
     const users = await UserModel.find({
       $or: [
         { email: { $regex: query, $options: "i" } },
-        { name: { $regex: query, $options: "i" } }
+        { name: { $regex: query, $options: "i" } },
       ],
-      _id: { $ne: req.user._id } // Exclude self
+      _id: { $ne: req.user._id }, // Exclude self
     })
-    .select("name email avatar")
-    .limit(10);
+      .select("name email avatar")
+      .limit(10);
 
     res.json({ users });
   } catch (error) {

@@ -28,7 +28,11 @@ fileRouter.post("/presign", isAuthenticated, async (req, res) => {
 // Save file metadata after upload
 fileRouter.post("/upload", isAuthenticated, async (req, res) => {
   try {
-    const { filename, size, mimeType, url, thumbnail, workspaceId, parentId, metaData } = req.body;
+    const { filename, size, mimeType, url, thumbnail, workspaceId, projectId, parentId, metaData } = req.body;
+    
+    if (!projectId) {
+      return res.status(400).json({ error: "projectId is required" });
+    }
     
     const file = new FileModel({
       filename,
@@ -37,6 +41,7 @@ fileRouter.post("/upload", isAuthenticated, async (req, res) => {
       url,
       thumbnail,
       workspace: workspaceId,
+      project: projectId,
       parent: parentId || null,
       author: req.user._id,
       metaData: metaData || {},
@@ -54,15 +59,16 @@ fileRouter.post("/upload", isAuthenticated, async (req, res) => {
 // Create folder
 fileRouter.post("/folder", isAuthenticated, async (req, res) => {
   try {
-    const { name, workspaceId, parentId } = req.body;
+    const { name, workspaceId, projectId, parentId } = req.body;
     
-    if (!name || !workspaceId) {
+    if (!name || !projectId) {
       return res.status(400).json({ error: "Missing required fields" });
     }
     
     const folder = new FileModel({
       filename: name,
       workspace: workspaceId,
+      project: projectId,
       parent: parentId || null,
       author: req.user._id,
       isFolder: true,
@@ -76,14 +82,14 @@ fileRouter.post("/folder", isAuthenticated, async (req, res) => {
   }
 });
 
-// List files in workspace or folder
-fileRouter.get("/workspace/:workspaceId", isAuthenticated, async (req, res) => {
+// List files in project or folder
+fileRouter.get("/project/:projectId", isAuthenticated, async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const { projectId } = req.params;
     const { parentId, includeTrash } = req.query;
     
     const query = {
-      workspace: workspaceId,
+      project: projectId,
       parent: parentId || null,
     };
     
@@ -103,13 +109,13 @@ fileRouter.get("/workspace/:workspaceId", isAuthenticated, async (req, res) => {
   }
 });
 
-// Get files by current user
-fileRouter.get("/my-files/:workspaceId", isAuthenticated, async (req, res) => {
+// Get files by current user in project
+fileRouter.get("/my-files/:projectId", isAuthenticated, async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const { projectId } = req.params;
     
     const files = await FileModel.find({
-      workspace: workspaceId,
+      project: projectId,
       author: req.user._id,
       trashedAt: null,
     })
@@ -123,13 +129,13 @@ fileRouter.get("/my-files/:workspaceId", isAuthenticated, async (req, res) => {
   }
 });
 
-// Get starred files
-fileRouter.get("/starred/:workspaceId", isAuthenticated, async (req, res) => {
+// Get starred files in project
+fileRouter.get("/starred/:projectId", isAuthenticated, async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const { projectId } = req.params;
     
     const files = await FileModel.find({
-      workspace: workspaceId,
+      project: projectId,
       starred: true,
       trashedAt: null,
     })
@@ -143,13 +149,13 @@ fileRouter.get("/starred/:workspaceId", isAuthenticated, async (req, res) => {
   }
 });
 
-// Get shared files
-fileRouter.get("/shared/:workspaceId", isAuthenticated, async (req, res) => {
+// Get shared files in project
+fileRouter.get("/shared/:projectId", isAuthenticated, async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const { projectId } = req.params;
     
     const files = await FileModel.find({
-      workspace: workspaceId,
+      project: projectId,
       "sharedWith.user": req.user._id,
       trashedAt: null,
     })
@@ -163,13 +169,13 @@ fileRouter.get("/shared/:workspaceId", isAuthenticated, async (req, res) => {
   }
 });
 
-// Get trashed files
-fileRouter.get("/trash/:workspaceId", isAuthenticated, async (req, res) => {
+// Get trashed files in project
+fileRouter.get("/trash/:projectId", isAuthenticated, async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const { projectId } = req.params;
     
     const files = await FileModel.find({
-      workspace: workspaceId,
+      project: projectId,
       trashedAt: { $ne: null },
     })
       .populate("author", "name email avatar")
@@ -348,6 +354,120 @@ fileRouter.put("/:fileId/rename", isAuthenticated, async (req, res) => {
   } catch (error) {
     console.error("Error renaming file:", error);
     res.status(500).json({ error: "Failed to rename file" });
+  }
+});
+
+// Workspace-level aggregation endpoints
+// Get all files from all projects in workspace
+fileRouter.get("/workspace/:workspaceId/all", isAuthenticated, async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+    const { parentId } = req.query;
+    
+    const query = {
+      workspace: workspaceId,
+      trashedAt: null,
+    };
+    
+    // If parentId is provided, filter by it; otherwise get root level
+    if (parentId) {
+      query.parent = parentId;
+    } else {
+      query.parent = null;
+    }
+    
+    const files = await FileModel.find(query)
+      .populate("author", "name email avatar")
+      .populate("project", "name")
+      .sort({ isFolder: -1, filename: 1 });
+    
+    res.json({ files });
+  } catch (error) {
+    console.error("Error fetching workspace files:", error);
+    res.status(500).json({ error: "Failed to fetch files" });
+  }
+});
+
+// Get all files by current user from all projects in workspace
+fileRouter.get("/workspace/:workspaceId/my-files", isAuthenticated, async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+    
+    const files = await FileModel.find({
+      workspace: workspaceId,
+      author: req.user._id,
+      trashedAt: null,
+    })
+      .populate("author", "name email avatar")
+      .populate("project", "name")
+      .sort({ createdAt: -1 });
+    
+    res.json({ files });
+  } catch (error) {
+    console.error("Error fetching my files:", error);
+    res.status(500).json({ error: "Failed to fetch files" });
+  }
+});
+
+// Get all starred files from all projects in workspace
+fileRouter.get("/workspace/:workspaceId/starred", isAuthenticated, async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+    
+    const files = await FileModel.find({
+      workspace: workspaceId,
+      starred: true,
+      trashedAt: null,
+    })
+      .populate("author", "name email avatar")
+      .populate("project", "name")
+      .sort({ createdAt: -1 });
+    
+    res.json({ files });
+  } catch (error) {
+    console.error("Error fetching starred files:", error);
+    res.status(500).json({ error: "Failed to fetch starred files" });
+  }
+});
+
+// Get all shared files from all projects in workspace
+fileRouter.get("/workspace/:workspaceId/shared", isAuthenticated, async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+    
+    const files = await FileModel.find({
+      workspace: workspaceId,
+      "sharedWith.user": req.user._id,
+      trashedAt: null,
+    })
+      .populate("author", "name email avatar")
+      .populate("project", "name")
+      .sort({ createdAt: -1 });
+    
+    res.json({ files });
+  } catch (error) {
+    console.error("Error fetching shared files:", error);
+    res.status(500).json({ error: "Failed to fetch shared files" });
+  }
+});
+
+// Get all trashed files from all projects in workspace
+fileRouter.get("/workspace/:workspaceId/trash", isAuthenticated, async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+    
+    const files = await FileModel.find({
+      workspace: workspaceId,
+      trashedAt: { $ne: null },
+    })
+      .populate("author", "name email avatar")
+      .populate("project", "name")
+      .sort({ trashedAt: -1 });
+    
+    res.json({ files });
+  } catch (error) {
+    console.error("Error fetching trashed files:", error);
+    res.status(500).json({ error: "Failed to fetch trashed files" });
   }
 });
 

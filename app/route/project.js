@@ -11,6 +11,27 @@ import {
 
 const projectRouter = Router();
 
+// Get single project details
+projectRouter.get(
+  "/:projectId",
+  isAuthenticated,
+  checkProjectRole("manager", "member", "viewer"),
+  async (req, res) => {
+    try {
+      const project = await req.project.populate([
+        { path: "members.user", select: "name email avatar" },
+        { path: "createdBy", select: "name email avatar" },
+        { path: "workspace", select: "_id name" },
+      ]);
+
+      res.json({ project });
+    } catch (error) {
+      console.error("Get Project Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  },
+);
+
 // Lấy overview của project
 projectRouter.get(
   "/project/:projectId/overview",
@@ -19,7 +40,7 @@ projectRouter.get(
   async (req, res) => {
     try {
       const { projectId } = req.params;
-      
+
       // 1. Get Project Details (already fetched in middleware but populating more if needed)
       const project = await req.project.populate([
         { path: "members.user", select: "name email avatar" },
@@ -27,25 +48,37 @@ projectRouter.get(
       ]);
 
       // 2. Get File Stats
-      const fileCount = await FileModel.countDocuments({ project: projectId, trashedAt: null });
-      const recentFiles = await FileModel.find({ project: projectId, trashedAt: null })
+      const fileCount = await FileModel.countDocuments({
+        project: projectId,
+        trashedAt: null,
+      });
+      const recentFiles = await FileModel.find({
+        project: projectId,
+        trashedAt: null,
+      })
         .sort({ createdAt: -1 })
         .limit(5)
         .populate("author", "name avatar");
-      
+
       // Calculate total size
       const filesSizeAggregate = await FileModel.aggregate([
-        { $match: { project: new mongoose.Types.ObjectId(projectId), trashedAt: null } },
-        { $group: { _id: null, totalSize: { $sum: "$size" } } }
+        {
+          $match: {
+            project: new mongoose.Types.ObjectId(projectId),
+            trashedAt: null,
+          },
+        },
+        { $group: { _id: null, totalSize: { $sum: "$size" } } },
       ]);
-      const totalSize = filesSizeAggregate.length > 0 ? filesSizeAggregate[0].totalSize : 0;
+      const totalSize =
+        filesSizeAggregate.length > 0 ? filesSizeAggregate[0].totalSize : 0;
 
       // 3. Get Task Stats (If TaskModel exists later, add here. For now returning empty stats)
       const taskStats = {
         total: 0,
         completed: 0,
         pending: 0,
-        inProgress: 0
+        inProgress: 0,
       };
 
       res.json({
@@ -54,17 +87,17 @@ projectRouter.get(
           files: {
             count: fileCount,
             totalSize,
-            recent: recentFiles
+            recent: recentFiles,
           },
           tasks: taskStats,
-          members: project.members.length
-        }
+          members: project.members.length,
+        },
       });
     } catch (error) {
       console.error("Overview Error:", error);
       res.status(500).json({ error: error.message });
     }
-  }
+  },
 );
 
 // Lấy tất cả project trong workspace (member workspace trở lên)
@@ -75,7 +108,7 @@ projectRouter.get(
   async (req, res) => {
     try {
       const { includeInactive } = req.query;
-      
+
       const baseQuery = {
         workspace: req.workspace._id,
         $or: [
@@ -101,7 +134,7 @@ projectRouter.get(
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
-  }
+  },
 );
 
 // Tạo project mới (admin workspace trở lên)
@@ -113,28 +146,53 @@ projectRouter.post(
     try {
       const { name, description, avatar, modules, settings } = req.body;
 
+      // Sử dụng role Owner của workspace làm default manager cho project
+      // (User tạo project sẽ có quyền manager/owner)
+      const RoleModel = (await import("../schema/role.js")).default;
+
+      // Tìm Owner role trong workspace để dùng làm manager cho project
+      const ownerRole = await RoleModel.findOne({
+        workspace: req.workspace._id,
+        name: { $regex: /^owner$/i },
+        isSystem: true,
+      });
+
+      if (!ownerRole) {
+        return res.status(500).json({
+          error: "Workspace roles not initialized. Please run migration.",
+        });
+      }
+
       const newProject = new ProjectModel({
         name,
         avatar: avatar || "",
         description: description || "",
         workspace: req.workspace._id,
-        members: [{ user: req.user._id, role: "manager" }],
+        members: [
+          {
+            user: req.user._id,
+            role: ownerRole._id,
+            legacyRole: "manager",
+          },
+        ],
         createdBy: req.user._id,
         ...(modules && { modules }),
         ...(settings && { settings }),
       });
 
       await newProject.save();
-      
+
       const populatedProject = await ProjectModel.findById(newProject._id)
         .populate("members.user", "name email")
+        .populate("members.role", "name color")
         .populate("createdBy", "name email");
-        
+
       res.status(201).json({ project: populatedProject });
     } catch (error) {
+      console.error("Error creating project:", error);
       res.status(500).json({ error: error.message });
     }
-  }
+  },
 );
 
 // Lấy chi tiết project (member project hoặc admin workspace trở lên)
@@ -152,7 +210,7 @@ projectRouter.get(
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
-  }
+  },
 );
 
 // Cập nhật project (manager project hoặc admin workspace trở lên)
@@ -162,7 +220,8 @@ projectRouter.put(
   checkProjectRole("manager"),
   async (req, res) => {
     try {
-      const { name, description, avatar, modules, settings, isActive } = req.body;
+      const { name, description, avatar, modules, settings, isActive } =
+        req.body;
 
       const updateData = {};
       if (name !== undefined) updateData.name = name;
@@ -175,7 +234,7 @@ projectRouter.put(
       const project = await ProjectModel.findByIdAndUpdate(
         req.params.projectId,
         updateData,
-        { new: true }
+        { new: true },
       )
         .populate("members.user", "name email")
         .populate("createdBy", "name email");
@@ -184,7 +243,7 @@ projectRouter.put(
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
-  }
+  },
 );
 
 // Toggle project active status (manager project hoặc admin workspace trở lên)
@@ -198,14 +257,14 @@ projectRouter.patch(
       project.isActive = !project.isActive;
       await project.save();
 
-      res.json({ 
-        project, 
-        message: project.isActive ? "Project activated" : "Project deactivated" 
+      res.json({
+        project,
+        message: project.isActive ? "Project activated" : "Project deactivated",
       });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
-  }
+  },
 );
 
 // Cập nhật modules của project (manager project hoặc admin workspace trở lên)
@@ -224,7 +283,7 @@ projectRouter.patch(
       const project = await ProjectModel.findByIdAndUpdate(
         req.params.projectId,
         { modules },
-        { new: true }
+        { new: true },
       )
         .populate("members.user", "name email")
         .populate("createdBy", "name email");
@@ -233,7 +292,7 @@ projectRouter.patch(
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
-  }
+  },
 );
 
 // Cập nhật settings của project (manager project hoặc admin workspace trở lên)
@@ -248,7 +307,7 @@ projectRouter.patch(
       const project = await ProjectModel.findByIdAndUpdate(
         req.params.projectId,
         { settings },
-        { new: true }
+        { new: true },
       )
         .populate("members.user", "name email")
         .populate("createdBy", "name email");
@@ -257,7 +316,7 @@ projectRouter.patch(
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
-  }
+  },
 );
 
 // Xóa project (manager project hoặc admin workspace trở lên)
@@ -272,7 +331,7 @@ projectRouter.delete(
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
-  }
+  },
 );
 
 // Thêm member vào project (manager project hoặc admin workspace trở lên)
@@ -288,7 +347,7 @@ projectRouter.put(
       // Kiểm tra user có trong workspace không
       const workspace = await WorkspaceModel.findById(project.workspace);
       const isWorkspaceMember = workspace.members.find(
-        (m) => m.user.toString() === userId
+        (m) => m.user.toString() === userId,
       );
 
       if (!isWorkspaceMember) {
@@ -299,7 +358,7 @@ projectRouter.put(
 
       // Kiểm tra đã là member project chưa
       const existingMember = project.members.find(
-        (m) => m.user.toString() === userId
+        (m) => m.user.toString() === userId,
       );
 
       if (existingMember) {
@@ -319,7 +378,7 @@ projectRouter.put(
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
-  }
+  },
 );
 
 // Cập nhật role member trong project (manager project hoặc admin workspace trở lên)
@@ -350,7 +409,7 @@ projectRouter.put(
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
-  }
+  },
 );
 
 // Xóa member khỏi project (manager project hoặc admin workspace trở lên)
@@ -364,7 +423,7 @@ projectRouter.put(
       const project = req.project;
 
       const memberToRemove = project.members.find(
-        (m) => m.user.toString() === userId
+        (m) => m.user.toString() === userId,
       );
 
       if (!memberToRemove) {
@@ -382,7 +441,7 @@ projectRouter.put(
       }
 
       project.members = project.members.filter(
-        (m) => m.user.toString() !== userId
+        (m) => m.user.toString() !== userId,
       );
       await project.save();
 
@@ -390,7 +449,7 @@ projectRouter.put(
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
-  }
+  },
 );
 
 // Rời khỏi project (tự rời, không phải manager cuối cùng)
@@ -412,7 +471,7 @@ projectRouter.put(
       // Nếu là manager, kiểm tra còn manager khác không
       if (member.role === "manager") {
         const otherManagers = project.members.filter(
-          (m) => m.role === "manager" && m.user.toString() !== userId
+          (m) => m.role === "manager" && m.user.toString() !== userId,
         );
 
         if (otherManagers.length === 0) {
@@ -424,7 +483,7 @@ projectRouter.put(
       }
 
       project.members = project.members.filter(
-        (m) => m.user.toString() !== userId
+        (m) => m.user.toString() !== userId,
       );
       await project.save();
 
@@ -432,7 +491,158 @@ projectRouter.put(
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
-  }
+  },
 );
+
+// Get recent items (projects, pages, files) for workspace home
+projectRouter.get(
+  "/workspace/:id/recent",
+  isAuthenticated,
+  checkWorkspaceRole("owner", "admin", "member"),
+  async (req, res) => {
+    try {
+      const userId = req.user._id;
+      const workspaceId = req.workspace._id;
+      const limit = parseInt(req.query.limit) || 10;
+
+      // Get recent projects user has access to
+      const recentProjects = await ProjectModel.find({
+        workspace: workspaceId,
+        isActive: true,
+        $or: [
+          { "members.user": userId },
+          ...(["owner", "admin"].includes(req.workspaceRole)
+            ? [{ workspace: workspaceId }]
+            : []),
+        ],
+      })
+        .sort({ updatedAt: -1 })
+        .limit(limit)
+        .select("name avatar updatedAt")
+        .lean();
+
+      // Get recent files
+      const recentFiles = await FileModel.find({
+        workspace: workspaceId,
+        trashedAt: null,
+        $or: [
+          { author: userId },
+          ...(["owner", "admin"].includes(req.workspaceRole)
+            ? [{ workspace: workspaceId }]
+            : []),
+        ],
+      })
+        .sort({ updatedAt: -1 })
+        .limit(limit)
+        .select("filename url updatedAt mimeType")
+        .lean();
+
+      // Combine and sort by most recent
+      const recentItems = [
+        ...recentProjects.map((p) => ({
+          type: "project",
+          id: p._id,
+          name: p.name,
+          icon: p.avatar,
+          lastEdited: p.updatedAt,
+        })),
+        ...recentFiles.map((f) => ({
+          type: "file",
+          id: f._id,
+          name: f.filename,
+          icon: getFileIcon(f.mimeType),
+          lastEdited: f.updatedAt,
+        })),
+      ]
+        .sort((a, b) => new Date(b.lastEdited) - new Date(a.lastEdited))
+        .slice(0, limit);
+
+      res.json({ items: recentItems });
+    } catch (error) {
+      console.error("Recent items error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  },
+);
+
+// Get recent activities for workspace home
+projectRouter.get(
+  "/workspace/:id/activities",
+  isAuthenticated,
+  checkWorkspaceRole("owner", "admin", "member"),
+  async (req, res) => {
+    try {
+      const workspaceId = req.workspace._id;
+      const limit = parseInt(req.query.limit) || 20;
+
+      // Get recent file uploads
+      const recentFiles = await FileModel.find({
+        workspace: workspaceId,
+        trashedAt: null,
+      })
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .populate("author", "name email avatar")
+        .select("filename createdAt author")
+        .lean();
+
+      // Get recent projects
+      const recentProjects = await ProjectModel.find({
+        workspace: workspaceId,
+        isActive: true,
+      })
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .populate("createdBy", "name email avatar")
+        .select("name createdAt createdBy")
+        .lean();
+
+      // Combine activities
+      const activities = [
+        ...recentFiles.map((f) => ({
+          type: "file_upload",
+          user: f.author?.name || "Unknown",
+          userAvatar: f.author?.avatar || null,
+          content: `uploaded ${f.filename}`,
+          time: f.createdAt,
+        })),
+        ...recentProjects.map((p) => ({
+          type: "project_created",
+          user: p.createdBy?.name || "Unknown",
+          userAvatar: p.createdBy?.avatar || null,
+          content: `created project ${p.name}`,
+          time: p.createdAt,
+        })),
+      ]
+        .sort((a, b) => new Date(b.time) - new Date(a.time))
+        .slice(0, limit);
+
+      res.json({ activities });
+    } catch (error) {
+      console.error("Activities error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  },
+);
+
+// Helper function to get file icon based on mime type
+function getFileIcon(mimeType) {
+  if (!mimeType) return "📄";
+  if (mimeType.startsWith("image/")) return "🖼️";
+  if (mimeType.startsWith("video/")) return "🎥";
+  if (mimeType.startsWith("audio/")) return "🎵";
+  if (mimeType.includes("pdf")) return "📕";
+  if (mimeType.includes("word") || mimeType.includes("document")) return "📝";
+  if (mimeType.includes("sheet") || mimeType.includes("excel")) return "📊";
+  if (mimeType.includes("presentation") || mimeType.includes("powerpoint"))
+    return "📽️";
+  if (
+    mimeType.includes("zip") ||
+    mimeType.includes("rar") ||
+    mimeType.includes("tar")
+  )
+    return "📦";
+  return "📄";
+}
 
 export default projectRouter;
