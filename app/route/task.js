@@ -15,28 +15,47 @@ const checkTaskAccess = (requiredRoles) => {
       const task = await TaskModel.findById(req.params.taskId);
       if (!task) return res.status(404).json({ error: "Task not found" });
 
-      const project = await ProjectModel.findById(task.project);
+      const project = await ProjectModel.findById(task.project).populate(
+        "members.role",
+      );
       if (!project) return res.status(404).json({ error: "Project not found" });
 
-      const workspace = await WorkspaceModel.findById(project.workspace);
+      const workspace = await WorkspaceModel.findById(
+        project.workspace,
+      ).populate("members.role");
       const workspaceMember = workspace.members.find(
         (m) => m.user.toString() === req.user._id.toString(),
       );
 
-      if (
-        workspaceMember &&
-        ["owner", "admin"].includes(workspaceMember.role)
-      ) {
-        return next();
+      // Workspace owners and admins always have access
+      if (workspaceMember && workspaceMember.role) {
+        const wsRoleName = workspaceMember.role.name?.toLowerCase();
+        if (["owner", "admin"].includes(wsRoleName)) {
+          return next();
+        }
       }
 
+      // Check project member role
       const projectMember = project.members.find(
         (m) => m.user.toString() === req.user._id.toString(),
       );
 
-      if (!projectMember || !requiredRoles.includes(projectMember.role)) {
+      if (!projectMember) {
         return res.status(403).json({ error: "Insufficient permissions" });
       }
+
+      // Get role name from populated role object
+      const role = projectMember.role;
+      if (!role || !role.name) {
+        return res.status(403).json({ error: "Role not found" });
+      }
+
+      const roleName = role.name.toLowerCase();
+
+      if (!requiredRoles.includes(roleName)) {
+        return res.status(403).json({ error: "Insufficient permissions" });
+      }
+
       next();
     } catch (error) {
       res.status(500).json({ error: error.message });

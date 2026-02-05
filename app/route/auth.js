@@ -55,8 +55,15 @@ authRouter.get(
   "/github/callback",
   passport.authenticate("github", { failureRedirect: "/login" }),
   function (req, res) {
-    // console.log("Github authentication successful");
-    res.redirect(process.env.CLIENT_URL || "http://localhost:5173/callback");
+    // Login thành công, set session
+    req.login(req.user, (err) => {
+      if (err) {
+        console.error("Error logging in:", err);
+        return res.redirect("http://localhost:5173/login");
+      }
+      // Redirect về callback để đóng popup
+      res.redirect(process.env.CLIENT_URL || "http://localhost:5173/callback");
+    });
   },
 );
 
@@ -69,8 +76,15 @@ authRouter.get(
   "/google/callback",
   passport.authenticate("google", { failureRedirect: "/login" }),
   function (req, res) {
-    // console.log("Google authentication successful");
-    res.redirect(process.env.CLIENT_URL || "http://localhost:5173/callback");
+    // Login thành công, set session
+    req.login(req.user, (err) => {
+      if (err) {
+        console.error("Error logging in:", err);
+        return res.redirect("http://localhost:5173/login");
+      }
+      // Redirect về callback để đóng popup
+      res.redirect(process.env.CLIENT_URL || "http://localhost:5173/callback");
+    });
   },
 );
 

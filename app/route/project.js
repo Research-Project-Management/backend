@@ -102,7 +102,7 @@ projectRouter.get(
 
 // Lấy tất cả project trong workspace (member workspace trở lên)
 projectRouter.get(
-  "/workspace/:id/projects",
+  "/workspace/:workspaceId/projects",
   isAuthenticated,
   checkWorkspaceRole("owner", "admin", "member"),
   async (req, res) => {
@@ -139,7 +139,7 @@ projectRouter.get(
 
 // Tạo project mới (admin workspace trở lên)
 projectRouter.post(
-  "/workspace/:id/project",
+  "/workspace/:workspaceId/project",
   isAuthenticated,
   checkWorkspaceRole("owner", "admin"),
   async (req, res) => {
@@ -172,7 +172,6 @@ projectRouter.post(
           {
             user: req.user._id,
             role: ownerRole._id,
-            legacyRole: "manager",
           },
         ],
         createdBy: req.user._id,
@@ -435,8 +434,19 @@ projectRouter.put(
         return res.status(400).json({ error: "Cannot remove yourself" });
       }
 
+      // Populate role to check role name
+      const populatedProject = await ProjectModel.findById(
+        project._id,
+      ).populate("members.role");
+      const populatedMember = populatedProject.members.find(
+        (m) => m.user.toString() === userId,
+      );
+
       // Không thể xóa manager nếu mình không phải workspace admin/owner
-      if (memberToRemove.role === "manager" && req.projectRole !== "manager") {
+      if (
+        populatedMember?.role?.name?.toLowerCase() === "manager" &&
+        req.projectRole !== "manager"
+      ) {
         return res.status(403).json({ error: "Cannot remove a manager" });
       }
 
@@ -462,16 +472,24 @@ projectRouter.put(
       const project = req.project;
       const userId = req.user._id.toString();
 
-      const member = project.members.find((m) => m.user.toString() === userId);
+      // Populate role to check role name
+      const populatedProject = await ProjectModel.findById(
+        project._id,
+      ).populate("members.role");
+      const member = populatedProject.members.find(
+        (m) => m.user.toString() === userId,
+      );
 
       if (!member) {
         return res.status(404).json({ error: "You are not a member" });
       }
 
       // Nếu là manager, kiểm tra còn manager khác không
-      if (member.role === "manager") {
-        const otherManagers = project.members.filter(
-          (m) => m.role === "manager" && m.user.toString() !== userId,
+      if (member.role?.name?.toLowerCase() === "manager") {
+        const otherManagers = populatedProject.members.filter(
+          (m) =>
+            m.role?.name?.toLowerCase() === "manager" &&
+            m.user.toString() !== userId,
         );
 
         if (otherManagers.length === 0) {

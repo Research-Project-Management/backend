@@ -7,11 +7,6 @@ const workspaceMemberSchema = new mongoose.Schema({
     ref: "Role",
     required: true,
   },
-  // Legacy role field for backward compatibility
-  legacyRole: {
-    type: String,
-    enum: ["owner", "admin", "member"],
-  },
   joinedAt: { type: Date, default: Date.now },
 });
 

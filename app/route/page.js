@@ -21,22 +21,35 @@ const checkPageAccess = (requiredRoles) => {
       if (!project) return res.status(404).json({ error: "Project not found" });
 
       // Logic from checkProjectRole
-       const workspace = await WorkspaceModel.findById(project.workspace);
-       const workspaceMember = workspace.members.find(
-        (m) => m.user.toString() === req.user._id.toString()
+      const workspace = await WorkspaceModel.findById(
+        project.workspace,
+      ).populate("members.role");
+      const workspaceMember = workspace.members.find(
+        (m) => m.user.toString() === req.user._id.toString(),
       );
 
-      if (workspaceMember && ["owner", "admin"].includes(workspaceMember.role)) {
-         req.page = page;
-         req.project = project;
-         return next();
+      if (
+        workspaceMember &&
+        workspaceMember.role &&
+        ["owner", "admin"].includes(workspaceMember.role.name?.toLowerCase())
+      ) {
+        req.page = page;
+        req.project = project;
+        return next();
       }
 
-      const projectMember = project.members.find(
-        (m) => m.user.toString() === req.user._id.toString()
+      const populatedProject = await ProjectModel.findById(
+        project._id,
+      ).populate("members.role");
+      const projectMember = populatedProject.members.find(
+        (m) => m.user.toString() === req.user._id.toString(),
       );
 
-      if (!projectMember || !requiredRoles.includes(projectMember.role)) {
+      if (
+        !projectMember ||
+        !projectMember.role ||
+        !requiredRoles.includes(projectMember.role.name?.toLowerCase())
+      ) {
         return res.status(403).json({ error: "Insufficient permissions" });
       }
 
@@ -57,18 +70,20 @@ pageRouter.get(
   async (req, res) => {
     try {
       const { status, search } = req.query;
-      
+
       // Find all projects in workspace first
       // Use req.workspace._id from middleware which resolves both ID and URL slug
-      const projects = await ProjectModel.find({ workspace: req.workspace._id }).select("_id");
-      const projectIds = projects.map(p => p._id);
-      
+      const projects = await ProjectModel.find({
+        workspace: req.workspace._id,
+      }).select("_id");
+      const projectIds = projects.map((p) => p._id);
+
       const query = { project: { $in: projectIds } };
-      
+
       if (status && status !== "all") {
         query.status = status;
       }
-      
+
       if (search) {
         query.title = { $regex: search, $options: "i" };
       }
@@ -77,14 +92,13 @@ pageRouter.get(
         .populate("author", "name avatar")
         .populate("project", "name")
         .sort({ updatedAt: -1 });
-        
+
       res.json({ pages });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
-  }
+  },
 );
-
 
 // 1. Get all pages in a project
 pageRouter.get(
@@ -95,11 +109,11 @@ pageRouter.get(
     try {
       const { status, search } = req.query;
       const query = { project: req.params.projectId };
-      
+
       if (status && status !== "all") {
         query.status = status;
       }
-      
+
       if (search) {
         query.title = { $regex: search, $options: "i" };
       }
@@ -107,12 +121,12 @@ pageRouter.get(
       const pages = await PageModel.find(query)
         .populate("author", "name avatar")
         .sort({ updatedAt: -1 });
-        
+
       res.json({ pages });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
-  }
+  },
 );
 
 // 2. Create a new page
@@ -123,7 +137,7 @@ pageRouter.post(
   async (req, res) => {
     try {
       const { title, content, status } = req.body;
-      
+
       const newPage = new PageModel({
         title,
         content,
@@ -134,12 +148,12 @@ pageRouter.post(
 
       await newPage.save();
       await newPage.populate("author", "name avatar");
-      
+
       res.status(201).json({ page: newPage });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
-  }
+  },
 );
 
 // 3. Get single page details
@@ -153,13 +167,13 @@ pageRouter.get(
       req.page.views += 1;
       req.page.lastAccessedAt = Date.now();
       await req.page.save();
-      
+
       const page = await req.page.populate("author", "name avatar");
       res.json({ page });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
-  }
+  },
 );
 
 // 4. Update a page
@@ -181,7 +195,7 @@ pageRouter.put(
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
-  }
+  },
 );
 
 // 5. Delete a page
@@ -196,7 +210,7 @@ pageRouter.delete(
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
-  }
+  },
 );
 
 export default pageRouter;

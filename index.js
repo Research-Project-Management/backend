@@ -2,6 +2,7 @@ import express from "express";
 import dotenv from "dotenv";
 dotenv.config();
 import connectDB from "./app/config/db.js";
+import { connectRedis, redisClient } from "./app/config/redis.js";
 import authRouter from "./app/route/auth.js";
 import workspaceRouter from "./app/route/workspace.js";
 import projectRouter from "./app/route/project.js";
@@ -11,18 +12,47 @@ import stickyRouter from "./app/route/sticky.js";
 import tagRouter from "./app/route/tag.js";
 import roleRouter from "./app/route/role.js";
 import session from "express-session";
+import { RedisStore } from "connect-redis";
 import passport from "passport";
 import initPassportLocal from "./app/config/passport.js";
 import flash from "express-flash";
 import cors from "cors";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
+import { RedisStore as RedisRateLimitStore } from "rate-limit-redis";
 import fileRouter from "./app/route/files.js";
 //config
 
 const PORT = process.env.PORT;
 const app = express();
 connectDB(process.env.MONGODB_URI);
+await connectRedis();
 app.set("trust proxy", 1);
+
 //middleware
+// Security headers
+app.use(
+  helmet({
+    contentSecurityPolicy: false, // Disable CSP for OAuth
+    crossOriginEmbedderPolicy: false,
+  }),
+);
+
+// Rate limiting với Redis - chỉ áp dụng cho API, bỏ qua auth routes
+const limiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 phút
+  max: process.env.NODE_ENV === "production" ? 100 : 1000, // Development: 1000, Production: 100
+  standardHeaders: true,
+  legacyHeaders: false,
+  store: new RedisRateLimitStore({
+    sendCommand: (...args) => redisClient.sendCommand(args),
+  }),
+  message: "Too many requests from this IP, please try again later.",
+  // Bỏ qua rate limit cho auth routes để tránh lỗi 429 khi OAuth
+  skip: (req) => req.path.startsWith("/auth/"),
+});
+app.use(limiter);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(
@@ -33,8 +63,17 @@ app.use(
   }),
 );
 app.use(flash());
+
+// Session với Redis store
+const redisStore = new RedisStore({
+  client: redisClient,
+  prefix: "rpm:sess:",
+  ttl: 7 * 24 * 60 * 60, // 7 ngày (giây)
+});
+
 app.use(
   session({
+    store: redisStore,
     secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,

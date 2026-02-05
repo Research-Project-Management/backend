@@ -39,12 +39,13 @@ export const checkWorkspaceRole = (...allowedRoles) => {
           .json({ error: "Not a member of this workspace" });
       }
 
-      // Get role name from populated role object or legacy role
+      // Get role name from populated role object
       const role = member.role;
-      const roleName =
-        role && role.name
-          ? role.name.toLowerCase()
-          : (member.legacyRole || "").toLowerCase();
+      if (!role || !role.name) {
+        return res.status(403).json({ error: "Role not found" });
+      }
+
+      const roleName = role.name.toLowerCase();
 
       let effectiveAllowedRoles = [...allowedRoles];
       if (effectiveAllowedRoles.includes("member"))
@@ -62,9 +63,9 @@ export const checkWorkspaceRole = (...allowedRoles) => {
       }
 
       req.workspace = workspace;
-      req.workspaceRole = roleName || member.legacyRole || "member";
+      req.workspaceRole = roleName;
       req.userRole = role;
-      if (role && role.permissions) {
+      if (role.permissions) {
         req.userPermissions = role.permissions;
       }
       next();
@@ -102,16 +103,17 @@ export const checkProjectRole = (...allowedRoles) => {
 
       if (workspaceMember) {
         const role = workspaceMember.role;
-        const roleName =
-          role && role.name
-            ? role.name.toLowerCase()
-            : (workspaceMember.legacyRole || "").toLowerCase();
+        if (!role || !role.name) {
+          return res.status(403).json({ error: "Workspace role not found" });
+        }
+
+        const roleName = role.name.toLowerCase();
 
         if (["owner", "admin"].includes(roleName)) {
           req.project = project;
           req.projectRole = "manager";
           req.userRole = role;
-          if (role && role.permissions) {
+          if (role.permissions) {
             req.userPermissions = role.permissions;
           }
           return next();
@@ -127,10 +129,11 @@ export const checkProjectRole = (...allowedRoles) => {
       }
 
       const role = projectMember.role;
-      const roleName =
-        role && role.name
-          ? role.name.toLowerCase()
-          : (projectMember.legacyRole || "").toLowerCase();
+      if (!role || !role.name) {
+        return res.status(403).json({ error: "Project role not found" });
+      }
+
+      const roleName = role.name.toLowerCase();
 
       const hasAccess = allowedRoles.some(
         (allowed) => allowed.toLowerCase() === roleName,
@@ -141,9 +144,9 @@ export const checkProjectRole = (...allowedRoles) => {
       }
 
       req.project = project;
-      req.projectRole = roleName || projectMember.legacyRole || "member";
+      req.projectRole = roleName;
       req.userRole = role;
-      if (role && role.permissions) {
+      if (role.permissions) {
         req.userPermissions = role.permissions;
       }
       next();

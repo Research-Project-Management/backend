@@ -5,15 +5,42 @@ import {
   checkWorkspaceRole,
 } from "../middleware/checkWorkspaceRole.js";
 import { initializeDefaultRoles } from "./role.js";
+import {
+  getCache,
+  setCache,
+  deleteCache,
+  deleteCacheByPattern,
+  userWorkspacesCacheKey,
+  workspaceCacheKey,
+  CACHE_DURATION,
+} from "../libs/cache.js";
 
 const workspaceRouter = Router();
 
 // Lấy tất cả workspace của user
 workspaceRouter.get("/", isAuthenticated, async (req, res) => {
-  const workspaces = await WorkspaceModel.find({
-    "members.user": req.user._id,
-  });
-  res.json({ workspaces });
+  try {
+    const cacheKey = userWorkspacesCacheKey(req.user._id);
+
+    // Kiểm tra cache
+    const cachedWorkspaces = await getCache(cacheKey);
+    if (cachedWorkspaces) {
+      return res.json({ workspaces: cachedWorkspaces, cached: true });
+    }
+
+    // Nếu không có cache, query DB
+    const workspaces = await WorkspaceModel.find({
+      "members.user": req.user._id,
+    });
+
+    // Lưu vào cache (5 phút)
+    await setCache(cacheKey, workspaces, CACHE_DURATION.MEDIUM);
+
+    res.json({ workspaces });
+  } catch (error) {
+    console.error("Error fetching workspaces:", error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Tạo workspace mới (user tạo sẽ là owner)
@@ -42,9 +69,11 @@ workspaceRouter.post("/", isAuthenticated, async (req, res) => {
     newWorkspace.members.push({
       user: req.user._id,
       role: roleIds.owner,
-      legacyRole: "owner",
     });
     await newWorkspace.save();
+
+    // Xóa cache của user
+    await deleteCache(userWorkspacesCacheKey(req.user._id));
 
     res.status(201).json({ workspace: newWorkspace });
   } catch (error) {
@@ -54,8 +83,9 @@ workspaceRouter.post("/", isAuthenticated, async (req, res) => {
 });
 
 // Lấy chi tiết workspace (member trở lên)
+// :workspaceId có thể là _id (ObjectId) HOẶC url (string)
 workspaceRouter.get(
-  "/:id",
+  "/:workspaceId",
   isAuthenticated,
   checkWorkspaceRole("owner", "admin", "member"),
   async (req, res) => {
@@ -69,7 +99,7 @@ workspaceRouter.get(
 
 // Cập nhật workspace (admin trở lên)
 workspaceRouter.put(
-  "/:id",
+  "/:workspaceId",
   isAuthenticated,
   checkWorkspaceRole("owner", "admin"),
   async (req, res) => {
@@ -89,7 +119,7 @@ workspaceRouter.put(
 
 // Thêm member (admin trở lên)
 workspaceRouter.put(
-  "/:id/add-member",
+  "/:workspaceId/add-member",
   isAuthenticated,
   checkWorkspaceRole("owner", "admin"),
   async (req, res) => {
@@ -118,7 +148,7 @@ workspaceRouter.put(
 
 // Cập nhật role member (owner hoặc admin)
 workspaceRouter.put(
-  "/:id/update-member-role",
+  "/:workspaceId/update-member-role",
   isAuthenticated,
   checkWorkspaceRole("owner", "admin"),
   async (req, res) => {
@@ -145,14 +175,18 @@ workspaceRouter.put(
 
 // Xóa member (admin trở lên, không thể xóa owner)
 workspaceRouter.put(
-  "/:id/remove-member",
+  "/:workspaceId/remove-member",
   isAuthenticated,
   checkWorkspaceRole("owner", "admin"),
   async (req, res) => {
     const { userId } = req.body;
     const workspace = req.workspace;
 
-    const memberToRemove = workspace.members.find(
+    // Populate role to check role name
+    const populatedWorkspace = await WorkspaceModel.findById(
+      workspace._id,
+    ).populate("members.role");
+    const memberToRemove = populatedWorkspace.members.find(
       (m) => m.user.toString() === userId,
     );
 
@@ -161,12 +195,15 @@ workspaceRouter.put(
     }
 
     // Không thể xóa owner
-    if (memberToRemove.role === "owner") {
+    if (memberToRemove.role?.name?.toLowerCase() === "owner") {
       return res.status(403).json({ error: "Cannot remove owner" });
     }
 
     // Admin không thể xóa admin khác
-    if (req.workspaceRole === "admin" && memberToRemove.role === "admin") {
+    if (
+      req.workspaceRole === "admin" &&
+      memberToRemove.role?.name?.toLowerCase() === "admin"
+    ) {
       return res
         .status(403)
         .json({ error: "Admin cannot remove another admin" });
@@ -182,7 +219,7 @@ workspaceRouter.put(
 
 // Xóa workspace (chỉ owner)
 workspaceRouter.delete(
-  "/:id",
+  "/:workspaceId",
   isAuthenticated,
   checkWorkspaceRole("owner"),
   async (req, res) => {
@@ -193,7 +230,7 @@ workspaceRouter.delete(
 
 // Get recent items (pages, projects) in workspace
 workspaceRouter.get(
-  "/:id/recent",
+  "/:workspaceId/recent",
   isAuthenticated,
   checkWorkspaceRole("owner", "admin", "member"),
   async (req, res) => {
@@ -273,7 +310,7 @@ workspaceRouter.get(
 
 // Get activity feed in workspace
 workspaceRouter.get(
-  "/:id/activity",
+  "/:workspaceId/activity",
   isAuthenticated,
   checkWorkspaceRole("owner", "admin", "member"),
   async (req, res) => {

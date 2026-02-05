@@ -7,11 +7,6 @@ const projectMemberSchema = new mongoose.Schema({
     ref: "Role",
     required: true,
   },
-  // Legacy role field for backward compatibility
-  legacyRole: {
-    type: String,
-    enum: ["manager", "member", "viewer"],
-  },
   joinedAt: { type: Date, default: Date.now },
 });
 
