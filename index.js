@@ -57,7 +57,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(
   cors({
-    origin: ["http://localhost:5173"],
+    origin: ["http://localhost:5173","https://flux.aisq.dev"],
     credentials: true,
     secure: false,
   }),
@@ -78,10 +78,10 @@ app.use(
     resave: false,
     saveUninitialized: false,
     cookie: {
-      https: false,
+      https: true,
       maxAge: 7 * 24 * 60 * 60 * 1000,
-      secure: false,
-      sameSite: "lax",
+      secure: true,
+      sameSite: "none",
     },
   }),
 );

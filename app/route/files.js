@@ -525,6 +525,7 @@ fileRouter.get(/^\/(.+)/, async (req, res) => {
 
     // Set CORS headers for cross-origin access
     res.setHeader("Access-Control-Allow-Origin", "http://localhost:5173");
+    res.setHeader("Access-Control-Allow-Origin", "https://flux.aisq.dev");
     res.setHeader("Access-Control-Allow-Credentials", "true");
     res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
 
