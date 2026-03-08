@@ -37,6 +37,7 @@ aiRouter.post("/chat", optionalAuth, async (req, res) => {
       session_id,
       enable_web_search,
       selected_files,
+      document_ids,
       messages,
       intent_hint,
       project_id,
@@ -56,7 +57,8 @@ aiRouter.post("/chat", optionalAuth, async (req, res) => {
     const fluxBody = {
       messages: fluxMessages,
       project_id: project_id || null,
-      document_ids: selected_files || null,
+      // Accept both field names: FE sends document_ids, legacy clients may send selected_files
+      document_ids: document_ids || selected_files || null,
       intent_hint: intent_hint || null,
       web_search_sites: web_search_sites || null,
     };
@@ -130,8 +132,14 @@ aiRouter.post("/chat", optionalAuth, async (req, res) => {
  */
 aiRouter.post("/chat/sync", isAuthenticated, async (req, res) => {
   try {
-    const { query, messages, intent_hint, project_id, selected_files } =
-      req.body;
+    const {
+      query,
+      messages,
+      intent_hint,
+      project_id,
+      selected_files,
+      document_ids,
+    } = req.body;
 
     let fluxMessages;
     if (messages && Array.isArray(messages)) {
@@ -145,7 +153,7 @@ aiRouter.post("/chat/sync", isAuthenticated, async (req, res) => {
     const fluxBody = {
       messages: fluxMessages,
       project_id: project_id || null,
-      document_ids: selected_files || null,
+      document_ids: document_ids || selected_files || null,
       intent_hint: intent_hint || null,
     };
 
@@ -204,6 +212,53 @@ aiRouter.post("/documents/upload", isAuthenticated, async (req, res) => {
   } catch (error) {
     console.error("Document Upload Proxy Error:", error);
     res.status(500).json({ error: "Failed to upload document" });
+  }
+});
+
+/**
+ * GET /api/ai/documents/bulk?ids=id1,id2,...
+ * Resolve titles/types for multiple doc IDs (used to restore filenames after history load)
+ */
+aiRouter.get("/documents/bulk", isAuthenticated, async (req, res) => {
+  try {
+    const { ids } = req.query;
+    if (!ids) return res.status(400).json({ error: "Missing ids parameter" });
+    const fluxResponse = await fetch(
+      `${FLUX_AI_URL}/documents/bulk?ids=${encodeURIComponent(ids)}`,
+    );
+    if (!fluxResponse.ok) {
+      return res
+        .status(fluxResponse.status)
+        .json({ error: "Failed to fetch document metadata" });
+    }
+    const data = await fluxResponse.json();
+    res.json(data);
+  } catch (error) {
+    console.error("Document Bulk Metadata Error:", error);
+    res.status(500).json({ error: "Failed to fetch document metadata" });
+  }
+});
+
+/**
+ * GET /api/ai/documents/:docId
+ * Fetch full reconstructed content of a single document
+ */
+aiRouter.get("/documents/:docId", isAuthenticated, async (req, res) => {
+  try {
+    const { docId } = req.params;
+    const fluxResponse = await fetch(
+      `${FLUX_AI_URL}/documents/${encodeURIComponent(docId)}`,
+    );
+    if (!fluxResponse.ok) {
+      return res
+        .status(fluxResponse.status)
+        .json({ error: "Document not found" });
+    }
+    const data = await fluxResponse.json();
+    res.json(data);
+  } catch (error) {
+    console.error("Document Content Error:", error);
+    res.status(500).json({ error: "Failed to fetch document content" });
   }
 });
 
