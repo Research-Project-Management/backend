@@ -21,6 +21,8 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { RedisStore as RedisRateLimitStore } from "rate-limit-redis";
 import fileRouter from "./app/route/files.js";
+import aiRouter from "./app/route/ai.js";
+import chatHistoryRouter from "./app/route/chatHistory.js";
 //config
 
 const PORT = process.env.PORT;
@@ -57,7 +59,12 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(
   cors({
-    origin: ["http://localhost:5173","https://flux.aisq.dev"],
+    origin: [
+      "http://localhost:5173",
+      "http://localhost:2916",
+      "http://localhost:3000",
+      "https://flux.aisq.dev",
+    ],
     credentials: true,
     secure: false,
   }),
@@ -78,10 +85,10 @@ app.use(
     resave: false,
     saveUninitialized: false,
     cookie: {
-      https: true,
+      https: process.env.NODE_ENV === "production",
       maxAge: 7 * 24 * 60 * 60 * 1000,
-      secure: true,
-      sameSite: "none",
+      secure: process.env.NODE_ENV === "production",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
     },
   }),
 );
@@ -101,6 +108,8 @@ app.use("/api", taskRouter);
 app.use("/api", stickyRouter);
 app.use("/api", tagRouter);
 app.use("/api/files", fileRouter);
+app.use("/api/ai", aiRouter);
+app.use("/api/ai", chatHistoryRouter);
 app.use("/api/roles", roleRouter);
 //listen
 app.listen(PORT, () => {
