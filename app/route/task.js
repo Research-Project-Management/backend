@@ -6,6 +6,7 @@ import {
   isAuthenticated,
   checkProjectRole,
 } from "../middleware/checkWorkspaceRole.js";
+import { getIO } from "../libs/socket.js";
 
 const taskRouter = Router();
 
@@ -160,6 +161,7 @@ taskRouter.post(
       await newTask.save();
       await newTask.populate("assignee", "name avatar");
 
+      getIO()?.to(`project:${projectId}`).emit("task:created", { task: newTask });
       res.status(201).json({ task: newTask });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -183,6 +185,7 @@ taskRouter.put(
         { new: true },
       ).populate("assignee", "name avatar");
 
+      getIO()?.to(`project:${updatedTask.project}`).emit("task:updated", { task: updatedTask });
       res.json({ task: updatedTask });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -197,7 +200,11 @@ taskRouter.delete(
   checkTaskAccess(["manager", "member"]),
   async (req, res) => {
     try {
+      const task = await TaskModel.findById(req.params.taskId);
+      if (!task) return res.status(404).json({ error: "Task not found" });
+      const projectId = task.project.toString();
       await TaskModel.findByIdAndDelete(req.params.taskId);
+      getIO()?.to(`project:${projectId}`).emit("task:deleted", { taskId: req.params.taskId, projectId });
       res.status(204).end();
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -225,6 +232,7 @@ taskRouter.post(
       project.taskColumns.push(newColumn);
       await project.save();
 
+      getIO()?.to(`project:${req.params.projectId}`).emit("column:created", { columns: project.taskColumns });
       res.json({ columns: project.taskColumns });
     } catch (error) {
       res.status(500).json({ error: error.message });

@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import ProjectModel from "../schema/project.js";
 import WorkspaceModel from "../schema/workspace.js";
 import FileModel from "../schema/file.js";
+import RoleModel from "../schema/role.js";
 import {
   isAuthenticated,
   checkWorkspaceRole,
@@ -366,7 +367,16 @@ projectRouter.put(
           .json({ error: "User is already a member of this project" });
       }
 
-      project.members.push({ user: userId, role });
+      // Look up the Role document by name for this workspace
+      const roleDoc = await RoleModel.findOne({
+        workspace: project.workspace,
+        name: { $regex: new RegExp(`^${role}$`, "i") },
+      });
+      if (!roleDoc) {
+        return res.status(400).json({ error: `Role "${role}" not found in this workspace` });
+      }
+
+      project.members.push({ user: userId, role: roleDoc._id });
       await project.save();
 
       const populatedProject = await ProjectModel.findById(project._id)
@@ -401,7 +411,16 @@ projectRouter.put(
         return res.status(400).json({ error: "Cannot change your own role" });
       }
 
-      member.role = newRole;
+      // Look up the Role document by name for this workspace
+      const roleDoc = await RoleModel.findOne({
+        workspace: project.workspace,
+        name: { $regex: new RegExp(`^${newRole}$`, "i") },
+      });
+      if (!roleDoc) {
+        return res.status(400).json({ error: `Role "${newRole}" not found in this workspace` });
+      }
+
+      member.role = roleDoc._id;
       await project.save();
 
       res.json({ project });

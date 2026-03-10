@@ -1,7 +1,7 @@
 import express from "express";
 import RoleModel from "../schema/role.js";
 import WorkspaceModel from "../schema/workspace.js";
-import { checkWorkspaceRole } from "../middleware/checkWorkspaceRole.js";
+import { isAuthenticated, checkWorkspaceRole } from "../middleware/checkWorkspaceRole.js";
 
 const router = express.Router();
 
@@ -98,7 +98,7 @@ export async function initializeDefaultRoles(workspaceId, userId) {
 }
 
 // GET /api/roles/:workspaceId - Lấy tất cả roles của workspace
-router.get("/:workspaceId", checkWorkspaceRole("member"), async (req, res) => {
+router.get("/:workspaceId", isAuthenticated, checkWorkspaceRole("member"), async (req, res) => {
   try {
     const { workspaceId } = req.params;
 
@@ -119,6 +119,7 @@ router.get("/:workspaceId", checkWorkspaceRole("member"), async (req, res) => {
 // GET /api/roles/:workspaceId/:roleId - Lấy chi tiết role
 router.get(
   "/:workspaceId/:roleId",
+  isAuthenticated,
   checkWorkspaceRole("member"),
   async (req, res) => {
     try {
@@ -144,6 +145,7 @@ router.get(
 // POST /api/roles/:workspaceId - Tạo role mới
 router.post(
   "/:workspaceId",
+  isAuthenticated,
   checkWorkspaceRole("owner", "admin"),
   async (req, res) => {
     try {
@@ -185,6 +187,7 @@ router.post(
 // PUT /api/roles/:workspaceId/:roleId - Cập nhật role
 router.put(
   "/:workspaceId/:roleId",
+  isAuthenticated,
   checkWorkspaceRole("owner", "admin"),
   async (req, res) => {
     try {
@@ -234,6 +237,7 @@ router.put(
 // DELETE /api/roles/:workspaceId/:roleId - Xóa role
 router.delete(
   "/:workspaceId/:roleId",
+  isAuthenticated,
   checkWorkspaceRole("owner", "admin"),
   async (req, res) => {
     try {
@@ -277,6 +281,7 @@ router.delete(
 // POST /api/roles/:workspaceId/:roleId/duplicate - Nhân bản role
 router.post(
   "/:workspaceId/:roleId/duplicate",
+  isAuthenticated,
   checkWorkspaceRole("owner", "admin"),
   async (req, res) => {
     try {

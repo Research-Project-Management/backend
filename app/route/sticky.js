@@ -4,6 +4,7 @@ import {
   isAuthenticated,
   checkWorkspaceRole,
 } from "../middleware/checkWorkspaceRole.js";
+import { getIO } from "../libs/socket.js";
 
 const stickyRouter = Router();
 
@@ -73,6 +74,7 @@ stickyRouter.post(
       });
       await newSticky.populate("author", "name avatar");
 
+      getIO()?.to(`workspace:${req.workspace._id}`).emit("sticky:created", { sticky: newSticky });
       res.status(201).json({ sticky: newSticky });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -106,6 +108,7 @@ stickyRouter.put("/stickies/:stickyId", isAuthenticated, async (req, res) => {
         })
         .populate("author", "name avatar");
 
+      getIO()?.to(`workspace:${sticky.workspace}`).emit("sticky:updated", { sticky: updatedSticky });
       res.json({ sticky: updatedSticky });
     });
   } catch (error) {
@@ -133,6 +136,7 @@ stickyRouter.delete(
         res,
         async () => {
           await StickyModel.findByIdAndDelete(stickyId);
+          getIO()?.to(`workspace:${sticky.workspace}`).emit("sticky:deleted", { stickyId });
           res.status(204).end();
         },
       );

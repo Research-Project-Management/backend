@@ -1,8 +1,10 @@
+import http from "http";
 import express from "express";
 import dotenv from "dotenv";
 dotenv.config();
 import connectDB from "./app/config/db.js";
 import { connectRedis, redisClient } from "./app/config/redis.js";
+import { initSocket } from "./app/libs/socket.js";
 import authRouter from "./app/route/auth.js";
 import workspaceRouter from "./app/route/workspace.js";
 import projectRouter from "./app/route/project.js";
@@ -23,6 +25,8 @@ import { RedisStore as RedisRateLimitStore } from "rate-limit-redis";
 import fileRouter from "./app/route/files.js";
 import aiRouter from "./app/route/ai.js";
 import chatHistoryRouter from "./app/route/chatHistory.js";
+import latexRouter from "./app/route/latex.js";
+import commentRouter from "./app/route/comment.js";
 //config
 
 const PORT = process.env.PORT;
@@ -55,8 +59,8 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "15mb" }));
+app.use(express.urlencoded({ extended: true, limit: "15mb" }));
 app.use(
   cors({
     origin: [
@@ -111,7 +115,11 @@ app.use("/api/files", fileRouter);
 app.use("/api/ai", aiRouter);
 app.use("/api/ai", chatHistoryRouter);
 app.use("/api/roles", roleRouter);
+app.use("/api/latex", latexRouter);
+app.use("/api", commentRouter);
 //listen
-app.listen(PORT, () => {
+const server = http.createServer(app);
+initSocket(server);
+server.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
 });

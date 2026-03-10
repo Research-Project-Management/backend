@@ -13,7 +13,7 @@ const pageSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["draft", "approved", "archived"], // Matching frontend enum in PageItem.tsx
+      enum: ["draft", "published", "archived"],
       default: "draft",
     },
     project: {
@@ -34,10 +34,28 @@ const pageSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    // Parent page — set for file-level pages that belong to a page-project container.
+    // Top-level pages (shown in PagesManager) have parentPage: null.
+    parentPage: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Page",
+      default: null,
+    },
+    // The file within this page-project that is used for compilation & as thumbnail.
+    mainFile: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Page",
+      default: null,
+    },
+    // Base64 JPEG data URL of the first page of the last successful PDF build.
+    pdfThumbnail: {
+      type: String,
+      default: null,
+    },
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 const PageModel = mongoose.models.Page || mongoose.model("Page", pageSchema);

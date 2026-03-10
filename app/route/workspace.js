@@ -1,5 +1,6 @@
 import { Router } from "express";
 import WorkspaceModel from "../schema/workspace.js";
+import RoleModel from "../schema/role.js";
 import {
   isAuthenticated,
   checkWorkspaceRole,
@@ -140,7 +141,16 @@ workspaceRouter.put(
       return res.status(400).json({ error: "User already a member" });
     }
 
-    workspace.members.push({ user: userId, role });
+    // Look up the Role document by name for this workspace
+    const roleDoc = await RoleModel.findOne({
+      workspace: workspace._id,
+      name: { $regex: new RegExp(`^${role}$`, "i") },
+    });
+    if (!roleDoc) {
+      return res.status(400).json({ error: `Role "${role}" not found in this workspace` });
+    }
+
+    workspace.members.push({ user: userId, role: roleDoc._id });
     await workspace.save();
     res.json({ workspace });
   },
@@ -167,7 +177,16 @@ workspaceRouter.put(
       return res.status(404).json({ error: "Member not found" });
     }
 
-    member.role = newRole;
+    // Look up the Role document by name for this workspace
+    const roleDoc = await RoleModel.findOne({
+      workspace: workspace._id,
+      name: { $regex: new RegExp(`^${newRole}$`, "i") },
+    });
+    if (!roleDoc) {
+      return res.status(400).json({ error: `Role "${newRole}" not found in this workspace` });
+    }
+
+    member.role = roleDoc._id;
     await workspace.save();
     res.json({ workspace });
   },
