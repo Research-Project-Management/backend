@@ -37,7 +37,10 @@ export function initSocket(server) {
       socket.join(`page:${pageId}`);
       // Send current presence snapshot to the joining socket
       const roomId = `page:${pageId}`;
-      socket.emit("presence:update", { roomId, users: getRoomPresence(roomId) });
+      socket.emit("presence:update", {
+        roomId,
+        users: getRoomPresence(roomId),
+      });
     });
     socket.on(
       "join:project",
