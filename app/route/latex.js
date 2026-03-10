@@ -18,7 +18,7 @@ import { isAuthenticated } from "../middleware/checkWorkspaceRole.js";
 
 const latexRouter = Router();
 
-const LATEX_URL = process.env.LATEX_URL || "http://localhost:8001";
+const LATEX_URL = process.env.LATEX_URL || "http://localhost:2918";
 
 latexRouter.post("/compile", isAuthenticated, async (req, res) => {
   try {

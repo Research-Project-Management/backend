@@ -19,7 +19,7 @@ const pageRouter = Router();
 // These keep the Flux-Latex-Compiler's persistent project folder in sync with
 // MongoDB so that compile requests only need to send the current editor source.
 
-const LATEX_URL = process.env.LATEX_URL || "http://localhost:8001";
+const LATEX_URL = process.env.LATEX_URL || "http://localhost:2918";
 
 /** Derive the compiler project folder key from a page document. */
 function projectFolderKey(page) {
