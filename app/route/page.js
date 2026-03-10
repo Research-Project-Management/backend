@@ -201,9 +201,15 @@ pageRouter.get(
     try {
       const { status, search } = req.query;
 
-      const projects = await ProjectModel.find({
-        workspace: req.workspace._id,
-      }).select("_id");
+      // Owners and admins can see pages from all projects.
+      // Regular members can only see pages from projects they belong to.
+      const isPrivileged = ["owner", "admin"].includes(req.workspaceRole);
+      const projectQuery = { workspace: req.workspace._id };
+      if (!isPrivileged) {
+        projectQuery["members.user"] = req.user._id;
+      }
+
+      const projects = await ProjectModel.find(projectQuery).select("_id");
       const projectIds = projects.map((p) => p._id);
 
       // Only top-level pages (not child files of a page-project)

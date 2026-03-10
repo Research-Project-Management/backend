@@ -262,30 +262,35 @@ workspaceRouter.get(
       const { default: ProjectModel } = await import("../schema/project.js");
       const { default: FileModel } = await import("../schema/file.js");
 
+      const isPrivileged = ["owner", "admin"].includes(req.workspaceRole);
+
+      // Build the set of accessible project IDs for this user
+      const projectQuery = { workspace: req.workspace._id };
+      if (!isPrivileged) projectQuery["members.user"] = req.user._id;
+      const accessibleProjectIds =
+        await ProjectModel.find(projectQuery).distinct("_id");
+
       // Get recent pages
       const recentPages = await PageModel.find({
-        project: {
-          $in: await ProjectModel.find({
-            workspace: req.workspace._id,
-          }).distinct("_id"),
-        },
+        project: { $in: accessibleProjectIds },
       })
         .sort({ lastAccessedAt: -1 })
         .limit(5)
         .populate("author", "name avatar email")
         .populate("project", "name avatar");
 
-      // Get recent projects
+      // Get recent projects (members only see their own projects)
       const recentProjects = await ProjectModel.find({
-        workspace: req.workspace._id,
+        _id: { $in: accessibleProjectIds },
       })
         .sort({ updatedAt: -1 })
         .limit(5)
         .populate("createdBy", "name avatar email");
 
-      // Get recent files
+      // Get recent files (scoped to accessible projects)
       const recentFiles = await FileModel.find({
         workspace: req.workspace._id,
+        project: { $in: accessibleProjectIds },
         trashedAt: null,
       })
         .sort({ updatedAt: -1 })
@@ -343,15 +348,17 @@ workspaceRouter.get(
       const { default: FileModel } = await import("../schema/file.js");
       const { default: TaskModel } = await import("../schema/task.js");
 
+      const isPrivileged = ["owner", "admin"].includes(req.workspaceRole);
+      const projectQuery = { workspace: req.workspace._id };
+      if (!isPrivileged) projectQuery["members.user"] = req.user._id;
+      const accessibleProjectIds =
+        await ProjectModel.find(projectQuery).distinct("_id");
+
       const activities = [];
 
       // Get recent page updates
       const recentPages = await PageModel.find({
-        project: {
-          $in: await ProjectModel.find({
-            workspace: req.workspace._id,
-          }).distinct("_id"),
-        },
+        project: { $in: accessibleProjectIds },
       })
         .sort({ updatedAt: -1 })
         .limit(10)
@@ -368,9 +375,10 @@ workspaceRouter.get(
         })),
       );
 
-      // Get recent file uploads
+      // Get recent file uploads (scoped to accessible projects)
       const recentFiles = await FileModel.find({
         workspace: req.workspace._id,
+        project: { $in: accessibleProjectIds },
         trashedAt: null,
       })
         .sort({ createdAt: -1 })
@@ -387,13 +395,9 @@ workspaceRouter.get(
         })),
       );
 
-      // Get recent task updates
+      // Get recent task updates (scoped to accessible projects)
       const recentTasks = await TaskModel.find({
-        project: {
-          $in: await ProjectModel.find({
-            workspace: req.workspace._id,
-          }).distinct("_id"),
-        },
+        project: { $in: accessibleProjectIds },
       })
         .sort({ updatedAt: -1 })
         .limit(10)

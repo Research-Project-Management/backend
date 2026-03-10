@@ -30,7 +30,7 @@ const optionalAuth = (req, res, next) => {
  * POST /api/ai/chat
  * Proxy chat requests to Flux-AI with SSE streaming
  */
-aiRouter.post("/chat", optionalAuth, async (req, res) => {
+aiRouter.post("/chat", isAuthenticated, async (req, res) => {
   try {
     const {
       query,

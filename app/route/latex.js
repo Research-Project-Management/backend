@@ -49,10 +49,17 @@ latexRouter.post("/compile", isAuthenticated, async (req, res) => {
     });
 
     if (upstream.ok) {
-      const pdfBuffer = Buffer.from(await upstream.arrayBuffer());
-      res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", "inline; filename=output.pdf");
-      return res.send(pdfBuffer);
+      const contentType = upstream.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        // New compiler: returns JSON { pdf: base64, synctex: string }
+        const data = await upstream.json();
+        return res.json(data);
+      } else {
+        // Legacy compiler: returns raw PDF bytes → wrap in expected JSON format
+        const arrayBuffer = await upstream.arrayBuffer();
+        const pdfBase64 = Buffer.from(arrayBuffer).toString("base64");
+        return res.json({ pdf: pdfBase64, synctex: "" });
+      }
     }
 
     // Forward error body (422 compilation_failed with log, 400 invalid_engine, etc.)
