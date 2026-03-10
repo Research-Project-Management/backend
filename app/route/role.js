@@ -1,7 +1,10 @@
 import express from "express";
 import RoleModel from "../schema/role.js";
 import WorkspaceModel from "../schema/workspace.js";
-import { isAuthenticated, checkWorkspaceRole } from "../middleware/checkWorkspaceRole.js";
+import {
+  isAuthenticated,
+  checkWorkspaceRole,
+} from "../middleware/checkWorkspaceRole.js";
 
 const router = express.Router();
 
@@ -98,23 +101,28 @@ export async function initializeDefaultRoles(workspaceId, userId) {
 }
 
 // GET /api/roles/:workspaceId - Lấy tất cả roles của workspace
-router.get("/:workspaceId", isAuthenticated, checkWorkspaceRole("member"), async (req, res) => {
-  try {
-    const { workspaceId } = req.params;
+router.get(
+  "/:workspaceId",
+  isAuthenticated,
+  checkWorkspaceRole("member"),
+  async (req, res) => {
+    try {
+      const { workspaceId } = req.params;
 
-    const roles = await RoleModel.find({
-      workspace: workspaceId,
-      type: "workspace",
-    })
-      .populate("createdBy", "name email avatar")
-      .sort({ isSystem: -1, name: 1 });
+      const roles = await RoleModel.find({
+        workspace: workspaceId,
+        type: "workspace",
+      })
+        .populate("createdBy", "name email avatar")
+        .sort({ isSystem: -1, name: 1 });
 
-    res.json({ roles });
-  } catch (error) {
-    console.error("Error fetching roles:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
+      res.json({ roles });
+    } catch (error) {
+      console.error("Error fetching roles:", error);
+      res.status(500).json({ error: error.message });
+    }
+  },
+);
 
 // GET /api/roles/:workspaceId/:roleId - Lấy chi tiết role
 router.get(
@@ -261,11 +269,9 @@ router.delete(
       );
 
       if (isRoleInUse) {
-        return res
-          .status(400)
-          .json({
-            error: "Cannot delete role that is currently assigned to members",
-          });
+        return res.status(400).json({
+          error: "Cannot delete role that is currently assigned to members",
+        });
       }
 
       await RoleModel.findByIdAndDelete(roleId);

@@ -288,7 +288,9 @@ pageRouter.post(
       await newPage.populate("author", "name avatar");
       await newPage.populate("mainFile", "title");
 
-      getIO()?.to(`project:${req.params.projectId}`).emit("page:created", { page: newPage });
+      getIO()
+        ?.to(`project:${req.params.projectId}`)
+        .emit("page:created", { page: newPage });
       res.status(201).json({ page: newPage, mainFile });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -339,11 +341,13 @@ pageRouter.put(
       await page.save();
 
       // Broadcast metadata changes (not the full content) to collaborators
-      getIO()?.to(`page:${req.params.pageId}`).emit("page:updated", {
-        pageId: req.params.pageId,
-        title: title !== undefined ? page.title : undefined,
-        status: status !== undefined ? page.status : undefined,
-      });
+      getIO()
+        ?.to(`page:${req.params.pageId}`)
+        .emit("page:updated", {
+          pageId: req.params.pageId,
+          title: title !== undefined ? page.title : undefined,
+          status: status !== undefined ? page.status : undefined,
+        });
 
       // Sync tex content to the compiler's project folder (fire-and-forget).
       // Root pages are always stored as "main.tex"; child files use their title.
@@ -376,7 +380,9 @@ pageRouter.delete(
       // If it's a top-level page, also delete all child files
       await PageModel.deleteMany({ parentPage: req.params.pageId });
       await PageModel.findByIdAndDelete(req.params.pageId);
-      getIO()?.to(`project:${req.page.project}`).emit("page:deleted", { pageId: req.params.pageId });
+      getIO()
+        ?.to(`project:${req.page.project}`)
+        .emit("page:deleted", { pageId: req.params.pageId });
       if (!req.page.parentPage) {
         // Deleting a root page — remove the entire compiler project folder.
         deleteProjectFromCompiler(req.params.pageId);

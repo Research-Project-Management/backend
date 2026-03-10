@@ -147,7 +147,9 @@ workspaceRouter.put(
       name: { $regex: new RegExp(`^${role}$`, "i") },
     });
     if (!roleDoc) {
-      return res.status(400).json({ error: `Role "${role}" not found in this workspace` });
+      return res
+        .status(400)
+        .json({ error: `Role "${role}" not found in this workspace` });
     }
 
     workspace.members.push({ user: userId, role: roleDoc._id });
@@ -183,7 +185,9 @@ workspaceRouter.put(
       name: { $regex: new RegExp(`^${newRole}$`, "i") },
     });
     if (!roleDoc) {
-      return res.status(400).json({ error: `Role "${newRole}" not found in this workspace` });
+      return res
+        .status(400)
+        .json({ error: `Role "${newRole}" not found in this workspace` });
     }
 
     member.role = roleDoc._id;

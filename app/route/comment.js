@@ -113,7 +113,12 @@ commentRouter.post(
 
       await populateComment(PageCommentModel.findById(comment._id)).then(
         (c) => {
-          getIO()?.to(`page:${page._id}`).emit("comment:created", { comment: c, projectPageId: projectPageId.toString() });
+          getIO()
+            ?.to(`page:${page._id}`)
+            .emit("comment:created", {
+              comment: c,
+              projectPageId: projectPageId.toString(),
+            });
           res.status(201).json({ comment: c });
         },
       );
@@ -152,7 +157,9 @@ commentRouter.put(
       const updated = await populateComment(
         PageCommentModel.findById(comment._id),
       );
-      getIO()?.to(`page:${req.params.pageId}`).emit("comment:updated", { comment: updated });
+      getIO()
+        ?.to(`page:${req.params.pageId}`)
+        .emit("comment:updated", { comment: updated });
       res.json({ comment: updated });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -185,7 +192,12 @@ commentRouter.delete(
       }
 
       await comment.deleteOne();
-      getIO()?.to(`page:${req.params.pageId}`).emit("comment:deleted", { commentId: req.params.commentId, pageId: req.params.pageId });
+      getIO()
+        ?.to(`page:${req.params.pageId}`)
+        .emit("comment:deleted", {
+          commentId: req.params.commentId,
+          pageId: req.params.pageId,
+        });
       res.status(204).end();
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -217,7 +229,9 @@ commentRouter.post(
       const updated = await populateComment(
         PageCommentModel.findById(comment._id),
       );
-      getIO()?.to(`page:${req.params.pageId}`).emit("reply:added", { comment: updated });
+      getIO()
+        ?.to(`page:${req.params.pageId}`)
+        .emit("reply:added", { comment: updated });
       res.status(201).json({ comment: updated });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -252,7 +266,9 @@ commentRouter.delete(
       const updated = await populateComment(
         PageCommentModel.findById(comment._id),
       );
-      getIO()?.to(`page:${req.params.pageId}`).emit("reply:removed", { comment: updated });
+      getIO()
+        ?.to(`page:${req.params.pageId}`)
+        .emit("reply:removed", { comment: updated });
       res.json({ comment: updated });
     } catch (err) {
       res.status(500).json({ error: err.message });
