@@ -87,11 +87,20 @@ fileRouter.post("/presign", isAuthenticated, async (req, res) => {
 fileRouter.post(
   "/upload",
   isAuthenticated,
-  (req, res, next) => {
-    req.params.projectId = req.body.projectId;
-    next();
+  async (req, res, next) => {
+    const { projectId, workspaceId } = req.body;
+    // If projectId is a valid ObjectId, check project role; otherwise check workspace role
+    const isValidProjectId = projectId && /^[0-9a-fA-F]{24}$/.test(projectId);
+    if (isValidProjectId) {
+      req.params.projectId = projectId;
+      return checkProjectRole("manager", "member")(req, res, next);
+    } else if (workspaceId) {
+      req.params.workspaceId = workspaceId;
+      return checkWorkspaceRole("owner", "admin", "member")(req, res, next);
+    } else {
+      return res.status(400).json({ error: "workspaceId is required" });
+    }
   },
-  checkProjectRole("manager", "member"),
   async (req, res) => {
     try {
       const {
@@ -106,18 +115,14 @@ fileRouter.post(
         metaData,
       } = req.body;
 
-      if (!projectId) {
-        return res.status(400).json({ error: "projectId is required" });
-      }
-
       const file = new FileModel({
         filename,
         size,
         mimeType,
         url,
         thumbnail,
-        workspace: workspaceId,
-        project: projectId,
+        workspace: req.workspace?._id || workspaceId,
+        project: projectId || null,
         parent: parentId || null,
         author: req.user._id,
         metaData: metaData || {},
@@ -137,23 +142,31 @@ fileRouter.post(
 fileRouter.post(
   "/folder",
   isAuthenticated,
-  (req, res, next) => {
-    req.params.projectId = req.body.projectId;
-    next();
+  async (req, res, next) => {
+    const { projectId, workspaceId } = req.body;
+    const isValidProjectId = projectId && /^[0-9a-fA-F]{24}$/.test(projectId);
+    if (isValidProjectId) {
+      req.params.projectId = projectId;
+      return checkProjectRole("manager", "member")(req, res, next);
+    } else if (workspaceId) {
+      req.params.workspaceId = workspaceId;
+      return checkWorkspaceRole("owner", "admin", "member")(req, res, next);
+    } else {
+      return res.status(400).json({ error: "workspaceId is required" });
+    }
   },
-  checkProjectRole("manager", "member"),
   async (req, res) => {
     try {
       const { name, workspaceId, projectId, parentId } = req.body;
 
-      if (!name || !projectId) {
-        return res.status(400).json({ error: "Missing required fields" });
+      if (!name) {
+        return res.status(400).json({ error: "Folder name is required" });
       }
 
       const folder = new FileModel({
         filename: name,
-        workspace: workspaceId,
-        project: projectId,
+        workspace: req.workspace?._id || workspaceId,
+        project: projectId || null,
         parent: parentId || null,
         author: req.user._id,
         isFolder: true,
@@ -464,6 +477,73 @@ fileRouter.put(
 );
 
 // Workspace-level aggregation endpoints
+
+// Workspace Storage Home — project folders + workspace-level files
+fileRouter.get(
+  "/workspace/:workspaceId/home",
+  isAuthenticated,
+  checkWorkspaceRole("owner", "admin", "member"),
+  async (req, res) => {
+    try {
+      const { workspaceId } = req.params;
+      const isPrivileged = ["owner", "admin"].includes(req.workspaceRole);
+
+      // Get projects the user has access to
+      let projectQuery = { workspace: req.workspace._id };
+      if (!isPrivileged) {
+        projectQuery["members.user"] = req.user._id;
+      }
+      const projects = await ProjectModel.find(projectQuery)
+        .select("_id name")
+        .lean();
+
+      // Get file stats for each project
+      const projectStats = await Promise.all(
+        projects.map(async (project) => {
+          const stats = await FileModel.aggregate([
+            {
+              $match: {
+                project: project._id,
+                trashedAt: null,
+                isFolder: false,
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                fileCount: { $sum: 1 },
+                totalSize: { $sum: { $ifNull: ["$size", 0] } },
+              },
+            },
+          ]);
+
+          return {
+            _id: project._id,
+            name: project.name,
+            fileCount: stats[0]?.fileCount || 0,
+            totalSize: stats[0]?.totalSize || 0,
+          };
+        }),
+      );
+
+      // Get workspace-level files (project = null)
+      const workspaceFiles = await FileModel.find({
+        workspace: workspaceId,
+        project: null,
+        parent: null,
+        trashedAt: null,
+      })
+        .populate("author", "name email avatar")
+        .sort({ isFolder: -1, filename: 1 });
+
+      res.json({ projects: projectStats, workspaceFiles });
+    } catch (error) {
+      console.error("Error fetching workspace home:", error);
+      res.status(500).json({ error: "Failed to fetch workspace home" });
+    }
+  },
+);
+
 // Get all files from all projects in workspace
 fileRouter.get(
   "/workspace/:workspaceId/all",
@@ -639,8 +719,11 @@ fileRouter.get(/^\/(.+)/, async (req, res) => {
     const response = await r2.send(command);
 
     // Set CORS headers for cross-origin access
-    res.setHeader("Access-Control-Allow-Origin", "http://localhost:5173");
-    res.setHeader("Access-Control-Allow-Origin", "https://flux.aisq.dev");
+    const allowedOrigins = ["http://localhost:5173", "http://localhost:2916", "https://flux.aisq.dev"];
+    const origin = req.headers.origin;
+    if (origin && allowedOrigins.includes(origin)) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+    }
     res.setHeader("Access-Control-Allow-Credentials", "true");
     res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
 

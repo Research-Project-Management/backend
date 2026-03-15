@@ -123,4 +123,67 @@ authRouter.get("/search", async (req, res) => {
   }
 });
 
+// Update user profile
+authRouter.put("/profile", async (req, res) => {
+  if (!req.isAuthenticated())
+    return res.status(401).json({ error: "Unauthorized" });
+
+  try {
+    const { name, avatar } = req.body;
+    const updates = {};
+    if (name !== undefined) updates.name = name.trim();
+    if (avatar !== undefined) updates.avatar = avatar;
+
+    if (Object.keys(updates).length === 0)
+      return res.status(400).json({ error: "No fields to update" });
+
+    const user = await UserModel.findByIdAndUpdate(req.user._id, updates, {
+      new: true,
+    }).select("-password");
+
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    // Update session
+    req.user.name = user.name;
+    req.user.avatar = user.avatar;
+
+    res.json({ user });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Change password
+authRouter.put("/change-password", async (req, res) => {
+  if (!req.isAuthenticated())
+    return res.status(401).json({ error: "Unauthorized" });
+
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!newPassword || newPassword.length < 6)
+      return res
+        .status(400)
+        .json({ error: "Password must be at least 6 characters" });
+
+    const user = await UserModel.findById(req.user._id);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    // If user has a password (local auth), verify current password
+    if (user.password) {
+      if (!currentPassword)
+        return res.status(400).json({ error: "Current password is required" });
+      const isValid = await user.comparePassword(currentPassword);
+      if (!isValid)
+        return res.status(400).json({ error: "Current password is incorrect" });
+    }
+
+    user.password = await bcrypt.hash(newPassword, 10);
+    await user.save();
+
+    res.json({ message: "Password updated successfully" });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default authRouter;

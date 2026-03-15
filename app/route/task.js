@@ -72,14 +72,21 @@ taskRouter.get(
   async (req, res) => {
     try {
       const { projectId } = req.params;
-      const tasks = await TaskModel.find({ project: projectId })
+      const { cycle } = req.query;
+
+      const query = { project: projectId };
+      if (cycle) query.cycle = cycle;
+
+      const tasks = await TaskModel.find(query)
         .populate("assignee", "name avatar")
+        .populate("cycle", "name phase status")
+        .populate("parentTask", "title identifier")
         .sort({ rank: 1 });
 
       const project =
-        await ProjectModel.findById(projectId).select("taskColumns");
+        await ProjectModel.findById(projectId).select("taskColumns name");
 
-      res.json({ tasks, columns: project.taskColumns });
+      res.json({ tasks, columns: project.taskColumns, projectName: project.name });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
@@ -138,7 +145,19 @@ taskRouter.post(
   checkProjectRole("manager", "member"),
   async (req, res) => {
     try {
-      const { title, columnId, content, assignee, dueDate, labels } = req.body;
+      const {
+        title,
+        columnId,
+        content,
+        description,
+        assignee,
+        dueDate,
+        labels,
+        priority,
+        estimate,
+        cycle,
+        parentTask,
+      } = req.body;
       const { projectId } = req.params;
 
       const count = await TaskModel.countDocuments({
@@ -146,20 +165,36 @@ taskRouter.post(
         columnId,
       });
 
+      // Auto-generate identifier
+      const project = req.project;
+      const prefix = (project.name || "TASK")
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, "")
+        .slice(0, 4);
+      const totalInProject = await TaskModel.countDocuments({ project: projectId });
+      const identifier = `${prefix}-${totalInProject + 1}`;
+
       const newTask = new TaskModel({
         title,
         content,
+        description,
         columnId,
         project: projectId,
         assignee,
         dueDate,
         labels,
+        priority: priority || "none",
+        estimate,
+        cycle: cycle || null,
+        parentTask: parentTask || null,
+        identifier,
         rank: count + 1,
         author: req.user._id,
       });
 
       await newTask.save();
       await newTask.populate("assignee", "name avatar");
+      await newTask.populate("cycle", "name phase status");
 
       getIO()
         ?.to(`project:${projectId}`)

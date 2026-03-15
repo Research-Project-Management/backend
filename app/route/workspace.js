@@ -429,4 +429,260 @@ workspaceRouter.get(
   },
 );
 
+// Search everything in workspace
+workspaceRouter.get(
+  "/:workspaceId/search",
+  isAuthenticated,
+  checkWorkspaceRole("owner", "admin", "member"),
+  async (req, res) => {
+    try {
+      const { q } = req.query;
+      if (!q || typeof q !== "string" || q.trim().length < 1) {
+        return res.json({ results: [] });
+      }
+
+      const { default: PageModel } = await import("../schema/page.js");
+      const { default: ProjectModel } = await import("../schema/project.js");
+      const { default: FileModel } = await import("../schema/file.js");
+      const { default: StickyModel } = await import("../schema/sticky.js");
+
+      const searchRegex = { $regex: q.trim(), $options: "i" };
+      const isPrivileged = ["owner", "admin"].includes(req.workspaceRole);
+
+      // Get accessible project IDs
+      const projectQuery = { workspace: req.workspace._id };
+      if (!isPrivileged) projectQuery["members.user"] = req.user._id;
+      const accessibleProjectIds =
+        await ProjectModel.find(projectQuery).distinct("_id");
+
+      // Search in parallel
+      const [projects, pages, files, stickies] = await Promise.all([
+        ProjectModel.find({
+          _id: { $in: accessibleProjectIds },
+          name: searchRegex,
+        })
+          .limit(5)
+          .select("name avatar updatedAt"),
+        PageModel.find({
+          project: { $in: accessibleProjectIds },
+          title: searchRegex,
+        })
+          .limit(5)
+          .select("title project updatedAt")
+          .populate("project", "name"),
+        // Files: include workspace-level files (project null) AND project-scoped files
+        FileModel.find({
+          workspace: req.workspace._id,
+          $or: [
+            { project: { $in: accessibleProjectIds } },
+            { project: null },
+          ],
+          filename: searchRegex,
+          trashedAt: null,
+        })
+          .limit(5)
+          .select("filename mimeType size updatedAt project isFolder"),
+        // Stickies: search by title or content
+        StickyModel.find({
+          workspace: req.workspace._id,
+          $or: [
+            { title: searchRegex },
+            { content: searchRegex },
+          ],
+        })
+          .limit(5)
+          .select("title content color updatedAt"),
+      ]);
+
+      const results = [
+        ...projects.map((p) => ({
+          type: "project",
+          id: p._id,
+          name: p.name,
+          icon: p.avatar || null,
+          updatedAt: p.updatedAt,
+        })),
+        ...pages.map((p) => ({
+          type: "page",
+          id: p._id,
+          name: p.title,
+          projectId: p.project?._id,
+          projectName: p.project?.name,
+          updatedAt: p.updatedAt,
+        })),
+        ...files.map((f) => ({
+          type: f.isFolder ? "folder" : "file",
+          id: f._id,
+          name: f.filename,
+          mimeType: f.mimeType,
+          size: f.size,
+          projectId: f.project,
+          updatedAt: f.updatedAt,
+        })),
+        ...stickies.map((s) => {
+          const stripHtml = (str) => str?.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").trim() || "";
+          return {
+            type: "sticky",
+            id: s._id,
+            name: stripHtml(s.title) || "Untitled",
+            content: stripHtml(s.content)?.substring(0, 80) || "",
+            color: s.color,
+            updatedAt: s.updatedAt,
+          };
+        }),
+      ];
+
+      res.json({ results });
+    } catch (error) {
+      console.error("Error searching workspace:", error);
+      res.status(500).json({ error: "Search failed" });
+    }
+  },
+);
+
+// Get research overview for "Your Works" — cycles + upcoming deadlines
+workspaceRouter.get(
+  "/:workspaceId/my-research",
+  isAuthenticated,
+  checkWorkspaceRole("owner", "admin", "member"),
+  async (req, res) => {
+    try {
+      const { default: ProjectModel } = await import("../schema/project.js");
+      const { default: CycleModel } = await import("../schema/cycle.js");
+      const { default: TaskModel } = await import("../schema/task.js");
+
+      const isPrivileged = ["owner", "admin"].includes(req.workspaceRole);
+      const projectQuery = { workspace: req.workspace._id };
+      if (!isPrivileged) projectQuery["members.user"] = req.user._id;
+      const accessibleProjects = await ProjectModel.find(projectQuery).select(
+        "name avatar",
+      );
+      const accessibleProjectIds = accessibleProjects.map((p) => p._id);
+      const projectMap = Object.fromEntries(
+        accessibleProjects.map((p) => [
+          p._id.toString(),
+          { _id: p._id, name: p.name, avatar: p.avatar },
+        ]),
+      );
+
+      // 1. Active cycles across all projects
+      const cycles = await CycleModel.find({
+        project: { $in: accessibleProjectIds },
+        status: { $in: ["active", "planned"] },
+      })
+        .sort({ status: 1, order: 1 })
+        .populate("author", "name avatar");
+
+      // Compute task stats for each cycle
+      const cycleIds = cycles.map((c) => c._id);
+      const cycleTasks = await TaskModel.find({
+        cycle: { $in: cycleIds },
+      }).select("cycle columnId");
+
+      const cycleStatsMap = {};
+      cycleTasks.forEach((t) => {
+        const key = t.cycle?.toString();
+        if (!key) return;
+        if (!cycleStatsMap[key]) cycleStatsMap[key] = { total: 0, done: 0 };
+        cycleStatsMap[key].total++;
+        if (t.columnId === "done") cycleStatsMap[key].done++;
+      });
+
+      const cyclesData = cycles.map((c) => {
+        const stats = cycleStatsMap[c._id.toString()] || {
+          total: 0,
+          done: 0,
+        };
+        return {
+          _id: c._id,
+          name: c.name,
+          description: c.description,
+          phase: c.phase,
+          status: c.status,
+          startDate: c.startDate,
+          endDate: c.endDate,
+          milestones: c.milestones,
+          deliverables: c.deliverables,
+          project: projectMap[c.project.toString()] || null,
+          author: c.author,
+          stats: {
+            totalTasks: stats.total,
+            completedTasks: stats.done,
+            progress: stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 0,
+          },
+        };
+      });
+
+      // 2. Upcoming deadlines: milestones (next 14 days) + tasks with dueDate
+      const now = new Date();
+      const in14Days = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+
+      // Milestone deadlines from cycles
+      const milestoneDeadlines = [];
+      cycles.forEach((c) => {
+        (c.milestones || []).forEach((m) => {
+          if (!m.dueDate) return;
+          const d = new Date(m.dueDate);
+          // Include overdue (not completed) + upcoming 14 days
+          if ((!m.completed && d < now) || (d >= now && d <= in14Days)) {
+            milestoneDeadlines.push({
+              type: "milestone",
+              id: m._id?.toString(),
+              title: m.title,
+              dueDate: m.dueDate,
+              completed: m.completed,
+              cycleName: c.name,
+              cycleId: c._id,
+              project: projectMap[c.project.toString()] || null,
+              isOverdue: !m.completed && d < now,
+            });
+          }
+        });
+      });
+
+      // Task deadlines
+      const taskDeadlines = await TaskModel.find({
+        project: { $in: accessibleProjectIds },
+        assignee: req.user._id,
+        dueDate: { $exists: true, $ne: null },
+        $or: [
+          { dueDate: { $lt: now }, columnId: { $ne: "done" } }, // overdue
+          { dueDate: { $gte: now, $lte: in14Days } }, // upcoming
+        ],
+      })
+        .sort({ dueDate: 1 })
+        .limit(20)
+        .select("title dueDate columnId priority project identifier")
+        .populate("project", "name avatar");
+
+      const taskDeadlinesData = taskDeadlines.map((t) => ({
+        type: "task",
+        id: t._id,
+        title: t.title,
+        identifier: t.identifier,
+        dueDate: t.dueDate,
+        completed: t.columnId === "done",
+        priority: t.priority,
+        project: t.project,
+        isOverdue:
+          t.columnId !== "done" && new Date(t.dueDate) < now,
+      }));
+
+      // Merge and sort: overdue first, then by date
+      const deadlines = [...milestoneDeadlines, ...taskDeadlinesData].sort(
+        (a, b) => {
+          if (a.isOverdue && !b.isOverdue) return -1;
+          if (!a.isOverdue && b.isOverdue) return 1;
+          return new Date(a.dueDate) - new Date(b.dueDate);
+        },
+      );
+
+      res.json({ cycles: cyclesData, deadlines });
+    } catch (error) {
+      console.error("Error fetching research overview:", error);
+      res.status(500).json({ error: "Failed to fetch research overview" });
+    }
+  },
+);
+
 export default workspaceRouter;
