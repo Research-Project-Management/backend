@@ -26,6 +26,13 @@ const fileSchema = new mongoose.Schema(
       required: false,
       default: null,
     },
+    // Link to a LaTeX page-project — set when asset is uploaded from the editor.
+    pageId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Page",
+      required: false,
+      default: null,
+    },
     starred: { type: Boolean, default: false },
     trashedAt: { type: Date, default: null },
     sharedWith: [

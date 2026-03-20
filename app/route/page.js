@@ -1,7 +1,11 @@
 import { Router } from "express";
-import { PutObjectCommand } from "@aws-sdk/client-s3";
+import {
+  PutObjectCommand,
+  DeleteObjectCommand,
+} from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import PageModel from "../schema/page.js";
-import PageAssetModel from "../schema/pageAsset.js";
+import FileModel from "../schema/file.js";
 import PageVersionModel from "../schema/pageVersion.js";
 import ProjectModel from "../schema/project.js";
 import WorkspaceModel from "../schema/workspace.js";
@@ -70,6 +74,27 @@ function deleteProjectFromCompiler(folderId) {
     (err) =>
       console.warn(`[sync] DELETE project ${folderId} failed:`, err.message),
   );
+}
+
+/**
+ * Walk up the folder-parent chain to build a relative path for the compiler.
+ * e.g. if file "photo.png" is inside folder "images", returns "images/photo.png".
+ * For root-level files (no parent folder), returns just the filename.
+ */
+async function buildRelativePath(filename, parentId, pageId) {
+  const parts = [filename];
+  let currentParentId = parentId;
+  while (currentParentId) {
+    const parentFolder = await FileModel.findOne({
+      _id: currentParentId,
+      pageId,
+      isFolder: true,
+    }).select("filename parent");
+    if (!parentFolder) break;
+    parts.unshift(parentFolder.filename);
+    currentParentId = parentFolder.parent;
+  }
+  return parts.join("/");
 }
 
 // ── Version control helpers ───────────────────────────────────────────────────
@@ -542,18 +567,23 @@ pageRouter.put(
   },
 );
 
-// 10. List assets for a page-project (name/meta only, no binary data)
+// 10. List assets for a page-project (File model, R2-backed)
+// Supports optional ?parentId= for folder navigation.
 pageRouter.get(
   "/pages/:pageId/assets",
   isAuthenticated,
   checkPageAccess(["manager", "member", "viewer"]),
   async (req, res) => {
     try {
-      const assets = await PageAssetModel.find({
-        parentPage: req.params.pageId,
-      })
-        .select("_id name mimeType size createdAt")
-        .sort({ createdAt: 1 });
+      const { parentId } = req.query;
+      const query = {
+        pageId: req.params.pageId,
+        parent: parentId || null,
+        trashedAt: null,
+      };
+      const assets = await FileModel.find(query)
+        .populate("author", "name email avatar")
+        .sort({ isFolder: -1, filename: 1 });
       res.json({ assets });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -561,104 +591,220 @@ pageRouter.get(
   },
 );
 
-// 11. Upload an asset (image / binary file) — client sends JSON { name, mimeType, data (base64) }
+// 10b. Get a presigned upload URL for a page asset
+pageRouter.post(
+  "/pages/:pageId/assets/presign",
+  isAuthenticated,
+  checkPageAccess(["manager", "member"]),
+  async (req, res) => {
+    try {
+      const { fileName } = req.body;
+      if (!fileName)
+        return res.status(400).json({ error: "fileName is required" });
+      const key = `page-assets/${req.params.pageId}/${Date.now()}-${fileName}`;
+      const presignedUrl = await getSignedUrl(
+        r2,
+        new PutObjectCommand({
+          Bucket: process.env.R2_BUCKET_NAME,
+          Key: key,
+        }),
+        { expiresIn: 3600 },
+      );
+      res.json({ url: presignedUrl, path: key });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  },
+);
+
+// 11. Upload an asset — client uploads to R2 first, then saves metadata here
 pageRouter.post(
   "/pages/:pageId/assets",
   isAuthenticated,
   checkPageAccess(["manager", "member"]),
   async (req, res) => {
     try {
-      const { name, mimeType, data } = req.body;
-      if (!name || !data)
-        return res.status(400).json({ error: "name and data are required" });
+      const { filename, size, mimeType, url, thumbnail, parentId, base64Data } =
+        req.body;
+      if (!filename)
+        return res.status(400).json({ error: "filename is required" });
 
-      // Guard against oversized payloads (max 10 MB decoded)
-      const sizeBytes = Buffer.from(data, "base64").length;
-      if (sizeBytes > 10 * 1024 * 1024)
-        return res.status(413).json({ error: "Asset too large (max 10 MB)" });
+      // Determine workspace from the page's project
+      const project = await ProjectModel.findById(req.page.project).select(
+        "workspace",
+      );
 
-      const asset = new PageAssetModel({
-        name,
+      const asset = new FileModel({
+        filename,
+        size: size || 0,
         mimeType: mimeType || "application/octet-stream",
-        size: sizeBytes,
-        data,
-        parentPage: req.params.pageId,
+        url: url || null,
+        thumbnail: thumbnail || null,
+        workspace: project?.workspace || null,
         project: req.page.project,
+        pageId: req.params.pageId,
+        parent: parentId || null,
         author: req.user._id,
+        isFolder: false,
       });
       await asset.save();
 
       // Sync the asset to the compiler's project folder (fire-and-forget).
-      syncFileToCompiler(req.params.pageId, name, data);
+      // Build full relative path (e.g. "images/photo.png") for folder children.
+      if (base64Data) {
+        const relPath = await buildRelativePath(filename, parentId, req.params.pageId);
+        syncFileToCompiler(req.params.pageId, relPath, base64Data);
+      }
       // Record lifecycle event.
       recordLifecycleEvent(
         req.params.pageId,
         req.user._id,
         "asset_uploaded",
-        name,
+        filename,
       );
 
-      res.status(201).json({
-        asset: {
-          _id: asset._id,
-          name: asset.name,
-          mimeType: asset.mimeType,
-          size: asset.size,
-          createdAt: asset.createdAt,
-        },
-      });
+      res.status(201).json({ asset });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
   },
 );
 
-// 12. Get asset binary data (for image preview)
-pageRouter.get(
-  "/pages/:pageId/assets/:assetId/data",
+// 11b. Create a folder inside a page-project
+pageRouter.post(
+  "/pages/:pageId/folders",
   isAuthenticated,
-  checkPageAccess(["manager", "member", "viewer"]),
+  checkPageAccess(["manager", "member"]),
   async (req, res) => {
     try {
-      const asset = await PageAssetModel.findOne({
-        _id: req.params.assetId,
-        parentPage: req.params.pageId,
-      }).select("name mimeType data");
-      if (!asset) return res.status(404).json({ error: "Asset not found" });
-      res.json({
-        name: asset.name,
-        mimeType: asset.mimeType,
-        data: asset.data,
+      const { name, parentId } = req.body;
+      if (!name)
+        return res.status(400).json({ error: "Folder name is required" });
+
+      const project = await ProjectModel.findById(req.page.project).select(
+        "workspace",
+      );
+
+      const folder = new FileModel({
+        filename: name,
+        workspace: project?.workspace || null,
+        project: req.page.project,
+        pageId: req.params.pageId,
+        parent: parentId || null,
+        author: req.user._id,
+        isFolder: true,
       });
+      await folder.save();
+      res.status(201).json({ folder });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
   },
 );
 
-// 13. Delete an asset from a page-project
+// 12. Delete an asset from a page-project (R2 + File record + compiler)
 pageRouter.delete(
   "/pages/:pageId/assets/:assetId",
   isAuthenticated,
   checkPageAccess(["manager", "member"]),
   async (req, res) => {
     try {
-      const asset = await PageAssetModel.findOne({
+      const asset = await FileModel.findOne({
         _id: req.params.assetId,
-        parentPage: req.params.pageId,
+        pageId: req.params.pageId,
       });
       if (!asset) return res.status(404).json({ error: "Asset not found" });
+
+      // Delete from R2 if it's a file (not a folder) with a URL
+      if (!asset.isFolder && asset.url) {
+        try {
+          const urlParts = asset.url.split("/api/files/");
+          const key = urlParts[1];
+          if (key) {
+            await r2.send(
+              new DeleteObjectCommand({
+                Bucket: process.env.R2_BUCKET_NAME,
+                Key: key,
+              }),
+            );
+          }
+        } catch (r2Error) {
+          console.error("Error deleting asset from R2:", r2Error);
+        }
+      }
+
+      // If it's a folder, also delete all children recursively
+      if (asset.isFolder) {
+        const deleteChildren = async (parentId, parentPath) => {
+          const children = await FileModel.find({ parent: parentId, pageId: req.params.pageId });
+          for (const child of children) {
+            const childPath = parentPath ? `${parentPath}/${child.filename}` : child.filename;
+            if (child.isFolder) {
+              await deleteChildren(child._id, childPath);
+            } else {
+              if (child.url) {
+                try {
+                  const urlParts = child.url.split("/api/files/");
+                  const key = urlParts[1];
+                  if (key) {
+                    await r2.send(
+                      new DeleteObjectCommand({
+                        Bucket: process.env.R2_BUCKET_NAME,
+                        Key: key,
+                      }),
+                    );
+                  }
+                } catch (_) { /* ignore */ }
+              }
+              deleteFileFromCompiler(req.params.pageId, childPath);
+            }
+            await child.deleteOne();
+          }
+        };
+        // Build the folder's own relative path for its children
+        const folderPath = await buildRelativePath(asset.filename, asset.parent, req.params.pageId);
+        // We pass the folder path without the folder's own name since children will prepend it
+        await deleteChildren(asset._id, folderPath);
+      } else {
+        // Remove from the compiler's project folder (fire-and-forget).
+        const relPath = await buildRelativePath(asset.filename, asset.parent, req.params.pageId);
+        deleteFileFromCompiler(req.params.pageId, relPath);
+      }
+
       await asset.deleteOne();
-      // Remove from the compiler's project folder (fire-and-forget).
-      deleteFileFromCompiler(req.params.pageId, asset.name);
+
       // Record lifecycle event.
       recordLifecycleEvent(
         req.params.pageId,
         req.user._id,
         "asset_deleted",
-        asset.name,
+        asset.filename,
       );
       res.status(204).end();
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  },
+);
+
+// 12b. Rename an asset in a page-project
+pageRouter.put(
+  "/pages/:pageId/assets/:assetId/rename",
+  isAuthenticated,
+  checkPageAccess(["manager", "member"]),
+  async (req, res) => {
+    try {
+      const { name } = req.body;
+      if (!name)
+        return res.status(400).json({ error: "name is required" });
+      const asset = await FileModel.findOne({
+        _id: req.params.assetId,
+        pageId: req.params.pageId,
+      });
+      if (!asset) return res.status(404).json({ error: "Asset not found" });
+      asset.filename = name;
+      await asset.save();
+      res.json({ asset });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
