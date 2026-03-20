@@ -811,6 +811,41 @@ pageRouter.put(
   },
 );
 
+// 12c. Move an asset to a different folder in a page-project
+pageRouter.put(
+  "/pages/:pageId/assets/:assetId/move",
+  isAuthenticated,
+  checkPageAccess(["manager", "member"]),
+  async (req, res) => {
+    try {
+      const { parentId } = req.body;
+      const asset = await FileModel.findOne({
+        _id: req.params.assetId,
+        pageId: req.params.pageId,
+      });
+      if (!asset) return res.status(404).json({ error: "Asset not found" });
+
+      if (parentId) {
+        const targetFolder = await FileModel.findOne({
+          _id: parentId,
+          pageId: req.params.pageId,
+          isFolder: true,
+        });
+        if (!targetFolder)
+          return res.status(400).json({ error: "Target folder not found" });
+        if (asset._id.toString() === parentId)
+          return res.status(400).json({ error: "Cannot move into itself" });
+      }
+
+      asset.parent = parentId || null;
+      await asset.save();
+      res.json({ asset });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  },
+);
+
 // ── Version control ──────────────────────────────────────────────────────
 
 // List versions for a page (metadata only)

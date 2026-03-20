@@ -500,6 +500,71 @@ const registerFileActionRoutes = (router) => {
       }
     },
   );
+
+  router.put(
+    "/:fileId/move",
+    isAuthenticated,
+    checkFileAccess(["manager", "member"]),
+    async (req, res) => {
+      try {
+        const file = req.file;
+        const { parentId } = req.body;
+
+        // parentId can be null (move to root) or a valid folder ID
+        if (parentId) {
+          const targetFolder = await FileModel.findById(parentId);
+          if (!targetFolder || !targetFolder.isFolder) {
+            return res.status(400).json({ error: "Target is not a valid folder" });
+          }
+          // Prevent moving a folder into itself
+          if (file._id.toString() === parentId) {
+            return res.status(400).json({ error: "Cannot move a folder into itself" });
+          }
+        }
+
+        file.parent = parentId || null;
+        await file.save();
+        return res.json({ file });
+      } catch (error) {
+        return handleServerError(res, error, "Failed to move file");
+      }
+    },
+  );
+
+  router.post(
+    "/check-duplicate",
+    isAuthenticated,
+    async (req, res) => {
+      try {
+        const { filename, parentId, projectId, workspaceId } = req.body;
+
+        if (!filename) {
+          return res.status(400).json({ error: "Missing filename" });
+        }
+
+        const query = {
+          filename,
+          parent: parentId || null,
+          trashedAt: null,
+        };
+
+        if (projectId && isValidObjectId(projectId)) {
+          query.project = projectId;
+        } else if (workspaceId) {
+          query.workspace = workspaceId;
+          query.project = null;
+        }
+
+        const existing = await FileModel.findOne(query).select("_id filename").lean();
+        return res.json({
+          exists: !!existing,
+          existingFile: existing || null,
+        });
+      } catch (error) {
+        return handleServerError(res, error, "Failed to check duplicate");
+      }
+    },
+  );
 };
 
 const registerWorkspaceStorageRoutes = (router) => {
