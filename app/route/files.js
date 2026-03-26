@@ -855,12 +855,12 @@ const registerCrossrefRoutes = (router) => {
 
   // Lookup by DOI
   router.get(
-    "/crossref/doi/*",
+    "/crossref/doi/*doi",
     isAuthenticated,
     async (req, res) => {
       try {
-        // Express 5 puts the wildcard into req.params[0]
-        const doi = req.params[0];
+        // Express 5 named wildcard: req.params.doi
+        const doi = req.params.doi;
         if (!doi) return res.status(400).json({ error: "DOI is required" });
 
         const url = `https://api.crossref.org/works/${encodeURIComponent(doi)}`;
