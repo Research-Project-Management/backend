@@ -17,33 +17,108 @@ authRouter.get("/user", (req, res) => {
 authRouter.post("/login", (req, res, next) => {
   passport.authenticate("local", (err, user, info) => {
     if (err) {
-      res.status(500).json({
+      return res.status(500).json({
         type: err.type || "NULL_TYPE",
         error: err.message || "Internal server error",
       });
     }
-    if (user) {
-      res.json({ user });
+    if (!user) {
+      return res.status(401).json({
+        type: info?.type || "INVALID_CREDENTIALS",
+        error: info?.message || "Invalid credentials",
+      });
     }
+    req.login(user, (err) => {
+      if (err) {
+        return res.status(500).json({
+          type: err.type || "LOGIN_ERROR",
+          error: err.message || "Login failed",
+        });
+      }
+      return res.json({ user });
+    });
   })(req, res, next);
 });
 
 authRouter.post("/register", async (req, res) => {
-  const { password, name, email } = req.body;
-  if (!password || !name || !email) {
-    res.status(400).json({ error: "Missing required fields" });
-    return;
-  }
-  const existedUser = await UserModel.findOne(email);
-  if (existedUser)
-    return res.status(400).json({
-      type: "EMAIL_HAD_ALREADY_TO_USE",
-      error: "Please use orther email",
+  try {
+    const { name, email, password } = req.body;
+
+    if (name == null || email == null || password == null) {
+      return res.status(400).json({
+        type: "MISSING_REQUIRED_FIELDS",
+        error: "Name, email and password are required",
+      });
+    }
+
+    const normalizedName = String(name).trim();
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const normalizedPassword = String(password);
+
+    if (!normalizedName) {
+      return res.status(400).json({
+        type: "INVALID_NAME",
+        error: "Name is required",
+      });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(normalizedEmail)) {
+      return res.status(400).json({
+        type: "INVALID_EMAIL",
+        error: "Email is invalid",
+      });
+    }
+
+    if (normalizedPassword.length < 6) {
+      return res.status(400).json({
+        type: "INVALID_PASSWORD",
+        error: "Password must be at least 6 characters",
+      });
+    }
+
+    const existedUser = await UserModel.findOne({ email: normalizedEmail });
+
+    if (existedUser) {
+      return res.status(400).json({
+        type: "EMAIL_ALREADY_IN_USE",
+        error: "Email is already in use",
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(normalizedPassword, 10);
+
+    const user = new UserModel({
+      name: normalizedName,
+      email: normalizedEmail,
+      password: hashedPassword,
     });
-  const hashedPassword = await bcrypt.hash(password, 10);
-  const user = new UserModel({ email, password: hashedPassword, name });
-  await user.save();
-  res.json(user);
+
+    await user.save();
+
+    return res.status(201).json({
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        avatar: user.avatar ?? null,
+      },
+    });
+  } catch (error) {
+    if (error?.code === 11000) {
+      return res.status(400).json({
+        type: "EMAIL_ALREADY_IN_USE",
+        error: "Email is already in use",
+      });
+    }
+
+    console.error("[AUTH][REGISTER]", error);
+
+    return res.status(500).json({
+      type: "INTERNAL_SERVER_ERROR",
+      error: "Internal server error",
+    });
+  }
 });
 
 authRouter.get(
