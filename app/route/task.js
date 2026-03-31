@@ -253,34 +253,139 @@ taskRouter.delete(
   },
 );
 
+async function createColumnHandler(req, res) {
+  try {
+    const { title, accentColor, isDefault } = req.body;
+    const project = req.project;
+
+    const newColumn = {
+      id: `col-${Date.now()}`,
+      title,
+      isDefault: !!isDefault,
+      accentColor: accentColor || "#e2e8f0",
+    };
+
+    project.taskColumns.push(newColumn);
+    await project.save();
+
+    getIO()
+      ?.to(`project:${req.params.projectId}`)
+      .emit("column:created", { columns: project.taskColumns });
+    res.json({ columns: project.taskColumns });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+async function updateColumnHandler(req, res) {
+  try {
+    const { projectId, columnId } = req.params;
+    const { title, accentColor } = req.body;
+    const project = req.project;
+
+    const column = project.taskColumns.find(
+      (c) => c.id === columnId || c._id?.toString() === columnId,
+    );
+    if (!column) return res.status(404).json({ error: "Column not found" });
+
+    if (column.isDefault || !column.id.startsWith("col-")) {
+      return res.status(403).json({ error: "Default columns cannot be renamed" });
+    }
+
+    if (title) column.title = title;
+    if (accentColor) column.accentColor = accentColor;
+
+    await project.save();
+
+    getIO()?.to(`project:${projectId}`).emit("column:updated", {
+      columns: project.taskColumns,
+    });
+
+    res.json({ columns: project.taskColumns });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+async function deleteColumnHandler(req, res) {
+  try {
+    const { projectId, columnId } = req.params;
+    const project = req.project;
+
+    const columnIndex = project.taskColumns.findIndex(
+      (c) => c.id === columnId || c._id?.toString() === columnId,
+    );
+    if (columnIndex === -1) {
+      return res.status(404).json({ error: "Column not found" });
+    }
+
+    const column = project.taskColumns[columnIndex];
+    if (column.isDefault || !column.id.startsWith("col-")) {
+      return res.status(403).json({ error: "Default columns cannot be deleted" });
+    }
+
+    project.taskColumns.splice(columnIndex, 1);
+    await project.save();
+
+    // If there are tasks in this column, move them to the default column (todo)
+    await TaskModel.updateMany(
+      { project: projectId, columnId: columnId },
+      { columnId: "todo" },
+    );
+
+    getIO()?.to(`project:${projectId}`).emit("column:updated", {
+      columns: project.taskColumns,
+    });
+
+    res.status(204).end();
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
 // Create Column
 taskRouter.post(
   "/project/:projectId/columns",
   isAuthenticated,
   checkProjectRole("manager"),
-  async (req, res) => {
-    try {
-      const { title, accentColor, isDefault } = req.body;
-      const project = req.project;
+  createColumnHandler,
+);
 
-      const newColumn = {
-        id: `col-${Date.now()}`,
-        title,
-        isDefault: !!isDefault,
-        accentColor: accentColor || "#e2e8f0",
-      };
+taskRouter.post(
+  "/projects/:projectId/columns",
+  isAuthenticated,
+  checkProjectRole("manager"),
+  createColumnHandler,
+);
 
-      project.taskColumns.push(newColumn);
-      await project.save();
+// Update Column
+taskRouter.put(
+  "/project/:projectId/columns/:columnId",
+  isAuthenticated,
+  checkProjectRole("manager"),
+  updateColumnHandler,
+);
 
-      getIO()
-        ?.to(`project:${req.params.projectId}`)
-        .emit("column:created", { columns: project.taskColumns });
-      res.json({ columns: project.taskColumns });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  },
+taskRouter.put(
+  "/projects/:projectId/columns/:columnId",
+  isAuthenticated,
+  checkProjectRole("manager"),
+  updateColumnHandler,
+);
+
+// Delete Column
+taskRouter.delete(
+  "/project/:projectId/columns/:columnId",
+  isAuthenticated,
+  checkProjectRole("manager"),
+  deleteColumnHandler,
+);
+
+taskRouter.delete(
+  "/projects/:projectId/columns/:columnId",
+  isAuthenticated,
+  checkProjectRole("manager"),
+  deleteColumnHandler,
 );
 
 export default taskRouter;
