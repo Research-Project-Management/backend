@@ -25,7 +25,7 @@ projectRouter.get(
         { path: "workspace", select: "_id name" },
       ]);
 
-      res.json({ project });
+      res.json({ project, yourRole: req.projectRole });
     } catch (error) {
       console.error("Get Project Error:", error);
       res.status(500).json({ error: error.message });
