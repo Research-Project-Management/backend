@@ -243,14 +243,18 @@ authRouter.put("/change-password", async (req, res) => {
     const user = await UserModel.findById(req.user._id);
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    // If user has a password (local auth), verify current password
-    if (user.password) {
-      if (!currentPassword)
-        return res.status(400).json({ error: "Current password is required" });
-      const isValid = await user.comparePassword(currentPassword);
-      if (!isValid)
-        return res.status(400).json({ error: "Current password is incorrect" });
+    if (!user.password) {
+      return res.status(403).json({
+        error: "Password changes are only available for accounts registered with email and password.",
+      });
     }
+
+    if (!currentPassword)
+      return res.status(400).json({ error: "Current password is required" });
+
+    const isValid = await user.comparePassword(currentPassword);
+    if (!isValid)
+      return res.status(400).json({ error: "Current password is incorrect" });
 
     user.password = await bcrypt.hash(newPassword, 10);
     await user.save();
