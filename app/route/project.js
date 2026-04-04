@@ -1,9 +1,16 @@
 import { Router } from "express";
 import mongoose from "mongoose";
+import CycleModel from "../schema/cycle.js";
 import ProjectModel from "../schema/project.js";
 import WorkspaceModel from "../schema/workspace.js";
 import FileModel from "../schema/file.js";
+import PageAssetModel from "../schema/pageAsset.js";
+import PageCommentModel from "../schema/pageComment.js";
+import PageModel from "../schema/page.js";
+import PageVersionModel from "../schema/pageVersion.js";
 import RoleModel from "../schema/role.js";
+import TaskCommentModel from "../schema/taskComment.js";
+import TaskModel from "../schema/task.js";
 import {
   isAuthenticated,
   checkWorkspaceRole,
@@ -326,7 +333,28 @@ projectRouter.delete(
   checkProjectRole("manager"),
   async (req, res) => {
     try {
-      await ProjectModel.findByIdAndDelete(req.params.projectId);
+      const projectId = req.params.projectId;
+      const pageIds = await PageModel.find({ project: projectId }).distinct("_id");
+
+      await Promise.all([
+        TaskCommentModel.deleteMany({ project: projectId }),
+        TaskModel.deleteMany({ project: projectId }),
+        CycleModel.deleteMany({ project: projectId }),
+        PageAssetModel.deleteMany({
+          $or: [{ project: projectId }, { parentPage: { $in: pageIds } }],
+        }),
+        PageCommentModel.deleteMany({
+          $or: [{ page: { $in: pageIds } }, { projectPageId: { $in: pageIds } }],
+        }),
+        PageVersionModel.deleteMany({
+          $or: [{ page: { $in: pageIds } }, { projectPageId: { $in: pageIds } }],
+        }),
+        PageModel.deleteMany({ project: projectId }),
+        FileModel.deleteMany({ project: projectId }),
+        RoleModel.deleteMany({ project: projectId }),
+      ]);
+
+      await ProjectModel.findByIdAndDelete(projectId);
       res.status(204).end();
     } catch (error) {
       res.status(500).json({ error: error.message });
