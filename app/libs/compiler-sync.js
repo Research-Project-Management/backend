@@ -4,11 +4,59 @@
  *
  * Used by:  app/route/page.js  (tex file sync)
  *           app/route/files.js (binary file sync)
+ *
+ * All sync functions are await-able and support retry with exponential
+ * backoff. A per-folder queue serialises rapid syncs to prevent race
+ * conditions (e.g. auto-save firing faster than the compiler can process).
  */
 
 import FileModel from "../schema/file.js";
 
 export const LATEX_URL = process.env.LATEX_URL || "http://localhost:2918";
+
+/**
+ * Validate that a pageId is a root page (parentPage: null).
+ * Root pages are used as compiler project folders.
+ * @param {string} pageId
+ * @returns {Promise<{_id: string, title: string}>}
+ */
+export async function validateRootPage(pageId) {
+  const PageModel = (await import("../schema/page.js")).default;
+  const page = await PageModel.findById(pageId).select("parentPage title").lean();
+
+  if (!page) {
+    throw new Error("Page not found");
+  }
+
+  if (page.parentPage !== null) {
+    throw new Error("Only root pages can be used as compiler project folders");
+  }
+
+  return page;
+}
+
+/**
+ * Check if compiler project folder exists AND optionally if a specific file is present.
+ * Returns { exists: boolean, files: string[] } from GET /projects/{folderId}.
+ * @param {string} folderId
+ * @returns {Promise<{ exists: boolean, files: string[] }>}
+ */
+export async function checkCompilerFolderExists(folderId) {
+  try {
+    const resp = await fetch(`${LATEX_URL}/projects/${folderId}`, {
+      method: "GET",
+    });
+    if (!resp.ok) return { exists: false, files: [] };
+    const data = await resp.json();
+    return { exists: data.exists === true, files: data.files ?? [] };
+  } catch (err) {
+    console.warn(`[compiler-sync] Failed to check folder ${folderId}:`, err.message);
+    return { exists: false, files: [] };
+  }
+}
+
+const MAX_RETRIES = 2;
+const BASE_DELAY_MS = 200;
 
 // ── Encoding helpers ──────────────────────────────────────────────────────────
 
@@ -32,46 +80,122 @@ function compilerFilePath(folderId, filePath) {
   return `${LATEX_URL}/projects/${folderId}/files/${encoded}`;
 }
 
-// ── Sync helpers (fire-and-forget) ────────────────────────────────────────────
+// ── Per-folder sync queue ─────────────────────────────────────────────────────
 
 /**
- * Write a file to the compiler's persistent project folder.
+ * Map<folderId, Promise> — serialises rapid sync calls for the same project
+ * so that the compiler always receives files in the order they were saved.
+ */
+const folderQueues = new Map();
+
+/**
+ * Run an async task after all previously-queued tasks for the same folder.
+ * Errors are logged but do not break the chain.
+ */
+function enqueue(folderId, task) {
+  const prev = folderQueues.get(folderId) ?? Promise.resolve();
+  const next = prev
+    .then(() => task())
+    .catch((err) => {
+      console.warn(`[compiler-sync] queued task failed for ${folderId}:`, err.message);
+    });
+  folderQueues.set(folderId, next);
+  // Prune resolved entries to avoid unbounded growth
+  next.finally(() => {
+    if (folderQueues.get(folderId) === next) folderQueues.delete(folderId);
+  });
+  return next;
+}
+
+// ── Core sync helpers (await-able) ────────────────────────────────────────────
+
+/**
+ * Write a file to the compiler's persistent project folder (await-able).
  * @param {string} folderId  Root page ID (MongoDB ObjectId string).
  * @param {string} filePath  Relative path inside the project, e.g. "images/fig.png".
  * @param {string} base64    Base64-encoded file content.
  */
-export function syncFileToCompiler(folderId, filePath, base64) {
-  fetch(compilerFilePath(folderId, filePath), {
+export async function syncFileToCompiler(folderId, filePath, base64) {
+  const resp = await fetch(compilerFilePath(folderId, filePath), {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ data: base64 }),
-  }).catch((err) =>
-    console.warn(`[compiler-sync] PUT ${folderId}/${filePath} failed:`, err.message),
-  );
+  });
+  if (!resp.ok) {
+    throw new Error(`PUT ${folderId}/${filePath} returned ${resp.status}`);
+  }
+  return resp.json();
 }
 
 /**
- * Remove a single file from the compiler's persistent project folder.
+ * Remove a single file from the compiler's persistent project folder (await-able).
  * @param {string} folderId  Root page ID.
  * @param {string} filePath  Relative path, e.g. "chapters/intro.tex".
  */
-export function deleteFileFromCompiler(folderId, filePath) {
-  fetch(compilerFilePath(folderId, filePath), { method: "DELETE" }).catch(
-    (err) =>
-      console.warn(`[compiler-sync] DELETE ${folderId}/${filePath} failed:`, err.message),
+export async function deleteFileFromCompiler(folderId, filePath) {
+  const resp = await fetch(compilerFilePath(folderId, filePath), { method: "DELETE" });
+  if (!resp.ok) {
+    throw new Error(`DELETE ${folderId}/${filePath} returned ${resp.status}`);
+  }
+  return resp.json();
+}
+
+/**
+ * Remove the entire project folder from the compiler (await-able).
+ * @param {string} folderId  Root page ID.
+ */
+export async function deleteProjectFromCompiler(folderId) {
+  const resp = await fetch(`${LATEX_URL}/projects/${folderId}`, { method: "DELETE" });
+  if (!resp.ok) {
+    throw new Error(`DELETE project ${folderId} returned ${resp.status}`);
+  }
+  return resp.json();
+}
+
+// ── Retry wrappers ────────────────────────────────────────────────────────────
+
+/**
+ * Retry wrapper — retries up to `retries` times with linear backoff.
+ */
+async function withRetry(fn, retries = MAX_RETRIES) {
+  let lastError;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      if (attempt < retries) {
+        await new Promise((r) => setTimeout(r, BASE_DELAY_MS * (attempt + 1)));
+      }
+    }
+  }
+  throw lastError;
+}
+
+/**
+ * Write a file to the compiler with retry + per-folder queueing.
+ * This is the recommended function for all callers.
+ */
+export function syncFileToCompilerReliable(folderId, filePath, base64) {
+  return enqueue(folderId, () =>
+    withRetry(() => syncFileToCompiler(folderId, filePath, base64)),
   );
 }
 
 /**
- * Remove the entire project folder from the compiler (e.g. when a page-project
- * is deleted).
- * @param {string} folderId  Root page ID.
+ * Delete a single file from the compiler with retry + per-folder queueing.
  */
-export function deleteProjectFromCompiler(folderId) {
-  fetch(`${LATEX_URL}/projects/${folderId}`, { method: "DELETE" }).catch(
-    (err) =>
-      console.warn(`[compiler-sync] DELETE project ${folderId} failed:`, err.message),
+export function deleteFileFromCompilerReliable(folderId, filePath) {
+  return enqueue(folderId, () =>
+    withRetry(() => deleteFileFromCompiler(folderId, filePath)),
   );
+}
+
+/**
+ * Delete an entire project folder from the compiler with retry.
+ */
+export function deleteProjectFromCompilerReliable(folderId) {
+  return withRetry(() => deleteProjectFromCompiler(folderId));
 }
 
 // ── Path builder ──────────────────────────────────────────────────────────────
@@ -81,9 +205,6 @@ export function deleteProjectFromCompiler(folderId) {
  *
  * Example: file "photo.png" inside folder "images" → "images/photo.png"
  * Root-level files → "photo.png"
- *
- * NOTE: FileModel does NOT have a `pageId` field — we only filter by `_id`
- * and `isFolder`.
  *
  * @param {string} filename   The file's own name.
  * @param {string|null} parentId  The `parent` field value of the FileModel doc.
@@ -120,16 +241,14 @@ export async function buildRelativePath(filename, parentId) {
  */
 export async function bulkSyncToCompiler(folderId, files) {
   if (!files || Object.keys(files).length === 0) return;
-  try {
+  await withRetry(async () => {
     const resp = await fetch(`${LATEX_URL}/projects/${folderId}/sync`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ files }),
     });
     if (!resp.ok) {
-      console.warn(`[compiler-sync] bulk sync for ${folderId} returned ${resp.status}`);
+      throw new Error(`bulk sync for ${folderId} returned ${resp.status}`);
     }
-  } catch (err) {
-    console.warn(`[compiler-sync] bulk sync for ${folderId} failed:`, err.message);
-  }
+  });
 }

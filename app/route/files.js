@@ -15,8 +15,9 @@ import {
 import ProjectModel from "../schema/project.js";
 import WorkspaceModel from "../schema/workspace.js";
 import {
-  syncFileToCompiler,
+  syncFileToCompilerReliable,
   buildRelativePath,
+  validateRootPage,
 } from "../libs/compiler-sync.js";
 
 const fileRouter = Router();
@@ -192,9 +193,12 @@ const registerUploadAndFolderRoutes = (router) => {
           metaData,
           scope,
           // parentPageId: the root LaTeX page ID used as the compiler project folder.
-          // When provided, the backend fetches the uploaded file from R2 and syncs
-          // it to the compiler so the file is available for \includegraphics etc.
+          // When provided, the backend syncs the file to the compiler so the file
+          // is available for \includegraphics etc.
           parentPageId,
+          // fileBase64: optional base64-encoded file content sent directly by the
+          // client. When present, skips the R2 re-download and uses this instead.
+          fileBase64,
         } = req.body;
 
         const resolvedWorkspaceId = req.project?.workspace || req.workspace?._id || workspaceId;
@@ -213,37 +217,44 @@ const registerUploadAndFolderRoutes = (router) => {
           author: req.user._id,
           metaData: metaData || {},
           isFolder: false,
+          // Save the parentPageId as pageId to associate this file with a specific page
+          pageId: parentPageId || null,
         });
 
         await file.save();
 
-        // ── Compiler sync (fire-and-forget) ──────────────────────────────────
-        // If a parentPageId is given, fetch the file from R2 and push it to
-        // the LaTeX compiler's persistent project folder.  We stream the R2
-        // response and buffer it so we do NOT block the HTTP response.
+        // ── Compiler sync (await-able) ──────────────────────────────────────
+        // If a parentPageId is given, sync the file to the LaTeX compiler's
+        // persistent project folder.  When the client provides fileBase64 we
+        // use it directly; otherwise we fall back to fetching from R2.
         if (parentPageId && url) {
-          (async () => {
-            try {
-              // Derive the R2 key from the stored URL (pattern: /api/files/{key})
+          try {
+            await validateRootPage(parentPageId);
+            const relPath = await buildRelativePath(filename, parentId || null);
+
+            if (fileBase64) {
+              // Client provided base64 — skip R2 download
+              await syncFileToCompilerReliable(parentPageId, relPath, fileBase64);
+            } else {
+              // Legacy: fetch from R2
               const key = url.split("/api/files/")[1];
-              if (!key) return;
-
-              const r2Resp = await r2.send(
-                new GetObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: key }),
-              );
-
-              // Collect the readable stream into a Buffer.
-              const chunks = [];
-              for await (const chunk of r2Resp.Body) chunks.push(chunk);
-              const base64 = Buffer.concat(chunks).toString("base64");
-
-              // Build relative path including any folder hierarchy.
-              const relPath = await buildRelativePath(filename, parentId || null);
-              syncFileToCompiler(parentPageId, relPath, base64);
-            } catch (err) {
-              console.warn("[files] compiler sync after upload failed:", err.message);
+              if (key) {
+                const r2Resp = await r2.send(
+                  new GetObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: key }),
+                );
+                const chunks = [];
+                for await (const chunk of r2Resp.Body) chunks.push(chunk);
+                const base64 = Buffer.concat(chunks).toString("base64");
+                await syncFileToCompilerReliable(parentPageId, relPath, base64);
+              }
             }
-          })();
+          } catch (err) {
+            console.warn("[files] compiler sync after upload failed:", err.message);
+            return res.status(400).json({ 
+              error: "Invalid parentPageId or sync failed", 
+              details: err.message 
+            });
+          }
         }
 
         return res.status(201).json({ file });
@@ -287,6 +298,7 @@ const registerUploadAndFolderRoutes = (router) => {
 };
 
 const registerProjectStorageRoutes = (router) => {
+  // Get files by project ID (legacy)
   router.get(
     "/project/:projectId",
     isAuthenticated,
@@ -312,6 +324,40 @@ const registerProjectStorageRoutes = (router) => {
         return res.json({ files });
       } catch (error) {
         return handleServerError(res, error, "Failed to fetch files");
+      }
+    },
+  );
+
+  // Get files by parentPageId (root page) - each page has independent file system
+  router.get(
+    "/page/:parentPageId",
+    isAuthenticated,
+    async (req, res) => {
+      try {
+        const { parentPageId } = req.params;
+        const { parentId, includeTrash } = req.query;
+
+        // Query by pageId (the root page) instead of project
+        const query = {
+          pageId: parentPageId,
+        };
+
+        // If parentId is provided, filter by it; otherwise get root items
+        if (parentId !== undefined) {
+          query.parent = parentId || null;
+        }
+
+        if (!includeTrash) {
+          query.trashedAt = null;
+        }
+
+        const files = await FileModel.find(query)
+          .populate("author", "name email avatar")
+          .sort({ isFolder: -1, filename: 1 });
+
+        return res.json({ files });
+      } catch (error) {
+        return handleServerError(res, error, "Failed to fetch page files");
       }
     },
   );

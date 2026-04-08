@@ -21,8 +21,11 @@ import {
   LATEX_URL,
   textToBase64,
   syncFileToCompiler,
+  syncFileToCompilerReliable,
   deleteFileFromCompiler,
+  deleteFileFromCompilerReliable,
   deleteProjectFromCompiler,
+  deleteProjectFromCompilerReliable,
   buildRelativePath,
   bulkSyncToCompiler,
 } from "../libs/compiler-sync.js";
@@ -227,6 +230,8 @@ pageRouter.post(
     try {
       const { title, content, status } = req.body;
 
+      console.log("[page.js] Creating new page:", { projectId: req.params.projectId, title });
+
       const newPage = new PageModel({
         title,
         status: status || "draft",
@@ -235,34 +240,43 @@ pageRouter.post(
         parentPage: null,
       });
       await newPage.save();
+      console.log("[page.js] New page created:", { _id: newPage._id.toString(), title: newPage.title });
 
       const mainFile = new PageModel({
         title: "main.tex",
-        content: content ?? null,
+        content: content || null,
         status: status || "draft",
         project: req.params.projectId,
         author: req.user._id,
         parentPage: newPage._id,
       });
       await mainFile.save();
+      console.log("[page.js] Main file created:", { _id: mainFile._id.toString(), title: mainFile.title });
 
       newPage.mainFile = mainFile._id;
       await newPage.save();
 
-      // Seed the compiler project folder (fire-and-forget).
+      // Seed the compiler project folder with the main file content.
       if (content) {
-        syncFileToCompiler(newPage._id.toString(), "main.tex", textToBase64(content));
+        await syncFileToCompilerReliable(newPage._id.toString(), "main.tex", textToBase64(content));
+        console.log("[page.js] Synced to compiler:", newPage._id.toString());
       }
 
       await newPage.populate("author", "name avatar");
-      await newPage.populate("mainFile", "title");
+      await mainFile.populate("author", "name avatar");
+
+      console.log("[page.js] Returning response:", {
+        page: { _id: newPage._id.toString(), title: newPage.title },
+        mainFile: { _id: mainFile._id.toString(), title: mainFile.title }
+      });
 
       getIO()
         ?.to(`project:${req.params.projectId}`)
-        .emit("page:created", { page: newPage });
+        .emit("page:created", { page: newPage, mainFile });
 
       res.status(201).json({ page: newPage, mainFile });
     } catch (error) {
+      console.error("[page.js] Create page error:", error);
       res.status(500).json({ error: error.message });
     }
   },
@@ -281,7 +295,7 @@ pageRouter.get(
 
       const page = await PageModel.findById(req.page._id)
         .populate("author", "name avatar")
-        .populate("mainFile", "title")
+        .populate("mainFile")
         .populate({
           path: "project",
           select: "name",
@@ -326,7 +340,7 @@ pageRouter.put(
 
       if (content !== undefined) {
         // Content changed — sync the updated source.
-        syncFileToCompiler(folderId, newTexName, textToBase64(content));
+        await syncFileToCompilerReliable(folderId, newTexName, textToBase64(content));
         // Record auto-version (fire-and-forget).
         recordAutoVersion(req.params.pageId, page, req.user._id);
       }
@@ -343,10 +357,10 @@ pageRouter.put(
         const oldTexName = _oldTitle.endsWith(".tex")
           ? _oldTitle
           : `${_oldTitle}.tex`;
-        deleteFileFromCompiler(folderId, oldTexName);
+        await deleteFileFromCompilerReliable(folderId, oldTexName);
         // 2. Re-upload content under the new filename.
         if (page.content) {
-          syncFileToCompiler(folderId, newTexName, textToBase64(page.content));
+          await syncFileToCompilerReliable(folderId, newTexName, textToBase64(page.content));
         }
       }
 
@@ -373,12 +387,14 @@ pageRouter.delete(
 
       if (!req.page.parentPage) {
         // Root page deleted — remove entire compiler project folder.
-        deleteProjectFromCompiler(req.params.pageId);
+        deleteProjectFromCompilerReliable(req.params.pageId).catch((err) =>
+          console.warn("[compiler-sync] delete project failed:", err.message),
+        );
       } else {
         // Child file deleted — remove just that file from compiler.
         const texName = pageTexName(req.page);
         const folderId = req.page.parentPage.toString();
-        deleteFileFromCompiler(folderId, texName);
+        await deleteFileFromCompilerReliable(folderId, texName);
         recordLifecycleEvent(
           req.page.parentPage.toString(),
           req.user._id,
@@ -432,7 +448,7 @@ pageRouter.post(
       await file.save();
 
       const texName = title.endsWith(".tex") ? title : `${title}.tex`;
-      syncFileToCompiler(
+      await syncFileToCompilerReliable(
         parentPage._id.toString(),
         texName,
         textToBase64(content ?? ""),
@@ -600,13 +616,9 @@ pageRouter.post(
         .select("_id title content")
         .lean();
 
-      // Build { relativePath → base64 } map.
+      // Build { relativePath → base64 } map from child pages.
+      // Root page has no LaTeX content — the main file is always a child page.
       const files = {};
-
-      // Root page → main.tex
-      if (rootPage.content) {
-        files["main.tex"] = textToBase64(rootPage.content);
-      }
 
       // Child .tex files
       for (const child of childFiles) {
@@ -616,11 +628,39 @@ pageRouter.post(
         files[texName] = textToBase64(child.content ?? "");
       }
 
+      // Binary assets (images, .bib, etc.) from FileModel
+      // Filter by pageId (root page ID) so we only sync assets belonging to
+      // THIS specific LaTeX page-project, not all files in the MongoDB project.
+      const binaryFiles = await FileModel.find({
+        pageId: rootPage._id,
+        trashedAt: null,
+        isFolder: false,
+        url: { $exists: true, $ne: null },
+      }).lean();
+
+      for (const bf of binaryFiles) {
+        try {
+          const key = bf.url?.split("/api/files/")[1];
+          if (!key) continue;
+          const r2Resp = await r2.send(new GetObjectCommand({
+            Bucket: process.env.R2_BUCKET_NAME,
+            Key: key,
+          }));
+          const chunks = [];
+          for await (const chunk of r2Resp.Body) chunks.push(chunk);
+          const b64 = Buffer.concat(chunks).toString("base64");
+          const relPath = await buildRelativePath(bf.filename, bf.parent);
+          files[relPath] = b64;
+        } catch (err) {
+          console.warn(`[sync-project] failed to sync asset ${bf.filename}:`, err.message);
+        }
+      }
+
       if (Object.keys(files).length === 0) {
         return res.json({ ok: true, synced: 0 });
       }
 
-      // Fire bulk sync — awaited so caller knows if it succeeded.
+      // Bulk sync — awaited so caller knows if it succeeded.
       await bulkSyncToCompiler(folderId, files);
 
       res.json({ ok: true, synced: Object.keys(files).length });
@@ -707,7 +747,7 @@ pageRouter.post(
       // Re-sync the restored content to compiler.
       if (page) {
         const folderId = projectFolderKey(page);
-        syncFileToCompiler(folderId, pageTexName(page), textToBase64(page.content ?? ""));
+        await syncFileToCompilerReliable(folderId, pageTexName(page), textToBase64(page.content ?? ""));
       }
 
       res.json({ page });

@@ -19,6 +19,13 @@
 
 import { Router } from "express";
 import { isAuthenticated } from "../middleware/checkWorkspaceRole.js";
+import {
+  validateRootPage,
+  checkCompilerFolderExists,
+  bulkSyncToCompiler,
+  buildRelativePath,
+  textToBase64,
+} from "../libs/compiler-sync.js";
 
 const latexRouter = Router();
 
@@ -33,15 +40,106 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 latexRouter.post("/compile", isAuthenticated, async (req, res) => {
   try {
-    const { source, engine, parentPageId, mainFile, draft } = req.body;
+    // Accept both project_id (from frontend) and parentPageId
+    const { source, engine, parentPageId, project_id, mainFile, main_file, draft } = req.body;
+    
+    // Normalize: use project_id as parentPageId if parentPageId not provided
+    const resolvedParentPageId = parentPageId || project_id;
+    // Normalize mainFile parameter — must be defined before auto-sync uses it.
+    const resolvedMainFile = mainFile || main_file || "main.tex";
+
+    // Validate parentPageId is a root page
+    if (resolvedParentPageId) {
+      try {
+        await validateRootPage(resolvedParentPageId);
+      } catch (err) {
+        return res.status(400).json({ error: err.message });
+      }
+    }
 
     // In fast mode (no project), source is required.
     // In project mode (parentPageId provided), source is optional — compiler
     // uses the project's synced files instead.
-    if (!parentPageId && (!source || typeof source !== "string")) {
+    if (!resolvedParentPageId && (!source || typeof source !== "string")) {
       return res
         .status(400)
         .json({ error: "Missing or invalid 'source' field in fast mode" });
+    }
+
+    // Auto-sync if compiler folder is missing or the main file is not present.
+    if (resolvedParentPageId) {
+      const { exists: folderExists, files: compilerFiles } = await checkCompilerFolderExists(resolvedParentPageId);
+      // Normalise the main file name the same way the compiler does.
+      const resolvedMainFileNorm = resolvedMainFile.endsWith(".tex") ? resolvedMainFile : `${resolvedMainFile}.tex`;
+      const mainFilePresent = folderExists && compilerFiles.some(
+        (f) => f === resolvedMainFileNorm || f.endsWith(`/${resolvedMainFileNorm}`)
+      );
+
+      if (!mainFilePresent) {
+        console.log(`[latex] Compiler folder/main-file missing for ${resolvedParentPageId} (${resolvedMainFile}), auto-syncing...`);
+
+        try {
+          const PageModel = (await import("../schema/page.js")).default;
+          const FileModel = (await import("../schema/file.js")).default;
+          const { r2 } = (await import("../config/r2.js"));
+          const { GetObjectCommand } = (await import("@aws-sdk/client-s3"));
+
+          const rootPage = await PageModel.findById(resolvedParentPageId).select("content project mainFile").lean();
+          if (!rootPage) {
+            throw new Error(`Root page not found: ${resolvedParentPageId}`);
+          }
+          const childFiles = await PageModel.find({ parentPage: rootPage._id })
+            .select("_id title content").lean();
+
+          // Build file map from child pages (root page itself has no LaTeX content).
+          // Child named "main.tex" (or mainFile title) is the root LaTeX document.
+          const files = {};
+          for (const child of childFiles) {
+            const texName = child.title.endsWith(".tex") ? child.title : `${child.title}.tex`;
+            files[texName] = textToBase64(child.content || "");
+          }
+
+          // Sync binary assets filtered by this root page only.
+          const binaryFiles = await FileModel.find({
+            pageId: rootPage._id,
+            trashedAt: null,
+            isFolder: false,
+            url: { $exists: true, $ne: null },
+          }).lean();
+
+          for (const bf of binaryFiles) {
+            try {
+              const key = bf.url?.split("/api/files/")[1];
+              if (!key) continue;
+              const r2Resp = await r2.send(new GetObjectCommand({
+                Bucket: process.env.R2_BUCKET_NAME,
+                Key: key,
+              }));
+              const chunks = [];
+              for await (const chunk of r2Resp.Body) chunks.push(chunk);
+              const b64 = Buffer.concat(chunks).toString("base64");
+              const relPath = await buildRelativePath(bf.filename, bf.parent);
+              files[relPath] = b64;
+            } catch (err) {
+              console.warn(`[latex] Failed to sync asset ${bf.filename}:`, err.message);
+            }
+          }
+
+          if (Object.keys(files).length > 0) {
+            await bulkSyncToCompiler(resolvedParentPageId, files);
+          }
+          console.log(`[latex] Auto-sync completed for ${resolvedParentPageId} (${Object.keys(files).length} files)`);
+        } catch (syncErr) {
+          console.error("[latex] Auto-sync failed:", syncErr);
+          return res.status(500).json({
+            error: "auto_sync_failed",
+            message: "Failed to sync project to compiler. Please try again.",
+            details: syncErr.message,
+          });
+        }
+      } else {
+        console.log(`[latex] Compiler folder ready for ${resolvedParentPageId} (${compilerFiles.length} files)`);
+      }
     }
 
     const allowed = ["pdflatex", "xelatex", "lualatex"];
@@ -49,14 +147,14 @@ latexRouter.post("/compile", isAuthenticated, async (req, res) => {
       engine && allowed.includes(engine) ? engine : "pdflatex";
 
     console.log(
-      `[latex] compile — engine=${selectedEngine} main=${mainFile || "main.tex"} project=${parentPageId || "(fast/no-project)"} draft=${!!draft}`,
+      `[latex] compile — engine=${selectedEngine} main=${resolvedMainFile} project=${resolvedParentPageId || "(fast/no-project)"} draft=${!!draft}`,
     );
 
     const payload = {
-      source,
+      source: source ?? "",            // "" = project-mode, compiler uses synced files
       engine: selectedEngine,
-      project_id: parentPageId || null,
-      main_file: mainFile || "main.tex",
+      project_id: resolvedParentPageId || null,
+      main_file: resolvedMainFile,
       draft: !!draft,
     };
 
@@ -126,6 +224,15 @@ latexRouter.post("/compile", isAuthenticated, async (req, res) => {
     });
   } catch (error) {
     console.error("[latex] proxy error:", error);
+
+    if (error.message?.includes("Page not found") || error.message?.includes("Only root pages")) {
+      return res.status(400).json({
+        error: "invalid_page_id",
+        message: "Invalid page ID provided for compilation.",
+        details: error.message,
+      });
+    }
+
     return res
       .status(502)
       .json({ error: "latex_service_unavailable", message: error.message });
