@@ -14,6 +14,10 @@ import {
 } from "../middleware/checkWorkspaceRole.js";
 import ProjectModel from "../schema/project.js";
 import WorkspaceModel from "../schema/workspace.js";
+import {
+  syncFileToCompiler,
+  buildRelativePath,
+} from "../libs/compiler-sync.js";
 
 const fileRouter = Router();
 
@@ -187,6 +191,10 @@ const registerUploadAndFolderRoutes = (router) => {
           parentId,
           metaData,
           scope,
+          // parentPageId: the root LaTeX page ID used as the compiler project folder.
+          // When provided, the backend fetches the uploaded file from R2 and syncs
+          // it to the compiler so the file is available for \includegraphics etc.
+          parentPageId,
         } = req.body;
 
         const resolvedWorkspaceId = req.project?.workspace || req.workspace?._id || workspaceId;
@@ -208,6 +216,36 @@ const registerUploadAndFolderRoutes = (router) => {
         });
 
         await file.save();
+
+        // ── Compiler sync (fire-and-forget) ──────────────────────────────────
+        // If a parentPageId is given, fetch the file from R2 and push it to
+        // the LaTeX compiler's persistent project folder.  We stream the R2
+        // response and buffer it so we do NOT block the HTTP response.
+        if (parentPageId && url) {
+          (async () => {
+            try {
+              // Derive the R2 key from the stored URL (pattern: /api/files/{key})
+              const key = url.split("/api/files/")[1];
+              if (!key) return;
+
+              const r2Resp = await r2.send(
+                new GetObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: key }),
+              );
+
+              // Collect the readable stream into a Buffer.
+              const chunks = [];
+              for await (const chunk of r2Resp.Body) chunks.push(chunk);
+              const base64 = Buffer.concat(chunks).toString("base64");
+
+              // Build relative path including any folder hierarchy.
+              const relPath = await buildRelativePath(filename, parentId || null);
+              syncFileToCompiler(parentPageId, relPath, base64);
+            } catch (err) {
+              console.warn("[files] compiler sync after upload failed:", err.message);
+            }
+          })();
+        }
+
         return res.status(201).json({ file });
       } catch (error) {
         return handleServerError(res, error, "Failed to save file metadata");

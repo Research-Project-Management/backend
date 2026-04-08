@@ -2,6 +2,7 @@ import { Router } from "express";
 import {
   PutObjectCommand,
   DeleteObjectCommand,
+  GetObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import PageModel from "../schema/page.js";
@@ -16,86 +17,17 @@ import {
   checkWorkspaceRole,
 } from "../middleware/checkWorkspaceRole.js";
 import { getIO } from "../libs/socket.js";
+import {
+  LATEX_URL,
+  textToBase64,
+  syncFileToCompiler,
+  deleteFileFromCompiler,
+  deleteProjectFromCompiler,
+  buildRelativePath,
+  bulkSyncToCompiler,
+} from "../libs/compiler-sync.js";
 
 const pageRouter = Router();
-
-// ── Compiler file-sync helpers ────────────────────────────────────────────────
-// These keep the Flux-Latex-Compiler's persistent project folder in sync with
-// MongoDB so that compile requests only need to send the current editor source.
-
-const LATEX_URL = process.env.LATEX_URL || "http://localhost:2918";
-
-/** Derive the compiler project folder key from a page document. */
-function projectFolderKey(page) {
-  return page.parentPage ? page.parentPage.toString() : page._id.toString();
-}
-
-/** Encodes text as base64 (UTF-8). */
-function textToBase64(text) {
-  return Buffer.from(text ?? "", "utf8").toString("base64");
-}
-
-/**
- * Fire-and-forget: write a file to the compiler's persistent project folder.
- * @param {string} folderId  - MongoDB ObjectId string (the root page ID).
- * @param {string} filename  - Destination filename inside the project folder.
- * @param {string} base64    - Base64-encoded file content.
- */
-function syncFileToCompiler(folderId, filename, base64) {
-  fetch(
-    `${LATEX_URL}/projects/${folderId}/files/${encodeURIComponent(filename)}`,
-    {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ data: base64 }),
-    },
-  ).catch((err) =>
-    console.warn(`[sync] PUT ${folderId}/${filename} failed:`, err.message),
-  );
-}
-
-/**
- * Fire-and-forget: remove a file from the compiler's persistent project folder.
- */
-function deleteFileFromCompiler(folderId, filename) {
-  fetch(
-    `${LATEX_URL}/projects/${folderId}/files/${encodeURIComponent(filename)}`,
-    { method: "DELETE" },
-  ).catch((err) =>
-    console.warn(`[sync] DELETE ${folderId}/${filename} failed:`, err.message),
-  );
-}
-
-/**
- * Fire-and-forget: remove the entire project folder from the compiler.
- */
-function deleteProjectFromCompiler(folderId) {
-  fetch(`${LATEX_URL}/projects/${folderId}`, { method: "DELETE" }).catch(
-    (err) =>
-      console.warn(`[sync] DELETE project ${folderId} failed:`, err.message),
-  );
-}
-
-/**
- * Walk up the folder-parent chain to build a relative path for the compiler.
- * e.g. if file "photo.png" is inside folder "images", returns "images/photo.png".
- * For root-level files (no parent folder), returns just the filename.
- */
-async function buildRelativePath(filename, parentId, pageId) {
-  const parts = [filename];
-  let currentParentId = parentId;
-  while (currentParentId) {
-    const parentFolder = await FileModel.findOne({
-      _id: currentParentId,
-      pageId,
-      isFolder: true,
-    }).select("filename parent");
-    if (!parentFolder) break;
-    parts.unshift(parentFolder.filename);
-    currentParentId = parentFolder.parent;
-  }
-  return parts.join("/");
-}
 
 // ── Version control helpers ───────────────────────────────────────────────────
 
@@ -165,7 +97,21 @@ async function recordLifecycleEvent(rootPageId, userId, eventType, fileName) {
   }
 }
 
-// Middleware to check role via pageId
+// ── Derive compiler folder key ────────────────────────────────────────────────
+
+/** Root page ID = compiler project folder ID. */
+function projectFolderKey(page) {
+  return page.parentPage ? page.parentPage.toString() : page._id.toString();
+}
+
+/** ".tex" name for a page doc. */
+function pageTexName(page) {
+  if (!page.parentPage) return "main.tex";
+  return page.title.endsWith(".tex") ? page.title : `${page.title}.tex`;
+}
+
+// ── Access middleware ─────────────────────────────────────────────────────────
+
 const checkPageAccess = (requiredRoles) => {
   return async (req, res, next) => {
     try {
@@ -175,7 +121,6 @@ const checkPageAccess = (requiredRoles) => {
       const project = await ProjectModel.findById(page.project);
       if (!project) return res.status(404).json({ error: "Project not found" });
 
-      // Logic from checkProjectRole
       const workspace = await WorkspaceModel.findById(
         project.workspace,
       ).populate("members.role");
@@ -184,8 +129,7 @@ const checkPageAccess = (requiredRoles) => {
       );
 
       if (
-        workspaceMember &&
-        workspaceMember.role &&
+        workspaceMember?.role &&
         ["owner", "admin"].includes(workspaceMember.role.name?.toLowerCase())
       ) {
         req.page = page;
@@ -201,8 +145,7 @@ const checkPageAccess = (requiredRoles) => {
       );
 
       if (
-        !projectMember ||
-        !projectMember.role ||
+        !projectMember?.role ||
         !requiredRoles.includes(projectMember.role.name?.toLowerCase())
       ) {
         return res.status(403).json({ error: "Insufficient permissions" });
@@ -217,6 +160,8 @@ const checkPageAccess = (requiredRoles) => {
   };
 };
 
+// ── Routes ────────────────────────────────────────────────────────────────────
+
 // 0. Get all pages in a workspace (top-level only)
 pageRouter.get(
   "/workspace/:id/pages",
@@ -225,19 +170,12 @@ pageRouter.get(
   async (req, res) => {
     try {
       const { status, search } = req.query;
-
-      // Owners and admins can see pages from all projects.
-      // Regular members can only see pages from projects they belong to.
       const isPrivileged = ["owner", "admin"].includes(req.workspaceRole);
       const projectQuery = { workspace: req.workspace._id };
-      if (!isPrivileged) {
-        projectQuery["members.user"] = req.user._id;
-      }
+      if (!isPrivileged) projectQuery["members.user"] = req.user._id;
 
       const projects = await ProjectModel.find(projectQuery).select("_id");
       const projectIds = projects.map((p) => p._id);
-
-      // Only top-level pages (not child files of a page-project)
       const query = { project: { $in: projectIds }, parentPage: null };
 
       if (status && status !== "all") query.status = status;
@@ -264,9 +202,7 @@ pageRouter.get(
   async (req, res) => {
     try {
       const { status, search } = req.query;
-      // Only top-level pages (page-projects), not child files
       const query = { project: req.params.projectId, parentPage: null };
-
       if (status && status !== "all") query.status = status;
       if (search) query.title = { $regex: search, $options: "i" };
 
@@ -291,7 +227,6 @@ pageRouter.post(
     try {
       const { title, content, status } = req.body;
 
-      // Create the top-level page container (no content itself)
       const newPage = new PageModel({
         title,
         status: status || "draft",
@@ -301,7 +236,6 @@ pageRouter.post(
       });
       await newPage.save();
 
-      // Auto-create the default main.tex file inside the page-project
       const mainFile = new PageModel({
         title: "main.tex",
         content: content ?? null,
@@ -312,9 +246,13 @@ pageRouter.post(
       });
       await mainFile.save();
 
-      // Set mainFile on the page container
       newPage.mainFile = mainFile._id;
       await newPage.save();
+
+      // Seed the compiler project folder (fire-and-forget).
+      if (content) {
+        syncFileToCompiler(newPage._id.toString(), "main.tex", textToBase64(content));
+      }
 
       await newPage.populate("author", "name avatar");
       await newPage.populate("mainFile", "title");
@@ -322,6 +260,7 @@ pageRouter.post(
       getIO()
         ?.to(`project:${req.params.projectId}`)
         .emit("page:created", { page: newPage });
+
       res.status(201).json({ page: newPage, mainFile });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -348,6 +287,7 @@ pageRouter.get(
           select: "name",
           populate: { path: "workspace", select: "url" },
         });
+
       res.json({ page });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -362,7 +302,7 @@ pageRouter.put(
   checkPageAccess(["manager", "member"]),
   async (req, res) => {
     try {
-      const { title, content, status } = req.body;
+      const { title, content, status, _oldTitle } = req.body;
       const page = req.page;
 
       if (title !== undefined) page.title = title;
@@ -371,7 +311,7 @@ pageRouter.put(
 
       await page.save();
 
-      // Broadcast metadata changes (not the full content) to collaborators
+      // Broadcast metadata changes (not the full content) to collaborators.
       getIO()
         ?.to(`page:${req.params.pageId}`)
         .emit("page:updated", {
@@ -380,18 +320,34 @@ pageRouter.put(
           status: status !== undefined ? page.status : undefined,
         });
 
-      // Sync tex content to the compiler's project folder (fire-and-forget).
-      // Root pages are always stored as "main.tex"; child files use their title.
+      // ── Compiler sync ──────────────────────────────────────────────────────
+      const folderId = projectFolderKey(page);
+      const newTexName = pageTexName(page);
+
       if (content !== undefined) {
-        const folderId = projectFolderKey(page);
-        const texName = page.parentPage
-          ? page.title.endsWith(".tex")
-            ? page.title
-            : `${page.title}.tex`
-          : "main.tex";
-        syncFileToCompiler(folderId, texName, textToBase64(content));
-        // Record auto-version (fire-and-forget, non-blocking).
+        // Content changed — sync the updated source.
+        syncFileToCompiler(folderId, newTexName, textToBase64(content));
+        // Record auto-version (fire-and-forget).
         recordAutoVersion(req.params.pageId, page, req.user._id);
+      }
+
+      if (
+        title !== undefined &&
+        content === undefined &&
+        page.parentPage &&
+        _oldTitle &&
+        _oldTitle !== page.title
+      ) {
+        // Title-only change on a child file → rename in compiler:
+        // 1. Delete the old filename.
+        const oldTexName = _oldTitle.endsWith(".tex")
+          ? _oldTitle
+          : `${_oldTitle}.tex`;
+        deleteFileFromCompiler(folderId, oldTexName);
+        // 2. Re-upload content under the new filename.
+        if (page.content) {
+          syncFileToCompiler(folderId, newTexName, textToBase64(page.content));
+        }
       }
 
       res.json({ page });
@@ -408,20 +364,21 @@ pageRouter.delete(
   checkPageAccess(["manager"]),
   async (req, res) => {
     try {
-      // If it's a top-level page, also delete all child files
       await PageModel.deleteMany({ parentPage: req.params.pageId });
       await PageModel.findByIdAndDelete(req.params.pageId);
+
       getIO()
         ?.to(`project:${req.page.project}`)
         .emit("page:deleted", { pageId: req.params.pageId });
+
       if (!req.page.parentPage) {
-        // Deleting a root page — remove the entire compiler project folder.
+        // Root page deleted — remove entire compiler project folder.
         deleteProjectFromCompiler(req.params.pageId);
       } else {
-        // Deleting a child file — record lifecycle event under its parent project.
-        const texName = req.page.title.endsWith(".tex")
-          ? req.page.title
-          : `${req.page.title}.tex`;
+        // Child file deleted — remove just that file from compiler.
+        const texName = pageTexName(req.page);
+        const folderId = req.page.parentPage.toString();
+        deleteFileFromCompiler(folderId, texName);
         recordLifecycleEvent(
           req.page.parentPage.toString(),
           req.user._id,
@@ -429,6 +386,7 @@ pageRouter.delete(
           texName,
         );
       }
+
       res.status(204).end();
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -473,62 +431,16 @@ pageRouter.post(
       });
       await file.save();
 
-      // Sync new child file's content to the compiler project folder.
       const texName = title.endsWith(".tex") ? title : `${title}.tex`;
       syncFileToCompiler(
         parentPage._id.toString(),
         texName,
         textToBase64(content ?? ""),
       );
-      // Record lifecycle event.
-      recordLifecycleEvent(
-        req.params.pageId,
-        req.user._id,
-        "file_created",
-        texName,
-      );
+      recordLifecycleEvent(req.params.pageId, req.user._id, "file_created", texName);
 
       getIO()?.to(`page:${req.params.pageId}`).emit("file:created", { file });
       res.status(201).json({ file });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  },
-);
-
-// 9. Save a PDF thumbnail — uploads JPEG to R2, stores the proxy URL in MongoDB
-pageRouter.put(
-  "/pages/:pageId/thumbnail",
-  isAuthenticated,
-  checkPageAccess(["manager", "member"]),
-  async (req, res) => {
-    try {
-      // dataUrl is raw base64 (no "data:...;base64," prefix)
-      const { dataUrl } = req.body;
-      if (!dataUrl)
-        return res.status(400).json({ error: "dataUrl is required" });
-
-      const key = `thumbnails/${req.params.pageId}.jpg`;
-      const buffer = Buffer.from(dataUrl, "base64");
-
-      await r2.send(
-        new PutObjectCommand({
-          Bucket: process.env.R2_BUCKET_NAME,
-          Key: key,
-          Body: buffer,
-          ContentType: "image/jpeg",
-          CacheControl: "public, max-age=31536000",
-        }),
-      );
-
-      // Build URL via the existing /api/files/* proxy.
-      // trust proxy = 1 is set, so req.protocol / host resolve correctly behind nginx/Cloudflare.
-      const thumbnailUrl = `${req.protocol}://${req.get("host")}/api/files/${key}`;
-
-      req.page.pdfThumbnail = thumbnailUrl;
-      await req.page.save();
-
-      res.json({ pdfThumbnail: thumbnailUrl });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
@@ -545,7 +457,6 @@ pageRouter.put(
       const { fileId } = req.body;
       if (!fileId) return res.status(400).json({ error: "fileId is required" });
 
-      // Ensure the file actually belongs to this page
       const file = await PageModel.findOne({
         _id: fileId,
         parentPage: req.params.pageId,
@@ -567,8 +478,46 @@ pageRouter.put(
   },
 );
 
+// 9. Save a PDF thumbnail — uploads JPEG to R2, stores the proxy URL in MongoDB
+pageRouter.put(
+  "/pages/:pageId/thumbnail",
+  isAuthenticated,
+  checkPageAccess(["manager", "member"]),
+  async (req, res) => {
+    try {
+      const { dataUrl } = req.body;
+      if (!dataUrl) return res.status(400).json({ error: "dataUrl is required" });
+
+      const key = `thumbnails/${req.params.pageId}.jpg`;
+      const buffer = Buffer.from(dataUrl, "base64");
+
+      await r2.send(
+        new PutObjectCommand({
+          Bucket: process.env.R2_BUCKET_NAME,
+          Key: key,
+          Body: buffer,
+          ContentType: "image/jpeg",
+          CacheControl: "public, max-age=31536000",
+        }),
+      );
+
+      const thumbnailUrl = `${req.protocol}://${req.get("host")}/api/files/${key}`;
+      req.page.pdfThumbnail = thumbnailUrl;
+      await req.page.save();
+
+      res.json({ pdfThumbnail: thumbnailUrl });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  },
+);
+
+// ── Binary asset endpoints (File model, R2-backed) ────────────────────────────
+// These are used by FilesTab for images, PDFs, etc.
+// The compiler-sync step happens inside /api/files/upload (files.js),
+// so these endpoints only need to handle the page-scoped metadata view.
+
 // 10. List assets for a page-project (File model, R2-backed)
-// Supports optional ?parentId= for folder navigation.
 pageRouter.get(
   "/pages/:pageId/assets",
   isAuthenticated,
@@ -576,14 +525,18 @@ pageRouter.get(
   async (req, res) => {
     try {
       const { parentId } = req.query;
+      // Assets are stored in FileModel keyed by project, not pageId.
+      // We use the project ID from the page to find all related files.
+      const project = req.project;
       const query = {
-        pageId: req.params.pageId,
+        project: project._id,
         parent: parentId || null,
         trashedAt: null,
+        isFolder: false,
       };
       const assets = await FileModel.find(query)
         .populate("author", "name email avatar")
-        .sort({ isFolder: -1, filename: 1 });
+        .sort({ filename: 1 });
       res.json({ assets });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -617,258 +570,68 @@ pageRouter.post(
   },
 );
 
-// 11. Upload an asset — client uploads to R2 first, then saves metadata here
+// ── Sync endpoints ────────────────────────────────────────────────────────────
+
+/**
+ * POST /pages/:pageId/sync-project
+ *
+ * Bulk-sync ALL .tex files for a root page-project from MongoDB to the compiler.
+ * Call this once when opening the editor to ensure the compiler has fresh content
+ * after a restart / cold deployment.
+ *
+ * Only syncs text (.tex) files — binary assets are synced individually on upload.
+ * Responds immediately (non-blocking) after dispatching the bulk sync.
+ */
 pageRouter.post(
-  "/pages/:pageId/assets",
+  "/pages/:pageId/sync-project",
   isAuthenticated,
-  checkPageAccess(["manager", "member"]),
+  checkPageAccess(["manager", "member", "viewer"]),
   async (req, res) => {
     try {
-      const { filename, size, mimeType, url, thumbnail, parentId, base64Data } =
-        req.body;
-      if (!filename)
-        return res.status(400).json({ error: "filename is required" });
-
-      // Determine workspace from the page's project
-      const project = await ProjectModel.findById(req.page.project).select(
-        "workspace",
-      );
-
-      const asset = new FileModel({
-        filename,
-        size: size || 0,
-        mimeType: mimeType || "application/octet-stream",
-        url: url || null,
-        thumbnail: thumbnail || null,
-        workspace: project?.workspace || null,
-        project: req.page.project,
-        pageId: req.params.pageId,
-        parent: parentId || null,
-        author: req.user._id,
-        isFolder: false,
-      });
-      await asset.save();
-
-      // Sync the asset to the compiler's project folder (fire-and-forget).
-      // Build full relative path (e.g. "images/photo.png") for folder children.
-      if (base64Data) {
-        const relPath = await buildRelativePath(filename, parentId, req.params.pageId);
-        syncFileToCompiler(req.params.pageId, relPath, base64Data);
-      }
-      // Record lifecycle event.
-      recordLifecycleEvent(
-        req.params.pageId,
-        req.user._id,
-        "asset_uploaded",
-        filename,
-      );
-
-      res.status(201).json({ asset });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  },
-);
-
-// 11b. Create a folder inside a page-project
-pageRouter.post(
-  "/pages/:pageId/folders",
-  isAuthenticated,
-  checkPageAccess(["manager", "member"]),
-  async (req, res) => {
-    try {
-      const { name, parentId } = req.body;
-      if (!name)
-        return res.status(400).json({ error: "Folder name is required" });
-
-      const project = await ProjectModel.findById(req.page.project).select(
-        "workspace",
-      );
-
-      const folder = new FileModel({
-        filename: name,
-        workspace: project?.workspace || null,
-        project: req.page.project,
-        pageId: req.params.pageId,
-        parent: parentId || null,
-        author: req.user._id,
-        isFolder: true,
-      });
-      await folder.save();
-      res.status(201).json({ folder });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  },
-);
-
-// 12. Delete an asset from a page-project (R2 + File record + compiler)
-pageRouter.delete(
-  "/pages/:pageId/assets/:assetId",
-  isAuthenticated,
-  checkPageAccess(["manager", "member"]),
-  async (req, res) => {
-    try {
-      const asset = await FileModel.findOne({
-        _id: req.params.assetId,
-        pageId: req.params.pageId,
-      });
-      if (!asset) return res.status(404).json({ error: "Asset not found" });
-
-      // Delete from R2 if it's a file (not a folder) with a URL
-      if (!asset.isFolder && asset.url) {
-        try {
-          const urlParts = asset.url.split("/api/files/");
-          const key = urlParts[1];
-          if (key) {
-            await r2.send(
-              new DeleteObjectCommand({
-                Bucket: process.env.R2_BUCKET_NAME,
-                Key: key,
-              }),
-            );
-          }
-        } catch (r2Error) {
-          console.error("Error deleting asset from R2:", r2Error);
-        }
+      const rootPage = req.page;
+      if (rootPage.parentPage) {
+        return res.status(400).json({ error: "Only root pages can sync a project" });
       }
 
-      // If it's a folder, also delete all children recursively
-      if (asset.isFolder) {
-        const deleteChildren = async (parentId, parentPath) => {
-          const children = await FileModel.find({ parent: parentId, pageId: req.params.pageId });
-          for (const child of children) {
-            const childPath = parentPath ? `${parentPath}/${child.filename}` : child.filename;
-            if (child.isFolder) {
-              await deleteChildren(child._id, childPath);
-            } else {
-              if (child.url) {
-                try {
-                  const urlParts = child.url.split("/api/files/");
-                  const key = urlParts[1];
-                  if (key) {
-                    await r2.send(
-                      new DeleteObjectCommand({
-                        Bucket: process.env.R2_BUCKET_NAME,
-                        Key: key,
-                      }),
-                    );
-                  }
-                } catch (_) { /* ignore */ }
-              }
-              deleteFileFromCompiler(req.params.pageId, childPath);
-            }
-            await child.deleteOne();
-          }
-        };
-        // Build the folder's own relative path for its children
-        const folderPath = await buildRelativePath(asset.filename, asset.parent, req.params.pageId);
-        // We pass the folder path without the folder's own name since children will prepend it
-        await deleteChildren(asset._id, folderPath);
-      } else {
-        // Remove from the compiler's project folder (fire-and-forget).
-        const relPath = await buildRelativePath(asset.filename, asset.parent, req.params.pageId);
-        deleteFileFromCompiler(req.params.pageId, relPath);
+      const folderId = rootPage._id.toString();
+
+      // Fetch root + all children in parallel.
+      const childFiles = await PageModel.find({ parentPage: rootPage._id })
+        .select("_id title content")
+        .lean();
+
+      // Build { relativePath → base64 } map.
+      const files = {};
+
+      // Root page → main.tex
+      if (rootPage.content) {
+        files["main.tex"] = textToBase64(rootPage.content);
       }
 
-      await asset.deleteOne();
-
-      // Record lifecycle event.
-      recordLifecycleEvent(
-        req.params.pageId,
-        req.user._id,
-        "asset_deleted",
-        asset.filename,
-      );
-      res.status(204).end();
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  },
-);
-
-// 12b. Rename an asset in a page-project
-pageRouter.put(
-  "/pages/:pageId/assets/:assetId/rename",
-  isAuthenticated,
-  checkPageAccess(["manager", "member"]),
-  async (req, res) => {
-    try {
-      const { name } = req.body;
-      if (!name)
-        return res.status(400).json({ error: "name is required" });
-      const asset = await FileModel.findOne({
-        _id: req.params.assetId,
-        pageId: req.params.pageId,
-      });
-      if (!asset) return res.status(404).json({ error: "Asset not found" });
-      asset.filename = name;
-      await asset.save();
-      res.json({ asset });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  },
-);
-
-// 12c. Move an asset to a different folder in a page-project
-pageRouter.put(
-  "/pages/:pageId/assets/:assetId/move",
-  isAuthenticated,
-  checkPageAccess(["manager", "member"]),
-  async (req, res) => {
-    try {
-      const { parentId } = req.body;
-      const asset = await FileModel.findOne({
-        _id: req.params.assetId,
-        pageId: req.params.pageId,
-      });
-      if (!asset) return res.status(404).json({ error: "Asset not found" });
-
-      if (parentId) {
-        const targetFolder = await FileModel.findOne({
-          _id: parentId,
-          pageId: req.params.pageId,
-          isFolder: true,
-        });
-        if (!targetFolder)
-          return res.status(400).json({ error: "Target folder not found" });
-        if (asset._id.toString() === parentId)
-          return res.status(400).json({ error: "Cannot move into itself" });
+      // Child .tex files
+      for (const child of childFiles) {
+        const texName = child.title.endsWith(".tex")
+          ? child.title
+          : `${child.title}.tex`;
+        files[texName] = textToBase64(child.content ?? "");
       }
 
-      asset.parent = parentId || null;
-      await asset.save();
-      res.json({ asset });
+      if (Object.keys(files).length === 0) {
+        return res.json({ ok: true, synced: 0 });
+      }
+
+      // Fire bulk sync — awaited so caller knows if it succeeded.
+      await bulkSyncToCompiler(folderId, files);
+
+      res.json({ ok: true, synced: Object.keys(files).length });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
   },
 );
 
-// 13. Sync a non-tex file to the LaTeX compiler project folder (fire-and-forget)
-// Called by the frontend after uploading a binary file to R2 via the storage API.
-pageRouter.post(
-  "/pages/:pageId/files/sync",
-  isAuthenticated,
-  checkPageAccess(["manager", "member"]),
-  async (req, res) => {
-    try {
-      const { filename, base64Data, parentId } = req.body;
-      if (!filename || !base64Data)
-        return res.status(400).json({ error: "filename and base64Data required" });
-      const relPath = await buildRelativePath(filename, parentId || null, req.params.pageId);
-      syncFileToCompiler(req.params.pageId, relPath, base64Data);
-      res.json({ ok: true });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  },
-);
+// ── Version control ───────────────────────────────────────────────────────────
 
-// ── Version control ──────────────────────────────────────────────────────
-
-// List versions for a page (metadata only)
 pageRouter.get(
   "/pages/:pageId/versions",
   isAuthenticated,
@@ -890,7 +653,6 @@ pageRouter.get(
   },
 );
 
-// Save current page content as a new version
 pageRouter.post(
   "/pages/:pageId/versions",
   isAuthenticated,
@@ -904,11 +666,8 @@ pageRouter.post(
 
       const { label = "" } = req.body;
       const projectPageId = page.parentPage ?? page._id;
-      const texName = page.parentPage
-        ? page.title.endsWith(".tex")
-          ? page.title
-          : `${page.title}.tex`
-        : "main.tex";
+      const texName = pageTexName(page);
+
       const version = await PageVersionModel.create({
         page: req.params.pageId,
         projectPageId,
@@ -927,7 +686,6 @@ pageRouter.post(
   },
 );
 
-// Restore a version
 pageRouter.post(
   "/pages/:pageId/versions/:versionId/restore",
   isAuthenticated,
@@ -944,7 +702,14 @@ pageRouter.post(
         req.params.pageId,
         { content: version.content },
         { new: true },
-      ).select("_id title content");
+      ).select("_id title content parentPage");
+
+      // Re-sync the restored content to compiler.
+      if (page) {
+        const folderId = projectFolderKey(page);
+        syncFileToCompiler(folderId, pageTexName(page), textToBase64(page.content ?? ""));
+      }
+
       res.json({ page });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -952,7 +717,6 @@ pageRouter.post(
   },
 );
 
-// Delete a version
 pageRouter.delete(
   "/pages/:pageId/versions/:versionId",
   isAuthenticated,
@@ -971,9 +735,8 @@ pageRouter.delete(
   },
 );
 
-// ── Project history endpoints ─────────────────────────────────────────────────
+// ── Project history ───────────────────────────────────────────────────────────
 
-// GET /pages/:rootPageId/history — project-level event timeline
 pageRouter.get(
   "/pages/:pageId/history",
   isAuthenticated,
@@ -1003,7 +766,6 @@ pageRouter.get(
   },
 );
 
-// POST /pages/:rootPageId/history/:eventId/restore — restore all project files to snapshot
 pageRouter.post(
   "/pages/:pageId/history/:eventId/restore",
   isAuthenticated,
@@ -1020,7 +782,6 @@ pageRouter.post(
       const T = targetEvent.createdAt;
       const folderId = req.params.pageId;
 
-      // Fetch all files in the project (root page + child files).
       const [rootPage, childFiles] = await Promise.all([
         PageModel.findById(folderId).select("_id title content parentPage"),
         PageModel.find({ parentPage: folderId }).select(
@@ -1030,9 +791,10 @@ pageRouter.post(
       if (!rootPage)
         return res.status(404).json({ error: "Project not found" });
 
+      const restoredFiles = {};
       const restored = [];
+
       for (const p of [rootPage, ...childFiles]) {
-        // Find the most recent content snapshot at or before T.
         const snapshot = await PageVersionModel.findOne({
           page: p._id,
           eventType: { $in: ["manual_save", "auto_save"] },
@@ -1043,16 +805,8 @@ pageRouter.post(
           await PageModel.findByIdAndUpdate(p._id, {
             content: snapshot.content,
           });
-          const texName = p.parentPage
-            ? p.title.endsWith(".tex")
-              ? p.title
-              : `${p.title}.tex`
-            : "main.tex";
-          syncFileToCompiler(
-            folderId,
-            texName,
-            textToBase64(snapshot.content ?? ""),
-          );
+          const texName = pageTexName(p);
+          restoredFiles[texName] = textToBase64(snapshot.content ?? "");
           restored.push({
             pageId: p._id.toString(),
             title: p.title,
@@ -1061,13 +815,14 @@ pageRouter.post(
         }
       }
 
+      // Bulk-sync all restored files in one request.
+      bulkSyncToCompiler(folderId, restoredFiles);
+
       res.json({ restored, restoredAt: T });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
   },
 );
-
-// ── Version control (per-file) ────────────────────────────────────────────────
 
 export default pageRouter;

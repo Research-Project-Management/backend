@@ -35,10 +35,13 @@ latexRouter.post("/compile", isAuthenticated, async (req, res) => {
   try {
     const { source, engine, parentPageId, mainFile, draft } = req.body;
 
-    if (!source || typeof source !== "string") {
+    // In fast mode (no project), source is required.
+    // In project mode (parentPageId provided), source is optional — compiler
+    // uses the project's synced files instead.
+    if (!parentPageId && (!source || typeof source !== "string")) {
       return res
         .status(400)
-        .json({ error: "Missing or invalid 'source' field" });
+        .json({ error: "Missing or invalid 'source' field in fast mode" });
     }
 
     const allowed = ["pdflatex", "xelatex", "lualatex"];
