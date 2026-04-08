@@ -66,9 +66,11 @@ app.use(
   cors({
     origin: [
       "http://localhost:5173",
+      "http://localhost:2915",
       "http://localhost:2916",
       "http://localhost:3000",
       "https://flux.aisq.dev",
+      ...(process.env.ORIGINS ? process.env.ORIGINS.split(",").map((o) => o.trim()) : []),
     ],
     credentials: true,
     secure: false,

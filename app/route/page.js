@@ -846,6 +846,26 @@ pageRouter.put(
   },
 );
 
+// 13. Sync a non-tex file to the LaTeX compiler project folder (fire-and-forget)
+// Called by the frontend after uploading a binary file to R2 via the storage API.
+pageRouter.post(
+  "/pages/:pageId/files/sync",
+  isAuthenticated,
+  checkPageAccess(["manager", "member"]),
+  async (req, res) => {
+    try {
+      const { filename, base64Data, parentId } = req.body;
+      if (!filename || !base64Data)
+        return res.status(400).json({ error: "filename and base64Data required" });
+      const relPath = await buildRelativePath(filename, parentId || null, req.params.pageId);
+      syncFileToCompiler(req.params.pageId, relPath, base64Data);
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  },
+);
+
 // ── Version control ──────────────────────────────────────────────────────
 
 // List versions for a page (metadata only)
