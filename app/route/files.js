@@ -270,7 +270,7 @@ const registerUploadAndFolderRoutes = (router) => {
     ensureProjectOrWorkspaceAccess,
     async (req, res) => {
       try {
-        const { name, workspaceId, projectId, parentId, scope } = req.body;
+        const { name, workspaceId, projectId, parentId, scope, parentPageId } = req.body;
         if (!name) {
           return res.status(400).json({ error: "Folder name is required" });
         }
@@ -286,6 +286,8 @@ const registerUploadAndFolderRoutes = (router) => {
           parent: parentId || null,
           author: req.user._id,
           isFolder: true,
+          // Scope to a specific root page (LaTeX project page) if provided
+          pageId: parentPageId || null,
         });
 
         await folder.save();
