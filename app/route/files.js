@@ -339,15 +339,13 @@ const registerProjectStorageRoutes = (router) => {
         const { parentPageId } = req.params;
         const { parentId, includeTrash } = req.query;
 
-        // Query by pageId (the root page) instead of project
+        // Always filter by parent:
+        //   • no parentId param  → root items only (parent: null)
+        //   • parentId param     → children of that folder
         const query = {
           pageId: parentPageId,
+          parent: parentId !== undefined ? (parentId || null) : null,
         };
-
-        // If parentId is provided, filter by it; otherwise get root items
-        if (parentId !== undefined) {
-          query.parent = parentId || null;
-        }
 
         if (!includeTrash) {
           query.trashedAt = null;
