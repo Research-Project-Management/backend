@@ -27,7 +27,8 @@ import fileRouter from "./app/route/files.js";
 import aiRouter from "./app/route/ai.js";
 import chatHistoryRouter from "./app/route/chatHistory.js";
 import latexRouter from "./app/route/latex.js";
-import commentRouter from "./app/route/comment.js";
+import commentRouter from "./app/route/pageComment.js";
+import taskCommentRouter from "./app/route/taskComment.js";
 //config
 
 const PORT = process.env.PORT;
@@ -121,6 +122,7 @@ app.use("/api/ai", chatHistoryRouter);
 app.use("/api/roles", roleRouter);
 app.use("/api/latex", latexRouter);
 app.use("/api", commentRouter);
+app.use("/api", taskCommentRouter);
 //listen
 const server = http.createServer(app);
 initSocket(server);

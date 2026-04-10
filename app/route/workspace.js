@@ -1,6 +1,16 @@
 import { Router } from "express";
+import CycleModel from "../schema/cycle.js";
+import FileModel from "../schema/file.js";
+import PageAssetModel from "../schema/pageAsset.js";
+import PageCommentModel from "../schema/pageComment.js";
+import PageModel from "../schema/page.js";
+import PageVersionModel from "../schema/pageVersion.js";
+import ProjectModel from "../schema/project.js";
 import WorkspaceModel from "../schema/workspace.js";
 import RoleModel from "../schema/role.js";
+import StickyModel from "../schema/sticky.js";
+import TagModel from "../schema/tag.js";
+import TaskModel from "../schema/task.js";
 import {
   isAuthenticated,
   checkWorkspaceRole,
@@ -104,17 +114,40 @@ workspaceRouter.put(
   isAuthenticated,
   checkWorkspaceRole("owner", "admin"),
   async (req, res) => {
-    const { name, avatar } = req.body;
-    const updateData = { name };
-    if (avatar !== undefined) {
-      updateData.avatar = avatar;
+    try {
+      const { name, avatar } = req.body;
+      const updateData = { name };
+      if (avatar !== undefined) {
+        updateData.avatar = avatar;
+      }
+
+      const memberIds = Array.from(
+        new Set(
+          (req.workspace?.members || [])
+            .map((member) => member.user?.toString())
+            .filter(Boolean),
+        ),
+      );
+
+      const workspace = await WorkspaceModel.findByIdAndUpdate(
+        req.workspace._id,
+        updateData,
+        { new: true },
+      );
+
+      await Promise.allSettled([
+        ...memberIds.map((userId) =>
+          deleteCache(userWorkspacesCacheKey(userId)),
+        ),
+        deleteCache(workspaceCacheKey(req.workspace._id.toString())),
+        deleteCacheByPattern(`workspace:${req.workspace._id.toString()}*`),
+      ]);
+
+      res.json({ workspace });
+    } catch (error) {
+      console.error("Error updating workspace:", error);
+      res.status(500).json({ error: error.message });
     }
-    const workspace = await WorkspaceModel.findByIdAndUpdate(
-      req.workspace._id,
-      updateData,
-      { new: true },
-    );
-    res.json({ workspace });
   },
 );
 
@@ -240,14 +273,115 @@ workspaceRouter.put(
   },
 );
 
-// Xóa workspace (chỉ owner)
+// Xóa workspace
 workspaceRouter.delete(
   "/:workspaceId",
   isAuthenticated,
-  checkWorkspaceRole("owner"),
   async (req, res) => {
-    await WorkspaceModel.findByIdAndDelete(req.workspace._id);
-    res.status(204).end();
+    try {
+      const { workspaceId: rawWorkspaceId } = req.params;
+      const isObjectId = /^[0-9a-fA-F]{24}$/.test(rawWorkspaceId);
+
+      const workspace = isObjectId
+        ? await WorkspaceModel.findById(rawWorkspaceId).populate("members.role")
+        : await WorkspaceModel.findOne({ url: rawWorkspaceId }).populate("members.role");
+
+      if (!workspace) {
+        return res.status(404).json({ error: "Workspace not found" });
+      }
+
+      const member = (workspace.members || []).find(
+        (m) => m.user?.toString() === req.user._id.toString(),
+      );
+
+      const memberRoleName = member?.role?.name?.toLowerCase();
+      const isOwnerByRole = memberRoleName === "owner";
+      const isOwnerByCreator =
+        workspace.createdBy?.toString() === req.user._id.toString();
+
+      if (!isOwnerByRole && !isOwnerByCreator) {
+        return res.status(403).json({ error: "Only owner can delete workspace" });
+      }
+
+      const workspaceId = workspace._id.toString();
+      const memberIds = (workspace.members || [])
+        .map((m) => m.user?.toString())
+        .filter(Boolean);
+      const projectIds = await ProjectModel.find({
+        workspace: workspace._id,
+      }).distinct("_id");
+      const pageIds =
+        projectIds.length > 0
+          ? await PageModel.find({
+              project: { $in: projectIds },
+            }).distinct("_id")
+          : [];
+
+      await Promise.all([
+        TaskModel.deleteMany({ project: { $in: projectIds } }),
+        CycleModel.deleteMany({ project: { $in: projectIds } }),
+        PageAssetModel.deleteMany({
+          $or: [
+            { project: { $in: projectIds } },
+            { parentPage: { $in: pageIds } },
+          ],
+        }),
+        PageCommentModel.deleteMany({
+          $or: [
+            { page: { $in: pageIds } },
+            { projectPageId: { $in: pageIds } },
+          ],
+        }),
+        PageVersionModel.deleteMany({
+          $or: [
+            { page: { $in: pageIds } },
+            { projectPageId: { $in: pageIds } },
+          ],
+        }),
+        PageModel.deleteMany({ project: { $in: projectIds } }),
+        FileModel.deleteMany({ workspace: workspace._id }),
+        ProjectModel.deleteMany({ workspace: workspace._id }),
+        RoleModel.deleteMany({ workspace: workspace._id }),
+        StickyModel.deleteMany({ workspace: workspace._id }),
+        TagModel.deleteMany({ workspace: workspace._id }),
+      ]);
+
+      await WorkspaceModel.findByIdAndDelete(workspaceId);
+
+      const cacheCleanupResults = await Promise.allSettled([
+        ...memberIds.map(async (userId) => {
+          const freshWorkspaces = await WorkspaceModel.find({
+            "members.user": userId,
+          });
+          return setCache(
+            userWorkspacesCacheKey(userId),
+            freshWorkspaces,
+            CACHE_DURATION.MEDIUM,
+          );
+        }),
+        ...(!memberIds.includes(req.user._id.toString())
+          ? [deleteCache(userWorkspacesCacheKey(req.user._id))]
+          : []),
+        deleteCache(workspaceCacheKey(workspaceId)),
+        deleteCacheByPattern(`workspace:${workspaceId}*`),
+      ]);
+
+      cacheCleanupResults.forEach((result, index) => {
+        if (result.status === "rejected") {
+          console.warn(
+            `Workspace delete cache cleanup failed at step ${index}:`,
+            result.reason,
+          );
+        }
+      });
+
+      res.status(204).end();
+    } catch (error) {
+      console.error("Error deleting workspace:", error);
+      res
+        .status(500)
+        .json({ error: error?.message || "Failed to delete workspace" });
+    }
   },
 );
 
