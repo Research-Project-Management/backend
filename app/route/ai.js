@@ -61,6 +61,9 @@ aiRouter.post("/chat", isAuthenticated, async (req, res) => {
       document_ids: document_ids || selected_files || null,
       intent_hint: intent_hint || null,
       web_search_sites: web_search_sites || null,
+      // Agent context — inject user identity for action agent
+      workspace_id: req.body.workspace_id || null,
+      user_id: req.user._id.toString(),
     };
 
     // Forward to Flux-AI with streaming
