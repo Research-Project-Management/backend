@@ -1019,8 +1019,8 @@ async function updateColumnHandler(req, res) {
     );
     if (!column) return res.status(404).json({ error: "Column not found" });
 
-    if (column.isDefault || !column.id.startsWith("col-")) {
-      return res.status(403).json({ error: "Default columns cannot be renamed" });
+    if (!column.id.startsWith("col-")) {
+      return res.status(403).json({ error: "System columns cannot be renamed" });
     }
 
     if (title) column.title = title;
@@ -1051,9 +1051,13 @@ async function deleteColumnHandler(req, res) {
     }
 
     const column = project.taskColumns[columnIndex];
-    if (column.isDefault || !column.id.startsWith("col-")) {
-      return res.status(403).json({ error: "Default columns cannot be deleted" });
+    // Nếu là column mặc định, chỉ cho xóa khi có query forceDeleteDefault=1
+    if (!column.id.startsWith("col-")) {
+      return res.status(403).json({ error: "System columns cannot be deleted" });
     }
+
+    // Xóa toàn bộ task thuộc column này
+    await TaskModel.deleteMany({ project: projectId, columnId: columnId });
 
     project.taskColumns.splice(columnIndex, 1);
     await project.save();
