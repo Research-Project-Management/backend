@@ -187,6 +187,9 @@ chatHistoryRouter.patch(
 
 /**
  * DELETE /api/ai/chats/:chatId
+ *
+ * Deletes the chat session from MongoDB and removes all associated
+ * Qdrant document chunks from Flux-AI (per-session RAG isolation).
  */
 chatHistoryRouter.delete(
   "/chats/:chatId",
@@ -202,6 +205,24 @@ chatHistoryRouter.delete(
         return res.status(404).json({ error: "Chat not found" });
       }
 
+      // Fire-and-forget: delete all Qdrant chunks scoped to this chat session.
+      // We do not await so the client gets a fast response even if Flux-AI is slow.
+      const FLUX_AI_URL =
+        process.env.FLUX_AI_URL || "http://localhost:8000";
+      const userId = getUserId(req);
+      const chatId = req.params.chatId;
+
+      fetch(
+        `${FLUX_AI_URL}/documents/by-chat/${encodeURIComponent(chatId)}?user_id=${encodeURIComponent(userId)}`,
+        { method: "DELETE" },
+      ).catch((err) =>
+        console.error(
+          "Flux-AI document cleanup error for chat %s: %s",
+          chatId,
+          err.message,
+        ),
+      );
+
       res.json({ message: "Chat deleted" });
     } catch (err) {
       console.error("ChatHistory delete error:", err);
@@ -211,3 +232,4 @@ chatHistoryRouter.delete(
 );
 
 export default chatHistoryRouter;
+

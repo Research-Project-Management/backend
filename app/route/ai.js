@@ -42,6 +42,7 @@ aiRouter.post("/chat", isAuthenticated, async (req, res) => {
       intent_hint,
       project_id,
       web_search_sites,
+      chat_id,
     } = req.body;
 
     // Build Flux-AI compatible request
@@ -64,6 +65,8 @@ aiRouter.post("/chat", isAuthenticated, async (req, res) => {
       // Agent context — inject user identity for action agent
       workspace_id: req.body.workspace_id || null,
       user_id: req.user._id.toString(),
+      // RAG isolation — scope retrieval to this chat session
+      chat_id: chat_id || null,
     };
 
     // Forward to Flux-AI with streaming
@@ -183,23 +186,91 @@ aiRouter.post("/chat/sync", isAuthenticated, async (req, res) => {
 });
 
 /**
- * POST /api/ai/documents/upload
- * Proxy document uploads to Flux-AI
+ * Build extra MIME text-field parts to append to an existing multipart body.
+ *
+ * @param {string} boundary   - The multipart boundary (without leading --)
+ * @param {Record<string,string>} fields - Key/value pairs to add
+ * @returns {Buffer}
+ */
+function _buildExtraFields(boundary, fields) {
+  const parts = [];
+  for (const [name, value] of Object.entries(fields)) {
+    parts.push(
+      `\r\n--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="${name}"\r\n\r\n` +
+        value,
+    );
+  }
+  return Buffer.from(parts.join(""), "utf8");
+}
+
+/**
+ * Inject extra form fields into a raw multipart/form-data Buffer.
+ * Inserts the new parts just before the closing `--boundary--` marker.
+ *
+ * Returns the original body unchanged if the boundary cannot be parsed.
+ *
+ * @param {Buffer} rawBody
+ * @param {string} contentType  - Value of the Content-Type header
+ * @param {Record<string,string>} fields
+ * @returns {Buffer}
+ */
+function _injectMultipartFields(rawBody, contentType, fields) {
+  const boundaryMatch = contentType.match(/boundary=([^\s;]+)/i);
+  if (!boundaryMatch) return rawBody;
+
+  const boundary = boundaryMatch[1].replace(/^"|"$/g, ""); // strip optional quotes
+  const endMarker = Buffer.from(`\r\n--${boundary}--`);
+
+  // Find the LAST occurrence of the closing boundary
+  let endIdx = -1;
+  for (let i = rawBody.length - endMarker.length; i >= 0; i--) {
+    if (rawBody.slice(i, i + endMarker.length).equals(endMarker)) {
+      endIdx = i;
+      break;
+    }
+  }
+
+  if (endIdx === -1) return rawBody; // malformed — pass through unchanged
+
+  const prefix = rawBody.slice(0, endIdx);
+  const extra = _buildExtraFields(boundary, fields);
+  return Buffer.concat([prefix, extra, endMarker]);
+}
+
+/**
+ * POST /api/ai/documents/upload?chatId=<chatId>
+ * Proxy document uploads to Flux-AI.
+ *
+ * Injects `user_id` (from authenticated session) and `chat_id` (from ?chatId
+ * query param) into the multipart body so Flux-AI can scope the RAG chunks
+ * to this user/session only.
  */
 aiRouter.post("/documents/upload", isAuthenticated, async (req, res) => {
   try {
-    // Collect raw multipart body from the request stream.
-    // express.json() does NOT consume multipart bodies, so req is still readable.
+    const chatId = req.query.chatId || req.body?.chatId || "";
+    const userId = req.user._id.toString();
+
+    // Collect raw multipart body — express.json() does NOT consume it.
     const chunks = [];
     for await (const chunk of req) {
       chunks.push(chunk);
     }
-    const rawBody = Buffer.concat(chunks);
+    let rawBody = Buffer.concat(chunks);
+
+    const contentType = req.headers["content-type"] || "";
+
+    // Inject user_id + chat_id BEFORE the closing boundary so Flux-AI stores
+    // them in Qdrant metadata for per-session isolation.
+    rawBody = _injectMultipartFields(rawBody, contentType, {
+      user_id: userId,
+      chat_id: chatId,
+    });
 
     const fluxResponse = await fetch(`${FLUX_AI_URL}/documents/upload`, {
       method: "POST",
       headers: {
-        "content-type": req.headers["content-type"],
+        "content-type": contentType,
       },
       body: rawBody,
     });
