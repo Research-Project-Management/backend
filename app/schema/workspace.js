@@ -23,7 +23,7 @@ const workspaceSchema = new mongoose.Schema(
 );
 
 // Indexes for performance optimization
-workspaceSchema.index({ url: 1 });
+// Note: url index is already created by `unique: true` in the field definition
 workspaceSchema.index({ "members.user": 1 });
 workspaceSchema.index({ createdBy: 1 });
 

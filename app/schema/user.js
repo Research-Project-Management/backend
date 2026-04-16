@@ -42,7 +42,7 @@ UserSchema.methods.comparePassword = async function (pw) {
 };
 
 // Indexes for performance optimization
-UserSchema.index({ email: 1 });
+// Note: email index is already created by `unique: true` in the field definition
 UserSchema.index({ googleId: 1 });
 UserSchema.index({ githubId: 1 });
 
