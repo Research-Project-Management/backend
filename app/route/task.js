@@ -397,11 +397,13 @@ taskRouter.get(
       const query = { project: projectId };
       if (cycle) query.cycle = cycle;
 
+      // .lean() → trả plain JS object, giảm memory/CPU ~30-40% so với Mongoose Document
       const tasks = await TaskModel.find(query)
         .populate("assignee", "name avatar")
         .populate("cycle", "name phase status")
         .populate("parentTask", "title identifier")
-        .sort({ rank: 1 });
+        .sort({ rank: 1 })
+        .lean();
 
       const taskIds = tasks.map((task) => task._id);
       const commentCounts = await TaskCommentModel.aggregate([
@@ -411,17 +413,21 @@ taskRouter.get(
       const commentCountMap = new Map(
         commentCounts.map((item) => [item._id.toString(), item.count]),
       );
-      const tasksWithCommentCount = tasks.map((task) =>
-        toTaskResponse(task, {
-          commentCount: commentCountMap.get(task._id.toString()) || 0,
-          projectRole: req.projectRole,
-          userId: req.user._id.toString(),
-        }),
-      );
 
-      const project =
-        await ProjectModel.findById(projectId).select("taskColumns name");
-      if (!project) return res.status(404).json({ error: "Project not found" });
+      // lean() returns plain objects, so pass directly (no .toObject() needed)
+      const tasksWithCommentCount = tasks.map((task) => {
+        const { isOverdue, dueState } = getTaskDueState(task.dueDate);
+        return {
+          ...task,
+          commentCount: commentCountMap.get(task._id.toString()) || 0,
+          isOverdue,
+          dueState,
+          permissions: getTaskPermissions(task, req.projectRole, req.user._id.toString()),
+        };
+      });
+
+      // Dùng req.project (đã fetch bởi middleware) thay vì query DB lần nữa
+      const project = req.project;
 
       res.json({
         tasks: tasksWithCommentCount,
@@ -450,7 +456,8 @@ taskRouter.get(
         .populate("assignee", "name avatar")
         .populate("cycle", "name phase status")
         .populate("parentTask", "title identifier")
-        .sort({ rank: 1 });
+        .sort({ rank: 1 })
+        .lean();
 
       const taskIds = tasks.map((task) => task._id);
       const commentCounts = await TaskCommentModel.aggregate([
@@ -460,17 +467,19 @@ taskRouter.get(
       const commentCountMap = new Map(
         commentCounts.map((item) => [item._id.toString(), item.count]),
       );
-      const tasksWithCommentCount = tasks.map((task) =>
-        toTaskResponse(task, {
+      const tasksWithCommentCount = tasks.map((task) => {
+        const { isOverdue, dueState } = getTaskDueState(task.dueDate);
+        return {
+          ...task,
           commentCount: commentCountMap.get(task._id.toString()) || 0,
-          projectRole: req.projectRole,
-          userId: req.user._id.toString(),
-        }),
-      );
+          isOverdue,
+          dueState,
+          permissions: getTaskPermissions(task, req.projectRole, req.user._id.toString()),
+        };
+      });
 
-      const project =
-        await ProjectModel.findById(projectId).select("taskColumns name");
-      if (!project) return res.status(404).json({ error: "Project not found" });
+      // Dùng req.project từ middleware, tránh query DB lần 2
+      const project = req.project;
 
       res.json({
         tasks: tasksWithCommentCount,
@@ -491,8 +500,12 @@ taskRouter.get(
     try {
       const { workspaceId } = req.params;
 
-      // Check if user has access to workspace (find by URL)
-      const workspace = await WorkspaceModel.findOne({ url: workspaceId });
+      // Check if user has access to workspace (find by URL or ObjectId)
+      const isObjectId = workspaceId.match(/^[0-9a-fA-F]{24}$/);
+      const workspace = isObjectId
+        ? await WorkspaceModel.findById(workspaceId).select("_id members").lean()
+        : await WorkspaceModel.findOne({ url: workspaceId }).select("_id members").lean();
+
       if (!workspace) {
         return res.status(404).json({ error: "Workspace not found" });
       }
@@ -505,21 +518,21 @@ taskRouter.get(
         return res.status(403).json({ error: "Access denied" });
       }
 
-      // Get all projects in workspace
-      const projects = await ProjectModel.find({ workspace: workspace._id });
-      const projectIds = projects.map((p) => p._id);
+      // Chỉ select _id — không cần các fields khác của project
+      const projectIds = await ProjectModel.find({ workspace: workspace._id })
+        .select("_id")
+        .lean()
+        .then((docs) => docs.map((d) => d._id));
 
-      // Get all tasks from these projects
+      // Fetch tasks + populate cần thiết
       const tasks = await TaskModel.find({
         project: { $in: projectIds },
-        assignee: req.user._id, // Only get tasks assigned to current user
+        assignee: req.user._id,
       })
         .populate("assignee", "name avatar")
-        .populate({
-          path: "project",
-          select: "name emoji",
-        })
-        .sort({ createdAt: -1 });
+        .populate({ path: "project", select: "name avatar" })
+        .sort({ dueDate: 1, rank: 1 })
+        .lean();
 
       const taskIds = tasks.map((task) => task._id);
       const commentCounts = await TaskCommentModel.aggregate([
@@ -529,13 +542,16 @@ taskRouter.get(
       const commentCountMap = new Map(
         commentCounts.map((item) => [item._id.toString(), item.count]),
       );
-      const tasksWithCommentCount = tasks.map((task) =>
-        toTaskResponse(task, {
+      const tasksWithCommentCount = tasks.map((task) => {
+        const { isOverdue, dueState } = getTaskDueState(task.dueDate);
+        return {
+          ...task,
           commentCount: commentCountMap.get(task._id.toString()) || 0,
-          projectRole: "member",
-          userId: req.user._id.toString(),
-        }),
-      );
+          isOverdue,
+          dueState,
+          permissions: getTaskPermissions(task, "member", req.user._id.toString()),
+        };
+      });
 
       res.json({ tasks: tasksWithCommentCount });
     } catch (error) {
@@ -603,7 +619,8 @@ taskRouter.post(
         description,
         columnId,
         project: projectId,
-        assignee,
+        // Default assignee to creator if not explicitly provided
+        assignee: assignee || req.user._id,
         startDate,
         dueDate,
         recurrence: recurrence || "none",
@@ -617,6 +634,7 @@ taskRouter.post(
         rank: count + 1,
         author: req.user._id,
       });
+
 
       await newTask.save();
       await newTask.populate("assignee", "name avatar");
