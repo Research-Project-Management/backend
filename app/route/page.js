@@ -369,10 +369,9 @@ pageRouter.put(
         _oldTitle !== page.title
       ) {
         // Title-only change on a child file → rename in compiler:
-        // 1. Delete the old filename.
-        const oldTexName = _oldTitle.endsWith(".tex")
-          ? _oldTitle
-          : `${_oldTitle}.tex`;
+        // 1. Delete the old filename (preserve non-.tex extensions like .bib/.cls).
+        const _oldPage = { title: _oldTitle, parentPage: page.parentPage };
+        const oldTexName = pageTexName(_oldPage);
         await deleteFileFromCompilerReliable(folderId, oldTexName);
         // 2. Re-upload content under the new filename.
         if (page.content) {
@@ -463,7 +462,8 @@ pageRouter.post(
       });
       await file.save();
 
-      const texName = title.endsWith(".tex") ? title : `${title}.tex`;
+      // Use pageTexName helper so .bib/.cls/.sty are not wrongly renamed to .bib.tex
+      const texName = pageTexName(file);
       await syncFileToCompilerReliable(
         parentPage._id.toString(),
         texName,
