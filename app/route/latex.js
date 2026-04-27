@@ -95,7 +95,11 @@ latexRouter.post("/compile", isAuthenticated, async (req, res) => {
           // Child named "main.tex" (or mainFile title) is the root LaTeX document.
           const files = {};
           for (const child of childFiles) {
-            const texName = child.title.endsWith(".tex") ? child.title : `${child.title}.tex`;
+            // Known LaTeX-related extensions that must be preserved as-is.
+          const LATEX_EXTS = new Set([".tex", ".bib", ".cls", ".sty", ".bst", ".bbx", ".cbx", ".ldf", ".ist"]);
+          const dotIdx = child.title.lastIndexOf(".");
+          const hasKnownExt = dotIdx > 0 && LATEX_EXTS.has(child.title.slice(dotIdx).toLowerCase());
+          const texName = hasKnownExt ? child.title : `${child.title}.tex`;
             files[texName] = textToBase64(child.content || "");
           }
 

@@ -107,10 +107,26 @@ function projectFolderKey(page) {
   return page.parentPage ? page.parentPage.toString() : page._id.toString();
 }
 
-/** ".tex" name for a page doc. */
+/**
+ * Known non-.tex LaTeX-related extensions that should be preserved as-is.
+ * Files with these extensions are stored verbatim in the compiler project folder.
+ */
+const LATEX_EXTENSIONS = new Set([".tex", ".bib", ".cls", ".sty", ".bst", ".bbx", ".cbx", ".ldf", ".ist"]);
+
+/**
+ * Derive the filename to use in the compiler project folder for a page doc.
+ * - Root page (no parentPage) → always "main.tex"
+ * - Child page with a recognised LaTeX extension → use as-is
+ * - Child page with no recognised extension → append ".tex"
+ */
 function pageTexName(page) {
   if (!page.parentPage) return "main.tex";
-  return page.title.endsWith(".tex") ? page.title : `${page.title}.tex`;
+  const dotIdx = page.title.lastIndexOf(".");
+  if (dotIdx > 0) {
+    const ext = page.title.slice(dotIdx).toLowerCase();
+    if (LATEX_EXTENSIONS.has(ext)) return page.title;
+  }
+  return `${page.title}.tex`;
 }
 
 // ── Access middleware ─────────────────────────────────────────────────────────
@@ -353,10 +369,9 @@ pageRouter.put(
         _oldTitle !== page.title
       ) {
         // Title-only change on a child file → rename in compiler:
-        // 1. Delete the old filename.
-        const oldTexName = _oldTitle.endsWith(".tex")
-          ? _oldTitle
-          : `${_oldTitle}.tex`;
+        // 1. Delete the old filename (preserve non-.tex extensions like .bib/.cls).
+        const _oldPage = { title: _oldTitle, parentPage: page.parentPage };
+        const oldTexName = pageTexName(_oldPage);
         await deleteFileFromCompilerReliable(folderId, oldTexName);
         // 2. Re-upload content under the new filename.
         if (page.content) {
@@ -447,7 +462,8 @@ pageRouter.post(
       });
       await file.save();
 
-      const texName = title.endsWith(".tex") ? title : `${title}.tex`;
+      // Use pageTexName helper so .bib/.cls/.sty are not wrongly renamed to .bib.tex
+      const texName = pageTexName(file);
       await syncFileToCompilerReliable(
         parentPage._id.toString(),
         texName,
@@ -620,11 +636,9 @@ pageRouter.post(
       // Root page has no LaTeX content — the main file is always a child page.
       const files = {};
 
-      // Child .tex files
+      // Child text files (.tex, .bib, .cls, .sty, etc.)
       for (const child of childFiles) {
-        const texName = child.title.endsWith(".tex")
-          ? child.title
-          : `${child.title}.tex`;
+        const texName = pageTexName(child);
         files[texName] = textToBase64(child.content ?? "");
       }
 
