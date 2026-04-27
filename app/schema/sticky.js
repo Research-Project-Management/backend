@@ -19,6 +19,15 @@ const stickySchema = new mongoose.Schema({
     ref: "User",
     required: true
   },
+  projectId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Project"
+  },
+  category: {
+    type: String,
+    enum: ['sticky', 'note'],
+    default: 'sticky'
+  },
   position: {
     x: { type: Number, default: 0 },
     y: { type: Number, default: 0 }
@@ -27,6 +36,7 @@ const stickySchema = new mongoose.Schema({
 
 stickySchema.index({ workspace: 1, createdAt: -1 });
 stickySchema.index({ workspace: 1, tags: 1 });
+stickySchema.index({ projectId: 1, author: 1 });
 stickySchema.index({ content: 'text', title: 'text' });
 
 const StickyModel = mongoose.models.Sticky || mongoose.model("Sticky", stickySchema);

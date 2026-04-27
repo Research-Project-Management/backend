@@ -51,6 +51,10 @@ export function initSocket(server) {
       (workspaceId) => workspaceId && socket.join(`workspace:${workspaceId}`),
     );
     socket.on(
+      "join:user",
+      (userId) => userId && socket.join(`user:${userId}`),
+    );
+    socket.on(
       "leave:page",
       (pageId) => pageId && socket.leave(`page:${pageId}`),
     );
@@ -61,6 +65,10 @@ export function initSocket(server) {
     socket.on(
       "leave:workspace",
       (workspaceId) => workspaceId && socket.leave(`workspace:${workspaceId}`),
+    );
+    socket.on(
+      "leave:user",
+      (userId) => userId && socket.leave(`user:${userId}`),
     );
 
     // Presence — client sends { roomId, user: { _id, name, avatar } }
