@@ -8,8 +8,7 @@ import PageVersionModel from "../schema/pageVersion.js";
 import ProjectModel from "../schema/project.js";
 import WorkspaceModel from "../schema/workspace.js";
 import RoleModel from "../schema/role.js";
-import StickyModel from "../schema/sticky.js";
-import TagModel from "../schema/tag.js";
+import { StickyModel, StickyNoteLinkModel, TagModel } from "../schema/sticky.js";
 import TaskModel from "../schema/task.js";
 import {
   isAuthenticated,
@@ -100,7 +99,7 @@ workspaceRouter.get(
   isAuthenticated,
   checkWorkspaceRole("owner", "admin", "member"),
   async (req, res) => {
-    const workspace = await req.workspace.populate([
+    const workspace = await WorkspaceModel.populate(req.workspace, [
       { path: "members.user", select: "name email avatar" },
       { path: "members.role", select: "name color isDefault isSystem" },
     ]);
@@ -343,6 +342,7 @@ workspaceRouter.delete(
         ProjectModel.deleteMany({ workspace: workspace._id }),
         RoleModel.deleteMany({ workspace: workspace._id }),
         StickyModel.deleteMany({ workspace: workspace._id }),
+        StickyNoteLinkModel.deleteMany({ workspace: workspace._id }),
         TagModel.deleteMany({ workspace: workspace._id }),
       ]);
 

@@ -12,8 +12,6 @@ import pageRouter from "./app/route/page.js";
 import taskRouter from "./app/route/task.js";
 import cycleRouter from "./app/route/cycle.js";
 import stickyRouter from "./app/route/sticky.js";
-import noteRouter from "./app/route/note.js";
-import tagRouter from "./app/route/tag.js";
 import roleRouter from "./app/route/role.js";
 import session from "express-session";
 import { RedisStore } from "connect-redis";
@@ -75,9 +73,9 @@ app.use(
       ...(process.env.ORIGINS ? process.env.ORIGINS.split(",").map((o) => o.trim()) : []),
     ],
     credentials: true,
-    secure: false,
   }),
 );
+
 app.use(flash());
 
 // Session với Redis store
@@ -94,11 +92,11 @@ app.use(
     resave: false,
     saveUninitialized: false,
     cookie: {
-      https: process.env.NODE_ENV === "production",
       maxAge: 7 * 24 * 60 * 60 * 1000,
       secure: process.env.NODE_ENV === "production",
       sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
     },
+
   }),
 );
 app.use(passport.initialize());
@@ -116,8 +114,6 @@ app.use("/api", pageRouter);
 app.use("/api", taskRouter);
 app.use("/api", cycleRouter);
 app.use("/api", stickyRouter);
-app.use("/api", noteRouter);
-app.use("/api", tagRouter);
 app.use("/api/files", fileRouter);
 app.use("/api/ai", aiRouter);
 app.use("/api/ai", chatHistoryRouter);

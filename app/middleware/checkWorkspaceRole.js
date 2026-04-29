@@ -198,7 +198,17 @@ export const checkProjectRole = (...allowedRoles) => {
 
       const roleName = role.name.toLowerCase();
 
-      const hasAccess = allowedRoles.some(
+      let effectiveAllowedRoles = [...allowedRoles];
+      if (effectiveAllowedRoles.includes("viewer"))
+        effectiveAllowedRoles.push("member", "manager", "admin", "owner");
+      if (effectiveAllowedRoles.includes("member"))
+        effectiveAllowedRoles.push("manager", "admin", "owner");
+      if (effectiveAllowedRoles.includes("manager"))
+        effectiveAllowedRoles.push("admin", "owner");
+      if (effectiveAllowedRoles.includes("admin"))
+        effectiveAllowedRoles.push("owner");
+
+      const hasAccess = effectiveAllowedRoles.some(
         (allowed) => allowed.toLowerCase() === roleName,
       );
 

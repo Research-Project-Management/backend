@@ -9,6 +9,7 @@ import PageCommentModel from "../schema/pageComment.js";
 import PageModel from "../schema/page.js";
 import PageVersionModel from "../schema/pageVersion.js";
 import RoleModel from "../schema/role.js";
+import { StickyModel, StickyNoteLinkModel } from "../schema/sticky.js";
 import TaskCommentModel from "../schema/taskComment.js";
 import TaskModel from "../schema/task.js";
 import {
@@ -16,6 +17,8 @@ import {
   checkWorkspaceRole,
   checkProjectRole,
 } from "../middleware/checkWorkspaceRole.js";
+import { asyncHandler } from "../middleware/helpers.js";
+
 
 const projectRouter = Router();
 
@@ -24,89 +27,81 @@ projectRouter.get(
   "/:projectId",
   isAuthenticated,
   checkProjectRole("manager", "member", "viewer"),
-  async (req, res) => {
-    try {
-      const project = await req.project.populate([
-        { path: "members.user", select: "name email avatar" },
-        { path: "createdBy", select: "name email avatar" },
-        { path: "workspace", select: "_id name" },
-      ]);
+  asyncHandler(async (req, res) => {
+    const project = await req.project.populate([
+      { path: "members.user", select: "name email avatar" },
+      { path: "createdBy", select: "name email avatar" },
+      { path: "workspace", select: "_id name" },
+    ]);
 
-      res.json({ project, yourRole: req.projectRole });
-    } catch (error) {
-      console.error("Get Project Error:", error);
-      res.status(500).json({ error: error.message });
-    }
-  },
+    res.json({ project, yourRole: req.projectRole });
+  }),
 );
+
 
 // Lấy overview của project
 projectRouter.get(
   "/project/:projectId/overview",
   isAuthenticated,
   checkProjectRole("manager", "member", "viewer"),
-  async (req, res) => {
-    try {
-      const { projectId } = req.params;
+  asyncHandler(async (req, res) => {
+    const { projectId } = req.params;
 
-      // 1. Get Project Details (already fetched in middleware but populating more if needed)
-      const project = await req.project.populate([
-        { path: "members.user", select: "name email avatar" },
-        { path: "createdBy", select: "name email avatar" },
-      ]);
+    // 1. Get Project Details (already fetched in middleware but populating more if needed)
+    const project = await req.project.populate([
+      { path: "members.user", select: "name email avatar" },
+      { path: "createdBy", select: "name email avatar" },
+    ]);
 
-      // 2. Get File Stats
-      const fileCount = await FileModel.countDocuments({
-        project: projectId,
-        trashedAt: null,
-      });
-      const recentFiles = await FileModel.find({
-        project: projectId,
-        trashedAt: null,
-      })
-        .sort({ createdAt: -1 })
-        .limit(5)
-        .populate("author", "name avatar");
+    // 2. Get File Stats
+    const fileCount = await FileModel.countDocuments({
+      project: projectId,
+      trashedAt: null,
+    });
+    const recentFiles = await FileModel.find({
+      project: projectId,
+      trashedAt: null,
+    })
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .populate("author", "name avatar");
 
-      // Calculate total size
-      const filesSizeAggregate = await FileModel.aggregate([
-        {
-          $match: {
-            project: new mongoose.Types.ObjectId(projectId),
-            trashedAt: null,
-          },
+    // Calculate total size
+    const filesSizeAggregate = await FileModel.aggregate([
+      {
+        $match: {
+          project: new mongoose.Types.ObjectId(projectId),
+          trashedAt: null,
         },
-        { $group: { _id: null, totalSize: { $sum: "$size" } } },
-      ]);
-      const totalSize =
-        filesSizeAggregate.length > 0 ? filesSizeAggregate[0].totalSize : 0;
+      },
+      { $group: { _id: null, totalSize: { $sum: "$size" } } },
+    ]);
+    const totalSize =
+      filesSizeAggregate.length > 0 ? filesSizeAggregate[0].totalSize : 0;
 
-      // 3. Get Task Stats (If TaskModel exists later, add here. For now returning empty stats)
-      const taskStats = {
-        total: 0,
-        completed: 0,
-        pending: 0,
-        inProgress: 0,
-      };
+    // 3. Get Task Stats (If TaskModel exists later, add here. For now returning empty stats)
+    const taskStats = {
+      total: 0,
+      completed: 0,
+      pending: 0,
+      inProgress: 0,
+    };
 
-      res.json({
-        project,
-        stats: {
-          files: {
-            count: fileCount,
-            totalSize,
-            recent: recentFiles,
-          },
-          tasks: taskStats,
-          members: project.members.length,
+    res.json({
+      project,
+      stats: {
+        files: {
+          count: fileCount,
+          totalSize,
+          recent: recentFiles,
         },
-      });
-    } catch (error) {
-      console.error("Overview Error:", error);
-      res.status(500).json({ error: error.message });
-    }
-  },
+        tasks: taskStats,
+        members: project.members.length,
+      },
+    });
+  }),
 );
+
 
 // Lấy tất cả project trong workspace (member workspace trở lên)
 projectRouter.get(
@@ -351,6 +346,8 @@ projectRouter.delete(
         }),
         PageModel.deleteMany({ project: projectId }),
         FileModel.deleteMany({ project: projectId }),
+        StickyModel.deleteMany({ projectId }),
+        StickyNoteLinkModel.deleteMany({ project: projectId }),
         RoleModel.deleteMany({ project: projectId }),
       ]);
 

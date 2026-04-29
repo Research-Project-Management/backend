@@ -2,6 +2,8 @@ import { Router } from "express";
 import bcrypt from "bcrypt";
 import passport from "passport";
 import UserModel from "../schema/user.js";
+import { asyncHandler } from "../middleware/helpers.js";
+
 
 const authRouter = Router();
 
@@ -40,11 +42,10 @@ authRouter.post("/login", (req, res, next) => {
   })(req, res, next);
 });
 
-authRouter.post("/register", async (req, res) => {
-  try {
+authRouter.post("/register", asyncHandler(async (req, res) => {
     const { name, email, password } = req.body;
 
-    if (name == null || email == null || password == null) {
+    if (!name || !email || !password) {
       return res.status(400).json({
         type: "MISSING_REQUIRED_FIELDS",
         error: "Name, email and password are required",
@@ -86,7 +87,7 @@ authRouter.post("/register", async (req, res) => {
       });
     }
 
-    const hashedPassword = await bcrypt.hash(normalizedPassword, 10);
+    const hashedPassword = await bcrypt.hash(normalizedPassword, 12); // Increased to 12
 
     const user = new UserModel({
       name: normalizedName,
@@ -104,22 +105,8 @@ authRouter.post("/register", async (req, res) => {
         avatar: user.avatar ?? null,
       },
     });
-  } catch (error) {
-    if (error?.code === 11000) {
-      return res.status(400).json({
-        type: "EMAIL_ALREADY_IN_USE",
-        error: "Email is already in use",
-      });
-    }
+}));
 
-    console.error("[AUTH][REGISTER]", error);
-
-    return res.status(500).json({
-      type: "INTERNAL_SERVER_ERROR",
-      error: "Internal server error",
-    });
-  }
-});
 
 authRouter.get(
   "/github",
@@ -174,95 +161,86 @@ authRouter.get("/logout", (req, res) => {
 });
 
 // Search users
-authRouter.get("/search", async (req, res) => {
+authRouter.get("/search", asyncHandler(async (req, res) => {
   if (!req.isAuthenticated())
     return res.status(401).json({ error: "Unauthorized" });
 
   const { query } = req.query;
   if (!query || query.length < 2) return res.json({ users: [] });
 
-  try {
-    const users = await UserModel.find({
-      $or: [
-        { email: { $regex: query, $options: "i" } },
-        { name: { $regex: query, $options: "i" } },
-      ],
-      _id: { $ne: req.user._id }, // Exclude self
-    })
-      .select("name email avatar")
-      .limit(10);
+  const users = await UserModel.find({
+    $or: [
+      { email: { $regex: query, $options: "i" } },
+      { name: { $regex: query, $options: "i" } },
+    ],
+    _id: { $ne: req.user._id }, // Exclude self
+  })
+    .select("name email avatar")
+    .limit(10);
 
-    res.json({ users });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+  res.json({ users });
+}));
+
 
 // Update user profile
-authRouter.put("/profile", async (req, res) => {
+authRouter.put("/profile", asyncHandler(async (req, res) => {
   if (!req.isAuthenticated())
     return res.status(401).json({ error: "Unauthorized" });
 
-  try {
-    const { name, avatar } = req.body;
-    const updates = {};
-    if (name !== undefined) updates.name = name.trim();
-    if (avatar !== undefined) updates.avatar = avatar;
+  const { name, avatar } = req.body;
+  const updates = {};
+  if (name !== undefined) updates.name = name.trim();
+  if (avatar !== undefined) updates.avatar = avatar;
 
-    if (Object.keys(updates).length === 0)
-      return res.status(400).json({ error: "No fields to update" });
+  if (Object.keys(updates).length === 0)
+    return res.status(400).json({ error: "No fields to update" });
 
-    const user = await UserModel.findByIdAndUpdate(req.user._id, updates, {
-      new: true,
-    }).select("-password");
+  const user = await UserModel.findByIdAndUpdate(req.user._id, updates, {
+    new: true,
+  }).select("-password");
 
-    if (!user) return res.status(404).json({ error: "User not found" });
+  if (!user) return res.status(404).json({ error: "User not found" });
 
-    // Update session
-    req.user.name = user.name;
-    req.user.avatar = user.avatar;
+  // Update session
+  req.user.name = user.name;
+  req.user.avatar = user.avatar;
 
-    res.json({ user });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+  res.json({ user });
+}));
+
 
 // Change password
-authRouter.put("/change-password", async (req, res) => {
+authRouter.put("/change-password", asyncHandler(async (req, res) => {
   if (!req.isAuthenticated())
     return res.status(401).json({ error: "Unauthorized" });
 
-  try {
-    const { currentPassword, newPassword } = req.body;
-    if (!newPassword || newPassword.length < 6)
-      return res
-        .status(400)
-        .json({ error: "Password must be at least 6 characters" });
+  const { currentPassword, newPassword } = req.body;
+  if (!newPassword || newPassword.length < 6)
+    return res
+      .status(400)
+      .json({ error: "Password must be at least 6 characters" });
 
-    const user = await UserModel.findById(req.user._id);
-    if (!user) return res.status(404).json({ error: "User not found" });
+  const user = await UserModel.findById(req.user._id);
+  if (!user) return res.status(404).json({ error: "User not found" });
 
-    if (!user.password) {
-      return res.status(403).json({
-        error: "Password changes are only available for accounts registered with email and password.",
-      });
-    }
-
-    if (!currentPassword)
-      return res.status(400).json({ error: "Current password is required" });
-
-    const isValid = await user.comparePassword(currentPassword);
-    if (!isValid)
-      return res.status(400).json({ error: "Current password is incorrect" });
-
-    user.password = await bcrypt.hash(newPassword, 10);
-    await user.save();
-
-    res.json({ message: "Password updated successfully" });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+  if (!user.password) {
+    return res.status(403).json({
+      error: "Password changes are only available for accounts registered with email and password.",
+    });
   }
-});
+
+  if (!currentPassword)
+    return res.status(400).json({ error: "Current password is required" });
+
+  const isValid = await user.comparePassword(currentPassword);
+  if (!isValid)
+    return res.status(400).json({ error: "Current password is incorrect" });
+
+  user.password = await bcrypt.hash(newPassword, 12); // Increased to 12
+  await user.save();
+
+  res.json({ message: "Password updated successfully" });
+}));
+
 
 export default authRouter;
