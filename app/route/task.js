@@ -620,7 +620,7 @@ taskRouter.post(
         columnId,
         project: projectId,
         // Default assignee to creator if not explicitly provided
-        assignee: assignee || req.user._id,
+        assignee: assignee || null,
         startDate,
         dueDate,
         recurrence: recurrence || "none",
@@ -1015,6 +1015,9 @@ async function createColumnHandler(req, res) {
 
     project.taskColumns.push(newColumn);
     await project.save();
+    
+    const { clearProjectCache } = await import("../middleware/checkWorkspaceRole.js");
+    await clearProjectCache(req.params.projectId);
 
     getIO()
       ?.to(`project:${req.params.projectId}`)
@@ -1042,6 +1045,8 @@ async function updateColumnHandler(req, res) {
     if (accentColor) column.accentColor = accentColor;
 
     await project.save();
+    const { clearProjectCache } = await import("../middleware/checkWorkspaceRole.js");
+    await clearProjectCache(projectId);
 
     getIO()?.to(`project:${projectId}`).emit("column:updated", {
       columns: project.taskColumns,
@@ -1071,6 +1076,9 @@ async function deleteColumnHandler(req, res) {
     // Xóa column khỏi danh sách
     project.taskColumns.splice(columnIndex, 1);
     await project.save();
+    
+    const { clearProjectCache } = await import("../middleware/checkWorkspaceRole.js");
+    await clearProjectCache(projectId);
 
     getIO()?.to(`project:${projectId}`).emit("column:updated", {
       columns: project.taskColumns,

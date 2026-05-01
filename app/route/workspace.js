@@ -8,7 +8,7 @@ import PageVersionModel from "../schema/pageVersion.js";
 import ProjectModel from "../schema/project.js";
 import WorkspaceModel from "../schema/workspace.js";
 import RoleModel from "../schema/role.js";
-import { StickyModel, StickyNoteLinkModel, TagModel } from "../schema/sticky.js";
+import { StickyModel, StickyNoteLinkModel, LabelModel } from "../schema/sticky.js";
 import TaskModel from "../schema/task.js";
 import {
   isAuthenticated,
@@ -444,7 +444,7 @@ workspaceRouter.delete(
         RoleModel.deleteMany({ workspace: workspace._id }),
         StickyModel.deleteMany({ workspace: workspace._id }),
         StickyNoteLinkModel.deleteMany({ workspace: workspace._id }),
-        TagModel.deleteMany({ workspace: workspace._id }),
+        LabelModel.deleteMany({ workspace: workspace._id }),
       ]);
 
       await WorkspaceModel.findByIdAndDelete(workspaceId);

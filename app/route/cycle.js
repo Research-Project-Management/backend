@@ -67,7 +67,7 @@ cycleRouter.post(
   checkProjectRole("manager", "member"),
   asyncHandler(async (req, res) => {
     const { projectId } = req.params;
-    const { name, description, startDate, endDate, phase, milestones, deliverables } = req.body;
+    const { name, description, startDate, endDate, phase, milestones, deliverables, members, labels } = req.body;
 
     const count = await CycleModel.countDocuments({ project: projectId });
 
@@ -80,6 +80,8 @@ cycleRouter.post(
       phase: phase || "custom",
       milestones: milestones || [],
       deliverables: deliverables || [],
+      members: members || [],
+      labels: labels || [],
       order: count,
       author: req.user._id,
     });
