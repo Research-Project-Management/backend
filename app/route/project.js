@@ -28,7 +28,7 @@ projectRouter.get(
   isAuthenticated,
   checkProjectRole("manager", "member", "viewer"),
   asyncHandler(async (req, res) => {
-    const project = await req.project.populate([
+    const project = await ProjectModel.populate(req.project, [
       { path: "members.user", select: "name email avatar" },
       { path: "createdBy", select: "name email avatar" },
       { path: "workspace", select: "_id name" },
@@ -48,7 +48,7 @@ projectRouter.get(
     const { projectId } = req.params;
 
     // 1. Get Project Details (already fetched in middleware but populating more if needed)
-    const project = await req.project.populate([
+    const project = await ProjectModel.populate(req.project, [
       { path: "members.user", select: "name email avatar" },
       { path: "createdBy", select: "name email avatar" },
     ]);
@@ -204,7 +204,7 @@ projectRouter.get(
   checkProjectRole("manager", "member", "viewer"),
   async (req, res) => {
     try {
-      const project = await req.project.populate([
+      const project = await ProjectModel.populate(req.project, [
         { path: "members.user", select: "name email" },
         { path: "createdBy", select: "name email" },
       ]);
@@ -255,13 +255,15 @@ projectRouter.patch(
   checkProjectRole("manager"),
   async (req, res) => {
     try {
-      const project = req.project;
-      project.isActive = !project.isActive;
-      await project.save();
+      const projectDoc = await ProjectModel.findByIdAndUpdate(
+        req.project._id,
+        { $set: { isActive: !req.project.isActive } },
+        { new: true }
+      );
 
       res.json({
-        project,
-        message: project.isActive ? "Project activated" : "Project deactivated",
+        project: projectDoc,
+        message: projectDoc.isActive ? "Project activated" : "Project deactivated",
       });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -403,8 +405,9 @@ projectRouter.put(
           .json({ error: `Role "${role}" not found in this workspace` });
       }
 
-      project.members.push({ user: userId, role: roleDoc._id });
-      await project.save();
+      await ProjectModel.findByIdAndUpdate(project._id, {
+        $push: { members: { user: userId, role: roleDoc._id } }
+      });
 
       const populatedProject = await ProjectModel.findById(project._id)
         .populate("members.user", "name email")
@@ -449,8 +452,10 @@ projectRouter.put(
           .json({ error: `Role "${newRole}" not found in this workspace` });
       }
 
-      member.role = roleDoc._id;
-      await project.save();
+      await ProjectModel.updateOne(
+        { _id: project._id, "members.user": userId },
+        { $set: { "members.$.role": roleDoc._id } }
+      );
 
       res.json({ project });
     } catch (error) {

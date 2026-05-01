@@ -24,10 +24,66 @@ import {
   workspaceCacheKey,
   CACHE_DURATION,
 } from "../libs/cache.js";
+import { getIO } from "../libs/socket.js";
 
 const workspaceRouter = Router();
 
+const populateWorkspaceMembers = (workspaceId) =>
+  WorkspaceModel.findById(workspaceId).populate([
+    { path: "members.user", select: "name email avatar" },
+    { path: "members.role", select: "name color isDefault isSystem" },
+  ]);
+
+const getWorkspaceMemberUserIds = (workspace) =>
+  Array.from(
+    new Set(
+      (workspace?.members || [])
+        .map((member) => member.user?._id?.toString() || member.user?.toString())
+        .filter(Boolean),
+    ),
+  );
+
+const syncWorkspaceMemberCaches = async (workspace, affectedUserIds = []) => {
+  const workspaceId = workspace._id.toString();
+  const workspaceUrl = workspace.url;
+  const userIds = Array.from(
+    new Set([...getWorkspaceMemberUserIds(workspace), ...affectedUserIds].filter(Boolean)),
+  );
+
+  await Promise.allSettled([
+    ...userIds.map((userId) => deleteCache(userWorkspacesCacheKey(userId))),
+    deleteCache(`ws:${workspaceId}`),
+    ...(workspaceUrl ? [deleteCache(`ws:${workspaceUrl}`)] : []),
+    deleteCache(workspaceCacheKey(workspaceId)),
+    deleteCacheByPattern(`workspace:${workspaceId}*`),
+  ]);
+};
+
 // Lấy tất cả workspace của user
+const emitWorkspaceMembersChanged = ({
+  action,
+  workspace,
+  affectedUserId,
+  actorId,
+}) => {
+  const workspaceId = workspace._id.toString();
+  const payload = {
+    action,
+    workspace,
+    workspaceId,
+    workspaceUrl: workspace.url,
+    affectedUserId,
+    actorId,
+  };
+
+  getIO()?.to(`workspace:${workspaceId}`).emit("workspace:members-changed", payload);
+  getIO()?.to(`user:${affectedUserId}`).emit("user:workspaces-changed", {
+    action,
+    workspaceId,
+    workspaceUrl: workspace.url,
+  });
+};
+
 workspaceRouter.get("/", isAuthenticated, async (req, res) => {
   try {
     const cacheKey = userWorkspacesCacheKey(req.user._id);
@@ -167,7 +223,7 @@ workspaceRouter.put(
 
     // Kiểm tra đã là member chưa
     const existingMember = workspace.members.find(
-      (m) => m.user.toString() === userId,
+      (m) => m.user && m.user.toString() === userId,
     );
     if (existingMember) {
       return res.status(400).json({ error: "User already a member" });
@@ -184,9 +240,25 @@ workspaceRouter.put(
         .json({ error: `Role "${role}" not found in this workspace` });
     }
 
-    workspace.members.push({ user: userId, role: roleDoc._id });
-    await workspace.save();
-    res.json({ workspace });
+    // Fetch the actual document to save (req.workspace is lean)
+    const workspaceDoc = await WorkspaceModel.findById(workspace._id);
+    if (!workspaceDoc) {
+      return res.status(404).json({ error: "Workspace not found" });
+    }
+
+    workspaceDoc.members.push({ user: userId, role: roleDoc._id });
+    await workspaceDoc.save();
+
+    const updatedWorkspace = await populateWorkspaceMembers(workspaceDoc._id);
+    await syncWorkspaceMemberCaches(updatedWorkspace, [userId]);
+    emitWorkspaceMembersChanged({
+      action: "added",
+      workspace: updatedWorkspace,
+      affectedUserId: userId,
+      actorId: req.user._id.toString(),
+    });
+
+    res.json({ workspace: updatedWorkspace });
   },
 );
 
@@ -222,9 +294,26 @@ workspaceRouter.put(
         .json({ error: `Role "${newRole}" not found in this workspace` });
     }
 
-    member.role = roleDoc._id;
-    await workspace.save();
-    res.json({ workspace });
+    // Fetch the actual document to save
+    const workspaceDoc = await WorkspaceModel.findById(workspace._id);
+    const memberDoc = workspaceDoc.members.find((m) => m.user.toString() === userId);
+    if (!memberDoc) {
+       return res.status(404).json({ error: "Member not found" });
+    }
+
+    memberDoc.role = roleDoc._id;
+    await workspaceDoc.save();
+
+    const updatedWorkspace = await populateWorkspaceMembers(workspaceDoc._id);
+    await syncWorkspaceMemberCaches(updatedWorkspace, [userId]);
+    emitWorkspaceMembersChanged({
+      action: "role-updated",
+      workspace: updatedWorkspace,
+      affectedUserId: userId,
+      actorId: req.user._id.toString(),
+    });
+
+    res.json({ workspace: updatedWorkspace });
   },
 );
 
@@ -242,7 +331,7 @@ workspaceRouter.put(
       workspace._id,
     ).populate("members.role");
     const memberToRemove = populatedWorkspace.members.find(
-      (m) => m.user.toString() === userId,
+      (m) => m.user && m.user.toString() === userId,
     );
 
     if (!memberToRemove) {
@@ -264,11 +353,23 @@ workspaceRouter.put(
         .json({ error: "Admin cannot remove another admin" });
     }
 
-    workspace.members = workspace.members.filter(
-      (m) => m.user.toString() !== userId,
+    // Fetch the actual document to save
+    const workspaceDoc = await WorkspaceModel.findById(workspace._id);
+    workspaceDoc.members = workspaceDoc.members.filter(
+      (m) => m.user && m.user.toString() !== userId,
     );
-    await workspace.save();
-    res.json({ workspace });
+    await workspaceDoc.save();
+
+    const updatedWorkspace = await populateWorkspaceMembers(workspaceDoc._id);
+    await syncWorkspaceMemberCaches(updatedWorkspace, [userId]);
+    emitWorkspaceMembersChanged({
+      action: "removed",
+      workspace: updatedWorkspace,
+      affectedUserId: userId,
+      actorId: req.user._id.toString(),
+    });
+
+    res.json({ workspace: updatedWorkspace });
   },
 );
 
