@@ -45,7 +45,6 @@ const cycleSchema = new mongoose.Schema(
         completed: { type: Boolean, default: false },
       },
     ],
-    members: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     labels: [{ type: String }],
     ended_at: { type: Date },
     order: { type: Number, default: 0 },
