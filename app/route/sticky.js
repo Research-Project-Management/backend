@@ -1,7 +1,6 @@
 import { Router } from "express";
 import mongoose from "mongoose";
 import { StickyModel, StickyChildLinkModel, LabelModel } from "../schema/sticky.js";
-import CycleModel from "../schema/cycle.js";
 import {
   isAuthenticated,
   checkWorkspaceRole,
@@ -44,17 +43,11 @@ stickyRouter.get(
   checkWorkspaceRole("owner", "admin", "member"),
   asyncHandler(async (req, res) => {
     const { type } = req.query;
-    
-    // Design Rule: Backend handles all business logic and data filtering
-    const filter = { 
-      workspace: req.workspace._id,
-    };
+    const filter = { workspace: req.workspace._id };
 
-    // If type is provided (sticky, cycle, or task), enforce strict filtering
     if (type && ["sticky", "cycle", "task"].includes(type)) {
       filter.type = type;
     } else if (type) {
-      // If an invalid type is provided, return empty to prevent data leakage
       return res.json({ labels: [] });
     }
 
@@ -68,7 +61,6 @@ stickyRouter.get(
 
 /**
  * @route   POST /api/workspace/:workspaceId/labels
- * @desc    Create a new label in a workspace
  */
 stickyRouter.post(
   "/workspace/:workspaceId/labels",
@@ -89,7 +81,6 @@ stickyRouter.post(
 
     await newLabel.save();
     await newLabel.populate("createdBy", "name avatar");
-
     res.status(201).json({ label: newLabel });
   }),
 );
@@ -107,24 +98,18 @@ stickyRouter.put(
     const label = await LabelModel.findById(labelId).populate("workspace");
     if (!label) return res.status(404).json({ error: "Label not found" });
 
-    // Allow creator OR workspace admin/owner to edit
     const isCreator = label.createdBy.toString() === req.user._id.toString();
     const workspace = label.workspace;
     const userInWorkspace = workspace.members.find(m => m.user.toString() === req.user._id.toString());
     const isAdmin = userInWorkspace && ["owner", "admin"].includes(userInWorkspace.role?.name?.toLowerCase() || "");
     
-    // Fallback: if role not populated, check by role ID (assuming we have access to RoleModel or middleware already checked)
-    // Actually, it's easier to just use the checkWorkspaceRole logic if we had workspaceId, but we don't.
-    // Let's assume the user must have some permission.
     if (!isCreator && !isAdmin) {
-      return res.status(403).json({ error: "Access denied. Only the creator or an admin can edit this label." });
+      return res.status(403).json({ error: "Access denied." });
     }
 
     if (name) label.name = name.trim();
     if (color) label.color = color;
-
     await label.save();
-
     res.json({ label });
   }),
 );
@@ -146,12 +131,10 @@ stickyRouter.delete(
     const isAdmin = userInWorkspace && ["owner", "admin"].includes(userInWorkspace.role?.name?.toLowerCase() || "");
 
     if (!isCreator && !isAdmin) {
-      return res.status(403).json({ error: "Access denied. Only the creator or an admin can delete this label." });
+      return res.status(403).json({ error: "Access denied." });
     }
 
-    const workspaceId = label.workspace._id;
     await LabelModel.findByIdAndDelete(labelId);
-
     res.status(204).end();
   }),
 );
@@ -168,10 +151,7 @@ stickyRouter.get(
   checkProjectRole("manager", "member", "viewer"),
   asyncHandler(async (req, res) => {
     const { labels } = req.query;
-    const projectId = req.project._id;
-
-    // Strictly personal: only fetch project-scoped stickies created by the current user
-    const query = { projectId: projectId, author: req.user._id };
+    const query = { projectId: req.project._id, author: req.user._id };
     const labelIds = parseLabelQuery(labels);
     if (labelIds.length > 0) query.labels = { $in: labelIds };
 
@@ -191,7 +171,6 @@ stickyRouter.put(
     const { stickyIds } = req.body;
     if (!Array.isArray(stickyIds)) return res.status(400).json({ error: "stickyIds must be an array" });
 
-    // Ensure users can only reorder their own project-scoped stickies
     const ops = stickyIds.map((id, index) => ({
       updateOne: {
         filter: { _id: id, author: req.user._id, projectId: req.project._id },
@@ -220,7 +199,6 @@ stickyRouter.get(
     const { labels, category, scope, projectId } = req.query;
     const hasProjectFilter = projectId && projectId !== "null" && projectId !== "undefined" && projectId !== "";
     
-    // Strictly personal: author check
     const query = { 
       workspace: req.workspace._id,
       author: req.user._id
@@ -242,9 +220,8 @@ stickyRouter.get(
     } else if (projectId === "null") {
       query.projectId = null;
     }
-    // If no scope/project filter is provided, show all stickies for the user.
 
-    const stickies = await populateSticky(StickyModel.find(query)).sort({ createdAt: -1 });
+    const stickies = await populateSticky(StickyModel.find(query)).sort({ order: 1, createdAt: -1 });
     res.json({ stickies });
   }),
 );
@@ -275,7 +252,6 @@ stickyRouter.put(
 
 /**
  * @route   POST /api/workspace/:workspaceId/stickies
- * @desc    Create a workspace or project-scoped sticky (Personal)
  */
 stickyRouter.post(
   "/workspace/:workspaceId/stickies",
@@ -329,7 +305,6 @@ stickyRouter.post(
 
 /**
  * @route   PUT /api/stickies/:stickyId
- * @desc    Update sticky (Strictly Private)
  */
 stickyRouter.put(
   "/stickies/:stickyId",
@@ -339,9 +314,8 @@ stickyRouter.put(
     const sticky = await StickyModel.findById(stickyId);
     if (!sticky) return res.status(404).json({ error: "Sticky not found" });
 
-    // ENFORCE PRIVACY: Only the author can update their stickies
     if (sticky.author.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ error: "Access denied. You can only edit your own stickies." });
+      return res.status(403).json({ error: "Access denied." });
     }
 
     const { title, content, color, labels, position, projectId } = req.body;
@@ -352,11 +326,8 @@ stickyRouter.put(
 
     if (sticky.projectId || projectId) {
       updateData.scope = "project";
-      updateData.category = "sticky";
     } else {
-      delete updateData.projectId;
       updateData.scope = "workspace";
-      updateData.category = "sticky";
     }
 
     const updatedSticky = await populateSticky(
@@ -368,7 +339,6 @@ stickyRouter.put(
 
 /**
  * @route   DELETE /api/stickies/:stickyId
- * @desc    Delete sticky (Strictly Private)
  */
 stickyRouter.delete(
   "/stickies/:stickyId",
@@ -378,14 +348,11 @@ stickyRouter.delete(
     const sticky = await StickyModel.findById(stickyId);
     if (!sticky) return res.status(404).json({ error: "Sticky not found" });
 
-    // ENFORCE PRIVACY: Only the author can delete their stickies
     if (sticky.author.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ error: "Access denied. You can only delete your own stickies." });
+      return res.status(403).json({ error: "Access denied." });
     }
 
     await StickyModel.findByIdAndDelete(stickyId);
-    
-    // Clean up links created by this user
     await StickyChildLinkModel.deleteMany({ 
       $or: [{ childSticky: sticky._id }, { childNote: sticky._id }, { parentSticky: sticky._id }],
       author: req.user._id 
@@ -397,7 +364,6 @@ stickyRouter.delete(
 
 /**
  * @route   GET /api/stickies/:stickyId/children
- * @desc    Get project-scoped sticky children linked to a parent sticky (Personal view)
  */
 stickyRouter.get(
   "/stickies/:stickyId/children",
@@ -458,7 +424,7 @@ stickyRouter.post(
       parentSticky.author.toString() !== req.user._id.toString() ||
       childSticky.author.toString() !== req.user._id.toString()
     ) {
-      return res.status(403).json({ error: "You can only link your own stickies." });
+      return res.status(403).json({ error: "Access denied." });
     }
 
     const link = await StickyChildLinkModel.findOneAndUpdate(

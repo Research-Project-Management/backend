@@ -1005,7 +1005,11 @@ taskRouter.delete(
 async function createColumnHandler(req, res) {
   try {
     const { title, accentColor } = req.body;
-    const project = req.project;
+    const { projectId } = req.params;
+
+    // Fetch the actual document to use .save()
+    const project = await ProjectModel.findById(projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
 
     const newColumn = {
       id: `col-${Date.now()}`,
@@ -1032,7 +1036,10 @@ async function updateColumnHandler(req, res) {
   try {
     const { projectId, columnId } = req.params;
     const { title, accentColor } = req.body;
-    const project = req.project;
+    
+    // Fetch the actual document to use .save()
+    const project = await ProjectModel.findById(projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
 
     const column = project.taskColumns.find(
       (c) => c.id === columnId || c._id?.toString() === columnId,
@@ -1061,7 +1068,10 @@ async function updateColumnHandler(req, res) {
 async function deleteColumnHandler(req, res) {
   try {
     const { projectId, columnId } = req.params;
-    const project = req.project;
+    
+    // Fetch the actual document to use .save()
+    const project = await ProjectModel.findById(projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
 
     const columnIndex = project.taskColumns.findIndex(
       (c) => c.id === columnId || c._id?.toString() === columnId,
