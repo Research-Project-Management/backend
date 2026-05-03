@@ -27,15 +27,20 @@ projectRouter.get(
   "/:projectId",
   isAuthenticated,
   checkProjectRole("manager", "member", "viewer"),
-  asyncHandler(async (req, res) => {
-    const project = await ProjectModel.populate(req.project, [
-      { path: "members.user", select: "name email avatar" },
-      { path: "createdBy", select: "name email avatar" },
-      { path: "workspace", select: "_id name" },
-    ]);
+  async (req, res) => {
+    try {
+      const project = await ProjectModel.findById(req.project._id).populate([
+        { path: "members.user", select: "name email avatar" },
+        { path: "createdBy", select: "name email avatar" },
+        { path: "workspace", select: "_id name" },
+      ]);
+      if (!project) return res.status(404).json({ error: "Project not found" });
 
-    res.json({ project, yourRole: req.projectRole });
-  }),
+      res.json({ project, yourRole: req.projectRole });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  },
 );
 
 
@@ -48,10 +53,11 @@ projectRouter.get(
     const { projectId } = req.params;
 
     // 1. Get Project Details (already fetched in middleware but populating more if needed)
-    const project = await ProjectModel.populate(req.project, [
+    const project = await ProjectModel.findById(req.project._id).populate([
       { path: "members.user", select: "name email avatar" },
       { path: "createdBy", select: "name email avatar" },
     ]);
+    if (!project) return res.status(404).json({ error: "Project not found" });
 
     // 2. Get File Stats
     const fileCount = await FileModel.countDocuments({
@@ -204,10 +210,11 @@ projectRouter.get(
   checkProjectRole("manager", "member", "viewer"),
   async (req, res) => {
     try {
-      const project = await ProjectModel.populate(req.project, [
+      const project = await ProjectModel.findById(req.project._id).populate([
         { path: "members.user", select: "name email" },
         { path: "createdBy", select: "name email" },
       ]);
+      if (!project) return res.status(404).json({ error: "Project not found" });
       res.json({ project, yourRole: req.projectRole });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -255,15 +262,14 @@ projectRouter.patch(
   checkProjectRole("manager"),
   async (req, res) => {
     try {
-      const projectDoc = await ProjectModel.findByIdAndUpdate(
-        req.project._id,
-        { $set: { isActive: !req.project.isActive } },
-        { new: true }
-      );
+      const project = await ProjectModel.findById(req.project._id);
+      if (!project) return res.status(404).json({ error: "Project not found" });
+      project.isActive = !project.isActive;
+      await project.save();
 
       res.json({
-        project: projectDoc,
-        message: projectDoc.isActive ? "Project activated" : "Project deactivated",
+        project,
+        message: project.isActive ? "Project activated" : "Project deactivated",
       });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -369,7 +375,8 @@ projectRouter.put(
   async (req, res) => {
     try {
       const { userId, role = "member" } = req.body;
-      const project = req.project;
+      const project = await ProjectModel.findById(req.project._id);
+      if (!project) return res.status(404).json({ error: "Project not found" });
 
       // Kiểm tra user có trong workspace không
       const workspace = await WorkspaceModel.findById(project.workspace);
@@ -428,7 +435,8 @@ projectRouter.put(
   async (req, res) => {
     try {
       const { userId, newRole } = req.body;
-      const project = req.project;
+      const project = await ProjectModel.findById(req.project._id);
+      if (!project) return res.status(404).json({ error: "Project not found" });
 
       const member = project.members.find((m) => m.user.toString() === userId);
 
@@ -472,7 +480,8 @@ projectRouter.put(
   async (req, res) => {
     try {
       const { userId } = req.body;
-      const project = req.project;
+      const project = await ProjectModel.findById(req.project._id).populate("members.role");
+      if (!project) return res.status(404).json({ error: "Project not found" });
 
       const memberToRemove = project.members.find(
         (m) => m.user.toString() === userId,
@@ -487,17 +496,9 @@ projectRouter.put(
         return res.status(400).json({ error: "Cannot remove yourself" });
       }
 
-      // Populate role to check role name
-      const populatedProject = await ProjectModel.findById(
-        project._id,
-      ).populate("members.role");
-      const populatedMember = populatedProject.members.find(
-        (m) => m.user.toString() === userId,
-      );
-
       // Không thể xóa manager nếu mình không phải workspace admin/owner
       if (
-        populatedMember?.role?.name?.toLowerCase() === "manager" &&
+        memberToRemove?.role?.name?.toLowerCase() === "manager" &&
         req.projectRole !== "manager"
       ) {
         return res.status(403).json({ error: "Cannot remove a manager" });
@@ -522,14 +523,11 @@ projectRouter.put(
   checkProjectRole("manager", "member", "viewer"),
   async (req, res) => {
     try {
-      const project = req.project;
+      const project = await ProjectModel.findById(req.project._id).populate("members.role");
+      if (!project) return res.status(404).json({ error: "Project not found" });
       const userId = req.user._id.toString();
 
-      // Populate role to check role name
-      const populatedProject = await ProjectModel.findById(
-        project._id,
-      ).populate("members.role");
-      const member = populatedProject.members.find(
+      const member = project.members.find(
         (m) => m.user.toString() === userId,
       );
 
@@ -539,7 +537,7 @@ projectRouter.put(
 
       // Nếu là manager, kiểm tra còn manager khác không
       if (member.role?.name?.toLowerCase() === "manager") {
-        const otherManagers = populatedProject.members.filter(
+        const otherManagers = project.members.filter(
           (m) =>
             m.role?.name?.toLowerCase() === "manager" &&
             m.user.toString() !== userId,

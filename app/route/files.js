@@ -205,23 +205,50 @@ const registerUploadAndFolderRoutes = (router) => {
         const resolvedProjectId =
           scope === "workspace" ? null : req.project?._id || (isValidObjectId(projectId) ? projectId : null);
 
-        const file = new FileModel({
-          filename,
-          size,
-          mimeType,
-          url,
-          thumbnail,
-          workspace: resolvedWorkspaceId,
-          project: resolvedProjectId,
-          parent: parentId || null,
-          author: req.user._id,
-          metaData: metaData || {},
-          isFolder: false,
-          // Save the parentPageId as pageId to associate this file with a specific page
-          pageId: parentPageId || null,
-        });
+        // ── Overleaf-style dedup: overwrite if same filename exists in same folder ──
+        // Match on (filename, pageId, parent) — the three fields that define
+        // "same file in the same directory" for a LaTeX project.
+        const existingFile = parentPageId
+          ? await FileModel.findOne({
+              filename,
+              pageId: parentPageId,
+              parent: parentId || null,
+              isFolder: false,
+            })
+          : null;
 
-        await file.save();
+        let file;
+        if (existingFile) {
+          // Overwrite: update the existing record in-place (Overleaf behaviour)
+          existingFile.url = url;
+          existingFile.size = size;
+          existingFile.mimeType = mimeType;
+          if (thumbnail !== undefined) existingFile.thumbnail = thumbnail;
+          if (metaData) existingFile.metaData = metaData;
+          existingFile.trashedAt = null; // un-trash if previously deleted
+          existingFile.updatedAt = new Date();
+          await existingFile.save();
+          file = existingFile;
+        } else {
+          // New file — create a fresh document
+          file = new FileModel({
+            filename,
+            size,
+            mimeType,
+            url,
+            thumbnail,
+            workspace: resolvedWorkspaceId,
+            project: resolvedProjectId,
+            parent: parentId || null,
+            author: req.user._id,
+            metaData: metaData || {},
+            isFolder: false,
+            // Save the parentPageId as pageId to associate this file with a specific page
+            pageId: parentPageId || null,
+          });
+          await file.save();
+        }
+
 
         // ── Compiler sync (await-able) ──────────────────────────────────────
         // If a parentPageId is given, sync the file to the LaTeX compiler's
@@ -250,19 +277,24 @@ const registerUploadAndFolderRoutes = (router) => {
             }
           } catch (err) {
             console.warn("[files] compiler sync after upload failed:", err.message);
-            return res.status(400).json({ 
-              error: "Invalid parentPageId or sync failed", 
-              details: err.message 
+            return res.status(400).json({
+              error: "Invalid parentPageId or sync failed",
+              details: err.message,
             });
           }
         }
 
-        return res.status(201).json({ file });
+        // 201 for new, 200 for overwrite — clients can tell which happened
+        return res.status(existingFile ? 200 : 201).json({
+          file,
+          overwritten: !!existingFile,
+        });
       } catch (error) {
         return handleServerError(res, error, "Failed to save file metadata");
       }
     },
   );
+
 
   router.post(
     "/folder",
@@ -279,6 +311,20 @@ const registerUploadAndFolderRoutes = (router) => {
         const resolvedProjectId =
           scope === "workspace" ? null : req.project?._id || (isValidObjectId(projectId) ? projectId : null);
 
+        // ── Upsert: reuse existing folder with same name in same location ──
+        // This prevents duplicate folders when re-uploading a folder that already exists.
+        const existing = await FileModel.findOne({
+          filename: name,
+          pageId: parentPageId || null,
+          parent: parentId || null,
+          isFolder: true,
+          trashedAt: null,
+        });
+
+        if (existing) {
+          return res.status(200).json({ folder: existing });
+        }
+
         const folder = new FileModel({
           filename: name,
           workspace: resolvedWorkspaceId,
@@ -286,7 +332,6 @@ const registerUploadAndFolderRoutes = (router) => {
           parent: parentId || null,
           author: req.user._id,
           isFolder: true,
-          // Scope to a specific root page (LaTeX project page) if provided
           pageId: parentPageId || null,
         });
 
@@ -298,6 +343,7 @@ const registerUploadAndFolderRoutes = (router) => {
     },
   );
 };
+
 
 const registerProjectStorageRoutes = (router) => {
   // Get files by project ID (legacy)
@@ -361,6 +407,7 @@ const registerProjectStorageRoutes = (router) => {
       }
     },
   );
+
 
   router.get(
     "/my-files/:projectId",

@@ -155,10 +155,13 @@ workspaceRouter.get(
   isAuthenticated,
   checkWorkspaceRole("owner", "admin", "member"),
   async (req, res) => {
-    const workspace = await WorkspaceModel.populate(req.workspace, [
+    const workspace = await WorkspaceModel.findById(req.workspace._id).populate([
       { path: "members.user", select: "name email avatar" },
       { path: "members.role", select: "name color isDefault isSystem" },
     ]);
+    if (!workspace) {
+      return res.status(404).json({ error: "Workspace not found" });
+    }
     res.json({ workspace, yourRole: req.workspaceRole });
   },
 );

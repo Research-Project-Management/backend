@@ -19,13 +19,7 @@
 
 import { Router } from "express";
 import { isAuthenticated } from "../middleware/checkWorkspaceRole.js";
-import {
-  validateRootPage,
-  checkCompilerFolderExists,
-  bulkSyncToCompiler,
-  buildRelativePath,
-  textToBase64,
-} from "../libs/compiler-sync.js";
+import { validateRootPage } from "../libs/compiler-sync.js";
 
 const latexRouter = Router();
 
@@ -57,102 +51,19 @@ latexRouter.post("/compile", isAuthenticated, async (req, res) => {
       }
     }
 
-    // In fast mode (no project), source is required.
-    // In project mode (parentPageId provided), source is optional — compiler
-    // uses the project's synced files instead.
+    // In project mode (project_id provided), the client is responsible for
+    // calling /api/pages/:id/sync-incremental before /compile.
+    // We only check that source is provided in fast (no-project) mode.
     if (!resolvedParentPageId && (!source || typeof source !== "string")) {
       return res
         .status(400)
         .json({ error: "Missing or invalid 'source' field in fast mode" });
     }
 
-    // Auto-sync if compiler folder is missing or the main file is not present.
-    if (resolvedParentPageId) {
-      const { exists: folderExists, files: compilerFiles } = await checkCompilerFolderExists(resolvedParentPageId);
-      // Normalise the main file name the same way the compiler does.
-      const resolvedMainFileNorm = resolvedMainFile.endsWith(".tex") ? resolvedMainFile : `${resolvedMainFile}.tex`;
-      const mainFilePresent = folderExists && compilerFiles.some(
-        (f) => f === resolvedMainFileNorm || f.endsWith(`/${resolvedMainFileNorm}`)
-      );
-
-      if (!mainFilePresent) {
-        console.log(`[latex] Compiler folder/main-file missing for ${resolvedParentPageId} (${resolvedMainFile}), auto-syncing...`);
-
-        try {
-          const PageModel = (await import("../schema/page.js")).default;
-          const FileModel = (await import("../schema/file.js")).default;
-          const { r2 } = (await import("../config/r2.js"));
-          const { GetObjectCommand } = (await import("@aws-sdk/client-s3"));
-
-          const rootPage = await PageModel.findById(resolvedParentPageId).select("content project mainFile").lean();
-          if (!rootPage) {
-            throw new Error(`Root page not found: ${resolvedParentPageId}`);
-          }
-          const childFiles = await PageModel.find({ parentPage: rootPage._id })
-            .select("_id title content").lean();
-
-          // Build file map from child pages (root page itself has no LaTeX content).
-          // Child named "main.tex" (or mainFile title) is the root LaTeX document.
-          const files = {};
-          for (const child of childFiles) {
-            // Known LaTeX-related extensions that must be preserved as-is.
-          const LATEX_EXTS = new Set([".tex", ".bib", ".cls", ".sty", ".bst", ".bbx", ".cbx", ".ldf", ".ist"]);
-          const dotIdx = child.title.lastIndexOf(".");
-          const hasKnownExt = dotIdx > 0 && LATEX_EXTS.has(child.title.slice(dotIdx).toLowerCase());
-          const texName = hasKnownExt ? child.title : `${child.title}.tex`;
-            files[texName] = textToBase64(child.content || "");
-          }
-
-          // Sync binary assets filtered by this root page only.
-          const binaryFiles = await FileModel.find({
-            pageId: rootPage._id,
-            trashedAt: null,
-            isFolder: false,
-            url: { $exists: true, $ne: null },
-          }).lean();
-
-          for (const bf of binaryFiles) {
-            try {
-              const key = bf.url?.split("/api/files/")[1];
-              if (!key) continue;
-              const r2Resp = await r2.send(new GetObjectCommand({
-                Bucket: process.env.R2_BUCKET_NAME,
-                Key: key,
-              }));
-              const chunks = [];
-              for await (const chunk of r2Resp.Body) chunks.push(chunk);
-              const b64 = Buffer.concat(chunks).toString("base64");
-              const relPath = await buildRelativePath(bf.filename, bf.parent);
-              files[relPath] = b64;
-            } catch (err) {
-              console.warn(`[latex] Failed to sync asset ${bf.filename}:`, err.message);
-            }
-          }
-
-          if (Object.keys(files).length > 0) {
-            await bulkSyncToCompiler(resolvedParentPageId, files);
-          }
-          console.log(`[latex] Auto-sync completed for ${resolvedParentPageId} (${Object.keys(files).length} files)`);
-        } catch (syncErr) {
-          console.error("[latex] Auto-sync failed:", syncErr);
-          return res.status(500).json({
-            error: "auto_sync_failed",
-            message: "Failed to sync project to compiler. Please try again.",
-            details: syncErr.message,
-          });
-        }
-      } else {
-        console.log(`[latex] Compiler folder ready for ${resolvedParentPageId} (${compilerFiles.length} files)`);
-      }
-    }
-
     const allowed = ["pdflatex", "xelatex", "lualatex"];
     const selectedEngine =
       engine && allowed.includes(engine) ? engine : "pdflatex";
 
-    console.log(
-      `[latex] compile — engine=${selectedEngine} main=${resolvedMainFile} project=${resolvedParentPageId || "(fast/no-project)"} draft=${!!draft}`,
-    );
 
     const payload = {
       source: source ?? "",            // "" = project-mode, compiler uses synced files
@@ -168,9 +79,6 @@ latexRouter.post("/compile", isAuthenticated, async (req, res) => {
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       if (attempt > 0) {
         const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1);
-        console.log(
-          `[latex] retry ${attempt}/${MAX_RETRIES} after ${delay}ms`,
-        );
         await sleep(delay);
       }
 
@@ -183,7 +91,6 @@ latexRouter.post("/compile", isAuthenticated, async (req, res) => {
 
         // 503 = compiler overloaded → retry
         if (upstream.status === 503 && attempt < MAX_RETRIES) {
-          console.log("[latex] compiler busy (503), will retry…");
           lastError = { status: 503 };
           continue;
         }
@@ -212,7 +119,6 @@ latexRouter.post("/compile", isAuthenticated, async (req, res) => {
       } catch (fetchError) {
         lastError = fetchError;
         if (attempt < MAX_RETRIES) {
-          console.log(`[latex] fetch error, will retry: ${fetchError.message}`);
           continue;
         }
       }
