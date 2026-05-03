@@ -1,0 +1,21 @@
+name: Deploy Flux-BE Application
+
+on:
+  push:
+    branches: ["master"]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Production
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          password: ${{ secrets.PASSWORD}}
+          script: |
+            cd /root/app/NCKH/RPM-BE
+            git pull origin master
+            npm i
+            pm2 restart RPM

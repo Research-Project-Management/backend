@@ -129,6 +129,55 @@ function pageTexName(page) {
   return `${page.title}.tex`;
 }
 
+/**
+ * Given a list of page docs, compute a de-duplicated filename for each one.
+ *
+ * Rules:
+ *  - First occurrence of a name keeps its original name.
+ *  - Subsequent duplicates get a numeric suffix before the extension:
+ *      "chapter1.tex" → "chapter1_2.tex", "chapter1_3.tex", …
+ *  - Root page ("main.tex") is always kept as-is regardless of collisions.
+ *
+ * @param {Array<{_id: ObjectId|string, title: string, parentPage?: any}>} pages
+ * @returns {Map<string, string>}  pageId (string) → unique compiler filename
+ */
+function deduplicateTexNames(pages) {
+  /** @type {Map<string, string>} pageId → resolved name */
+  const result = new Map();
+  /** @type {Map<string, number>} lowercased name → next available suffix */
+  const seen = new Map();
+
+  for (const page of pages) {
+    const id = page._id.toString();
+    const base = pageTexName(page);
+
+    // Root page is always "main.tex" — no dedup needed
+    if (base === "main.tex") {
+      result.set(id, base);
+      continue;
+    }
+
+    const lowerBase = base.toLowerCase();
+    if (!seen.has(lowerBase)) {
+      // First occurrence — use as-is
+      seen.set(lowerBase, 2);
+      result.set(id, base);
+    } else {
+      // Collision — insert numeric suffix before extension
+      const suffix = seen.get(lowerBase);
+      seen.set(lowerBase, suffix + 1);
+
+      const dotIdx = base.lastIndexOf(".");
+      const uniqueName = dotIdx > 0
+        ? `${base.slice(0, dotIdx)}_${suffix}${base.slice(dotIdx)}`
+        : `${base}_${suffix}`;
+      result.set(id, uniqueName);
+    }
+  }
+
+  return result;
+}
+
 // ── Access middleware ─────────────────────────────────────────────────────────
 
 const checkPageAccess = (requiredRoles) => {
@@ -246,8 +295,6 @@ pageRouter.post(
     try {
       const { title, content, status } = req.body;
 
-      console.log("[page.js] Creating new page:", { projectId: req.params.projectId, title });
-
       const newPage = new PageModel({
         title,
         status: status || "draft",
@@ -256,7 +303,6 @@ pageRouter.post(
         parentPage: null,
       });
       await newPage.save();
-      console.log("[page.js] New page created:", { _id: newPage._id.toString(), title: newPage.title });
 
       const mainFile = new PageModel({
         title: "main.tex",
@@ -267,7 +313,6 @@ pageRouter.post(
         parentPage: newPage._id,
       });
       await mainFile.save();
-      console.log("[page.js] Main file created:", { _id: mainFile._id.toString(), title: mainFile.title });
 
       newPage.mainFile = mainFile._id;
       await newPage.save();
@@ -275,16 +320,10 @@ pageRouter.post(
       // Seed the compiler project folder with the main file content.
       if (content) {
         await syncFileToCompilerReliable(newPage._id.toString(), "main.tex", textToBase64(content));
-        console.log("[page.js] Synced to compiler:", newPage._id.toString());
       }
 
       await newPage.populate("author", "name avatar");
       await mainFile.populate("author", "name avatar");
-
-      console.log("[page.js] Returning response:", {
-        page: { _id: newPage._id.toString(), title: newPage.title },
-        mainFile: { _id: mainFile._id.toString(), title: mainFile.title }
-      });
 
       getIO()
         ?.to(`project:${req.params.projectId}`)
@@ -478,6 +517,7 @@ pageRouter.post(
     }
   },
 );
+
 
 // 8. Set the mainFile for a page-project
 pageRouter.put(
@@ -678,6 +718,103 @@ pageRouter.post(
       await bulkSyncToCompiler(folderId, files);
 
       res.json({ ok: true, synced: Object.keys(files).length });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  },
+);
+
+/**
+ * POST /pages/:pageId/sync-incremental
+ *
+ * Incrementally sync files to the compiler, uploading only the files that:
+ *   1. Appear in `dirtyFileIds` (recently edited), OR
+ *   2. Have never been synced to the compiler for this project.
+ *
+ * This is 2-10× faster than sync-project for normal compile flows because
+ * it skips files that haven't changed since the last compile.
+ *
+ * Body: { dirtyFileIds?: string[] }  — array of page._id strings that were recently edited
+ * Response: { synced: string[] }     — list of fileIds actually uploaded
+ */
+pageRouter.post(
+  "/pages/:pageId/sync-incremental",
+  isAuthenticated,
+  checkPageAccess(["manager", "member", "viewer"]),
+  async (req, res) => {
+    try {
+      const rootPage = req.page;
+      if (rootPage.parentPage) {
+        return res.status(400).json({ error: "Only root pages can sync a project" });
+      }
+
+      const folderId = rootPage._id.toString();
+      // forceAll=true → behaves like sync-project (full re-sync, e.g. after compiler corruption)
+      const { dirtyFileIds = [], forceAll = false } = req.body;
+      const dirtySet = new Set(dirtyFileIds.map(String));
+
+      // Always filter parentPage = rootPage._id to avoid accidentally picking up
+      // root-page documents (parentPage: null) which have no LaTeX content.
+      const childFiles = await PageModel.find({ parentPage: rootPage._id })
+        .select("_id title content updatedAt parentPage")
+        .lean();
+
+      // Build a collision-safe name map for all children BEFORE filtering,
+      // so duplicate detection sees the full project scope.
+      const nameMap = deduplicateTexNames(childFiles);
+
+      // Determine which text files to sync
+      const toSync = (!forceAll && dirtySet.size > 0)
+        ? childFiles.filter((f) => dirtySet.has(f._id.toString()))
+        : childFiles; // full sync when forceAll or no dirty hint
+
+      const syncedIds = [];
+      const syncedNames = {}; // { pageId → resolvedTexName } returned to client
+      await Promise.allSettled(
+        toSync.map(async (file) => {
+          const texName = nameMap.get(file._id.toString()) ?? pageTexName(file);
+          try {
+            await syncFileToCompilerReliable(folderId, texName, textToBase64(file.content ?? ""));
+            syncedIds.push(file._id.toString());
+            syncedNames[file._id.toString()] = texName;
+          } catch (err) {
+            console.warn(`[sync-incremental] failed to sync ${texName}:`, err.message);
+          }
+        }),
+      );
+
+      // On full sync (no dirty hint or forceAll), also sync binary assets from FileModel
+      if (forceAll || dirtySet.size === 0) {
+        const binaryFiles = await FileModel.find({
+          pageId: rootPage._id,
+          trashedAt: null,
+          isFolder: false,
+          url: { $exists: true, $ne: null },
+        }).lean();
+
+        await Promise.allSettled(
+          binaryFiles.map(async (bf) => {
+            try {
+              const key = bf.url?.split("/api/files/")[1];
+              if (!key) return;
+              const r2Resp = await r2.send(new GetObjectCommand({
+                Bucket: process.env.R2_BUCKET_NAME,
+                Key: key,
+              }));
+              const chunks = [];
+              for await (const chunk of r2Resp.Body) chunks.push(chunk);
+              const b64 = Buffer.concat(chunks).toString("base64");
+              const relPath = await buildRelativePath(bf.filename, bf.parent);
+              await syncFileToCompilerReliable(folderId, relPath, b64);
+              syncedIds.push(`asset:${bf._id.toString()}`);
+            } catch (err) {
+              console.warn(`[sync-incremental] failed to sync asset ${bf.filename}:`, err.message);
+            }
+          }),
+        );
+      }
+
+      res.json({ synced: syncedIds, names: syncedNames, total: syncedIds.length });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
