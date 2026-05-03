@@ -3,12 +3,16 @@
  *
  * Mounted at /api/ai (alongside the existing proxy route).
  *
- * GET    /api/ai/chats?workspaceId=   — list sessions for a workspace
- * POST   /api/ai/chats                — create a new session
- * GET    /api/ai/chats/:chatId        — fetch a session with its messages
- * PATCH  /api/ai/chats/:chatId/messages — append messages to a session
- * PATCH  /api/ai/chats/:chatId/title  — rename a session title
- * DELETE /api/ai/chats/:chatId        — delete a session
+ * GET    /api/ai/chats?workspaceId=      — list sessions for a workspace
+ * POST   /api/ai/chats                   — create a new session
+ * GET    /api/ai/chats/:chatId           — fetch a session with its messages
+ * PATCH  /api/ai/chats/:chatId/messages  — append messages to a session
+ * PATCH  /api/ai/chats/:chatId/title     — rename a session title
+ * DELETE /api/ai/chats/:chatId           — delete a session
+ *
+ * Per-page routes (LaTeX editor AI panel):
+ * GET    /api/ai/chats/page/:pageId      — load (or auto-create) chat for a page
+ * DELETE /api/ai/chats/page/:pageId      — clear chat history for a page
  */
 
 import { Router } from "express";
@@ -84,6 +88,73 @@ chatHistoryRouter.post("/chats", isAuthenticated, async (req, res) => {
     res.status(201).json({ chat });
   } catch (err) {
     console.error("ChatHistory create error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/ai/chats/page/:pageId?workspaceId=
+ *
+ * Load the AI chat session for a specific LaTeX editor page.
+ * Auto-creates the session if one doesn't exist yet for this user+page.
+ * Returns the full session including all messages (last 50).
+ *
+ * IMPORTANT: This route must be declared BEFORE /chats/:chatId so that
+ * Express does not match "page" as a chatId parameter.
+ */
+chatHistoryRouter.get("/chats/page/:pageId", isAuthenticated, async (req, res) => {
+  const { pageId } = req.params;
+  const { workspaceId } = req.query;
+
+  if (!workspaceId) {
+    return res.status(400).json({ error: "workspaceId query param required" });
+  }
+
+  try {
+    const userId = getUserId(req);
+
+    let chat = await ChatHistoryModel.findOne({ pageId, user: userId }).lean();
+
+    if (!chat) {
+      chat = await ChatHistoryModel.create({
+        workspace: workspaceId,
+        user: userId,
+        title: `Page ${pageId}`,
+        messages: [],
+        projectId: null,
+        documentIds: [],
+        pageId,
+      });
+      chat = chat.toObject();
+    }
+
+    const recentMessages = (chat.messages || []).slice(-50);
+    res.json({ chat: { ...chat, messages: recentMessages } });
+  } catch (err) {
+    console.error("ChatHistory page get error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * DELETE /api/ai/chats/page/:pageId
+ * Clear all messages from the AI chat for a specific page.
+ */
+chatHistoryRouter.delete("/chats/page/:pageId", isAuthenticated, async (req, res) => {
+  const { pageId } = req.params;
+  try {
+    const userId = getUserId(req);
+    const chat = await ChatHistoryModel.findOneAndUpdate(
+      { pageId, user: userId },
+      { $set: { messages: [] } },
+      { new: true },
+    );
+    if (!chat) {
+      return res.status(404).json({ error: "Chat not found for this page" });
+    }
+    res.json({ message: "Chat history cleared", chatId: chat._id });
+  } catch (err) {
+    console.error("ChatHistory page clear error:", err);
     res.status(500).json({ error: err.message });
   }
 });

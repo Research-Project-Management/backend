@@ -23,11 +23,15 @@ const chatHistorySchema = new mongoose.Schema(
     messages: [messageSchema],
     projectId: { type: String, default: null },
     documentIds: { type: [String], default: [] },
+    // Per-page chat: when set, this chat is exclusively scoped to a LaTeX editor page
+    pageId: { type: String, default: null },
   },
   { timestamps: true },
 );
 
 // Index for efficient querying by workspace slug + user, sorted by recently updated
 chatHistorySchema.index({ workspace: 1, user: 1, updatedAt: -1 });
+// Index for per-page lookup (LaTeX editor AI panel)
+chatHistorySchema.index({ pageId: 1, user: 1 }, { sparse: true });
 
 export default mongoose.model("ChatHistory", chatHistorySchema);
