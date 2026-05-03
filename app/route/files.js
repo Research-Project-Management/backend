@@ -359,6 +359,7 @@ const registerProjectStorageRoutes = (router) => {
         const query = {
           project: projectId,
           parent: parentId || null,
+          pageId: null, // exclude editor-uploaded assets
         };
 
         if (!includeTrash) {
@@ -420,6 +421,7 @@ const registerProjectStorageRoutes = (router) => {
           project: projectId,
           author: req.user._id,
           trashedAt: null,
+          pageId: null, // exclude editor-uploaded assets
         })
           .populate("author", "name email avatar")
           .sort({ createdAt: -1 });
@@ -442,6 +444,7 @@ const registerProjectStorageRoutes = (router) => {
           project: projectId,
           starred: true,
           trashedAt: null,
+          pageId: null, // exclude editor-uploaded assets
         })
           .populate("author", "name email avatar")
           .sort({ createdAt: -1 });
@@ -464,6 +467,7 @@ const registerProjectStorageRoutes = (router) => {
           project: projectId,
           "sharedWith.user": req.user._id,
           trashedAt: null,
+          pageId: null, // exclude editor-uploaded assets
         })
           .populate("author", "name email avatar")
           .sort({ createdAt: -1 });
@@ -485,6 +489,7 @@ const registerProjectStorageRoutes = (router) => {
         const files = await FileModel.find({
           project: projectId,
           trashedAt: { $ne: null },
+          pageId: null, // exclude editor-uploaded assets
         })
           .populate("author", "name email avatar")
           .sort({ trashedAt: -1 });
@@ -718,6 +723,7 @@ const registerWorkspaceStorageRoutes = (router) => {
           trashedAt: null,
           ...(allowedProjectIds ? { project: { $in: allowedProjectIds } } : {}),
           parent: parentId || null,
+          pageId: null, // exclude editor-uploaded assets
         };
 
         const files = await FileModel.find(query)
@@ -745,6 +751,7 @@ const registerWorkspaceStorageRoutes = (router) => {
           author: req.user._id,
           parent: parentId || null,
           trashedAt: null,
+          pageId: null, // exclude editor-uploaded assets
         })
           .populate("author", "name email avatar")
           .populate("project", "name")
@@ -771,6 +778,7 @@ const registerWorkspaceStorageRoutes = (router) => {
           starred: true,
           trashedAt: null,
           ...(isPrivileged ? {} : { author: req.user._id }),
+          pageId: null, // exclude editor-uploaded assets
         })
           .populate("author", "name email avatar")
           .populate("project", "name")
@@ -794,6 +802,7 @@ const registerWorkspaceStorageRoutes = (router) => {
           workspace: workspaceId,
           "sharedWith.user": req.user._id,
           trashedAt: null,
+          pageId: null, // exclude editor-uploaded assets
         })
           .populate("author", "name email avatar")
           .populate("project", "name")
@@ -819,6 +828,7 @@ const registerWorkspaceStorageRoutes = (router) => {
           workspace: workspaceId,
           trashedAt: { $ne: null },
           ...(isPrivileged ? {} : { author: req.user._id }),
+          pageId: null, // exclude editor-uploaded assets
         })
           .populate("author", "name email avatar")
           .populate("project", "name")
