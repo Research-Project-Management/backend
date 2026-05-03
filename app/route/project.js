@@ -278,7 +278,7 @@ projectRouter.patch(
       project.isActive = !project.isActive;
       await project.save();
 
-      if (projectDoc) {
+      if (project) {
         await clearProjectCache(req.project._id);
       }
 
