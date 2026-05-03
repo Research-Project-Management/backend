@@ -80,10 +80,16 @@ projectRouter.get(
     const totalSize =
       filesSizeAggregate.length > 0 ? filesSizeAggregate[0].totalSize : 0;
 
-    // 3. Get Task Stats (If TaskModel exists later, add here. For now returning empty stats)
+    // 3. Get Task Stats
+    const totalTasks = await TaskModel.countDocuments({ project: projectId });
+    const completedTasks = await TaskModel.countDocuments({
+      project: projectId,
+      $or: [{ columnId: "done" }, { completed: true }],
+    });
+
     const taskStats = {
-      total: 0,
-      completed: 0,
+      total: totalTasks,
+      completed: completedTasks,
       pending: 0,
       inProgress: 0,
     };

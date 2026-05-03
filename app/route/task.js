@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import { Router } from "express";
 import TaskModel from "../schema/task.js";
 import TaskCommentModel from "../schema/taskComment.js";
+import AuditLogModel from "../schema/auditLog.js";
 import ProjectModel from "../schema/project.js";
 import WorkspaceModel from "../schema/workspace.js";
 import UserModel from "../schema/user.js";
@@ -13,55 +14,6 @@ import { checkTaskRole } from "../middleware/checkTaskRole.js";
 import { getIO } from "../libs/socket.js";
 
 const taskRouter = Router();
-
-const auditLogSchema = new mongoose.Schema(
-  {
-    task: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Task",
-      required: true,
-      index: true,
-    },
-    project: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Project",
-      required: true,
-      index: true,
-    },
-    actor: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
-    },
-    action: {
-      type: String,
-      enum: [
-        "task_created",
-        "assignee_added",
-        "assignee_removed",
-        "assignee_changed",
-        "column_moved",
-        "attachments_changed",
-        "due_date_changed",
-        "completed_status_changed",
-        "checklist_changed",
-      ],
-      required: true,
-    },
-    previous_value: mongoose.Schema.Types.Mixed,
-    new_value: mongoose.Schema.Types.Mixed,
-    description: String,
-  },
-  {
-    timestamps: true,
-  },
-);
-
-auditLogSchema.index({ task: 1, createdAt: -1 });
-auditLogSchema.index({ project: 1, createdAt: -1 });
-
-const AuditLogModel =
-  mongoose.models.AuditLog || mongoose.model("AuditLog", auditLogSchema);
 
 function getTaskDueState(dueDateValue) {
   if (!dueDateValue) {
@@ -1031,106 +983,113 @@ taskRouter.put(
 );
 
 // Bulk Update Tasks
+const bulkUpdateTasksHandler = async (req, res) => {
+  try {
+    const { taskIds, data: updateData } = req.body;
+    const { projectId } = req.params;
+
+    if (!Array.isArray(taskIds) || taskIds.length === 0) {
+      return res.status(400).json({ error: "taskIds must be a non-empty array" });
+    }
+
+    const allowedFields = ["cycle", "columnId", "completed", "priority", "assignee", "startDate", "dueDate", "labels", "estimate"];
+    const filteredUpdate = Object.fromEntries(
+      Object.entries(updateData).filter(([key]) => allowedFields.includes(key)),
+    );
+
+    if (Object.keys(filteredUpdate).length === 0) {
+      return res.status(400).json({ error: "No valid fields to update" });
+    }
+
+    // Check cycle isolation and status if cycle is being updated
+    if (filteredUpdate.cycle) {
+      const targetCycle = await mongoose.model("Cycle").findById(filteredUpdate.cycle);
+      if (!targetCycle || targetCycle.project.toString() !== projectId) {
+        return res.status(400).json({ error: "Invalid cycle for this project." });
+      }
+      if (targetCycle.status === "completed") {
+        return res.status(400).json({ error: "Cannot move tasks to a completed cycle." });
+      }
+    }
+
+    // Fetch tasks to check their current cycle status
+    const tasksToUpdate = await TaskModel.find({
+      _id: { $in: taskIds },
+      project: projectId,
+    }).populate("cycle");
+
+    const validTaskIds = [];
+    const sensitiveFields = ["priority", "title", "content", "description"]; // Fields blocked in completed cycles
+
+    for (const task of tasksToUpdate) {
+      if (task.cycle && task.cycle.status === "completed") {
+        const isModifyingSensitive = Object.keys(filteredUpdate).some((key) => sensitiveFields.includes(key));
+        if (isModifyingSensitive) continue;
+      }
+      validTaskIds.push(task._id);
+    }
+
+    if (validTaskIds.length === 0) {
+      return res.status(400).json({ message: "No tasks could be updated (some may belong to completed cycles)." });
+    }
+
+    // Update tasks in bulk
+    await TaskModel.updateMany(
+      { _id: { $in: validTaskIds }, project: projectId },
+      { $set: filteredUpdate },
+    );
+
+    // Fetch updated tasks to emit events
+    const updatedTasks = await TaskModel.find({
+      _id: { $in: validTaskIds },
+      project: projectId,
+    })
+      .populate("assignee", "name avatar")
+      .populate("cycle", "name phase status")
+      .populate("parentTask", "title identifier")
+      .lean();
+
+    const project = await ProjectModel.findById(projectId);
+    const defaultColumnId = project?.taskColumns?.[0]?.id;
+
+    const io = getIO();
+    if (io) {
+      for (const task of updatedTasks) {
+        if (!task.columnId && defaultColumnId) {
+          await TaskModel.findByIdAndUpdate(task._id, { columnId: defaultColumnId });
+          task.columnId = defaultColumnId;
+        }
+
+        const { isOverdue, dueState } = getTaskDueState(task.dueDate);
+        const responseTask = {
+          ...task,
+          isOverdue,
+          dueState,
+          permissions: getTaskPermissions(task, req.projectRole, req.user._id.toString()),
+        };
+        io.to(`project:${projectId}`).emit("task:updated", { task: responseTask });
+      }
+    }
+
+    res.json({ success: true, count: updatedTasks.length });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+taskRouter.put(
+  "/project/:projectId/tasks/bulk",
+  isAuthenticated,
+  checkProjectRole("manager", "member"),
+  bulkUpdateTasksHandler,
+);
+
 taskRouter.put(
   "/projects/:projectId/tasks/bulk",
   isAuthenticated,
   checkProjectRole("manager", "member"),
-  async (req, res) => {
-    try {
-      const { taskIds, data: updateData } = req.body;
-      const { projectId } = req.params;
+  bulkUpdateTasksHandler,
 
-      if (!Array.isArray(taskIds) || taskIds.length === 0) {
-        return res.status(400).json({ error: "taskIds must be a non-empty array" });
-      }
-
-      const allowedFields = ["cycle", "columnId", "completed", "priority"];
-      const filteredUpdate = Object.fromEntries(
-        Object.entries(updateData).filter(([key]) => allowedFields.includes(key))
-      );
-
-      if (Object.keys(filteredUpdate).length === 0) {
-        return res.status(400).json({ error: "No valid fields to update" });
-      }
-
-      // Check cycle isolation and status if cycle is being updated
-      if (filteredUpdate.cycle) {
-        const targetCycle = await mongoose.model("Cycle").findById(filteredUpdate.cycle);
-        if (!targetCycle || targetCycle.project.toString() !== projectId) {
-          return res.status(400).json({ error: "Invalid cycle for this project." });
-        }
-        if (targetCycle.status === "completed") {
-          return res.status(400).json({ error: "Cannot move tasks to a completed cycle." });
-        }
-      }
-
-      // Fetch tasks to check their current cycle status
-      const tasksToUpdate = await TaskModel.find({ 
-        _id: { $in: taskIds }, 
-        project: projectId 
-      }).populate("cycle");
-
-      const validTaskIds = [];
-      const sensitiveFields = ["priority"]; // Add fields that should be blocked in completed cycles
-
-      for (const task of tasksToUpdate) {
-        if (task.cycle && task.cycle.status === "completed") {
-          // Check if any sensitive fields are being updated
-          const isModifyingSensitive = Object.keys(filteredUpdate).some(key => sensitiveFields.includes(key));
-          if (isModifyingSensitive) continue; // Skip this task for sensitive updates
-        }
-        validTaskIds.push(task._id);
-      }
-
-      if (validTaskIds.length === 0) {
-        return res.status(400).json({ message: "No tasks could be updated (some may belong to completed cycles)." });
-      }
-
-      // Update tasks in bulk
-      await TaskModel.updateMany(
-        { _id: { $in: validTaskIds }, project: projectId },
-        { $set: filteredUpdate }
-      );
-
-      // Fetch updated tasks to emit events and for response - SECURE: filter by project
-      const updatedTasks = await TaskModel.find({ 
-        _id: { $in: validTaskIds },
-        project: projectId
-      })
-        .populate("assignee", "name avatar")
-        .populate("cycle", "name phase status")
-        .populate("parentTask", "title identifier")
-        .lean();
-
-      const project = await ProjectModel.findById(projectId);
-      const defaultColumnId = project?.taskColumns?.[0]?.id;
-
-      // Emit individual update events for real-time consistency
-      const io = getIO();
-      if (io) {
-        for (const task of updatedTasks) {
-          // Fix missing columnId if found during fetch
-          if (!task.columnId && defaultColumnId) {
-             await TaskModel.findByIdAndUpdate(task._id, { columnId: defaultColumnId });
-             task.columnId = defaultColumnId;
-          }
-
-          const { isOverdue, dueState } = getTaskDueState(task.dueDate);
-          const responseTask = {
-            ...task,
-            isOverdue,
-            dueState,
-            permissions: getTaskPermissions(task, req.projectRole, req.user._id.toString()),
-          };
-          io.to(`project:${projectId}`).emit("task:updated", { task: responseTask });
-        }
-      }
-
-      res.json({ success: true, count: updatedTasks.length });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  }
 );
 
 // Get Task Activity Logs
