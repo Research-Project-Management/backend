@@ -16,6 +16,7 @@ import {
   isAuthenticated,
   checkWorkspaceRole,
   checkProjectRole,
+  clearProjectCache,
 } from "../middleware/checkWorkspaceRole.js";
 import { asyncHandler } from "../middleware/helpers.js";
 
@@ -241,6 +242,10 @@ projectRouter.put(
         .populate("members.user", "name email")
         .populate("createdBy", "name email");
 
+      if (project) {
+        await clearProjectCache(req.params.projectId);
+      }
+
       res.json({ project });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -260,6 +265,10 @@ projectRouter.patch(
         { $set: { isActive: !req.project.isActive } },
         { new: true }
       );
+
+      if (projectDoc) {
+        await clearProjectCache(req.project._id);
+      }
 
       res.json({
         project: projectDoc,
@@ -292,6 +301,10 @@ projectRouter.patch(
         .populate("members.user", "name email")
         .populate("createdBy", "name email");
 
+      if (project) {
+        await clearProjectCache(req.params.projectId);
+      }
+
       res.json({ project });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -315,6 +328,10 @@ projectRouter.patch(
       )
         .populate("members.user", "name email")
         .populate("createdBy", "name email");
+
+      if (project) {
+        await clearProjectCache(req.params.projectId);
+      }
 
       res.json({ project });
     } catch (error) {

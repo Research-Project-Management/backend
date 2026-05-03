@@ -16,6 +16,7 @@ const workspaceSchema = new mongoose.Schema(
     members: [workspaceMemberSchema],
     url: { type: String, required: true, unique: true },
     avatar: { type: String, default: "" },
+    companySize: { type: String, default: "" },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     settings: { type: mongoose.Schema.Types.Mixed, default: {} },
   },
