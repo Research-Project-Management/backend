@@ -354,7 +354,7 @@ pageRouter.get(
         .populate({
           path: "project",
           select: "name",
-          populate: { path: "workspace", select: "url" },
+          populate: { path: "workspace", select: "_id url" },
         });
 
       res.json({ page });

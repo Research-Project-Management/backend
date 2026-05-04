@@ -67,6 +67,22 @@ aiRouter.post("/chat", isAuthenticated, async (req, res) => {
       user_id: req.user._id.toString(),
       // RAG isolation — scope retrieval to this chat session
       chat_id: chat_id || null,
+      // ── LaTeX editor context (forwarded as-is from frontend) ───────────────
+      file_content: req.body.file_content ?? null,
+      filename: req.body.filename ?? null,
+      selection: req.body.selection ?? null,
+      cursor_context: req.body.cursor_context ?? null,
+      // Cursor position
+      cursor_line: req.body.cursor_line ?? null,
+      cursor_column: req.body.cursor_column ?? null,
+      // Selection range
+      selection_start_line: req.body.selection_start_line ?? null,
+      selection_start_column: req.body.selection_start_column ?? null,
+      selection_end_line: req.body.selection_end_line ?? null,
+      selection_end_column: req.body.selection_end_column ?? null,
+      // Document structure summary & slash command
+      document_structure: req.body.document_structure ?? null,
+      command_hint: req.body.command_hint ?? null,
     };
 
     // Forward to Flux-AI with streaming
