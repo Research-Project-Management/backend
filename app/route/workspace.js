@@ -112,7 +112,7 @@ workspaceRouter.get("/", isAuthenticated, async (req, res) => {
 // Tạo workspace mới (user tạo sẽ là owner)
 workspaceRouter.post("/", isAuthenticated, async (req, res) => {
   try {
-    const { name, url, color, avatar } = req.body;
+    const { name, url, color, avatar, companySize } = req.body;
 
     // Tạo workspace
     const newWorkspace = new WorkspaceModel({
@@ -120,6 +120,7 @@ workspaceRouter.post("/", isAuthenticated, async (req, res) => {
       url,
       color,
       avatar: avatar || "",
+      companySize: companySize || "",
       members: [], // Sẽ thêm sau khi có roles
       createdBy: req.user._id,
     });
@@ -173,11 +174,17 @@ workspaceRouter.put(
   checkWorkspaceRole("owner", "admin"),
   async (req, res) => {
     try {
-      const { name, avatar } = req.body;
+      const { name, avatar, companySize } = req.body;
       const updateData = { name };
       if (avatar !== undefined) {
         updateData.avatar = avatar;
       }
+      if (companySize !== undefined) {
+        updateData.companySize = companySize;
+      }
+
+
+
 
       const memberIds = Array.from(
         new Set(
@@ -533,7 +540,8 @@ workspaceRouter.get(
       })
         .sort({ updatedAt: -1 })
         .limit(5)
-        .populate("author", "name avatar email");
+        .populate("author", "name avatar email")
+        .populate("project", "name avatar");
 
       // Combine and sort all items by date
       const allItems = [
@@ -560,6 +568,7 @@ workspaceRouter.get(
           name: f.filename,
           icon: "📎",
           author: f.author,
+          project: f.project,
           lastEdited: f.updatedAt,
         })),
       ]
@@ -621,13 +630,15 @@ workspaceRouter.get(
       })
         .sort({ createdAt: -1 })
         .limit(10)
-        .populate("author", "name avatar email");
+        .populate("author", "name avatar email")
+        .populate("project", "name");
 
       activities.push(
         ...recentFiles.map((f) => ({
           type: "file_upload",
           user: f.author,
           content: `uploaded file "${f.filename}"`,
+          project: f.project,
           time: f.createdAt,
           itemId: f._id,
         })),
@@ -640,7 +651,8 @@ workspaceRouter.get(
         .sort({ updatedAt: -1 })
         .limit(10)
         .populate("assignee", "name avatar email")
-        .populate("author", "name avatar email");
+        .populate("author", "name avatar email")
+        .populate("project", "name");
 
       activities.push(
         ...recentTasks
@@ -649,6 +661,7 @@ workspaceRouter.get(
             type: "task_update",
             user: t.assignee || t.author,
             content: `updated task "${t.title}"`,
+            project: t.project,
             time: t.updatedAt,
             itemId: t._id,
           })),

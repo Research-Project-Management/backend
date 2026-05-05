@@ -16,6 +16,7 @@ import {
   isAuthenticated,
   checkWorkspaceRole,
   checkProjectRole,
+  clearProjectCache,
 } from "../middleware/checkWorkspaceRole.js";
 import { asyncHandler } from "../middleware/helpers.js";
 
@@ -85,10 +86,16 @@ projectRouter.get(
     const totalSize =
       filesSizeAggregate.length > 0 ? filesSizeAggregate[0].totalSize : 0;
 
-    // 3. Get Task Stats (If TaskModel exists later, add here. For now returning empty stats)
+    // 3. Get Task Stats
+    const totalTasks = await TaskModel.countDocuments({ project: projectId });
+    const completedTasks = await TaskModel.countDocuments({
+      project: projectId,
+      $or: [{ columnId: "done" }, { completed: true }],
+    });
+
     const taskStats = {
-      total: 0,
-      completed: 0,
+      total: totalTasks,
+      completed: completedTasks,
       pending: 0,
       inProgress: 0,
     };
@@ -248,6 +255,10 @@ projectRouter.put(
         .populate("members.user", "name email")
         .populate("createdBy", "name email");
 
+      if (project) {
+        await clearProjectCache(req.params.projectId);
+      }
+
       res.json({ project });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -266,6 +277,10 @@ projectRouter.patch(
       if (!project) return res.status(404).json({ error: "Project not found" });
       project.isActive = !project.isActive;
       await project.save();
+
+      if (project) {
+        await clearProjectCache(req.project._id);
+      }
 
       res.json({
         project,
@@ -298,6 +313,10 @@ projectRouter.patch(
         .populate("members.user", "name email")
         .populate("createdBy", "name email");
 
+      if (project) {
+        await clearProjectCache(req.params.projectId);
+      }
+
       res.json({ project });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -321,6 +340,10 @@ projectRouter.patch(
       )
         .populate("members.user", "name email")
         .populate("createdBy", "name email");
+
+      if (project) {
+        await clearProjectCache(req.params.projectId);
+      }
 
       res.json({ project });
     } catch (error) {

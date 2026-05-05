@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import { Router } from "express";
 import TaskModel from "../schema/task.js";
 import TaskCommentModel from "../schema/taskComment.js";
+import AuditLogModel from "../schema/auditLog.js";
 import ProjectModel from "../schema/project.js";
 import WorkspaceModel from "../schema/workspace.js";
 import UserModel from "../schema/user.js";
@@ -13,55 +14,6 @@ import { checkTaskRole } from "../middleware/checkTaskRole.js";
 import { getIO } from "../libs/socket.js";
 
 const taskRouter = Router();
-
-const auditLogSchema = new mongoose.Schema(
-  {
-    task: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Task",
-      required: true,
-      index: true,
-    },
-    project: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Project",
-      required: true,
-      index: true,
-    },
-    actor: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
-    },
-    action: {
-      type: String,
-      enum: [
-        "task_created",
-        "assignee_added",
-        "assignee_removed",
-        "assignee_changed",
-        "column_moved",
-        "attachments_changed",
-        "due_date_changed",
-        "completed_status_changed",
-        "checklist_changed",
-      ],
-      required: true,
-    },
-    previous_value: mongoose.Schema.Types.Mixed,
-    new_value: mongoose.Schema.Types.Mixed,
-    description: String,
-  },
-  {
-    timestamps: true,
-  },
-);
-
-auditLogSchema.index({ task: 1, createdAt: -1 });
-auditLogSchema.index({ project: 1, createdAt: -1 });
-
-const AuditLogModel =
-  mongoose.models.AuditLog || mongoose.model("AuditLog", auditLogSchema);
 
 function getTaskDueState(dueDateValue) {
   if (!dueDateValue) {
@@ -131,7 +83,7 @@ async function createAuditLog(
       project: String(projectId),
       actor: {
         _id: String(actorId),
-        name: actor?.name || "Người dùng",
+        name: actor?.name || "User",
         avatar: actor?.avatar,
       },
       action,
@@ -155,34 +107,34 @@ async function createAuditLog(
 
 function getActionDescription(action, previousValue, newValue) {
   const actionLabels = {
-    task_created: "đã tạo tác vụ này",
-    assignee_added: previousValue && newValue ? `đã thêm ${formatUserValue(newValue)} vào thẻ này` : "đã thêm thành viên vào thẻ này",
-    assignee_removed: previousValue ? `đã loại ${formatUserValue(previousValue)} khỏi thẻ này` : "đã gỡ thành viên khỏi thẻ này",
-    assignee_changed: "đã cập nhật thành viên phụ trách",
-    column_moved: "đã chuyển cột",
-    attachments_changed: "đã cập nhật file đính kèm",
+    task_created: "created this task",
+    assignee_added: previousValue && newValue ? `added ${formatUserValue(newValue)} to this card` : "added a member to this card",
+    assignee_removed: previousValue ? `removed ${formatUserValue(previousValue)} from this card` : "removed a member from this card",
+    assignee_changed: "updated the assignee",
+    column_moved: "moved column",
+    attachments_changed: "updated attachments",
     due_date_changed: previousValue && newValue 
-      ? `đã chuyển ngày hết hạn thẻ này sang ${formatDateWithTime(newValue)}`
+      ? `changed the due date of this card to ${formatDateWithTime(newValue)}`
       : newValue
-      ? `đã đặt ngày hết hạn cho thẻ này là ${formatDateWithTime(newValue)}`
-      : "đã xóa ngày hết hạn",
+      ? `set the due date for this card to ${formatDateWithTime(newValue)}`
+      : "removed the due date",
     completed_status_changed: newValue
-      ? "đã đánh dấu thẻ này là hoàn tất"
-      : "đã đánh dấu thẻ này là chưa hoàn tất",
+      ? "marked this card as complete"
+      : "marked this card as incomplete",
     checklist_changed: getChecklistDescription(previousValue, newValue),
   };
 
-  return actionLabels[action] || "Đã cập nhật";
+  return actionLabels[action] || "Updated";
 }
 
 function formatUserValue(value) {
-  if (!value) return "người dùng";
+  if (!value) return "user";
   if (typeof value === "object" && value.name) {
     return value.name;
   }
 
   const id = normalizeId(value);
-  return id || "người dùng";
+  return id || "user";
 }
 
 function getChecklistDescription(previousValue, newValue) {
@@ -191,15 +143,15 @@ function getChecklistDescription(previousValue, newValue) {
 
   const addedTitle = newTitles.find((title) => !previousTitles.includes(title));
   if (addedTitle) {
-    return `đã thêm danh sách công việc "${addedTitle}"`;
+    return `added checklist "${addedTitle}"`;
   }
 
   const removedTitle = previousTitles.find((title) => !newTitles.includes(title));
   if (removedTitle) {
-    return `đã xóa danh sách công việc "${removedTitle}"`;
+    return `removed checklist "${removedTitle}"`;
   }
 
-  return "đã cập nhật danh sách việc cần làm";
+  return "updated the checklist";
 }
 
 function normalizeId(value) {
@@ -224,7 +176,7 @@ async function resolveUserName(value, cache) {
   if (cache.has(id)) return cache.get(id);
 
   const user = await UserModel.findById(id).select("name").lean();
-  const name = user?.name || "Người dùng";
+  const name = user?.name || "User";
   cache.set(id, name);
   return name;
 }
@@ -269,7 +221,7 @@ function formatDateWithTime(date) {
   const month = d.getMonth() + 1;
   const hours = String(d.getHours()).padStart(2, "0");
   const minutes = String(d.getMinutes()).padStart(2, "0");
-  return `${day} tháng ${month} lúc ${hours}:${minutes}`;
+  return `${day}/${month} at ${hours}:${minutes}`;
 }
 
 async function trackTaskChanges(
@@ -287,15 +239,15 @@ async function trackTaskChanges(
     const newName = await resolveUserName(newTask?.assignee, userNameCache);
 
     let action = "assignee_changed";
-    let description = "đã cập nhật thành viên phụ trách";
+    let description = "updated the assignee";
     if (!oldName && newName) {
       action = "assignee_added";
-      description = `đã thêm ${newName} vào thẻ này`;
+      description = `added ${newName} to this card`;
     } else if (oldName && !newName) {
       action = "assignee_removed";
-      description = `đã loại ${oldName} khỏi thẻ này`;
+      description = `removed ${oldName} from this card`;
     } else if (oldName && newName && oldName !== newName) {
-      description = `đã thay đổi thành viên phụ trách từ ${oldName} sang ${newName}`;
+      description = `changed the assignee from ${oldName} to ${newName}`;
     }
 
     changes.push({
@@ -307,14 +259,14 @@ async function trackTaskChanges(
   }
 
   if ((oldTask?.columnId || "") !== (newTask?.columnId || "")) {
-    const oldColumn = resolveColumnName(oldTask?.columnId, projectColumns) || "(không xác định)";
-    const newColumn = resolveColumnName(newTask?.columnId, projectColumns) || "(không xác định)";
+    const oldColumn = resolveColumnName(oldTask?.columnId, projectColumns) || "(unknown)";
+    const newColumn = resolveColumnName(newTask?.columnId, projectColumns) || "(unknown)";
 
     changes.push({
       action: "column_moved",
       previous: oldTask?.columnId,
       new: newTask?.columnId,
-      description: `đã chuyển thẻ này từ cột "${oldColumn}" sang cột "${newColumn}"`,
+      description: `moved this card from column "${oldColumn}" to column "${newColumn}"`,
     });
   }
 
@@ -344,7 +296,7 @@ async function trackTaskChanges(
         action: "attachments_changed",
         previous: null,
         new: added,
-        description: `đã đính kèm file ${addedNames}`,
+        description: `attached file ${addedNames}`,
       });
     }
 
@@ -354,7 +306,7 @@ async function trackTaskChanges(
         action: "attachments_changed",
         previous: removed,
         new: null,
-        description: `đã xóa file đính kèm ${removedNames}`,
+        description: `removed attachment ${removedNames}`,
       });
     }
   }
@@ -397,7 +349,7 @@ taskRouter.get(
       const query = { project: projectId };
       if (cycle) query.cycle = cycle;
 
-      // .lean() → trả plain JS object, giảm memory/CPU ~30-40% so với Mongoose Document
+      // .lean() → returns plain JS object, reduces memory/CPU by ~30-40% compared to Mongoose Document
       const tasks = await TaskModel.find(query)
         .populate("assignee", "name avatar")
         .populate("cycle", "name phase status")
@@ -426,7 +378,7 @@ taskRouter.get(
         };
       });
 
-      // Dùng req.project (đã fetch bởi middleware) thay vì query DB lần nữa
+      // Use req.project (already fetched by middleware) instead of querying DB again
       const project = req.project;
 
       res.json({
@@ -478,7 +430,7 @@ taskRouter.get(
         };
       });
 
-      // Dùng req.project từ middleware, tránh query DB lần 2
+      // Use req.project from middleware, avoid querying DB a 2nd time
       const project = req.project;
 
       res.json({
@@ -524,7 +476,7 @@ taskRouter.get(
         .lean()
         .then((docs) => docs.map((d) => d._id));
 
-      // Fetch tasks + populate cần thiết
+      // Fetch tasks + necessary populate
       const tasks = await TaskModel.find({
         project: { $in: projectIds },
         assignee: req.user._id,
@@ -599,19 +551,53 @@ taskRouter.post(
         return res.status(400).json({ error: "Invalid columnId" });
       }
 
+      // Block creation in completed cycles & ensure project isolation
+      if (cycle) {
+        const targetCycle = await mongoose.model("Cycle").findById(cycle);
+        if (targetCycle) {
+          if (targetCycle.status === "completed") {
+            return res.status(400).json({ message: "Cannot add tasks to a completed cycle." });
+          }
+          if (targetCycle.project.toString() !== projectId) {
+            return res.status(400).json({ message: "Cycle does not belong to this project." });
+          }
+        }
+      }
+
       const count = await TaskModel.countDocuments({
         project: projectId,
         columnId,
       });
 
-      // Auto-generate identifier
-      const project = req.project;
+      // Auto-generate identifier using atomic counter
+      // MIGRATION: If taskSequence is 0, initialize it from existing tasks
+      let project = await ProjectModel.findById(projectId);
+      if (project && project.taskSequence === 0) {
+        const tasks = await TaskModel.find({ project: projectId }, "identifier");
+        const maxSeq = tasks.reduce((max, t) => {
+          const parts = t.identifier.split("-");
+          const seq = parseInt(parts[parts.length - 1]);
+          return isNaN(seq) ? max : Math.max(max, seq);
+        }, 0);
+        
+        project = await ProjectModel.findByIdAndUpdate(
+          projectId,
+          { $set: { taskSequence: maxSeq } },
+          { new: true }
+        );
+      }
+
+      project = await ProjectModel.findByIdAndUpdate(
+        projectId,
+        { $inc: { taskSequence: 1 } },
+        { new: true }
+      );
+
       const prefix = (project.name || "TASK")
         .toUpperCase()
         .replace(/[^A-Z0-9]/g, "")
         .slice(0, 4);
-      const totalInProject = await TaskModel.countDocuments({ project: projectId });
-      const identifier = `${prefix}-${totalInProject + 1}`;
+      const identifier = `${prefix}-${project.taskSequence}`;
 
       const newTask = new TaskModel({
         title,
@@ -648,7 +634,7 @@ taskRouter.post(
         "task_created",
         null,
         null,
-        "Đã tạo tác vụ này",
+        "Created this task",
       );
 
       const responseTask = toTaskResponse(newTask, {
@@ -705,18 +691,31 @@ taskRouter.post(
         return res.status(400).json({ error: "Invalid columnId" });
       }
 
+      // Block creation in completed cycles
+      if (cycle) {
+        const targetCycle = await mongoose.model("Cycle").findById(cycle);
+        if (targetCycle && targetCycle.status === "completed") {
+          return res.status(400).json({ message: "Cannot add tasks to a completed cycle." });
+        }
+      }
+
       const count = await TaskModel.countDocuments({
         project: projectId,
         columnId,
       });
 
-      const project = req.project;
-      const prefix = (project.name || "TASK")
+      // Auto-generate identifier using atomic counter
+      const projectDoc = await ProjectModel.findByIdAndUpdate(
+        projectId,
+        { $inc: { taskSequence: 1 } },
+        { new: true }
+      );
+
+      const prefix = (projectDoc.name || "TASK")
         .toUpperCase()
         .replace(/[^A-Z0-9]/g, "")
         .slice(0, 4);
-      const totalInProject = await TaskModel.countDocuments({ project: projectId });
-      const identifier = `${prefix}-${totalInProject + 1}`;
+      const identifier = `${prefix}-${projectDoc.taskSequence}`;
 
       const newTask = new TaskModel({
         title,
@@ -751,7 +750,7 @@ taskRouter.post(
         "task_created",
         null,
         null,
-        "Đã tạo tác vụ này",
+        "Created this task",
       );
 
       const responseTask = toTaskResponse(newTask, {
@@ -811,13 +810,18 @@ taskRouter.post(
         columnId: sourceTask.columnId,
       });
 
-      const project = req.project;
-      const prefix = (project.name || "TASK")
+      // Auto-generate identifier using atomic counter
+      const projectDoc = await ProjectModel.findByIdAndUpdate(
+        sourceTask.project,
+        { $inc: { taskSequence: 1 } },
+        { new: true }
+      );
+
+      const prefix = (projectDoc.name || "TASK")
         .toUpperCase()
         .replace(/[^A-Z0-9]/g, "")
         .slice(0, 4);
-      const totalInProject = await TaskModel.countDocuments({ project: sourceTask.project });
-      const identifier = `${prefix}-${totalInProject + 1}`;
+      const identifier = `${prefix}-${projectDoc.taskSequence}`;
 
       const duplicatedTask = new TaskModel({
         title: `${sourceTask.title} (copy)`,
@@ -915,9 +919,32 @@ taskRouter.put(
         }
       }
 
+      if (updateData.cycle) {
+        const targetCycle = await mongoose.model("Cycle").findById(updateData.cycle);
+        if (targetCycle) {
+          const task = await TaskModel.findById(taskId);
+          if (targetCycle.project.toString() !== task.project.toString()) {
+            return res.status(400).json({ error: "Cycle does not belong to this project." });
+          }
+          if (targetCycle.status === "completed") {
+             return res.status(400).json({ error: "Cannot move tasks to a completed cycle." });
+          }
+        }
+      }
+
       // Fetch old task for audit tracking
-      const oldTask = await TaskModel.findById(taskId);
+      const oldTask = await TaskModel.findById(taskId).populate("cycle");
       if (!oldTask) return res.status(404).json({ error: "Task not found" });
+
+      // Block updates if cycle is completed (Allow column moves and ranking)
+      if (oldTask.cycle && oldTask.cycle.status === "completed") {
+        const sensitiveFields = ["title", "content", "description", "assignee", "startDate", "dueDate", "recurrence", "reminder", "labels", "priority", "estimate", "checklists", "attachments"];
+        const isModifyingSensitive = Object.keys(updateData).some(key => sensitiveFields.includes(key));
+        
+        if (isModifyingSensitive) {
+          return res.status(400).json({ message: "Completed cycles are read-only." });
+        }
+      }
 
       const updatedTask = await TaskModel.findByIdAndUpdate(
         taskId,
@@ -955,6 +982,116 @@ taskRouter.put(
   },
 );
 
+// Bulk Update Tasks
+const bulkUpdateTasksHandler = async (req, res) => {
+  try {
+    const { taskIds, data: updateData } = req.body;
+    const { projectId } = req.params;
+
+    if (!Array.isArray(taskIds) || taskIds.length === 0) {
+      return res.status(400).json({ error: "taskIds must be a non-empty array" });
+    }
+
+    const allowedFields = ["cycle", "columnId", "completed", "priority", "assignee", "startDate", "dueDate", "labels", "estimate"];
+    const filteredUpdate = Object.fromEntries(
+      Object.entries(updateData).filter(([key]) => allowedFields.includes(key)),
+    );
+
+    if (Object.keys(filteredUpdate).length === 0) {
+      return res.status(400).json({ error: "No valid fields to update" });
+    }
+
+    // Check cycle isolation and status if cycle is being updated
+    if (filteredUpdate.cycle) {
+      const targetCycle = await mongoose.model("Cycle").findById(filteredUpdate.cycle);
+      if (!targetCycle || targetCycle.project.toString() !== projectId) {
+        return res.status(400).json({ error: "Invalid cycle for this project." });
+      }
+      if (targetCycle.status === "completed") {
+        return res.status(400).json({ error: "Cannot move tasks to a completed cycle." });
+      }
+    }
+
+    // Fetch tasks to check their current cycle status
+    const tasksToUpdate = await TaskModel.find({
+      _id: { $in: taskIds },
+      project: projectId,
+    }).populate("cycle");
+
+    const validTaskIds = [];
+    const sensitiveFields = ["priority", "title", "content", "description"]; // Fields blocked in completed cycles
+
+    for (const task of tasksToUpdate) {
+      if (task.cycle && task.cycle.status === "completed") {
+        const isModifyingSensitive = Object.keys(filteredUpdate).some((key) => sensitiveFields.includes(key));
+        if (isModifyingSensitive) continue;
+      }
+      validTaskIds.push(task._id);
+    }
+
+    if (validTaskIds.length === 0) {
+      return res.status(400).json({ message: "No tasks could be updated (some may belong to completed cycles)." });
+    }
+
+    // Update tasks in bulk
+    await TaskModel.updateMany(
+      { _id: { $in: validTaskIds }, project: projectId },
+      { $set: filteredUpdate },
+    );
+
+    // Fetch updated tasks to emit events
+    const updatedTasks = await TaskModel.find({
+      _id: { $in: validTaskIds },
+      project: projectId,
+    })
+      .populate("assignee", "name avatar")
+      .populate("cycle", "name phase status")
+      .populate("parentTask", "title identifier")
+      .lean();
+
+    const project = await ProjectModel.findById(projectId);
+    const defaultColumnId = project?.taskColumns?.[0]?.id;
+
+    const io = getIO();
+    if (io) {
+      for (const task of updatedTasks) {
+        if (!task.columnId && defaultColumnId) {
+          await TaskModel.findByIdAndUpdate(task._id, { columnId: defaultColumnId });
+          task.columnId = defaultColumnId;
+        }
+
+        const { isOverdue, dueState } = getTaskDueState(task.dueDate);
+        const responseTask = {
+          ...task,
+          isOverdue,
+          dueState,
+          permissions: getTaskPermissions(task, req.projectRole, req.user._id.toString()),
+        };
+        io.to(`project:${projectId}`).emit("task:updated", { task: responseTask });
+      }
+    }
+
+    res.json({ success: true, count: updatedTasks.length });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+taskRouter.put(
+  "/project/:projectId/tasks/bulk",
+  isAuthenticated,
+  checkProjectRole("manager", "member"),
+  bulkUpdateTasksHandler,
+);
+
+taskRouter.put(
+  "/projects/:projectId/tasks/bulk",
+  isAuthenticated,
+  checkProjectRole("manager", "member"),
+  bulkUpdateTasksHandler,
+
+);
+
 // Get Task Activity Logs
 taskRouter.get(
   "/tasks/:taskId/activity",
@@ -984,8 +1121,12 @@ taskRouter.delete(
   async (req, res) => {
     try {
       const { taskId } = req.params;
-      const task = await TaskModel.findById(taskId);
+      const task = await TaskModel.findById(taskId).populate("cycle");
       if (!task) return res.status(404).json({ error: "Task not found" });
+
+      if (task.cycle && task.cycle.status === "completed") {
+        return res.status(400).json({ message: "Completed cycles are read-only." });
+      }
 
       const projectId = task.project.toString();
       await TaskCommentModel.deleteMany({ task: taskId });
@@ -1080,10 +1221,10 @@ async function deleteColumnHandler(req, res) {
       return res.status(404).json({ error: "Column not found" });
     }
 
-    // Xóa toàn bộ task thuộc column này
+    // Delete all tasks belonging to this column
     await TaskModel.deleteMany({ project: projectId, columnId: columnId });
 
-    // Xóa column khỏi danh sách
+    // Remove column from list
     project.taskColumns.splice(columnIndex, 1);
     await project.save();
     

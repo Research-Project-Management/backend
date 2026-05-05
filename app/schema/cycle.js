@@ -47,6 +47,12 @@ const cycleSchema = new mongoose.Schema(
     ],
     labels: [{ type: String }],
     ended_at: { type: Date },
+    started_at: { type: Date },
+    statsAtCompletion: {
+      totalTasks: { type: Number, default: 0 },
+      completedTasks: { type: Number, default: 0 },
+      completionPercentage: { type: Number, default: 0 },
+    },
     order: { type: Number, default: 0 },
     author: {
       type: mongoose.Schema.Types.ObjectId,
