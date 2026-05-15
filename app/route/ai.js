@@ -274,6 +274,11 @@ aiRouter.post("/documents/upload", isAuthenticated, async (req, res) => {
     }
     let rawBody = Buffer.concat(chunks);
 
+    if (rawBody.length === 0) {
+      console.error("Document upload error: Request body is empty!");
+      return res.status(400).json({ error: "Empty request body" });
+    }
+
     const contentType = req.headers["content-type"] || "";
 
     // Inject user_id + chat_id BEFORE the closing boundary so Flux-AI stores
