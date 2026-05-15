@@ -19,30 +19,11 @@ import {
   clearProjectCache,
 } from "../middleware/checkWorkspaceRole.js";
 import { asyncHandler } from "../middleware/helpers.js";
+import { getFileIcon } from "../libs/fileUtils.js";
 
 
 const projectRouter = Router();
 
-// Get single project details
-projectRouter.get(
-  "/:projectId",
-  isAuthenticated,
-  checkProjectRole("manager", "member", "viewer"),
-  async (req, res) => {
-    try {
-      const project = await ProjectModel.findById(req.project._id).populate([
-        { path: "members.user", select: "name email avatar" },
-        { path: "createdBy", select: "name email avatar" },
-        { path: "workspace", select: "_id name" },
-      ]);
-      if (!project) return res.status(404).json({ error: "Project not found" });
-
-      res.json({ project, yourRole: req.projectRole });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  },
-);
 
 
 // Lấy overview của project
@@ -218,8 +199,9 @@ projectRouter.get(
   async (req, res) => {
     try {
       const project = await ProjectModel.findById(req.project._id).populate([
-        { path: "members.user", select: "name email" },
-        { path: "createdBy", select: "name email" },
+        { path: "members.user", select: "name email avatar" },
+        { path: "createdBy", select: "name email avatar" },
+        { path: "workspace", select: "_id name" },
       ]);
       if (!project) return res.status(404).json({ error: "Project not found" });
       res.json({ project, yourRole: req.projectRole });
@@ -716,25 +698,5 @@ projectRouter.get(
     }
   },
 );
-
-// Helper function to get file icon based on mime type
-function getFileIcon(mimeType) {
-  if (!mimeType) return "📄";
-  if (mimeType.startsWith("image/")) return "🖼️";
-  if (mimeType.startsWith("video/")) return "🎥";
-  if (mimeType.startsWith("audio/")) return "🎵";
-  if (mimeType.includes("pdf")) return "📕";
-  if (mimeType.includes("word") || mimeType.includes("document")) return "📝";
-  if (mimeType.includes("sheet") || mimeType.includes("excel")) return "📊";
-  if (mimeType.includes("presentation") || mimeType.includes("powerpoint"))
-    return "📽️";
-  if (
-    mimeType.includes("zip") ||
-    mimeType.includes("rar") ||
-    mimeType.includes("tar")
-  )
-    return "📦";
-  return "📄";
-}
 
 export default projectRouter;

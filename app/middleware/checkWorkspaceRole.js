@@ -1,6 +1,8 @@
 import WorkspaceModel from "../schema/workspace.js";
 import ProjectModel from "../schema/project.js";
-import { redisClient } from "../config/redis.js";
+import RoleModel from "../schema/role.js";
+import UserModel from "../schema/user.js";
+import { getOrSetCache, deleteCache } from "../libs/cache.js";
 
 // TTL (giây) cho workspace/project cache
 const WORKSPACE_CACHE_TTL = 60; // 60 giây
@@ -8,16 +10,12 @@ const PROJECT_CACHE_TTL = 30;   // 30 giây
 
 /** Xóa cache workspace khi có thay đổi */
 export const clearWorkspaceCache = async (workspaceId) => {
-  try {
-    await redisClient.del(`ws:${workspaceId}`);
-  } catch (_) {}
+  await deleteCache(`ws:${workspaceId}`);
 };
 
 /** Xóa cache project khi có thay đổi */
 export const clearProjectCache = async (projectId) => {
-  try {
-    await redisClient.del(`proj:${projectId}`);
-  } catch (_) {}
+  await deleteCache(`proj:${projectId}`);
 };
 
 export const checkWorkspaceRole = (...allowedRoles) => {
@@ -31,33 +29,23 @@ export const checkWorkspaceRole = (...allowedRoles) => {
 
       const isObjectId = inputId.match(/^[0-9a-fA-F]{24}$/);
 
-      // ─ Thử lấy từ Redis cache trước ─────────────────────
-      let workspace;
+      // ─ Lấy từ cache hoặc DB ─────────────────────
       const cacheKey = `ws:${inputId}`;
-      try {
-        const cached = await redisClient.get(cacheKey);
-        if (cached) {
-          workspace = JSON.parse(cached);
-        }
-      } catch (_) {} // nếu Redis lỗi, tiếp tục query DB
-
-      if (!workspace) {
-        if (isObjectId) {
-          workspace = await WorkspaceModel.findById(inputId)
-            .populate({ path: "members.role", model: "Role" })
-            .lean();
-        } else {
-          workspace = await WorkspaceModel.findOne({ url: inputId })
-            .populate({ path: "members.role", model: "Role" })
-            .lean();
-        }
-        // Lưu vào cache
-        if (workspace) {
-          try {
-            await redisClient.setEx(cacheKey, WORKSPACE_CACHE_TTL, JSON.stringify(workspace));
-          } catch (_) {}
-        }
-      }
+      const workspace = await getOrSetCache(
+        cacheKey,
+        async () => {
+          if (isObjectId) {
+            return await WorkspaceModel.findById(inputId)
+              .populate({ path: "members.role", model: "Role" })
+              .lean();
+          } else {
+            return await WorkspaceModel.findOne({ url: inputId })
+              .populate({ path: "members.role", model: "Role" })
+              .lean();
+          }
+        },
+        WORKSPACE_CACHE_TTL
+      );
 
       if (!workspace) {
         return res.status(404).json({ error: "Workspace not found" });
@@ -116,26 +104,17 @@ export const checkProjectRole = (...allowedRoles) => {
     try {
       const projectId = req.params.projectId;
 
-      // ─ Thử lấy project từ cache ──────────────────────
-      let project;
+      // ─ Lấy project từ cache hoặc DB ──────────────────────
       const projCacheKey = `proj:${projectId}`;
-      try {
-        const cached = await redisClient.get(projCacheKey);
-        if (cached) {
-          project = JSON.parse(cached);
-        }
-      } catch (_) {}
-
-      if (!project) {
-        project = await ProjectModel.findById(projectId)
-          .populate({ path: "members.role", model: "Role" })
-          .lean();
-        if (project) {
-          try {
-            await redisClient.setEx(projCacheKey, PROJECT_CACHE_TTL, JSON.stringify(project));
-          } catch (_) {}
-        }
-      }
+      const project = await getOrSetCache(
+        projCacheKey,
+        async () => {
+          return await ProjectModel.findById(projectId)
+            .populate({ path: "members.role", model: "Role" })
+            .lean();
+        },
+        PROJECT_CACHE_TTL
+      );
 
       if (!project) {
         return res.status(404).json({ error: "Project not found" });
@@ -143,22 +122,15 @@ export const checkProjectRole = (...allowedRoles) => {
 
       // Kiểm tra nếu user là admin/owner của workspace thì có full quyền
       const wsCacheKey = `ws:${project.workspace}`;
-      let workspace;
-      try {
-        const cached = await redisClient.get(wsCacheKey);
-        if (cached) workspace = JSON.parse(cached);
-      } catch (_) {}
-
-      if (!workspace) {
-        workspace = await WorkspaceModel.findById(project.workspace)
-          .populate({ path: "members.role", model: "Role" })
-          .lean();
-        if (workspace) {
-          try {
-            await redisClient.setEx(wsCacheKey, WORKSPACE_CACHE_TTL, JSON.stringify(workspace));
-          } catch (_) {}
-        }
-      }
+      const workspace = await getOrSetCache(
+        wsCacheKey,
+        async () => {
+          return await WorkspaceModel.findById(project.workspace)
+            .populate({ path: "members.role", model: "Role" })
+            .lean();
+        },
+        WORKSPACE_CACHE_TTL
+      );
 
       const workspaceMember = workspace?.members.find(
         (m) => m.user.toString() === req.user._id.toString(),
@@ -228,8 +200,6 @@ export const checkProjectRole = (...allowedRoles) => {
     }
   };
 };
-
-import UserModel from "../schema/user.js";
 
 export const isAuthenticated = async (req, res, next) => {
   // ── Internal API auth — FLux-AI calling on behalf of a user ──

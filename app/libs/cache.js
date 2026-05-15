@@ -50,6 +50,37 @@ export async function setCache(
 }
 
 /**
+ * Get cached data or fetch and cache if not exists
+ * @param {string} key - Cache key
+ * @param {Function} fetcher - Function to fetch data if cache misses
+ * @param {number} expirationInSeconds - TTL in seconds
+ * @returns {Promise<any|null>}
+ */
+export async function getOrSetCache(
+  key,
+  fetcher,
+  expirationInSeconds = CACHE_DURATION.MEDIUM,
+) {
+  try {
+    const cached = await getCache(key);
+    if (cached) return cached;
+  } catch (error) {
+    // Ignore cache error and proceed to fetch
+  }
+
+  try {
+    const data = await fetcher();
+    if (data) {
+      await setCache(key, data, expirationInSeconds);
+    }
+    return data;
+  } catch (error) {
+    console.error(`Error in getOrSetCache fetcher for key ${key}:`, error);
+    throw error;
+  }
+}
+
+/**
  * Delete cache by key
  * @param {string} key - Cache key
  * @returns {Promise<boolean>}
