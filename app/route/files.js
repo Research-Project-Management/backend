@@ -156,11 +156,27 @@ const checkFileAccess = (requiredRoles) => async (req, res, next) => {
   }
 };
 
+// ── Allowed upload path prefixes (enforce ownership of bucket paths) ─────────
+const ALLOWED_UPLOAD_PREFIXES = [
+  /^workspace\//,
+  /^project\//,
+];
+
+const isAllowedUploadPath = (fileName) =>
+  ALLOWED_UPLOAD_PREFIXES.some((re) => re.test(fileName));
+
 const registerUploadAndFolderRoutes = (router) => {
   router.post("/presign", isAuthenticated, async (req, res) => {
     const { fileName } = req.body;
     if (!fileName) {
       return res.status(400).json({ error: "Missing fileName" });
+    }
+
+    // C2: Prevent path traversal — only allow workspace/ or project/ prefixes
+    if (!isAllowedUploadPath(fileName)) {
+      return res.status(403).json({
+        error: "Invalid upload path. Must start with 'workspace/' or 'project/'",
+      });
     }
 
     const presignedUrl = await getSignedUrl(
@@ -276,10 +292,13 @@ const registerUploadAndFolderRoutes = (router) => {
               }
             }
           } catch (err) {
-            console.warn("[files] compiler sync after upload failed:", err.message);
-            return res.status(400).json({
-              error: "Invalid parentPageId or sync failed",
-              details: err.message,
+            // W3: File is already saved to DB + R2 — don't fail the upload.
+            // Return 201/200 with a syncWarning so the client knows to retry.
+            console.warn("[files] compiler sync after upload failed (non-fatal):", err.message);
+            return res.status(existingFile ? 200 : 201).json({
+              file,
+              overwritten: !!existingFile,
+              syncWarning: err.message,
             });
           }
         }
@@ -560,19 +579,29 @@ const registerFileActionRoutes = (router) => {
         const file = req.file;
         const { fileId } = req.params;
 
-        if (!file.isFolder && file.url) {
-          try {
+        if (!file.isFolder) {
+          // C3: Delete both the main object AND its thumbnail from R2
+          const keysToDelete = [];
+          if (file.url) {
             const key = file.url.split("/api/files/")[1];
-            if (key) {
+            if (key) keysToDelete.push(key);
+          }
+          if (file.thumbnail) {
+            const thumbKey = file.thumbnail.split("/api/files/")[1];
+            if (thumbKey) keysToDelete.push(thumbKey);
+          }
+
+          for (const key of keysToDelete) {
+            try {
               await r2.send(
                 new DeleteObjectCommand({
                   Bucket: process.env.R2_BUCKET_NAME,
                   Key: key,
                 }),
               );
+            } catch (r2Error) {
+              console.error(`Failed to delete R2 object: ${key}`, r2Error);
             }
-          } catch (r2Error) {
-            console.error("Failed to delete file from R2", r2Error);
           }
         }
 

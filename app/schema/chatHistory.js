@@ -5,6 +5,15 @@ const messageSchema = new mongoose.Schema(
     role: { type: String, enum: ["user", "assistant"], required: true },
     content: { type: String, required: true },
     sources: { type: Array, default: [] },
+    selectionContext: {
+      type: {
+        filename: { type: String, required: true },
+        startLine: { type: Number, required: true },
+        endLine: { type: Number, required: true },
+        text: { type: String, required: true },
+      },
+      default: undefined,
+    },
   },
   { timestamps: true },
 );

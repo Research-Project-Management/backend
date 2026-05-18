@@ -55,4 +55,22 @@ const fileSchema = new mongoose.Schema(
 
 const FileModel = mongoose.models.File || mongoose.model("File", fileSchema);
 
+// W7: Compound indexes for common storage query patterns.
+// All list/filter routes use (project/workspace + pageId + parent + trashedAt).
+if (!mongoose.models.File) {
+  // Project storage: /project/:id?parentId=&pageId=null&trashedAt=null
+  fileSchema.index({ project: 1, pageId: 1, parent: 1, trashedAt: 1 });
+  // Workspace storage: /workspace/:id + pageId filter
+  fileSchema.index({ workspace: 1, pageId: 1, trashedAt: 1 });
+  // Workspace all-files view (includes project cross-ref)
+  fileSchema.index({ workspace: 1, project: 1, pageId: 1, parent: 1, trashedAt: 1 });
+  // Editor assets: /page/:parentPageId
+  fileSchema.index({ pageId: 1, parent: 1, trashedAt: 1 });
+  // My-files / starred / shared per author
+  fileSchema.index({ workspace: 1, author: 1, pageId: 1, trashedAt: 1 });
+  fileSchema.index({ workspace: 1, starred: 1, pageId: 1, trashedAt: 1 });
+  // Dedup check in /upload: (filename, pageId, parent)
+  fileSchema.index({ filename: 1, pageId: 1, parent: 1, isFolder: 1 });
+}
+
 export default FileModel;
