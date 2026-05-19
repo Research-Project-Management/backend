@@ -28,6 +28,7 @@ import chatHistoryRouter from "./app/route/chatHistory.js";
 import latexRouter from "./app/route/latex.js";
 import commentRouter from "./app/route/pageComment.js";
 import taskCommentRouter from "./app/route/taskComment.js";
+import libraryRouter from "./app/route/library.js";
 //config
 
 const PORT = process.env.PORT;
@@ -121,6 +122,7 @@ app.use("/api/roles", roleRouter);
 app.use("/api/latex", latexRouter);
 app.use("/api", commentRouter);
 app.use("/api", taskCommentRouter);
+app.use("/api/library", libraryRouter);
 //listen
 const server = http.createServer(app);
 initSocket(server);

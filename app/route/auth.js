@@ -7,6 +7,8 @@ import { asyncHandler } from "../middleware/helpers.js";
 
 const authRouter = Router();
 
+const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 authRouter.get("/user", (req, res) => {
   // console.log(req.headers.cookie);
   if (req.isAuthenticated()) {
@@ -165,13 +167,16 @@ authRouter.get("/search", asyncHandler(async (req, res) => {
   if (!req.isAuthenticated())
     return res.status(401).json({ error: "Unauthorized" });
 
-  const { query } = req.query;
-  if (!query || query.length < 2) return res.json({ users: [] });
+  const rawQuery = req.query.query ?? req.query.q;
+  const query = typeof rawQuery === "string" ? rawQuery.trim() : "";
+  if (query.length < 2) return res.json({ users: [] });
+
+  const searchRegex = { $regex: escapeRegex(query), $options: "i" };
 
   const users = await UserModel.find({
     $or: [
-      { email: { $regex: query, $options: "i" } },
-      { name: { $regex: query, $options: "i" } },
+      { email: searchRegex },
+      { name: searchRegex },
     ],
     _id: { $ne: req.user._id }, // Exclude self
   })

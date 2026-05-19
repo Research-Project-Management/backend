@@ -30,6 +30,9 @@ const chatHistorySchema = new mongoose.Schema(
     },
     title: { type: String, default: "New Chat" },
     messages: [messageSchema],
+    summary: { type: String, default: "" },
+    keyFacts: { type: [String], default: [] },
+    openQuestions: { type: [String], default: [] },
     projectId: { type: String, default: null },
     documentIds: { type: [String], default: [] },
     // Per-page chat: when set, this chat is exclusively scoped to a LaTeX editor page

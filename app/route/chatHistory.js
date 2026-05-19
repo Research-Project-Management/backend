@@ -17,8 +17,10 @@
 
 import { Router } from "express";
 import ChatHistoryModel from "../schema/chatHistory.js";
+import AiMemoryModel from "../schema/aiMemory.js";
 
 const chatHistoryRouter = Router();
+const FLUX_AI_URL = process.env.FLUX_AI_URL || "http://localhost:8000";
 
 const isAuthenticated = (req, res, next) => {
   if (req.isAuthenticated && req.isAuthenticated()) return next();
@@ -26,6 +28,97 @@ const isAuthenticated = (req, res, next) => {
 };
 
 const getUserId = (req) => req.user._id.toString();
+
+const clampStrings = (value, limit) =>
+  Array.isArray(value)
+    ? value.filter((item) => typeof item === "string" && item.trim()).slice(0, limit)
+    : [];
+
+const refreshChatMemory = async (chatId, userId) => {
+  try {
+    const chat = await ChatHistoryModel.findOne({ _id: chatId, user: userId }).lean();
+    if (!chat || (chat.messages || []).length < 4) return;
+
+    const response = await fetch(`${FLUX_AI_URL}/memory/update`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chat._id.toString(),
+        user_id: userId,
+        workspace_id: chat.workspace,
+        project_id: chat.projectId || null,
+        existing_summary: chat.summary || "",
+        existing_key_facts: chat.keyFacts || [],
+        existing_open_questions: chat.openQuestions || [],
+        messages: (chat.messages || []).slice(-30).map((msg) => ({
+          role: msg.role,
+          content: msg.content,
+        })),
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Flux-AI memory update error:", response.status, errorText);
+      return;
+    }
+
+    const update = await response.json();
+    await ChatHistoryModel.findOneAndUpdate(
+      { _id: chatId, user: userId },
+      {
+        $set: {
+          summary: typeof update.summary === "string" ? update.summary : "",
+          keyFacts: clampStrings(update.key_facts, 16),
+          openQuestions: clampStrings(update.open_questions, 10),
+        },
+      },
+    );
+
+    const memories = Array.isArray(update.memories) ? update.memories : [];
+    for (const memory of memories.slice(0, 8)) {
+      const content = typeof memory.content === "string" ? memory.content.trim() : "";
+      if (!content) continue;
+
+      const scope = memory.scope === "project" && chat.projectId ? "project" : "workspace";
+      const type = [
+        "project_summary",
+        "workspace_summary",
+        "preference",
+        "decision",
+        "entity",
+        "constraint",
+      ].includes(memory.type)
+        ? memory.type
+        : scope === "project"
+          ? "project_summary"
+          : "workspace_summary";
+
+      await AiMemoryModel.findOneAndUpdate(
+        {
+          user: userId,
+          workspace: chat.workspace,
+          projectId: scope === "project" ? chat.projectId : null,
+          scope,
+          type,
+          content,
+        },
+        {
+          $set: {
+            confidence:
+              typeof memory.confidence === "number"
+                ? Math.max(0, Math.min(1, memory.confidence))
+                : 0.7,
+            sourceChatId: chat._id.toString(),
+          },
+        },
+        { upsert: true, new: true },
+      );
+    }
+  } catch (err) {
+    console.error("Chat memory refresh failed:", err.message);
+  }
+};
 
 /**
  * GET /api/ai/chats?workspaceId=<id>
@@ -214,6 +307,9 @@ chatHistoryRouter.patch(
       if (!chat) {
         return res.status(404).json({ error: "Chat not found" });
       }
+
+      const userId = getUserId(req);
+      refreshChatMemory(req.params.chatId, userId);
 
       res.json({ chat });
     } catch (err) {

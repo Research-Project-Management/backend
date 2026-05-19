@@ -24,6 +24,110 @@ import { getFileIcon } from "../libs/fileUtils.js";
 
 const projectRouter = Router();
 
+const isObjectId = (value) => mongoose.Types.ObjectId.isValid(String(value || ""));
+const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const findWorkspaceRole = async (workspaceId, role) => {
+  const normalizedRole = String(role || "member").trim();
+  if (!normalizedRole) return null;
+
+  if (isObjectId(normalizedRole)) {
+    return RoleModel.findOne({
+      _id: normalizedRole,
+      workspace: workspaceId,
+      type: "workspace",
+    });
+  }
+
+  return RoleModel.findOne({
+    workspace: workspaceId,
+    type: "workspace",
+    name: { $regex: new RegExp(`^${escapeRegex(normalizedRole)}$`, "i") },
+  });
+};
+
+const PROJECT_ROLE_TEMPLATES = {
+  manager: {
+    name: "Manager",
+    color: "#111827",
+    permissions: [
+      { resource: "project", actions: ["create", "read", "update", "delete", "manage"] },
+      { resource: "task", actions: ["create", "read", "update", "delete"] },
+      { resource: "page", actions: ["create", "read", "update", "delete"] },
+      { resource: "file", actions: ["create", "read", "update", "delete", "manage"] },
+      { resource: "sticky", actions: ["create", "read", "update", "delete"] },
+      { resource: "member", actions: ["create", "read", "update", "delete", "invite"] },
+    ],
+  },
+  member: {
+    name: "Member",
+    color: "#3b82f6",
+    permissions: [
+      { resource: "project", actions: ["read"] },
+      { resource: "task", actions: ["create", "read", "update"] },
+      { resource: "page", actions: ["create", "read", "update"] },
+      { resource: "file", actions: ["create", "read", "update"] },
+      { resource: "sticky", actions: ["create", "read", "update"] },
+      { resource: "member", actions: ["read"] },
+    ],
+  },
+  viewer: {
+    name: "Viewer",
+    color: "#64748b",
+    permissions: [
+      { resource: "project", actions: ["read"] },
+      { resource: "task", actions: ["read"] },
+      { resource: "page", actions: ["read"] },
+      { resource: "file", actions: ["read"] },
+      { resource: "sticky", actions: ["read"] },
+      { resource: "member", actions: ["read"] },
+    ],
+  },
+};
+
+const findOrCreateProjectRole = async (project, role, userId) => {
+  const normalizedRole = String(role || "member").trim();
+  if (!normalizedRole) return null;
+
+  if (isObjectId(normalizedRole)) {
+    return RoleModel.findOne({
+      _id: normalizedRole,
+      workspace: project.workspace,
+      $or: [{ project: project._id }, { type: "workspace" }],
+    });
+  }
+
+  const roleKey = normalizedRole.toLowerCase();
+  const projectRole = await RoleModel.findOne({
+    workspace: project.workspace,
+    project: project._id,
+    type: "project",
+    name: { $regex: new RegExp(`^${escapeRegex(normalizedRole)}$`, "i") },
+  });
+  if (projectRole) return projectRole;
+
+  const template = PROJECT_ROLE_TEMPLATES[roleKey];
+  if (template) {
+    return RoleModel.create({
+      ...template,
+      type: "project",
+      workspace: project.workspace,
+      project: project._id,
+      isDefault: true,
+      isSystem: true,
+      createdBy: userId,
+    });
+  }
+
+  return findWorkspaceRole(project.workspace, normalizedRole);
+};
+
+const populateProjectMembers = (projectId) =>
+  ProjectModel.findById(projectId)
+    .populate("members.user", "name email avatar")
+    .populate("members.role", "name color isDefault isSystem")
+    .populate("createdBy", "name email avatar");
+
 
 
 // Lấy overview của project
@@ -37,6 +141,7 @@ projectRouter.get(
     // 1. Get Project Details (already fetched in middleware but populating more if needed)
     const project = await ProjectModel.findById(req.project._id).populate([
       { path: "members.user", select: "name email avatar" },
+      { path: "members.role", select: "name color isDefault isSystem" },
       { path: "createdBy", select: "name email avatar" },
     ]);
     if (!project) return res.status(404).json({ error: "Project not found" });
@@ -380,6 +485,11 @@ projectRouter.put(
   async (req, res) => {
     try {
       const { userId, role = "member" } = req.body;
+      const normalizedRole = String(role || "member").trim();
+      if (!isObjectId(userId)) {
+        return res.status(400).json({ error: "Valid userId is required" });
+      }
+
       const project = await ProjectModel.findById(req.project._id);
       if (!project) return res.status(404).json({ error: "Project not found" });
 
@@ -407,23 +517,23 @@ projectRouter.put(
       }
 
       // Look up the Role document by name for this workspace
-      const roleDoc = await RoleModel.findOne({
-        workspace: project.workspace,
-        name: { $regex: new RegExp(`^${role}$`, "i") },
-      });
+      const roleDoc = await findOrCreateProjectRole(
+        project,
+        normalizedRole,
+        req.user._id,
+      );
       if (!roleDoc) {
         return res
           .status(400)
-          .json({ error: `Role "${role}" not found in this workspace` });
+          .json({ error: `Role "${normalizedRole}" not found in this workspace` });
       }
 
       await ProjectModel.findByIdAndUpdate(project._id, {
         $push: { members: { user: userId, role: roleDoc._id } }
       });
 
-      const populatedProject = await ProjectModel.findById(project._id)
-        .populate("members.user", "name email")
-        .populate("createdBy", "name email");
+      await clearProjectCache(project._id.toString());
+      const populatedProject = await populateProjectMembers(project._id);
 
       res.json({ project: populatedProject });
     } catch (error) {
@@ -440,6 +550,14 @@ projectRouter.put(
   async (req, res) => {
     try {
       const { userId, newRole } = req.body;
+      const normalizedRole = String(newRole || "").trim();
+      if (!isObjectId(userId)) {
+        return res.status(400).json({ error: "Valid userId is required" });
+      }
+      if (!normalizedRole) {
+        return res.status(400).json({ error: "Role is required" });
+      }
+
       const project = await ProjectModel.findById(req.project._id);
       if (!project) return res.status(404).json({ error: "Project not found" });
 
@@ -455,14 +573,15 @@ projectRouter.put(
       }
 
       // Look up the Role document by name for this workspace
-      const roleDoc = await RoleModel.findOne({
-        workspace: project.workspace,
-        name: { $regex: new RegExp(`^${newRole}$`, "i") },
-      });
+      const roleDoc = await findOrCreateProjectRole(
+        project,
+        normalizedRole,
+        req.user._id,
+      );
       if (!roleDoc) {
         return res
           .status(400)
-          .json({ error: `Role "${newRole}" not found in this workspace` });
+          .json({ error: `Role "${normalizedRole}" not found in this workspace` });
       }
 
       await ProjectModel.updateOne(
@@ -470,7 +589,10 @@ projectRouter.put(
         { $set: { "members.$.role": roleDoc._id } }
       );
 
-      res.json({ project });
+      await clearProjectCache(project._id.toString());
+      const populatedProject = await populateProjectMembers(project._id);
+
+      res.json({ project: populatedProject });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
@@ -485,6 +607,10 @@ projectRouter.put(
   async (req, res) => {
     try {
       const { userId } = req.body;
+      if (!isObjectId(userId)) {
+        return res.status(400).json({ error: "Valid userId is required" });
+      }
+
       const project = await ProjectModel.findById(req.project._id).populate("members.role");
       if (!project) return res.status(404).json({ error: "Project not found" });
 
@@ -514,7 +640,10 @@ projectRouter.put(
       );
       await project.save();
 
-      res.json({ project });
+      await clearProjectCache(project._id.toString());
+      const populatedProject = await populateProjectMembers(project._id);
+
+      res.json({ project: populatedProject });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
