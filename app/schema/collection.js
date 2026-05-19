@@ -18,11 +18,17 @@ const collectionSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+    // Nested collections — null = root-level collection
+    parent: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Collection",
+      default: null,
+    },
   },
   { timestamps: true },
 );
 
-collectionSchema.index({ workspace: 1, createdAt: -1 });
+collectionSchema.index({ workspace: 1, parent: 1, createdAt: -1 });
 
 const CollectionModel =
   mongoose.models.Collection ||

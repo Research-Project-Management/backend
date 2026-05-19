@@ -185,6 +185,7 @@ libraryRouter.get(
     res.json({
       collections: collections.map((c) => ({
         ...c,
+        parent: c.parent ? c.parent.toString() : null,
         paperCount: countMap.get(c._id.toString()) ?? 0,
       })),
     });
@@ -197,9 +198,20 @@ libraryRouter.post(
   isAuthenticated,
   checkWorkspaceRole("owner", "admin", "member"),
   asyncHandler(async (req, res) => {
-    const { name, description, color, icon } = req.body;
+    const { name, description, color, icon, parent } = req.body;
     if (!name?.trim()) {
       return res.status(400).json({ error: "Collection name is required" });
+    }
+
+    // Validate parent belongs to same workspace
+    if (parent) {
+      const parentCol = await CollectionModel.findOne({
+        _id: parent,
+        workspace: req.workspace._id,
+      });
+      if (!parentCol) {
+        return res.status(400).json({ error: "Parent collection not found" });
+      }
     }
 
     const collection = await CollectionModel.create({
@@ -209,13 +221,14 @@ libraryRouter.post(
       icon: icon || "",
       workspace: req.workspace._id,
       createdBy: req.user._id,
+      parent: parent || null,
     });
 
     const populated = await CollectionModel.findById(collection._id).populate(
       "createdBy",
       "name email avatar",
     );
-    res.status(201).json({ collection: { ...populated.toObject(), paperCount: 0 } });
+    res.status(201).json({ collection: { ...populated.toObject(), parent: parent || null, paperCount: 0 } });
   }),
 );
 
@@ -364,6 +377,24 @@ libraryRouter.post(
     triggerPaperRagIndex(paper._id, req.user._id);
 
     res.status(201).json({ paper: populated });
+  }),
+);
+
+// GET /api/library/:workspaceId/papers — all papers across all collections
+libraryRouter.get(
+  "/:workspaceId/papers",
+  isAuthenticated,
+  checkWorkspaceRole("owner", "admin", "member", "viewer"),
+  asyncHandler(async (req, res) => {
+    const papers = await PaperModel.find({
+      workspace: req.workspace._id,
+      deletedAt: null,
+    })
+      .populate("uploadedBy", "name email avatar")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    res.json({ papers });
   }),
 );
 
