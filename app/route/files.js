@@ -871,6 +871,112 @@ const registerWorkspaceStorageRoutes = (router) => {
   );
 };
 
+// ── Crossref API proxy ────────────────────────────────────────────────────────
+
+const CROSSREF_API = "https://api.crossref.org";
+
+const parseCrossrefWork = (item) => {
+  if (!item) return null;
+  const titleArr = item.title || [];
+  const authorArr = (item.author || []).map((a) => {
+    const parts = [a.given, a.family].filter(Boolean);
+    return parts.length ? parts.join(" ") : a.name || "";
+  });
+  const issued = item.issued?.["date-parts"]?.[0];
+  const year = issued?.[0] || null;
+
+  return {
+    title: titleArr[0] || "",
+    authors: authorArr,
+    doi: item.DOI || "",
+    journal: item["container-title"]?.[0] || "",
+    publisher: item.publisher || "",
+    issn: (item.ISSN || [])[0] || "",
+    isbn: (item.ISBN || [])[0] || "",
+    volume: item.volume || "",
+    issue: item.issue || "",
+    pages: item.page || "",
+    year,
+    type: item.type || "",
+    abstract: item.abstract?.replace(/<[^>]+>/g, "") || "",
+    url: item.URL || "",
+    score: item.score || 0,
+  };
+};
+
+const registerCrossrefRoutes = (router) => {
+  // GET /api/files/crossref/search?query=...&rows=5
+  router.get("/crossref/search", isAuthenticated, async (req, res) => {
+    try {
+      const { query, rows = 5 } = req.query;
+      if (!query) {
+        return res.status(400).json({ error: "query parameter is required" });
+      }
+
+      const url = `${CROSSREF_API}/works?query=${encodeURIComponent(query)}&rows=${rows}&select=DOI,title,author,issued,container-title,publisher,ISSN,ISBN,volume,issue,page,type,abstract,URL,score`;
+      const response = await fetch(url, {
+        headers: {
+          "User-Agent": "Flux/1.0 (mailto:support@aisq.dev)",
+        },
+      });
+
+      if (!response.ok) {
+        return res
+          .status(response.status)
+          .json({ error: `Crossref API error: ${response.status}` });
+      }
+
+      const data = await response.json();
+      const items = data?.message?.items || [];
+      const totalResults = data?.message?.["total-results"] || 0;
+
+      res.json({
+        works: items.map(parseCrossrefWork).filter(Boolean),
+        totalResults,
+      });
+    } catch (error) {
+      return handleServerError(res, error, "Crossref search failed");
+    }
+  });
+
+  // GET /api/files/crossref/doi/:doi(*) — e.g. /crossref/doi/10.1234/example
+  router.get(/^\/crossref\/doi\/(.+)/, isAuthenticated, async (req, res) => {
+    try {
+      const doi = req.params[0];
+      if (!doi) {
+        return res.status(400).json({ error: "DOI is required" });
+      }
+
+      const url = `${CROSSREF_API}/works/${encodeURIComponent(doi)}`;
+      const response = await fetch(url, {
+        headers: {
+          "User-Agent": "Flux/1.0 (mailto:support@aisq.dev)",
+        },
+      });
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          return res.status(404).json({ error: "DOI not found" });
+        }
+        return res
+          .status(response.status)
+          .json({ error: `Crossref API error: ${response.status}` });
+      }
+
+      const data = await response.json();
+      const work = parseCrossrefWork(data?.message);
+
+      if (!work) {
+        return res.status(404).json({ error: "Could not parse Crossref data" });
+      }
+
+      res.json({ work });
+    } catch (error) {
+      return handleServerError(res, error, "Crossref DOI lookup failed");
+    }
+  });
+};
+
 const registerFileProxyRoute = (router) => {
   router.get(/^\/(.+)/, async (req, res) => {
     try {
@@ -911,6 +1017,7 @@ registerUploadAndFolderRoutes(fileRouter);
 registerProjectStorageRoutes(fileRouter);
 registerFileActionRoutes(fileRouter);
 registerWorkspaceStorageRoutes(fileRouter);
+registerCrossrefRoutes(fileRouter);
 registerFileProxyRoute(fileRouter);
 
 export default fileRouter;
