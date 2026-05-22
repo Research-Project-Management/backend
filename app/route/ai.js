@@ -10,6 +10,7 @@ import mongoose from "mongoose";
 import { isAuthenticated } from "../middleware/checkWorkspaceRole.js";
 import ChatHistoryModel from "../schema/chatHistory.js";
 import AiMemoryModel from "../schema/aiMemory.js";
+import WorkspaceModel from "../schema/workspace.js";
 
 const aiRouter = Router();
 
@@ -145,8 +146,25 @@ const loadChatScopedContext = async (req, { chatId, query, messages, documentIds
   }
 
   const requestedWorkspace = req.body.workspace_id;
-  if (requestedWorkspace && chat.workspace !== requestedWorkspace) {
-    return { error: { status: 403, message: "Chat does not belong to this workspace" } };
+  if (requestedWorkspace) {
+    const queryConds = [];
+    if (mongoose.Types.ObjectId.isValid(requestedWorkspace)) {
+      queryConds.push({ _id: requestedWorkspace });
+    }
+    queryConds.push({ url: requestedWorkspace });
+
+    const workspace = await WorkspaceModel.findOne({ $or: queryConds }).lean();
+    if (workspace) {
+      const matchesId = chat.workspace === workspace._id.toString();
+      const matchesUrl = chat.workspace === workspace.url;
+      if (!matchesId && !matchesUrl) {
+        return { error: { status: 403, message: "Chat does not belong to this workspace" } };
+      }
+    } else {
+      if (chat.workspace !== requestedWorkspace) {
+        return { error: { status: 403, message: "Chat does not belong to this workspace" } };
+      }
+    }
   }
 
   const persistedMessages = (chat.messages || [])
