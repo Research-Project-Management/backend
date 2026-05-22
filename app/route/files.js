@@ -25,7 +25,11 @@ const fileRouter = Router();
 const OBJECT_ID_REGEX = /^[0-9a-fA-F]{24}$/;
 const R2_ALLOWED_ORIGINS = [
   "http://localhost:5173",
+  "http://localhost:5174",
+  "http://localhost:2915",
   "http://localhost:2916",
+  "http://localhost:2917",
+  "http://localhost:3000",
   "https://flux.aisq.dev",
 ];
 
@@ -877,30 +881,101 @@ const CROSSREF_API = "https://api.crossref.org";
 
 const parseCrossrefWork = (item) => {
   if (!item) return null;
-  const titleArr = item.title || [];
+
+  // Handle title as array or string
+  let title = "";
+  if (Array.isArray(item.title)) {
+    title = item.title[0] || "";
+  } else if (typeof item.title === "string") {
+    title = item.title;
+  }
+
   const authorArr = (item.author || []).map((a) => {
     const parts = [a.given, a.family].filter(Boolean);
     return parts.length ? parts.join(" ") : a.name || "";
   });
+
   const issued = item.issued?.["date-parts"]?.[0];
-  const year = issued?.[0] || null;
+  let year = issued?.[0] || null;
+  if (!year && typeof item.issued === "string") {
+    const match = item.issued.match(/\d{4}/);
+    if (match) year = parseInt(match[0]);
+  }
+
+  // Handle container-title as array or string
+  let journal = "";
+  const containerTitle = item["container-title"];
+  if (Array.isArray(containerTitle)) {
+    journal = containerTitle[0] || "";
+  } else if (typeof containerTitle === "string") {
+    journal = containerTitle;
+  }
+
+  // Handle ISSN and ISBN as array or string
+  let issn = "";
+  if (Array.isArray(item.ISSN)) {
+    issn = item.ISSN[0] || "";
+  } else if (typeof item.ISSN === "string") {
+    issn = item.ISSN;
+  }
+
+  let isbn = "";
+  if (Array.isArray(item.ISBN)) {
+    isbn = item.ISBN[0] || "";
+  } else if (typeof item.ISBN === "string") {
+    isbn = item.ISBN;
+  }
+
+  // Handle short-container-title
+  let journalAbbr = "";
+  const shortContainerTitle = item["short-container-title"];
+  if (Array.isArray(shortContainerTitle)) {
+    journalAbbr = shortContainerTitle[0] || "";
+  } else if (typeof shortContainerTitle === "string") {
+    journalAbbr = shortContainerTitle;
+  }
+
+  // Handle short-title
+  let shortTitle = "";
+  const shortTitleVal = item["short-title"];
+  if (Array.isArray(shortTitleVal)) {
+    shortTitle = shortTitleVal[0] || "";
+  } else if (typeof shortTitleVal === "string") {
+    shortTitle = shortTitleVal;
+  }
+
+  // Handle rights / license
+  let rights = "";
+  if (item.license && Array.isArray(item.license)) {
+    rights = item.license[0]?.URL || "";
+  } else if (item.license && typeof item.license === "string") {
+    rights = item.license;
+  } else if (item.copyright && typeof item.copyright === "string") {
+    rights = item.copyright;
+  } else if (item.rights && typeof item.rights === "string") {
+    rights = item.rights;
+  }
 
   return {
-    title: titleArr[0] || "",
+    title: title || "",
     authors: authorArr,
-    doi: item.DOI || "",
-    journal: item["container-title"]?.[0] || "",
+    doi: item.DOI || item.doi || "",
+    journal: journal || "",
     publisher: item.publisher || "",
-    issn: (item.ISSN || [])[0] || "",
-    isbn: (item.ISBN || [])[0] || "",
+    issn: issn || "",
+    isbn: isbn || "",
     volume: item.volume || "",
-    issue: item.issue || "",
-    pages: item.page || "",
+    issue: item.issue || item.number || "",
+    pages: item.page || item.pages || "",
     year,
     type: item.type || "",
     abstract: item.abstract?.replace(/<[^>]+>/g, "") || "",
-    url: item.URL || "",
+    url: item.URL || item.url || "",
     score: item.score || 0,
+    language: item.language || "",
+    journalAbbr: journalAbbr || "",
+    shortTitle: shortTitle || "",
+    rights: rights || "",
   };
 };
 
@@ -909,18 +984,24 @@ const registerCrossrefRoutes = (router) => {
   router.get("/crossref/search", isAuthenticated, async (req, res) => {
     try {
       const { query, rows = 5 } = req.query;
+      console.log(`[Crossref Search] Incoming query: "${query}", rows: ${rows}`);
       if (!query) {
         return res.status(400).json({ error: "query parameter is required" });
       }
 
-      const url = `${CROSSREF_API}/works?query=${encodeURIComponent(query)}&rows=${rows}&select=DOI,title,author,issued,container-title,publisher,ISSN,ISBN,volume,issue,page,type,abstract,URL,score`;
+      const url = `${CROSSREF_API}/works?query=${encodeURIComponent(query)}&rows=${rows}&select=DOI,title,author,issued,container-title,publisher,ISSN,ISBN,volume,issue,page,type,abstract,URL,score,language,short-container-title,short-title,license`;
+      console.log(`[Crossref Search] Fetching URL: ${url}`);
+      
       const response = await fetch(url, {
         headers: {
           "User-Agent": "Flux/1.0 (mailto:support@aisq.dev)",
         },
       });
 
+      console.log(`[Crossref Search] Response status: ${response.status}`);
       if (!response.ok) {
+        const errorText = await response.text().catch(() => "");
+        console.error(`[Crossref Search] Error response body:`, errorText);
         return res
           .status(response.status)
           .json({ error: `Crossref API error: ${response.status}` });
@@ -930,11 +1011,14 @@ const registerCrossrefRoutes = (router) => {
       const items = data?.message?.items || [];
       const totalResults = data?.message?.["total-results"] || 0;
 
+      console.log(`[Crossref Search] Found ${items.length} works (total results: ${totalResults})`);
+
       res.json({
         works: items.map(parseCrossrefWork).filter(Boolean),
         totalResults,
       });
     } catch (error) {
+      console.error("[Crossref Search] Failed:", error);
       return handleServerError(res, error, "Crossref search failed");
     }
   });
@@ -942,36 +1026,130 @@ const registerCrossrefRoutes = (router) => {
   // GET /api/files/crossref/doi/:doi(*) — e.g. /crossref/doi/10.1234/example
   router.get(/^\/crossref\/doi\/(.+)/, isAuthenticated, async (req, res) => {
     try {
-      const doi = req.params[0];
-      if (!doi) {
+      const rawDoi = req.params[0];
+      console.log(`[Crossref DOI] Received raw DOI: "${rawDoi}"`);
+      if (!rawDoi) {
         return res.status(400).json({ error: "DOI is required" });
       }
 
-      const url = `${CROSSREF_API}/works/${encodeURIComponent(doi)}`;
-      const response = await fetch(url, {
-        headers: {
-          "User-Agent": "Flux/1.0 (mailto:support@aisq.dev)",
-        },
-      });
-
-      if (!response.ok) {
-        if (response.status === 404) {
-          return res.status(404).json({ error: "DOI not found" });
+      // 1. Decode in case of single/double encoding
+      let cleanDoi = rawDoi.trim();
+      try {
+        let decoded = decodeURIComponent(cleanDoi).trim();
+        if (decoded.includes("%")) {
+          decoded = decodeURIComponent(decoded).trim();
         }
-        return res
-          .status(response.status)
-          .json({ error: `Crossref API error: ${response.status}` });
+        cleanDoi = decoded;
+      } catch (e) {
+        console.error(`[Crossref DOI] Failed to decode raw DOI:`, e);
       }
 
-      const data = await response.json();
-      const work = parseCrossrefWork(data?.message);
+      // 2. Strip URL prefixes and standard 'doi:' prefix
+      cleanDoi = cleanDoi.replace(/^(https?:\/\/)?(dx\.)?doi\.org\//i, "");
+      cleanDoi = cleanDoi.replace(/^doi:/i, "");
+      cleanDoi = cleanDoi.trim();
 
-      if (!work) {
-        return res.status(404).json({ error: "Could not parse Crossref data" });
+      // 3. Strip standard trailing punctuation EXCEPT parentheses/brackets first
+      cleanDoi = cleanDoi.replace(/[.,;:!?\s]+$/, "");
+
+      // 4. Balance parentheses (strip trailing ')' only if unmatched)
+      if (cleanDoi.endsWith(")")) {
+        const openCount = (cleanDoi.match(/\(/g) || []).length;
+        const closeCount = (cleanDoi.match(/\)/g) || []).length;
+        if (closeCount > openCount) {
+          cleanDoi = cleanDoi.slice(0, -1).trim();
+        }
       }
 
+      // 5. Balance square brackets
+      if (cleanDoi.endsWith("]")) {
+        const openCount = (cleanDoi.match(/\[/g) || []).length;
+        const closeCount = (cleanDoi.match(/\]/g) || []).length;
+        if (closeCount > openCount) {
+          cleanDoi = cleanDoi.slice(0, -1).trim();
+        }
+      }
+
+      // 6. Strip surrounding matching wrapper symbols
+      if (cleanDoi.startsWith("(") && cleanDoi.endsWith(")")) {
+        cleanDoi = cleanDoi.slice(1, -1).trim();
+      }
+      if (cleanDoi.startsWith("[") && cleanDoi.endsWith("]")) {
+        cleanDoi = cleanDoi.slice(1, -1).trim();
+      }
+      cleanDoi = cleanDoi.replace(/[.,;:!?\s]+$/, "");
+
+      console.log(`[Crossref DOI] Parsed clean DOI: "${cleanDoi}"`);
+
+      if (!cleanDoi) {
+        return res.status(400).json({ error: "Invalid DOI format" });
+      }
+
+      // Try unified resolver (doi.org content-negotiation) first, then fall back to api.crossref.org
+      let work = null;
+      let resolvedSuccess = false;
+
+      try {
+        const doiOrgUrl = `https://doi.org/${encodeURIComponent(cleanDoi)}`;
+        console.log(`[Crossref DOI] Querying doi.org via content negotiation: ${doiOrgUrl}`);
+        const response = await fetch(doiOrgUrl, {
+          headers: {
+            "Accept": "application/vnd.citationstyles.csl+json",
+            "User-Agent": "Flux/1.0 (mailto:support@aisq.dev)"
+          }
+        });
+
+        console.log(`[Crossref DOI] doi.org response status: ${response.status}`);
+        if (response.ok) {
+          const doiJson = await response.json();
+          work = parseCrossrefWork(doiJson);
+          if (work && work.title) {
+            resolvedSuccess = true;
+            console.log(`[Crossref DOI] Successfully resolved DOI via doi.org.`);
+          }
+        }
+      } catch (doiOrgError) {
+        console.error(`[Crossref DOI] doi.org resolution failed, will fall back:`, doiOrgError);
+      }
+
+      if (!resolvedSuccess) {
+        const url = `${CROSSREF_API}/works/${encodeURIComponent(cleanDoi)}`;
+        console.log(`[Crossref DOI] Falling back to Crossref URL: ${url}`);
+        
+        const response = await fetch(url, {
+          headers: {
+            "User-Agent": "Flux/1.0 (mailto:support@aisq.dev)",
+          },
+        });
+
+        console.log(`[Crossref DOI] Fallback status: ${response.status}`);
+        if (response.ok) {
+          const data = await response.json();
+          work = parseCrossrefWork(data?.message);
+          if (work && work.title) {
+            resolvedSuccess = true;
+            console.log(`[Crossref DOI] Successfully resolved DOI via Crossref fallback.`);
+          }
+        } else {
+          if (response.status === 404) {
+            console.warn(`[Crossref DOI] DOI not found in Crossref fallback registry: "${cleanDoi}"`);
+            return res.status(404).json({ error: "DOI not found in registries" });
+          }
+          const errorText = await response.text().catch(() => "");
+          console.error(`[Crossref DOI] Fallback error body:`, errorText);
+          return res.status(response.status).json({ error: `DOI registries error: ${response.status}` });
+        }
+      }
+
+      if (!resolvedSuccess || !work) {
+        console.warn(`[Crossref DOI] Could not parse work metadata from response`);
+        return res.status(404).json({ error: "Could not parse metadata" });
+      }
+
+      console.log(`[Crossref DOI] Successfully resolved. Title: "${work.title}"`);
       res.json({ work });
     } catch (error) {
+      console.error("[Crossref DOI] Failed:", error);
       return handleServerError(res, error, "Crossref DOI lookup failed");
     }
   });
@@ -993,8 +1171,10 @@ const registerFileProxyRoute = (router) => {
       );
 
       const origin = req.headers.origin;
-      if (origin && R2_ALLOWED_ORIGINS.includes(origin)) {
-        res.setHeader("Access-Control-Allow-Origin", origin);
+      if (origin) {
+        if (R2_ALLOWED_ORIGINS.includes(origin) || origin.startsWith("http://localhost:")) {
+          res.setHeader("Access-Control-Allow-Origin", origin);
+        }
       }
 
       res.setHeader("Access-Control-Allow-Credentials", "true");

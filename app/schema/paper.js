@@ -16,6 +16,25 @@ const paperSchema = new mongoose.Schema(
     keywords: [{ type: String }],
     journal: { type: String, default: "" },
     publisher: { type: String, default: "" },
+    volume: { type: String, default: "" },
+    issue: { type: String, default: "" },
+    pages: { type: String, default: "" },
+    issn: { type: String, default: "" },
+    isbn: { type: String, default: "" },
+    url: { type: String, default: "" },
+    type: { type: String, default: "" },
+    language: { type: String, default: "" },
+    journalAbbr: { type: String, default: "" },
+    shortTitle: { type: String, default: "" },
+    rights: { type: String, default: "" },
+    extra: { type: String, default: "" },
+    notes: [
+      {
+        content: { type: String, required: true },
+        createdAt: { type: Date, default: Date.now },
+        updatedAt: { type: Date, default: Date.now }
+      }
+    ],
 
     // File
     fileUrl: { type: String, required: true },

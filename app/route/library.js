@@ -341,6 +341,19 @@ libraryRouter.post(
       journal,
       publisher,
       tags,
+      volume,
+      issue,
+      pages,
+      issn,
+      isbn,
+      url,
+      type,
+      language,
+      journalAbbr,
+      shortTitle,
+      rights,
+      extra,
+      notes,
     } = req.body;
 
     if (!title?.trim()) {
@@ -364,6 +377,19 @@ libraryRouter.post(
       journal: journal || "",
       publisher: publisher || "",
       tags: Array.isArray(tags) ? tags : [],
+      volume: volume || "",
+      issue: issue || "",
+      pages: pages || "",
+      issn: issn || "",
+      isbn: isbn || "",
+      url: url || "",
+      type: type || "",
+      language: language || "",
+      journalAbbr: journalAbbr || "",
+      shortTitle: shortTitle || "",
+      rights: rights || "",
+      extra: extra || "",
+      notes: Array.isArray(notes) ? notes : [],
       workspace: req.workspace._id,
       uploadedBy: req.user._id,
       collection: collection._id,
@@ -432,6 +458,8 @@ libraryRouter.put(
     const fields = [
       "title", "authors", "year", "doi", "abstract",
       "keywords", "journal", "publisher", "tags",
+      "volume", "issue", "pages", "issn", "isbn", "url", "type",
+      "language", "journalAbbr", "shortTitle", "rights", "extra", "notes",
     ];
     for (const f of fields) {
       if (req.body[f] !== undefined) paper[f] = req.body[f];
