@@ -177,10 +177,11 @@ const loadChatScopedContext = async (req, { chatId, query, messages, documentIds
     scopedMessages.push(currentUserMessage);
   }
 
+  const reqDocumentIds = uniqueStrings(documentIds || []);
   return {
     messages: scopedMessages,
     chat,
-    documentIds: uniqueStrings(chat.documentIds || [], documentIds || []),
+    documentIds: reqDocumentIds.length > 0 ? reqDocumentIds : uniqueStrings(chat.documentIds || []),
   };
 };
 

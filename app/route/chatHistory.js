@@ -135,7 +135,7 @@ chatHistoryRouter.get("/chats", isAuthenticated, async (req, res) => {
       workspace: workspaceId,
       user: getUserId(req),
     })
-      .select("_id title messages updatedAt createdAt projectId")
+      .select("_id title messages updatedAt createdAt projectId documentIds")
       .sort({ updatedAt: -1 })
       .lean();
 
@@ -144,6 +144,7 @@ chatHistoryRouter.get("/chats", isAuthenticated, async (req, res) => {
       _id: c._id,
       title: c.title,
       projectId: c.projectId,
+      documentIds: c.documentIds || [],
       messageCount: c.messages.length,
       lastMessage: c.messages.at(-1)?.content?.slice(0, 120) || "",
       updatedAt: c.updatedAt,
