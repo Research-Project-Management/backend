@@ -882,6 +882,38 @@ const CROSSREF_API = "https://api.crossref.org";
 const parseCrossrefWork = (item) => {
   if (!item) return null;
 
+  const firstString = (...values) => {
+    for (const value of values) {
+      if (Array.isArray(value)) {
+        const found = value.find((v) => typeof v === "string" && v.trim());
+        if (found) return found.trim();
+      } else if (typeof value === "string" && value.trim()) {
+        return value.trim();
+      }
+    }
+    return "";
+  };
+
+  const namesFrom = (people = []) =>
+    (people || [])
+      .map((person) => {
+        const parts = [person.given, person.family].filter(Boolean);
+        return parts.length ? parts.join(" ") : person.name || person.literal || "";
+      })
+      .filter(Boolean);
+
+  const dateParts = (...values) => {
+    for (const value of values) {
+      const parts = value?.["date-parts"]?.[0];
+      if (Array.isArray(parts) && parts.length) return parts.filter(Boolean).join("-");
+      if (typeof value === "string") {
+        const match = value.match(/\d{4}(?:-\d{1,2})?(?:-\d{1,2})?/);
+        if (match) return match[0];
+      }
+    }
+    return "";
+  };
+
   // Handle title as array or string
   let title = "";
   if (Array.isArray(item.title)) {
@@ -890,12 +922,10 @@ const parseCrossrefWork = (item) => {
     title = item.title;
   }
 
-  const authorArr = (item.author || []).map((a) => {
-    const parts = [a.given, a.family].filter(Boolean);
-    return parts.length ? parts.join(" ") : a.name || "";
-  });
+  const authorArr = namesFrom(item.author);
+  const editorArr = namesFrom(item.editor);
 
-  const issued = item.issued?.["date-parts"]?.[0];
+  const issued = item.issued?.["date-parts"]?.[0] || item.published?.["date-parts"]?.[0];
   let year = issued?.[0] || null;
   if (!year && typeof item.issued === "string") {
     const match = item.issued.match(/\d{4}/);
@@ -903,72 +933,67 @@ const parseCrossrefWork = (item) => {
   }
 
   // Handle container-title as array or string
-  let journal = "";
-  const containerTitle = item["container-title"];
-  if (Array.isArray(containerTitle)) {
-    journal = containerTitle[0] || "";
-  } else if (typeof containerTitle === "string") {
-    journal = containerTitle;
-  }
+  const journal = firstString(item["container-title"], item["containerTitle"]);
 
   // Handle ISSN and ISBN as array or string
-  let issn = "";
-  if (Array.isArray(item.ISSN)) {
-    issn = item.ISSN[0] || "";
-  } else if (typeof item.ISSN === "string") {
-    issn = item.ISSN;
-  }
-
-  let isbn = "";
-  if (Array.isArray(item.ISBN)) {
-    isbn = item.ISBN[0] || "";
-  } else if (typeof item.ISBN === "string") {
-    isbn = item.ISBN;
-  }
+  const issn = firstString(item.ISSN, item.issn);
+  const isbn = firstString(item.ISBN, item.isbn);
 
   // Handle short-container-title
-  let journalAbbr = "";
-  const shortContainerTitle = item["short-container-title"];
-  if (Array.isArray(shortContainerTitle)) {
-    journalAbbr = shortContainerTitle[0] || "";
-  } else if (typeof shortContainerTitle === "string") {
-    journalAbbr = shortContainerTitle;
-  }
+  const journalAbbr = firstString(item["short-container-title"], item["container-title-short"]);
 
   // Handle short-title
-  let shortTitle = "";
-  const shortTitleVal = item["short-title"];
-  if (Array.isArray(shortTitleVal)) {
-    shortTitle = shortTitleVal[0] || "";
-  } else if (typeof shortTitleVal === "string") {
-    shortTitle = shortTitleVal;
-  }
+  const shortTitle = firstString(item["short-title"], item["shortTitle"]);
 
   // Handle rights / license
   let rights = "";
+  let license = "";
   if (item.license && Array.isArray(item.license)) {
     rights = item.license[0]?.URL || "";
+    license = item.license[0]?.URL || "";
   } else if (item.license && typeof item.license === "string") {
     rights = item.license;
+    license = item.license;
   } else if (item.copyright && typeof item.copyright === "string") {
     rights = item.copyright;
   } else if (item.rights && typeof item.rights === "string") {
     rights = item.rights;
   }
 
+  const publicationDate = dateParts(item.issued, item.published, item["published-print"], item["published-online"]);
+  const catalog = item.source === "DataCite" ? "DOI.org (DataCite)" : "DOI.org";
+  const subjects = Array.isArray(item.subject) ? item.subject.filter(Boolean) : [];
+  const extraLines = [
+    item["article-number"] && `Article Number: ${item["article-number"]}`,
+    item["number-of-pages"] && `Artwork Size: ${item["number-of-pages"]} pages`,
+    item.size && `Size: ${item.size}`,
+    item.medium && `Medium: ${item.medium}`,
+  ].filter(Boolean);
+
   return {
     title: title || "",
     authors: authorArr,
+    editors: editorArr,
     doi: item.DOI || item.doi || "",
     journal: journal || "",
+    publicationTitle: journal || "",
+    publicationDate: publicationDate || (year ? String(year) : ""),
     publisher: item.publisher || "",
+    place: item["publisher-location"] || item["event-place"] || "",
     issn: issn || "",
     isbn: isbn || "",
     volume: item.volume || "",
     issue: item.issue || item.number || "",
+    section: item.section || "",
+    partNumber: item.partNumber || item["part-number"] || "",
+    partTitle: item.partTitle || item["part-title"] || "",
     pages: item.page || item.pages || "",
+    series: item.series || "",
+    seriesTitle: firstString(item["collection-title"], item["series-title"]),
+    seriesText: item["collection-number"] || "",
     year,
     type: item.type || "",
+    itemType: item.type || "",
     abstract: item.abstract?.replace(/<[^>]+>/g, "") || "",
     url: item.URL || item.url || "",
     score: item.score || 0,
@@ -976,6 +1001,12 @@ const parseCrossrefWork = (item) => {
     journalAbbr: journalAbbr || "",
     shortTitle: shortTitle || "",
     rights: rights || "",
+    license: license || rights || "",
+    libraryCatalog: catalog,
+    keywords: subjects,
+    pmid: firstString(item.PMID, item.pmid),
+    pmcid: firstString(item.PMCID, item.pmcid),
+    extra: extraLines.join("\n"),
   };
 };
 
@@ -989,7 +1020,7 @@ const registerCrossrefRoutes = (router) => {
         return res.status(400).json({ error: "query parameter is required" });
       }
 
-      const url = `${CROSSREF_API}/works?query=${encodeURIComponent(query)}&rows=${rows}&select=DOI,title,author,issued,container-title,publisher,ISSN,ISBN,volume,issue,page,type,abstract,URL,score,language,short-container-title,short-title,license`;
+      const url = `${CROSSREF_API}/works?query=${encodeURIComponent(query)}&rows=${rows}&select=DOI,title,author,editor,issued,published,published-print,published-online,container-title,publisher,publisher-location,ISSN,ISBN,volume,issue,page,type,abstract,URL,score,language,short-container-title,short-title,license,subject`;
       console.log(`[Crossref Search] Fetching URL: ${url}`);
       
       const response = await fetch(url, {
