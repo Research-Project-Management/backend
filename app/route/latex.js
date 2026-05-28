@@ -35,7 +35,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 latexRouter.post("/compile", isAuthenticated, async (req, res) => {
   try {
     // Accept both project_id (from frontend) and parentPageId
-    const { source, engine, parentPageId, project_id, mainFile, main_file, draft } = req.body;
+    const { source, engine, parentPageId, project_id, mainFile, main_file, draft, use_cache } = req.body;
     
     // Normalize: use project_id as parentPageId if parentPageId not provided
     const resolvedParentPageId = parentPageId || project_id;
@@ -71,6 +71,7 @@ latexRouter.post("/compile", isAuthenticated, async (req, res) => {
       project_id: resolvedParentPageId || null,
       main_file: resolvedMainFile,
       draft: !!draft,
+      use_cache: use_cache !== false,  // Default to true
     };
 
     // Retry loop — handles 503 (compiler busy) with exponential backoff.

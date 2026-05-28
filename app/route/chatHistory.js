@@ -13,19 +13,31 @@
  * Per-page routes (LaTeX editor AI panel):
  * GET    /api/ai/chats/page/:pageId      — load (or auto-create) chat for a page
  * DELETE /api/ai/chats/page/:pageId      — clear chat history for a page
+/**
+ * Chat History Routes — CRUD for persisted AI chat sessions.
+ *
+ * Mounted at /api/ai (alongside the existing proxy route).
+ *
+ * GET    /api/ai/chats?workspaceId=      — list sessions for a workspace
+ * POST   /api/ai/chats                   — create a new session
+ * GET    /api/ai/chats/:chatId           — fetch a session with its messages
+ * PATCH  /api/ai/chats/:chatId/messages  — append messages to a session
+ * PATCH  /api/ai/chats/:chatId/title     — rename a session title
+ * DELETE /api/ai/chats/:chatId           — delete a session
+ *
+ * Per-page routes (LaTeX editor AI panel):
+ * GET    /api/ai/chats/page/:pageId      — load (or auto-create) chat for a page
+ * DELETE /api/ai/chats/page/:pageId      — clear chat history for a page
  */
 
 import { Router } from "express";
 import ChatHistoryModel from "../schema/chatHistory.js";
 import AiMemoryModel from "../schema/aiMemory.js";
 
+import { isAuthenticated } from "../middleware/checkWorkspaceRole.js";
+
 const chatHistoryRouter = Router();
 const FLUX_AI_URL = process.env.FLUX_AI_URL || "http://localhost:8000";
-
-const isAuthenticated = (req, res, next) => {
-  if (req.isAuthenticated && req.isAuthenticated()) return next();
-  return res.status(401).json({ error: "Unauthorized" });
-};
 
 const getUserId = (req) => req.user._id.toString();
 
@@ -399,5 +411,48 @@ chatHistoryRouter.delete(
   },
 );
 
-export default chatHistoryRouter;
+/**
+ * DELETE /api/ai/memory/clear
+ * Body: { workspaceId }
+ * Clears all AiMemory entries for this user in the specified workspace,
+ * and clears summary/keyFacts/openQuestions on all of their chat histories.
+ */
+chatHistoryRouter.delete(
+  "/memory/clear",
+  isAuthenticated,
+  async (req, res) => {
+    const { workspaceId } = req.body;
+    if (!workspaceId) {
+      return res.status(400).json({ error: "workspaceId is required" });
+    }
 
+    try {
+      const userId = getUserId(req);
+
+      // 1. Delete all workspace-scoped memory from AiMemoryModel
+      await AiMemoryModel.deleteMany({
+        user: userId,
+        workspace: workspaceId,
+      });
+
+      // 2. Clear summarized fields on all chat histories for this user in this workspace
+      await ChatHistoryModel.updateMany(
+        { workspace: workspaceId, user: userId },
+        {
+          $set: {
+            summary: "",
+            keyFacts: [],
+            openQuestions: [],
+          },
+        }
+      );
+
+      res.json({ message: "AI Memory cleared successfully" });
+    } catch (err) {
+      console.error("AI Memory clear error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+export default chatHistoryRouter;

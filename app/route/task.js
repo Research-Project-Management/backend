@@ -69,7 +69,7 @@ taskRouter.get(
       if (!workspace) return res.status(404).json({ error: "Workspace not found" });
 
       const isMember = workspace.members.some(
-        (m) => m.user.toString() === req.user._id.toString(),
+        (m) => m.user && m.user.toString() === req.user._id.toString(),
       );
       if (!isMember) return res.status(403).json({ error: "Access denied" });
 

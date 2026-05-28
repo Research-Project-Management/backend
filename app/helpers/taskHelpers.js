@@ -10,6 +10,7 @@ import TaskModel from "../schema/task.js";
 import TaskCommentModel from "../schema/taskComment.js";
 import AuditLogModel from "../schema/auditLog.js";
 import ProjectModel from "../schema/project.js";
+import CycleModel from "../schema/cycle.js";
 import { getIO } from "../libs/socket.js";
 
 // ─── Due-date helpers ────────────────────────────────────────────────────────
