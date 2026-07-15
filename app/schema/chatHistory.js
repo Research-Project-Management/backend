@@ -3,9 +3,8 @@ import mongoose from "mongoose";
 const messageSchema = new mongoose.Schema(
   {
     role: { type: String, enum: ["user", "assistant"], required: true },
-    content: { type: String, default: "" },
+    content: { type: String, required: true },
     sources: { type: Array, default: [] },
-    widgets: { type: Array, default: [] },
     selectionContext: {
       type: {
         filename: { type: String, required: true },
@@ -31,9 +30,6 @@ const chatHistorySchema = new mongoose.Schema(
     },
     title: { type: String, default: "New Chat" },
     messages: [messageSchema],
-    summary: { type: String, default: "" },
-    keyFacts: { type: [String], default: [] },
-    openQuestions: { type: [String], default: [] },
     projectId: { type: String, default: null },
     documentIds: { type: [String], default: [] },
     // Per-page chat: when set, this chat is exclusively scoped to a LaTeX editor page

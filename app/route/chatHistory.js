@@ -13,124 +13,19 @@
  * Per-page routes (LaTeX editor AI panel):
  * GET    /api/ai/chats/page/:pageId      — load (or auto-create) chat for a page
  * DELETE /api/ai/chats/page/:pageId      — clear chat history for a page
-/**
- * Chat History Routes — CRUD for persisted AI chat sessions.
- *
- * Mounted at /api/ai (alongside the existing proxy route).
- *
- * GET    /api/ai/chats?workspaceId=      — list sessions for a workspace
- * POST   /api/ai/chats                   — create a new session
- * GET    /api/ai/chats/:chatId           — fetch a session with its messages
- * PATCH  /api/ai/chats/:chatId/messages  — append messages to a session
- * PATCH  /api/ai/chats/:chatId/title     — rename a session title
- * DELETE /api/ai/chats/:chatId           — delete a session
- *
- * Per-page routes (LaTeX editor AI panel):
- * GET    /api/ai/chats/page/:pageId      — load (or auto-create) chat for a page
- * DELETE /api/ai/chats/page/:pageId      — clear chat history for a page
  */
 
 import { Router } from "express";
 import ChatHistoryModel from "../schema/chatHistory.js";
-import AiMemoryModel from "../schema/aiMemory.js";
-
-import { isAuthenticated } from "../middleware/checkWorkspaceRole.js";
 
 const chatHistoryRouter = Router();
-const FLUX_AI_URL = process.env.FLUX_AI_URL || "http://localhost:8000";
+
+const isAuthenticated = (req, res, next) => {
+  if (req.isAuthenticated && req.isAuthenticated()) return next();
+  return res.status(401).json({ error: "Unauthorized" });
+};
 
 const getUserId = (req) => req.user._id.toString();
-
-const clampStrings = (value, limit) =>
-  Array.isArray(value)
-    ? value.filter((item) => typeof item === "string" && item.trim()).slice(0, limit)
-    : [];
-
-const refreshChatMemory = async (chatId, userId) => {
-  try {
-    const chat = await ChatHistoryModel.findOne({ _id: chatId, user: userId }).lean();
-    if (!chat || (chat.messages || []).length < 4) return;
-
-    const response = await fetch(`${FLUX_AI_URL}/memory/update`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chat._id.toString(),
-        user_id: userId,
-        workspace_id: chat.workspace,
-        project_id: chat.projectId || null,
-        existing_summary: chat.summary || "",
-        existing_key_facts: chat.keyFacts || [],
-        existing_open_questions: chat.openQuestions || [],
-        messages: (chat.messages || []).slice(-30).map((msg) => ({
-          role: msg.role,
-          content: msg.content,
-        })),
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("Flux-AI memory update error:", response.status, errorText);
-      return;
-    }
-
-    const update = await response.json();
-    await ChatHistoryModel.findOneAndUpdate(
-      { _id: chatId, user: userId },
-      {
-        $set: {
-          summary: typeof update.summary === "string" ? update.summary : "",
-          keyFacts: clampStrings(update.key_facts, 16),
-          openQuestions: clampStrings(update.open_questions, 10),
-        },
-      },
-    );
-
-    const memories = Array.isArray(update.memories) ? update.memories : [];
-    for (const memory of memories.slice(0, 8)) {
-      const content = typeof memory.content === "string" ? memory.content.trim() : "";
-      if (!content) continue;
-
-      const scope = memory.scope === "project" && chat.projectId ? "project" : "workspace";
-      const type = [
-        "project_summary",
-        "workspace_summary",
-        "preference",
-        "decision",
-        "entity",
-        "constraint",
-      ].includes(memory.type)
-        ? memory.type
-        : scope === "project"
-          ? "project_summary"
-          : "workspace_summary";
-
-      await AiMemoryModel.findOneAndUpdate(
-        {
-          user: userId,
-          workspace: chat.workspace,
-          projectId: scope === "project" ? chat.projectId : null,
-          scope,
-          type,
-          content,
-        },
-        {
-          $set: {
-            confidence:
-              typeof memory.confidence === "number"
-                ? Math.max(0, Math.min(1, memory.confidence))
-                : 0.7,
-            sourceChatId: chat._id.toString(),
-          },
-        },
-        { upsert: true, new: true },
-      );
-    }
-  } catch (err) {
-    console.error("Chat memory refresh failed:", err.message);
-  }
-};
 
 /**
  * GET /api/ai/chats?workspaceId=<id>
@@ -147,7 +42,7 @@ chatHistoryRouter.get("/chats", isAuthenticated, async (req, res) => {
       workspace: workspaceId,
       user: getUserId(req),
     })
-      .select("_id title messages updatedAt createdAt projectId documentIds")
+      .select("_id title messages updatedAt createdAt projectId")
       .sort({ updatedAt: -1 })
       .lean();
 
@@ -156,7 +51,6 @@ chatHistoryRouter.get("/chats", isAuthenticated, async (req, res) => {
       _id: c._id,
       title: c.title,
       projectId: c.projectId,
-      documentIds: c.documentIds || [],
       messageCount: c.messages.length,
       lastMessage: c.messages.at(-1)?.content?.slice(0, 120) || "",
       updatedAt: c.updatedAt,
@@ -321,9 +215,6 @@ chatHistoryRouter.patch(
         return res.status(404).json({ error: "Chat not found" });
       }
 
-      const userId = getUserId(req);
-      refreshChatMemory(req.params.chatId, userId);
-
       res.json({ chat });
     } catch (err) {
       console.error("ChatHistory append error:", err);
@@ -411,48 +302,5 @@ chatHistoryRouter.delete(
   },
 );
 
-/**
- * DELETE /api/ai/memory/clear
- * Body: { workspaceId }
- * Clears all AiMemory entries for this user in the specified workspace,
- * and clears summary/keyFacts/openQuestions on all of their chat histories.
- */
-chatHistoryRouter.delete(
-  "/memory/clear",
-  isAuthenticated,
-  async (req, res) => {
-    const { workspaceId } = req.body;
-    if (!workspaceId) {
-      return res.status(400).json({ error: "workspaceId is required" });
-    }
-
-    try {
-      const userId = getUserId(req);
-
-      // 1. Delete all workspace-scoped memory from AiMemoryModel
-      await AiMemoryModel.deleteMany({
-        user: userId,
-        workspace: workspaceId,
-      });
-
-      // 2. Clear summarized fields on all chat histories for this user in this workspace
-      await ChatHistoryModel.updateMany(
-        { workspace: workspaceId, user: userId },
-        {
-          $set: {
-            summary: "",
-            keyFacts: [],
-            openQuestions: [],
-          },
-        }
-      );
-
-      res.json({ message: "AI Memory cleared successfully" });
-    } catch (err) {
-      console.error("AI Memory clear error:", err);
-      res.status(500).json({ error: err.message });
-    }
-  }
-);
-
 export default chatHistoryRouter;
+

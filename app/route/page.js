@@ -28,7 +28,6 @@ import {
   deleteProjectFromCompilerReliable,
   buildRelativePath,
   bulkSyncToCompiler,
-  checkCompilerFolderExists,
 } from "../libs/compiler-sync.js";
 
 const pageRouter = Router();
@@ -754,17 +753,6 @@ pageRouter.post(
       const { dirtyFileIds = [], forceAll = false } = req.body;
       const dirtySet = new Set(dirtyFileIds.map(String));
 
-      // Check if project folder exists on the compiler.
-      // If it doesn't, we MUST force a full sync (shouldForceAll = true) to prevent compiling an empty project.
-      let shouldForceAll = forceAll;
-      if (!shouldForceAll) {
-        const folderCheck = await checkCompilerFolderExists(folderId);
-        if (!folderCheck.exists || folderCheck.files.length === 0) {
-          console.log(`[sync-incremental] Folder ${folderId} does not exist on compiler or is empty. Forcing full sync.`);
-          shouldForceAll = true;
-        }
-      }
-
       // Always filter parentPage = rootPage._id to avoid accidentally picking up
       // root-page documents (parentPage: null) which have no LaTeX content.
       const childFiles = await PageModel.find({ parentPage: rootPage._id })
@@ -776,7 +764,7 @@ pageRouter.post(
       const nameMap = deduplicateTexNames(childFiles);
 
       // Determine which text files to sync
-      const toSync = (!shouldForceAll && dirtySet.size > 0)
+      const toSync = (!forceAll && dirtySet.size > 0)
         ? childFiles.filter((f) => dirtySet.has(f._id.toString()))
         : childFiles; // full sync when forceAll or no dirty hint
 
@@ -796,7 +784,7 @@ pageRouter.post(
       );
 
       // On full sync (no dirty hint or forceAll), also sync binary assets from FileModel
-      if (shouldForceAll || dirtySet.size === 0) {
+      if (forceAll || dirtySet.size === 0) {
         const binaryFiles = await FileModel.find({
           pageId: rootPage._id,
           trashedAt: null,

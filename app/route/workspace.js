@@ -8,7 +8,6 @@ import PageVersionModel from "../schema/pageVersion.js";
 import ProjectModel from "../schema/project.js";
 import WorkspaceModel from "../schema/workspace.js";
 import RoleModel from "../schema/role.js";
-import UserModel from "../schema/user.js";
 import { StickyModel, StickyNoteLinkModel, LabelModel } from "../schema/sticky.js";
 import TaskModel from "../schema/task.js";
 import {
@@ -28,28 +27,6 @@ import {
 import { getIO } from "../libs/socket.js";
 
 const workspaceRouter = Router();
-
-const isObjectId = (value) => /^[0-9a-fA-F]{24}$/.test(String(value || ""));
-const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-const findWorkspaceRole = async (workspaceId, role) => {
-  const normalizedRole = String(role || "member").trim();
-  if (!normalizedRole) return null;
-
-  if (isObjectId(normalizedRole)) {
-    return RoleModel.findOne({
-      _id: normalizedRole,
-      workspace: workspaceId,
-      type: "workspace",
-    });
-  }
-
-  return RoleModel.findOne({
-    workspace: workspaceId,
-    type: "workspace",
-    name: { $regex: new RegExp(`^${escapeRegex(normalizedRole)}$`, "i") },
-  });
-};
 
 const populateWorkspaceMembers = (workspaceId) =>
   WorkspaceModel.findById(workspaceId).populate([
@@ -246,25 +223,13 @@ workspaceRouter.put(
   checkWorkspaceRole("owner", "admin"),
   async (req, res) => {
     const { userId, role = "member" } = req.body;
-    const normalizedRole = String(role || "member").trim();
-
-    if (!isObjectId(userId)) {
-      return res.status(400).json({ error: "Valid userId is required" });
-    }
 
     // Admin không thể thêm owner hoặc admin khác
-    if (
-      req.workspaceRole === "admin" &&
-      ["owner", "admin"].includes(normalizedRole.toLowerCase())
-    ) {
+    if (req.workspaceRole === "admin" && ["owner", "admin"].includes(role)) {
       return res.status(403).json({ error: "Cannot add owner or admin" });
     }
 
     const workspace = req.workspace;
-    const user = await UserModel.findById(userId).select("_id");
-    if (!user) {
-      return res.status(404).json({ error: "User not found" });
-    }
 
     // Kiểm tra đã là member chưa
     const existingMember = workspace.members.find(
@@ -275,11 +240,14 @@ workspaceRouter.put(
     }
 
     // Look up the Role document by name for this workspace
-    const roleDoc = await findWorkspaceRole(workspace._id, normalizedRole);
+    const roleDoc = await RoleModel.findOne({
+      workspace: workspace._id,
+      name: { $regex: new RegExp(`^${role}$`, "i") },
+    });
     if (!roleDoc) {
       return res
         .status(400)
-        .json({ error: `Role "${normalizedRole}" not found in this workspace` });
+        .json({ error: `Role "${role}" not found in this workspace` });
     }
 
     // Fetch the actual document to save (req.workspace is lean)
@@ -311,22 +279,10 @@ workspaceRouter.put(
   checkWorkspaceRole("owner", "admin"),
   async (req, res) => {
     const { userId, newRole } = req.body;
-    const normalizedRole = String(newRole || "").trim();
     const workspace = req.workspace;
 
-    if (!isObjectId(userId)) {
-      return res.status(400).json({ error: "Valid userId is required" });
-    }
-
-    if (!normalizedRole) {
-      return res.status(400).json({ error: "Role is required" });
-    }
-
     // Chỉ owner mới đổi được role thành admin/owner
-    if (
-      req.workspaceRole !== "owner" &&
-      ["owner", "admin"].includes(normalizedRole.toLowerCase())
-    ) {
+    if (req.workspaceRole !== "owner" && ["owner", "admin"].includes(newRole)) {
       return res
         .status(403)
         .json({ error: "Only owner can assign admin/owner role" });
@@ -338,11 +294,14 @@ workspaceRouter.put(
     }
 
     // Look up the Role document by name for this workspace
-    const roleDoc = await findWorkspaceRole(workspace._id, normalizedRole);
+    const roleDoc = await RoleModel.findOne({
+      workspace: workspace._id,
+      name: { $regex: new RegExp(`^${newRole}$`, "i") },
+    });
     if (!roleDoc) {
       return res
         .status(400)
-        .json({ error: `Role "${normalizedRole}" not found in this workspace` });
+        .json({ error: `Role "${newRole}" not found in this workspace` });
     }
 
     // Fetch the actual document to save
@@ -376,10 +335,6 @@ workspaceRouter.put(
   async (req, res) => {
     const { userId } = req.body;
     const workspace = req.workspace;
-
-    if (!isObjectId(userId)) {
-      return res.status(400).json({ error: "Valid userId is required" });
-    }
 
     // Populate role to check role name
     const populatedWorkspace = await WorkspaceModel.findById(
