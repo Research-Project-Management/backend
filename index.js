@@ -4,15 +4,31 @@ import dotenv from "dotenv";
 dotenv.config();
 import connectDB from "./app/config/db.js";
 import { connectRedis, redisClient } from "./app/config/redis.js";
-import { initSocket } from "./app/libs/socket.js";
-import authRouter from "./app/route/auth.js";
-import workspaceRouter from "./app/route/workspace.js";
-import projectRouter from "./app/route/project.js";
-import pageRouter from "./app/route/page.js";
-import taskRouter from "./app/route/task.js";
-import cycleRouter from "./app/route/cycle.js";
-import stickyRouter from "./app/route/sticky.js";
-import roleRouter from "./app/route/role.js";
+import { initSocket } from "./app/config/socket.js";
+
+// ── Contexts & DI Container ──────────────────────────────────────────────────
+import * as container from "./app/container.js";
+
+import { buildAuthRouter } from "./app/contexts/identity/auth/auth.route.js";
+import { buildRoleRouter } from "./app/contexts/identity/role/role.route.js";
+import { buildWorkspaceRouter } from "./app/contexts/organization/workspace/workspace.route.js";
+import { buildProjectRouter } from "./app/contexts/organization/project/project.route.js";
+import { buildTaskRouter } from "./app/contexts/planning/task/task.route.js";
+import { buildCycleRouter } from "./app/contexts/planning/cycle/cycle.route.js";
+import { buildPageRouter } from "./app/contexts/manuscript/page/page.route.js";
+import { buildVersionRouter } from "./app/contexts/manuscript/version/version.route.js";
+import { buildLatexRouter } from "./app/contexts/manuscript/latex/latex.route.js";
+import { buildCommentRouter } from "./app/contexts/collaboration/page-comment/page-comment.route.js";
+import { buildTaskCommentRouter } from "./app/contexts/collaboration/task-comment/task-comment.route.js";
+import { buildStickyRouter } from "./app/contexts/collaboration/sticky/sticky.route.js";
+import { buildLabelRouter } from "./app/contexts/shared/label/label.route.js";
+import { buildFileRouter } from "./app/contexts/shared/file/file.route.js";
+import { buildAiRouter } from "./app/contexts/intelligence/ai/ai.route.js";
+import { buildChatHistoryRouter } from "./app/contexts/intelligence/chat-history/chat-history.route.js";
+import { buildCollectionRouter } from "./app/contexts/library/collection/collection.route.js";
+import { buildPaperRouter } from "./app/contexts/library/paper/paper.route.js";
+import { buildProjectCollectionRouter } from "./app/contexts/library/project-collection/project-collection.route.js";
+
 import session from "express-session";
 import { RedisStore } from "connect-redis";
 import passport from "passport";
@@ -22,14 +38,9 @@ import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { RedisStore as RedisRateLimitStore } from "rate-limit-redis";
-import fileRouter from "./app/route/files.js";
-import aiRouter from "./app/route/ai.js";
-import chatHistoryRouter from "./app/route/chatHistory.js";
-import latexRouter from "./app/route/latex.js";
-import commentRouter from "./app/route/pageComment.js";
-import taskCommentRouter from "./app/route/taskComment.js";
-//config
+import { errorHandler } from "./app/middleware/error.middleware.js";
 
+//config
 const PORT = process.env.PORT;
 const app = express();
 connectDB(process.env.MONGODB_URI);
@@ -37,25 +48,15 @@ await connectRedis();
 app.set("trust proxy", 1);
 
 //middleware
-// Security headers
-app.use(
-  helmet({
-    contentSecurityPolicy: false, // Disable CSP for OAuth
-    crossOriginEmbedderPolicy: false,
-  }),
-);
+app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 
-// Rate limiting với Redis - chỉ áp dụng cho API, bỏ qua auth routes
 const limiter = rateLimit({
-  windowMs: 1 * 60 * 1000, // 1 phút
-  max: process.env.NODE_ENV === "production" ? 100 : 1000, // Development: 1000, Production: 100
+  windowMs: 1 * 60 * 1000,
+  max: process.env.NODE_ENV === "production" ? 100 : 1000,
   standardHeaders: true,
   legacyHeaders: false,
-  store: new RedisRateLimitStore({
-    sendCommand: (...args) => redisClient.sendCommand(args),
-  }),
+  store: new RedisRateLimitStore({ sendCommand: (...args) => redisClient.sendCommand(args) }),
   message: "Too many requests from this IP, please try again later.",
-  // Bỏ qua rate limit cho auth routes để tránh lỗi 429 khi OAuth
   skip: (req) => req.path.startsWith("/auth/"),
 });
 app.use(limiter);
@@ -78,12 +79,7 @@ app.use(
 
 app.use(flash());
 
-// Session với Redis store
-const redisStore = new RedisStore({
-  client: redisClient,
-  prefix: "rpm:sess:",
-  ttl: 7 * 24 * 60 * 60, // 7 ngày (giây)
-});
+const redisStore = new RedisStore({ client: redisClient, prefix: "rpm:sess:", ttl: 7 * 24 * 60 * 60 });
 
 app.use(
   session({
@@ -91,36 +87,55 @@ app.use(
     secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
-    cookie: {
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-    },
-
+    cookie: { maxAge: 7 * 24 * 60 * 60 * 1000, secure: process.env.NODE_ENV === "production", sameSite: process.env.NODE_ENV === "production" ? "none" : "lax" },
   }),
 );
 app.use(passport.initialize());
 app.use(passport.session());
 
 initPassportLocal(passport);
+
 //route
-app.get("/", (req, res) => {
-  res.json({ message: "Hello bro" });
-});
-app.use("/auth", authRouter);
-app.use("/api/workspace", workspaceRouter);
-app.use("/api", projectRouter);
-app.use("/api", pageRouter);
-app.use("/api", taskRouter);
-app.use("/api", cycleRouter);
-app.use("/api", stickyRouter);
-app.use("/api/files", fileRouter);
-app.use("/api/ai", aiRouter);
-app.use("/api/ai", chatHistoryRouter);
-app.use("/api/roles", roleRouter);
-app.use("/api/latex", latexRouter);
-app.use("/api", commentRouter);
-app.use("/api", taskCommentRouter);
+app.get("/", (req, res) => { res.json({ message: "Hello bro" }); });
+
+// Identity
+app.use("/auth", buildAuthRouter(container.authController));
+app.use("/api/roles", buildRoleRouter(container.roleController));
+
+// Organization
+app.use("/api/workspace", buildWorkspaceRouter(container.workspaceController));
+app.use("/api", buildProjectRouter(container.projectController));
+
+// Planning
+app.use("/api", buildTaskRouter(container.taskController));
+app.use("/api", buildCycleRouter(container.cycleController));
+
+// Manuscript
+app.use("/api", buildPageRouter(container.pageController));
+app.use("/api", buildVersionRouter(container.versionController));
+app.use("/api/latex", buildLatexRouter(container.latexController));
+
+// Collaboration
+app.use("/api", buildCommentRouter(container.pageCommentController));
+app.use("/api", buildTaskCommentRouter(container.taskCommentController));
+app.use("/api", buildStickyRouter(container.stickyController));
+
+// Shared
+app.use("/api", buildLabelRouter(container.labelController));
+app.use("/api/files", buildFileRouter(container.fileController));
+
+// Research
+app.use("/api/library", buildCollectionRouter(container.default));
+app.use("/api/library", buildPaperRouter(container.default));
+app.use("/api/library", buildProjectCollectionRouter(container.default));
+
+// Intelligence
+app.use("/api/ai", buildChatHistoryRouter(container.chatHistoryController));
+app.use("/api/ai", buildAiRouter(container.aiController));
+
+// Error handler 
+app.use(errorHandler);
+
 //listen
 const server = http.createServer(app);
 initSocket(server);

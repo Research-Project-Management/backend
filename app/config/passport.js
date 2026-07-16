@@ -1,6 +1,6 @@
 import { Strategy as LocalStrategy } from "passport-local";
 
-import UserModel from "../schema/user.js";
+import UserModel from "../contexts/identity/auth/auth.schema.js";
 
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import { Strategy as GitHubStrategy } from "passport-github2";
@@ -105,10 +105,10 @@ let initPassportLocal = (passport) => {
         callbackURL: process.env.API_URL + "/auth/github/callback",
       },
       async function (accessToken, refreshToken, profile, done) {
-        let user = await UserModel.findOne({ gihubId: profile.id });
+        let user = await UserModel.findOne({ githubId: profile.id });
         if (user == null) {
           let newUser = new UserModel({
-            gihubId: profile.id,
+            githubId: profile.id,
             name: profile.displayName,
           });
           user = await newUser.save();
@@ -126,7 +126,7 @@ let initPassportLocal = (passport) => {
       },
       async (email, password, done) => {
         try {
-          let user = await UserModel.findOne({ email });
+          let user = await UserModel.findOne({ email }).select("+password");
           if (!user) {
             return done(null, false);
           }

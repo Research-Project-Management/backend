@@ -3,4 +3,9 @@ pnpm-lock.yaml
 pnpm-workspace.yaml
 .env
 .dev.env
+tests/
+scripts/
+dist/
+build/
+
 
