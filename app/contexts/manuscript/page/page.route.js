@@ -17,6 +17,9 @@ export const buildPageRouter = (pageController) => {
   pageRouter.put("/project/:projectId/pages/:pageId", isAuthenticated, checkPageRole("manager", "member"), validate(UpdatePageDto), pageController.updatePage);
   pageRouter.delete("/project/:projectId/pages/:pageId", isAuthenticated, checkPageRole("manager", "member"), pageController.deletePage);
   pageRouter.post("/project/:projectId/pages/:pageId/duplicate", isAuthenticated, checkPageRole("manager", "member"), pageController.duplicatePage);
+  pageRouter.put("/project/:projectId/pages/:pageId/main-file", isAuthenticated, checkPageRole("manager", "member"), pageController.setMainFile);
+  pageRouter.put("/project/:projectId/pages/:pageId/thumbnail", isAuthenticated, checkPageRole("manager", "member"), pageController.updateThumbnail);
+  pageRouter.post("/project/:projectId/pages/:pageId/sync-project", isAuthenticated, checkPageRole("manager", "member"), pageController.syncProject);
   
   // Legacy / Unused Assets routes (maintained for backwards-compatibility using checkPageRole)
   pageRouter.post("/project/:projectId/pages/:pageId/assets", isAuthenticated, checkPageRole("manager", "member"), pageController.uploadAsset);
@@ -31,6 +34,9 @@ export const buildPageRouter = (pageController) => {
   pageRouter.post("/pages/:pageId/duplicate", isAuthenticated, checkPageRole("manager", "member"), pageController.duplicatePage);
   pageRouter.get("/pages/:pageId/files", isAuthenticated, checkPageRole("manager", "member", "viewer"), pageController.getChildPages);
   pageRouter.post("/pages/:pageId/files", isAuthenticated, checkPageRole("manager", "member"), pageController.createChildPage);
+  pageRouter.put("/pages/:pageId/main-file", isAuthenticated, checkPageRole("manager", "member"), pageController.setMainFile);
+  pageRouter.put("/pages/:pageId/thumbnail", isAuthenticated, checkPageRole("manager", "member"), pageController.updateThumbnail);
+  pageRouter.post("/pages/:pageId/sync-project", isAuthenticated, checkPageRole("manager", "member"), pageController.syncProject);
 
   return pageRouter;
 }

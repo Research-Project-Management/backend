@@ -4,7 +4,7 @@ import { checkProjectRole } from "../../../middleware/project.middleware.js";
 import { checkWorkspaceRole } from "../../../middleware/workspace.middleware.js";
 import { checkTaskRole } from "../../../middleware/task.middleware.js";
 import { validate } from "../../../middleware/validate.middleware.js";
-import { CreateTaskDto, UpdateTaskDto, AssignTaskDto, ReorderTaskDto } from "./task.dto.js";
+import { CreateTaskDto, UpdateTaskDto, AssignTaskDto, ReorderTaskDto, BulkUpdateTaskDto } from "./task.dto.js";
 
 export const buildTaskRouter = (taskController) => {
   const taskRouter = Router();
@@ -20,6 +20,7 @@ export const buildTaskRouter = (taskController) => {
   taskRouter.put("/project/:projectId/tasks/:taskId/assign", isAuthenticated, checkTaskRole("manager", "member"), validate(AssignTaskDto), taskController.assignTask);
   taskRouter.post("/project/:projectId/tasks/:taskId/duplicate", isAuthenticated, checkTaskRole("manager", "member"), taskController.duplicateTask);
   taskRouter.put("/project/:projectId/tasks/reorder/batch", isAuthenticated, checkProjectRole("manager", "member"), validate(ReorderTaskDto), taskController.reorderTask);
+  taskRouter.put("/project/:projectId/tasks/bulk", isAuthenticated, checkProjectRole("manager", "member"), validate(BulkUpdateTaskDto), taskController.bulkUpdateTasks);
 
   // Global-context task routes (alias paths mapped from frontend queries)
   taskRouter.get("/tasks/:taskId", isAuthenticated, checkTaskRole("manager", "member", "viewer"), taskController.getTask);

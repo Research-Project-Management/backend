@@ -20,14 +20,18 @@ export const UpdateWorkspaceDto = {
 
 export const AddWorkspaceMemberDto = {
   body: z.object({
-    userId: z.string().min(1, "User ID is required"),
-    roleId: z.string().min(1, "Role ID is required"),
+    userId: z.string().min(1, "User ID is required").optional(),
+    roleId: z.string().optional(),
+    role: z.string().optional(),
+    newRole: z.string().optional(),
   }),
 };
 
 export const UpdateWorkspaceMemberDto = {
   body: z.object({
-    roleId: z.string().min(1, "Role ID is required"),
+    roleId: z.string().optional(),
+    role: z.string().optional(),
+    newRole: z.string().optional(),
   }),
 };
 

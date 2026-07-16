@@ -41,6 +41,13 @@ export const buildFileRouter = (fileController) => {
   fileRouter.delete("/:fileId/permanent", isAuthenticated, fileController.permanentlyDeleteFile);
   fileRouter.put("/:fileId/share", isAuthenticated, fileController.shareFile);
   fileRouter.put("/:fileId/rename", isAuthenticated, fileController.renameFile);
+  fileRouter.put("/:fileId/move", isAuthenticated, fileController.moveFile);
+  fileRouter.put("/:fileId/metadata", isAuthenticated, fileController.updateMetadata);
+
+  // Crossref API
+  fileRouter.get("/crossref/search", isAuthenticated, fileController.crossrefSearch);
+  fileRouter.get(/^\/crossref\/doi\/(.+)/, isAuthenticated, fileController.crossrefDoi);
+
 
   // R2 assets proxy
   fileRouter.get("/r2/{*key}", fileController.proxyR2);

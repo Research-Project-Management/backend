@@ -34,8 +34,15 @@ export class FileController {
     this.permanentlyDeleteFile = asyncHandler(async (req, res) => { await this.fileService.permanentlyDeleteFile(req.params.fileId); res.status(204).end(); });
     this.shareFile = asyncHandler(async (req, res) => { res.json({ file: await this.fileService.shareFile(req.params.fileId, req.body) }); });
     this.renameFile = asyncHandler(async (req, res) => { res.json({ file: await this.fileService.renameFile(req.params.fileId, req.body.name) }); });
+    this.moveFile = asyncHandler(async (req, res) => { res.json({ file: await this.fileService.moveFile(req.params.fileId, req.body.parentId) }); });
+    this.updateMetadata = asyncHandler(async (req, res) => { res.json({ file: await this.fileService.updateMetadata(req.params.fileId, req.body.metaData) }); });
+
+    // Crossref
+    this.crossrefSearch = asyncHandler(async (req, res) => { res.json(await this.fileService.crossrefSearch(req.query.query, req.query.rows)); });
+    this.crossrefDoi = asyncHandler(async (req, res) => { res.json(await this.fileService.crossrefDoi(req.params[0])); });
   }
 }
+
 
 
 

@@ -1,7 +1,9 @@
 export class CollectionService {
-  constructor({ collectionRepository }) {
+  constructor({ collectionRepository, paperRepository }) {
     this.collectionRepository = collectionRepository;
+    this.paperRepository = paperRepository;
   }
+
 
   async getCollections(workspaceId) {
     const collections = await this.collectionRepository.findByWorkspace(workspaceId);
@@ -13,6 +15,13 @@ export class CollectionService {
       paperCount: countMap.get(c._id.toString()) ?? 0,
     }));
   }
+
+  async getCollection(workspaceId, collectionId) {
+    const collection = await this.collectionRepository.findById(collectionId, workspaceId);
+    if (!collection) throw new Error("Collection not found");
+    return collection;
+  }
+
 
   async createCollection(workspaceId, userId, dto) {
     if (!dto.name) throw new Error("Collection name is required");
@@ -61,10 +70,13 @@ export class CollectionService {
     const hasChildren = await this.collectionRepository.existsWithParent(collection._id);
     if (hasChildren) throw new Error("Cannot delete collection with sub-collections");
 
-    const hasPapers = await this.collectionRepository.hasPapers(collection._id);
-    if (hasPapers) throw new Error("Cannot delete collection containing papers");
+    // Soft-delete all papers in this collection
+    if (this.paperRepository && this.paperRepository.softDeleteByCollection) {
+      await this.paperRepository.softDeleteByCollection(collection._id);
+    }
 
     await collection.deleteOne();
   }
+
 }
 

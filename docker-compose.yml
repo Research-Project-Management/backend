@@ -32,6 +32,16 @@ services:
     networks:
       - rpm-network
 
+  # Redis Cache / Message Broker
+  redis:
+    image: redis:alpine
+    container_name: rpm-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    networks:
+      - rpm-network
+
 networks:
   rpm-network:
     driver: bridge

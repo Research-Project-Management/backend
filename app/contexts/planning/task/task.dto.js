@@ -62,3 +62,11 @@ export const ReorderTaskDto = {
     destinationColumnId: z.string().min(1),
   }),
 };
+
+export const BulkUpdateTaskDto = {
+  body: z.object({
+    taskIds: z.array(z.string().min(1)).min(1, "taskIds must not be empty"),
+    data: z.record(z.any()),
+  }),
+};
+

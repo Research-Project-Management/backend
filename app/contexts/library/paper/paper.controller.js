@@ -1,8 +1,25 @@
 import { asyncHandler } from "../../../lib/asyncHandler.js";
 
 export class PaperController {
-  constructor({ paperService }) {
+  constructor({ paperService, collectionService }) {
     this.paperService = paperService;
+    this.collectionService = collectionService;
+
+    this.getCollectionPapers = asyncHandler(async (req, res) => {
+      const collection = await this.collectionService.getCollection(req.workspace._id, req.params.collectionId);
+      const papers = await this.paperService.getPapersByCollection(req.workspace._id, req.params.collectionId);
+      res.json({ collection, papers });
+    });
+
+    this.uploadPaperToCollection = asyncHandler(async (req, res) => {
+      const collection = await this.collectionService.getCollection(req.workspace._id, req.params.collectionId);
+      const paper = await this.paperService.uploadPaper(
+        req.workspace._id,
+        req.user._id,
+        { ...req.body, collectionId: req.params.collectionId }
+      );
+      res.status(201).json({ paper });
+    });
 
     this.getPapers = asyncHandler(async (req, res) => {
       const papers = await this.paperService.getPapers(req.workspace._id);

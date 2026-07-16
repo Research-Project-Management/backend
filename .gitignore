@@ -7,5 +7,6 @@ tests/
 scripts/
 dist/
 build/
+coverage/
 
 

@@ -129,6 +129,11 @@ export class PaperService {
     return this.paperRepository.findByWorkspace(workspaceId);
   }
 
+  async getPapersByCollection(workspaceId, collectionId) {
+    return this.paperRepository.findByCollection(workspaceId, collectionId);
+  }
+
+
   async uploadPaper(workspaceId, userId, dto) {
     if (!dto.title || !dto.filename || !dto.fileUrl) {
       throw new Error("Missing required paper data");

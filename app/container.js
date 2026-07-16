@@ -46,5 +46,7 @@ export const labelController = container.resolve("labelController");
 export const fileController = container.resolve("fileController");
 export const aiController = container.resolve("aiController");
 export const chatHistoryController = container.resolve("chatHistoryController");
-
+export const collectionController = container.resolve("collectionController");
+export const paperController = container.resolve("paperController");
+export const projectCollectionController = container.resolve("projectCollectionController");
 export default container;

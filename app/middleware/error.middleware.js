@@ -31,6 +31,7 @@ export class ErrorStrategyRegistry {
       success: false,
       error: "Internal Server Error",
       ...(isDev && { detail: err.message, stack: err.stack }),
+      ...(process.env.NODE_ENV === "test" && { stack: err.stack }),
     });
   }
 }

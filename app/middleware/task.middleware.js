@@ -9,6 +9,10 @@ export const checkTaskRole = (...requiredRoles) => {
       const task = await TaskModel.findById(req.params.taskId);
       if (!task) return res.status(404).json({ error: "Task not found" });
 
+      if (req.params.projectId && task.project.toString() !== req.params.projectId) {
+        return res.status(400).json({ error: "Task does not belong to the specified project" });
+      }
+
       const project = await ProjectModel.findById(task.project).populate("members.role");
       if (!project) return res.status(404).json({ error: "Project not found" });
 

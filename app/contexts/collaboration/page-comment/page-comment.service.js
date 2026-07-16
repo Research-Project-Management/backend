@@ -27,6 +27,7 @@ export class PageCommentService {
     if (!comment) throw new AppError("Comment not found", 404);
     if (content !== undefined) {
       if (comment.author.toString() !== userId.toString()) throw new AppError("Not the comment author", 403);
+      if (comment.content !== content) comment.isEdited = true;
       comment.content = content;
     }
     if (status !== undefined) comment.status = status;

@@ -28,7 +28,7 @@ export class CycleService {
 
   async createCycle(projectId, data, userId) {
     await this._validateCycle(projectId, data.status, data.startDate, data.endDate);
-    const cycle = await this.cycleRepository.create({ ...data, project: projectId, createdBy: userId });
+    const cycle = await this.cycleRepository.create({ ...data, project: projectId, author: userId });
     getIO()?.to(`project:${projectId}`).emit("cycle:created", { cycle });
     return cycle;
   }

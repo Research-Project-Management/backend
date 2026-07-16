@@ -22,6 +22,7 @@ const pageCommentSchema = new mongoose.Schema(
     line: { type: Number, default: null },
     /** Optional: end line number for range comments. */
     lineEnd: { type: Number, default: null },
+    isEdited: { type: Boolean, default: false },
     status: {
       type: String,
       enum: ["open", "resolved"],

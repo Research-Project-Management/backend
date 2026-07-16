@@ -3,9 +3,8 @@ import { checkProjectRole } from "../../../middleware/project.middleware.js";
 import { validate } from "../../../middleware/validate.middleware.js";
 import { CreateProjectCollectionDto, ImportLibraryCollectionDto, AddPaperToProjectCollectionDto } from "./project-collection.dto.js";
 
-export const buildProjectCollectionRouter = (container) => {
+export const buildProjectCollectionRouter = (controller) => {
   const pcRouter = Router();
-  const controller = container.resolve("projectCollectionController");
 
   pcRouter.get(
     "/project/:projectId/collections",

@@ -13,6 +13,10 @@ export const checkPageRole = (...requiredRoles) => async (req, res, next) => {
     const page = await PageModel.findById(req.params.pageId);
     if (!page) throw new AppError("Page not found", 404);
 
+    if (req.params.projectId && page.project.toString() !== req.params.projectId) {
+      throw new AppError("Page does not belong to the specified project", 400);
+    }
+
     const project = await ProjectModel.findById(page.project);
     if (!project) throw new AppError("Project not found", 404);
 

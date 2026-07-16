@@ -104,9 +104,9 @@ export class TaskService {
   }
 
   async bulkUpdateTasks(project, body, userId, projectRole) {
-    const { taskIds, updates } = body;
+    const { taskIds, data } = body;
     if (!Array.isArray(taskIds) || taskIds.length === 0) throw new AppError("taskIds required", 400);
-    await this.taskRepository.bulkUpdate(taskIds, updates);
+    await this.taskRepository.bulkUpdate(taskIds, data);
     return { updated: taskIds.length };
   }
 

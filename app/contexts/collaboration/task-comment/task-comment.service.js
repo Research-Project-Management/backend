@@ -56,6 +56,7 @@ export class TaskCommentService {
     if (comment.project.toString() !== project._id.toString()) throw new AppError("Insufficient permissions", 403);
     if (comment.author.toString() !== userId.toString()) throw new AppError("Not the comment author", 403);
     if (content !== undefined) {
+      if (comment.content !== content) comment.isEdited = true;
       comment.content = content;
     }
     await comment.save();

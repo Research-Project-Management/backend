@@ -24,6 +24,7 @@ const taskCommentSchema = new mongoose.Schema(
 		project: { type: ObjectId, ref: "Project", required: true, index: true },
 		author: { type: ObjectId, ref: "User", required: true, index: true },
 		content: { type: String, required: true, trim: true, maxlength: 5000 },
+		isEdited: { type: Boolean, default: false },
 		replies: { type: [taskReplySchema], default: [] },
 		reactions: { type: [taskReactionSchema], default: [] },
 	},

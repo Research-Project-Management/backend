@@ -125,9 +125,9 @@ app.use("/api", buildLabelRouter(container.labelController));
 app.use("/api/files", buildFileRouter(container.fileController));
 
 // Research
-app.use("/api/library", buildCollectionRouter(container.default));
-app.use("/api/library", buildPaperRouter(container.default));
-app.use("/api/library", buildProjectCollectionRouter(container.default));
+app.use("/api/library", buildCollectionRouter(container.collectionController));
+app.use("/api/library", buildPaperRouter(container.paperController));
+app.use("/api/library", buildProjectCollectionRouter(container.projectCollectionController));
 
 // Intelligence
 app.use("/api/ai", buildChatHistoryRouter(container.chatHistoryController));

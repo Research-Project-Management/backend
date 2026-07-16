@@ -5,6 +5,38 @@ import { syncFileToCompilerReliable } from "../../../config/compiler-sync.js";
 import { AppError } from "../../../lib/AppError.js";
 
 const ALLOWED_UPLOAD_PREFIXES = [/^workspace\//, /^project\//];
+const CROSSREF_API = "https://api.crossref.org";
+
+const firstString = (...args) => args.find((a) => typeof a === "string" && a.trim() !== "");
+
+const parseCrossrefWork = (item) => {
+  if (!item.title || !item.title.length) return null;
+  let year = null;
+  const dates = [
+    item["published-print"]?.["date-parts"]?.[0]?.[0],
+    item["published-online"]?.["date-parts"]?.[0]?.[0],
+    item["issued"]?.["date-parts"]?.[0]?.[0],
+  ];
+  for (const d of dates) {
+    if (d && !isNaN(d)) { year = parseInt(d, 10); break; }
+  }
+
+  return {
+    title: item.title[0],
+    authors: (item.author || []).map((a) => {
+      if (a.family && a.given) return `${a.family}, ${a.given}`;
+      if (a.family) return a.family;
+      if (a.name) return a.name;
+      return "Unknown";
+    }),
+    doi: item.DOI || "",
+    journal: firstString(item["container-title"]?.[0], item.publisher),
+    year,
+    type: item.type || "",
+    abstract: item.abstract?.replace(/<[^>]+>/g, "") || "",
+    url: item.URL || item.url || "",
+  };
+};
 
 export class FileService {
   constructor({ fileRepository, projectRepository }) {
@@ -178,6 +210,58 @@ export class FileService {
     await file.save();
     return file;
   }
+
+  async moveFile(fileId, parentId) {
+    const file = await this.repo.findById(fileId);
+    if (!file) throw new AppError("File not found", 404);
+    file.parent = parentId || null;
+    await file.save();
+    return file;
+  }
+
+  async updateMetadata(fileId, metaData) {
+    const file = await this.repo.findById(fileId);
+    if (!file) throw new AppError("File not found", 404);
+    file.metaData = metaData;
+    await file.save();
+    return file;
+  }
+
+  async crossrefSearch(query, rows = 5) {
+    const url = `${CROSSREF_API}/works?query=${encodeURIComponent(query)}&rows=${rows}&select=DOI,title,author,editor,issued,published,published-print,published-online,container-title,publisher,publisher-location,ISSN,ISBN,volume,issue,page,type,abstract,URL,score,language,short-container-title,short-title,license,subject`;
+    const response = await fetch(url, { headers: { "User-Agent": "Flux/1.0 (mailto:support@aisq.dev)" } });
+    if (!response.ok) throw new AppError(`Crossref API error: ${response.status}`, response.status);
+    const data = await response.json();
+    const items = data?.message?.items || [];
+    const totalResults = data?.message?.["total-results"] || 0;
+    return { works: items.map(parseCrossrefWork).filter(Boolean), totalResults };
+  }
+
+  async crossrefDoi(rawDoi) {
+    let cleanDoi = rawDoi.trim();
+    try {
+      let decoded = decodeURIComponent(cleanDoi).trim();
+      if (decoded.includes("%")) decoded = decodeURIComponent(decoded).trim();
+      cleanDoi = decoded;
+    } catch (e) {}
+    cleanDoi = cleanDoi.replace(/^(https?:\/\/)?(dx\.)?doi\.org\//i, "").replace(/^doi:/i, "").trim();
+
+    const url = `https://doi.org/${cleanDoi}`;
+    const response = await fetch(url, { headers: { Accept: "application/vnd.citationstyles.csl+json", "User-Agent": "Flux/1.0 (mailto:support@aisq.dev)" } });
+    
+    if (response.ok) {
+      const data = await response.json();
+      return { work: parseCrossrefWork(data) };
+    }
+
+    const fallbackUrl = `${CROSSREF_API}/works/${encodeURIComponent(cleanDoi)}`;
+    const fallbackResponse = await fetch(fallbackUrl, { headers: { "User-Agent": "Flux/1.0 (mailto:support@aisq.dev)" } });
+    if (!fallbackResponse.ok) throw new AppError(`Crossref API error: ${fallbackResponse.status}`, fallbackResponse.status);
+    
+    const fallbackData = await fallbackResponse.json();
+    return { work: parseCrossrefWork(fallbackData?.message || {}) };
+  }
+
 
   async proxyR2(key, res) {
     try { const r2Resp = await r2.send(new GetObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: key })); if (r2Resp.ContentType) res.set("Content-Type", r2Resp.ContentType); r2Resp.Body.pipe(res); }

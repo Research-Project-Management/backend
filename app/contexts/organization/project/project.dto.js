@@ -20,14 +20,16 @@ export const UpdateProjectDto = {
 
 export const AddProjectMemberDto = {
   body: z.object({
-    userId: z.string().min(1, "User ID is required"),
+    userId: z.string().min(1, "User ID is required").optional(),
     role: z.string().optional(),
+    newRole: z.string().optional(),
   }),
 };
 
 export const UpdateProjectMemberDto = {
   body: z.object({
     role: z.string().optional(),
+    newRole: z.string().optional(),
   }),
 };
 
