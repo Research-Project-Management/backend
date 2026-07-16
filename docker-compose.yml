@@ -3,41 +3,21 @@ version: "3.8"
 services:
   # Node.js Backend Application
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: rpm-backend
+    image: ghcr.io/research-project-management/backend:latest
+    container_name: flux-backend
+    command: node index.js
     ports:
       - "${PORT:-3000}:3000"
-    environment:
-      - NODE_ENV=${NODE_ENV:-development}
-      - PORT=3000
-      - MONGODB_URI=${MONGODB_URI}
-      - SESSION_SECRET=${SESSION_SECRET:-change-this-secret-in-production}
-      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
-      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
-      - GITHUB_CALLBACK_URL=${GITHUB_CALLBACK_URL}
-      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-      - GOOGLE_CALLBACK_URL=${GOOGLE_CALLBACK_URL}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - AWS_REGION=${AWS_REGION}
-      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
-      - R2_BUCKET_NAME=${R2_BUCKET_NAME}
+    env_file:
+      - .env
     restart: unless-stopped
-    volumes:
-      - ./:/app
-      - /app/node_modules
     networks:
       - rpm-network
 
   # Redis Cache / Message Broker
   redis:
     image: redis:alpine
-    container_name: rpm-redis
-    ports:
-      - "6379:6379"
+    container_name: flux-redis
     restart: unless-stopped
     networks:
       - rpm-network

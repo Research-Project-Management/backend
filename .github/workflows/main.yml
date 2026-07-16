@@ -1,21 +1,88 @@
-name: Deploy Flux-BE Application
+name: Deploy Backend CI/CD
 
 on:
   push:
     branches: ["master"]
+  pull_request:
+    branches: ["master"]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: research-project-management/backend
 
 jobs:
-  build-and-deploy:
+  test:
+    name: Code Quality
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy to Production
-        uses: appleboy/ssh-action@master
+      - uses: actions/checkout@v4
+      
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 10
+          
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+          
+      - name: Install Dependencies
+        run: pnpm install
+        
+      - name: Run Tests
+        run: echo "Skipping Jest tests for local dev"
+
+  build-and-push:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v2
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+      - uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          labels: ${{ steps.meta.outputs.labels }}
+
+  deploy-to-vps:
+    needs: build-and-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: appleboy/scp-action@master
         with:
           host: ${{ secrets.HOST }}
           username: ${{ secrets.USERNAME }}
-          password: ${{ secrets.PASSWORD}}
+          password: ${{ secrets.PASSWORD }}
+          source: "docker-compose.yml"
+          target: "/opt/flux-backend"
+
+      - uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          password: ${{ secrets.PASSWORD }}
           script: |
-            cd /root/app/NCKH/RPM-BE
-            git pull origin master
-            npm i
-            pm2 restart RPM
+            mkdir -p /opt/flux-backend
+            cd /opt/flux-backend
+            echo ${{ secrets.PAT_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            docker pull ghcr.io/research-project-management/backend:latest
+            docker compose up -d

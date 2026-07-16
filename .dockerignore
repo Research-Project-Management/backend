@@ -9,6 +9,8 @@ pnpm-debug.log*
 coverage
 *.lcov
 .nyc_output
+tests
+scripts
 
 # Production
 dist

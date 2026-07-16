@@ -1,12 +1,8 @@
 node_modules
-pnpm-lock.yaml
-pnpm-workspace.yaml
 .env
+.env.production
 .dev.env
-tests/
 scripts/
 dist/
 build/
 coverage/
-
-
