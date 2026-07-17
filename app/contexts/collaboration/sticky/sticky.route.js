@@ -1,4 +1,4 @@
-﻿import { Router } from "express";
+import { Router } from "express";
 import { isAuthenticated } from "../../../middleware/auth.middleware.js";
 import { checkWorkspaceRole } from "../../../middleware/workspace.middleware.js";
 import { checkProjectRole } from "../../../middleware/project.middleware.js";
@@ -14,6 +14,7 @@ stickyRouter.get("/workspace/:workspaceId/stickies", m, stickyController.getWork
 stickyRouter.post("/workspace/:workspaceId/stickies", m, validate(CreateStickyDto), stickyController.createSticky);
 stickyRouter.put("/workspace/:workspaceId/stickies/reorder", m, validate(ReorderStickiesDto), stickyController.reorderWorkspaceStickies);
 stickyRouter.get("/project/:projectId/stickies", pw, stickyController.getProjectStickies);
+stickyRouter.post("/project/:projectId/stickies", pw, validate(CreateStickyDto), stickyController.createSticky);
 stickyRouter.put("/project/:projectId/stickies/reorder", pw, validate(ReorderStickiesDto), stickyController.reorderProjectStickies);
 stickyRouter.put("/stickies/:stickyId", isAuthenticated, validate(UpdateStickyDto), stickyController.updateSticky);
 stickyRouter.delete("/stickies/:stickyId", isAuthenticated, stickyController.deleteSticky);

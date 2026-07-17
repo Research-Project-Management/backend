@@ -71,6 +71,7 @@ app.use(
       "http://localhost:2916",
       "http://localhost:3000",
       "https://flux.aisq.dev",
+      "https://flux.aisq.site",
       ...(process.env.ORIGINS ? process.env.ORIGINS.split(",").map((o) => o.trim()) : []),
     ],
     credentials: true,
@@ -111,7 +112,7 @@ app.use("/api", buildTaskRouter(container.taskController));
 app.use("/api", buildCycleRouter(container.cycleController));
 
 // Manuscript
-app.use("/api", buildPageRouter(container.pageController));
+app.use("/api", buildPageRouter(container.pageController, container.latexController));
 app.use("/api", buildVersionRouter(container.versionController));
 app.use("/api/latex", buildLatexRouter(container.latexController));
 

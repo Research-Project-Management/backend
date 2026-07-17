@@ -13,6 +13,11 @@ const collectionSchema = new mongoose.Schema(
       ref: "Workspace",
       required: true,
     },
+    project: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Project",
+      default: null,
+    },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

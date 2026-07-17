@@ -10,10 +10,15 @@ export class ProjectService {
     this.roleRepository = roleRepository;
   }
 
-  getProjects(workspaceId, userId) { return this.projectRepository.findByWorkspace(workspaceId); }
+  getProjects(workspaceId, userId, workspaceRole) {
+    const isPrivileged = workspaceRole === "owner" || workspaceRole === "admin";
+    const query = { workspace: workspaceId };
+    if (!isPrivileged) query["members.user"] = userId;
+    return this.projectRepository.model.find(query);
+  }
 
   async createProject(workspaceId, data, userId) {
-    const { name, description, color, avatar } = data;
+    const { name, description, color, avatar, modules } = data;
     const ownerRole = await this.roleRepository.findByWorkspaceAndName(workspaceId, "Owner");
     const roleId = ownerRole ? ownerRole._id : null;
 
@@ -22,6 +27,7 @@ export class ProjectService {
       description,
       color,
       avatar,
+      modules,
       workspace: workspaceId,
       createdBy: userId,
       members: [{ user: userId, role: roleId }],
@@ -35,8 +41,25 @@ export class ProjectService {
   }
 
   async getProjectOverview(projectId, userId) {
-    const [project, fileCount, taskCount] = await Promise.all([this.projectRepository.findByIdPopulated(projectId), this.fileRepository.countByProject(projectId), this.taskRepository.countByProject(projectId)]);
-    return { project, fileCount, taskCount };
+    const project = await this.projectRepository.findByIdPopulated(projectId);
+    
+    const files = await this.fileRepository.findAllActiveByProject(projectId);
+    const fileCount = files.length;
+    const totalSize = files.reduce((acc, f) => acc + (f.size || 0), 0);
+    
+    const tasks = await this.taskRepository.findByProject(projectId);
+    const taskCount = tasks.length;
+    const completedTasks = tasks.filter(t => t.completed).length;
+    const inProgressTasks = tasks.filter(t => t.columnId === "in-progress" && !t.completed).length;
+    const pendingTasks = taskCount - completedTasks - inProgressTasks;
+
+    const stats = {
+      files: { count: fileCount, totalSize, recent: files.slice(0, 5) },
+      tasks: { total: taskCount, completed: completedTasks, pending: pendingTasks, inProgress: inProgressTasks },
+      members: project.members.length
+    };
+
+    return { project, stats };
   }
 
   async updateProject(currentProject, updates, userId) {

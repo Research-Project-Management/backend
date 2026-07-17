@@ -28,6 +28,9 @@ export class FileRepository {
   updateById(id, data) { return this.model.findByIdAndUpdate(id, data, { new: true }); }
   deleteById(id) { return this.model.findByIdAndDelete(id); }
   countByProject(projectId) { return this.model.countDocuments({ project: projectId, trashedAt: null }); }
+  findAllActiveByProject(projectId) {
+    return this.model.find({ project: projectId, trashedAt: null }).sort({ createdAt: -1 });
+  }
 
   aggregateProjectStats(projectId) {
     return this.model.aggregate([

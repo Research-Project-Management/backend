@@ -5,15 +5,21 @@ export class CollectionController {
     this.collectionService = collectionService;
 
     this.getCollections = asyncHandler(async (req, res) => {
-      const collections = await this.collectionService.getCollections(req.workspace._id);
-      res.json({ collections });
+      const workspaceId = req.workspace ? req.workspace._id : req.project?.workspace;
+      const collections = await this.collectionService.getCollections(workspaceId);
+      // Filter by project if projectId is present
+      const filtered = req.project ? collections.filter(c => c.project?.toString() === req.project._id.toString()) : collections;
+      res.json({ collections: filtered });
     });
 
     this.createCollection = asyncHandler(async (req, res) => {
+      const workspaceId = req.workspace ? req.workspace._id : req.project?.workspace;
+      const projectId = req.project ? req.project._id : req.body.projectId;
+      const body = { ...req.body, project: projectId };
       const collection = await this.collectionService.createCollection(
-        req.workspace._id,
+        workspaceId,
         req.user._id,
-        req.body
+        body
       );
       res.status(201).json({ collection });
     });

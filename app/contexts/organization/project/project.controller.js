@@ -3,8 +3,8 @@ import { asyncHandler } from "../../../lib/asyncHandler.js";
 export class ProjectController {
   constructor({ projectService }) {
     this.projectService = projectService;
-    this.getProjects = asyncHandler(async (req, res) => { res.json({ projects: await this.projectService.getProjects(req.params.workspaceId, req.user._id) }); });
-    this.createProject = asyncHandler(async (req, res) => { res.status(201).json({ project: await this.projectService.createProject(req.params.workspaceId, req.body, req.user._id) }); });
+    this.getProjects = asyncHandler(async (req, res) => { res.json({ projects: await this.projectService.getProjects(req.workspace._id, req.user._id, req.workspaceRole) }); });
+    this.createProject = asyncHandler(async (req, res) => { res.status(201).json({ project: await this.projectService.createProject(req.workspace._id, req.body, req.user._id) }); });
     this.getProject = asyncHandler(async (req, res) => { res.json({ project: req.project, yourRole: req.projectRole }); });
     this.getProjectOverview = asyncHandler(async (req, res) => { res.json(await this.projectService.getProjectOverview(req.project._id, req.user._id)); });
     this.updateProject = asyncHandler(async (req, res) => { res.json({ project: await this.projectService.updateProject(req.project, req.body, req.user._id) }); });

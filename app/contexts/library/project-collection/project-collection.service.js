@@ -67,7 +67,7 @@ export class ProjectCollectionService {
     const pc = await this.projectCollectionRepository.findById(pcId, projectId);
     if (!pc) throw new Error("Project collection not found");
 
-    const alreadyAdded = pc.papers.some((p) => p.paper.toString() === dto.paperId);
+    const alreadyAdded = pc.papers.some((p) => (p.paper._id ? p.paper._id.toString() : p.paper.toString()) === dto.paperId);
     if (alreadyAdded) throw new Error("Paper already in this collection");
 
     pc.papers.push({
@@ -84,7 +84,7 @@ export class ProjectCollectionService {
     const pc = await this.projectCollectionRepository.findById(pcId, projectId);
     if (!pc) throw new Error("Project collection not found");
 
-    pc.papers = pc.papers.filter((p) => p.paper.toString() !== paperId);
+    pc.papers = pc.papers.filter((p) => (p.paper._id ? p.paper._id.toString() : p.paper.toString()) !== paperId);
     await this.projectCollectionRepository.save(pc);
   }
 

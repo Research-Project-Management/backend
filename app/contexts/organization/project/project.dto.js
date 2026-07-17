@@ -6,6 +6,7 @@ export const CreateProjectDto = {
     description: z.string().optional(),
     color: z.string().optional(),
     avatar: z.string().optional(),
+    modules: z.array(z.string()).optional(),
   }),
 };
 
@@ -15,6 +16,8 @@ export const UpdateProjectDto = {
     description: z.string().optional(),
     color: z.string().optional(),
     avatar: z.string().optional(),
+    modules: z.array(z.string()).optional(),
+    settings: z.any().optional(),
   }),
 };
 

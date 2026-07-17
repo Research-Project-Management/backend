@@ -30,7 +30,7 @@ const projectSchema = new mongoose.Schema(
     },
     modules: {
       type: [String],
-      default: ["overview", "tasks", "cycles", "pages", "storage", "stickies"],
+      default: ["overview", "tasks", "cycles", "pages", "storage", "stickies", "collection"],
     },
     members: [projectMemberSchema],
     workspace: {

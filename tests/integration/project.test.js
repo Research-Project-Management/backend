@@ -21,9 +21,11 @@ import FileModel from "../../app/contexts/shared/file/file.schema.js"; // Needs 
 // actually wait, file and task repos:
 class MockFileRepo {
   async countByProject(projectId) { return 0; }
+  async findAllActiveByProject(projectId) { return []; }
 }
 class MockTaskRepo {
   async countByProject(projectId) { return 0; }
+  async findByProject(projectId) { return []; }
 }
 
 import { RoleRepository } from "../../app/contexts/identity/role/role.repository.js";
@@ -163,9 +165,10 @@ describe("Project Service Integration", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.project.name).toBe("Test Project");
-    // Ensure task and file counts are returned
-    expect(res.body.taskCount).toBeDefined();
-    expect(res.body.fileCount).toBeDefined();
+    // Ensure stats are returned
+    expect(res.body.stats).toBeDefined();
+    expect(res.body.stats.tasks.total).toBeDefined();
+    expect(res.body.stats.files.count).toBeDefined();
   });
 
   it("should update the project", async () => {

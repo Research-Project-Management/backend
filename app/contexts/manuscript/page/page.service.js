@@ -2,6 +2,7 @@ import { AppError } from "../../../lib/AppError.js";
 import { getIO } from "../../../config/socket.js";
 import FileModel from "../../shared/file/file.schema.js";
 import { textToBase64, bulkSyncToCompiler, buildRelativePath } from "../../../config/compiler-sync.js";
+import WorkspaceModel from "../../organization/workspace/workspace.schema.js";
 
 
 export class PageService {
@@ -10,7 +11,17 @@ export class PageService {
     
   }
 
-  getWorkspacePages(workspaceId) { return this.repo.findByWorkspace(workspaceId); }
+  async getWorkspacePages(workspaceInput) {
+    // workspaceInput may be a slug (url) or an ObjectId string
+    const isObjectId = /^[0-9a-fA-F]{24}$/.test(workspaceInput);
+    let workspaceId = workspaceInput;
+    if (!isObjectId) {
+      const ws = await WorkspaceModel.findOne({ url: workspaceInput }).select("_id").lean();
+      if (!ws) return [];
+      workspaceId = ws._id.toString();
+    }
+    return this.repo.findByWorkspace(workspaceId);
+  }
   getProjectPages(projectId) { return this.repo.findByProject(projectId); }
   getPage(id) { return this.repo.findById(id); }
 

@@ -14,6 +14,13 @@ export const buildCollectionRouter = (controller) => {
     controller.getCollections
   );
 
+  collectionRouter.get(
+    "/project/:projectId/collections",
+    isAuthenticated,
+    checkWorkspaceRole("owner", "admin", "member", "viewer"), // or checkProjectRole
+    controller.getCollections
+  );
+
   collectionRouter.post(
     "/:workspaceId/collections",
     isAuthenticated,

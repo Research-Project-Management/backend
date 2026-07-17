@@ -4,7 +4,12 @@ export class StickyController {
   constructor({ stickyService }) {
     this.stickyService = stickyService;
     this.getWorkspaceStickies = asyncHandler(async (req, res) => { res.json({ stickies: await this.stickyService.getWorkspaceStickies(req.workspace._id, req.user._id, req.query) }); });
-    this.createSticky = asyncHandler(async (req, res) => { res.status(201).json({ sticky: await this.stickyService.createSticky(req.workspace._id, req.body, req.user._id) }); });
+    this.createSticky = asyncHandler(async (req, res) => { 
+      const workspaceId = req.workspace ? req.workspace._id : req.project.workspace;
+      const projectId = req.project ? req.project._id : req.body.projectId;
+      const body = { ...req.body, projectId };
+      res.status(201).json({ sticky: await this.stickyService.createSticky(workspaceId, body, req.user._id) }); 
+    });
     this.reorderWorkspaceStickies = asyncHandler(async (req, res) => { await this.stickyService.reorder(req.body.stickyIds, req.user._id, "workspace", req.workspace._id); res.json({ message: "Reordered successfully" }); });
     this.getProjectStickies = asyncHandler(async (req, res) => { res.json({ stickies: await this.stickyService.getProjectStickies(req.project._id, req.user._id, req.query) }); });
     this.reorderProjectStickies = asyncHandler(async (req, res) => { await this.stickyService.reorder(req.body.stickyIds, req.user._id, "project", req.project._id); res.json({ message: "Reordered successfully" }); });

@@ -14,11 +14,13 @@ export const validate = (schema) => async (req, res, next) => {
     return next();
   } catch (error) {
     if (error.name === "ZodError") {
-      const details = error.errors.map((e) => ({
-        path: e.path.join("."),
+      const issues = Array.isArray(error.errors) ? error.errors : (Array.isArray(error.issues) ? error.issues : []);
+      const details = issues.map((e) => ({
+        path: e.path ? e.path.join(".") : "",
         message: e.message,
       }));
-      const appError = new AppError("Validation Failed", 400, "VALIDATION_ERROR");
+      const errorMessage = details.map((d) => `${d.path ? d.path + ": " : ""}${d.message}`).join(", ") || "Validation Failed";
+      const appError = new AppError(errorMessage, 400, "VALIDATION_ERROR");
       appError.details = details;
       return next(appError);
     }

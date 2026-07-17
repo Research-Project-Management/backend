@@ -4,9 +4,11 @@ let _io = null;
 
 const CORS_ORIGINS = [
   "http://localhost:5173",
+  "http://localhost:2915",
   "http://localhost:2916",
   "http://localhost:3000",
   "https://flux.aisq.dev",
+  "https://flux.aisq.site",
 ];
 
 // Presence tracking: socketId -> Map<roomId, userInfo>

@@ -15,7 +15,6 @@ export const buildCommentRouter = (pageCommentController) => {
   commentRouter.delete("/pages/:pageId/comments/:commentId", write, pageCommentController.deleteComment);
   commentRouter.post("/pages/:pageId/comments/:commentId/replies", write, validate(AddPageReplyDto), pageCommentController.addReply);
   commentRouter.delete("/pages/:pageId/comments/:commentId/replies/:replyId", write, pageCommentController.deleteReply);
-  commentRouter.post("/pages/:pageId/comments/:commentId/replies/:replyId", write, pageCommentController.deleteReply);
 
   return commentRouter;
 }

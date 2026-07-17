@@ -1,12 +1,22 @@
 import { PageModel } from "./page.schema.js";
+import ProjectModel from "../../organization/project/project.schema.js";
 
 export class PageRepository {
   constructor() {
     this.model = PageModel;
   }
-  findByWorkspace(id) { return this.model.find({ workspace: id, parentPage: null }); }
-  findByProject(id) { return this.model.find({ project: id, parentPage: null }); }
-  findById(id) { return this.model.findById(id); }
+  async findByWorkspace(workspaceId) {
+    // Page schema has no direct workspace field; join via project
+    const projectIds = await ProjectModel.find({ workspace: workspaceId }).distinct("_id");
+    return this.model.find({ project: { $in: projectIds }, parentPage: null })
+      .populate("project", "_id name workspace")
+      .populate("mainFile", "_id title")
+      .sort({ updatedAt: -1 });
+  }
+  findByProject(id) { return this.model.find({ project: id, parentPage: null }).populate("project", "_id name workspace").populate("mainFile", "_id title").sort({ updatedAt: -1 }); }
+  findById(id) { return this.model.findById(id)
+    .populate({ path: "project", select: "name workspace", populate: { path: "workspace", select: "_id name url" } })
+    .populate("mainFile", "_id title"); }
   findByIdSelect(id, select) { return this.model.findById(id).select(select); }
   findChildPages(parentId, select = "_id title content parentPage") { return this.model.find({ parentPage: parentId }).select(select).lean(); }
   findChildPagesWithMeta(parentId) { return this.model.find({ parentPage: parentId }).select("_id title content updatedAt parentPage").lean(); }

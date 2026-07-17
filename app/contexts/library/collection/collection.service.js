@@ -37,6 +37,7 @@ export class CollectionService {
       color: dto.color || "#3370ff",
       icon: dto.icon || "",
       workspace: workspaceId,
+      project: dto.project || null,
       createdBy: userId,
       parent: dto.parent || null,
     });

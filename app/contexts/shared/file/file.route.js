@@ -32,6 +32,22 @@ export const buildFileRouter = (fileController) => {
   // Page storage scope (used by LaTeX compiler sync)
   fileRouter.get("/page/:pageId", isAuthenticated, fileController.getPageFiles);
 
+  // Crossref API
+  fileRouter.get("/crossref/search", isAuthenticated, fileController.crossrefSearch);
+  fileRouter.get(/^\/crossref\/doi\/(.+)/, isAuthenticated, fileController.crossrefDoi);
+
+  // R2 assets proxy
+  fileRouter.get(/^\/r2\/(.+)/, (req, res, next) => {
+    req.params.key = req.params[0];
+    next();
+  }, fileController.proxyR2);
+
+  // Legacy proxy for URLs without /r2/ (e.g. avatars)
+  fileRouter.get(/^\/(workspace\/.+|project\/.+|avatars\/.+|avat\..+)/, (req, res, next) => {
+    req.params.key = req.params[0];
+    next();
+  }, fileController.proxyR2);
+
   // File mutations & detail routes
   fileRouter.get("/:fileId", isAuthenticated, fileController.getFile);
   fileRouter.put("/:fileId", isAuthenticated, validate(UpdateFileDto), fileController.updateFile);
@@ -43,14 +59,6 @@ export const buildFileRouter = (fileController) => {
   fileRouter.put("/:fileId/rename", isAuthenticated, fileController.renameFile);
   fileRouter.put("/:fileId/move", isAuthenticated, fileController.moveFile);
   fileRouter.put("/:fileId/metadata", isAuthenticated, fileController.updateMetadata);
-
-  // Crossref API
-  fileRouter.get("/crossref/search", isAuthenticated, fileController.crossrefSearch);
-  fileRouter.get(/^\/crossref\/doi\/(.+)/, isAuthenticated, fileController.crossrefDoi);
-
-
-  // R2 assets proxy
-  fileRouter.get("/r2/{*key}", fileController.proxyR2);
 
   return fileRouter;
 }

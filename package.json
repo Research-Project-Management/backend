@@ -6,8 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node index.js",
-    "dev": "node index.js",
-    "test": "cross-env MONGOMS_MD5_CHECK=0 NODE_OPTIONS=--experimental-vm-modules NODE_ENV=test jest --runInBand --detectOpenHandles"
+    "dev": "nodemon index.js",
+    "test": "cross-env MONGOMS_MD5_CHECK=0 NODE_OPTIONS=--experimental-vm-modules NODE_ENV=test jest --runInBand --detectOpenHandles --forceExit"
   },
   "keywords": [],
   "author": "",

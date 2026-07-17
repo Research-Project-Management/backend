@@ -24,7 +24,7 @@ export class TaskController {
     this.duplicateTask = asyncHandler(async (req, res) => { res.status(201).json({ task: await this.taskService.duplicateTask(req.task, req.project, req.user._id, req.projectRole) }); });
     this.assignTask = asyncHandler(async (req, res) => { res.json({ task: await this.taskService.updateTask(req.task, req.project, req.body, req.user._id, req.projectRole) }); });
     this.reorderTask = asyncHandler(async (req, res) => { res.json(await this.taskService.bulkUpdateTasks(req.project, req.body, req.user._id, req.projectRole)); });
-    this.getAuditLog = asyncHandler(async (req, res) => { res.json({ logs: await this.taskService.getAuditLog(req.task._id) }); });
+    this.getAuditLog = asyncHandler(async (req, res) => { res.json({ activity: await this.taskService.getAuditLog(req.task._id) }); });
   }
 }
 

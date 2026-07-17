@@ -1,6 +1,7 @@
 import { MongoMemoryServer } from "mongodb-memory-server";
 import mongoose from "mongoose";
 import { jest } from "@jest/globals";
+import { connectRedis, redisClient } from "../app/config/redis.js";
 
 jest.setTimeout(600000); // 10 minutes for downloading MongoDB binary on first run
 
@@ -15,6 +16,7 @@ beforeAll(async () => {
   }
   
   await mongoose.connect(uri);
+  await connectRedis();
 });
 
 afterAll(async () => {

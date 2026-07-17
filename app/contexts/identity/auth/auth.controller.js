@@ -15,7 +15,12 @@ export class AuthController {
       this.passport.authenticate("local", (err, user, info) => {
         if (err) return next(err);
         if (!user) return res.status(401).json({ success: false, error: info?.message || "Invalid credentials", type: info?.type || "INVALID_CREDENTIALS" });
-        req.login(user, (err) => { if (err) return next(err); return res.json({ user }); });
+        req.login(user, (err) => { 
+          if (err) return next(err); 
+          const userResponse = user.toObject ? user.toObject() : user;
+          delete userResponse.password;
+          return res.json({ user: userResponse }); 
+        });
       })(req, res, next);
     };
 
@@ -35,10 +40,17 @@ export class AuthController {
 
     this.changePassword = asyncHandler(async (req, res) => { await this.authService.changePassword(req.user._id, req.body); res.json({ message: "Password updated successfully" }); });
 
+    this.forgotPassword = asyncHandler(async (req, res) => {
+      // Logic for sending an email should be implemented here in the future
+      // For now, we mock the success response.
+      console.log(`Mock: Password reset requested for email ${req.body.email}`);
+      res.json({ message: "If this email is registered, a reset link will be sent." });
+    });
+
     this.githubAuth = this.passport.authenticate("github", { scope: ["user:email"] });
-    this.githubCallback = [this.passport.authenticate("github", { failureRedirect: "/login" }), (req, res) => { req.login(req.user, (err) => { if (err) return res.redirect("http://localhost:2916/login"); res.redirect(process.env.CLIENT_URL || "http://localhost:2916/callback"); }); }];
+    this.githubCallback = [this.passport.authenticate("github", { failureRedirect: "/login" }), (req, res) => { req.login(req.user, (err) => { if (err) return res.redirect("http://localhost:2915/login"); res.redirect(process.env.CLIENT_URL || "http://localhost:2915/callback"); }); }];
     this.googleAuth = this.passport.authenticate("google", { scope: ["profile", "email"] });
-    this.googleCallback = [this.passport.authenticate("google", { failureRedirect: "/login" }), (req, res) => { req.login(req.user, (err) => { if (err) return res.redirect("http://localhost:2916/login"); res.redirect(process.env.CLIENT_URL || "http://localhost:2916/callback"); }); }];
+    this.googleCallback = [this.passport.authenticate("google", { failureRedirect: "/login" }), (req, res) => { req.login(req.user, (err) => { if (err) return res.redirect("http://localhost:2915/login"); res.redirect(process.env.CLIENT_URL || "http://localhost:2915/callback"); }); }];
   }
 }
 

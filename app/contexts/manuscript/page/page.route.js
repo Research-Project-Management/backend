@@ -5,7 +5,7 @@ import { checkPageRole } from "../../../middleware/page.middleware.js";
 import { validate } from "../../../middleware/validate.middleware.js";
 import { CreatePageDto, UpdatePageDto } from "./page.dto.js";
 
-export const buildPageRouter = (pageController) => {
+export const buildPageRouter = (pageController, latexController) => {
   const pageRouter = Router();
 
   pageRouter.get("/workspace/:workspaceId/pages", isAuthenticated, pageController.getWorkspacePages);
@@ -37,6 +37,8 @@ export const buildPageRouter = (pageController) => {
   pageRouter.put("/pages/:pageId/main-file", isAuthenticated, checkPageRole("manager", "member"), pageController.setMainFile);
   pageRouter.put("/pages/:pageId/thumbnail", isAuthenticated, checkPageRole("manager", "member"), pageController.updateThumbnail);
   pageRouter.post("/pages/:pageId/sync-project", isAuthenticated, checkPageRole("manager", "member"), pageController.syncProject);
+  // LaTeX sync endpoints (compiler integration)
+  pageRouter.post("/pages/:pageId/sync-incremental", isAuthenticated, checkPageRole("manager", "member"), latexController?.syncIncremental ?? ((req, res) => res.json({ synced: [], names: {}, total: 0 })));
 
   return pageRouter;
 }
