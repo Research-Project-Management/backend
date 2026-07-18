@@ -7,7 +7,7 @@ import { jest } from "@jest/globals";
 import UserModel from "../../app/contexts/identity/auth/auth.schema.js";
 import RoleModel from "../../app/contexts/identity/role/role.schema.js";
 import WorkspaceModel from "../../app/contexts/organization/workspace/workspace.schema.js";
-import CollectionModel from "../../app/contexts/library/collection/collection.schema.js";
+import { WorkspaceCollectionModel } from "../../app/contexts/library/collection/collection.schema.js";
 import PaperModel from "../../app/contexts/library/paper/paper.schema.js";
 
 import { AuthRepository } from "../../app/contexts/identity/auth/auth.repository.js";
@@ -18,8 +18,8 @@ import { WorkspaceService } from "../../app/contexts/organization/workspace/work
 import { WorkspaceController } from "../../app/contexts/organization/workspace/workspace.controller.js";
 import { buildWorkspaceRouter } from "../../app/contexts/organization/workspace/workspace.route.js";
 
-import { CollectionRepository } from "../../app/contexts/library/collection/collection.repository.js";
-import { CollectionService } from "../../app/contexts/library/collection/collection.service.js";
+import { WorkspaceCollectionRepository } from "../../app/contexts/library/collection/collection.repository.js";
+import { WorkspaceCollectionService } from "../../app/contexts/library/collection/collection.service.js";
 import { PaperRepository } from "../../app/contexts/library/paper/paper.repository.js";
 import { PaperService } from "../../app/contexts/library/paper/paper.service.js";
 import { PaperController } from "../../app/contexts/library/paper/paper.controller.js";
@@ -63,12 +63,11 @@ describe("Library Paper Service Integration", () => {
     });
     workspaceController = new WorkspaceController({ workspaceService });
     
-    collectionRepo = new CollectionRepository();
+    collectionRepo = new WorkspaceCollectionRepository();
     paperRepo = new PaperRepository();
-    collectionService = new CollectionService({
-      collectionRepository: collectionRepo,
-      paperRepository: paperRepo,
-      workspaceRepository: workspaceRepo
+    collectionService = new WorkspaceCollectionService({
+      workspaceCollectionRepository: collectionRepo,
+      paperRepository: paperRepo
     });
     
     // Create a mock queue service to avoid trying to connect to real queue
@@ -82,7 +81,10 @@ describe("Library Paper Service Integration", () => {
       workspaceRepository: workspaceRepo,
       queueService: mockQueueService
     });
-    paperController = new PaperController({ paperService, collectionService });
+    // Mock the background indexing to prevent MongoNotConnectedError
+    paperService.indexPaperForRag = jest.fn().mockResolvedValue(true);
+    
+    paperController = new PaperController({ paperService, workspaceCollectionService: collectionService });
 
     workspaceRouter = buildWorkspaceRouter(workspaceController);
     paperRouter = buildPaperRouter(paperController);
@@ -120,16 +122,16 @@ describe("Library Paper Service Integration", () => {
     workspace = wsRes.body.workspace;
     
     // add member
-    const role = await RoleModel.findOne({ name: "Member", workspace: workspace._id });
+    const role = await RoleModel.findOne({ name: "Member", workspaceId: workspace._id });
     await WorkspaceModel.findByIdAndUpdate(workspace._id, {
-      $push: { members: { user: member._id, role: role._id } }
+      $push: { members: { userId: member._id, roleId: role._id } }
     });
 
     // Create a collection
-    collection = await CollectionModel.create({
+    collection = await WorkspaceCollectionModel.create({
       name: "Papers Collection",
-      workspace: workspace._id,
-      createdBy: owner._id
+      workspaceId: workspace._id,
+      createdById: owner._id
     });
   });
 
@@ -150,15 +152,16 @@ describe("Library Paper Service Integration", () => {
     expect(res.status).toBe(201);
     expect(res.body.paper).toHaveProperty("_id");
     expect(res.body.paper.title).toBe("Test Paper");
-    expect(res.body.paper.collection.toString()).toBe(collection._id.toString());
+    expect(res.body.paper.workspaceId.toString()).toBe(workspace._id.toString());
+    expect(res.body.paper.uploadedById.toString()).toBe(owner._id.toString());
   });
 
   it("should get papers for a workspace", async () => {
     await PaperModel.create({
       title: "Workspace Paper",
       filename: "wp.pdf",
-      workspace: workspace._id,
-      uploadedBy: owner._id,
+      workspaceId: workspace._id.toString(),
+      uploadedById: owner._id.toString(),
       fileUrl: "http://test.com/wp.pdf"
     });
 
@@ -176,9 +179,9 @@ describe("Library Paper Service Integration", () => {
     await PaperModel.create({
       title: "Collection Paper",
       filename: "cp.pdf",
-      workspace: workspace._id,
-      collection: collection._id,
-      uploadedBy: owner._id,
+      workspaceId: workspace._id.toString(),
+      collectionId: collection._id.toString(),
+      uploadedById: owner._id.toString(),
       fileUrl: "http://test.com/cp.pdf"
     });
 
@@ -197,8 +200,8 @@ describe("Library Paper Service Integration", () => {
     const paper = await PaperModel.create({
       title: "To Update Paper",
       filename: "update.pdf",
-      workspace: workspace._id,
-      uploadedBy: owner._id,
+      workspaceId: workspace._id.toString(),
+      uploadedById: owner._id.toString(),
       fileUrl: "http://test.com/update.pdf"
     });
 
@@ -219,8 +222,8 @@ describe("Library Paper Service Integration", () => {
     const paper = await PaperModel.create({
       title: "Owner's Paper",
       filename: "del.pdf",
-      workspace: workspace._id,
-      uploadedBy: owner._id,
+      workspaceId: workspace._id.toString(),
+      uploadedById: owner._id.toString(),
       fileUrl: "http://test.com/del.pdf"
     });
 

@@ -4,8 +4,8 @@ export const CreateCycleDto = {
   body: z.object({
     name: z.string().trim().min(1, "Cycle name is required"),
     description: z.string().optional(),
-    startDate: z.string().datetime().optional().or(z.date().optional()),
-    endDate: z.string().datetime().optional().or(z.date().optional()),
+    startDate: z.coerce.date().optional().nullable(),
+    endDate: z.coerce.date().optional().nullable(),
     status: z.enum(["planned", "active", "completed", "cancelled"]).optional(),
     phase: z.enum([
       "topic_selection",
@@ -25,8 +25,8 @@ export const UpdateCycleDto = {
   body: z.object({
     name: z.string().trim().min(1, "Cycle name cannot be empty").optional(),
     description: z.string().optional(),
-    startDate: z.string().datetime().optional().or(z.date().optional()),
-    endDate: z.string().datetime().optional().or(z.date().optional()),
+    startDate: z.coerce.date().optional().nullable(),
+    endDate: z.coerce.date().optional().nullable(),
     status: z.enum(["planned", "active", "completed", "cancelled"]).optional(),
     phase: z.enum([
       "topic_selection",

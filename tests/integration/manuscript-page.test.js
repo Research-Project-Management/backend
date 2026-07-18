@@ -8,7 +8,7 @@ import UserModel from "../../app/contexts/identity/auth/auth.schema.js";
 import RoleModel from "../../app/contexts/identity/role/role.schema.js";
 import WorkspaceModel from "../../app/contexts/organization/workspace/workspace.schema.js";
 import ProjectModel from "../../app/contexts/organization/project/project.schema.js";
-import { PageModel } from "../../app/contexts/manuscript/page/page.schema.js";
+import PageModel from "../../app/contexts/manuscript/page/page.schema.js";
 
 import { AuthRepository } from "../../app/contexts/identity/auth/auth.repository.js";
 import { RoleRepository } from "../../app/contexts/identity/role/role.repository.js";
@@ -121,13 +121,13 @@ describe("Manuscript Page Service Integration", () => {
       });
     workspace = wsRes.body.workspace;
 
-    const ownerRole = await RoleModel.findOne({ name: "Owner", workspace: workspace._id });
+    const ownerRole = await RoleModel.findOne({ name: "Owner", workspaceId: workspace._id });
 
     project = await ProjectModel.create({
       name: "Page Project",
-      workspace: workspace._id,
-      createdBy: owner._id,
-      members: [{ user: owner._id, role: ownerRole._id }]
+      workspaceId: workspace._id,
+      createdById: owner._id,
+      members: [{ userId: owner._id, roleId: ownerRole._id }]
     });
   });
 
@@ -152,8 +152,9 @@ describe("Manuscript Page Service Integration", () => {
   it("should get pages for a project", async () => {
     await PageModel.create({
       title: "Existing Page",
-      project: project._id,
-      author: owner._id,
+      projectId: project._id,
+      workspaceId: workspace._id,
+      authorId: owner._id,
     });
 
     const res = await request(testApp)
@@ -171,8 +172,9 @@ describe("Manuscript Page Service Integration", () => {
   it("should create a child page", async () => {
     const rootPage = await PageModel.create({
       title: "Root Page",
-      project: project._id,
-      author: owner._id,
+      projectId: project._id,
+      workspaceId: workspace._id,
+      authorId: owner._id,
     });
 
     const res = await request(testApp)
@@ -195,8 +197,9 @@ describe("Manuscript Page Service Integration", () => {
   it("should update a page", async () => {
     const page = await PageModel.create({
       title: "Old Title",
-      project: project._id,
-      author: owner._id,
+      projectId: project._id,
+      workspaceId: workspace._id,
+      authorId: owner._id,
     });
 
     const res = await request(testApp)
@@ -216,8 +219,9 @@ describe("Manuscript Page Service Integration", () => {
   it("should get a specific page", async () => {
     const page = await PageModel.create({
       title: "Specific Page",
-      project: project._id,
-      author: owner._id,
+      projectId: project._id,
+      workspaceId: workspace._id,
+      authorId: owner._id,
     });
 
     const res = await request(testApp)
@@ -234,8 +238,9 @@ describe("Manuscript Page Service Integration", () => {
   it("should delete a page", async () => {
     const page = await PageModel.create({
       title: "Page To Delete",
-      project: project._id,
-      author: owner._id,
+      projectId: project._id,
+      workspaceId: workspace._id,
+      authorId: owner._id,
     });
 
     const res = await request(testApp)

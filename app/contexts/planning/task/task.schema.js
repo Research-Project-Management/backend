@@ -4,7 +4,7 @@ const checklistItemSchema = new mongoose.Schema(
   {
     title: { type: String, required: true, trim: true },
     completed: { type: Boolean, default: false },
-    assigneeId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    assigneeId: { type: String },
     dueDate: { type: Date },
   },
   { _id: true },
@@ -35,14 +35,13 @@ const taskSchema = new mongoose.Schema(
     title: { type: String, required: true, trim: true },
     content: { type: String, default: "" },
     description: { type: String, default: "" },
-    project: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Project",
+    projectId: {
+      type: mongoose.Schema.Types.ObjectId, ref: 'Project',
       required: true,
       index: true,
     },
     columnId: { type: String, required: true, trim: true, index: true },
-    assignee: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    assigneeId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     startDate: { type: Date },
     dueDate: { type: Date },
     recurrence: {
@@ -57,9 +56,9 @@ const taskSchema = new mongoose.Schema(
     },
     labels: { type: [String], default: [] },
     rank: { type: Number, default: 0 },
-    author: {
+    authorId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+      ref: 'User',
       required: true,
     },
     priority: {
@@ -68,15 +67,14 @@ const taskSchema = new mongoose.Schema(
       default: "none",
     },
     estimate: { type: Number, min: 0 },
-    cycle: {
+    cycleId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Cycle",
+      ref: 'Cycle',
       default: null,
       index: true,
     },
-    parentTask: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Task",
+    parentTaskId: {
+      type: String,
       default: null,
     },
     identifier: { type: String, trim: true },
@@ -90,10 +88,10 @@ const taskSchema = new mongoose.Schema(
   },
 );
 
-taskSchema.index({ project: 1, columnId: 1, rank: 1 });
-taskSchema.index({ project: 1, assignee: 1, dueDate: 1 });
+taskSchema.index({ projectId: 1, columnId: 1, rank: 1 });
+taskSchema.index({ projectId: 1, assigneeId: 1, dueDate: 1 });
 taskSchema.index(
-  { project: 1, identifier: 1 },
+  { projectId: 1, identifier: 1 },
   { unique: true, sparse: true },
 );
 
@@ -104,21 +102,18 @@ export { TaskModel };
 
 const auditLogSchema = new mongoose.Schema(
   {
-    task: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Task",
+    taskId: {
+      type: String,
       required: true,
       index: true,
     },
-    project: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Project",
+    projectId: {
+      type: String,
       required: true,
       index: true,
     },
-    actor: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+    actorId: {
+      type: String,
       required: true,
     },
     action: {
@@ -145,8 +140,8 @@ const auditLogSchema = new mongoose.Schema(
   }
 );
 
-auditLogSchema.index({ task: 1, createdAt: -1 });
-auditLogSchema.index({ project: 1, createdAt: -1 });
+auditLogSchema.index({ taskId: 1, createdAt: -1 });
+auditLogSchema.index({ projectId: 1, createdAt: -1 });
 
 const AuditLogModel =
   mongoose.models.AuditLog || mongoose.model("AuditLog", auditLogSchema);

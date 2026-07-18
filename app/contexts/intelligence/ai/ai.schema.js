@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 
-const aiMemorySchema = new mongoose.Schema(
+const aiSchema = new mongoose.Schema(
   {
     user: {
       type: String,
@@ -48,7 +48,7 @@ const aiMemorySchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-aiMemorySchema.index({
+aiSchema.index({
   user: 1,
   workspace: 1,
   projectId: 1,
@@ -57,4 +57,4 @@ aiMemorySchema.index({
   updatedAt: -1,
 });
 
-export default mongoose.model("AiMemory", aiMemorySchema);
+export default mongoose.models.Ai || mongoose.model("Ai", aiSchema);

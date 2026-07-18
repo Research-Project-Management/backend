@@ -1,47 +1,16 @@
 import { r2 } from "../../../config/r2.js";
 import { PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { syncFileToCompilerReliable } from "../../../config/compiler-sync.js";
+import { syncFileToCompilerReliable } from "../../../lib/compiler-sync.js";
 import { AppError } from "../../../lib/AppError.js";
 
 const ALLOWED_UPLOAD_PREFIXES = [/^workspace\//, /^project\//];
-const CROSSREF_API = "https://api.crossref.org";
-
-const firstString = (...args) => args.find((a) => typeof a === "string" && a.trim() !== "");
-
-const parseCrossrefWork = (item) => {
-  if (!item.title || !item.title.length) return null;
-  let year = null;
-  const dates = [
-    item["published-print"]?.["date-parts"]?.[0]?.[0],
-    item["published-online"]?.["date-parts"]?.[0]?.[0],
-    item["issued"]?.["date-parts"]?.[0]?.[0],
-  ];
-  for (const d of dates) {
-    if (d && !isNaN(d)) { year = parseInt(d, 10); break; }
-  }
-
-  return {
-    title: item.title[0],
-    authors: (item.author || []).map((a) => {
-      if (a.family && a.given) return `${a.family}, ${a.given}`;
-      if (a.family) return a.family;
-      if (a.name) return a.name;
-      return "Unknown";
-    }),
-    doi: item.DOI || "",
-    journal: firstString(item["container-title"]?.[0], item.publisher),
-    year,
-    type: item.type || "",
-    abstract: item.abstract?.replace(/<[^>]+>/g, "") || "",
-    url: item.URL || item.url || "",
-  };
-};
 
 export class FileService {
-  constructor({ fileRepository, projectRepository }) {
+  constructor({ fileRepository, projectRepository, crossrefClient }) {
     this.repo = fileRepository;
     this.projectRepository = projectRepository;
+    this.crossrefClient = crossrefClient;
   }
 
   _isAllowedUploadPath(name) { return ALLOWED_UPLOAD_PREFIXES.some((re) => re.test(name)); }
@@ -62,7 +31,13 @@ export class FileService {
 
   async upload({ filename, size, mimeType, url, thumbnail, workspaceId, projectId, parentId, metaData, scope, parentPageId, fileBase64 }, userId) {
     const resolvedProjectId = scope === "workspace" ? null : (projectId || null);
-    const existingFile = parentPageId ? await this.repo.findOne({ filename, pageId: parentPageId, parent: parentId || null, isFolder: false }) : null;
+    const linkedTo = parentPageId 
+      ? { entityType: "Page", entityId: parentPageId } 
+      : resolvedProjectId 
+        ? { entityType: "Project", entityId: resolvedProjectId } 
+        : { entityType: null, entityId: null };
+
+    const existingFile = parentPageId ? await this.repo.findOne({ filename, "linkedTo.entityType": "Page", "linkedTo.entityId": parentPageId, parent: parentId || null, isFolder: false }) : null;
     let file;
     if (existingFile) {
       existingFile.url = url; existingFile.size = size; existingFile.mimeType = mimeType;
@@ -71,7 +46,7 @@ export class FileService {
       existingFile.trashedAt = null; existingFile.updatedAt = new Date();
       await existingFile.save(); file = existingFile;
     } else {
-      file = await this.repo.create({ filename, size, mimeType, url, thumbnail, workspace: workspaceId, project: resolvedProjectId, parent: parentId || null, author: userId, metaData: metaData || {}, isFolder: false, pageId: parentPageId || null });
+      file = await this.repo.create({ filename, size, mimeType, url, thumbnail, workspaceId, linkedTo, parent: parentId || null, authorId: userId, metaData: metaData || {}, isFolder: false });
     }
     if (parentPageId && url) {
       try {
@@ -87,9 +62,24 @@ export class FileService {
   }
 
   async createFolder({ name, workspaceId, projectId, parentId, scope, parentPageId }, userId) {
-    const existing = await this.repo.findOne({ filename: name, pageId: parentPageId || null, parent: parentId || null, isFolder: true, trashedAt: null });
+    const resolvedProjectId = scope === "workspace" ? null : (projectId || null);
+    const linkedTo = parentPageId 
+      ? { entityType: "Page", entityId: parentPageId } 
+      : resolvedProjectId 
+        ? { entityType: "Project", entityId: resolvedProjectId } 
+        : { entityType: null, entityId: null };
+
+    const existing = await this.repo.findOne({
+      filename: name,
+      workspaceId,
+      "linkedTo.entityType": linkedTo.entityType,
+      "linkedTo.entityId": linkedTo.entityId,
+      parent: parentId || null,
+      isFolder: true,
+      trashedAt: null
+    });
     if (existing) return existing;
-    return this.repo.create({ filename: name, workspace: workspaceId, project: scope === "workspace" ? null : (projectId || null), parent: parentId || null, author: userId, isFolder: true, pageId: parentPageId || null });
+    return this.repo.create({ filename: name, workspaceId, linkedTo, parent: parentId || null, authorId: userId, isFolder: true });
   }
 
   getProjectFiles(projectId, { parentId, includeTrash }) { return this.repo.findByProject(projectId, parentId, includeTrash); }
@@ -169,7 +159,20 @@ export class FileService {
     if (!file) throw new AppError("File not found", 404);
     file.trashedAt = new Date();
     await file.save();
+    // Recursively trash children if folder
+    if (file.isFolder) {
+      await this._trashChildren(fileId);
+    }
     return file;
+  }
+
+  async _trashChildren(parentId) {
+    const children = await this.repo.findChildren(parentId);
+    for (const child of children) {
+      child.trashedAt = new Date();
+      await child.save();
+      if (child.isFolder) await this._trashChildren(child._id);
+    }
   }
 
   async restoreFile(fileId) {
@@ -177,17 +180,46 @@ export class FileService {
     if (!file) throw new AppError("File not found", 404);
     file.trashedAt = null;
     await file.save();
+    // Recursively restore children if folder
+    if (file.isFolder) {
+      await this._restoreChildren(fileId);
+    }
     return file;
+  }
+
+  async _restoreChildren(parentId) {
+    const children = await this.repo.findChildren(parentId);
+    for (const child of children) {
+      child.trashedAt = null;
+      await child.save();
+      if (child.isFolder) await this._restoreChildren(child._id);
+    }
   }
 
   async permanentlyDeleteFile(fileId) {
     const file = await this.repo.findById(fileId);
     if (!file) throw new AppError("File not found", 404);
+    // Recursively delete children first if folder
+    if (file.isFolder) {
+      await this._permanentlyDeleteChildren(fileId);
+    }
     if (file.url) {
       const key = file.url.split("/api/files/")[1];
       if (key) await r2.send(new DeleteObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: key })).catch(() => {});
     }
     await this.repo.deleteById(fileId);
+  }
+
+  async _permanentlyDeleteChildren(parentId) {
+    const children = await this.repo.findChildren(parentId);
+    for (const child of children) {
+      if (child.isFolder) await this._permanentlyDeleteChildren(child._id);
+      if (child.url) {
+        const key = child.url.split("/api/files/")[1];
+        if (key) await r2.send(new DeleteObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: key })).catch(() => {});
+      }
+      await this.repo.deleteById(child._id);
+    }
   }
 
   async shareFile(fileId, { userId, permission }) {
@@ -228,44 +260,20 @@ export class FileService {
   }
 
   async crossrefSearch(query, rows = 5) {
-    const url = `${CROSSREF_API}/works?query=${encodeURIComponent(query)}&rows=${rows}&select=DOI,title,author,editor,issued,published,published-print,published-online,container-title,publisher,publisher-location,ISSN,ISBN,volume,issue,page,type,abstract,URL,score,language,short-container-title,short-title,license,subject`;
-    const response = await fetch(url, { headers: { "User-Agent": "Flux/1.0 (mailto:support@aisq.dev)" } });
-    if (!response.ok) throw new AppError(`Crossref API error: ${response.status}`, response.status);
-    const data = await response.json();
-    const items = data?.message?.items || [];
-    const totalResults = data?.message?.["total-results"] || 0;
-    return { works: items.map(parseCrossrefWork).filter(Boolean), totalResults };
+    return this.crossrefClient.search(query, rows);
   }
 
   async crossrefDoi(rawDoi) {
-    let cleanDoi = rawDoi.trim();
-    try {
-      let decoded = decodeURIComponent(cleanDoi).trim();
-      if (decoded.includes("%")) decoded = decodeURIComponent(decoded).trim();
-      cleanDoi = decoded;
-    } catch (e) {}
-    cleanDoi = cleanDoi.replace(/^(https?:\/\/)?(dx\.)?doi\.org\//i, "").replace(/^doi:/i, "").trim();
-
-    const url = `https://doi.org/${cleanDoi}`;
-    const response = await fetch(url, { headers: { Accept: "application/vnd.citationstyles.csl+json", "User-Agent": "Flux/1.0 (mailto:support@aisq.dev)" } });
-    
-    if (response.ok) {
-      const data = await response.json();
-      return { work: parseCrossrefWork(data) };
-    }
-
-    const fallbackUrl = `${CROSSREF_API}/works/${encodeURIComponent(cleanDoi)}`;
-    const fallbackResponse = await fetch(fallbackUrl, { headers: { "User-Agent": "Flux/1.0 (mailto:support@aisq.dev)" } });
-    if (!fallbackResponse.ok) throw new AppError(`Crossref API error: ${fallbackResponse.status}`, fallbackResponse.status);
-    
-    const fallbackData = await fallbackResponse.json();
-    return { work: parseCrossrefWork(fallbackData?.message || {}) };
+    return this.crossrefClient.getByDoi(rawDoi);
   }
 
 
   async proxyR2(key, res) {
     try { const r2Resp = await r2.send(new GetObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: key })); if (r2Resp.ContentType) res.set("Content-Type", r2Resp.ContentType); r2Resp.Body.pipe(res); }
-    catch (err) { res.status(404).json({ error: "File not found" }); }
+    catch (err) { 
+      if (err.name !== "NoSuchKey") console.error("proxyR2 error for key:", key, err);
+      res.status(404).json({ error: "File not found" }); 
+    }
   }
 }
 

@@ -5,7 +5,7 @@ import UserModel from "../../app/contexts/identity/auth/auth.schema.js";
 import RoleModel from "../../app/contexts/identity/role/role.schema.js";
 import WorkspaceModel from "../../app/contexts/organization/workspace/workspace.schema.js";
 import ProjectModel from "../../app/contexts/organization/project/project.schema.js";
-import { PageModel } from "../../app/contexts/manuscript/page/page.schema.js";
+import PageModel from "../../app/contexts/manuscript/page/page.schema.js";
 
 import { RoleRepository } from "../../app/contexts/identity/role/role.repository.js";
 import { RoleService } from "../../app/contexts/identity/role/role.service.js";
@@ -15,6 +15,10 @@ import { WorkspaceController } from "../../app/contexts/organization/workspace/w
 import { buildWorkspaceRouter } from "../../app/contexts/organization/workspace/workspace.route.js";
 
 import { buildLatexRouter } from "../../app/contexts/manuscript/latex/latex.route.js";
+import { LatexController } from "../../app/contexts/manuscript/latex/latex.controller.js";
+import { LatexService } from "../../app/contexts/manuscript/latex/latex.service.js";
+import { PageRepository } from "../../app/contexts/manuscript/page/page.repository.js";
+import { FileRepository } from "../../app/contexts/shared/file/file.repository.js";
 
 import { errorHandler } from "../../app/middleware/error.middleware.js";
 import { isAuthenticated } from "../../app/middleware/auth.middleware.js";
@@ -58,7 +62,11 @@ describe("Manuscript Latex Integration", () => {
     workspaceController = new WorkspaceController({ workspaceService });
     const workspaceRouter = buildWorkspaceRouter(workspaceController);
 
-    latexRouter = buildLatexRouter();
+    const pageRepository = new PageRepository();
+    const fileRepository = new FileRepository();
+    const latexService = new LatexService({ pageRepository, fileRepository });
+    const latexController = new LatexController({ latexService });
+    latexRouter = buildLatexRouter(latexController);
 
     testApp.use("/api/workspace", workspaceRouter);
     testApp.use("/api/latex", isAuthenticated, latexRouter);
@@ -97,20 +105,21 @@ describe("Manuscript Latex Integration", () => {
         url: "latex-ws-" + Date.now(),
       });
     workspace = wsRes.body.workspace;
-    const ownerRole = await RoleModel.findOne({ name: "Owner", workspace: workspace._id });
+    const ownerRole = await RoleModel.findOne({ name: "Owner", workspaceId: workspace._id });
 
     project = await ProjectModel.create({
       name: "Latex Project",
-      workspace: workspace._id,
-      createdBy: owner._id,
-      members: [{ user: owner._id, role: ownerRole._id }]
+      workspaceId: workspace._id,
+      createdById: owner._id,
+      members: [{ userId: owner._id, roleId: ownerRole._id }]
     });
 
     rootPage = await PageModel.create({
       title: "Root Latex Page",
       content: "\\documentclass{article}\\begin{document}Hello\\end{document}",
-      project: project._id,
-      author: owner._id
+      projectId: project._id,
+      workspaceId: workspace._id,
+      authorId: owner._id
     });
   });
 
@@ -122,8 +131,9 @@ describe("Manuscript Latex Integration", () => {
     const childPage = await PageModel.create({
       title: "Child Latex Page",
       content: "test",
-      project: project._id,
-      author: owner._id,
+      projectId: project._id,
+      workspaceId: workspace._id,
+      authorId: owner._id,
       parentPage: rootPage._id
     });
 
@@ -136,7 +146,7 @@ describe("Manuscript Latex Integration", () => {
       });
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/Only root pages/);
+    expect(res.body.details).toMatch(/Only root pages/);
   });
 
   it("should compile successfully and return JSON on 200 (modern compiler)", async () => {

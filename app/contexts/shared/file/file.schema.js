@@ -10,34 +10,33 @@ const fileSchema = new mongoose.Schema(
       required: false,
       default: null,
     },
-    author: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+    authorId: {
+      type: mongoose.Schema.Types.ObjectId, ref: 'User',
       required: true,
     },
-    workspace: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Workspace",
+    workspaceId: {
+      type: mongoose.Schema.Types.ObjectId, ref: 'Workspace',
       required: true,
     },
-    project: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Project",
-      required: false,
-      default: null,
-    },
-    // Link to a LaTeX page-project — set when asset is uploaded from the editor.
-    pageId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Page",
-      required: false,
-      default: null,
+    // Generic polymorphic owner instead of project & pageId
+    linkedTo: {
+      entityType: {
+        type: String,
+        enum: ["Project", "Page", "Task", "Comment", "Collection", "Workspace", "User", null],
+        required: false,
+        default: null
+      },
+      entityId: {
+        type: String,
+        required: false,
+        default: null
+      }
     },
     starred: { type: Boolean, default: false },
     trashedAt: { type: Date, default: null },
     sharedWith: [
       {
-        user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
         permission: { type: String, enum: ["view", "edit"], default: "view" },
       },
     ],
@@ -50,27 +49,37 @@ const fileSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true }
   }
 );
+
+fileSchema.virtual('author', {
+  ref: 'User',
+  localField: 'authorId',
+  foreignField: '_id',
+  justOne: true
+});
+
+fileSchema.virtual('sharedUsers', {
+  ref: 'User',
+  localField: 'sharedWith.userId',
+  foreignField: '_id'
+});
 
 const FileModel = mongoose.models.File || mongoose.model("File", fileSchema);
 
 // W7: Compound indexes for common storage query patterns.
-// All list/filter routes use (project/workspace + pageId + parent + trashedAt).
 if (!mongoose.models.File) {
-  // Project storage: /project/:id?parentId=&pageId=null&trashedAt=null
-  fileSchema.index({ project: 1, pageId: 1, parent: 1, trashedAt: 1 });
-  // Workspace storage: /workspace/:id + pageId filter
-  fileSchema.index({ workspace: 1, pageId: 1, trashedAt: 1 });
-  // Workspace all-files view (includes project cross-ref)
-  fileSchema.index({ workspace: 1, project: 1, pageId: 1, parent: 1, trashedAt: 1 });
-  // Editor assets: /page/:parentPageId
-  fileSchema.index({ pageId: 1, parent: 1, trashedAt: 1 });
+  // Common multi-tenant index
+  fileSchema.index({ workspaceId: 1, "linkedTo.entityId": 1, parent: 1, trashedAt: 1 });
+  // Specific entity index
+  fileSchema.index({ "linkedTo.entityId": 1, "linkedTo.entityType": 1, parent: 1, trashedAt: 1 });
   // My-files / starred / shared per author
-  fileSchema.index({ workspace: 1, author: 1, pageId: 1, trashedAt: 1 });
-  fileSchema.index({ workspace: 1, starred: 1, pageId: 1, trashedAt: 1 });
-  // Dedup check in /upload: (filename, pageId, parent)
-  fileSchema.index({ filename: 1, pageId: 1, parent: 1, isFolder: 1 });
+  fileSchema.index({ workspaceId: 1, authorId: 1, trashedAt: 1 });
+  fileSchema.index({ workspaceId: 1, starred: 1, trashedAt: 1 });
+  // Dedup check in /upload
+  fileSchema.index({ filename: 1, "linkedTo.entityId": 1, parent: 1, isFolder: 1 });
 }
 
 export default FileModel;

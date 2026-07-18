@@ -8,7 +8,7 @@ import { CreateStickyDto, UpdateStickyDto, ReorderStickiesDto, AddChildStickyDto
 export const buildStickyRouter = (stickyController) => {
   const stickyRouter = Router();
   const m = [isAuthenticated, checkWorkspaceRole("member")];
-  const pw = [isAuthenticated, checkProjectRole("manager", "member", "viewer")];
+  const pw = [isAuthenticated, checkProjectRole("owner", "admin", "member", "viewer")];
 
 stickyRouter.get("/workspace/:workspaceId/stickies", m, stickyController.getWorkspaceStickies);
 stickyRouter.post("/workspace/:workspaceId/stickies", m, validate(CreateStickyDto), stickyController.createSticky);

@@ -5,7 +5,7 @@ export class StickyController {
     this.stickyService = stickyService;
     this.getWorkspaceStickies = asyncHandler(async (req, res) => { res.json({ stickies: await this.stickyService.getWorkspaceStickies(req.workspace._id, req.user._id, req.query) }); });
     this.createSticky = asyncHandler(async (req, res) => { 
-      const workspaceId = req.workspace ? req.workspace._id : req.project.workspace;
+      const workspaceId = req.workspace ? req.workspace._id : req.project?.workspaceId;
       const projectId = req.project ? req.project._id : req.body.projectId;
       const body = { ...req.body, projectId };
       res.status(201).json({ sticky: await this.stickyService.createSticky(workspaceId, body, req.user._id) }); 

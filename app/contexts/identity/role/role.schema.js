@@ -43,14 +43,12 @@ const roleSchema = new mongoose.Schema(
       required: true,
     },
     // workspace hoặc project mà role này thuộc về
-    workspace: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Workspace",
+    workspaceId: {
+      type: mongoose.Schema.Types.ObjectId, ref: 'Workspace',
       required: true,
     },
-    project: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Project",
+    projectId: {
+      type: mongoose.Schema.Types.ObjectId, ref: 'Project',
       default: null,
     },
     // Danh sách permissions
@@ -70,17 +68,16 @@ const roleSchema = new mongoose.Schema(
       type: String,
       default: "#6366f1",
     },
-    createdBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+    createdById: {
+      type: mongoose.Schema.Types.ObjectId, ref: 'User',
     },
   },
   { timestamps: true },
 );
 
 // Index để tìm kiếm nhanh
-roleSchema.index({ workspace: 1, type: 1 });
-roleSchema.index({ project: 1 });
-roleSchema.index({ name: 1, workspace: 1 });
+roleSchema.index({ workspaceId: 1, type: 1 });
+roleSchema.index({ projectId: 1 });
+roleSchema.index({ name: 1, workspaceId: 1 });
 
 export default mongoose.model("Role", roleSchema);

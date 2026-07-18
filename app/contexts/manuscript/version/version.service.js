@@ -1,5 +1,5 @@
 import { AppError } from "../../../lib/AppError.js";
-import { syncFileToCompilerReliable, bulkSyncToCompiler } from "../../../config/compiler-sync.js";
+import { syncFileToCompilerReliable, bulkSyncToCompiler } from "../../../lib/compiler-sync.js";
 
 export class VersionService {
   constructor({ versionRepository, pageRepository }) {
@@ -16,8 +16,8 @@ export class VersionService {
     const page = await this.pageRepository.findByIdSelect(pageId, "content title parentPage");
     if (!page) throw new AppError("Page not found", 404);
     const projectPageId = page.parentPage ?? page._id;
-    const version = await this.versionRepository.create({ page: pageId, projectPageId, content: page.content ?? "", title: page.title, label, savedBy: userId, eventType: "manual_save", fileName: this._pageTexName(page) });
-    await version.populate("savedBy", "name avatar");
+    const version = await this.versionRepository.create({ page: pageId, projectPageId, content: page.content ?? "", title: page.title, label, savedById: userId, eventType: "manual_save", fileName: this._pageTexName(page) });
+    await version.populate("savedById", "name avatar");
     return version;
   }
 

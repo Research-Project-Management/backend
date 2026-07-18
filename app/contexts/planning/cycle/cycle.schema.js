@@ -4,9 +4,8 @@ const cycleSchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
     description: { type: String, default: "" },
-    project: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Project",
+    projectId: {
+      type: mongoose.Schema.Types.ObjectId, ref: 'Project',
       required: true,
     },
     startDate: { type: Date },
@@ -41,7 +40,7 @@ const cycleSchema = new mongoose.Schema(
     deliverables: [
       {
         title: { type: String, required: true },
-        fileId: { type: mongoose.Schema.Types.ObjectId, ref: "File" },
+        fileId: { type: String },
         completed: { type: Boolean, default: false },
       },
     ],
@@ -54,9 +53,8 @@ const cycleSchema = new mongoose.Schema(
       completionPercentage: { type: Number, default: 0 },
     },
     order: { type: Number, default: 0 },
-    author: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+    authorId: {
+      type: mongoose.Schema.Types.ObjectId, ref: 'User',
       required: true,
     },
   },

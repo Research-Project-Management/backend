@@ -10,8 +10,6 @@ const CORS_ORIGINS = [
   "https://flux.aisq.dev",
   "https://flux.aisq.site",
 ];
-
-// Presence tracking: socketId -> Map<roomId, userInfo>
 const presence = new Map();
 
 function getRoomPresence(roomId) {
@@ -33,11 +31,9 @@ export function initSocket(server) {
   });
 
   _io.on("connection", (socket) => {
-    // Room management — client emits join/leave when mounting a view
     socket.on("join:page", (pageId) => {
       if (!pageId) return;
       socket.join(`page:${pageId}`);
-      // Send current presence snapshot to the joining socket
       const roomId = `page:${pageId}`;
       socket.emit("presence:update", {
         roomId,
@@ -73,10 +69,8 @@ export function initSocket(server) {
       (userId) => userId && socket.leave(`user:${userId}`),
     );
 
-    // Presence — client sends { roomId, user: { _id, name, avatar } }
     socket.on("presence:join", ({ roomId, user } = {}) => {
       if (!roomId || !user) return;
-      // Ensure the socket is in the room BEFORE broadcasting so it receives its own update
       socket.join(roomId);
       if (!presence.has(socket.id)) presence.set(socket.id, new Map());
       presence.get(socket.id).set(roomId, user);
@@ -93,13 +87,11 @@ export function initSocket(server) {
         .emit("presence:update", { roomId, users: getRoomPresence(roomId) });
     });
 
-    // Realtime content sync — client emits when editor content changes
     socket.on("page:content", ({ pageId, content } = {}) => {
       if (!pageId || content === undefined) return;
       socket.to(`page:${pageId}`).emit("page:content", { pageId, content });
     });
 
-    // Realtime cursor sync — broadcast cursor position to room, injecting socketId
     socket.on("page:cursor", ({ pageId, line, column } = {}) => {
       if (!pageId || line == null || column == null) return;
       socket
@@ -125,7 +117,6 @@ export function initSocket(server) {
   return _io;
 }
 
-/** Returns the Socket.IO server instance (null until initSocket is called). */
 export function getIO() {
   return _io;
 }

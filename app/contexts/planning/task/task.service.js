@@ -1,5 +1,5 @@
-import { getIO } from "../../../config/socket.js";
 import { AppError } from "../../../lib/AppError.js";
+import { eventBus, Events } from "../../../lib/eventBus.js";
 
 export class TaskService {
   constructor({ taskRepository, projectRepository, authRepository, taskCommentRepository}) {
@@ -20,15 +20,20 @@ export class TaskService {
   }
 
   _getTaskPermissions(task, projectRole, userId) {
-    const canWrite = projectRole === "manager" || projectRole === "member";
-    const isAuthor = task?.author?.toString?.() === userId;
-    return { canEdit: canWrite, canMove: canWrite, canDuplicate: canWrite, canDelete: projectRole === "manager" || isAuthor };
+    const canWrite = ["owner", "admin", "member"].includes(projectRole);
+    const isAuthor = task?.authorId === userId;
+    return { canEdit: canWrite, canMove: canWrite, canDuplicate: canWrite, canDelete: ["owner", "admin"].includes(projectRole) || isAuthor };
   }
 
   _toTaskResponse(task, { commentCount = 0, projectRole = "viewer", userId = "" } = {}) {
-    const raw = typeof task.toObject === "function" ? task.toObject() : task;
+    const raw = typeof task.toObject === "function" ? task.toObject() : { ...task };
     const { isOverdue, dueState } = this._getTaskDueState(raw.dueDate);
-    return { ...raw, commentCount, isOverdue, dueState, permissions: this._getTaskPermissions(task, projectRole, userId) };
+    const mapped = { ...raw, commentCount, isOverdue, dueState, permissions: this._getTaskPermissions(task, projectRole, userId) };
+    if (mapped.assigneeId !== undefined) { mapped.assignee = mapped.assigneeId; delete mapped.assigneeId; }
+    if (mapped.authorId !== undefined) { mapped.author = mapped.authorId; delete mapped.authorId; }
+    if (mapped.cycleId !== undefined) { mapped.cycle = mapped.cycleId; delete mapped.cycleId; }
+    if (mapped.parentTaskId !== undefined) { mapped.parentTask = mapped.parentTaskId; delete mapped.parentTaskId; }
+    return mapped;
   }
 
   async _generateTaskIdentifier(projectId) {
@@ -54,13 +59,15 @@ export class TaskService {
     try {
       const log = await this.taskRepository.createAuditLog({ task: taskId, project: projectId, actor: actorId, action, previous_value: previousValue, new_value: newValue, description });
       const actor = await this.authRepository.findByIdSelect(actorId, "name avatar");
-      getIO()?.to(`project:${projectId}`).emit("task-activity:created", { taskId: String(taskId), projectId: String(projectId), action, activityId: log._id.toString(), activity: { _id: log._id.toString(), actor: { _id: String(actorId), name: actor?.name || "User", avatar: actor?.avatar }, action, previous_value: previousValue, new_value: newValue, description: log.description, createdAt: log.createdAt } });
+      if (log) {
+        eventBus.emit("TASK_ACTIVITY_CREATED", { projectId: String(projectId), payload: { taskId: String(taskId), projectId: String(projectId), action, activityId: log._id.toString(), activity: { _id: log._id.toString(), actor: { _id: String(actorId), name: actor?.name || "User", avatar: actor?.avatar }, action, previous_value: previousValue, new_value: newValue, description: log.description, createdAt: log.createdAt } } });
+      }
     } catch (_) { /* non-fatal */ }
   }
 
   async _trackTaskChanges(taskId, projectId, actorId, oldTask, newTask, projectColumns) {
     const changes = [];
-    if (oldTask?.assignee?.toString() !== newTask?.assignee?.toString()) changes.push({ action: oldTask?.assignee && !newTask?.assignee ? "assignee_removed" : !oldTask?.assignee && newTask?.assignee ? "assignee_added" : "assignee_changed", previous: oldTask?.assignee, new: newTask?.assignee });
+    if (oldTask?.assigneeId !== newTask?.assigneeId) changes.push({ action: oldTask?.assigneeId && !newTask?.assigneeId ? "assignee_removed" : !oldTask?.assigneeId && newTask?.assigneeId ? "assignee_added" : "assignee_changed", previous: oldTask?.assigneeId, new: newTask?.assigneeId });
     if ((oldTask?.columnId || "") !== (newTask?.columnId || "")) {
       const oldCol = projectColumns.find((c) => c.id === oldTask?.columnId)?.title || oldTask?.columnId || "(unknown)";
       const newCol = projectColumns.find((c) => c.id === newTask?.columnId)?.title || newTask?.columnId || "(unknown)";
@@ -71,36 +78,42 @@ export class TaskService {
     for (const change of changes) await this._createAuditLog(taskId, projectId, actorId, change.action, change.previous, change.new, change.description);
   }
 
-  async getTasks(project, query, projectRole, userId) {
-    const tasks = await this.taskRepository.findWithPopulate({ project: project._id });
-    return this._enrichTasksWithComments(tasks, { projectRole, userId });
+  async getTasks(project, query, projectRole, userId, pagination = null) {
+    const filter = { projectId: project._id.toString() };
+    if (query.cycle) filter.cycleId = query.cycle;
+    
+    const { tasks, total } = await this.taskRepository.findTasksWithCount(filter, null, pagination);
+    
+    return { tasks: await this._enrichTasksWithComments(tasks, { projectRole, userId }), total };
   }
 
-  async getWorkspaceTasks(workspaceId, userId) {
+  async getWorkspaceTasks(workspaceId, userId, pagination = null) {
     const projects = await this.projectRepository.findByWorkspace(workspaceId);
     const projectIds = projects.map((p) => p._id);
-    const tasks = await this.taskRepository.findWithPopulate(
-      { project: { $in: projectIds }, assignee: userId },
-      { dueDate: 1, rank: 1 }
-    );
-    return this._enrichTasksWithComments(tasks, { projectRole: "member", userId: userId.toString() });
+    const filter = { projectId: { $in: projectIds.map(String) }, assigneeId: userId.toString() };
+    
+    const { tasks, total } = await this.taskRepository.findTasksWithCount(filter, { dueDate: 1, rank: 1 }, pagination);
+    
+    return { tasks: await this._enrichTasksWithComments(tasks, { projectRole: "member", userId: userId.toString() }), total };
   }
 
   async createTask(project, body, userId, projectRole) {
     const { identifier } = await this._generateTaskIdentifier(project._id);
-    const task = await this.taskRepository.create({ ...body, project: project._id, identifier, author: userId, rank: body.rank ?? Date.now() });
+    const task = await this.taskRepository.create({ ...body, projectId: project._id.toString(), identifier, authorId: userId.toString(), rank: body.rank ?? Date.now() });
     await this._createAuditLog(task._id, project._id, userId, "task_created", null, null, "created this task");
-    getIO()?.to(`project:${project._id}`).emit("task:created", { task: this._toTaskResponse(task, { projectRole, userId: userId.toString() }) });
+    eventBus.emit(Events.TASK_CREATED, { projectId: project._id.toString(), task: this._toTaskResponse(task, { projectRole, userId: userId.toString() }) });
     return this._toTaskResponse(task, { projectRole, userId: userId.toString() });
   }
 
-  async filterTasks(projectId, query, projectRole, userId) {
-    const filter = { project: projectId };
+  async filterTasks(projectId, query, projectRole, userId, pagination = null) {
+    const filter = { projectId: projectId.toString() };
     if (query.columnId) filter.columnId = query.columnId;
-    if (query.assignee) filter.assignee = query.assignee;
-    if (query.cycleId) filter.cycle = query.cycleId;
-    const tasks = await this.taskRepository.findWithPopulate(filter);
-    return this._enrichTasksWithComments(tasks, { projectRole, userId });
+    if (query.assignee) filter.assigneeId = query.assignee;
+    if (query.cycleId) filter.cycleId = query.cycleId;
+    
+    const { tasks, total } = await this.taskRepository.findTasksWithCount(filter, null, pagination);
+    
+    return { tasks: await this._enrichTasksWithComments(tasks, { projectRole, userId }), total };
   }
 
   async bulkUpdateTasks(project, body, userId, projectRole) {
@@ -119,21 +132,21 @@ export class TaskService {
     const oldTask = task.toObject ? task.toObject() : { ...task };
     const updated = await this.taskRepository.updateById(task._id, updates);
     this._trackTaskChanges(task._id, project._id, userId, oldTask, updated, project.taskColumns || []);
-    getIO()?.to(`project:${project._id}`).emit("task:updated", { task: this._toTaskResponse(updated, { projectRole, userId: userId.toString() }) });
+    eventBus.emit(Events.TASK_UPDATED, { projectId: project._id.toString(), task: this._toTaskResponse(updated, { projectRole, userId: userId.toString() }) });
     return this._toTaskResponse(updated, { projectRole, userId: userId.toString() });
   }
 
   async deleteTask(task, projectId, userId, projectRole) {
-    if (projectRole !== "manager" && task.author?.toString() !== userId.toString()) throw new AppError("Insufficient permissions", 403);
+    if (!["owner", "admin"].includes(projectRole) && task.authorId !== userId.toString()) throw new AppError("Insufficient permissions", 403);
     await this.taskRepository.deleteById(task._id);
-    getIO()?.to(`project:${projectId}`).emit("task:deleted", { taskId: task._id });
+    eventBus.emit(Events.TASK_DELETED, { projectId: projectId.toString(), taskId: task._id.toString() });
   }
 
   async duplicateTask(task, project, userId, projectRole) {
     const { identifier } = await this._generateTaskIdentifier(project._id);
     const raw = task.toObject ? task.toObject() : { ...task };
     const { _id, createdAt, updatedAt, ...rest } = raw;
-    const newTask = await this.taskRepository.create({ ...rest, identifier, author: userId, rank: Date.now() });
+    const newTask = await this.taskRepository.create({ ...rest, identifier, authorId: userId.toString(), rank: Date.now() });
     return this._toTaskResponse(newTask, { projectRole, userId: userId.toString() });
   }
 

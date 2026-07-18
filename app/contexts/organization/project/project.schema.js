@@ -1,10 +1,9 @@
 import mongoose from "mongoose";
 
 const projectMemberSchema = new mongoose.Schema({
-  user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-  role: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Role",
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  roleId: {
+    type: mongoose.Schema.Types.ObjectId, ref: 'Role',
     required: true,
   },
   joinedAt: { type: Date, default: Date.now },
@@ -33,14 +32,12 @@ const projectSchema = new mongoose.Schema(
       default: ["overview", "tasks", "cycles", "pages", "storage", "stickies", "collection"],
     },
     members: [projectMemberSchema],
-    workspace: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Workspace",
+    workspaceId: {
+      type: mongoose.Schema.Types.ObjectId, ref: 'Workspace',
       required: true,
     },
-    createdBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+    createdById: {
+      type: mongoose.Schema.Types.ObjectId, ref: 'User',
       required: true,
     },
     taskColumns: {
@@ -90,9 +87,9 @@ const projectSchema = new mongoose.Schema(
 );
 
 // Indexes for performance optimization
-projectSchema.index({ workspace: 1 });
-projectSchema.index({ "members.user": 1 });
-projectSchema.index({ createdBy: 1 });
+projectSchema.index({ workspaceId: 1 });
+projectSchema.index({ "members.userId": 1 });
+projectSchema.index({ createdById: 1 });
 projectSchema.index({ isActive: 1 });
 
 const ProjectModel =

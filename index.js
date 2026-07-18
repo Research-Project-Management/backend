@@ -5,6 +5,7 @@ dotenv.config();
 import connectDB from "./app/config/db.js";
 import { connectRedis, redisClient } from "./app/config/redis.js";
 import { initSocket } from "./app/config/socket.js";
+import { bindSocketToEventBus } from "./app/lib/eventBus.js";
 
 // ── Contexts & DI Container ──────────────────────────────────────────────────
 import * as container from "./app/container.js";
@@ -18,16 +19,15 @@ import { buildCycleRouter } from "./app/contexts/planning/cycle/cycle.route.js";
 import { buildPageRouter } from "./app/contexts/manuscript/page/page.route.js";
 import { buildVersionRouter } from "./app/contexts/manuscript/version/version.route.js";
 import { buildLatexRouter } from "./app/contexts/manuscript/latex/latex.route.js";
-import { buildCommentRouter } from "./app/contexts/collaboration/page-comment/page-comment.route.js";
-import { buildTaskCommentRouter } from "./app/contexts/collaboration/task-comment/task-comment.route.js";
+import { buildPageCommentRouter, buildTaskCommentRouter } from "./app/contexts/collaboration/comment/comment.route.js";
 import { buildStickyRouter } from "./app/contexts/collaboration/sticky/sticky.route.js";
 import { buildLabelRouter } from "./app/contexts/shared/label/label.route.js";
 import { buildFileRouter } from "./app/contexts/shared/file/file.route.js";
 import { buildAiRouter } from "./app/contexts/intelligence/ai/ai.route.js";
 import { buildChatHistoryRouter } from "./app/contexts/intelligence/chat-history/chat-history.route.js";
-import { buildCollectionRouter } from "./app/contexts/library/collection/collection.route.js";
+import { buildCollectionRouter, buildProjectCollectionRouter } from "./app/contexts/library/collection/collection.route.js";
 import { buildPaperRouter } from "./app/contexts/library/paper/paper.route.js";
-import { buildProjectCollectionRouter } from "./app/contexts/library/project-collection/project-collection.route.js";
+import { buildDashboardRouter } from "./app/contexts/dashboard/dashboard.route.js";
 
 import session from "express-session";
 import { RedisStore } from "connect-redis";
@@ -107,6 +107,9 @@ app.use("/api/roles", buildRoleRouter(container.roleController));
 app.use("/api/workspace", buildWorkspaceRouter(container.workspaceController));
 app.use("/api", buildProjectRouter(container.projectController));
 
+// Dashboard
+app.use("/api/dashboard", buildDashboardRouter(container.dashboardController));
+
 // Planning
 app.use("/api", buildTaskRouter(container.taskController));
 app.use("/api", buildCycleRouter(container.cycleController));
@@ -117,7 +120,7 @@ app.use("/api", buildVersionRouter(container.versionController));
 app.use("/api/latex", buildLatexRouter(container.latexController));
 
 // Collaboration
-app.use("/api", buildCommentRouter(container.pageCommentController));
+app.use("/api", buildPageCommentRouter(container.pageCommentController));
 app.use("/api", buildTaskCommentRouter(container.taskCommentController));
 app.use("/api", buildStickyRouter(container.stickyController));
 
@@ -126,7 +129,7 @@ app.use("/api", buildLabelRouter(container.labelController));
 app.use("/api/files", buildFileRouter(container.fileController));
 
 // Research
-app.use("/api/library", buildCollectionRouter(container.collectionController));
+app.use("/api/library", buildCollectionRouter(container.workspaceCollectionController));
 app.use("/api/library", buildPaperRouter(container.paperController));
 app.use("/api/library", buildProjectCollectionRouter(container.projectCollectionController));
 
@@ -140,6 +143,9 @@ app.use(errorHandler);
 //listen
 const server = http.createServer(app);
 initSocket(server);
+bindSocketToEventBus();
 server.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
 });
+
+// trigger reload

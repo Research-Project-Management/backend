@@ -8,7 +8,8 @@ export class PageController {
     this.getWorkspacePages = asyncHandler(async (req, res) => { res.json({ pages: await this.pageService.getWorkspacePages(req.params.workspaceId) }); });
     this.getProjectPages = asyncHandler(async (req, res) => { res.json({ pages: await this.pageService.getProjectPages(req.params.projectId) }); });
     this.createPage = asyncHandler(async (req, res) => { 
-      const result = await this.pageService.createPage(req.params.projectId, req.body, req.user._id);
+      const workspaceId = req.project?.workspaceId?.toString();
+      const result = await this.pageService.createPage(workspaceId, req.params.projectId, req.body, req.user._id);
       res.status(201).json(result); 
     });
     this.getPage = asyncHandler(async (req, res) => { const page = await this.pageService.getPage(req.params.pageId); if (!page) throw new AppError("Page not found", 404); res.json({ page }); });
@@ -27,7 +28,7 @@ export class PageController {
     // Assets integrated via FileService
     this.uploadAsset = asyncHandler(async (req, res) => { 
       const { fileName } = req.body;
-      if (!fileName) return res.status(400).json({ error: "fileName is required" });
+      if (!fileName) throw new AppError("fileName is required", 400);
       const key = `project/${req.params.projectId}/pages/${req.params.pageId}/assets/${Date.now()}-${fileName}`;
       res.json(await this.fileService.presign({ filename: key })); 
     });
@@ -40,9 +41,9 @@ export class PageController {
     });
     this.getAssetRaw = asyncHandler(async (req, res) => { 
       const f = await this.fileService.getFile(req.params.assetId);
-      if (!f || !f.url) return res.status(404).end();
+      if (!f || !f.url) throw new AppError("Asset not found", 404);
       const key = f.url.split("/api/files/")[1];
-      if (!key) return res.status(404).end();
+      if (!key) throw new AppError("Asset key not found", 404);
       await this.fileService.proxyR2(key, res); 
     });
 

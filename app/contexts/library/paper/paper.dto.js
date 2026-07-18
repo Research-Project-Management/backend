@@ -1,15 +1,24 @@
 import { z } from "zod";
 
+
 export const UploadPaperDto = {
   body: z.object({
     collectionId: z.string().optional().nullable(),
     title: z.string().trim().min(1, "Title is required"),
     filename: z.string().min(1, "Filename is required"),
-    fileUrl: z.string().url("Valid file URL is required"),
+    fileUrl: z.string().min(1, "Valid file URL is required"),
     size: z.number().optional(),
     mimeType: z.string().optional(),
     authors: z.array(z.string()).optional().default([]),
     year: z.number().optional().nullable(),
+    notes: z.array(
+      z.object({
+        _id: z.string().optional(),
+        content: z.string().min(1),
+        createdAt: z.any().optional(),
+        updatedAt: z.any().optional(),
+      })
+    ).optional(),
   }),
 };
 
@@ -28,7 +37,7 @@ export const UpdatePaperDto = {
     publicationDate: z.string().optional(),
     publisher: z.string().optional(),
     place: z.string().optional(),
-    tags: z.array(z.string()).optional(),
+    labels: z.array(z.string()).optional(),
     volume: z.string().optional(),
     issue: z.string().optional(),
     section: z.string().optional(),
@@ -56,7 +65,15 @@ export const UpdatePaperDto = {
     callNumber: z.string().optional(),
     accessedAt: z.string().optional(),
     extra: z.string().optional(),
-    notes: z.string().optional(),
+    notes: z.array(
+      z.object({
+        _id: z.string().optional(),
+        content: z.string().min(1),
+        createdAt: z.any().optional(),
+        updatedAt: z.any().optional(),
+      })
+    ).optional(),
   }),
 };
+
 

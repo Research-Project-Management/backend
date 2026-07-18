@@ -147,9 +147,9 @@ export class PaperService {
       fileUrl: dto.fileUrl,
       size: dto.size,
       mimeType: dto.mimeType,
-      workspace: workspaceId,
-      collection: dto.collectionId || null,
-      uploadedBy: userId,
+      workspaceId: workspaceId,
+      collectionId: dto.collectionId || null,
+      uploadedById: userId,
       ragStatus: "pending",
     });
 

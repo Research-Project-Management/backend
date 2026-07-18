@@ -3,7 +3,7 @@ import PaperModel from "./paper.schema.js";
 export class PaperRepository {
   async findByWorkspace(workspaceId) {
     return PaperModel.find({
-      workspace: workspaceId,
+      workspaceId: workspaceId,
       deletedAt: null,
     })
       .populate("uploadedBy", "name email avatar")
@@ -13,8 +13,8 @@ export class PaperRepository {
 
   async findByCollection(workspaceId, collectionId) {
     return PaperModel.find({
-      workspace: workspaceId,
-      collection: collectionId,
+      workspaceId: workspaceId,
+      collectionId: collectionId,
       deletedAt: null,
     })
       .populate("uploadedBy", "name email avatar")
@@ -25,8 +25,8 @@ export class PaperRepository {
 
   async findById(paperId, workspaceId = null) {
     const query = { _id: paperId, deletedAt: null };
-    if (workspaceId) query.workspace = workspaceId;
-    return PaperModel.findOne(query);
+    if (workspaceId) query.workspaceId = workspaceId;
+    return PaperModel.findOne(query).populate("uploadedBy", "name email avatar").populate("collection", "name");
   }
 
   async create(data) {
@@ -51,7 +51,7 @@ export class PaperRepository {
 
   async softDeleteByCollection(collectionId) {
     return PaperModel.updateMany(
-      { collection: collectionId, deletedAt: null },
+      { collectionId: collectionId, deletedAt: null },
       { deletedAt: new Date() }
     );
   }

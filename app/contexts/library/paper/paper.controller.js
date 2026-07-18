@@ -1,9 +1,9 @@
 import { asyncHandler } from "../../../lib/asyncHandler.js";
 
 export class PaperController {
-  constructor({ paperService, collectionService }) {
+  constructor({ paperService, workspaceCollectionService }) {
     this.paperService = paperService;
-    this.collectionService = collectionService;
+    this.collectionService = workspaceCollectionService;
 
     this.getCollectionPapers = asyncHandler(async (req, res) => {
       const collection = await this.collectionService.getCollection(req.workspace._id, req.params.collectionId);

@@ -74,7 +74,8 @@ describe("Project Service Integration", () => {
       projectRepository: projectRepo,
       fileRepository: new MockFileRepo(),
       taskRepository: new MockTaskRepo(),
-      roleRepository: roleRepo
+      roleRepository: roleRepo,
+      roleService: roleService
     });
     projectController = new ProjectController({ projectService, workspaceService });
 
@@ -119,7 +120,7 @@ describe("Project Service Integration", () => {
       });
     workspace = wsRes.body.workspace;
 
-    const wsRoles = await RoleModel.find({ workspace: workspace._id });
+    const wsRoles = await RoleModel.find({ workspaceId: workspace._id });
     wsRoles.forEach((r) => {
       roles[r.name.toLowerCase()] = r._id;
     });
@@ -157,18 +158,14 @@ describe("Project Service Integration", () => {
     expect(res.body.project.name).toBe("Another Test Project");
   });
 
-  it("should get project overview", async () => {
+  it("should get a project", async () => {
     const res = await request(testApp)
-      .get(`/api/project/${project._id}/overview`)
+      .get(`/api/project/${project._id}`)
       .set("x-internal-key", "test-internal-key")
       .set("x-user-id", owner._id.toString());
 
     expect(res.status).toBe(200);
     expect(res.body.project.name).toBe("Test Project");
-    // Ensure stats are returned
-    expect(res.body.stats).toBeDefined();
-    expect(res.body.stats.tasks.total).toBeDefined();
-    expect(res.body.stats.files.count).toBeDefined();
   });
 
   it("should update the project", async () => {
@@ -198,7 +195,7 @@ describe("Project Service Integration", () => {
 
     expect(res.status).toBe(201);
     const updatedProject = await ProjectModel.findById(project._id);
-    expect(updatedProject.members.some(m => m.user.toString() === memberUser._id.toString())).toBe(true);
+    expect(updatedProject.members.some(m => m.userId.toString() === memberUser._id.toString())).toBe(true);
   });
 
   it("should update a member role in the project", async () => {
@@ -218,8 +215,8 @@ describe("Project Service Integration", () => {
 
     expect(res.status).toBe(200);
     const updatedProject = await ProjectModel.findById(project._id);
-    const member = updatedProject.members.find(m => m.user.toString() === memberUser._id.toString());
-    expect(member.role.toString()).toBe(roles.admin.toString());
+    const member = updatedProject.members.find(m => m.userId.toString() === memberUser._id.toString());
+    expect(member.roleId.toString()).toBe(roles.admin.toString());
   });
 
   it("should remove a member from the project", async () => {
@@ -236,7 +233,7 @@ describe("Project Service Integration", () => {
 
     expect(res.status).toBe(204);
     const updatedProject = await ProjectModel.findById(project._id);
-    expect(updatedProject.members.some(m => m.user.toString() === memberUser._id.toString())).toBe(false);
+    expect(updatedProject.members.some(m => m.userId.toString() === memberUser._id.toString())).toBe(false);
   });
 
   it("should list projects in workspace", async () => {

@@ -11,7 +11,7 @@ const redisClient = createClient(
     ? {
         url: REDIS_URL,
         socket: {
-          tls: false, // Redis Cloud yêu cầu TLS
+          tls: true, // Redis Cloud yêu cầu TLS
           rejectUnauthorized: false, // Cho phép self-signed certificates
         },
       }

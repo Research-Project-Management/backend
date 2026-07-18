@@ -4,34 +4,31 @@ import mongoose from "mongoose";
 
 const stickyNoteLinkSchema = new mongoose.Schema(
   {
-    workspace: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Workspace",
+    workspaceId: {
+      type: mongoose.Schema.Types.ObjectId, ref: 'Workspace',
       required: true,
     },
-    parentSticky: {
-      type: mongoose.Schema.Types.ObjectId,
+    parentStickyId: {
+      type: mongoose.Schema.Types.ObjectId, ref: 'Sticky',
       ref: "Sticky",
       required: true,
     },
-    childSticky: {
-      type: mongoose.Schema.Types.ObjectId,
+    childStickyId: {
+      type: mongoose.Schema.Types.ObjectId, ref: 'Sticky',
       ref: "Sticky",
       required: true,
     },
-    childNote: {
-      type: mongoose.Schema.Types.ObjectId,
+    childNoteId: {
+      type: mongoose.Schema.Types.ObjectId, ref: 'Sticky',
       ref: "Sticky",
       select: false,
     },
-    project: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Project",
+    projectId: {
+      type: mongoose.Schema.Types.ObjectId, ref: 'Project',
       required: true,
     },
-    author: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+    authorId: {
+      type: mongoose.Schema.Types.ObjectId, ref: 'User',
       required: true,
     },
   },
@@ -39,23 +36,21 @@ const stickyNoteLinkSchema = new mongoose.Schema(
 );
 
 stickyNoteLinkSchema.index(
-  { workspace: 1, parentSticky: 1, project: 1, author: 1 },
+  { workspaceId: 1, parentStickyId: 1, projectId: 1, authorId: 1 },
 );
 stickyNoteLinkSchema.pre("validate", function normalizeStickyChildLink(next) {
-  if (!this.childSticky && this.childNote) this.childSticky = this.childNote;
+  if (!this.childStickyId && this.childNoteId) this.childStickyId = this.childNoteId;
   next();
 });
 
 stickyNoteLinkSchema.index(
-  { childSticky: 1, author: 1 },
+  { childStickyId: 1, authorId: 1 },
   { unique: true },
 );
 
 export const StickyChildLinkModel =
   mongoose.models.StickyNoteLink ||
   mongoose.model("StickyNoteLink", stickyNoteLinkSchema);
-
-export const StickyNoteLinkModel = StickyChildLinkModel;
 
 // ── Sticky Schema ─────────────────────────────────────────────────────────────
 
@@ -67,20 +62,17 @@ const stickySchema = new mongoose.Schema({
     enum: ['cyan-1', 'cyan-2', 'mint-1', 'mint-2', 'yellow-1', 'lavender-1', 'pink-1', 'purple-1'],
     default: 'yellow-1'
   },
-  workspace: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Workspace",
+  workspaceId: {
+    type: mongoose.Schema.Types.ObjectId, ref: 'Workspace',
     required: true
   },
-  labels: [{ type: mongoose.Schema.Types.ObjectId, ref: "Label" }],
-  author: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User",
+  labels: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Label' }],
+  authorId: {
+    type: mongoose.Schema.Types.ObjectId, ref: 'User',
     required: true
   },
   projectId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Project"
+    type: mongoose.Schema.Types.ObjectId, ref: 'Project'
   },
   category: {
     type: String,
@@ -109,9 +101,9 @@ stickySchema.pre("validate", function normalizeStickyScope(next) {
   next();
 });
 
-stickySchema.index({ workspace: 1, createdAt: -1 });
-stickySchema.index({ workspace: 1, labels: 1 });
-stickySchema.index({ projectId: 1, author: 1 });
+stickySchema.index({ workspaceId: 1, createdAt: -1 });
+stickySchema.index({ workspaceId: 1, labels: 1 });
+stickySchema.index({ projectId: 1, authorId: 1 });
 stickySchema.index({ content: 'text', title: 'text' });
 
 export const StickyModel = mongoose.models.Sticky || mongoose.model("Sticky", stickySchema);

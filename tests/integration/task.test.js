@@ -132,7 +132,7 @@ describe("Task Service Integration", () => {
     workspace = wsRes.body.workspace;
 
     // Load roles
-    const wsRoles = await RoleModel.find({ workspace: workspace._id });
+    const wsRoles = await RoleModel.find({ workspaceId: workspace._id });
     wsRoles.forEach((r) => {
       roles[r.name.toLowerCase()] = r._id;
     });

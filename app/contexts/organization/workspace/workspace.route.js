@@ -9,10 +9,10 @@ export const buildWorkspaceRouter = (workspaceController) => {
 
 workspaceRouter.get("/", isAuthenticated, workspaceController.getMyWorkspaces);
 workspaceRouter.post("/", isAuthenticated, validate(CreateWorkspaceDto), workspaceController.createWorkspace);
-workspaceRouter.get("/:workspaceId", isAuthenticated, checkWorkspaceRole("member"), workspaceController.getWorkspace);
+workspaceRouter.get("/:workspaceId", isAuthenticated, checkWorkspaceRole("owner", "admin", "member", "viewer"), workspaceController.getWorkspace);
 workspaceRouter.put("/:workspaceId", isAuthenticated, checkWorkspaceRole("owner", "admin"), validate(UpdateWorkspaceDto), workspaceController.updateWorkspace);
 workspaceRouter.delete("/:workspaceId", isAuthenticated, checkWorkspaceRole("owner"), workspaceController.deleteWorkspace);
-workspaceRouter.get("/:workspaceId/members", isAuthenticated, checkWorkspaceRole("member"), workspaceController.getMembers);
+workspaceRouter.get("/:workspaceId/members", isAuthenticated, checkWorkspaceRole("owner", "admin", "member", "viewer"), workspaceController.getMembers);
 workspaceRouter.post("/:workspaceId/members", isAuthenticated, checkWorkspaceRole("owner", "admin"), validate(AddWorkspaceMemberDto), workspaceController.addMember);
 workspaceRouter.put("/:workspaceId/members/:userId", isAuthenticated, checkWorkspaceRole("owner", "admin"), validate(UpdateWorkspaceMemberDto), workspaceController.updateMember);
 workspaceRouter.delete("/:workspaceId/members/:userId", isAuthenticated, checkWorkspaceRole("owner", "admin"), workspaceController.removeMember);
@@ -24,12 +24,9 @@ workspaceRouter.put("/:workspaceId/remove-member", isAuthenticated, checkWorkspa
 
 workspaceRouter.post("/:workspaceId/invite", isAuthenticated, checkWorkspaceRole("owner", "admin"), validate(AddWorkspaceMemberDto), workspaceController.inviteMember);
 workspaceRouter.post("/join/code", isAuthenticated, validate(JoinWorkspaceDto), workspaceController.joinWorkspace);
-workspaceRouter.post("/:workspaceId/leave", isAuthenticated, checkWorkspaceRole("member"), workspaceController.leaveWorkspace);
+workspaceRouter.post("/:workspaceId/leave", isAuthenticated, checkWorkspaceRole("owner", "admin", "member", "viewer"), workspaceController.leaveWorkspace);
 
-// Recent items & Activity feeds
-workspaceRouter.get("/:workspaceId/recent", isAuthenticated, checkWorkspaceRole("member"), workspaceController.getRecentItems);
-workspaceRouter.get("/:workspaceId/activity", isAuthenticated, checkWorkspaceRole("member"), workspaceController.getActivityFeed);
-workspaceRouter.get("/:workspaceId/search", isAuthenticated, checkWorkspaceRole("member"), workspaceController.searchWorkspace);
+
 
   return workspaceRouter;
 }

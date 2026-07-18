@@ -16,10 +16,10 @@ import { WorkspaceService } from "../../app/contexts/organization/workspace/work
 import { WorkspaceController } from "../../app/contexts/organization/workspace/workspace.controller.js";
 import { buildWorkspaceRouter } from "../../app/contexts/organization/workspace/workspace.route.js";
 
-import { CollectionRepository } from "../../app/contexts/library/collection/collection.repository.js";
+import { WorkspaceCollectionRepository } from "../../app/contexts/library/collection/collection.repository.js";
 import { PaperRepository } from "../../app/contexts/library/paper/paper.repository.js";
-import { CollectionService } from "../../app/contexts/library/collection/collection.service.js";
-import { CollectionController } from "../../app/contexts/library/collection/collection.controller.js";
+import { WorkspaceCollectionService } from "../../app/contexts/library/collection/collection.service.js";
+import { WorkspaceCollectionController } from "../../app/contexts/library/collection/collection.controller.js";
 import { buildCollectionRouter } from "../../app/contexts/library/collection/collection.route.js";
 import { errorHandler } from "../../app/middleware/error.middleware.js";
 
@@ -58,14 +58,14 @@ describe("Library Collection Service Integration", () => {
     });
     workspaceController = new WorkspaceController({ workspaceService });
     
-    collectionRepo = new CollectionRepository();
+    collectionRepo = new WorkspaceCollectionRepository();
     paperRepo = new PaperRepository();
-    collectionService = new CollectionService({
-      collectionRepository: collectionRepo,
+    collectionService = new WorkspaceCollectionService({
+      workspaceCollectionRepository: collectionRepo,
       paperRepository: paperRepo,
       workspaceRepository: workspaceRepo
     });
-    collectionController = new CollectionController({ collectionService });
+    collectionController = new WorkspaceCollectionController({ workspaceCollectionService: collectionService });
 
     workspaceRouter = buildWorkspaceRouter(workspaceController);
     collectionRouter = buildCollectionRouter(collectionController);
@@ -103,9 +103,9 @@ describe("Library Collection Service Integration", () => {
     workspace = wsRes.body.workspace;
     
     // add member
-    const role = await RoleModel.findOne({ name: "Member", workspace: workspace._id });
+    const role = await RoleModel.findOne({ name: "Member", workspaceId: workspace._id });
     await WorkspaceModel.findByIdAndUpdate(workspace._id, {
-      $push: { members: { user: member._id, role: role._id } }
+      $push: { members: { userId: member._id, roleId: role._id } }
     });
   });
 
@@ -125,7 +125,7 @@ describe("Library Collection Service Integration", () => {
     expect(res.body.collection.name).toBe("My Collection");
     expect(res.body.collection.description).toBe("Test description");
     expect(res.body.collection.color).toBe("#123456");
-    expect(res.body.collection.createdBy.toString()).toBe(owner._id.toString());
+    expect(res.body.collection.createdById.toString()).toBe(owner._id.toString());
   });
 
   it("should get collections for a workspace", async () => {

@@ -23,11 +23,11 @@ export const buildFileRouter = (fileController) => {
   fileRouter.get("/workspace/:workspaceId", isAuthenticated, checkWorkspaceRole("member"), fileController.getWorkspaceFiles);
 
   // Project storage scopes
-  fileRouter.get("/project/:projectId", isAuthenticated, checkProjectRole("manager", "member", "viewer"), fileController.getProjectFiles);
-  fileRouter.get("/my-files/:projectId", isAuthenticated, checkProjectRole("manager", "member", "viewer"), fileController.getProjectMyFiles);
-  fileRouter.get("/starred/:projectId", isAuthenticated, checkProjectRole("manager", "member", "viewer"), fileController.getProjectStarredFiles);
-  fileRouter.get("/shared/:projectId", isAuthenticated, checkProjectRole("manager", "member", "viewer"), fileController.getProjectSharedFiles);
-  fileRouter.get("/trash/:projectId", isAuthenticated, checkProjectRole("manager", "member", "viewer"), fileController.getProjectTrashedFiles);
+  fileRouter.get("/project/:projectId", isAuthenticated, checkProjectRole("owner", "admin", "member", "viewer"), fileController.getProjectFiles);
+  fileRouter.get("/my-files/:projectId", isAuthenticated, checkProjectRole("owner", "admin", "member", "viewer"), fileController.getProjectMyFiles);
+  fileRouter.get("/starred/:projectId", isAuthenticated, checkProjectRole("owner", "admin", "member", "viewer"), fileController.getProjectStarredFiles);
+  fileRouter.get("/shared/:projectId", isAuthenticated, checkProjectRole("owner", "admin", "member", "viewer"), fileController.getProjectSharedFiles);
+  fileRouter.get("/trash/:projectId", isAuthenticated, checkProjectRole("owner", "admin", "member", "viewer"), fileController.getProjectTrashedFiles);
 
   // Page storage scope (used by LaTeX compiler sync)
   fileRouter.get("/page/:pageId", isAuthenticated, fileController.getPageFiles);

@@ -62,8 +62,8 @@ const paperSchema = new mongoose.Schema(
     mimeType: { type: String, default: "application/pdf" },
     size: { type: Number, default: 0 },
 
-    // Tags
-    tags: [{ type: String }],
+    // Labels
+    labels: [{ type: String }],
 
     // RAG indexing
     ragDocId: { type: String, default: null },
@@ -78,32 +78,47 @@ const paperSchema = new mongoose.Schema(
     },
 
     // Ownership
-    workspace: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Workspace",
+    workspaceId: {
+      type: mongoose.Schema.Types.ObjectId, ref: 'Workspace',
       required: true,
     },
-    uploadedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+    uploadedById: {
+      type: mongoose.Schema.Types.ObjectId, ref: 'User',
       required: true,
     },
 
     // Library collection (workspace-level) — null if project-only paper
-    collection: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Collection",
+    collectionId: {
+      type: mongoose.Schema.Types.ObjectId, ref: 'Collection',
       default: null,
     },
 
     // Soft-delete (for safe ref integrity)
     deletedAt: { type: Date, default: null },
   },
-  { timestamps: true },
+  { 
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true }
+  },
 );
 
-paperSchema.index({ workspace: 1, collection: 1, deletedAt: 1, createdAt: -1 });
-paperSchema.index({ workspace: 1, deletedAt: 1 });
+paperSchema.virtual('uploadedBy', {
+  ref: 'User',
+  localField: 'uploadedById',
+  foreignField: '_id',
+  justOne: true
+});
+
+paperSchema.virtual('collection', {
+  ref: 'Collection',
+  localField: 'collectionId',
+  foreignField: '_id',
+  justOne: true
+});
+
+paperSchema.index({ workspaceId: 1, collectionId: 1, deletedAt: 1, createdAt: -1 });
+paperSchema.index({ workspaceId: 1, deletedAt: 1 });
 paperSchema.index({ doi: 1 }); // for dedup by DOI
 
 const PaperModel =

@@ -8,6 +8,8 @@ export const CreateStickyDto = {
     scope: z.enum(["workspace", "project"]).optional(),
     projectId: z.string().optional().nullable(),
     position: z.object({ x: z.number(), y: z.number() }).optional(),
+    labels: z.array(z.string()).optional(),
+    parentStickyId: z.string().optional(),
   }),
 };
 
@@ -18,6 +20,7 @@ export const UpdateStickyDto = {
     color: z.enum(['cyan-1', 'cyan-2', 'mint-1', 'mint-2', 'yellow-1', 'lavender-1', 'pink-1', 'purple-1']).optional(),
     position: z.object({ x: z.number(), y: z.number() }).optional(),
     labels: z.array(z.string()).optional(),
+    projectId: z.string().optional().nullable(),
   }),
 };
 
@@ -29,6 +32,6 @@ export const ReorderStickiesDto = {
 
 export const AddChildStickyDto = {
   body: z.object({
-    childId: z.string().min(1, "Child Sticky ID is required"),
+    childStickyId: z.string().min(1, "Child Sticky ID is required"),
   }),
 };

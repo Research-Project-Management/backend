@@ -1,6 +1,7 @@
 // app/middleware/workspace.middleware.js
 import WorkspaceModel from "../contexts/organization/workspace/workspace.schema.js";
 import { getOrSetCache, deleteCache } from "../config/cache.js";
+import { AppError } from "../lib/AppError.js";
 
 const WORKSPACE_CACHE_TTL = 60;
 
@@ -8,41 +9,46 @@ export const clearWorkspaceCache = async (workspaceId) => {
   await deleteCache(`ws:${workspaceId}`);
 };
 
+export const getCachedWorkspace = async (inputId) => {
+  if (!inputId) return null;
+  const isObjectId = /^[0-9a-fA-F]{24}$/.test(inputId);
+  const cacheKey = `ws:${inputId}`;
+  return getOrSetCache(
+    cacheKey,
+    async () => {
+      if (isObjectId) {
+        return await WorkspaceModel.findById(inputId).populate({ path: "members.roleId", model: "Role" }).lean();
+      } else {
+        return await WorkspaceModel.findOne({ url: inputId }).populate({ path: "members.roleId", model: "Role" }).lean();
+      }
+    },
+    WORKSPACE_CACHE_TTL
+  );
+};
+
 export const checkWorkspaceRole = (...allowedRoles) => {
   return async (req, res, next) => {
     try {
       const inputId = req.params.id || req.params.workspaceId;
-      if (!inputId) return res.status(400).json({ error: "Workspace identifier missing" });
+      if (!inputId) throw new AppError("Workspace identifier missing", 400);
 
-      const isObjectId = inputId.match(/^[0-9a-fA-F]{24}$/);
-      const cacheKey = `ws:${inputId}`;
-      const workspace = await getOrSetCache(
-        cacheKey,
-        async () => {
-          if (isObjectId) {
-            return await WorkspaceModel.findById(inputId).populate({ path: "members.role", model: "Role" }).lean();
-          } else {
-            return await WorkspaceModel.findOne({ url: inputId }).populate({ path: "members.role", model: "Role" }).lean();
-          }
-        },
-        WORKSPACE_CACHE_TTL
-      );
+      const workspace = await getCachedWorkspace(inputId);
+      if (!workspace) throw new AppError("Workspace not found", 404);
 
-      if (!workspace) return res.status(404).json({ error: "Workspace not found" });
+      const member = workspace.members.find((m) => m.userId.toString() === req.user._id.toString());
+      if (!member) throw new AppError("Not a member of this workspace", 403);
 
-      const member = workspace.members.find((m) => m.user.toString() === req.user._id.toString());
-      if (!member) return res.status(403).json({ error: "Not a member of this workspace" });
-
-      const role = member.role;
-      if (!role?.name) return res.status(403).json({ error: "Role not found" });
+      const role = member.roleId;
+      if (!role?.name) throw new AppError("Role not found", 403);
 
       const roleName = role.name.toLowerCase();
       let effectiveAllowedRoles = [...allowedRoles];
+      if (effectiveAllowedRoles.includes("viewer")) effectiveAllowedRoles.push("member", "admin", "owner");
       if (effectiveAllowedRoles.includes("member")) effectiveAllowedRoles.push("admin", "owner");
       if (effectiveAllowedRoles.includes("admin")) effectiveAllowedRoles.push("owner");
 
       if (!effectiveAllowedRoles.some((r) => r.toLowerCase() === roleName)) {
-        return res.status(403).json({ error: "Insufficient permissions" });
+        throw new AppError("Insufficient permissions", 403);
       }
 
       req.workspace = workspace;
@@ -51,7 +57,7 @@ export const checkWorkspaceRole = (...allowedRoles) => {
       if (role.permissions) req.userPermissions = role.permissions;
       next();
     } catch (error) {
-      res.status(500).json({ error: error.message });
+      next(error);
     }
   };
 };
@@ -61,23 +67,11 @@ export const mapWorkspaceId = async (req, res, next) => {
   try {
     const inputId = req.params.workspaceId;
     if (!inputId) return next();
-    const isObjectId = /^[0-9a-fA-F]{24}$/.test(inputId);
-    const cacheKey = `ws:${inputId}`;
-    const workspace = await getOrSetCache(
-      cacheKey,
-      async () => {
-        if (isObjectId) {
-          return await WorkspaceModel.findById(inputId).populate({ path: "members.role", model: "Role" }).lean();
-        } else {
-          return await WorkspaceModel.findOne({ url: inputId }).populate({ path: "members.role", model: "Role" }).lean();
-        }
-      },
-      WORKSPACE_CACHE_TTL
-    );
-    if (!workspace) return res.status(404).json({ error: "Workspace not found" });
+    const workspace = await getCachedWorkspace(inputId);
+    if (!workspace) throw new AppError("Workspace not found", 404);
     req.workspace = workspace;
     next();
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    next(error);
   }
 };

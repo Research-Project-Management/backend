@@ -6,8 +6,7 @@ import RoleModel from "../../app/contexts/identity/role/role.schema.js";
 import WorkspaceModel from "../../app/contexts/organization/workspace/workspace.schema.js";
 import ProjectModel from "../../app/contexts/organization/project/project.schema.js";
 import PaperModel from "../../app/contexts/library/paper/paper.schema.js";
-import CollectionModel from "../../app/contexts/library/collection/collection.schema.js";
-import ProjectCollectionModel from "../../app/contexts/library/project-collection/project-collection.schema.js";
+import CollectionModel, { WorkspaceCollectionModel, ProjectCollectionModel } from "../../app/contexts/library/collection/collection.schema.js";
 
 import { RoleRepository } from "../../app/contexts/identity/role/role.repository.js";
 import { RoleService } from "../../app/contexts/identity/role/role.service.js";
@@ -17,11 +16,11 @@ import { WorkspaceController } from "../../app/contexts/organization/workspace/w
 import { buildWorkspaceRouter } from "../../app/contexts/organization/workspace/workspace.route.js";
 
 import { PaperRepository } from "../../app/contexts/library/paper/paper.repository.js";
-import { CollectionRepository } from "../../app/contexts/library/collection/collection.repository.js";
-import { ProjectCollectionRepository } from "../../app/contexts/library/project-collection/project-collection.repository.js";
-import { ProjectCollectionService } from "../../app/contexts/library/project-collection/project-collection.service.js";
-import { ProjectCollectionController } from "../../app/contexts/library/project-collection/project-collection.controller.js";
-import { buildProjectCollectionRouter } from "../../app/contexts/library/project-collection/project-collection.route.js";
+import { WorkspaceCollectionRepository } from "../../app/contexts/library/collection/collection.repository.js";
+import { ProjectCollectionRepository } from "../../app/contexts/library/collection/collection.repository.js";
+import { ProjectCollectionService } from "../../app/contexts/library/collection/collection.service.js";
+import { ProjectCollectionController } from "../../app/contexts/library/collection/collection.controller.js";
+import { buildProjectCollectionRouter } from "../../app/contexts/library/collection/collection.route.js";
 import { errorHandler } from "../../app/middleware/error.middleware.js";
 import { isAuthenticated } from "../../app/middleware/auth.middleware.js";
 
@@ -72,11 +71,11 @@ describe("Library Project Collection Integration", () => {
     const workspaceRouter = buildWorkspaceRouter(workspaceController);
 
     pcRepo = new ProjectCollectionRepository();
-    collRepo = new CollectionRepository();
+    collRepo = new WorkspaceCollectionRepository();
     paperRepo = new PaperRepository();
     pcService = new ProjectCollectionService({
       projectCollectionRepository: pcRepo,
-      collectionRepository: collRepo,
+      workspaceCollectionRepository: collRepo,
       paperRepository: paperRepo
     });
     pcController = new ProjectCollectionController({ projectCollectionService: pcService });
@@ -121,34 +120,34 @@ describe("Library Project Collection Integration", () => {
         url: "pc-ws-" + Date.now(),
       });
     workspace = wsRes.body.workspace;
-    const ownerRole = await RoleModel.findOne({ name: "Owner", workspace: workspace._id });
+    const ownerRole = await RoleModel.findOne({ name: "Owner", workspaceId: workspace._id });
 
     project = await ProjectModel.create({
       name: "PC Project",
-      workspace: workspace._id,
-      createdBy: owner._id,
-      members: [{ user: owner._id, role: ownerRole._id }]
+      workspaceId: workspace._id,
+      createdById: owner._id,
+      members: [{ userId: owner._id, roleId: ownerRole._id }]
     });
 
-    libCollection = await CollectionModel.create({
+    libCollection = await WorkspaceCollectionModel.create({
       name: "Lib Col",
-      workspace: workspace._id,
-      createdBy: owner._id
+      workspaceId: workspace._id,
+      createdById: owner._id
     });
 
     paper1 = await PaperModel.create({
       title: "Paper 1",
-      workspace: workspace._id,
-      uploadedBy: owner._id,
+      workspaceId: workspace._id,
+      uploadedById: owner._id,
       filename: "test1.pdf",
       fileUrl: "http://example.com/test1.pdf",
-      collection: libCollection._id
+      collectionId: libCollection._id
     });
 
     paper2 = await PaperModel.create({
       title: "Paper 2",
-      workspace: workspace._id,
-      uploadedBy: owner._id,
+      workspaceId: workspace._id,
+      uploadedById: owner._id,
       filename: "test2.pdf",
       fileUrl: "http://example.com/test2.pdf"
     });
@@ -172,9 +171,9 @@ describe("Library Project Collection Integration", () => {
   it("should get project collections", async () => {
     await ProjectCollectionModel.create({
       name: "Existing PC",
-      project: project._id,
-      workspace: workspace._id,
-      createdBy: owner._id
+      projectId: project._id,
+      workspaceId: workspace._id,
+      createdById: owner._id
     });
 
     const res = await request(testApp)
@@ -189,9 +188,9 @@ describe("Library Project Collection Integration", () => {
   it("should import library collection", async () => {
     const pc = await ProjectCollectionModel.create({
       name: "PC to import to",
-      project: project._id,
-      workspace: workspace._id,
-      createdBy: owner._id
+      projectId: project._id,
+      workspaceId: workspace._id,
+      createdById: owner._id
     });
 
     const res = await request(testApp)
@@ -210,9 +209,9 @@ describe("Library Project Collection Integration", () => {
   it("should add a paper to project collection", async () => {
     const pc = await ProjectCollectionModel.create({
       name: "PC to add paper",
-      project: project._id,
-      workspace: workspace._id,
-      createdBy: owner._id
+      projectId: project._id,
+      workspaceId: workspace._id,
+      createdById: owner._id
     });
 
     const res = await request(testApp)
@@ -231,9 +230,9 @@ describe("Library Project Collection Integration", () => {
   it("should remove a paper from project collection", async () => {
     const pc = await ProjectCollectionModel.create({
       name: "PC to remove paper from",
-      project: project._id,
-      workspace: workspace._id,
-      createdBy: owner._id,
+      projectId: project._id,
+      workspaceId: workspace._id,
+      createdById: owner._id,
       papers: [{
         paper: paper2._id,
         addedBy: owner._id
@@ -254,9 +253,9 @@ describe("Library Project Collection Integration", () => {
   it("should delete a project collection", async () => {
     const pc = await ProjectCollectionModel.create({
       name: "PC to delete",
-      project: project._id,
-      workspace: workspace._id,
-      createdBy: owner._id
+      projectId: project._id,
+      workspaceId: workspace._id,
+      createdById: owner._id
     });
 
     const res = await request(testApp)

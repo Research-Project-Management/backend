@@ -1,10 +1,15 @@
 import { z } from "zod";
 
+const dateSchema = z.preprocess(
+  (val) => (val === "" ? null : val),
+  z.string().datetime().optional().nullable().or(z.date().optional().nullable())
+);
+
 const ChecklistItemSchema = z.object({
   title: z.string().trim().min(1),
   completed: z.boolean().default(false),
   assigneeId: z.string().optional().nullable(),
-  dueDate: z.string().datetime().optional().or(z.date().optional()),
+  dueDate: dateSchema,
 });
 
 const ChecklistSchema = z.object({
@@ -19,8 +24,8 @@ export const CreateTaskDto = {
     description: z.string().optional(),
     columnId: z.string().trim().min(1, "Column ID is required"),
     assignee: z.string().optional().nullable(),
-    startDate: z.string().datetime().optional().or(z.date().optional()),
-    dueDate: z.string().datetime().optional().or(z.date().optional()),
+    startDate: dateSchema,
+    dueDate: dateSchema,
     priority: z.enum(["urgent", "high", "medium", "low", "none"]).optional(),
     cycle: z.string().optional().nullable(),
     parentTask: z.string().optional().nullable(),
@@ -36,8 +41,8 @@ export const UpdateTaskDto = {
     description: z.string().optional(),
     columnId: z.string().trim().min(1).optional(),
     assignee: z.string().optional().nullable(),
-    startDate: z.string().datetime().optional().or(z.date().optional()),
-    dueDate: z.string().datetime().optional().or(z.date().optional()),
+    startDate: dateSchema,
+    dueDate: dateSchema,
     priority: z.enum(["urgent", "high", "medium", "low", "none"]).optional(),
     cycle: z.string().optional().nullable(),
     parentTask: z.string().optional().nullable(),

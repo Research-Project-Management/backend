@@ -8,8 +8,8 @@ import { CreateRoleDto, UpdateRoleDto } from "./role.dto.js";
 export const buildRoleRouter = (roleController) => {
   const roleRouter = Router();
 
-roleRouter.get("/:workspaceId", isAuthenticated, checkWorkspaceRole("member"), roleController.getRoles);
-roleRouter.get("/:workspaceId/:roleId", isAuthenticated, checkWorkspaceRole("member"), roleController.getRole);
+roleRouter.get("/:workspaceId", isAuthenticated, checkWorkspaceRole("member", "viewer"), roleController.getRoles);
+roleRouter.get("/:workspaceId/:roleId", isAuthenticated, checkWorkspaceRole("member", "viewer"), roleController.getRole);
 roleRouter.post("/:workspaceId", isAuthenticated, checkWorkspaceRole("owner", "admin"), validate(CreateRoleDto), roleController.createRole);
 roleRouter.put("/:workspaceId/:roleId", isAuthenticated, checkWorkspaceRole("owner", "admin"), validate(UpdateRoleDto), roleController.updateRole);
 roleRouter.delete("/:workspaceId/:roleId", isAuthenticated, checkWorkspaceRole("owner", "admin"), roleController.deleteRole);

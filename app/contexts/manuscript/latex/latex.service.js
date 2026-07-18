@@ -1,5 +1,5 @@
 import { AppError } from "../../../lib/AppError.js";
-import { syncFileToCompilerReliable, bulkSyncToCompiler } from "../../../config/compiler-sync.js";
+import { syncFileToCompilerReliable, bulkSyncToCompiler } from "../../../lib/compiler-sync.js";
 import { r2 } from "../../../config/r2.js";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { Readable } from "stream";
@@ -87,17 +87,66 @@ export class LatexService {
     return { synced: syncedIds, names: syncedNames, total: syncedIds.length };
   }
 
-  async proxy(req, res) {
-    const COMPILER_URL = process.env.COMPILER_SERVICE_URL || "http://localhost:3001";
-    const targetPath = req.path.replace(/^\/latex/, "");
-    const targetUrl = COMPILER_URL + targetPath;
-    const compilerRes = await fetch(targetUrl, { method: req.method, headers: { "content-type": req.headers["content-type"] || "application/json" }, body: ["POST", "PUT", "PATCH"].includes(req.method) ? JSON.stringify(req.body) : undefined });
-    res.status(compilerRes.status);
-    if (compilerRes.body) {
-      Readable.fromWeb(compilerRes.body).pipe(res);
-    } else {
-      res.end();
+  async compile(payload) {
+    if (payload.project_id) {
+      const rootPage = await this.pageRepository.findByIdSelect(payload.project_id, "_id parentPage");
+      if (!rootPage) throw new AppError("Page not found", 404);
+      if (rootPage.parentPage) throw new AppError("Only root pages can be compiled directly.", 400);
     }
+
+    const LATEX_URL = process.env.LATEX_URL || "http://localhost:2918";
+    const MAX_RETRIES = 3;
+    const BASE_DELAY_MS = 500;
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    let lastError = null;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      if (attempt > 0) {
+        const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1);
+        await sleep(delay);
+      }
+
+      try {
+        const upstream = await fetch(`${LATEX_URL}/compile`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        if (upstream.status === 503 && attempt < MAX_RETRIES) {
+          lastError = { status: 503 };
+          continue;
+        }
+
+        if (upstream.ok) {
+          const contentType = upstream.headers.get("content-type") || "";
+          if (contentType.includes("application/json")) {
+            const data = await upstream.json();
+            return { status: 200, data };
+          } else {
+            const arrayBuffer = await upstream.arrayBuffer();
+            const pdfBase64 = Buffer.from(arrayBuffer).toString("base64");
+            return { status: 200, data: { pdf: pdfBase64, synctex: "" } };
+          }
+        }
+
+        let errorBody;
+        try {
+          errorBody = await upstream.json();
+        } catch {
+          errorBody = { error: "upstream_error", message: upstream.statusText };
+        }
+        return { status: upstream.status, data: errorBody };
+      } catch (fetchError) {
+        lastError = fetchError;
+        if (attempt < MAX_RETRIES) {
+          continue;
+        }
+      }
+    }
+
+    throw new AppError(lastError?.message || "Compiler is overloaded. Please try again in a moment.", 502);
   }
 }
 

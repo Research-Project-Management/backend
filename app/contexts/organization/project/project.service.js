@@ -1,25 +1,32 @@
 import { clearProjectCache } from "../../../middleware/project.middleware.js";
-import { getIO } from "../../../config/socket.js";
 import { AppError } from "../../../lib/AppError.js";
+import { eventBus, Events } from "../../../lib/eventBus.js";
 
 export class ProjectService {
-  constructor({ projectRepository, fileRepository, taskRepository, roleRepository }) {
+  constructor({ projectRepository, roleRepository, roleService }) {
     this.projectRepository = projectRepository;
-    this.fileRepository = fileRepository;
-    this.taskRepository = taskRepository;
     this.roleRepository = roleRepository;
+    this.roleService = roleService;
   }
 
-  getProjects(workspaceId, userId, workspaceRole) {
+  getProjects(workspaceId, userId, workspaceRole, pagination = null) {
     const isPrivileged = workspaceRole === "owner" || workspaceRole === "admin";
-    const query = { workspace: workspaceId };
-    if (!isPrivileged) query["members.user"] = userId;
-    return this.projectRepository.model.find(query);
+    const query = { workspaceId: workspaceId };
+    if (!isPrivileged) query["members.userId"] = userId;
+    
+    return this.projectRepository.findProjectsWithCount(query, pagination);
   }
 
   async createProject(workspaceId, data, userId) {
     const { name, description, color, avatar, modules } = data;
-    const ownerRole = await this.roleRepository.findByWorkspaceAndName(workspaceId, "Owner");
+    let ownerRole = await this.roleRepository.findByWorkspaceAndName(workspaceId, "Owner");
+    
+    // For backward compatibility with old workspaces that don't have roles
+    if (!ownerRole) {
+      const roles = await this.roleService.initializeDefaultRoles(workspaceId, userId);
+      ownerRole = await this.roleRepository.findById(roles.owner);
+    }
+
     const roleId = ownerRole ? ownerRole._id : null;
 
     return this.projectRepository.create({
@@ -28,9 +35,9 @@ export class ProjectService {
       color,
       avatar,
       modules,
-      workspace: workspaceId,
-      createdBy: userId,
-      members: [{ user: userId, role: roleId }],
+      workspaceId: workspaceId,
+      createdById: userId,
+      members: [{ userId: userId, roleId: roleId }],
       taskColumns: [
         { id: "todo", title: "Todo", accentColor: "#6b7280" },
         { id: "in-progress", title: "In Progress", accentColor: "#3b82f6" },
@@ -40,32 +47,12 @@ export class ProjectService {
     });
   }
 
-  async getProjectOverview(projectId, userId) {
-    const project = await this.projectRepository.findByIdPopulated(projectId);
-    
-    const files = await this.fileRepository.findAllActiveByProject(projectId);
-    const fileCount = files.length;
-    const totalSize = files.reduce((acc, f) => acc + (f.size || 0), 0);
-    
-    const tasks = await this.taskRepository.findByProject(projectId);
-    const taskCount = tasks.length;
-    const completedTasks = tasks.filter(t => t.completed).length;
-    const inProgressTasks = tasks.filter(t => t.columnId === "in-progress" && !t.completed).length;
-    const pendingTasks = taskCount - completedTasks - inProgressTasks;
 
-    const stats = {
-      files: { count: fileCount, totalSize, recent: files.slice(0, 5) },
-      tasks: { total: taskCount, completed: completedTasks, pending: pendingTasks, inProgress: inProgressTasks },
-      members: project.members.length
-    };
-
-    return { project, stats };
-  }
 
   async updateProject(currentProject, updates, userId) {
     const project = await this.projectRepository.updateById(currentProject._id, updates);
     await clearProjectCache(currentProject._id);
-    getIO()?.to(`workspace:${currentProject.workspace}`).emit("project:updated", { projectId: currentProject._id });
+    eventBus.emit(Events.PROJECT_UPDATED, { workspaceId: currentProject.workspaceId.toString(), projectId: currentProject._id.toString() });
     return project;
   }
 
@@ -93,9 +80,9 @@ export class ProjectService {
     const { userId, role, roleId } = data;
     const project = await this.projectRepository.findById(projectId);
     if (!project) throw new AppError("Project not found", 404);
-    if (project.members.find((m) => m.user.toString() === userId)) throw new AppError("User is already a member", 400);
-    const resolvedRole = await this._resolveRole(project.workspace, roleId || role);
-    project.members.push({ user: userId, role: resolvedRole });
+    if (project.members.find((m) => m.userId.toString() === userId.toString())) throw new AppError("User is already a member", 400);
+    const resolvedRole = await this._resolveRole(project.workspaceId, roleId || role);
+    project.members.push({ userId: userId, roleId: resolvedRole });
     await project.save();
     await clearProjectCache(projectId);
     return project;
@@ -104,10 +91,10 @@ export class ProjectService {
   async updateMember(projectId, userId, data, actorId) {
     const { role, roleId, newRole } = data;
     const project = await this.projectRepository.findById(projectId);
-    const member = project.members.find((m) => m.user.toString() === userId);
+    const member = project.members.find((m) => m.userId.toString() === userId.toString());
     if (!member) throw new AppError("Member not found", 404);
-    const resolvedRole = await this._resolveRole(project.workspace, roleId || role || newRole);
-    member.role = resolvedRole;
+    const resolvedRole = await this._resolveRole(project.workspaceId, roleId || role || newRole);
+    member.roleId = resolvedRole;
     await project.save();
     await clearProjectCache(projectId);
     return project;
@@ -115,7 +102,7 @@ export class ProjectService {
 
   async removeMember(currentProject, userId, actorId) {
     const project = await this.projectRepository.findById(currentProject._id);
-    project.members = project.members.filter((m) => m.user.toString() !== userId);
+    project.members = project.members.filter((m) => m.userId.toString() !== userId.toString());
     await project.save();
     await clearProjectCache(currentProject._id);
   }
@@ -126,7 +113,7 @@ export class ProjectService {
     project.taskColumns.push({ id: `col_${Date.now()}`, title: title, accentColor: color || "#e2e8f0" });
     await project.save();
     await clearProjectCache(projectId);
-    getIO()?.to(`project:${projectId}`).emit("column:created", { columns: project.taskColumns });
+    eventBus.emit(Events.PROJECT_COLUMN_CREATED, { projectId: projectId.toString(), columns: project.taskColumns });
     return project;
   }
 
@@ -138,7 +125,7 @@ export class ProjectService {
     if (color !== undefined) col.accentColor = color;
     await project.save();
     await clearProjectCache(projectId);
-    getIO()?.to(`project:${projectId}`).emit("column:updated", { columns: project.taskColumns });
+    eventBus.emit(Events.PROJECT_COLUMN_UPDATED, { projectId: projectId.toString(), columns: project.taskColumns });
     return project;
   }
 
@@ -149,7 +136,7 @@ export class ProjectService {
     project.taskColumns.splice(colIndex, 1);
     await project.save();
     await clearProjectCache(projectId);
-    getIO()?.to(`project:${projectId}`).emit("column:updated", { columns: project.taskColumns });
+    eventBus.emit(Events.PROJECT_COLUMN_UPDATED, { projectId: projectId.toString(), columns: project.taskColumns });
     return project;
   }
 }

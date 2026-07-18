@@ -1,14 +1,13 @@
 import { AppError } from "../../../lib/AppError.js";
-import { getIO } from "../../../config/socket.js";
-import FileModel from "../../shared/file/file.schema.js";
-import { textToBase64, bulkSyncToCompiler, buildRelativePath } from "../../../config/compiler-sync.js";
-import WorkspaceModel from "../../organization/workspace/workspace.schema.js";
+import { eventBus, Events } from "../../../lib/eventBus.js";
+import { textToBase64, bulkSyncToCompiler, buildRelativePath } from "../../../lib/compiler-sync.js";
 
 
 export class PageService {
-  constructor({ pageRepository}) {
+  constructor({ pageRepository, workspaceRepository, fileRepository }) {
     this.repo = pageRepository;
-    
+    this.workspaceRepository = workspaceRepository;
+    this.fileRepository = fileRepository;
   }
 
   async getWorkspacePages(workspaceInput) {
@@ -16,7 +15,7 @@ export class PageService {
     const isObjectId = /^[0-9a-fA-F]{24}$/.test(workspaceInput);
     let workspaceId = workspaceInput;
     if (!isObjectId) {
-      const ws = await WorkspaceModel.findOne({ url: workspaceInput }).select("_id").lean();
+      const ws = await this.workspaceRepository.findByUrl(workspaceInput);
       if (!ws) return [];
       workspaceId = ws._id.toString();
     }
@@ -25,11 +24,12 @@ export class PageService {
   getProjectPages(projectId) { return this.repo.findByProject(projectId); }
   getPage(id) { return this.repo.findById(id); }
 
-  async createPage(projectId, data, userId) {
+  async createPage(workspaceId, projectId, data, userId) {
     const rootPage = await this.repo.create({
       ...data,
-      project: projectId,
-      author: userId,
+      workspaceId: workspaceId,
+      projectId: projectId,
+      authorId: userId,
       content: data.content ?? "",
       parentPage: null,
       mainFile: null
@@ -39,21 +39,22 @@ export class PageService {
       title: "main.tex",
       content: "\\documentclass{article}\n\\begin{document}\nHello World\n\\end{document}",
       status: "draft",
-      project: projectId,
-      author: userId,
+      workspaceId: workspaceId,
+      projectId: projectId,
+      authorId: userId,
       parentPage: rootPage._id
     });
 
     rootPage.mainFile = mainFile._id;
     await rootPage.save();
 
-    getIO()?.to("project:" + projectId).emit("page:created", { page: rootPage });
+    eventBus.emit(Events.PAGE_CREATED, { projectId: projectId.toString(), page: rootPage });
     return { page: rootPage, mainFile };
   }
 
   async updatePage(pageId, data, userId) {
     const page = await this.repo.updateById(pageId, data);
-    if (page) getIO()?.to("page:" + pageId).emit("page:updated", { page });
+    if (page) eventBus.emit(Events.PAGE_UPDATED, { pageId: pageId.toString(), page });
     return page;
   }
 
@@ -61,7 +62,8 @@ export class PageService {
     const page = await this.repo.findById(pageId);
     if (page) {
       await this.repo.deleteById(pageId);
-      getIO()?.to("project:" + page.project).emit("page:deleted", { pageId });
+      const projectId = page.projectId;
+      eventBus.emit(Events.PAGE_DELETED, { projectId: projectId.toString(), pageId: pageId.toString() });
     }
   }
 
@@ -70,7 +72,7 @@ export class PageService {
     if (!original) throw new AppError("Page not found", 404);
     const raw = original.toObject ? original.toObject() : { ...original };
     const { _id, createdAt, updatedAt, ...rest } = raw;
-    return this.repo.create({ ...rest, title: rest.title + " (Copy)", author: userId });
+    return this.repo.create({ ...rest, title: rest.title + " (Copy)", authorId: userId });
   }
 
   getChildPages(pageId) {
@@ -82,12 +84,13 @@ export class PageService {
     if (!parentPage) throw new AppError("Parent page not found", 404);
     const child = await this.repo.create({
       ...data,
-      project: parentPage.project,
+      workspaceId: parentPage.workspaceId,
+      projectId: parentPage.projectId,
       parentPage: parentPageId,
-      author: userId,
+      authorId: userId,
       content: data.content ?? ""
     });
-    getIO()?.to("page:" + parentPageId).emit("file:created", { file: child });
+    eventBus.emit(Events.CHILD_PAGE_CREATED, { parentPageId: parentPageId.toString(), file: child });
     return child;
   }
 
@@ -122,7 +125,7 @@ export class PageService {
     }
 
     // 3. Binary file assets (images, etc)
-    const assets = await FileModel.find({ project: rootPage.project }).lean();
+    const assets = await this.fileRepository.findAllActiveByProject(rootPage.projectId.toString());
     for (const asset of assets) {
       // Build relative path
       const relPath = await buildRelativePath(asset.filename, asset.parent);

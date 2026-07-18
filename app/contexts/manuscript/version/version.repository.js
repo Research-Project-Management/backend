@@ -1,13 +1,14 @@
-import { PageVersionModel } from "../page/page.schema.js";
+import VersionModel from "./version.schema.js";
 
 export class VersionRepository {
   constructor() {
-    this.model = PageVersionModel;
+    this.model = VersionModel;
   }
   findManualSaves(pageId) {
     return this.model.find({ page: pageId, eventType: "manual_save" })
-      .select("_id title label fileName savedBy createdAt")
-      .populate("savedBy", "name avatar")
+      .select("_id title label fileName savedById createdAt")
+      .populate("savedById", "name avatar")
+      .lean()
       .sort({ createdAt: -1 })
       .limit(50);
   }
@@ -19,8 +20,9 @@ export class VersionRepository {
     return this.model.find({
       projectPageId,
       eventType: { $in: ["manual_save", "file_created", "file_deleted", "asset_uploaded", "asset_deleted"] },
-    }).select("_id eventType title label fileName savedBy createdAt page")
-      .populate("savedBy", "name avatar")
+    }).select("_id eventType title label fileName savedById createdAt page")
+      .populate("savedById", "name avatar")
+      .lean()
       .sort({ createdAt: -1 })
       .limit(200);
   }

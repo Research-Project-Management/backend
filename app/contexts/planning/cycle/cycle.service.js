@@ -1,5 +1,5 @@
-import { getIO } from "../../../config/socket.js";
 import { AppError } from "../../../lib/AppError.js";
+import { eventBus, Events } from "../../../lib/eventBus.js";
 
 export class CycleService {
   constructor({ cycleRepository, projectRepository, taskRepository }) {
@@ -15,9 +15,9 @@ export class CycleService {
     if (targetStatus === "active") {
       if (!startDate || !endDate) throw new AppError("Active cycles must have both start and end dates", 400);
       if (!project.settings?.parallelCycles) {
-        const q = { project: projectId, status: "active" };
+        const q = { projectId: projectId, status: "active" };
         if (excludeId) q._id = { $ne: excludeId };
-        const active = await this.cycleRepository.findOne ? this.cycleRepository.findOne(q) : null;
+        const active = await this.cycleRepository.findOne(q);
         if (active) throw new AppError(`"${active.name}" is already active`, 400);
       }
     }
@@ -28,24 +28,31 @@ export class CycleService {
 
   async createCycle(projectId, data, userId) {
     await this._validateCycle(projectId, data.status, data.startDate, data.endDate);
-    const cycle = await this.cycleRepository.create({ ...data, project: projectId, author: userId });
-    getIO()?.to(`project:${projectId}`).emit("cycle:created", { cycle });
+    const cycle = await this.cycleRepository.create({ ...data, projectId: projectId, authorId: userId });
+    eventBus.emit(Events.CYCLE_CREATED, { projectId: projectId.toString(), cycle });
     return cycle;
   }
 
   async updateCycle(cycleId, data, projectId, userId) {
-    await this._validateCycle(projectId, data.status, data.startDate, data.endDate, cycleId);
+    // Merge existing cycle dates with updates so status-only changes don't fail validation
+    const existing = await this.cycleRepository.findById(cycleId);
+    const mergedStartDate = data.startDate !== undefined ? data.startDate : existing?.startDate;
+    const mergedEndDate = data.endDate !== undefined ? data.endDate : existing?.endDate;
+    await this._validateCycle(projectId, data.status ?? existing?.status, mergedStartDate, mergedEndDate, cycleId);
     const cycle = await this.cycleRepository.updateById(cycleId, data);
-    getIO()?.to(`project:${projectId}`).emit("cycle:updated", { cycle });
+    eventBus.emit(Events.CYCLE_UPDATED, { projectId: projectId.toString(), cycle });
     return cycle;
   }
 
-  deleteCycle(cycleId) { return this.cycleRepository.deleteById(cycleId); }
+  async deleteCycle(cycleId, projectId) {
+    await this.cycleRepository.deleteById(cycleId);
+    eventBus.emit(Events.CYCLE_DELETED, { projectId: projectId.toString(), cycleId: cycleId.toString() });
+  }
 
   async addTask(cycleId, taskId) {
     const cycle = await this.cycleRepository.findById(cycleId);
     if (!cycle) throw new AppError("Cycle not found", 404);
-    const task = await this.taskRepository.updateById(taskId, { cycle: cycleId });
+    const task = await this.taskRepository.updateById(taskId, { cycleId: cycleId });
     if (!task) throw new AppError("Task not found", 404);
     return { cycle };
   }
@@ -54,8 +61,8 @@ export class CycleService {
     const cycle = await this.cycleRepository.findById(cycleId);
     if (!cycle) throw new AppError("Cycle not found", 404);
     const task = await this.taskRepository.findById(taskId);
-    if (task && task.cycle?._id?.toString() === cycleId) {
-      await this.taskRepository.updateById(taskId, { cycle: null });
+    if (task && task.cycleId === cycleId) {
+      await this.taskRepository.updateById(taskId, { cycleId: null });
     }
     return { cycle };
   }

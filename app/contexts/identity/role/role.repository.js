@@ -5,13 +5,12 @@ export class RoleRepository {
     this.model = RoleModel;
   }
   findByWorkspace(workspaceId) {
-    return this.model.find({ workspace: workspaceId, type: "workspace" })
-      .populate("createdBy", "name email avatar")
+    return this.model.find({ workspaceId: workspaceId, type: "workspace" })
       .sort({ isSystem: -1, name: 1 });
   }
-  findById(id) { return this.model.findById(id).populate("createdBy", "name email avatar"); }
+  findById(id) { return this.model.findById(id); }
   findByWorkspaceAndName(workspaceId, name, excludeId = null) {
-    const q = { workspace: workspaceId, name };
+    const q = { workspaceId: workspaceId, name };
     if (excludeId) q._id = { $ne: excludeId };
     return this.model.findOne(q);
   }

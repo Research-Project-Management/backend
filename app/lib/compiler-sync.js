@@ -21,7 +21,7 @@ export const LATEX_URL = process.env.LATEX_URL || "http://localhost:2918";
  * @returns {Promise<{_id: string, title: string}>}
  */
 export async function validateRootPage(pageId) {
-  const { PageModel } = await import("../contexts/manuscript/page/page.schema.js");
+  const { default: PageModel } = await import("../contexts/manuscript/page/page.schema.js");
   const page = await PageModel.findById(pageId).select("parentPage title").lean();
 
   if (!page) {

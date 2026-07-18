@@ -1,7 +1,7 @@
 import { AppError } from "../lib/AppError.js";
-import { PageModel } from "../contexts/manuscript/page/page.schema.js";
-import ProjectModel from "../contexts/organization/project/project.schema.js";
-import WorkspaceModel from "../contexts/organization/workspace/workspace.schema.js";
+import PageModel from "../contexts/manuscript/page/page.schema.js";
+import { getCachedProject } from "./project.middleware.js";
+import { getCachedWorkspace } from "./workspace.middleware.js";
 
 /**
  * checkPageRole — Application-layer middleware (infrastructure).
@@ -17,25 +17,31 @@ export const checkPageRole = (...requiredRoles) => async (req, res, next) => {
       throw new AppError("Page does not belong to the specified project", 400);
     }
 
-    const project = await ProjectModel.findById(page.project);
+    const project = await getCachedProject(page.projectId || page.project);
     if (!project) throw new AppError("Project not found", 404);
 
-    const workspace = await WorkspaceModel.findById(project.workspace).populate("members.role");
-    const wsMember = workspace?.members.find((m) => m.user.toString() === req.user._id.toString());
+    const workspace = await getCachedWorkspace(project.workspaceId || project.workspace);
+    const wsMember = workspace?.members.find((m) => m.userId.toString() === req.user._id.toString());
 
     // Workspace owner/admin bypass
-    if (wsMember?.role && ["owner", "admin"].includes(wsMember.role.name?.toLowerCase())) {
+    if (wsMember?.roleId && ["owner", "admin"].includes(wsMember.roleId.name?.toLowerCase())) {
       req.page = page;
       req.project = project;
       return next();
     }
 
     // Check project-level role
-    const populated = await ProjectModel.findById(project._id).populate("members.role");
-    const projMember = populated.members.find((m) => m.user.toString() === req.user._id.toString());
+    const projMember = project.members.find((m) => m.userId.toString() === req.user._id.toString());
     
     if (requiredRoles.length > 0) {
-      if (!projMember?.role || !requiredRoles.includes(projMember.role.name?.toLowerCase())) {
+      const roleName = projMember?.roleId?.name?.toLowerCase();
+      let effectiveAllowedRoles = [...requiredRoles];
+      if (effectiveAllowedRoles.includes("viewer")) effectiveAllowedRoles.push("member", "admin", "owner", "manager");
+      if (effectiveAllowedRoles.includes("member")) effectiveAllowedRoles.push("admin", "owner", "manager");
+      if (effectiveAllowedRoles.includes("manager")) effectiveAllowedRoles.push("admin", "owner");
+      if (effectiveAllowedRoles.includes("admin")) effectiveAllowedRoles.push("owner");
+
+      if (!roleName || !effectiveAllowedRoles.includes(roleName)) {
         return next(new AppError("Insufficient permissions", 403));
       }
     } else {

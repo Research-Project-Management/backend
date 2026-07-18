@@ -8,7 +8,7 @@ import RoleModel from "../../app/contexts/identity/role/role.schema.js";
 import { TaskModel } from "../../app/contexts/planning/task/task.schema.js";
 import CycleModel from "../../app/contexts/planning/cycle/cycle.schema.js";
 import ProjectModel from "../../app/contexts/organization/project/project.schema.js";
-import TaskCommentModel from "../../app/contexts/collaboration/task-comment/task-comment.schema.js";
+import { TaskCommentModel } from "../../app/contexts/collaboration/comment/comment.schema.js";
 
 import { AuthRepository } from "../../app/contexts/identity/auth/auth.repository.js";
 import { RoleRepository } from "../../app/contexts/identity/role/role.repository.js";
@@ -25,11 +25,12 @@ import { TaskRepository } from "../../app/contexts/planning/task/task.repository
 import { TaskService } from "../../app/contexts/planning/task/task.service.js";
 import { TaskController } from "../../app/contexts/planning/task/task.controller.js";
 import { buildTaskRouter } from "../../app/contexts/planning/task/task.route.js";
-import { TaskCommentRepository } from "../../app/contexts/collaboration/task-comment/task-comment.repository.js";
-import { TaskCommentService } from "../../app/contexts/collaboration/task-comment/task-comment.service.js";
-import { TaskCommentController } from "../../app/contexts/collaboration/task-comment/task-comment.controller.js";
-import { buildTaskCommentRouter } from "../../app/contexts/collaboration/task-comment/task-comment.route.js";
+import { TaskCommentRepository } from "../../app/contexts/collaboration/comment/comment.repository.js";
+import { TaskCommentService } from "../../app/contexts/collaboration/comment/comment.service.js";
+import { TaskCommentController } from "../../app/contexts/collaboration/comment/comment.controller.js";
+import { buildTaskCommentRouter } from "../../app/contexts/collaboration/comment/comment.route.js";
 import { errorHandler } from "../../app/middleware/error.middleware.js";
+import { clearProjectCache } from "../../app/middleware/project.middleware.js";
 
 class MockFileRepo {
   async countByProject(projectId) { return 0; }
@@ -180,10 +181,11 @@ describe("Task Comment Service Integration", () => {
     task = taskRes.body.task;
     
     // Add member to project directly via db
-    const role = await RoleModel.findOne({ name: "Member", workspace: workspace._id });
+    const role = await RoleModel.findOne({ name: "Member", workspaceId: workspace._id });
     await ProjectModel.findByIdAndUpdate(project._id, {
-      $push: { members: { user: member._id, role: role._id } }
+      $push: { members: { userId: member._id, roleId: role._id } }
     });
+    await clearProjectCache(project._id);
   });
 
   it("should create a new task comment", async () => {
@@ -198,7 +200,7 @@ describe("Task Comment Service Integration", () => {
     expect(res.status).toBe(201);
     expect(res.body.comment).toHaveProperty("_id");
     expect(res.body.comment.content).toBe("This is a test comment");
-    expect(res.body.comment.author._id.toString()).toBe(owner._id.toString());
+    expect(res.body.comment.authorId.toString()).toBe(owner._id.toString());
   });
 
   it("should get comments for a task", async () => {
@@ -301,7 +303,7 @@ describe("Task Comment Service Integration", () => {
     expect(replyRes.status).toBe(201);
     expect(replyRes.body.comment.replies.length).toBe(1);
     expect(replyRes.body.comment.replies[0].content).toBe("A reply from member");
-    expect(replyRes.body.comment.replies[0].author._id.toString()).toBe(member._id.toString());
+    expect(replyRes.body.comment.replies[0].authorId.toString()).toBe(member._id.toString());
   });
   
   it("should add a reaction to a comment", async () => {

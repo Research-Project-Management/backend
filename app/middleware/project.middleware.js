@@ -1,7 +1,8 @@
-// app/middleware/project.middleware.js
 import ProjectModel from "../contexts/organization/project/project.schema.js";
-import WorkspaceModel from "../contexts/organization/workspace/workspace.schema.js";
+import UserModel from "../contexts/identity/auth/auth.schema.js";
+import { getCachedWorkspace } from "./workspace.middleware.js";
 import { getOrSetCache, deleteCache } from "../config/cache.js";
+import { AppError } from "../lib/AppError.js";
 
 const WORKSPACE_CACHE_TTL = 60;
 const PROJECT_CACHE_TTL = 30;
@@ -10,38 +11,54 @@ export const clearProjectCache = async (projectId) => {
   await deleteCache(`proj:${projectId}`);
 };
 
+export const getCachedProject = async (projectId) => {
+  if (!projectId) return null;
+  return getOrSetCache(
+    `proj:${projectId}`,
+    async () => {
+      const project = await ProjectModel.findById(projectId).populate({ path: "members.roleId", model: "Role" }).lean();
+      if (!project) return null;
+      
+      const userIds = project.members.map(m => m.userId).filter(Boolean);
+      const users = await UserModel.find({ _id: { $in: userIds } }).select("name email avatar").lean();
+      const userMap = new Map(users.map(u => [u._id.toString(), u]));
+      
+      project.members = project.members.map(m => ({
+        ...m,
+        user: userMap.get(m.userId?.toString()) || { _id: m.userId, name: "Unknown User", email: "", avatar: null }
+      }));
+      
+      return project;
+    },
+    PROJECT_CACHE_TTL
+  );
+};
+
 export const checkProjectRole = (...allowedRoles) => {
   return async (req, res, next) => {
     try {
       const projectId = req.params.projectId;
+      if (!projectId) throw new AppError("Project identifier missing", 400);
 
-      const project = await getOrSetCache(
-        `proj:${projectId}`,
-        async () => ProjectModel.findById(projectId).populate({ path: "members.role", model: "Role" }).lean(),
-        PROJECT_CACHE_TTL
-      );
-      if (!project) return res.status(404).json({ error: "Project not found" });
+      const project = await getCachedProject(projectId);
+      if (!project) throw new AppError("Project not found", 404);
 
-      const workspace = await getOrSetCache(
-        `ws:${project.workspace}`,
-        async () => WorkspaceModel.findById(project.workspace).populate({ path: "members.role", model: "Role" }).lean(),
-        WORKSPACE_CACHE_TTL
-      );
-
-      const workspaceMember = workspace?.members.find((m) => m.user.toString() === req.user._id.toString());
-      if (workspaceMember?.role?.name && ["owner", "admin"].includes(workspaceMember.role.name.toLowerCase())) {
+      const workspace = await getCachedWorkspace(project.workspaceId);
+      const workspaceMember = workspace?.members.find((m) => m.userId.toString() === req.user._id.toString());
+      
+      if (workspaceMember?.roleId?.name && ["owner", "admin"].includes(workspaceMember.roleId.name.toLowerCase())) {
         req.project = project;
-        req.projectRole = "manager";
-        req.userRole = workspaceMember.role;
-        if (workspaceMember.role.permissions) req.userPermissions = workspaceMember.role.permissions;
+        req.projectRole = workspaceMember.roleId.name.toLowerCase();
+        req.userRole = workspaceMember.roleId;
+        if (workspaceMember.roleId.permissions) req.userPermissions = workspaceMember.roleId.permissions;
         return next();
       }
 
-      const projectMember = project.members.find((m) => m.user.toString() === req.user._id.toString());
-      if (!projectMember) return res.status(403).json({ error: "Not a member of this project" });
+      const projectMember = project.members.find((m) => m.userId.toString() === req.user._id.toString());
+      if (!projectMember) throw new AppError("Not a member of this project", 403);
 
-      const role = projectMember.role;
-      if (!role?.name) return res.status(403).json({ error: "Project role not found" });
+      const role = projectMember.roleId;
+      if (!role?.name) throw new AppError("Project role not found", 403);
 
       const roleName = role.name.toLowerCase();
       let effectiveAllowedRoles = [...allowedRoles];
@@ -50,7 +67,7 @@ export const checkProjectRole = (...allowedRoles) => {
       if (effectiveAllowedRoles.includes("admin")) effectiveAllowedRoles.push("owner");
 
       if (!effectiveAllowedRoles.some((r) => r.toLowerCase() === roleName)) {
-        return res.status(403).json({ error: "Insufficient permissions" });
+        throw new AppError("Insufficient permissions", 403);
       }
 
       req.project = project;
@@ -59,7 +76,7 @@ export const checkProjectRole = (...allowedRoles) => {
       if (role.permissions) req.userPermissions = role.permissions;
       next();
     } catch (error) {
-      res.status(500).json({ error: error.message });
+      next(error);
     }
   };
 };

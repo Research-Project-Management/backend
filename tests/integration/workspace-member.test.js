@@ -79,8 +79,8 @@ describe("Workspace Member Flow", () => {
     await WorkspaceModel.updateOne({ _id: workspace._id }, {
       $push: {
         members: [
-          { user: adminUser._id, role: roles.admin },
-          { user: memberUser._id, role: roles.member }
+          { userId: adminUser._id, roleId: roles.admin },
+          { userId: memberUser._id, roleId: roles.member }
         ]
       }
     });
@@ -99,7 +99,7 @@ describe("Workspace Member Flow", () => {
     expect(res.status).toBe(201);
     const updated = await WorkspaceModel.findById(workspace._id);
     expect(updated.members.length).toBe(4);
-    expect(updated.members.some(m => m.user.toString() === outsideUser._id.toString())).toBe(true);
+    expect(updated.members.some(m => m.userId.toString() === outsideUser._id.toString())).toBe(true);
   });
 
   it("should block a member from adding a new member", async () => {
@@ -126,8 +126,8 @@ describe("Workspace Member Flow", () => {
 
     expect(res.status).toBe(200);
     const updated = await WorkspaceModel.findById(workspace._id);
-    const m = updated.members.find(m => m.user.toString() === memberUser._id.toString());
-    expect(m.role.toString()).toBe(roles.admin.toString());
+    const m = updated.members.find(m => m.userId.toString() === memberUser._id.toString());
+    expect(m.roleId.toString()).toBe(roles.admin.toString());
   });
 
   it("should allow an owner to remove a member", async () => {
@@ -179,7 +179,7 @@ describe("Workspace Member Flow", () => {
 
     expect(res.status).toBe(200);
     const updated = await WorkspaceModel.findById(wsWithInviteCode._id);
-    expect(updated.members.some(m => m.user.toString() === outsideUser._id.toString())).toBe(true);
+    expect(updated.members.some(m => m.userId.toString() === outsideUser._id.toString())).toBe(true);
   });
 
   it("should allow a member to leave the workspace", async () => {
@@ -190,6 +190,6 @@ describe("Workspace Member Flow", () => {
 
     expect(res.status).toBe(204);
     const updated = await WorkspaceModel.findById(workspace._id);
-    expect(updated.members.some(m => m.user.toString() === memberUser._id.toString())).toBe(false);
+    expect(updated.members.some(m => m.userId.toString() === memberUser._id.toString())).toBe(false);
   });
 });

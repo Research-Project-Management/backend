@@ -5,9 +5,9 @@ import mongoose from "mongoose";
 
 import UserModel from "../../app/contexts/identity/auth/auth.schema.js";
 import RoleModel from "../../app/contexts/identity/role/role.schema.js";
-import { PageModel } from "../../app/contexts/manuscript/page/page.schema.js";
+import PageModel from "../../app/contexts/manuscript/page/page.schema.js";
 import ProjectModel from "../../app/contexts/organization/project/project.schema.js";
-import PageCommentModel from "../../app/contexts/collaboration/page-comment/page-comment.schema.js";
+import { PageCommentModel } from "../../app/contexts/collaboration/comment/comment.schema.js";
 
 import { AuthRepository } from "../../app/contexts/identity/auth/auth.repository.js";
 import { RoleRepository } from "../../app/contexts/identity/role/role.repository.js";
@@ -21,10 +21,10 @@ import { ProjectService } from "../../app/contexts/organization/project/project.
 import { ProjectController } from "../../app/contexts/organization/project/project.controller.js";
 import { buildProjectRouter } from "../../app/contexts/organization/project/project.route.js";
 
-import { PageCommentRepository } from "../../app/contexts/collaboration/page-comment/page-comment.repository.js";
-import { PageCommentService } from "../../app/contexts/collaboration/page-comment/page-comment.service.js";
-import { PageCommentController } from "../../app/contexts/collaboration/page-comment/page-comment.controller.js";
-import { buildCommentRouter } from "../../app/contexts/collaboration/page-comment/page-comment.route.js";
+import { PageCommentRepository } from "../../app/contexts/collaboration/comment/comment.repository.js";
+import { PageCommentService } from "../../app/contexts/collaboration/comment/comment.service.js";
+import { PageCommentController } from "../../app/contexts/collaboration/comment/comment.controller.js";
+import { buildPageCommentRouter } from "../../app/contexts/collaboration/comment/comment.route.js";
 import { errorHandler } from "../../app/middleware/error.middleware.js";
 
 class MockFileRepo {
@@ -88,7 +88,7 @@ describe("Page Comment Service Integration", () => {
 
     workspaceRouter = buildWorkspaceRouter(workspaceController);
     projectRouter = buildProjectRouter(projectController);
-    pageCommentRouter = buildCommentRouter(pageCommentController);
+    pageCommentRouter = buildPageCommentRouter(pageCommentController);
 
     // Mount routers
     testApp.use("/api/workspace", workspaceRouter);
@@ -137,17 +137,18 @@ describe("Page Comment Service Integration", () => {
     
     // Create a page directly in the DB
     page = await PageModel.create({
-      project: project._id,
+      projectId: project._id,
+      workspaceId: workspace._id,
       title: "Test Page",
       content: "This is a test page",
-      author: owner._id,
+      authorId: owner._id,
       path: "/test-page"
     });
     
     // Add member to project directly via db
-    const role = await RoleModel.findOne({ name: "Member", workspace: workspace._id });
+    const role = await RoleModel.findOne({ name: "Member", workspaceId: workspace._id });
     await ProjectModel.findByIdAndUpdate(project._id, {
-      $push: { members: { user: member._id, role: role._id } }
+      $push: { members: { userId: member._id, roleId: role._id } }
     });
   });
 
@@ -167,7 +168,7 @@ describe("Page Comment Service Integration", () => {
     expect(res.body.comment.content).toBe("This is a page comment");
     expect(res.body.comment.line).toBe(1);
     expect(res.body.comment.lineEnd).toBe(2);
-    expect(res.body.comment.author._id.toString()).toBe(owner._id.toString());
+    expect(res.body.comment.authorId.toString()).toBe(owner._id.toString());
   });
 
   it("should get comments for a page", async () => {
@@ -272,7 +273,7 @@ describe("Page Comment Service Integration", () => {
     expect(replyRes.status).toBe(201);
     expect(replyRes.body.comment.replies.length).toBe(1);
     expect(replyRes.body.comment.replies[0].content).toBe("A reply from member");
-    expect(replyRes.body.comment.replies[0].author._id.toString()).toBe(member._id.toString());
+    expect(replyRes.body.comment.replies[0].authorId.toString()).toBe(member._id.toString());
   });
   
   it("should delete a reply from a comment", async () => {

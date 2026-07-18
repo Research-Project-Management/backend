@@ -6,7 +6,8 @@ import UserModel from "../../app/contexts/identity/auth/auth.schema.js";
 import RoleModel from "../../app/contexts/identity/role/role.schema.js";
 import WorkspaceModel from "../../app/contexts/organization/workspace/workspace.schema.js";
 import ProjectModel from "../../app/contexts/organization/project/project.schema.js";
-import { PageModel, PageVersionModel } from "../../app/contexts/manuscript/page/page.schema.js";
+import PageModel from "../../app/contexts/manuscript/page/page.schema.js";
+import VersionModel from "../../app/contexts/manuscript/version/version.schema.js";
 
 import { AuthRepository } from "../../app/contexts/identity/auth/auth.repository.js";
 import { RoleRepository } from "../../app/contexts/identity/role/role.repository.js";
@@ -77,7 +78,7 @@ describe("Manuscript Version Service Integration", () => {
     await WorkspaceModel.deleteMany({});
     await ProjectModel.deleteMany({});
     await PageModel.deleteMany({});
-    await PageVersionModel.deleteMany({});
+    await VersionModel.deleteMany({});
   });
 
   beforeEach(async () => {
@@ -85,7 +86,7 @@ describe("Manuscript Version Service Integration", () => {
     await WorkspaceModel.deleteMany({});
     await ProjectModel.deleteMany({});
     await PageModel.deleteMany({});
-    await PageVersionModel.deleteMany({});
+    await VersionModel.deleteMany({});
 
     owner = await UserModel.create({
       email: "owner-version@test.com",
@@ -103,19 +104,20 @@ describe("Manuscript Version Service Integration", () => {
         url: "version-ws-" + Date.now(),
       });
     workspace = wsRes.body.workspace;
-    const ownerRole = await RoleModel.findOne({ name: "Owner", workspace: workspace._id });
+    const ownerRole = await RoleModel.findOne({ name: "Owner", workspaceId: workspace._id });
 
     project = await ProjectModel.create({
       name: "Version Project",
-      workspace: workspace._id,
-      createdBy: owner._id,
-      members: [{ user: owner._id, role: ownerRole._id }]
+      workspaceId: workspace._id,
+      createdById: owner._id,
+      members: [{ userId: owner._id, roleId: ownerRole._id }]
     });
 
     page = await PageModel.create({
       title: "Test Page",
-      project: project._id,
-      author: owner._id,
+      projectId: project._id,
+      workspaceId: workspace._id,
+      authorId: owner._id,
       content: "Initial content"
     });
   });
@@ -141,7 +143,7 @@ describe("Manuscript Version Service Integration", () => {
   });
 
   it("should get history events", async () => {
-    await PageVersionModel.create({
+    await VersionModel.create({
       page: page._id,
       projectPageId: page._id,
       title: "History Event",
@@ -164,7 +166,7 @@ describe("Manuscript Version Service Integration", () => {
   });
 
   it("should delete a version", async () => {
-    const version = await PageVersionModel.create({
+    const version = await VersionModel.create({
       page: page._id,
       title: "To Delete",
       content: "Del",
@@ -180,7 +182,7 @@ describe("Manuscript Version Service Integration", () => {
 
     expect(res.status).toBe(204);
 
-    const deleted = await PageVersionModel.findById(version._id);
+    const deleted = await VersionModel.findById(version._id);
     expect(deleted).toBeNull();
   });
 });
