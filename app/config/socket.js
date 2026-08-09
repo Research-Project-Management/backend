@@ -7,8 +7,7 @@ const CORS_ORIGINS = [
   "http://localhost:2915",
   "http://localhost:2916",
   "http://localhost:3000",
-  "https://flux.aisq.dev",
-  "https://flux.aisq.site",
+  "https://flux.chqv.tech",
 ];
 const presence = new Map();
 
