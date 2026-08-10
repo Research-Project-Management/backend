@@ -3,10 +3,8 @@ import { AppError } from "../../../lib/AppError.js";
 import { eventBus, Events } from "../../../lib/eventBus.js";
 
 export class ProjectService {
-  constructor({ projectRepository, roleRepository, roleService }) {
+  constructor({ projectRepository }) {
     this.projectRepository = projectRepository;
-    this.roleRepository = roleRepository;
-    this.roleService = roleService;
   }
 
   getProjects(workspaceId, userId, workspaceRole, pagination = null) {
@@ -19,15 +17,6 @@ export class ProjectService {
 
   async createProject(workspaceId, data, userId) {
     const { name, description, color, avatar, modules } = data;
-    let ownerRole = await this.roleRepository.findByWorkspaceAndName(workspaceId, "Owner");
-    
-    // For backward compatibility with old workspaces that don't have roles
-    if (!ownerRole) {
-      const roles = await this.roleService.initializeDefaultRoles(workspaceId, userId);
-      ownerRole = await this.roleRepository.findById(roles.owner);
-    }
-
-    const roleId = ownerRole ? ownerRole._id : null;
 
     return this.projectRepository.create({
       name,
@@ -37,7 +26,7 @@ export class ProjectService {
       modules,
       workspaceId: workspaceId,
       createdById: userId,
-      members: [{ userId: userId, roleId: roleId }],
+      members: [{ userId: userId, role: "owner" }],
       taskColumns: [
         { id: "todo", title: "Todo", accentColor: "#6b7280" },
         { id: "in-progress", title: "In Progress", accentColor: "#3b82f6" },
@@ -58,31 +47,13 @@ export class ProjectService {
 
   async deleteProject(projectId, userId) { await this.projectRepository.deleteById(projectId); await clearProjectCache(projectId); }
 
-  async _resolveRole(workspaceId, roleInput) {
-    if (!roleInput) {
-      const defaultRole = await this.roleRepository.findByWorkspaceAndName(workspaceId, "Member");
-      return defaultRole?._id;
-    }
-    if (/^[0-9a-fA-F]{24}$/.test(roleInput)) {
-      return roleInput;
-    }
-    const resolvedRole = await this.roleRepository.findByWorkspaceAndName(workspaceId, roleInput);
-    if (!resolvedRole) {
-      const roles = await this.roleRepository.findByWorkspace(workspaceId);
-      const matched = roles.find(r => r.name.toLowerCase() === roleInput.toLowerCase());
-      if (matched) return matched._id;
-      throw new AppError(`Role "${roleInput}" not found in this workspace`, 404);
-    }
-    return resolvedRole._id;
-  }
-
   async addMember(projectId, data, actorId) {
     const { userId, role, roleId } = data;
     const project = await this.projectRepository.findById(projectId);
     if (!project) throw new AppError("Project not found", 404);
     if (project.members.find((m) => m.userId.toString() === userId.toString())) throw new AppError("User is already a member", 400);
-    const resolvedRole = await this._resolveRole(project.workspaceId, roleId || role);
-    project.members.push({ userId: userId, roleId: resolvedRole });
+    const resolvedRole = (role || roleId || "member").toLowerCase();
+    project.members.push({ userId: userId, role: resolvedRole });
     await project.save();
     await clearProjectCache(projectId);
     return project;
@@ -93,8 +64,8 @@ export class ProjectService {
     const project = await this.projectRepository.findById(projectId);
     const member = project.members.find((m) => m.userId.toString() === userId.toString());
     if (!member) throw new AppError("Member not found", 404);
-    const resolvedRole = await this._resolveRole(project.workspaceId, roleId || role || newRole);
-    member.roleId = resolvedRole;
+    const resolvedRole = (role || roleId || newRole || "member").toLowerCase();
+    member.role = resolvedRole;
     await project.save();
     await clearProjectCache(projectId);
     return project;

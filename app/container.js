@@ -35,7 +35,7 @@ for (const file of files) {
 
 // Resolve all controllers so index.js can use them exactly as before
 export const authController = container.resolve("authController");
-export const roleController = container.resolve("roleController");
+
 export const workspaceController = container.resolve("workspaceController");
 export const projectController = container.resolve("projectController");
 export const taskController = container.resolve("taskController");

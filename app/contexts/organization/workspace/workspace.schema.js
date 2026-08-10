@@ -3,9 +3,10 @@ import crypto from "crypto";
 
 const workspaceMemberSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  roleId: {
-    type: mongoose.Schema.Types.ObjectId, ref: 'Role',
-    required: true,
+  role: {
+    type: String,
+    enum: ['owner', 'admin', 'member', 'viewer'],
+    default: 'member',
   },
   joinedAt: { type: Date, default: Date.now },
 });
@@ -30,7 +31,6 @@ const workspaceSchema = new mongoose.Schema(
 );
 
 // Indexes for performance optimization
-// Note: url index is already created by `unique: true` in the field definition
 workspaceSchema.index({ "members.userId": 1 });
 workspaceSchema.index({ createdById: 1 });
 

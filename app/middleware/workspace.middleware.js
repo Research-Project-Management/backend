@@ -17,9 +17,9 @@ export const getCachedWorkspace = async (inputId) => {
     cacheKey,
     async () => {
       if (isObjectId) {
-        return await WorkspaceModel.findById(inputId).populate({ path: "members.roleId", model: "Role" }).lean();
+        return await WorkspaceModel.findById(inputId).lean();
       } else {
-        return await WorkspaceModel.findOne({ url: inputId }).populate({ path: "members.roleId", model: "Role" }).lean();
+        return await WorkspaceModel.findOne({ url: inputId }).lean();
       }
     },
     WORKSPACE_CACHE_TTL
@@ -38,10 +38,7 @@ export const checkWorkspaceRole = (...allowedRoles) => {
       const member = workspace.members.find((m) => m.userId.toString() === req.user._id.toString());
       if (!member) throw new AppError("Not a member of this workspace", 403);
 
-      const role = member.roleId;
-      if (!role?.name) throw new AppError("Role not found", 403);
-
-      const roleName = role.name.toLowerCase();
+      const roleName = (member.role || "member").toLowerCase();
       let effectiveAllowedRoles = [...allowedRoles];
       if (effectiveAllowedRoles.includes("viewer")) effectiveAllowedRoles.push("member", "admin", "owner");
       if (effectiveAllowedRoles.includes("member")) effectiveAllowedRoles.push("admin", "owner");
@@ -53,8 +50,7 @@ export const checkWorkspaceRole = (...allowedRoles) => {
 
       req.workspace = workspace;
       req.workspaceRole = roleName;
-      req.userRole = role;
-      if (role.permissions) req.userPermissions = role.permissions;
+      req.userRole = { name: roleName }; // Stub for backward compatibility
       next();
     } catch (error) {
       next(error);

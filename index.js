@@ -11,7 +11,6 @@ import { bindSocketToEventBus } from "./app/lib/eventBus.js";
 import * as container from "./app/container.js";
 
 import { buildAuthRouter } from "./app/contexts/identity/auth/auth.route.js";
-import { buildRoleRouter } from "./app/contexts/identity/role/role.route.js";
 import { buildWorkspaceRouter } from "./app/contexts/organization/workspace/workspace.route.js";
 import { buildProjectRouter } from "./app/contexts/organization/project/project.route.js";
 import { buildTaskRouter } from "./app/contexts/planning/task/task.route.js";
@@ -100,7 +99,7 @@ app.get("/", (req, res) => { res.json({ message: "Hello bro" }); });
 
 // Identity
 app.use("/auth", buildAuthRouter(container.authController));
-app.use("/api/roles", buildRoleRouter(container.roleController));
+
 
 // Organization
 app.use("/api/workspace", buildWorkspaceRouter(container.workspaceController));

@@ -2,9 +2,10 @@ import mongoose from "mongoose";
 
 const projectMemberSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  roleId: {
-    type: mongoose.Schema.Types.ObjectId, ref: 'Role',
-    required: true,
+  role: {
+    type: String,
+    enum: ['owner', 'admin', 'member', 'viewer'],
+    default: 'member',
   },
   joinedAt: { type: Date, default: Date.now },
 });

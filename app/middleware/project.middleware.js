@@ -16,7 +16,7 @@ export const getCachedProject = async (projectId) => {
   return getOrSetCache(
     `proj:${projectId}`,
     async () => {
-      const project = await ProjectModel.findById(projectId).populate({ path: "members.roleId", model: "Role" }).lean();
+      const project = await ProjectModel.findById(projectId).lean();
       if (!project) return null;
       
       const userIds = project.members.map(m => m.userId).filter(Boolean);
@@ -46,21 +46,17 @@ export const checkProjectRole = (...allowedRoles) => {
       const workspace = await getCachedWorkspace(project.workspaceId);
       const workspaceMember = workspace?.members.find((m) => m.userId.toString() === req.user._id.toString());
       
-      if (workspaceMember?.roleId?.name && ["owner", "admin"].includes(workspaceMember.roleId.name.toLowerCase())) {
+      if (workspaceMember?.role && ["owner", "admin"].includes(workspaceMember.role.toLowerCase())) {
         req.project = project;
-        req.projectRole = workspaceMember.roleId.name.toLowerCase();
-        req.userRole = workspaceMember.roleId;
-        if (workspaceMember.roleId.permissions) req.userPermissions = workspaceMember.roleId.permissions;
+        req.projectRole = workspaceMember.role.toLowerCase();
+        req.userRole = { name: workspaceMember.role.toLowerCase() };
         return next();
       }
 
       const projectMember = project.members.find((m) => m.userId.toString() === req.user._id.toString());
       if (!projectMember) throw new AppError("Not a member of this project", 403);
 
-      const role = projectMember.roleId;
-      if (!role?.name) throw new AppError("Project role not found", 403);
-
-      const roleName = role.name.toLowerCase();
+      const roleName = (projectMember.role || "member").toLowerCase();
       let effectiveAllowedRoles = [...allowedRoles];
       if (effectiveAllowedRoles.includes("viewer")) effectiveAllowedRoles.push("member", "admin", "owner");
       if (effectiveAllowedRoles.includes("member")) effectiveAllowedRoles.push("admin", "owner");
@@ -72,9 +68,8 @@ export const checkProjectRole = (...allowedRoles) => {
 
       req.project = project;
       req.projectRole = roleName;
-      req.userRole = role;
-      if (role.permissions) req.userPermissions = role.permissions;
-      next();
+      req.userRole = { name: roleName };
+      return next();
     } catch (error) {
       next(error);
     }

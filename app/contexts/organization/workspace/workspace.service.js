@@ -3,9 +3,8 @@ import { AppError } from "../../../lib/AppError.js";
 import { eventBus, Events } from "../../../lib/eventBus.js";
 
 export class WorkspaceService {
-  constructor({ workspaceRepository, roleService }) {
+  constructor({ workspaceRepository }) {
     this.repo = workspaceRepository;
-    this.roleService = roleService;
   }
 
 
@@ -42,8 +41,7 @@ export class WorkspaceService {
   async createWorkspace(data, userId) {
     const { name, url, color, avatar, companySize } = data;
     const workspace = await this.repo.create({ name, url, color, avatar: avatar || "", companySize: companySize || "", members: [], createdById: userId });
-    const roleIds = await this.roleService.initializeDefaultRoles(workspace._id.toString(), userId);
-    workspace.members.push({ userId: userId, roleId: roleIds.owner });
+    workspace.members.push({ userId: userId, role: "owner" });
     await workspace.save();
     await deleteCache(userWorkspacesCacheKey(userId));
     return workspace;
@@ -65,31 +63,13 @@ export class WorkspaceService {
     await this._syncCaches(workspace);
   }
 
-  async _resolveRole(workspaceId, roleInput) {
-    if (!roleInput) {
-      const defaultRole = await this.roleService.getRoleByName(workspaceId, "Member");
-      return defaultRole?._id;
-    }
-    if (/^[0-9a-fA-F]{24}$/.test(roleInput)) {
-      return roleInput;
-    }
-    const resolvedRole = await this.roleService.getRoleByName(workspaceId, roleInput);
-    if (!resolvedRole) {
-      const roles = await this.roleService.getRoles(workspaceId);
-      const matched = roles.find(r => r.name.toLowerCase() === roleInput.toLowerCase());
-      if (matched) return matched._id;
-      throw new AppError(`Role "${roleInput}" not found in this workspace`, 404);
-    }
-    return resolvedRole._id;
-  }
-
   async addMember(workspaceId, data, actorId) {
     const { userId, role, roleId } = data;
     const workspace = await this.repo.findByIdPopulated(workspaceId);
     if (!workspace) throw new AppError("Workspace not found", 404);
     if (workspace.members.find((m) => m.userId.toString() === userId.toString())) throw new AppError("User is already a member", 400);
-    const resolvedRole = await this._resolveRole(workspaceId, roleId || role);
-    workspace.members.push({ userId: userId, roleId: resolvedRole });
+    const resolvedRole = (role || roleId || "member").toLowerCase();
+    workspace.members.push({ userId: userId, role: resolvedRole });
     await workspace.save();
     const updated = await this.repo.findByIdPopulated(workspaceId);
     await this._syncCaches(updated, [userId]);
@@ -102,8 +82,8 @@ export class WorkspaceService {
     const workspace = await this.repo.findById(workspaceId);
     const member = workspace.members.find((m) => m.userId.toString() === userId.toString());
     if (!member) throw new AppError("Member not found", 404);
-    const resolvedRole = await this._resolveRole(workspaceId, roleId || role || newRole);
-    member.roleId = resolvedRole;
+    const resolvedRole = (role || roleId || newRole || "member").toLowerCase();
+    member.role = resolvedRole;
     await workspace.save();
     const updated = await this.repo.findByIdPopulated(workspaceId);
     await this._syncCaches(updated, [userId]);
