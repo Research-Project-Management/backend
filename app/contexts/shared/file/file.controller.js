@@ -5,6 +5,12 @@ export class FileController {
   constructor({ fileService }) {
     this.fileService = fileService;
     this.presign = asyncHandler(async (req, res) => { const filename = req.body.filename || req.body.fileName; res.json(await this.fileService.presign({ filename })); });
+    this.uploadR2 = asyncHandler(async (req, res) => {
+      if (!req.file) throw new AppError("No file uploaded", 400);
+      const filename = req.body.filename || req.body.fileName;
+      if (!filename) throw new AppError("filename is required", 400);
+      res.json(await this.fileService.uploadR2({ filename, buffer: req.file.buffer, mimeType: req.file.mimetype }));
+    });
     this.upload = asyncHandler(async (req, res) => { const result = await this.fileService.upload(req.body, req.user._id); res.status(result.overwritten ? 200 : 201).json(result); });
     this.createFolder = asyncHandler(async (req, res) => { res.status(201).json({ folder: await this.fileService.createFolder(req.body, req.user._id) }); });
     this.getProjectFiles = asyncHandler(async (req, res) => { res.json({ files: await this.fileService.getProjectFiles(req.params.projectId, req.query) }); });

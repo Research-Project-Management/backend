@@ -29,6 +29,17 @@ export class FileService {
     return { url, path: filename };
   }
 
+  async uploadR2({ filename, buffer, mimeType }) {
+    if (!this._isAllowedUploadPath(filename)) throw new AppError("Invalid upload path. Must start with 'workspace/' or 'project/'", 403);
+    await r2.send(new PutObjectCommand({ 
+      Bucket: process.env.R2_BUCKET_NAME, 
+      Key: filename, 
+      Body: buffer, 
+      ContentType: mimeType 
+    }));
+    return { url: `/api/files/r2/${filename}`, path: filename };
+  }
+
   async upload({ filename, size, mimeType, url, thumbnail, workspaceId, projectId, parentId, metaData, scope, parentPageId, fileBase64 }, userId) {
     const resolvedProjectId = scope === "workspace" ? null : (projectId || null);
     const linkedTo = parentPageId 

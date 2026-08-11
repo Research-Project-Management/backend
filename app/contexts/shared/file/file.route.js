@@ -1,15 +1,19 @@
 import { Router } from "express";
+import multer from "multer";
 import { isAuthenticated } from "../../../middleware/auth.middleware.js";
 import { checkWorkspaceRole } from "../../../middleware/workspace.middleware.js";
 import { checkProjectRole } from "../../../middleware/project.middleware.js";
 import { validate } from "../../../middleware/validate.middleware.js";
 import { PresignDto, UploadFileDto, CreateFolderDto, UpdateFileDto } from "./file.dto.js";
 
+const upload = multer({ storage: multer.memoryStorage() });
+
 export const buildFileRouter = (fileController) => {
   const fileRouter = Router();
 
   // Basic uploading & folders
   fileRouter.post("/presign", isAuthenticated, validate(PresignDto), fileController.presign);
+  fileRouter.post("/upload-r2", isAuthenticated, upload.single("file"), fileController.uploadR2);
   fileRouter.post("/upload", isAuthenticated, validate(UploadFileDto), fileController.upload);
   fileRouter.post("/folder", isAuthenticated, validate(CreateFolderDto), fileController.createFolder);
 
