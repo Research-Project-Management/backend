@@ -6,6 +6,7 @@ import connectDB from "./app/config/db.js";
 import { connectRedis, redisClient } from "./app/config/redis.js";
 import { initSocket } from "./app/config/socket.js";
 import { bindSocketToEventBus } from "./app/lib/eventBus.js";
+import { bindCompilerToEventBus } from "./app/contexts/manuscript/latex/latex.subscriber.js";
 
 // ── Contexts & DI Container ──────────────────────────────────────────────────
 import * as container from "./app/container.js";
@@ -26,6 +27,7 @@ import { buildAiRouter } from "./app/contexts/intelligence/ai/ai.route.js";
 import { buildChatHistoryRouter } from "./app/contexts/intelligence/chat-history/chat-history.route.js";
 import { buildCollectionRouter, buildProjectCollectionRouter } from "./app/contexts/library/collection/collection.route.js";
 import { buildPaperRouter } from "./app/contexts/library/paper/paper.route.js";
+import { buildReferenceRouter } from "./app/contexts/library/reference/reference.route.js";
 import { buildDashboardRouter } from "./app/contexts/dashboard/dashboard.route.js";
 
 import session from "express-session";
@@ -124,12 +126,18 @@ app.use("/api", buildStickyRouter(container.stickyController));
 
 // Shared
 app.use("/api", buildLabelRouter(container.labelController));
-app.use("/api/files", buildFileRouter(container.fileController));
+app.use("/api/files", buildFileRouter(
+  container.fileController,
+  container.workspaceFileController,
+  container.projectFileController,
+  container.pageFileController
+));
 
 // Research
 app.use("/api/library", buildCollectionRouter(container.workspaceCollectionController));
 app.use("/api/library", buildPaperRouter(container.paperController));
 app.use("/api/library", buildProjectCollectionRouter(container.projectCollectionController));
+app.use("/api/library/reference", buildReferenceRouter(container.referenceController));
 
 // Intelligence
 app.use("/api/ai", buildChatHistoryRouter(container.chatHistoryController));
@@ -142,6 +150,7 @@ app.use(errorHandler);
 const server = http.createServer(app);
 initSocket(server);
 bindSocketToEventBus();
+bindCompilerToEventBus();
 server.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
 });

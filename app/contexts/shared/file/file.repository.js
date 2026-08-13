@@ -1,123 +1,213 @@
-import FileModel from "./file.schema.js";
+import FileModel from './file.schema.js';
 
+/**
+ * Base Repository layer for File entity.
+ */
 export class FileRepository {
   constructor() {
     this.model = FileModel;
   }
-  findById(id) { return this.model.findById(id); }
-  findOneById(id) { return this.model.findById(id).lean(); }
-  findByProject(projectId, parentId, includeTrash) {
-    return this.model.find({ "linkedTo.entityType": "Project", "linkedTo.entityId": projectId, parent: parentId || null, ...(includeTrash ? {} : { trashedAt: null }) })
-      .populate("author", "name email avatar")
-      .sort({ isFolder: -1, filename: 1 });
-  }
-  findByWorkspace(workspaceId, q) {
-    return this.model.find({ workspaceId, ...q })
-      .populate("author", "name email avatar")
-      .sort({ isFolder: -1, filename: 1 });
-  }
-  findByPage(pageId, parentId) {
-    return this.model.find({ "linkedTo.entityType": "Page", "linkedTo.entityId": pageId, parent: parentId || null, trashedAt: null })
-      .populate("author", "name email avatar")
-      .sort({ isFolder: -1, filename: 1 });
-  }
-  findByPageId(pageId) { return this.model.find({ "linkedTo.entityType": "Page", "linkedTo.entityId": pageId, trashedAt: null, isFolder: false, url: { $exists: true, $ne: null } }).lean(); }
-  findOne(filter) { return this.model.findOne(filter); }
-  create(data) { return this.model.create(data); }
-  save(doc) { return doc.save(); }
-  updateById(id, data) { return this.model.findByIdAndUpdate(id, data, { new: true }); }
-  deleteById(id) { return this.model.findByIdAndDelete(id); }
-  findChildren(parentId) { return this.model.find({ parent: parentId }); }
-  updateManyByParent(parentId, updates) { return this.model.updateMany({ parent: parentId }, updates); }
-  deleteManyByParent(parentId) { return this.model.deleteMany({ parent: parentId }); }
-  countByProject(projectId) { return this.model.countDocuments({ "linkedTo.entityType": "Project", "linkedTo.entityId": projectId, trashedAt: null }); }
-  findAllActiveByProject(projectId) {
-    return this.model.find({ "linkedTo.entityType": "Project", "linkedTo.entityId": projectId, trashedAt: null }).sort({ createdAt: -1 });
+
+  /**
+   * Finds a file by its ID.
+   * @param {string} fileId - The ID of the file.
+   * @returns {Promise<Object>} The file document.
+   */
+  findById(fileId) {
+    return this.model.findById(fileId);
   }
 
-  aggregateProjectStats(projectId) {
-    return this.model.aggregate([
-      { $match: { "linkedTo.entityType": "Project", "linkedTo.entityId": projectId, trashedAt: null } },
-      { $group: { _id: null, fileCount: { $sum: 1 }, totalSize: { $sum: "$size" } } }
-    ]);
+  /**
+   * Finds a file by its ID and returns a plain JavaScript object.
+   * @param {string} fileId - The ID of the file.
+   * @returns {Promise<Object>} The plain file object.
+   */
+  findOneById(fileId) {
+    return this.model.findById(fileId).lean();
   }
 
-  findWorkspaceFiles(workspaceId, parentId) {
-    return this.model.find({ workspaceId, "linkedTo.entityType": null, parent: parentId || null, trashedAt: null })
-      .populate("author", "name email avatar")
+  /**
+   * Finds a single file matching the given filter.
+   * @param {Object} filter - The MongoDB filter object.
+   * @returns {Promise<Object>} The file document.
+   */
+  findOne(filter) {
+    return this.model.findOne(filter);
+  }
+
+  /**
+   * Creates a new file record.
+   * @param {Object} data - The data to create the file.
+   * @returns {Promise<Object>} The created file document.
+   */
+  create(data) {
+    return this.model.create(data);
+  }
+
+  /**
+   * Saves an existing file document.
+   * @param {Object} doc - The Mongoose document to save.
+   * @returns {Promise<Object>} The saved document.
+   */
+  save(doc) {
+    return doc.save();
+  }
+
+  /**
+   * Updates a file by its ID.
+   * @param {string} fileId - The ID of the file.
+   * @param {Object} data - The update payload.
+   * @returns {Promise<Object>} The updated file document.
+   */
+  updateById(fileId, data) {
+    return this.model.findByIdAndUpdate(fileId, data, { new: true });
+  }
+
+  /**
+   * Deletes a file by its ID.
+   * @param {string} fileId - The ID of the file.
+   * @returns {Promise<Object>} The deleted file document.
+   */
+  deleteById(fileId) {
+    return this.model.findByIdAndDelete(fileId);
+  }
+
+  /**
+   * Finds all children files/folders of a given parent folder.
+   * @param {string} parentId - The ID of the parent folder.
+   * @returns {Promise<Array>} List of children files.
+   */
+  findChildren(parentId) {
+    return this.model.find({ parent: parentId });
+  }
+
+  /**
+   * Updates all children of a given parent folder.
+   * @param {string} parentId - The ID of the parent folder.
+   * @param {Object} updates - The update payload.
+   * @returns {Promise<Object>} The update result.
+   */
+  updateManyByParent(parentId, updates) {
+    return this.model.updateMany({ parent: parentId }, updates);
+  }
+
+  /**
+   * Deletes all children of a given parent folder.
+   * @param {string} parentId - The ID of the parent folder.
+   * @returns {Promise<Object>} The deletion result.
+   */
+  deleteManyByParent(parentId) {
+    return this.model.deleteMany({ parent: parentId });
+  }
+
+  /**
+   * Base method meant to be overridden by child classes (Polymorphism).
+   * Determines the database filter structure for the current scope.
+   */
+  getScopeFilter(entityId) {
+    return {};
+  }
+
+  /**
+   * Finds files dynamically utilizing the scoped filter and extra queries.
+   * @param {string} entityId - The scope ID (workspaceId, projectId, etc.)
+   * @param {Object} filters - Query filters (isTrashed, parentId, authorId, starred, sharedWithUserId)
+   * @returns {Promise<Array>} List of files matching criteria.
+   */
+  getFiles(entityId, filters = {}) {
+    const query = { ...this.getScopeFilter(entityId) };
+
+    if (filters.isTrashed) {
+      query.trashedAt = { $ne: null };
+    } else {
+      query.trashedAt = null;
+    }
+
+    if (filters.parentId !== undefined) {
+      query.parent = filters.parentId || null;
+    }
+    if (filters.authorId) {
+      query.authorId = filters.authorId;
+    }
+    if (filters.starred) {
+      query.starred = true;
+    }
+    if (filters.sharedWithUserId) {
+      query['sharedWith.userId'] = filters.sharedWithUserId;
+    }
+
+    return this.model
+      .find(query)
+      .populate('author', 'name email avatar')
       .sort({ isFolder: -1, filename: 1 });
   }
 
-  findMyWorkspaceFiles(workspaceId, userId) {
-    return this.model.find({ workspaceId, "linkedTo.entityType": null, authorId: userId, trashedAt: null })
-      .populate("author", "name email avatar")
-      .sort({ isFolder: -1, filename: 1 });
+  /**
+   * Counts active files in the current scope.
+   */
+  countFiles(entityId) {
+    return this.model.countDocuments({
+      ...this.getScopeFilter(entityId),
+      trashedAt: null,
+    });
   }
 
-  findStarredWorkspaceFiles(workspaceId) {
-    return this.model.find({ workspaceId, "linkedTo.entityType": null, starred: true, trashedAt: null })
-      .populate("author", "name email avatar")
-      .sort({ isFolder: -1, filename: 1 });
-  }
-
-  findSharedWorkspaceFiles(workspaceId, userId) {
-    return this.model.find({ workspaceId, "linkedTo.entityType": null, "sharedWith.userId": userId, trashedAt: null })
-      .populate("author", "name email avatar")
-      .sort({ isFolder: -1, filename: 1 });
-  }
-
-  findTrashedWorkspaceFiles(workspaceId) {
-    return this.model.find({ workspaceId, "linkedTo.entityType": null, trashedAt: { $ne: null } })
-      .populate("author", "name email avatar")
-      .sort({ isFolder: -1, filename: 1 });
-  }
-
-  findProjectMyFiles(projectId, userId) {
-    return this.model.find({ "linkedTo.entityType": "Project", "linkedTo.entityId": projectId, authorId: userId, trashedAt: null })
-      .populate("author", "name email avatar")
-      .sort({ isFolder: -1, filename: 1 });
-  }
-
-  findProjectStarredFiles(projectId) {
-    return this.model.find({ "linkedTo.entityType": "Project", "linkedTo.entityId": projectId, starred: true, trashedAt: null })
-      .populate("author", "name email avatar")
-      .sort({ isFolder: -1, filename: 1 });
-  }
-
-  findProjectSharedFiles(projectId, userId) {
-    return this.model.find({ "linkedTo.entityType": "Project", "linkedTo.entityId": projectId, "sharedWith.userId": userId, trashedAt: null })
-      .populate("author", "name email avatar")
-      .sort({ isFolder: -1, filename: 1 });
-  }
-
-  findProjectTrashedFiles(projectId) {
-    return this.model.find({ "linkedTo.entityType": "Project", "linkedTo.entityId": projectId, trashedAt: { $ne: null } })
-      .populate("author", "name email avatar")
-      .sort({ isFolder: -1, filename: 1 });
-  }
-
-  searchFiles(workspaceId, accessibleProjectIds, queryStr) {
-    const searchRegex = { $regex: queryStr.trim(), $options: "i" };
-    return this.model.find({ 
-      workspaceId, 
-      $or: [
-        { "linkedTo.entityType": "Project", "linkedTo.entityId": { $in: accessibleProjectIds } }, 
-        { "linkedTo.entityType": null }
-      ], 
-      filename: searchRegex, 
-      trashedAt: null 
-    })
-      .limit(5)
-      .select("filename mimeType size updatedAt linkedTo isFolder");
+  /**
+   * Finds all active files in the current scope without pagination.
+   */
+  findAllActive(entityId) {
+    return this.model
+      .find({ ...this.getScopeFilter(entityId), trashedAt: null })
+      .sort({ createdAt: -1 });
   }
 
   findRecentFiles(workspaceId, limit = 10) {
-    return this.model.find({ workspaceId, trashedAt: null })
-      .populate("author", "name email avatar")
+    return this.model
+      .find({ workspaceId, trashedAt: null })
+      .populate('author', 'name email avatar')
       .sort({ updatedAt: -1 })
       .limit(limit);
   }
+
+  searchFiles(workspaceId, accessibleProjectIds, queryStr) {
+    const searchRegex = { $regex: queryStr.trim(), $options: 'i' };
+
+    return this.model
+      .find({
+        workspaceId,
+        $or: [
+          {
+            'linkedTo.entityType': 'Project',
+            'linkedTo.entityId': { $in: accessibleProjectIds },
+          },
+          { 'linkedTo.entityType': null },
+        ],
+        filename: searchRegex,
+        trashedAt: null,
+      })
+      .limit(5)
+      .select('filename mimeType size updatedAt linkedTo isFolder');
+  }
 }
 
+export class WorkspaceFileRepository extends FileRepository {
+  getScopeFilter(workspaceId) {
+    return { workspaceId, 'linkedTo.entityType': null };
+  }
+}
 
+export class ProjectFileRepository extends FileRepository {
+  getScopeFilter(projectId) {
+    return { 'linkedTo.entityType': 'Project', 'linkedTo.entityId': projectId };
+  }
+}
 
+export class PageFileRepository extends FileRepository {
+  getScopeFilter(pageId) {
+    return { 'linkedTo.entityType': 'Page', 'linkedTo.entityId': pageId };
+  }
+
+  findByPageId(pageId) { 
+    return this.model.find({ ...this.getScopeFilter(pageId), trashedAt: null, isFolder: false, url: { $exists: true, $ne: null } }).lean(); 
+  }
+}

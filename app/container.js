@@ -1,8 +1,9 @@
-import { createContainer, Lifetime, asClass } from "awilix";
+import { createContainer, Lifetime, asClass, asValue } from "awilix";
 import path from "path";
 import { fileURLToPath } from "url";
 import fg from "fast-glob";
 import { CrossrefClient } from "./lib/crossref.js";
+import { r2 } from "./config/r2.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,6 +12,7 @@ const container = createContainer();
 
 // Manual registrations
 container.register("crossrefClient", asClass(CrossrefClient).singleton());
+container.register("r2", asValue(r2));
 
 // Automatically find and register all Repositories, Services, and Controllers using fast-glob
 const files = fg.sync([
@@ -48,10 +50,14 @@ export const taskCommentController = container.resolve("taskCommentController");
 export const stickyController = container.resolve("stickyController");
 export const labelController = container.resolve("labelController");
 export const fileController = container.resolve("fileController");
+export const workspaceFileController = container.resolve("workspaceFileController");
+export const projectFileController = container.resolve("projectFileController");
+export const pageFileController = container.resolve("pageFileController");
 export const aiController = container.resolve("aiController");
 export const chatHistoryController = container.resolve("chatHistoryController");
 export const workspaceCollectionController = container.resolve("workspaceCollectionController");
-export const paperController = container.resolve("paperController");
 export const projectCollectionController = container.resolve("projectCollectionController");
+export const paperController = container.resolve("paperController");
+export const referenceController = container.resolve("referenceController");
 export const dashboardController = container.resolve("dashboardController");
 export default container;
