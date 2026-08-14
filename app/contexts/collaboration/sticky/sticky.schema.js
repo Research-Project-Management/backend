@@ -1,59 +1,5 @@
 import mongoose from "mongoose";
 
-// ── Sticky Note Link Schema ───────────────────────────────────────────────────
-
-const stickyNoteLinkSchema = new mongoose.Schema(
-  {
-    workspaceId: {
-      type: mongoose.Schema.Types.ObjectId, ref: 'Workspace',
-      required: true,
-    },
-    parentStickyId: {
-      type: mongoose.Schema.Types.ObjectId, ref: 'Sticky',
-      ref: "Sticky",
-      required: true,
-    },
-    childStickyId: {
-      type: mongoose.Schema.Types.ObjectId, ref: 'Sticky',
-      ref: "Sticky",
-      required: true,
-    },
-    childNoteId: {
-      type: mongoose.Schema.Types.ObjectId, ref: 'Sticky',
-      ref: "Sticky",
-      select: false,
-    },
-    projectId: {
-      type: mongoose.Schema.Types.ObjectId, ref: 'Project',
-      required: true,
-    },
-    authorId: {
-      type: mongoose.Schema.Types.ObjectId, ref: 'User',
-      required: true,
-    },
-  },
-  { timestamps: true },
-);
-
-stickyNoteLinkSchema.index(
-  { workspaceId: 1, parentStickyId: 1, projectId: 1, authorId: 1 },
-);
-stickyNoteLinkSchema.pre("validate", function normalizeStickyChildLink(next) {
-  if (!this.childStickyId && this.childNoteId) this.childStickyId = this.childNoteId;
-  next();
-});
-
-stickyNoteLinkSchema.index(
-  { childStickyId: 1, authorId: 1 },
-  { unique: true },
-);
-
-export const StickyChildLinkModel =
-  mongoose.models.StickyNoteLink ||
-  mongoose.model("StickyNoteLink", stickyNoteLinkSchema);
-
-// ── Sticky Schema ─────────────────────────────────────────────────────────────
-
 const stickySchema = new mongoose.Schema({
   title: { type: String, default: "" },
   content: { type: String, required: true },
@@ -66,18 +12,12 @@ const stickySchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId, ref: 'Workspace',
     required: true
   },
-  labels: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Label' }],
-  authorId: {
+  userId: {
     type: mongoose.Schema.Types.ObjectId, ref: 'User',
     required: true
   },
   projectId: {
     type: mongoose.Schema.Types.ObjectId, ref: 'Project'
-  },
-  category: {
-    type: String,
-    enum: ['sticky', 'note'],
-    default: 'sticky'
   },
   scope: {
     type: String,
@@ -97,13 +37,11 @@ stickySchema.pre("validate", function normalizeStickyScope(next) {
   } else {
     this.scope = "workspace";
   }
-  this.category = "sticky";
   next();
 });
 
 stickySchema.index({ workspaceId: 1, createdAt: -1 });
-stickySchema.index({ workspaceId: 1, labels: 1 });
-stickySchema.index({ projectId: 1, authorId: 1 });
+stickySchema.index({ projectId: 1, userId: 1 });
 stickySchema.index({ content: 'text', title: 'text' });
 
 export const StickyModel = mongoose.models.Sticky || mongoose.model("Sticky", stickySchema);

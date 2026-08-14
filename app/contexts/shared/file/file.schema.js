@@ -18,7 +18,8 @@ const fileSchema = new mongoose.Schema(
     workspaceId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Workspace',
-      required: true,
+      required: false,
+      default: null,
     },
     // Generic polymorphic owner instead of project & pageId
     linkedTo: {

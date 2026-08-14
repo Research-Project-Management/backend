@@ -49,7 +49,11 @@ await connectRedis();
 app.set("trust proxy", 1);
 
 //middleware
-app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
+app.use(helmet({ 
+  contentSecurityPolicy: false, 
+  crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
 
 const limiter = rateLimit({
   windowMs: 1 * 60 * 1000,
@@ -122,7 +126,7 @@ app.use("/api/latex", buildLatexRouter(container.latexController));
 // Collaboration
 app.use("/api", buildPageCommentRouter(container.pageCommentController));
 app.use("/api", buildTaskCommentRouter(container.taskCommentController));
-app.use("/api", buildStickyRouter(container.stickyController));
+app.use("/api", buildStickyRouter(container.stickyController, container.workspaceStickyController, container.projectStickyController));
 
 // Shared
 app.use("/api", buildLabelRouter(container.labelController));

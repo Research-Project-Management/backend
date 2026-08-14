@@ -194,6 +194,63 @@ export class WorkspaceFileRepository extends FileRepository {
   getScopeFilter(workspaceId) {
     return { workspaceId, 'linkedTo.entityType': null };
   }
+
+  /**
+   * When browsing inside a subfolder, search by workspaceId + parent only —
+   * skip the linkedTo.entityType restriction because a folder can hold both
+   * workspace-level and project-level files.
+   */
+  getFiles(entityId, filters = {}) {
+    if (filters.parentId) {
+      const query = {
+        workspaceId: entityId,
+        parent: filters.parentId,
+        trashedAt: null,
+      };
+      return this.model
+        .find(query)
+        .populate('author', 'name email avatar')
+        .sort({ isFolder: -1, filename: 1 });
+    }
+    // No parentId — use inherited base behaviour (workspace-level root only)
+    return super.getFiles(entityId, filters);
+  }
+
+  /**
+   * Returns all files for a workspace: workspace-level files + all project files.
+   * Root view (no parentId) filters to parent:null so folder-nested files are excluded.
+   * projectIds: array of project _id strings belonging to this workspace.
+   * filters.projectId: optional — restrict to a single project.
+   */
+  getWorkspaceAllFiles(workspaceId, projectIds = [], filters = {}) {
+    const query = { trashedAt: null };
+
+    if (filters.parentId !== undefined) {
+      query.parent = filters.parentId;
+    }
+
+    if (filters.projectId) {
+      // Drill-down: only files from one specific project
+      query['linkedTo.entityType'] = 'Project';
+      query['linkedTo.entityId'] = filters.projectId;
+    } else {
+      const scopes = [
+        { workspaceId, 'linkedTo.entityType': null },
+      ];
+      if (projectIds.length > 0) {
+        scopes.push({
+          'linkedTo.entityType': 'Project',
+          'linkedTo.entityId': { $in: projectIds },
+        });
+      }
+      query.$or = scopes;
+    }
+
+    return this.model
+      .find(query)
+      .populate('author', 'name email avatar')
+      .sort({ isFolder: -1, filename: 1 });
+  }
 }
 
 export class ProjectFileRepository extends FileRepository {

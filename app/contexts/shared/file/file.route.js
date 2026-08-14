@@ -86,7 +86,7 @@ export const buildFileRouter = (
     '/workspace/:workspaceId',
     isAuthenticated,
     checkWorkspaceRole('member'),
-    workspaceFileController.getFiles,
+    workspaceFileController.getHomeFiles,
   );
 
   fileRouter.post(

@@ -381,12 +381,23 @@ export class FileService {
 }
 
 export class WorkspaceFileService extends FileService {
-  constructor({ workspaceFileRepository, r2 }) {
+  constructor({ workspaceFileRepository, projectRepository, r2 }) {
     super({ fileRepository: workspaceFileRepository, r2 });
+    this.projectRepo = projectRepository;
   }
 
   getScopeContext(workspaceId) {
     return { workspaceId, linkedTo: { entityType: null, entityId: null } };
+  }
+
+  /**
+   * Returns workspace-level files + files from all projects in this workspace.
+   * Supports optional filters: { projectId } for single-project drill-down.
+   */
+  async getHomeFiles(workspaceId, filters = {}) {
+    const projects = await this.projectRepo.findByWorkspace(workspaceId);
+    const projectIds = projects.map((p) => p._id);
+    return this.repo.getWorkspaceAllFiles(workspaceId, projectIds, filters);
   }
 }
 

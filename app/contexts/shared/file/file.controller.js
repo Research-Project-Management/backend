@@ -130,9 +130,11 @@ export class FileController {
     });
 
     this.getFiles = asyncHandler(async (req, res) => {
-      const files = await this.fileService.getFiles(this.getScopeId(req), {
-        parentId: req.query.parentId,
-      });
+      const filters = {};
+      if (req.query.parentId !== undefined) {
+        filters.parentId = req.query.parentId === 'null' ? null : req.query.parentId;
+      }
+      const files = await this.fileService.getFiles(this.getScopeId(req), filters);
       res.json({ files });
     });
 
@@ -176,6 +178,31 @@ export class FileController {
 export class WorkspaceFileController extends FileController {
   constructor({ workspaceFileService }) {
     super({ fileService: workspaceFileService });
+
+    // Override getHomeFiles to aggregate workspace + all project files
+    this.getHomeFiles = asyncHandler(async (req, res) => {
+      const workspaceId = req.params.workspaceId;
+      const rawParentId = req.query.parentId;
+
+      // Navigating inside a subfolder — show that folder's contents directly
+      if (rawParentId && rawParentId !== 'null') {
+        const files = await this.fileService.getFiles(workspaceId, {
+          parentId: rawParentId,
+        });
+        return res.json({ files });
+      }
+
+      // Root view — aggregate workspace-level + all project files
+      const filters = {};
+      if (req.query.projectId) filters.projectId = req.query.projectId;
+      
+      if (rawParentId === 'null') {
+        filters.parentId = null;
+      }
+
+      const files = await this.fileService.getHomeFiles(workspaceId, filters);
+      res.json({ files });
+    });
   }
 
   getScopeId(req) {
