@@ -1,27 +1,67 @@
-version: "3.8"
+version: '3.8'
 
 services:
-  # Node.js Backend Application
-  app:
-    image: ghcr.io/research-project-management/backend:latest
-    container_name: flux-backend
-    command: node index.js
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: research_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgrespassword}
+      POSTGRES_DB: ${DB_NAME:-research_management}
     ports:
-      - "${PORT:-3000}:3000"
-    env_file:
-      - .env
-    restart: unless-stopped
-    networks:
-      - rpm-network
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-research_management}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # Redis Cache / Message Broker
+  # Redis Cache & Background Tasks
   redis:
-    image: redis:alpine
-    container_name: flux-redis
+    image: redis:7-alpine
+    container_name: research_redis
     restart: unless-stopped
-    networks:
-      - rpm-network
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-networks:
-  rpm-network:
-    driver: bridge
+  # NestJS Fastify Application Server
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: research_backend
+    restart: unless-stopped
+    ports:
+      - "${PORT:-2915}:2915"
+    environment:
+      NODE_ENV: production
+      PORT: 2915
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgrespassword}@postgres:5432/${DB_NAME:-research_management}?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: ${JWT_SECRET:-change-this-secret-in-production-12345}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-this-refresh-secret-in-production-67890}
+      JWT_EXPIRATION: 15m
+      JWT_REFRESH_EXPIRATION: 7d
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local

@@ -1,45 +1,40 @@
-# Build stage
-FROM node:20-alpine AS builder
+# Multi-stage Dockerfile for NestJS Fastify Backend
+FROM node:22-alpine AS base
+RUN corepack enable && corepack prepare pnpm@latest --activate
 
-# Install pnpm
-RUN corepack enable && corepack prepare pnpm@10.11.1 --activate
-
+# 1. Dependencies Stage
+FROM base AS dependencies
 WORKDIR /app
-
-# Copy package files
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-
-# Install dependencies
+COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
-# Copy application code
-COPY . .
-
-# Production stage
-FROM node:20-alpine
-
-# Install pnpm
-RUN corepack enable && corepack prepare pnpm@10.11.1 --activate
-
+# 2. Builder Stage
+FROM base AS builder
 WORKDIR /app
+COPY --from=dependencies /app/node_modules ./node_modules
+COPY . .
+RUN npx prisma generate
+RUN pnpm run build
+RUN pnpm prune --prod
 
-# Copy dependencies and application from builder
+# 3. Production Runner Stage
+FROM node:22-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=2915
+
+# Security: run as non-root user
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nestjs
+
+COPY package.json ./
+COPY prisma ./prisma
 COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app .
+COPY --from=builder /app/dist ./dist
 
-# Create a non-root user
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001 && \
-    chown -R nodejs:nodejs /app
+# Give ownership to nestjs user
+USER nestjs
 
-USER nodejs
+EXPOSE 2915
 
-# Expose port
-EXPOSE 3000
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
-    CMD node -e "require('http').get('http://localhost:3000/', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
-
-# Start application
-CMD ["pnpm", "start"]
+CMD ["node", "dist/main.js"]

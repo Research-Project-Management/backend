@@ -1,0 +1,37 @@
+version: "3.8"
+
+services:
+  # NestJS Fastify Backend Application
+  backend:
+    image: ghcr.io/research-project-management/backend:latest
+    container_name: flux-backend
+    restart: unless-stopped
+    ports:
+      - "${PORT:-2915}:2915"
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_started
+    networks:
+      - rpm-network
+
+  # Redis Cache & Message Broker
+  redis:
+    image: redis:alpine
+    container_name: flux-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - rpm-network
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  rpm-network:
+    driver: bridge

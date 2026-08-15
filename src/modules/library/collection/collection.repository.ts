@@ -1,0 +1,63 @@
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '@/core/database/prisma.service';
+import { Prisma } from '@prisma/client';
+
+export type CollectionWithCount = Prisma.CollectionGetPayload<{
+  include: {
+    _count?: {
+      select: { papers: true };
+    };
+  };
+}>;
+
+@Injectable()
+export class CollectionRepository {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async findWorkspaceCollections(workspaceId: string) {
+    return this.prisma.collection.findMany({
+      where: { workspaceId },
+      include: {
+        _count: {
+          select: { papers: { where: { deletedAt: null } } },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async findCollectionById(collectionId: string) {
+    return this.prisma.collection.findUnique({
+      where: { id: collectionId },
+      include: {
+        _count: {
+          select: { papers: { where: { deletedAt: null } } },
+        },
+      },
+    });
+  }
+
+  async createCollection(
+    data: Prisma.CollectionCreateInput | Prisma.CollectionUncheckedCreateInput,
+  ) {
+    return this.prisma.collection.create({
+      data: data as Prisma.CollectionCreateInput,
+    });
+  }
+
+  async updateCollection(
+    collectionId: string,
+    data: Prisma.CollectionUpdateInput | Prisma.CollectionUncheckedUpdateInput,
+  ) {
+    return this.prisma.collection.update({
+      where: { id: collectionId },
+      data: data,
+    });
+  }
+
+  async deleteCollection(collectionId: string) {
+    return this.prisma.collection.delete({
+      where: { id: collectionId },
+    });
+  }
+}
