@@ -1,9 +1,26 @@
 import { z } from "zod";
 
+export const IngestPaperDto = {
+  body: z.object({
+    source: z.enum(["upload", "storage", "identifier"]).optional().default("upload"),
+    fileId: z.string().optional().nullable(),
+    collectionId: z.string().optional().nullable(),
+    title: z.string().optional(),
+    filename: z.string().optional(),
+    fileUrl: z.string().optional(),
+    size: z.number().optional(),
+    mimeType: z.string().optional(),
+    authors: z.array(z.string()).optional().default([]),
+    year: z.number().optional().nullable(),
+    doi: z.string().optional(),
+    citationKey: z.string().optional(),
+  }),
+};
 
 export const UploadPaperDto = {
   body: z.object({
     collectionId: z.string().optional().nullable(),
+    fileId: z.string().optional().nullable(),
     title: z.string().trim().min(1, "Title is required"),
     filename: z.string().min(1, "Filename is required"),
     fileUrl: z.string().min(1, "Valid file URL is required"),
@@ -11,6 +28,8 @@ export const UploadPaperDto = {
     mimeType: z.string().optional(),
     authors: z.array(z.string()).optional().default([]),
     year: z.number().optional().nullable(),
+    doi: z.string().optional(),
+    citationKey: z.string().optional(),
     notes: z.array(
       z.object({
         _id: z.string().optional(),
@@ -19,6 +38,31 @@ export const UploadPaperDto = {
         updatedAt: z.any().optional(),
       })
     ).optional(),
+  }),
+};
+
+export const AddAttachmentDto = {
+  body: z.object({
+    fileId: z.string().optional().nullable(),
+    filename: z.string().min(1, "Filename is required"),
+    url: z.string().min(1, "Valid attachment URL is required"),
+    size: z.number().optional(),
+    mimeType: z.string().optional(),
+    attachmentType: z
+      .enum(["primary_pdf", "supplementary", "dataset", "slides", "code", "figure", "other"])
+      .optional()
+      .default("supplementary"),
+  }),
+};
+
+export const ImportStoragePaperDto = {
+  body: z.object({
+    fileId: z.string().min(1, "Storage fileId is required"),
+    collectionId: z.string().optional().nullable(),
+    title: z.string().optional(),
+    authors: z.array(z.string()).optional(),
+    doi: z.string().optional(),
+    citationKey: z.string().optional(),
   }),
 };
 
@@ -75,5 +119,3 @@ export const UpdatePaperDto = {
     ).optional(),
   }),
 };
-
-

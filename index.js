@@ -24,8 +24,7 @@ import { buildStickyRouter } from "./app/contexts/collaboration/sticky/sticky.ro
 import { buildLabelRouter } from "./app/contexts/shared/label/label.route.js";
 import { buildFileRouter } from "./app/contexts/shared/file/file.route.js";
 import { buildAiRouter } from "./app/contexts/intelligence/ai/ai.route.js";
-import { buildChatHistoryRouter } from "./app/contexts/intelligence/chat-history/chat-history.route.js";
-import { buildCollectionRouter, buildProjectCollectionRouter } from "./app/contexts/library/collection/collection.route.js";
+import { buildCollectionRouter } from "./app/contexts/library/collection/collection.route.js";
 import { buildPaperRouter } from "./app/contexts/library/paper/paper.route.js";
 import { buildReferenceRouter } from "./app/contexts/library/reference/reference.route.js";
 import { buildDashboardRouter } from "./app/contexts/dashboard/dashboard.route.js";
@@ -137,10 +136,14 @@ app.use("/api/files", buildFileRouter(
   container.pageFileController
 ));
 
-// Research
-app.use("/api/library", buildCollectionRouter(container.workspaceCollectionController));
+// Research (Library Context)
+app.use("/api/library/papers", buildPaperRouter(container.paperController));
+app.use("/api/library/collections", buildCollectionRouter(container.collectionController));
+app.use("/api/library/references", buildReferenceRouter(container.referenceController));
+
+// Legacy Library Root mounts (100% backward compatibility)
 app.use("/api/library", buildPaperRouter(container.paperController));
-app.use("/api/library", buildProjectCollectionRouter(container.projectCollectionController));
+app.use("/api/library", buildCollectionRouter(container.collectionController));
 app.use("/api/library/reference", buildReferenceRouter(container.referenceController));
 
 // Intelligence

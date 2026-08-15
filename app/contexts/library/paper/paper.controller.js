@@ -1,9 +1,18 @@
 import { asyncHandler } from "../../../lib/asyncHandler.js";
 
 export class PaperController {
-  constructor({ paperService, workspaceCollectionService }) {
+  constructor({ paperService, collectionService }) {
     this.paperService = paperService;
-    this.collectionService = workspaceCollectionService;
+    this.collectionService = collectionService;
+
+    this.ingestPaper = asyncHandler(async (req, res) => {
+      const paper = await this.paperService.ingestPaper(
+        req.workspace._id,
+        req.user._id,
+        req.body
+      );
+      res.status(201).json({ paper });
+    });
 
     this.getCollectionPapers = asyncHandler(async (req, res) => {
       const collection = await this.collectionService.getCollection(req.workspace._id, req.params.collectionId);
@@ -13,10 +22,10 @@ export class PaperController {
 
     this.uploadPaperToCollection = asyncHandler(async (req, res) => {
       const collection = await this.collectionService.getCollection(req.workspace._id, req.params.collectionId);
-      const paper = await this.paperService.uploadPaper(
+      const paper = await this.paperService.ingestPaper(
         req.workspace._id,
         req.user._id,
-        { ...req.body, collectionId: req.params.collectionId }
+        { ...req.body, source: "upload", collectionId: req.params.collectionId }
       );
       res.status(201).json({ paper });
     });
@@ -26,13 +35,46 @@ export class PaperController {
       res.json({ papers });
     });
 
+    this.getPaperById = asyncHandler(async (req, res) => {
+      const paper = await this.paperService.getPaperById(req.workspace._id, req.params.paperId);
+      res.json({ paper });
+    });
+
     this.uploadPaper = asyncHandler(async (req, res) => {
-      const paper = await this.paperService.uploadPaper(
+      const paper = await this.paperService.ingestPaper(
         req.workspace._id,
+        req.user._id,
+        { source: "upload", ...req.body }
+      );
+      res.status(201).json({ paper });
+    });
+
+    this.importFromStorage = asyncHandler(async (req, res) => {
+      const paper = await this.paperService.ingestPaper(
+        req.workspace._id,
+        req.user._id,
+        { source: "storage", ...req.body }
+      );
+      res.status(201).json({ paper });
+    });
+
+    this.addAttachment = asyncHandler(async (req, res) => {
+      const paper = await this.paperService.addAttachment(
+        req.workspace._id,
+        req.params.paperId,
         req.user._id,
         req.body
       );
       res.status(201).json({ paper });
+    });
+
+    this.removeAttachment = asyncHandler(async (req, res) => {
+      const paper = await this.paperService.removeAttachment(
+        req.workspace._id,
+        req.params.paperId,
+        req.params.attachmentId
+      );
+      res.json({ paper });
     });
 
     this.triggerReindex = asyncHandler(async (req, res) => {
@@ -62,4 +104,3 @@ export class PaperController {
     });
   }
 }
-

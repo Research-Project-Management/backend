@@ -1,54 +1,44 @@
-import { GetObjectCommand } from "@aws-sdk/client-s3";
-import { r2 } from "../../../config/r2.js";
-
-const extractR2KeyFromFileUrl = (fileUrl) => {
-  if (!fileUrl || typeof fileUrl !== "string") return null;
-  const trimmedUrl = fileUrl.trim();
-  const match = trimmedUrl.match(/\/api\/files\/([^?#]+)/);
-  if (match?.[1]) return decodeURIComponent(match[1]);
-  if (!trimmedUrl.startsWith("http") && !trimmedUrl.startsWith("/") && !trimmedUrl.startsWith("r2://")) {
-    return trimmedUrl;
-  }
-  if (trimmedUrl.startsWith("r2://")) {
-    const withoutScheme = trimmedUrl.slice("r2://".length);
-    const [, ...keyParts] = withoutScheme.split("/");
-    return keyParts.join("/") || null;
-  }
-  return null;
-};
-
-const streamToBuffer = async (stream) => {
-  const chunks = [];
-  for await (const chunk of stream) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  return Buffer.concat(chunks);
-};
-
-const fetchPaperFileBuffer = async (fileUrl) => {
-  const r2Key = extractR2KeyFromFileUrl(fileUrl);
-  if (r2Key) {
-    const response = await r2.send(
-      new GetObjectCommand({
-        Bucket: process.env.R2_BUCKET_NAME,
-        Key: r2Key,
-      }),
-    );
-    return streamToBuffer(response.Body);
-  }
-  const response = await fetch(fileUrl);
-  if (!response.ok) {
-    throw new Error(`Fetch failed: ${response.status}`);
-  }
-  return Buffer.from(await response.arrayBuffer());
-};
+import { AppError } from "../../../lib/AppError.js";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export class PaperService {
-  constructor({ paperRepository }) {
-    this.paperRepository = paperRepository;
+// Fields explicitly allowed for update — prevents overwriting ownership/system fields
+const UPDATABLE_FIELDS = [
+  "title", "authors", "year", "doi", "abstract", "keywords", "itemType",
+  "editors", "journal", "publicationTitle", "publicationDate", "publisher",
+  "place", "labels", "volume", "issue", "section", "partNumber", "partTitle",
+  "pages", "series", "seriesTitle", "seriesText", "issn", "isbn", "pmid",
+  "pmcid", "url", "type", "language", "journalAbbr", "shortTitle", "rights",
+  "license", "citationKey", "libraryCatalog", "archive", "archiveLocation",
+  "callNumber", "accessedAt", "extra", "notes", "primaryFile", "collectionId",
+];
+
+function generateCitationKey(title, authors = [], year = null) {
+  let firstAuthor = "author";
+  if (authors && authors.length > 0 && typeof authors[0] === "string") {
+    const name = authors[0].trim();
+    const parts = name.split(/[\s,]+/);
+    firstAuthor = parts[0].toLowerCase().replace(/[^a-z0-9]/g, "") || "author";
   }
+  const cleanYear = year ? String(year) : new Date().getFullYear().toString();
+  const cleanTitleWord = (title || "paper")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .split(/\s+/)
+    .find((w) => w.length > 3) || "doc";
+
+  return `${firstAuthor}${cleanYear}${cleanTitleWord}`;
+}
+
+export class PaperService {
+  constructor({ paperRepository, fileRepository, fileBufferService, crossrefClient }) {
+    this.paperRepository = paperRepository;
+    this.fileRepository = fileRepository;
+    this.fileBufferService = fileBufferService;
+    this.crossrefClient = crossrefClient;
+  }
+
+  // ── RAG Indexing (Resilient Background Worker) ────────────────────────────
 
   async indexPaperForRag(paperId, userId) {
     const paper = await this.paperRepository.findById(paperId);
@@ -56,12 +46,18 @@ export class PaperService {
 
     await this.paperRepository.incrementRagAttempts(paperId);
 
-    const fileBuffer = await fetchPaperFileBuffer(paper.fileUrl);
+    const fileUrl = paper.primaryFile?.url || paper.fileUrl;
+    if (!fileUrl) return null;
+
+    const fileBuffer = await this.fileBufferService.fetchBuffer(fileUrl);
+
     const form = new FormData();
     form.append(
       "file",
-      new Blob([fileBuffer], { type: paper.mimeType || "application/pdf" }),
-      paper.filename || "paper.pdf",
+      new Blob([fileBuffer], {
+        type: paper.primaryFile?.mimeType || paper.mimeType || "application/pdf",
+      }),
+      paper.primaryFile?.filename || paper.filename || "paper.pdf",
     );
     form.append("title", paper.title);
     form.append("user_id", userId.toString());
@@ -74,13 +70,13 @@ export class PaperService {
 
     if (!uploadRes.ok) {
       const body = await uploadRes.text().catch(() => "");
-      throw new Error(`Flux-AI upload failed: ${uploadRes.status} ${body}`);
+      throw new AppError(`Flux-AI upload failed: ${uploadRes.status} ${body}`, 502);
     }
 
     const uploadData = await uploadRes.json();
     const ragDocId = uploadData.id;
     if (!ragDocId) {
-      throw new Error("Flux-AI upload did not return document id");
+      throw new AppError("Flux-AI upload did not return document id", 502);
     }
 
     return this.paperRepository.updateRagStatus(paper._id, {
@@ -125,6 +121,133 @@ export class PaperService {
     });
   }
 
+  // ── Unified Academic Ingestion Seam ───────────────────────────────────────
+
+  async ingestPaper(workspaceId, userId, dto) {
+    let filename = dto.filename || "paper.pdf";
+    let fileUrl = dto.fileUrl || "";
+    let size = dto.size || 0;
+    let mimeType = dto.mimeType || "application/pdf";
+    let fileId = dto.fileId || null;
+    let title = dto.title || "";
+    let authors = dto.authors || [];
+    let year = dto.year || null;
+    let doi = dto.doi || "";
+
+    // 1. Resolve source payload
+    if (dto.source === "storage" || (!fileUrl && dto.fileId)) {
+      if (!this.fileRepository) {
+        throw new AppError("File repository not available for storage import", 500);
+      }
+      const storageFile = await this.fileRepository.findOneById(dto.fileId);
+      if (!storageFile) {
+        throw new AppError("Storage file not found", 404);
+      }
+      fileId = storageFile._id;
+      filename = storageFile.filename;
+      fileUrl = storageFile.url;
+      size = storageFile.size || 0;
+      mimeType = storageFile.mimeType || "application/pdf";
+      if (!title) {
+        title = filename.replace(/\.pdf$/i, "").replace(/[-_]/g, " ");
+      }
+    }
+
+    if (!fileUrl) {
+      throw new AppError("A valid file URL or storage fileId is required", 400);
+    }
+    if (!title) {
+      title = filename.replace(/\.pdf$/i, "").replace(/[-_]/g, " ");
+    }
+
+    // 2. Auto-enrich metadata from DOI if available
+    let enrichedData = {};
+    if (doi && this.crossrefClient) {
+      try {
+        const crossrefResult = await this.crossrefClient.getByDoi(doi);
+        if (crossrefResult) {
+          enrichedData = {
+            title: crossrefResult.title || title,
+            authors: crossrefResult.authors?.length ? crossrefResult.authors : authors,
+            year: crossrefResult.year || year,
+            journal: crossrefResult.journal || "",
+            publicationTitle: crossrefResult.journal || "",
+            publisher: crossrefResult.publisher || "",
+            volume: crossrefResult.volume || "",
+            issue: crossrefResult.issue || "",
+            abstract: crossrefResult.abstract || "",
+            issn: crossrefResult.issn || "",
+            url: crossrefResult.url || "",
+          };
+          title = enrichedData.title;
+          authors = enrichedData.authors;
+          year = enrichedData.year;
+        }
+      } catch (err) {
+        console.warn(`[Library] CrossRef lookup for DOI ${doi} failed gracefully:`, err.message);
+      }
+    }
+
+    // 3. Generate Citation Key if missing
+    const citationKey = dto.citationKey || generateCitationKey(title, authors, year);
+
+    // 4. Construct Primary File and Multi-attachments
+    const primaryFileData = {
+      fileId,
+      filename,
+      url: fileUrl,
+      size,
+      mimeType,
+    };
+
+    const paper = await this.paperRepository.create({
+      title,
+      authors,
+      year,
+      doi,
+      citationKey,
+      ...enrichedData,
+      primaryFile: primaryFileData,
+      attachments: [
+        {
+          fileId,
+          filename,
+          url: fileUrl,
+          size,
+          mimeType,
+          attachmentType: "primary_pdf",
+          uploadedAt: new Date(),
+        },
+      ],
+      // Legacy compatibility fields
+      filename,
+      fileUrl,
+      size,
+      mimeType,
+      workspaceId,
+      collectionId: dto.collectionId || null,
+      uploadedById: userId,
+      ragStatus: "pending",
+    });
+
+    // 5. Trigger resilient background vector RAG index
+    this.triggerPaperRagIndex(paper._id, userId);
+
+    return paper;
+  }
+
+  // ── Backward-compatible Aliases ───────────────────────────────────────────
+
+  async uploadPaper(workspaceId, userId, dto) {
+    return this.ingestPaper(workspaceId, userId, { source: "upload", ...dto });
+  }
+
+  async importFromStorage(workspaceId, userId, dto) {
+    return this.ingestPaper(workspaceId, userId, { source: "storage", ...dto });
+  }
+
+  // ── Query & Attachment Operations ─────────────────────────────────────────
+
   async getPapers(workspaceId) {
     return this.paperRepository.findByWorkspace(workspaceId);
   }
@@ -133,33 +256,39 @@ export class PaperService {
     return this.paperRepository.findByCollection(workspaceId, collectionId);
   }
 
-
-  async uploadPaper(workspaceId, userId, dto) {
-    if (!dto.title || !dto.filename || !dto.fileUrl) {
-      throw new Error("Missing required paper data");
-    }
-
-    const paper = await this.paperRepository.create({
-      title: dto.title,
-      authors: dto.authors,
-      year: dto.year || null,
-      filename: dto.filename,
-      fileUrl: dto.fileUrl,
-      size: dto.size,
-      mimeType: dto.mimeType,
-      workspaceId: workspaceId,
-      collectionId: dto.collectionId || null,
-      uploadedById: userId,
-      ragStatus: "pending",
-    });
-
-    this.triggerPaperRagIndex(paper._id, userId);
+  async getPaperById(workspaceId, paperId) {
+    const paper = await this.paperRepository.findById(paperId, workspaceId);
+    if (!paper) throw new AppError("Paper not found", 404);
     return paper;
+  }
+
+  async addAttachment(workspaceId, paperId, userId, dto) {
+    const paper = await this.paperRepository.findById(paperId, workspaceId);
+    if (!paper) throw new AppError("Paper not found", 404);
+
+    const attachmentData = {
+      fileId: dto.fileId || null,
+      filename: dto.filename,
+      url: dto.url,
+      size: dto.size || 0,
+      mimeType: dto.mimeType || "application/octet-stream",
+      attachmentType: dto.attachmentType || "supplementary",
+      uploadedAt: new Date(),
+    };
+
+    return this.paperRepository.addAttachment(paper._id, attachmentData);
+  }
+
+  async removeAttachment(workspaceId, paperId, attachmentId) {
+    const paper = await this.paperRepository.findById(paperId, workspaceId);
+    if (!paper) throw new AppError("Paper not found", 404);
+
+    return this.paperRepository.removeAttachment(paper._id, attachmentId);
   }
 
   async triggerReindex(workspaceId, userId, paperId) {
     const paper = await this.paperRepository.findById(paperId, workspaceId);
-    if (!paper) throw new Error("Paper not found");
+    if (!paper) throw new AppError("Paper not found", 404);
 
     this.triggerPaperRagIndex(paper._id, userId);
     return paper;
@@ -167,21 +296,22 @@ export class PaperService {
 
   async updatePaper(workspaceId, paperId, dto) {
     const paper = await this.paperRepository.findById(paperId, workspaceId);
-    if (!paper) throw new Error("Paper not found");
+    if (!paper) throw new AppError("Paper not found", 404);
 
-    for (const key of Object.keys(dto)) {
-      paper[key] = dto[key];
+    const updates = {};
+    for (const key of UPDATABLE_FIELDS) {
+      if (dto[key] !== undefined) {
+        updates[key] = dto[key];
+      }
     }
-    await paper.save();
-    return paper;
+
+    return this.paperRepository.updateById(paper._id, updates);
   }
 
   async deletePaper(workspaceId, paperId) {
     const paper = await this.paperRepository.findById(paperId, workspaceId);
-    if (!paper) throw new Error("Paper not found");
+    if (!paper) throw new AppError("Paper not found", 404);
 
-    paper.deletedAt = new Date();
-    await paper.save();
+    await this.paperRepository.softDelete(paper._id);
   }
 }
-

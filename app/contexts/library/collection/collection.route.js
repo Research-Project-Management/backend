@@ -1,24 +1,59 @@
 import { Router } from "express";
 import { checkWorkspaceRole } from "../../../middleware/workspace.middleware.js";
-import { checkProjectRole } from "../../../middleware/project.middleware.js";
 import { isAuthenticated } from "../../../middleware/auth.middleware.js";
 import { validate } from "../../../middleware/validate.middleware.js";
-import { 
-  CreateCollectionDto, UpdateCollectionDto,
-  CreateProjectCollectionDto, ImportLibraryCollectionDto, AddPaperToProjectCollectionDto
-} from "./collection.dto.js";
+import { CreateCollectionDto, UpdateCollectionDto } from "./collection.dto.js";
 
 export const buildCollectionRouter = (controller) => {
-  const collectionRouter = Router();
+  const router = Router();
 
-  collectionRouter.get(
+  // Modern RESTful endpoints (mounted at /api/library/collections)
+  router.get(
+    "/:workspaceId",
+    isAuthenticated,
+    checkWorkspaceRole("owner", "admin", "member", "viewer"),
+    controller.getCollections
+  );
+
+  router.post(
+    "/:workspaceId",
+    isAuthenticated,
+    checkWorkspaceRole("owner", "admin", "member"),
+    validate(CreateCollectionDto),
+    controller.createCollection
+  );
+
+  router.get(
+    "/:workspaceId/:collectionId",
+    isAuthenticated,
+    checkWorkspaceRole("owner", "admin", "member", "viewer"),
+    controller.getCollectionById
+  );
+
+  router.put(
+    "/:workspaceId/:collectionId",
+    isAuthenticated,
+    checkWorkspaceRole("owner", "admin", "member"),
+    validate(UpdateCollectionDto),
+    controller.updateCollection
+  );
+
+  router.delete(
+    "/:workspaceId/:collectionId",
+    isAuthenticated,
+    checkWorkspaceRole("owner", "admin", "member"),
+    controller.deleteCollection
+  );
+
+  // Legacy route aliases (for backward compatibility when mounted at /api/library)
+  router.get(
     "/:workspaceId/collections",
     isAuthenticated,
     checkWorkspaceRole("owner", "admin", "member", "viewer"),
     controller.getCollections
   );
 
-  collectionRouter.post(
+  router.post(
     "/:workspaceId/collections",
     isAuthenticated,
     checkWorkspaceRole("owner", "admin", "member"),
@@ -26,7 +61,7 @@ export const buildCollectionRouter = (controller) => {
     controller.createCollection
   );
 
-  collectionRouter.put(
+  router.put(
     "/:workspaceId/collections/:collectionId",
     isAuthenticated,
     checkWorkspaceRole("owner", "admin", "member"),
@@ -34,63 +69,12 @@ export const buildCollectionRouter = (controller) => {
     controller.updateCollection
   );
 
-  collectionRouter.delete(
+  router.delete(
     "/:workspaceId/collections/:collectionId",
     isAuthenticated,
     checkWorkspaceRole("owner", "admin", "member"),
     controller.deleteCollection
   );
 
-  return collectionRouter;
-};
-
-export const buildProjectCollectionRouter = (controller) => {
-  const pcRouter = Router();
-
-  pcRouter.get(
-    "/project/:projectId/collections",
-    isAuthenticated,
-    checkProjectRole("owner", "admin", "member", "viewer"),
-    controller.getCollections
-  );
-
-  pcRouter.post(
-    "/project/:projectId/collections",
-    isAuthenticated,
-    checkProjectRole("owner", "admin", "member"),
-    validate(CreateProjectCollectionDto),
-    controller.createCollection
-  );
-
-  pcRouter.post(
-    "/project/:projectId/collections/:pcId/import-library",
-    isAuthenticated,
-    checkProjectRole("owner", "admin", "member"),
-    validate(ImportLibraryCollectionDto),
-    controller.importLibraryCollection
-  );
-
-  pcRouter.post(
-    "/project/:projectId/collections/:pcId/papers",
-    isAuthenticated,
-    checkProjectRole("owner", "admin", "member"),
-    validate(AddPaperToProjectCollectionDto),
-    controller.addPaperToProjectCollection
-  );
-
-  pcRouter.delete(
-    "/project/:projectId/collections/:pcId/papers/:paperId",
-    isAuthenticated,
-    checkProjectRole("owner", "admin", "member"),
-    controller.removePaperFromProjectCollection
-  );
-
-  pcRouter.delete(
-    "/project/:projectId/collections/:pcId",
-    isAuthenticated,
-    checkProjectRole("owner", "admin"),
-    controller.deleteCollection
-  );
-
-  return pcRouter;
+  return router;
 };

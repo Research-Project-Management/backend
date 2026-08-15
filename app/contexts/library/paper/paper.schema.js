@@ -1,20 +1,19 @@
 import mongoose from "mongoose";
 
 // ── Paper (individual uploaded paper/article in a collection) ─────────────────
-// A Paper can belong to a workspace Collection (Library) OR be directly
-// attached to a Project Collection (projectCollection field set).
-// Files are stored in Cloudflare R2; we only keep metadata here.
+// A Paper belongs to a workspace Library Collection or project collection.
+// Files are stored in Cloudflare R2; we keep standard CSL metadata and attachments.
 
 const paperSchema = new mongoose.Schema(
   {
-    // Basic metadata
+    // Basic CSL metadata
     title: { type: String, required: true, trim: true },
     authors: [{ type: String, trim: true }],
     year: { type: Number, default: null },
     doi: { type: String, default: "", trim: true },
     abstract: { type: String, default: "" },
     keywords: [{ type: String }],
-    itemType: { type: String, default: "" },
+    itemType: { type: String, default: "journalArticle" },
     editors: [{ type: String, trim: true }],
     journal: { type: String, default: "" },
     publicationTitle: { type: String, default: "" },
@@ -56,7 +55,33 @@ const paperSchema = new mongoose.Schema(
       }
     ],
 
-    // File
+    // Primary File (used for PDF Reader & Vector RAG)
+    primaryFile: {
+      fileId: { type: mongoose.Schema.Types.ObjectId, ref: 'File', default: null },
+      url: { type: String, default: "" },
+      filename: { type: String, default: "" },
+      size: { type: Number, default: 0 },
+      mimeType: { type: String, default: "application/pdf" },
+    },
+
+    // Attachments (Zotero Multi-Attachment Pattern: dataset, supplementary, slides, code)
+    attachments: [
+      {
+        fileId: { type: mongoose.Schema.Types.ObjectId, ref: 'File', default: null },
+        filename: { type: String, required: true },
+        url: { type: String, required: true },
+        size: { type: Number, default: 0 },
+        mimeType: { type: String, default: "application/octet-stream" },
+        attachmentType: {
+          type: String,
+          enum: ["primary_pdf", "supplementary", "dataset", "slides", "code", "figure", "other"],
+          default: "supplementary",
+        },
+        uploadedAt: { type: Date, default: Date.now },
+      },
+    ],
+
+    // Legacy File fields (kept for 100% backward compatibility)
     fileUrl: { type: String, required: true },
     filename: { type: String, required: true },
     mimeType: { type: String, default: "application/pdf" },
@@ -87,7 +112,7 @@ const paperSchema = new mongoose.Schema(
       required: true,
     },
 
-    // Library collection (workspace-level) — null if project-only paper
+    // Library collection (workspace-level) — null if unfiled
     collectionId: {
       type: mongoose.Schema.Types.ObjectId, ref: 'Collection',
       default: null,

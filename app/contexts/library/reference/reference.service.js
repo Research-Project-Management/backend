@@ -1,17 +1,13 @@
-import { CrossrefClient } from "../../../lib/crossref.js";
-
 export class ReferenceService {
   constructor({ crossrefClient }) {
-    this.crossrefClient = crossrefClient || new CrossrefClient();
+    this.crossrefClient = crossrefClient;
   }
 
   async crossrefSearch(query, rows = 5) {
-    if (this.crossrefClient) return this.crossrefClient.search(query, rows);
-    return [];
+    return this.crossrefClient.search(query, rows);
   }
 
   async crossrefDoi(rawDoi) {
-    if (this.crossrefClient) return this.crossrefClient.getByDoi(rawDoi);
-    return null;
+    return this.crossrefClient.getByDoi(rawDoi);
   }
 }

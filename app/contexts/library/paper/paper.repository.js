@@ -22,15 +22,36 @@ export class PaperRepository {
       .lean();
   }
 
-
   async findById(paperId, workspaceId = null) {
     const query = { _id: paperId, deletedAt: null };
     if (workspaceId) query.workspaceId = workspaceId;
-    return PaperModel.findOne(query).populate("uploadedBy", "name email avatar").populate("collection", "name");
+    return PaperModel.findOne(query)
+      .populate("uploadedBy", "name email avatar")
+      .populate("collection", "name");
   }
 
   async create(data) {
     return PaperModel.create(data);
+  }
+
+  async updateById(paperId, data) {
+    return PaperModel.findByIdAndUpdate(paperId, data, { new: true, runValidators: true });
+  }
+
+  async addAttachment(paperId, attachmentData) {
+    return PaperModel.findByIdAndUpdate(
+      paperId,
+      { $push: { attachments: attachmentData } },
+      { new: true, runValidators: true }
+    );
+  }
+
+  async removeAttachment(paperId, attachmentId) {
+    return PaperModel.findByIdAndUpdate(
+      paperId,
+      { $pull: { attachments: { _id: attachmentId } } },
+      { new: true }
+    );
   }
 
   async updateRagStatus(paperId, statusData) {
@@ -49,6 +70,14 @@ export class PaperRepository {
     );
   }
 
+  async softDelete(paperId) {
+    return PaperModel.findByIdAndUpdate(
+      paperId,
+      { deletedAt: new Date() },
+      { new: true },
+    );
+  }
+
   async softDeleteByCollection(collectionId) {
     return PaperModel.updateMany(
       { collectionId: collectionId, deletedAt: null },
@@ -56,5 +85,3 @@ export class PaperRepository {
     );
   }
 }
-
-
