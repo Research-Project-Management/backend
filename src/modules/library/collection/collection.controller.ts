@@ -13,8 +13,8 @@ import {
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { CollectionService } from './collection.service';
 import { CreateCollectionDto, UpdateCollectionDto } from './dto/collection.dto';
-import { JwtAuthGuard } from '@/core/guards/jwt-auth.guard';
-import { CurrentUser } from '@/core/decorators/current-user.decorator';
+import { JwtAuthGuard } from '@/modules/iam/authentication';
+import { CurrentUser } from '@/modules/iam/authentication';
 
 @ApiTags('Library')
 @ApiBearerAuth('JWT-auth')

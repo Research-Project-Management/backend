@@ -1,9 +1,9 @@
 import { Module } from '@nestjs/common';
 import { FileModule } from './file/file.module';
-import { LabelModule } from './label/label.module';
 
 @Module({
-  imports: [FileModule, LabelModule],
-  exports: [FileModule, LabelModule],
+  imports: [FileModule],
+  exports: [FileModule],
 })
 export class StorageModule {}
+

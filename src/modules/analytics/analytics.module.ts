@@ -1,10 +1,14 @@
 import { Module } from '@nestjs/common';
-import { DashboardModule } from './dashboard/dashboard.module';
+import { AnalyticsController } from './analytics.controller';
+import { AnalyticsService } from './analytics.service';
+import { AnalyticsRepository } from './analytics.repository';
+import { ActivityModule } from '../activity/activity.module';
+import { CacheModule } from '@/core/cache/cache.module';
 
 @Module({
-  imports: [DashboardModule],
-  exports: [DashboardModule],
+  imports: [ActivityModule, CacheModule],
+  controllers: [AnalyticsController],
+  providers: [AnalyticsService, AnalyticsRepository],
+  exports: [AnalyticsService, AnalyticsRepository],
 })
 export class AnalyticsModule {}
-
-export { DashboardModule };

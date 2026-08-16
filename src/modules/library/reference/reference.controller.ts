@@ -16,8 +16,8 @@ import {
   CreateReferenceDto,
   ExportBibtexDto,
 } from './dto/reference.dto';
-import { JwtAuthGuard } from '@/core/guards/jwt-auth.guard';
-import { CurrentUser } from '@/core/decorators/current-user.decorator';
+import { JwtAuthGuard } from '@/modules/iam/authentication';
+import { CurrentUser } from '@/modules/iam/authentication';
 
 @ApiTags('Library - References')
 @ApiBearerAuth('JWT-auth')

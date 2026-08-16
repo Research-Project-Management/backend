@@ -120,11 +120,11 @@ async function bootstrap() {
       'Intelligence',
       'Flux-AI Proxy, Streaming Chat, RAG Document Search',
     )
-    .addTag(
-      'Dashboard',
-      'Global Search, Recent Items, Activity Feed, Analytics',
-    )
+    .addTag('Activity', 'Activity Feed, Collaboration Stream, Recent Items')
+    .addTag('Search', 'Global Search & Discovery')
+    .addTag('Analytics', 'Workload Metrics, Velocity, Overview')
     .build();
+
 
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('docs', app, document, {

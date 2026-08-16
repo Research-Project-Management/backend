@@ -1,0 +1,102 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { WorklogRepository } from './worklog.repository';
+import { CreateWorklogDto, QueryWorklogDto } from './dto/worklog.dto';
+
+@Injectable()
+export class WorklogService {
+  constructor(private readonly worklogRepo: WorklogRepository) {}
+
+  async getProjectWorklogs(projectId: string, query: QueryWorklogDto) {
+    const page = Math.max(1, query.page ?? 1);
+    const limit = Math.min(200, Math.max(1, query.limit ?? 50));
+    const offset = (page - 1) * limit;
+
+    const startDate = query.startDate ? new Date(query.startDate) : undefined;
+    const endDate = query.endDate ? new Date(query.endDate) : undefined;
+
+    const { items, total } = await this.worklogRepo.findProjectWorklogs(
+      projectId,
+      {
+        userId: query.userId,
+        startDate,
+        endDate,
+        limit,
+        offset,
+      },
+    );
+
+    const totalHours = items.reduce((sum, log) => sum + (log.hours || 0), 0);
+
+    return {
+      items,
+      total,
+      totalHours,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit) || 1,
+    };
+  }
+
+  async getWorkspaceWorklogs(workspaceId: string, query: QueryWorklogDto) {
+    const page = Math.max(1, query.page ?? 1);
+    const limit = Math.min(200, Math.max(1, query.limit ?? 50));
+    const offset = (page - 1) * limit;
+
+    const startDate = query.startDate ? new Date(query.startDate) : undefined;
+    const endDate = query.endDate ? new Date(query.endDate) : undefined;
+
+    const { items, total } = await this.worklogRepo.findWorkspaceWorklogs(
+      workspaceId,
+      {
+        userId: query.userId,
+        startDate,
+        endDate,
+        limit,
+        offset,
+      },
+    );
+
+    const totalHours = items.reduce((sum, log) => sum + (log.hours || 0), 0);
+
+    return {
+      items,
+      total,
+      totalHours,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit) || 1,
+    };
+  }
+
+  async createWorklog(
+    projectId: string,
+    userId: string,
+    dto: CreateWorklogDto,
+  ) {
+    const workspaceId = await this.worklogRepo.resolveWorkspaceId(projectId);
+    if (!workspaceId) {
+      throw new NotFoundException(`Project with ID ${projectId} not found`);
+    }
+
+    const log = await this.worklogRepo.createWorklog({
+      hours: dto.hours,
+      description: dto.description,
+      date: dto.date ? new Date(dto.date) : new Date(),
+      userId,
+      projectId,
+      workspaceId,
+      taskId: dto.taskId,
+      taskTitle: dto.taskTitle,
+    });
+
+    return {
+      success: true,
+      data: log,
+    };
+  }
+
+  async deleteWorklog(id: string) {
+    await this.worklogRepo.deleteWorklog(id);
+    return { success: true, message: 'Worklog deleted successfully' };
+  }
+}

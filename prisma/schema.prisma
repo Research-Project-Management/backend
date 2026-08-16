@@ -8,10 +8,17 @@ datasource db {
 
 // ── Enums ───────────────────────────────────────────────────────────────────
 
-enum MemberRole {
+enum WorkspaceMemberRole {
   owner
   admin
   member
+  viewer
+}
+
+enum ProjectMemberRole {
+  admin
+  contributor
+  commenter
   viewer
 }
 
@@ -120,6 +127,12 @@ enum MessageRole {
   assistant
 }
 
+enum EntityType {
+  task
+  paper
+  page
+}
+
 // ── 1. Identity Context ─────────────────────────────────────────────────────
 
 model User {
@@ -153,6 +166,7 @@ model User {
   pageComments        PageComment[]
   taskComments        TaskComment[]
   aiChats             AiChat[]
+  activityEvents      ActivityEvent[]
 
   @@index([googleId])
   @@index([githubId])
@@ -198,6 +212,7 @@ model Workspace {
   collections Collection[]
   pages       Page[]
   stickies    Sticky[]
+  activityEvents ActivityEvent[]
 
   @@index([createdById])
   @@map("workspaces")
@@ -209,7 +224,7 @@ model WorkspaceMember {
   workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   userId      String
   user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role        MemberRole  @default(member)
+  role        WorkspaceMemberRole  @default(member)
   joinedAt    DateTime    @default(now())
 
   @@unique([workspaceId, userId])
@@ -240,6 +255,7 @@ model Project {
   tasks        Task[]
   cycles       Cycle[]
   stickies     Sticky[]
+  activityEvents ActivityEvent[]
 
   @@index([workspaceId])
   @@index([createdById])
@@ -253,7 +269,7 @@ model ProjectMember {
   project   Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
   userId    String
   user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role      MemberRole  @default(member)
+  role      ProjectMemberRole  @default(viewer)
   joinedAt  DateTime    @default(now())
 
   @@unique([projectId, userId])
@@ -674,4 +690,31 @@ model AiMessage {
 
   @@index([chatId])
   @@map("ai_messages")
+}
+
+// ── 9. Activity Context (Event Stream & Collaboration Feed) ─────────────────
+
+model ActivityEvent {
+  id            String      @id @default(uuid())
+  entityType    EntityType
+  entityId      String
+  verb          String      // "created" | "updated" | "deleted" | "assigned" | etc.
+  field         String?     // specific field changed (e.g. "state", "priority", "assigneeId")
+  oldValue      String?     // textual / serialized representation of old value
+  newValue      String?     // textual / serialized representation of new value
+  oldIdentifier String?     // old UUID if relation changed
+  newIdentifier String?     // new UUID if relation changed
+  actorId       String
+  actor         User        @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  workspaceId   String
+  workspace     Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  projectId     String?
+  project       Project?    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt     DateTime    @default(now())
+
+  @@index([workspaceId, createdAt])
+  @@index([projectId, createdAt])
+  @@index([entityType, entityId])
+  @@index([actorId, createdAt])
+  @@map("activity_events")
 }

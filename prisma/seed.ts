@@ -1,7 +1,9 @@
 import 'dotenv/config';
 import {
   PrismaClient,
-  MemberRole,
+  WorkspaceMemberRole,
+  ProjectMemberRole,
+  AttachmentType,
   TaskPriority,
   CycleStatus,
   CyclePhase,
@@ -9,20 +11,18 @@ import {
   PageStatus,
 } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
-import pg from 'pg';
+import { Pool } from 'pg';
 import * as bcrypt from 'bcrypt';
 
-const pool = new pg.Pool({
+const pool = new Pool({
   connectionString:
     process.env.DATABASE_URL ||
     'postgresql://postgres:postgres@localhost:5432/rpm_db?schema=public',
 });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
-
 async function main() {
   console.log('🌱 Starting database seeding...');
-
   // 1. Clean existing sample data
   console.log('🧹 Clearing previous seed data...');
   await prisma.sticky.deleteMany();
@@ -43,10 +43,8 @@ async function main() {
   await prisma.workspace.deleteMany();
   await prisma.refreshToken.deleteMany();
   await prisma.user.deleteMany();
-
   // 2. Create Users
   const passwordHash = await bcrypt.hash('Password123!', 10);
-
   const adminUser = await prisma.user.create({
     data: {
       email: 'admin@rpm.local',
@@ -56,7 +54,6 @@ async function main() {
       isVerified: true,
     },
   });
-
   const researcherUser = await prisma.user.create({
     data: {
       email: 'researcher@rpm.local',
@@ -66,9 +63,7 @@ async function main() {
       isVerified: true,
     },
   });
-
   console.log(`👤 Created users: ${adminUser.email}, ${researcherUser.email}`);
-
   // 3. Create Workspaces
   const workspace = await prisma.workspace.create({
     data: {
@@ -77,15 +72,13 @@ async function main() {
       createdById: adminUser.id,
       members: {
         create: [
-          { userId: adminUser.id, role: MemberRole.owner },
-          { userId: researcherUser.id, role: MemberRole.member },
+          { userId: adminUser.id, role: WorkspaceMemberRole.owner },
+          { userId: researcherUser.id, role: WorkspaceMemberRole.member },
         ],
       },
     },
   });
-
   console.log(`🏢 Created workspace: ${workspace.name} (${workspace.id})`);
-
   // 4. Create Project
   const defaultColumns = [
     { id: 'backlog', title: 'Backlog', accentColor: 'gray' },
@@ -94,7 +87,6 @@ async function main() {
     { id: 'review', title: 'Under Review', accentColor: 'purple' },
     { id: 'done', title: 'Completed', accentColor: 'emerald' },
   ];
-
   const project = await prisma.project.create({
     data: {
       name: 'Physics-Informed Deep Learning for Navier-Stokes',
@@ -104,15 +96,13 @@ async function main() {
       taskColumns: defaultColumns,
       members: {
         create: [
-          { userId: adminUser.id, role: MemberRole.owner },
-          { userId: researcherUser.id, role: MemberRole.member },
+          { userId: adminUser.id, role: ProjectMemberRole.admin },
+          { userId: researcherUser.id, role: ProjectMemberRole.contributor },
         ],
       },
     },
   });
-
   console.log(`📁 Created project: ${project.name} (${project.id})`);
-
   // 5. Create Library Collections & Papers
   const collection = await prisma.collection.create({
     data: {
@@ -124,7 +114,6 @@ async function main() {
       createdById: adminUser.id,
     },
   });
-
   const paper1 = await prisma.paper.create({
     data: {
       title: 'Fourier Neural Operator for Parametric Partial Differential Equations',
@@ -141,7 +130,6 @@ async function main() {
       uploadedById: adminUser.id,
     },
   });
-
   const paper2 = await prisma.paper.create({
     data: {
       title: 'Physics-Informed Neural Networks: A Deep Learning Framework for Solving Forward and Inverse Problems',
@@ -158,9 +146,7 @@ async function main() {
       uploadedById: researcherUser.id,
     },
   });
-
   console.log(`📚 Created papers: "${paper1.title}" and "${paper2.title}"`);
-
   // 6. Create Manuscript Pages (LaTeX hierarchy)
   const mainPage = await prisma.page.create({
     data: {
@@ -175,7 +161,6 @@ async function main() {
       authorId: adminUser.id,
     },
   });
-
   const abstractPage = await prisma.page.create({
     data: {
       title: 'abstract.tex',
@@ -190,9 +175,7 @@ async function main() {
       parentPageId: mainPage.id,
     },
   });
-
   console.log(`📝 Created LaTeX manuscript pages: ${mainPage.title}, ${abstractPage.title}`);
-
   // 7. Create Cycles / Sprints
   const cycle = await prisma.cycle.create({
     data: {
@@ -210,7 +193,6 @@ async function main() {
       ],
     },
   });
-
   // 8. Create Tasks
   await prisma.task.create({
     data: {
@@ -229,7 +211,6 @@ async function main() {
       ],
     },
   });
-
   await prisma.task.create({
     data: {
       title: 'Export BibTeX citations for related works',
@@ -243,9 +224,7 @@ async function main() {
       cycleId: cycle.id,
     },
   });
-
   console.log(`📋 Created sprint cycle and tasks.`);
-
   // 9. Create Collaboration Stickies
   await prisma.sticky.create({
     data: {
@@ -260,7 +239,6 @@ async function main() {
       userId: adminUser.id,
     },
   });
-
   await prisma.sticky.create({
     data: {
       title: 'Cluster GPU Allocation',
@@ -274,9 +252,7 @@ async function main() {
       userId: researcherUser.id,
     },
   });
-
   console.log(`📌 Created collaboration stickies.`);
-
   console.log('✅ Database seeding finished successfully!');
   console.log('--------------------------------------------------');
   console.log('🔑 Demo Login Credentials:');
@@ -284,7 +260,6 @@ async function main() {
   console.log('   Researcher: researcher@rpm.local / Password123!');
   console.log('--------------------------------------------------');
 }
-
 main()
   .catch((e) => {
     console.error('❌ Error during seeding:', e);

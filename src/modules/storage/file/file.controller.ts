@@ -22,8 +22,8 @@ import {
   MoveFileDto,
   ShareFileDto,
 } from './dto/file.dto';
-import { JwtAuthGuard } from '@/core/guards/jwt-auth.guard';
-import { CurrentUser } from '@/core/decorators/current-user.decorator';
+import { JwtAuthGuard } from '@/modules/iam/authentication';
+import { CurrentUser } from '@/modules/iam/authentication';
 
 @ApiTags('Storage')
 @ApiBearerAuth('JWT-auth')
