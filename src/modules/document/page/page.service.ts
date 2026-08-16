@@ -1,7 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PageRepository } from './page.repository';
 import { CreatePageDto, UpdatePageDto } from './dto/page.dto';
-import { PageStatus, Prisma } from '@prisma/client';
+import { PageStatus, Prisma, EntityType } from '@prisma/client';
+import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
 
 export type FormattedPage<
   T extends {
@@ -16,7 +18,10 @@ export type FormattedPage<
 
 @Injectable()
 export class PageService {
-  constructor(private readonly pageRepo: PageRepository) {}
+  constructor(
+    private readonly pageRepo: PageRepository,
+    @Optional() private readonly eventEmitter?: EventEmitter2,
+  ) {}
 
   private formatPage<
     T extends {
@@ -97,7 +102,21 @@ export class PageService {
       parentPageId,
     });
 
-    return { page: this.formatPage(page) };
+    const formatted = this.formatPage(page);
+
+    this.eventEmitter?.emit(
+      'page.created',
+      new DomainActivityEvent({
+        entityType: EntityType.page,
+        entityId: page.id,
+        verb: 'created',
+        actorId: userId,
+        workspaceId: page.workspaceId,
+        projectId: page.projectId,
+      }),
+    );
+
+    return { page: formatted };
   }
 
   async updatePage(pageId: string, dto: UpdatePageDto) {
@@ -123,11 +142,37 @@ export class PageService {
       }),
     });
 
-    return { page: this.formatPage(page) };
+    const formatted = this.formatPage(page);
+
+    this.eventEmitter?.emit(
+      'page.updated',
+      new DomainActivityEvent({
+        entityType: EntityType.page,
+        entityId: page.id,
+        verb: 'updated',
+        actorId: page.authorId,
+        workspaceId: page.workspaceId,
+        projectId: page.projectId,
+      }),
+    );
+
+    return { page: formatted };
   }
 
   async deletePage(pageId: string) {
     await this.pageRepo.deletePage(pageId);
+
+    this.eventEmitter?.emit(
+      'page.deleted',
+      new DomainActivityEvent({
+        entityType: EntityType.page,
+        entityId: pageId,
+        verb: 'deleted',
+        actorId: '',
+        workspaceId: '',
+      }),
+    );
+
     return { message: 'Page moved to trash successfully' };
   }
 

@@ -21,10 +21,19 @@ export type PageWithAuthor = Prisma.PageGetPayload<{
 export class PageRepository {
   constructor(private readonly prisma: PrismaService) {}
 
+  async resolveWorkspace(workspaceIdOrSlug: string) {
+    return this.prisma.workspace.findFirst({
+      where: { OR: [{ id: workspaceIdOrSlug }, { url: workspaceIdOrSlug }] },
+      select: { id: true },
+    });
+  }
+
   async findWorkspacePages(workspaceId: string) {
+    const ws = await this.resolveWorkspace(workspaceId);
+    const targetId = ws?.id || workspaceId;
     return this.prisma.page.findMany({
       where: {
-        workspaceId,
+        workspaceId: targetId,
         parentPageId: null,
         deletedAt: null,
       },

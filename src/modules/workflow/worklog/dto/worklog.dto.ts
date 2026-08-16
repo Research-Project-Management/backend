@@ -15,7 +15,7 @@ export class CreateWorklogDto {
   @IsNumber()
   @Min(0.1)
   @Max(24)
-  hours: number;
+  hours!: number;
 
   @ApiPropertyOptional({ description: 'Description of the work performed' })
   @IsOptional()

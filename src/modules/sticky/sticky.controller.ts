@@ -17,10 +17,15 @@ import {
   UpdateStickyDto,
   ReorderStickiesDto,
 } from './dto/sticky.dto';
-import { JwtAuthGuard } from '@/modules/iam/authentication';
-import { CurrentUser } from '@/modules/iam/authentication';
+import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authentication';
+import {
+  WorkspaceRoleGuard,
+  WorkspaceRoles,
+  ProjectRoleGuard,
+  ProjectRoles,
+} from '@/modules/iam/authorization';
 
-@ApiTags('Collaboration')
+@ApiTags('Ideation & Sticky Notes')
 @ApiBearerAuth('JWT-auth')
 @Controller('api')
 @UseGuards(JwtAuthGuard)
@@ -28,12 +33,16 @@ export class StickyController {
   constructor(private readonly stickyService: StickyService) {}
 
   @Get('workspace/:workspaceId/stickies')
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async getWorkspaceStickies(@Param('workspaceId') workspaceId: string) {
     return this.stickyService.getWorkspaceStickies(workspaceId);
   }
 
   @Post('workspace/:workspaceId/stickies')
   @HttpCode(HttpStatus.CREATED)
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member')
   async createWorkspaceSticky(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
@@ -43,17 +52,23 @@ export class StickyController {
   }
 
   @Put('workspace/:workspaceId/stickies/reorder')
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member')
   async reorderWorkspaceStickies(@Body() dto: ReorderStickiesDto) {
     return this.stickyService.reorderStickies(dto.stickyIds);
   }
 
   @Get('project/:projectId/stickies')
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   async getProjectStickies(@Param('projectId') projectId: string) {
     return this.stickyService.getProjectStickies(projectId);
   }
 
   @Post('project/:projectId/stickies')
   @HttpCode(HttpStatus.CREATED)
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor', 'commenter')
   async createProjectSticky(
     @Param('projectId') projectId: string,
     @CurrentUser('id') userId: string,
@@ -63,6 +78,8 @@ export class StickyController {
   }
 
   @Put('project/:projectId/stickies/reorder')
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor', 'commenter')
   async reorderProjectStickies(@Body() dto: ReorderStickiesDto) {
     return this.stickyService.reorderStickies(dto.stickyIds);
   }

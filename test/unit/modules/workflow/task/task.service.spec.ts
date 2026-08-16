@@ -54,7 +54,7 @@ describe('TaskService', () => {
       columnId: 'col-todo',
     });
 
-    expect(result.task.title).toBe('Write literature review');
-    expect(result.task.id).toBe('t-1');
+    expect(result.task?.title).toBe('Write literature review');
+    expect(result.task?.id).toBe('t-1');
   });
 });

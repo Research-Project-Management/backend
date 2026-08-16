@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { TaskRepository } from './task.repository';
 import {
   CreateTaskDto,
@@ -6,8 +7,9 @@ import {
   ReorderTaskDto,
   BulkUpdateTaskDto,
 } from './dto/task.dto';
-import { TaskPriority, Prisma } from '@prisma/client';
+import { TaskPriority, Prisma, EntityType } from '@prisma/client';
 import { parseTaskColumns } from '@/core/types/json-fields.type';
+import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
 
 export interface TaskResponse {
   id: string;
@@ -41,7 +43,10 @@ export interface TaskResponse {
 
 @Injectable()
 export class TaskService {
-  constructor(private readonly taskRepo: TaskRepository) {}
+  constructor(
+    private readonly taskRepo: TaskRepository,
+    @Optional() private readonly eventEmitter?: EventEmitter2,
+  ) {}
 
   private formatTask(t: any): TaskResponse | null {
     if (!t) return null;
@@ -174,7 +179,22 @@ export class TaskService {
       parentTaskId,
     });
 
-    return { task: this.formatTask(task) };
+    const formatted = this.formatTask(task);
+
+    this.eventEmitter?.emit(
+      'task.created',
+      new DomainActivityEvent({
+        entityType: EntityType.task,
+        entityId: task.id,
+        verb: 'created',
+        actorId: userId,
+        projectId,
+        workspaceId: '',
+        newIdentifier: task.identifier || undefined,
+      }),
+    );
+
+    return { task: formatted };
   }
 
   async updateTask(taskId: string, dto: UpdateTaskDto) {
@@ -235,11 +255,39 @@ export class TaskService {
       }),
     });
 
-    return { task: this.formatTask(task) };
+    const formatted = this.formatTask(task);
+
+    this.eventEmitter?.emit(
+      'task.updated',
+      new DomainActivityEvent({
+        entityType: EntityType.task,
+        entityId: task.id,
+        verb: hasColumnChange ? 'moved' : 'updated',
+        field: hasColumnChange ? 'columnId' : undefined,
+        newValue: dto.columnId,
+        actorId: task.authorId,
+        projectId: task.projectId,
+        workspaceId: '',
+      }),
+    );
+
+    return { task: formatted };
   }
 
   async deleteTask(taskId: string) {
     await this.taskRepo.deleteTask(taskId);
+
+    this.eventEmitter?.emit(
+      'task.deleted',
+      new DomainActivityEvent({
+        entityType: EntityType.task,
+        entityId: taskId,
+        verb: 'deleted',
+        actorId: '',
+        workspaceId: '',
+      }),
+    );
+
     return { message: 'Task deleted successfully', success: true };
   }
 

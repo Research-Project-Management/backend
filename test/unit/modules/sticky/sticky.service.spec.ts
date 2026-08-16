@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { StickyService } from '@/modules/shared/sticky/sticky.service';
-import { StickyRepository } from '@/modules/shared/sticky/sticky.repository';
+import { StickyService } from '@/modules/sticky/sticky.service';
+import { StickyRepository } from '@/modules/sticky/sticky.repository';
 
 
 

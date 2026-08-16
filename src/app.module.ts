@@ -9,6 +9,7 @@ import { ProjectModule } from './modules/project/project.module';
 import { ActivityModule } from './modules/activity/activity.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { SharedModule } from './modules/shared/shared.module';
+import { StickyModule } from './modules/sticky/sticky.module';
 import { StorageModule } from './modules/storage/storage.module';
 import { LibraryModule } from './modules/library/library.module';
 import { DocumentModule } from './modules/document/document.module';
@@ -36,6 +37,7 @@ import { AppService } from './app.service';
     ActivityModule,
     AnalyticsModule,
     SharedModule,
+    StickyModule,
     WorkflowModule,
     DocumentModule,
     LibraryModule,

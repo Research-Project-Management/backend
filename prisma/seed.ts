@@ -23,6 +23,34 @@ const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 async function main() {
   console.log('🌱 Starting database seeding...');
+  await pool.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'WorkspaceMemberRole') THEN
+        CREATE TYPE "WorkspaceMemberRole" AS ENUM ('owner', 'admin', 'member', 'viewer');
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'ProjectMemberRole') THEN
+        CREATE TYPE "ProjectMemberRole" AS ENUM ('admin', 'contributor', 'commenter', 'viewer');
+      END IF;
+    END $$;
+    DO $$ BEGIN
+      IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'workspace_members' AND column_name = 'role') THEN
+        ALTER TABLE workspace_members ALTER COLUMN role DROP DEFAULT;
+        ALTER TABLE workspace_members ALTER COLUMN role TYPE text;
+        ALTER TABLE workspace_members ALTER COLUMN role TYPE "WorkspaceMemberRole" USING (role::"WorkspaceMemberRole");
+        ALTER TABLE workspace_members ALTER COLUMN role SET DEFAULT 'member'::"WorkspaceMemberRole";
+      END IF;
+    END $$;
+    DO $$ BEGIN
+      IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'project_members' AND column_name = 'role') THEN
+        ALTER TABLE project_members ALTER COLUMN role DROP DEFAULT;
+        ALTER TABLE project_members ALTER COLUMN role TYPE text;
+        UPDATE project_members SET role = 'admin' WHERE role = 'owner';
+        UPDATE project_members SET role = 'contributor' WHERE role = 'member';
+        ALTER TABLE project_members ALTER COLUMN role TYPE "ProjectMemberRole" USING (role::"ProjectMemberRole");
+        ALTER TABLE project_members ALTER COLUMN role SET DEFAULT 'viewer'::"ProjectMemberRole";
+      END IF;
+    END $$;
+  `);
   // 1. Clean existing sample data
   console.log('🧹 Clearing previous seed data...');
   await prisma.sticky.deleteMany();

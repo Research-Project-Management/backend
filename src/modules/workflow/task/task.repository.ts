@@ -62,10 +62,19 @@ export class TaskRepository {
     return `${prefix}-${project.taskSequence}`;
   }
 
+  async resolveWorkspace(workspaceIdOrSlug: string) {
+    return this.prisma.workspace.findFirst({
+      where: { OR: [{ id: workspaceIdOrSlug }, { url: workspaceIdOrSlug }] },
+      select: { id: true },
+    });
+  }
+
   async findWorkspaceTasks(workspaceId: string) {
+    const ws = await this.resolveWorkspace(workspaceId);
+    const targetId = ws?.id || workspaceId;
     return this.prisma.task.findMany({
       where: {
-        project: { workspaceId },
+        project: { workspaceId: targetId },
       },
       include: {
         assignee: { select: USER_SELECT },

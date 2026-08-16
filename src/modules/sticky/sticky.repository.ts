@@ -19,10 +19,19 @@ export type StickyWithUser = Prisma.StickyGetPayload<{
 export class StickyRepository {
   constructor(private readonly prisma: PrismaService) {}
 
+  async resolveWorkspace(workspaceIdOrSlug: string) {
+    return this.prisma.workspace.findFirst({
+      where: { OR: [{ id: workspaceIdOrSlug }, { url: workspaceIdOrSlug }] },
+      select: { id: true },
+    });
+  }
+
   async findWorkspaceStickies(workspaceId: string): Promise<StickyWithUser[]> {
+    const ws = await this.resolveWorkspace(workspaceId);
+    const targetId = ws?.id || workspaceId;
     return this.prisma.sticky.findMany({
       where: {
-        workspaceId,
+        workspaceId: targetId,
         scope: StickyScope.workspace,
       },
       include: {
@@ -46,8 +55,10 @@ export class StickyRepository {
   }
 
   async countWorkspaceStickies(workspaceId: string): Promise<number> {
+    const ws = await this.resolveWorkspace(workspaceId);
+    const targetId = ws?.id || workspaceId;
     return this.prisma.sticky.count({
-      where: { workspaceId, scope: StickyScope.workspace },
+      where: { workspaceId: targetId, scope: StickyScope.workspace },
     });
   }
 
