@@ -110,7 +110,10 @@ export class CommentController {
     return this.commentService.deletePageComment(commentId);
   }
 
-  @Post(['pages/:pageId/comments/:commentId/replies', 'pages/comments/:commentId/replies'])
+  @Post([
+    'pages/:pageId/comments/:commentId/replies',
+    'pages/comments/:commentId/replies',
+  ])
   @ApiOperation({ summary: 'Reply to a page comment' })
   async addPageReply(
     @Param('commentId') commentId: string,

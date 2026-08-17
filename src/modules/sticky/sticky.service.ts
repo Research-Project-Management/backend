@@ -29,12 +29,18 @@ export class StickyService {
   }
 
   async getWorkspaceStickies(workspaceId: string, userId: string) {
-    const stickies = await this.stickyRepo.findWorkspaceStickies(workspaceId, userId);
+    const stickies = await this.stickyRepo.findWorkspaceStickies(
+      workspaceId,
+      userId,
+    );
     return { stickies: stickies.map((s) => this.formatSticky(s)) };
   }
 
   async getProjectStickies(projectId: string, userId: string) {
-    const stickies = await this.stickyRepo.findProjectStickies(projectId, userId);
+    const stickies = await this.stickyRepo.findProjectStickies(
+      projectId,
+      userId,
+    );
     return { stickies: stickies.map((s) => this.formatSticky(s)) };
   }
 
@@ -43,7 +49,10 @@ export class StickyService {
     userId: string,
     dto: CreateStickyDto,
   ) {
-    const count = await this.stickyRepo.countWorkspaceStickies(workspaceId, userId);
+    const count = await this.stickyRepo.countWorkspaceStickies(
+      workspaceId,
+      userId,
+    );
 
     const sticky = await this.stickyRepo.createSticky({
       title: dto.title || '',

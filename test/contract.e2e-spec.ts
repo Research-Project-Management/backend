@@ -163,17 +163,17 @@ describe('System Contract & API Verification Suite (e2e)', () => {
     });
   });
 
-  // ── Dashboard Contracts ───────────────────────────────────────────────────
-  describe('10. Dashboard Contracts', () => {
-    it('GET /api/dashboard/workspaces/:workspaceId/overview rejects unauthenticated request with 401', () => {
+  // ── Analytics Contracts ───────────────────────────────────────────────────
+  describe('10. Analytics & Insights Contracts', () => {
+    it('GET /api/analytics/workspaces/:workspaceId/overview rejects unauthenticated request with 401', () => {
       return request(app.getHttpServer())
-        .get('/api/dashboard/workspaces/ws-test/overview')
+        .get('/api/analytics/workspaces/ws-test/overview')
         .expect(401);
     });
 
-    it('GET /api/dashboard/projects/:projectId/overview rejects unauthenticated request with 401', () => {
+    it('GET /api/analytics/projects/:projectId rejects unauthenticated request with 401', () => {
       return request(app.getHttpServer())
-        .get('/api/dashboard/projects/proj-test/overview')
+        .get('/api/analytics/projects/proj-test')
         .expect(401);
     });
   });

@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  Optional,
+} from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { TaskRepository } from './task.repository';
 import {
@@ -81,7 +86,9 @@ export class TaskService {
       : [];
 
     const subtaskCount = subtasks.length;
-    const subtaskCompletedCount = subtasks.filter((s: any) => s.completed).length;
+    const subtaskCompletedCount = subtasks.filter(
+      (s: any) => s.completed,
+    ).length;
 
     return {
       ...t,
@@ -104,8 +111,12 @@ export class TaskService {
       completed: isCompleted,
       startDate: t.startDate ? new Date(t.startDate).toISOString() : null,
       dueDate: t.dueDate ? new Date(t.dueDate).toISOString() : null,
-      createdAt: t.createdAt ? new Date(t.createdAt).toISOString() : new Date().toISOString(),
-      updatedAt: t.updatedAt ? new Date(t.updatedAt).toISOString() : new Date().toISOString(),
+      createdAt: t.createdAt
+        ? new Date(t.createdAt).toISOString()
+        : new Date().toISOString(),
+      updatedAt: t.updatedAt
+        ? new Date(t.updatedAt).toISOString()
+        : new Date().toISOString(),
     };
   }
 
@@ -170,7 +181,7 @@ export class TaskService {
       startDate: dto.startDate ? new Date(dto.startDate) : null,
       dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
       labels: dto.labels || [],
-      checklists: (dto.checklists as Prisma.InputJsonValue) || [],
+      checklists: dto.checklists || [],
       rank: count,
       projectId,
       authorId: userId,
@@ -226,7 +237,9 @@ export class TaskService {
       }
       const parent = await this.taskRepo.findTaskById(parentTaskId);
       if (parent && parent.parentTaskId === taskId) {
-        throw new BadRequestException('Circular parent-child relationship detected');
+        throw new BadRequestException(
+          'Circular parent-child relationship detected',
+        );
       }
     }
 
@@ -247,7 +260,9 @@ export class TaskService {
         dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
       }),
       ...(dto.labels !== undefined && { labels: dto.labels }),
-      ...(dto.checklists !== undefined && { checklists: dto.checklists as Prisma.InputJsonValue }),
+      ...(dto.checklists !== undefined && {
+        checklists: dto.checklists,
+      }),
       ...(dto.rank !== undefined && { rank: dto.rank }),
       ...(assigneeId !== undefined && { assigneeId: assigneeId || null }),
       ...(cycleId !== undefined && { cycleId: cycleId || null }),

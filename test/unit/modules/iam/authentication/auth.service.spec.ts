@@ -6,8 +6,6 @@ import { AuthService } from '@/modules/iam/authentication/auth.service';
 import { AuthRepository } from '@/modules/iam/authentication/auth.repository';
 import * as bcrypt from 'bcrypt';
 
-
-
 jest.mock('bcrypt');
 
 describe('AuthService', () => {

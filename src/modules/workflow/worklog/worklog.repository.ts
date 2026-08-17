@@ -54,7 +54,9 @@ export class WorklogRepository {
           take: options.limit,
           skip: options.offset,
           include: {
-            user: { select: { id: true, name: true, avatar: true, email: true } },
+            user: {
+              select: { id: true, name: true, avatar: true, email: true },
+            },
           },
         }),
         (this.prisma as any).worklog.count({ where }),
@@ -69,7 +71,9 @@ export class WorklogRepository {
       include: {
         members: {
           include: {
-            user: { select: { id: true, name: true, avatar: true, email: true } },
+            user: {
+              select: { id: true, name: true, avatar: true, email: true },
+            },
           },
         },
       },
@@ -98,7 +102,9 @@ export class WorklogRepository {
           take: options.limit,
           skip: options.offset,
           include: {
-            user: { select: { id: true, name: true, avatar: true, email: true } },
+            user: {
+              select: { id: true, name: true, avatar: true, email: true },
+            },
             project: { select: { id: true, name: true } },
           },
         }),
@@ -161,7 +167,7 @@ export class WorklogRepository {
 
   async deleteWorklog(id: string) {
     if ((this.prisma as any).worklog) {
-      return (this.prisma as any).worklog.delete({
+      return await (this.prisma as any).worklog.delete({
         where: { id },
       });
     }

@@ -21,7 +21,10 @@ import {
   ImportStoragePaperDto,
 } from './dto/paper.dto';
 import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authentication';
-import { WorkspaceRoleGuard, WorkspaceRoles } from '@/modules/iam/authorization';
+import {
+  WorkspaceRoleGuard,
+  WorkspaceRoles,
+} from '@/modules/iam/authorization';
 
 @ApiTags('Library Papers')
 @ApiBearerAuth('JWT-auth')

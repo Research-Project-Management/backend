@@ -44,7 +44,14 @@ export class AuthController {
     const clientId = process.env.GOOGLE_CLIENT_ID;
     const apiUrl = process.env.API_URL || 'http://localhost:3000';
     const redirectUri = apiUrl + '/auth/google/callback';
-    const url = 'https://accounts.google.com/o/oauth2/v2/auth?client_id=' + clientId + '&redirect_uri=' + encodeURIComponent(redirectUri) + '&response_type=code&scope=' + encodeURIComponent('openid email profile') + '&access_type=offline&prompt=consent';
+    const url =
+      'https://accounts.google.com/o/oauth2/v2/auth?client_id=' +
+      clientId +
+      '&redirect_uri=' +
+      encodeURIComponent(redirectUri) +
+      '&response_type=code&scope=' +
+      encodeURIComponent('openid email profile') +
+      '&access_type=offline&prompt=consent';
     return { url, statusCode: 302 };
   }
 
@@ -56,7 +63,10 @@ export class AuthController {
   ) {
     const clientUrl = process.env.CLIENT_URL || 'http://localhost:2915';
     if (error || !code) {
-      return { url: clientUrl + '/login?error=' + (error || 'no_code'), statusCode: 302 };
+      return {
+        url: clientUrl + '/login?error=' + (error || 'no_code'),
+        statusCode: 302,
+      };
     }
 
     try {
@@ -79,7 +89,10 @@ export class AuthController {
 
       const tokenData = (await tokenRes.json()) as { access_token?: string };
       if (!tokenData.access_token) {
-        return { url: clientUrl + '/login?error=google_token_failed', statusCode: 302 };
+        return {
+          url: clientUrl + '/login?error=google_token_failed',
+          statusCode: 302,
+        };
       }
 
       const userRes = await fetch(
@@ -104,7 +117,12 @@ export class AuthController {
       });
 
       return {
-        url: clientUrl + '/auth/callback?accessToken=' + result.accessToken + '&refreshToken=' + result.refreshToken,
+        url:
+          clientUrl +
+          '/auth/callback?accessToken=' +
+          result.accessToken +
+          '&refreshToken=' +
+          result.refreshToken,
         statusCode: 302,
       };
     } catch (err) {
@@ -118,7 +136,13 @@ export class AuthController {
     const clientId = process.env.GITHUB_CLIENT_ID;
     const apiUrl = process.env.API_URL || 'http://localhost:3000';
     const redirectUri = apiUrl + '/auth/github/callback';
-    const url = 'https://github.com/login/oauth/authorize?client_id=' + clientId + '&redirect_uri=' + encodeURIComponent(redirectUri) + '&scope=' + encodeURIComponent('read:user user:email');
+    const url =
+      'https://github.com/login/oauth/authorize?client_id=' +
+      clientId +
+      '&redirect_uri=' +
+      encodeURIComponent(redirectUri) +
+      '&scope=' +
+      encodeURIComponent('read:user user:email');
     return { url, statusCode: 302 };
   }
 
@@ -130,7 +154,10 @@ export class AuthController {
   ) {
     const clientUrl = process.env.CLIENT_URL || 'http://localhost:2915';
     if (error || !code) {
-      return { url: clientUrl + '/login?error=' + (error || 'no_code'), statusCode: 302 };
+      return {
+        url: clientUrl + '/login?error=' + (error || 'no_code'),
+        statusCode: 302,
+      };
     }
 
     try {
@@ -155,7 +182,10 @@ export class AuthController {
 
       const tokenData = (await tokenRes.json()) as { access_token?: string };
       if (!tokenData.access_token) {
-        return { url: clientUrl + '/login?error=github_token_failed', statusCode: 302 };
+        return {
+          url: clientUrl + '/login?error=github_token_failed',
+          statusCode: 302,
+        };
       }
 
       const userRes = await fetch('https://api.github.com/user', {
@@ -199,7 +229,12 @@ export class AuthController {
       });
 
       return {
-        url: clientUrl + '/auth/callback?accessToken=' + result.accessToken + '&refreshToken=' + result.refreshToken,
+        url:
+          clientUrl +
+          '/auth/callback?accessToken=' +
+          result.accessToken +
+          '&refreshToken=' +
+          result.refreshToken,
         statusCode: 302,
       };
     } catch (err) {
@@ -228,4 +263,3 @@ export class AuthController {
     };
   }
 }
-

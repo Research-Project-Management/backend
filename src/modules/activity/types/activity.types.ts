@@ -9,21 +9,11 @@ export type TaskVerb =
   | 'deleted';
 
 export type PaperVerb =
-  | 'uploaded'
-  | 'metadata_extracted'
-  | 'updated'
-  | 'deleted';
+  'uploaded' | 'metadata_extracted' | 'updated' | 'deleted';
 
-export type PageVerb =
-  | 'created'
-  | 'saved'
-  | 'version_created'
-  | 'deleted';
+export type PageVerb = 'created' | 'saved' | 'version_created' | 'deleted';
 
-export type GenericVerb =
-  | 'created'
-  | 'updated'
-  | 'deleted';
+export type GenericVerb = 'created' | 'updated' | 'deleted';
 
 export interface BaseActivityEvent {
   entityId: string;

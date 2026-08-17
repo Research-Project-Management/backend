@@ -21,7 +21,8 @@ export class RagAgentService {
   }
 
   private extractDocIds(dto: RagAgentQueryDto): string[] | null {
-    const list = dto.document_ids || dto.documentIds || dto.selected_files || [];
+    const list =
+      dto.document_ids || dto.documentIds || dto.selected_files || [];
     return list.length > 0 ? list : null;
   }
 

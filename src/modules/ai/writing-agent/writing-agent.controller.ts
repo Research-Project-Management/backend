@@ -21,7 +21,9 @@ export class WritingAgentController {
   constructor(private readonly writingAgentService: WritingAgentService) {}
 
   @Post(['editor-chat', 'chat/writing', 'writing/chat'])
-  @ApiOperation({ summary: 'Stream LaTeX Writing Agent chat responses via SSE' })
+  @ApiOperation({
+    summary: 'Stream LaTeX Writing Agent chat responses via SSE',
+  })
   async chatStream(
     @CurrentUser('id') userId: string,
     @Body() dto: WritingAgentQueryDto,

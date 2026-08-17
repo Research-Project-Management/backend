@@ -10,7 +10,12 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+} from '@nestjs/swagger';
 import { CycleService } from './cycle.service';
 import {
   CreateCycleDto,
@@ -19,10 +24,7 @@ import {
   CompleteCycleDto,
 } from './dto/cycle.dto';
 import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authentication';
-import {
-  ProjectRoleGuard,
-  ProjectRoles,
-} from '@/modules/iam/authorization';
+import { ProjectRoleGuard, ProjectRoles } from '@/modules/iam/authorization';
 
 @ApiTags('Planning Cycles')
 @ApiBearerAuth('JWT-auth')
@@ -35,7 +37,10 @@ export class CycleController {
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get all cycles for a project' })
-  @ApiResponse({ status: 200, description: 'List of project cycles with task summaries' })
+  @ApiResponse({
+    status: 200,
+    description: 'List of project cycles with task summaries',
+  })
   async getCycles(@Param('projectId') projectId: string) {
     return this.cycleService.getCycles(projectId);
   }
@@ -89,7 +94,10 @@ export class CycleController {
     return this.cycleService.addTask(cycleId, dto.taskId);
   }
 
-  @Delete(['project/:projectId/cycles/:cycleId/tasks/:taskId', 'cycles/:cycleId/tasks/:taskId'])
+  @Delete([
+    'project/:projectId/cycles/:cycleId/tasks/:taskId',
+    'cycles/:cycleId/tasks/:taskId',
+  ])
   @ApiOperation({ summary: 'Remove a task from a cycle' })
   @ApiResponse({ status: 200, description: 'Updated cycle object' })
   async removeTask(
@@ -99,7 +107,10 @@ export class CycleController {
     return this.cycleService.removeTask(cycleId, taskId);
   }
 
-  @Post(['project/:projectId/cycles/:cycleId/complete', 'cycles/:cycleId/complete'])
+  @Post([
+    'project/:projectId/cycles/:cycleId/complete',
+    'cycles/:cycleId/complete',
+  ])
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Complete a cycle and handle incomplete tasks' })
   @ApiResponse({ status: 200, description: 'Completed cycle summary' })

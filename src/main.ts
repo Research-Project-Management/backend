@@ -144,7 +144,6 @@ async function bootstrap() {
     .addTag('Analytics', 'Workload Metrics, Velocity, Overview')
     .build();
 
-
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('docs', app, document, {
     swaggerOptions: {

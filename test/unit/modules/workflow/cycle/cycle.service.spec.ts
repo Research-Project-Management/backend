@@ -3,7 +3,6 @@ import { CycleService } from '@/modules/workflow/cycle/cycle.service';
 import { CycleRepository } from '@/modules/workflow/cycle/cycle.repository';
 import { TaskService } from '@/modules/workflow/task/task.service';
 
-
 describe('CycleService', () => {
   let service: CycleService;
   let repo: CycleRepository;

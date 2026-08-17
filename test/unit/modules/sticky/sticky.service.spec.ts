@@ -111,9 +111,9 @@ describe('StickyService', () => {
       userId: 'user-2',
     });
 
-    await expect(
-      service.deleteSticky('s-1', 'user-1'),
-    ).rejects.toThrow(ForbiddenException);
+    await expect(service.deleteSticky('s-1', 'user-1')).rejects.toThrow(
+      ForbiddenException,
+    );
   });
 
   it('should delete sticky successfully when user is owner', async () => {

@@ -11,7 +11,13 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { TaskService } from './task.service';
 import {
   CreateTaskDto,
@@ -51,9 +57,18 @@ export class TaskController {
   @Get('project/:projectId/tasks')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
-  @ApiOperation({ summary: 'Get all tasks for a specific project with optional cycle filter' })
-  @ApiQuery({ name: 'cycle', required: false, description: 'Optional cycle ID to filter tasks' })
-  @ApiResponse({ status: 200, description: 'Project tasks with column definitions and project info' })
+  @ApiOperation({
+    summary: 'Get all tasks for a specific project with optional cycle filter',
+  })
+  @ApiQuery({
+    name: 'cycle',
+    required: false,
+    description: 'Optional cycle ID to filter tasks',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Project tasks with column definitions and project info',
+  })
   async getTasks(
     @Param('projectId') projectId: string,
     @Query('cycle') cycleId?: string,
@@ -91,7 +106,10 @@ export class TaskController {
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor')
   @ApiOperation({ summary: 'Bulk update multiple tasks in a project' })
-  @ApiResponse({ status: 200, description: 'Bulk update status with affected count' })
+  @ApiResponse({
+    status: 200,
+    description: 'Bulk update status with affected count',
+  })
   async bulkUpdateTasks(
     @Param('projectId') projectId: string,
     @Body() dto: BulkUpdateTaskDto,
@@ -141,7 +159,10 @@ export class TaskController {
     return this.taskService.assignTask(taskId, dto.assignee);
   }
 
-  @Post(['tasks/:taskId/duplicate', 'project/:projectId/tasks/:taskId/duplicate'])
+  @Post([
+    'tasks/:taskId/duplicate',
+    'project/:projectId/tasks/:taskId/duplicate',
+  ])
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor')

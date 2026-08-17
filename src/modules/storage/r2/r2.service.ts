@@ -49,7 +49,9 @@ export class R2Service {
         ? `https://${accountId}.r2.cloudflarestorage.com`
         : 'http://localhost:9000';
 
-    this.logger.log(`R2 initialized with endpoint: ${endpoint}, bucket: ${this.bucket}`);
+    this.logger.log(
+      `R2 initialized with endpoint: ${endpoint}, bucket: ${this.bucket}`,
+    );
 
     this.s3Client = new S3Client({
       region: 'auto',
@@ -113,7 +115,9 @@ export class R2Service {
         fs.writeFileSync(filePath, buffer);
         return { path: key, url: `/api/files/r2/${key}` };
       } catch (localErr) {
-        this.logger.error(`Local fallback also failed: ${getErrorMessage(localErr)}`);
+        this.logger.error(
+          `Local fallback also failed: ${getErrorMessage(localErr)}`,
+        );
         throw s3Err;
       }
     }
@@ -135,7 +139,9 @@ export class R2Service {
     if (fs.existsSync(filePath)) {
       try {
         fs.unlinkSync(filePath);
-      } catch {}
+      } catch {
+        // Silently ignore if file removal fails
+      }
     }
   }
 

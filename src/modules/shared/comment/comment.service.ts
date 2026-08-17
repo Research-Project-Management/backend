@@ -65,11 +65,7 @@ export class CommentService {
     return { success: true };
   }
 
-  async addTaskReply(
-    commentId: string,
-    userId: string,
-    dto: AddReplyDto,
-  ) {
+  async addTaskReply(commentId: string, userId: string, dto: AddReplyDto) {
     const existing = await this.commentRepo.findTaskCommentById(commentId);
     if (!existing) {
       throw new NotFoundException('Comment not found');
@@ -110,7 +106,7 @@ export class CommentService {
     reactions[dto.emoji] = users;
 
     const comment = await this.commentRepo.updateTaskComment(commentId, {
-      reactions: reactions as unknown as Prisma.InputJsonValue,
+      reactions: reactions,
     });
 
     return { comment };
@@ -154,11 +150,7 @@ export class CommentService {
     return { success: true };
   }
 
-  async addPageReply(
-    commentId: string,
-    userId: string,
-    dto: AddReplyDto,
-  ) {
+  async addPageReply(commentId: string, userId: string, dto: AddReplyDto) {
     const existing = await this.commentRepo.findPageCommentById(commentId);
     if (!existing) {
       throw new NotFoundException('Comment not found');

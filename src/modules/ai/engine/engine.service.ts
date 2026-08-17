@@ -28,7 +28,10 @@ export class EngineService {
     return { status: 'ok', service: 'flux-ai-proxy' };
   }
 
-  async streamChat(payload: StreamChatPayload, reply: FastifyReply): Promise<void> {
+  async streamChat(
+    payload: StreamChatPayload,
+    reply: FastifyReply,
+  ): Promise<void> {
     reply.hijack();
     const rawRes = reply.raw;
 
@@ -139,14 +142,20 @@ export class EngineService {
     ids: string[],
   ): Promise<Array<Record<string, unknown>>> {
     const result = await tryCatch(
-      fetch(`${this.fluxUrl}/documents/bulk?ids=${encodeURIComponent(ids.join(','))}`),
+      fetch(
+        `${this.fluxUrl}/documents/bulk?ids=${encodeURIComponent(ids.join(','))}`,
+      ),
     );
 
     if (result.ok && result.value.ok) {
       const json = await tryCatch(result.value.json());
       if (json.ok) {
-        const val = json.value as { documents?: Array<Record<string, unknown>> };
-        return val.documents || (json.value as Array<Record<string, unknown>>) || [];
+        const val = json.value as {
+          documents?: Array<Record<string, unknown>>;
+        };
+        return (
+          val.documents || (json.value as Array<Record<string, unknown>>) || []
+        );
       }
     }
 

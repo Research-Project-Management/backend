@@ -23,10 +23,9 @@ export class WorkspaceRoleGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const requiredRoles = this.reflector.getAllAndOverride<WorkspaceRoleInput[]>(
-      WORKSPACE_ROLES_KEY,
-      [context.getHandler(), context.getClass()],
-    );
+    const requiredRoles = this.reflector.getAllAndOverride<
+      WorkspaceRoleInput[]
+    >(WORKSPACE_ROLES_KEY, [context.getHandler(), context.getClass()]);
 
     const request = context.switchToHttp().getRequest();
     const user = request.user;

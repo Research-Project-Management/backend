@@ -99,7 +99,11 @@ export class AnalyticsService {
     const totalTasks = tasks.length;
     const completedTasks = tasks.filter((t) => t.completed).length;
     const inProgressTasks = tasks.filter(
-      (t) => t.columnId === 'doing' || t.columnId === 'in_progress' || t.columnId === 'review' || t.columnId === 'in_review',
+      (t) =>
+        t.columnId === 'doing' ||
+        t.columnId === 'in_progress' ||
+        t.columnId === 'review' ||
+        t.columnId === 'in_review',
     ).length;
     const pendingTasks = totalTasks - completedTasks - inProgressTasks;
     const completionRate =
@@ -190,4 +194,3 @@ export class AnalyticsService {
     };
   }
 }
-

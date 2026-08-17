@@ -15,7 +15,6 @@ import {
 import { SearchResultItem } from './dto/search-result.dto';
 import * as crypto from 'crypto';
 
-
 @Injectable()
 export class WorkspaceService {
   constructor(
@@ -210,14 +209,16 @@ export class WorkspaceService {
 
     const cleanQuery = query.trim();
 
-    const [projects, tasks, papers, pages, files, stickies] = await Promise.all([
-      this.workspaceRepo.searchProjects(workspaceId, cleanQuery),
-      this.workspaceRepo.searchTasks(workspaceId, cleanQuery),
-      this.workspaceRepo.searchPapers(workspaceId, cleanQuery),
-      this.workspaceRepo.searchPages(workspaceId, cleanQuery),
-      this.workspaceRepo.searchFiles(workspaceId, cleanQuery),
-      this.workspaceRepo.searchStickies(workspaceId, cleanQuery),
-    ]);
+    const [projects, tasks, papers, pages, files, stickies] = await Promise.all(
+      [
+        this.workspaceRepo.searchProjects(workspaceId, cleanQuery),
+        this.workspaceRepo.searchTasks(workspaceId, cleanQuery),
+        this.workspaceRepo.searchPapers(workspaceId, cleanQuery),
+        this.workspaceRepo.searchPages(workspaceId, cleanQuery),
+        this.workspaceRepo.searchFiles(workspaceId, cleanQuery),
+        this.workspaceRepo.searchStickies(workspaceId, cleanQuery),
+      ],
+    );
 
     const results: SearchResultItem[] = [
       ...projects.map((p) => ({
@@ -251,7 +252,7 @@ export class WorkspaceService {
         updatedAt: p.updatedAt,
       })),
       ...files.map((f) => ({
-        type: (f.isFolder ? 'folder' : 'file') as 'folder' | 'file',
+        type: f.isFolder ? ('folder' as const) : ('file' as const),
         id: f.id,
         name: f.filename,
         mimeType: f.mimeType,
@@ -268,8 +269,8 @@ export class WorkspaceService {
     ];
 
     return results.sort(
-      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+      (a, b) =>
+        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
     );
   }
 }
-

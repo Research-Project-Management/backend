@@ -46,5 +46,4 @@ describe('LatexService', () => {
       expect(result.error).toBe('LaTeX compilation fallback');
     }
   });
-
 });

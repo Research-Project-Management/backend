@@ -243,4 +243,3 @@ export class ProjectService {
     return overview;
   }
 }
-

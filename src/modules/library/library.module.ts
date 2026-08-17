@@ -5,17 +5,7 @@ import { ReferenceModule } from './reference/reference.module';
 import { IngestionModule } from './ingestion/ingestion.module';
 
 @Module({
-  imports: [
-    PaperModule,
-    CollectionModule,
-    ReferenceModule,
-    IngestionModule,
-  ],
-  exports: [
-    PaperModule,
-    CollectionModule,
-    ReferenceModule,
-    IngestionModule,
-  ],
+  imports: [PaperModule, CollectionModule, ReferenceModule, IngestionModule],
+  exports: [PaperModule, CollectionModule, ReferenceModule, IngestionModule],
 })
 export class LibraryModule {}

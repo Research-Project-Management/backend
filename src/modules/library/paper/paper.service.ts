@@ -82,7 +82,9 @@ export class PaperService {
 
     let targetUserId = userId;
     if (!targetUserId) {
-      const u = await this.paperRepo.prisma.user.findFirst({ select: { id: true } });
+      const u = await this.paperRepo.prisma.user.findFirst({
+        select: { id: true },
+      });
       targetUserId = u?.id || '';
     }
 
@@ -296,4 +298,3 @@ export class PaperService {
     return { message: 'RAG indexing queued' };
   }
 }
-

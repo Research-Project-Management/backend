@@ -22,7 +22,9 @@ export class WorklogController {
   constructor(private readonly worklogService: WorklogService) {}
 
   @Get('project/:projectId/worklogs')
-  @ApiOperation({ summary: 'Get project worklogs with filtering and pagination' })
+  @ApiOperation({
+    summary: 'Get project worklogs with filtering and pagination',
+  })
   async getProjectWorklogs(
     @Param('projectId') projectId: string,
     @Query() query: QueryWorklogDto,

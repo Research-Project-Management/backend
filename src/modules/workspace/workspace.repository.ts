@@ -251,7 +251,10 @@ export class WorkspaceRepository {
       where: {
         OR: [
           { workspaceId, title: { contains: query, mode: 'insensitive' } },
-          { project: { workspaceId }, title: { contains: query, mode: 'insensitive' } },
+          {
+            project: { workspaceId },
+            title: { contains: query, mode: 'insensitive' },
+          },
         ],
         deletedAt: null,
       },
@@ -305,4 +308,3 @@ export class WorkspaceRepository {
     });
   }
 }
-

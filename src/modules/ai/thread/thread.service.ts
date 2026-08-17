@@ -84,12 +84,11 @@ export class ThreadService {
     if (!pageId || !workspaceId) {
       throw new BadRequestException('pageId and workspaceId are required');
     }
-    const raw = await this.threadRepo.findPageChat(
-      pageId,
-      workspaceId,
-      userId,
-    );
-    return { chat: raw ? formatChat(raw) : null, messages: raw?.messages || [] };
+    const raw = await this.threadRepo.findPageChat(pageId, workspaceId, userId);
+    return {
+      chat: raw ? formatChat(raw) : null,
+      messages: raw?.messages || [],
+    };
   }
 
   async clearPageChat(pageId: string, workspaceId: string, userId: string) {
@@ -108,7 +107,10 @@ export class ThreadService {
     return formatChat(raw);
   }
 
-  async createChat(userId: string, dto: CreateThreadDto): Promise<FormattedChatSession> {
+  async createChat(
+    userId: string,
+    dto: CreateThreadDto,
+  ): Promise<FormattedChatSession> {
     const workspaceSlug = dto.workspaceSlug || dto.workspaceId;
     if (!workspaceSlug) {
       throw new BadRequestException('workspaceSlug or workspaceId is required');

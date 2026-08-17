@@ -6,7 +6,11 @@ import { MessageRole, Prisma } from '@prisma/client';
 export class ThreadRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findUserChats(workspaceSlug: string, userId: string, projectId?: string | null) {
+  async findUserChats(
+    workspaceSlug: string,
+    userId: string,
+    projectId?: string | null,
+  ) {
     const where: Prisma.AiChatWhereInput = {
       workspaceSlug,
       userId,

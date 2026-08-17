@@ -23,7 +23,9 @@ export class CycleService {
     private readonly taskService: TaskService,
   ) {}
 
-  private calculateStats(tasks: Array<{ columnId: string; completed?: boolean }>) {
+  private calculateStats(
+    tasks: Array<{ columnId: string; completed?: boolean }>,
+  ) {
     const total = tasks.length;
     const completed = tasks.filter(
       (t) => t.columnId === 'done' || t.completed === true,
@@ -130,10 +132,14 @@ export class CycleService {
 
     if (dto.action === IncompleteTaskAction.transfer) {
       if (!dto.targetCycleId) {
-        throw new BadRequestException('Target cycle ID is required for task transfer');
+        throw new BadRequestException(
+          'Target cycle ID is required for task transfer',
+        );
       }
       if (dto.targetCycleId === cycleId) {
-        throw new BadRequestException('Cannot transfer tasks to the same cycle');
+        throw new BadRequestException(
+          'Cannot transfer tasks to the same cycle',
+        );
       }
 
       const target = await this.cycleRepo.findCycleById(dto.targetCycleId);
@@ -141,7 +147,9 @@ export class CycleService {
         throw new BadRequestException('Target cycle not found in this project');
       }
       if (target.status === CycleStatus.completed) {
-        throw new BadRequestException('Cannot transfer tasks to an already completed cycle');
+        throw new BadRequestException(
+          'Cannot transfer tasks to an already completed cycle',
+        );
       }
 
       const result = await this.cycleRepo.transferIncompleteTasks(
@@ -150,7 +158,10 @@ export class CycleService {
       );
       transferredCount = result.count;
     } else if (dto.action === IncompleteTaskAction.backlog) {
-      const result = await this.cycleRepo.transferIncompleteTasks(cycleId, null);
+      const result = await this.cycleRepo.transferIncompleteTasks(
+        cycleId,
+        null,
+      );
       transferredCount = result.count;
     }
 

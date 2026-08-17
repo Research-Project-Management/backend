@@ -35,14 +35,24 @@ import {
 export class ProjectController {
   constructor(private readonly projectService: ProjectService) {}
 
-  @Get(['workspace/:workspaceId/projects', 'workspace/:workspaceId/project', ':workspaceId/projects', ':workspaceId/project'])
+  @Get([
+    'workspace/:workspaceId/projects',
+    'workspace/:workspaceId/project',
+    ':workspaceId/projects',
+    ':workspaceId/project',
+  ])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async getProjects(@Param('workspaceId') workspaceId: string) {
     return this.projectService.getProjects(workspaceId);
   }
 
-  @Post(['workspace/:workspaceId/projects', 'workspace/:workspaceId/project', ':workspaceId/projects', ':workspaceId/project'])
+  @Post([
+    'workspace/:workspaceId/projects',
+    'workspace/:workspaceId/project',
+    ':workspaceId/projects',
+    ':workspaceId/project',
+  ])
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member')
@@ -64,7 +74,11 @@ export class ProjectController {
     return this.projectService.getProject(projectId, userId);
   }
 
-  @Get(['project/:projectId/overview', 'projects/:projectId/overview', 'analytics/projects/:projectId/overview'])
+  @Get([
+    'project/:projectId/overview',
+    'projects/:projectId/overview',
+    'analytics/projects/:projectId/overview',
+  ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   async getProjectOverview(

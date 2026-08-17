@@ -59,8 +59,16 @@ export class ActivityService {
   /**
    * Entity Timeline for TaskActivities modal (Plane.so style).
    */
-  async getEntityActivity(entityType: EntityType, entityId: string, limit = 50) {
-    const items = await this.activityRepo.findEntityFeed(entityType, entityId, limit);
+  async getEntityActivity(
+    entityType: EntityType,
+    entityId: string,
+    limit = 50,
+  ) {
+    const items = await this.activityRepo.findEntityFeed(
+      entityType,
+      entityId,
+      limit,
+    );
     return {
       activities: items.map((item) => ({
         id: item.id,
@@ -226,7 +234,7 @@ export class ActivityService {
     const combined: RecentItemResponse[] = [
       ...tasks.map((t) => ({
         id: `task-${t.id}`,
-        entityType: 'task' as EntityType,
+        entityType: 'task' as const,
         entityId: t.id,
         title: t.title,
         workspaceId,
@@ -235,7 +243,7 @@ export class ActivityService {
       })),
       ...papers.map((p) => ({
         id: `paper-${p.id}`,
-        entityType: 'paper' as EntityType,
+        entityType: 'paper' as const,
         entityId: p.id,
         title: p.title,
         workspaceId,
@@ -244,7 +252,7 @@ export class ActivityService {
       })),
       ...pages.map((p) => ({
         id: `page-${p.id}`,
-        entityType: 'page' as EntityType,
+        entityType: 'page' as const,
         entityId: p.id,
         title: p.title,
         workspaceId,
@@ -254,7 +262,9 @@ export class ActivityService {
     ];
 
     return combined
-      .sort((a, b) => b.lastInteractedAt.getTime() - a.lastInteractedAt.getTime())
+      .sort(
+        (a, b) => b.lastInteractedAt.getTime() - a.lastInteractedAt.getTime(),
+      )
       .slice(0, limit);
   }
 }

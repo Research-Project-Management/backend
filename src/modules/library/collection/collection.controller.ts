@@ -14,7 +14,10 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { CollectionService } from './collection.service';
 import { CreateCollectionDto, UpdateCollectionDto } from './dto/collection.dto';
 import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authentication';
-import { WorkspaceRoleGuard, WorkspaceRoles } from '@/modules/iam/authorization';
+import {
+  WorkspaceRoleGuard,
+  WorkspaceRoles,
+} from '@/modules/iam/authorization';
 
 @ApiTags('Library Collections')
 @ApiBearerAuth('JWT-auth')

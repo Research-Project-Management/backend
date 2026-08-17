@@ -34,7 +34,12 @@ describe('ActivityService', () => {
                   actorId: 'user-1',
                   workspaceId: 'ws-1',
                   createdAt: mockDate,
-                  actor: { id: 'user-1', name: 'Alice', email: 'alice@test.com', avatar: null },
+                  actor: {
+                    id: 'user-1',
+                    name: 'Alice',
+                    email: 'alice@test.com',
+                    avatar: null,
+                  },
                 },
               ],
               total: 1,
@@ -48,7 +53,12 @@ describe('ActivityService', () => {
                 actorId: 'user-1',
                 workspaceId: 'ws-1',
                 createdAt: mockDate,
-                actor: { id: 'user-1', name: 'Alice', email: 'alice@test.com', avatar: null },
+                actor: {
+                  id: 'user-1',
+                  name: 'Alice',
+                  email: 'alice@test.com',
+                  avatar: null,
+                },
               },
             ]),
             findRecentByActor: jest.fn().mockResolvedValue([
@@ -67,16 +77,28 @@ describe('ActivityService', () => {
           provide: PrismaService,
           useValue: {
             task: {
-              findUnique: jest.fn().mockResolvedValue({ id: 'task-1', title: 'Test Task' }),
-              findMany: jest.fn().mockResolvedValue([{ id: 'task-1', title: 'Test Task' }]),
+              findUnique: jest
+                .fn()
+                .mockResolvedValue({ id: 'task-1', title: 'Test Task' }),
+              findMany: jest
+                .fn()
+                .mockResolvedValue([{ id: 'task-1', title: 'Test Task' }]),
             },
             paper: {
-              findUnique: jest.fn().mockResolvedValue({ id: 'paper-1', title: 'Test Paper' }),
-              findMany: jest.fn().mockResolvedValue([{ id: 'paper-1', title: 'Test Paper' }]),
+              findUnique: jest
+                .fn()
+                .mockResolvedValue({ id: 'paper-1', title: 'Test Paper' }),
+              findMany: jest
+                .fn()
+                .mockResolvedValue([{ id: 'paper-1', title: 'Test Paper' }]),
             },
             page: {
-              findUnique: jest.fn().mockResolvedValue({ id: 'page-1', title: 'Test Page' }),
-              findMany: jest.fn().mockResolvedValue([{ id: 'page-1', title: 'Test Page' }]),
+              findUnique: jest
+                .fn()
+                .mockResolvedValue({ id: 'page-1', title: 'Test Page' }),
+              findMany: jest
+                .fn()
+                .mockResolvedValue([{ id: 'page-1', title: 'Test Page' }]),
             },
           },
         },

@@ -50,7 +50,9 @@ export class ActivityListener {
   ) {
     try {
       if (workspaceId) {
-        await this.redisCache.delPattern(`analytics:workspace:${workspaceId}:*`);
+        await this.redisCache.delPattern(
+          `analytics:workspace:${workspaceId}:*`,
+        );
       }
       if (projectId) {
         await this.redisCache.delPattern(`analytics:project:${projectId}:*`);

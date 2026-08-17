@@ -66,7 +66,10 @@ describe('IAM Authorization Guards', () => {
     });
 
     it('should throw ForbiddenException if user is not a workspace member', async () => {
-      const context = createMockContext({ id: 'user-1' }, { workspaceId: 'ws-1' });
+      const context = createMockContext(
+        { id: 'user-1' },
+        { workspaceId: 'ws-1' },
+      );
       prismaService.workspace.findFirst.mockResolvedValue({ id: 'ws-1' });
       prismaService.workspaceMember.findFirst.mockResolvedValue(null);
 
@@ -76,28 +79,38 @@ describe('IAM Authorization Guards', () => {
     });
 
     it('should allow access if user has required role or higher', async () => {
-      const context = createMockContext({ id: 'user-1' }, { workspaceId: 'ws-1' });
+      const context = createMockContext(
+        { id: 'user-1' },
+        { workspaceId: 'ws-1' },
+      );
       prismaService.workspace.findFirst.mockResolvedValue({ id: 'ws-1' });
       prismaService.workspaceMember.findFirst.mockResolvedValue({
         role: WorkspaceRole.ADMIN,
         userId: 'user-1',
       });
 
-      jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([WorkspaceRole.MEMBER]);
+      jest
+        .spyOn(reflector, 'getAllAndOverride')
+        .mockReturnValue([WorkspaceRole.MEMBER]);
 
       const result = await guard.canActivate(context);
       expect(result).toBe(true);
     });
 
     it('should deny access if user has lower role than required', async () => {
-      const context = createMockContext({ id: 'user-1' }, { workspaceId: 'ws-1' });
+      const context = createMockContext(
+        { id: 'user-1' },
+        { workspaceId: 'ws-1' },
+      );
       prismaService.workspace.findFirst.mockResolvedValue({ id: 'ws-1' });
       prismaService.workspaceMember.findFirst.mockResolvedValue({
         role: WorkspaceRole.VIEWER,
         userId: 'user-1',
       });
 
-      jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([WorkspaceRole.ADMIN]);
+      jest
+        .spyOn(reflector, 'getAllAndOverride')
+        .mockReturnValue([WorkspaceRole.ADMIN]);
 
       await expect(guard.canActivate(context)).rejects.toThrow(
         ForbiddenException,
@@ -123,14 +136,19 @@ describe('IAM Authorization Guards', () => {
         role: WorkspaceRole.MEMBER,
       });
 
-      jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([ProjectRole.CONTRIBUTOR]);
+      jest
+        .spyOn(reflector, 'getAllAndOverride')
+        .mockReturnValue([ProjectRole.CONTRIBUTOR]);
 
       const result = await guard.canActivate(context);
       expect(result).toBe(true);
     });
 
     it('should allow workspace admin even if not in project member list (escalation rule)', async () => {
-      const context = createMockContext({ id: 'user-admin' }, { projectId: 'p-1' });
+      const context = createMockContext(
+        { id: 'user-admin' },
+        { projectId: 'p-1' },
+      );
       prismaService.project.findUnique.mockResolvedValue({
         id: 'p-1',
         workspaceId: 'ws-1',
@@ -140,14 +158,19 @@ describe('IAM Authorization Guards', () => {
         role: WorkspaceRole.ADMIN,
       });
 
-      jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([ProjectRole.ADMIN]);
+      jest
+        .spyOn(reflector, 'getAllAndOverride')
+        .mockReturnValue([ProjectRole.ADMIN]);
 
       const result = await guard.canActivate(context);
       expect(result).toBe(true);
     });
 
     it('should deny project viewer from performing admin actions', async () => {
-      const context = createMockContext({ id: 'user-viewer' }, { projectId: 'p-1' });
+      const context = createMockContext(
+        { id: 'user-viewer' },
+        { projectId: 'p-1' },
+      );
       prismaService.project.findUnique.mockResolvedValue({
         id: 'p-1',
         workspaceId: 'ws-1',
@@ -157,7 +180,9 @@ describe('IAM Authorization Guards', () => {
         role: WorkspaceRole.MEMBER,
       });
 
-      jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([ProjectRole.ADMIN]);
+      jest
+        .spyOn(reflector, 'getAllAndOverride')
+        .mockReturnValue([ProjectRole.ADMIN]);
 
       await expect(guard.canActivate(context)).rejects.toThrow(
         ForbiddenException,
@@ -165,7 +190,10 @@ describe('IAM Authorization Guards', () => {
     });
 
     it('should resolve projectId from cycleId param and authorize', async () => {
-      const context = createMockContext({ id: 'user-contrib' }, { cycleId: 'cycle-1' });
+      const context = createMockContext(
+        { id: 'user-contrib' },
+        { cycleId: 'cycle-1' },
+      );
       prismaService.cycle = {
         findUnique: jest.fn().mockResolvedValue({ projectId: 'p-1' }),
       } as any;
@@ -178,7 +206,9 @@ describe('IAM Authorization Guards', () => {
         role: WorkspaceRole.MEMBER,
       });
 
-      jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([ProjectRole.CONTRIBUTOR]);
+      jest
+        .spyOn(reflector, 'getAllAndOverride')
+        .mockReturnValue([ProjectRole.CONTRIBUTOR]);
 
       const result = await guard.canActivate(context);
       expect(result).toBe(true);
@@ -189,7 +219,10 @@ describe('IAM Authorization Guards', () => {
     });
 
     it('should resolve projectId from taskId param and authorize', async () => {
-      const context = createMockContext({ id: 'user-contrib' }, { taskId: 'task-1' });
+      const context = createMockContext(
+        { id: 'user-contrib' },
+        { taskId: 'task-1' },
+      );
       prismaService.task = {
         findUnique: jest.fn().mockResolvedValue({ projectId: 'p-1' }),
       } as any;
@@ -202,7 +235,9 @@ describe('IAM Authorization Guards', () => {
         role: WorkspaceRole.MEMBER,
       });
 
-      jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([ProjectRole.CONTRIBUTOR]);
+      jest
+        .spyOn(reflector, 'getAllAndOverride')
+        .mockReturnValue([ProjectRole.CONTRIBUTOR]);
 
       const result = await guard.canActivate(context);
       expect(result).toBe(true);

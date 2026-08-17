@@ -10,10 +10,7 @@ import {
   PROJECT_ROLES_KEY,
   ProjectRoleInput,
 } from '../decorators/project-roles.decorator';
-import {
-  ProjectRole,
-  ProjectRoleHierarchy,
-} from '../enums/project-role.enum';
+import { ProjectRole, ProjectRoleHierarchy } from '../enums/project-role.enum';
 import { WorkspaceRole } from '../enums/workspace-role.enum';
 
 @Injectable()
@@ -44,7 +41,11 @@ export class ProjectRoleGuard implements CanActivate {
       request.query?.projectId ||
       request.body?.projectId;
 
-    if (!projectId && request.params?.id && request.baseUrl?.includes('project')) {
+    if (
+      !projectId &&
+      request.params?.id &&
+      request.baseUrl?.includes('project')
+    ) {
       projectId = request.params.id;
     }
 

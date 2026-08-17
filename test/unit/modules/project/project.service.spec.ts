@@ -2,8 +2,6 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ProjectService } from '@/modules/project/project.service';
 import { ProjectRepository } from '@/modules/project/project.repository';
 
-
-
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 
 describe('ProjectService', () => {
@@ -31,7 +29,6 @@ describe('ProjectService', () => {
         },
       ],
     }).compile();
-
 
     service = module.get<ProjectService>(ProjectService);
     repo = module.get<ProjectRepository>(ProjectRepository);

@@ -15,6 +15,14 @@ describe('PaperService', () => {
         {
           provide: PaperRepository,
           useValue: {
+            prisma: {
+              workspace: {
+                findFirst: jest.fn().mockResolvedValue({ id: 'ws-1' }),
+              },
+              user: {
+                findFirst: jest.fn().mockResolvedValue({ id: 'user-1' }),
+              },
+            },
             findPapers: jest.fn(),
             countPapers: jest.fn(),
             findPaperById: jest.fn(),

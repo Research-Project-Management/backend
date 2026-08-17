@@ -55,7 +55,9 @@ export class ThreadController {
   }
 
   @Get(['chats/page/:pageId', 'ai/page-chats/:pageId', 'page-chats/:pageId'])
-  @ApiOperation({ summary: 'Get active AI chat thread for a specific document page' })
+  @ApiOperation({
+    summary: 'Get active AI chat thread for a specific document page',
+  })
   async getPageChat(
     @Param('pageId') pageId: string,
     @Query('workspaceId') workspaceId: string,
@@ -65,7 +67,9 @@ export class ThreadController {
   }
 
   @Delete(['chats/page/:pageId', 'ai/page-chats/:pageId', 'page-chats/:pageId'])
-  @ApiOperation({ summary: 'Clear AI chat thread for a specific document page' })
+  @ApiOperation({
+    summary: 'Clear AI chat thread for a specific document page',
+  })
   async clearPageChat(
     @Param('pageId') pageId: string,
     @Query('workspaceId') workspaceId: string,
@@ -102,7 +106,12 @@ export class ThreadController {
     return chat;
   }
 
-  @Patch(['chats/:chatId', 'ai/chats/:chatId', 'chats/:chatId/title', 'ai/chats/:chatId/title'])
+  @Patch([
+    'chats/:chatId',
+    'ai/chats/:chatId',
+    'chats/:chatId/title',
+    'ai/chats/:chatId/title',
+  ])
   @ApiOperation({ summary: 'Rename an AI chat thread' })
   async renameChat(
     @Param('chatId') chatId: string,

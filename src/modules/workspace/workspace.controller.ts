@@ -22,7 +22,10 @@ import {
   JoinWorkspaceDto,
 } from './dto/workspace.dto';
 import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authentication';
-import { WorkspaceRoleGuard, WorkspaceRoles } from '@/modules/iam/authorization';
+import {
+  WorkspaceRoleGuard,
+  WorkspaceRoles,
+} from '@/modules/iam/authorization';
 
 @ApiTags('Organization')
 @ApiBearerAuth('JWT-auth')
@@ -155,4 +158,3 @@ export class WorkspaceController {
     return this.workspaceService.search(workspaceId || '', query || '', userId);
   }
 }
-

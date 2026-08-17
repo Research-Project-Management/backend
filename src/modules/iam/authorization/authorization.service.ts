@@ -19,8 +19,7 @@ export class AuthorizationService {
     role: WorkspaceRole | string,
     permission: Permission,
   ): boolean {
-    const permissions =
-      WORKSPACE_ROLE_PERMISSIONS[role as WorkspaceRole] || [];
+    const permissions = WORKSPACE_ROLE_PERMISSIONS[role as WorkspaceRole] || [];
     return permissions.includes(permission);
   }
 
@@ -31,8 +30,7 @@ export class AuthorizationService {
     role: ProjectRole | string,
     permission: Permission,
   ): boolean {
-    const permissions =
-      PROJECT_ROLE_PERMISSIONS[role as ProjectRole] || [];
+    const permissions = PROJECT_ROLE_PERMISSIONS[role as ProjectRole] || [];
     return permissions.includes(permission);
   }
 

@@ -92,10 +92,22 @@ describe('WorkspaceService', () => {
 
   it('should return aggregated search results across entities in workspace', async () => {
     (repo.searchProjects as jest.Mock).mockResolvedValue([
-      { id: 'p-1', name: 'AI Project', avatar: null, updatedAt: new Date('2026-01-02') },
+      {
+        id: 'p-1',
+        name: 'AI Project',
+        avatar: null,
+        updatedAt: new Date('2026-01-02'),
+      },
     ]);
     (repo.searchTasks as jest.Mock).mockResolvedValue([
-      { id: 't-1', title: 'Task 1', identifier: 'T-1', projectId: 'p-1', project: { name: 'AI' }, updatedAt: new Date('2026-01-03') },
+      {
+        id: 't-1',
+        title: 'Task 1',
+        identifier: 'T-1',
+        projectId: 'p-1',
+        project: { name: 'AI' },
+        updatedAt: new Date('2026-01-03'),
+      },
     ]);
 
     const results = await service.search('ws-1', 'AI');

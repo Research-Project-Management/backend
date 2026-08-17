@@ -41,14 +41,19 @@ export class WritingAgentService {
       file_content: fileContent,
       selection: dto.selection || null,
       cursor_context: dto.cursor_context || dto.cursorContext || null,
-      selection_start_line: dto.selection_start_line ?? dto.selectionStartLine ?? null,
-      selection_end_line: dto.selection_end_line ?? dto.selectionEndLine ?? null,
-      selection_start_column: dto.selection_start_column ?? dto.selectionStartColumn ?? null,
-      selection_end_column: dto.selection_end_column ?? dto.selectionEndColumn ?? null,
+      selection_start_line:
+        dto.selection_start_line ?? dto.selectionStartLine ?? null,
+      selection_end_line:
+        dto.selection_end_line ?? dto.selectionEndLine ?? null,
+      selection_start_column:
+        dto.selection_start_column ?? dto.selectionStartColumn ?? null,
+      selection_end_column:
+        dto.selection_end_column ?? dto.selectionEndColumn ?? null,
       context_before: dto.context_before || dto.contextBefore || null,
       context_after: dto.context_after || dto.contextAfter || null,
       current_section: dto.current_section || dto.currentSection || null,
-      current_environment: dto.current_environment || dto.currentEnvironment || null,
+      current_environment:
+        dto.current_environment || dto.currentEnvironment || null,
       document_structure_summary:
         dto.document_structure_summary || dto.documentStructureSummary || null,
       compile_errors: dto.compile_errors || null,

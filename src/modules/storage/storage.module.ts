@@ -6,4 +6,3 @@ import { FileModule } from './file/file.module';
   exports: [FileModule],
 })
 export class StorageModule {}
-

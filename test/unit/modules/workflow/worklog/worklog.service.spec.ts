@@ -35,13 +35,21 @@ describe('WorklogService', () => {
   it('should get project worklogs with pagination and totalHours calculation', async () => {
     (repo.findProjectWorklogs as jest.Mock).mockResolvedValue({
       items: [
-        { id: 'wl-1', hours: 3.5, description: 'Experiment 1', date: new Date() },
+        {
+          id: 'wl-1',
+          hours: 3.5,
+          description: 'Experiment 1',
+          date: new Date(),
+        },
         { id: 'wl-2', hours: 2.0, description: 'Analysis 2', date: new Date() },
       ],
       total: 2,
     });
 
-    const result = await service.getProjectWorklogs('proj-1', { page: 1, limit: 10 });
+    const result = await service.getProjectWorklogs('proj-1', {
+      page: 1,
+      limit: 10,
+    });
 
     expect(result.items.length).toBe(2);
     expect(result.total).toBe(2);

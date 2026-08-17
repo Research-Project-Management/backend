@@ -72,17 +72,39 @@ export class FileController {
     const mimeType = data.mimetype || 'application/octet-stream';
 
     // Parse additional fields if any
-    const authorId = userId || (req as any)?.user?.id || (req as any)?.user?.sub || '';
+    const authorId =
+      userId || (req as any)?.user?.id || (req as any)?.user?.sub || '';
     const fields = (data.fields || {}) as Record<string, any>;
-    const workspaceId = typeof fields?.workspaceId?.value === 'string' ? fields.workspaceId.value : (typeof fields?.workspaceId === 'string' ? fields.workspaceId : undefined);
-    const projectId = typeof fields?.projectId?.value === 'string' ? fields.projectId.value : (typeof fields?.projectId === 'string' ? fields.projectId : undefined);
-    const pageId = typeof fields?.pageId?.value === 'string' ? fields.pageId.value : (typeof fields?.pageId === 'string' ? fields.pageId : undefined);
+    const workspaceId =
+      typeof fields?.workspaceId?.value === 'string'
+        ? fields.workspaceId.value
+        : typeof fields?.workspaceId === 'string'
+          ? fields.workspaceId
+          : undefined;
+    const projectId =
+      typeof fields?.projectId?.value === 'string'
+        ? fields.projectId.value
+        : typeof fields?.projectId === 'string'
+          ? fields.projectId
+          : undefined;
+    const pageId =
+      typeof fields?.pageId?.value === 'string'
+        ? fields.pageId.value
+        : typeof fields?.pageId === 'string'
+          ? fields.pageId
+          : undefined;
 
-    return this.fileService.uploadR2Buffer(authorId, filename, buffer, mimeType, {
-      workspaceId,
-      projectId,
-      pageId,
-    });
+    return this.fileService.uploadR2Buffer(
+      authorId,
+      filename,
+      buffer,
+      mimeType,
+      {
+        workspaceId,
+        projectId,
+        pageId,
+      },
+    );
   }
 
   /**
@@ -389,5 +411,3 @@ export class FileController {
     return this.fileService.shareFile(fileId, dto);
   }
 }
-
-

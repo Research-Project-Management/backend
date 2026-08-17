@@ -2,8 +2,6 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { LabelService } from '@/modules/shared/label/label.service';
 import { LabelRepository } from '@/modules/shared/label/label.repository';
 
-
-
 describe('LabelService', () => {
   let service: LabelService;
   let repo: LabelRepository;

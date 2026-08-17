@@ -83,7 +83,10 @@ export class PageController {
     return this.pageService.deletePage(pageId);
   }
 
-  @Post(['project/:projectId/pages/:pageId/duplicate', 'pages/:pageId/duplicate'])
+  @Post([
+    'project/:projectId/pages/:pageId/duplicate',
+    'pages/:pageId/duplicate',
+  ])
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor')
@@ -118,7 +121,10 @@ export class PageController {
     return this.pageService.createPageFile(pageId, userId, dto);
   }
 
-  @Put(['project/:projectId/pages/:pageId/main-file', 'pages/:pageId/main-file'])
+  @Put([
+    'project/:projectId/pages/:pageId/main-file',
+    'pages/:pageId/main-file',
+  ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor')
   async setMainFile(
@@ -128,7 +134,10 @@ export class PageController {
     return this.pageService.setMainFile(pageId, dto.mainFileId);
   }
 
-  @Put(['project/:projectId/pages/:pageId/thumbnail', 'pages/:pageId/thumbnail'])
+  @Put([
+    'project/:projectId/pages/:pageId/thumbnail',
+    'pages/:pageId/thumbnail',
+  ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor')
   async updateThumbnail(

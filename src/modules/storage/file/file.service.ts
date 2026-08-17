@@ -386,4 +386,3 @@ export class FileService {
     return { files: files.map((f) => this.formatFile(f)) };
   }
 }
-

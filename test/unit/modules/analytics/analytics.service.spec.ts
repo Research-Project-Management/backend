@@ -25,7 +25,9 @@ describe('AnalyticsService', () => {
         {
           provide: ActivityService,
           useValue: {
-            getActivityFeed: jest.fn().mockResolvedValue({ items: [], total: 0 }),
+            getActivityFeed: jest
+              .fn()
+              .mockResolvedValue({ items: [], total: 0 }),
             getRecentItems: jest.fn().mockResolvedValue([]),
           },
         },
@@ -48,7 +50,12 @@ describe('AnalyticsService', () => {
                 priority: 'urgent',
                 completed: true,
                 assigneeId: 'u-1',
-                assignee: { id: 'u-1', name: 'Alice', email: 'alice@test.com', avatar: null },
+                assignee: {
+                  id: 'u-1',
+                  name: 'Alice',
+                  email: 'alice@test.com',
+                  avatar: null,
+                },
               },
               {
                 id: 't-2',
@@ -56,12 +63,27 @@ describe('AnalyticsService', () => {
                 priority: 'high',
                 completed: false,
                 assigneeId: 'u-1',
-                assignee: { id: 'u-1', name: 'Alice', email: 'alice@test.com', avatar: null },
+                assignee: {
+                  id: 'u-1',
+                  name: 'Alice',
+                  email: 'alice@test.com',
+                  avatar: null,
+                },
               },
             ]),
             findCycleTasks: jest.fn().mockResolvedValue([
-              { id: 't-1', columnId: 'done', completed: true, priority: 'urgent' },
-              { id: 't-2', columnId: 'doing', completed: false, priority: 'high' },
+              {
+                id: 't-1',
+                columnId: 'done',
+                completed: true,
+                priority: 'urgent',
+              },
+              {
+                id: 't-2',
+                columnId: 'doing',
+                completed: false,
+                priority: 'high',
+              },
             ]),
             findUserWorkspaceTasks: jest.fn().mockResolvedValue([
               {
