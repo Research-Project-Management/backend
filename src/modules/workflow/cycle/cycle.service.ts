@@ -36,33 +36,9 @@ export class CycleService {
     };
   }
 
-  private async ensureCycleExpiration(cycle: any) {
-    if (!cycle) return cycle;
-
-    const now = new Date();
-    if (
-      cycle.status === CycleStatus.active &&
-      cycle.endDate &&
-      new Date(cycle.endDate) < now
-    ) {
-      const tasks = cycle.tasks || (await this.cycleRepo.findCycleTasks(cycle.id));
-      const stats = this.calculateStats(tasks);
-      return this.cycleRepo.updateCycle(cycle.id, {
-        status: CycleStatus.completed,
-        endedAt: now,
-        statsAtCompletion: stats as Prisma.InputJsonValue,
-      });
-    }
-
-    return cycle;
-  }
-
   async getCycles(projectId: string) {
     const cycles = await this.cycleRepo.findProjectCycles(projectId);
-    const processed = await Promise.all(
-      cycles.map((cycle) => this.ensureCycleExpiration(cycle)),
-    );
-    return { cycles: processed };
+    return { cycles };
   }
 
   async getCycle(cycleId: string) {
@@ -72,8 +48,7 @@ export class CycleService {
       throw new NotFoundException('Cycle not found');
     }
 
-    const processed = await this.ensureCycleExpiration(cycle);
-    return { cycle: processed };
+    return { cycle };
   }
 
   async createCycle(projectId: string, userId: string, dto: CreateCycleDto) {

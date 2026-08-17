@@ -26,12 +26,25 @@ export class StickyRepository {
     });
   }
 
-  async findWorkspaceStickies(workspaceId: string): Promise<StickyWithUser[]> {
+  async findStickyById(stickyId: string): Promise<StickyWithUser | null> {
+    return this.prisma.sticky.findUnique({
+      where: { id: stickyId },
+      include: {
+        user: { select: USER_SELECT },
+      },
+    });
+  }
+
+  async findWorkspaceStickies(
+    workspaceId: string,
+    userId: string,
+  ): Promise<StickyWithUser[]> {
     const ws = await this.resolveWorkspace(workspaceId);
     const targetId = ws?.id || workspaceId;
     return this.prisma.sticky.findMany({
       where: {
         workspaceId: targetId,
+        userId,
         scope: StickyScope.workspace,
       },
       include: {
@@ -41,10 +54,14 @@ export class StickyRepository {
     });
   }
 
-  async findProjectStickies(projectId: string): Promise<StickyWithUser[]> {
+  async findProjectStickies(
+    projectId: string,
+    userId: string,
+  ): Promise<StickyWithUser[]> {
     return this.prisma.sticky.findMany({
       where: {
         projectId,
+        userId,
         scope: StickyScope.project,
       },
       include: {
@@ -54,17 +71,31 @@ export class StickyRepository {
     });
   }
 
-  async countWorkspaceStickies(workspaceId: string): Promise<number> {
+  async countWorkspaceStickies(
+    workspaceId: string,
+    userId: string,
+  ): Promise<number> {
     const ws = await this.resolveWorkspace(workspaceId);
     const targetId = ws?.id || workspaceId;
     return this.prisma.sticky.count({
-      where: { workspaceId: targetId, scope: StickyScope.workspace },
+      where: {
+        workspaceId: targetId,
+        userId,
+        scope: StickyScope.workspace,
+      },
     });
   }
 
-  async countProjectStickies(projectId: string): Promise<number> {
+  async countProjectStickies(
+    projectId: string,
+    userId: string,
+  ): Promise<number> {
     return this.prisma.sticky.count({
-      where: { projectId, scope: StickyScope.project },
+      where: {
+        projectId,
+        userId,
+        scope: StickyScope.project,
+      },
     });
   }
 

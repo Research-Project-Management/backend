@@ -20,12 +20,24 @@ export class CreateThreadDto {
   @IsString()
   @IsOptional()
   title?: string;
+
+  @IsArray()
+  @IsOptional()
+  messages?: Array<Record<string, unknown>>;
+
+  @IsArray()
+  @IsOptional()
+  documentIds?: string[];
 }
 
 export class AppendMessagesDto {
   @IsArray()
   @IsNotEmpty({ message: 'Messages array is required' })
   messages!: Array<Record<string, unknown>>;
+
+  @IsArray()
+  @IsOptional()
+  documentIds?: string[];
 }
 
 export class RenameThreadDto {

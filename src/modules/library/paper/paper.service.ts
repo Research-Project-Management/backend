@@ -28,8 +28,14 @@ export class PaperService {
       skip?: number;
     },
   ) {
+    const ws = await this.paperRepo.prisma.workspace.findFirst({
+      where: { OR: [{ id: workspaceId }, { url: workspaceId }] },
+      select: { id: true },
+    });
+    const targetWsId = ws?.id || workspaceId;
+
     const where: Prisma.PaperWhereInput = {
-      workspaceId,
+      workspaceId: targetWsId,
       deletedAt: null,
       ...(query?.collectionId && { collectionId: query.collectionId }),
     };
@@ -68,6 +74,18 @@ export class PaperService {
   }
 
   async uploadPaper(workspaceId: string, userId: string, dto: UploadPaperDto) {
+    const ws = await this.paperRepo.prisma.workspace.findFirst({
+      where: { OR: [{ id: workspaceId }, { url: workspaceId }] },
+      select: { id: true },
+    });
+    const targetWsId = ws?.id || workspaceId;
+
+    let targetUserId = userId;
+    if (!targetUserId) {
+      const u = await this.paperRepo.prisma.user.findFirst({ select: { id: true } });
+      targetUserId = u?.id || '';
+    }
+
     const citationKey =
       dto.citationKey ||
       this.bibtexFormatter.generateCitationKey(
@@ -85,10 +103,25 @@ export class PaperService {
       authors: dto.authors || [],
       year: dto.year || null,
       doi: dto.doi || '',
+      abstract: dto.abstract || '',
+      journal: dto.journal || '',
+      publisher: dto.publisher || '',
+      keywords: dto.keywords || [],
+      volume: dto.volume || '',
+      issue: dto.issue || '',
+      pages: dto.pages || '',
+      issn: dto.issn || '',
+      isbn: dto.isbn || '',
+      url: dto.url || '',
+      type: dto.type || '',
+      language: dto.language || '',
+      journalAbbr: dto.journalAbbr || '',
+      shortTitle: dto.shortTitle || '',
+      rights: dto.rights || '',
       citationKey,
-      notes: dto.notes || [],
-      workspaceId,
-      uploadedById: userId,
+      notes: (dto.notes as any) || [],
+      workspaceId: targetWsId,
+      uploadedById: targetUserId,
       collectionId: dto.collectionId || null,
       primaryFile: {
         fileId: dto.fileId || null,
@@ -263,3 +296,4 @@ export class PaperService {
     return { message: 'RAG indexing queued' };
   }
 }
+

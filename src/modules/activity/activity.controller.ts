@@ -3,6 +3,12 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ActivityService } from './activity.service';
 import { JwtAuthGuard } from '@/modules/iam/authentication';
 import { CurrentUser } from '@/modules/iam/authentication';
+import {
+  WorkspaceRoleGuard,
+  ProjectRoleGuard,
+  WorkspaceRoles,
+  ProjectRoles,
+} from '@/modules/iam/authorization';
 import { EntityType } from '@prisma/client';
 
 @ApiTags('Activity')
@@ -12,33 +18,9 @@ import { EntityType } from '@prisma/client';
 export class ActivityController {
   constructor(private readonly activityService: ActivityService) {}
 
-  @Get('tasks/:taskId')
-  @ApiOperation({ summary: 'Get task specific activity timeline (Plane.so style)' })
-  async getTaskActivity(
-    @Param('taskId') taskId: string,
-    @Query('limit') limit?: string,
-  ) {
-    return this.activityService.getTaskActivity(
-      taskId,
-      limit ? parseInt(limit, 10) : 50,
-    );
-  }
-
-  @Get('entities/:entityType/:entityId')
-  @ApiOperation({ summary: 'Get entity specific activity timeline' })
-  async getEntityActivity(
-    @Param('entityType') entityType: EntityType,
-    @Param('entityId') entityId: string,
-    @Query('limit') limit?: string,
-  ) {
-    return this.activityService.getEntityActivity(
-      entityType,
-      entityId,
-      limit ? parseInt(limit, 10) : 50,
-    );
-  }
-
   @Get('workspaces/:workspaceId/feed')
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'Get workspace collaboration activity feed' })
   async getWorkspaceActivityFeed(
     @Param('workspaceId') workspaceId: string,
@@ -54,6 +36,8 @@ export class ActivityController {
   }
 
   @Get('workspaces/:workspaceId/recent')
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'Get user recent interacted items' })
   async getRecentItems(
     @Param('workspaceId') workspaceId: string,
@@ -68,6 +52,8 @@ export class ActivityController {
   }
 
   @Get('projects/:projectId/feed')
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get project specific activity feed' })
   async getProjectActivityFeed(
     @Param('projectId') projectId: string,

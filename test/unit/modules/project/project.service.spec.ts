@@ -4,7 +4,7 @@ import { ProjectRepository } from '@/modules/project/project.repository';
 
 
 
-import { NotFoundException } from '@nestjs/common';
+import { NotFoundException, BadRequestException } from '@nestjs/common';
 
 describe('ProjectService', () => {
   let service: ProjectService;
@@ -62,5 +62,39 @@ describe('ProjectService', () => {
     await expect(service.getProject('non-existing-proj')).rejects.toThrow(
       NotFoundException,
     );
+  });
+
+  describe('addProjectMember', () => {
+    it('should default role to contributor when role is not provided', async () => {
+      (repo.findProjectMember as jest.Mock).mockResolvedValue(null);
+      (repo.createProjectMember as jest.Mock).mockResolvedValue({
+        id: 'pm-1',
+        projectId: 'proj-1',
+        userId: 'user-2',
+        role: 'contributor',
+      });
+
+      const result = await service.addProjectMember('proj-1', {
+        userId: 'user-2',
+      });
+
+      expect(repo.createProjectMember).toHaveBeenCalledWith(
+        'proj-1',
+        'user-2',
+        'contributor',
+      );
+      expect(result.member.role).toBe('contributor');
+    });
+
+    it('should throw BadRequestException if invalid project role like "member" or "owner" is provided', async () => {
+      (repo.findProjectMember as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        service.addProjectMember('proj-1', {
+          userId: 'user-2',
+          role: 'member' as any,
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
   });
 });

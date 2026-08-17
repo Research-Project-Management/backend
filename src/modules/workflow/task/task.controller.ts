@@ -27,13 +27,17 @@ import {
   ProjectRoleGuard,
   ProjectRoles,
 } from '@/modules/iam/authorization';
+import { ActivityService } from '@/modules/activity/activity.service';
 
 @ApiTags('Planning Tasks')
 @ApiBearerAuth('JWT-auth')
 @Controller('api')
 @UseGuards(JwtAuthGuard)
 export class TaskController {
-  constructor(private readonly taskService: TaskService) {}
+  constructor(
+    private readonly taskService: TaskService,
+    private readonly activityService: ActivityService,
+  ) {}
 
   @Get('workspace/:workspaceId/tasks')
   @UseGuards(WorkspaceRoleGuard)
@@ -96,6 +100,8 @@ export class TaskController {
   }
 
   @Get(['tasks/:taskId', 'project/:projectId/tasks/:taskId'])
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get details of a single task' })
   @ApiResponse({ status: 200, description: 'Task detail' })
   async getTask(@Param('taskId') taskId: string) {
@@ -103,6 +109,8 @@ export class TaskController {
   }
 
   @Put(['tasks/:taskId', 'project/:projectId/tasks/:taskId'])
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor')
   @ApiOperation({ summary: 'Update a task' })
   @ApiResponse({ status: 200, description: 'Updated task object' })
   async updateTask(
@@ -113,6 +121,8 @@ export class TaskController {
   }
 
   @Delete(['tasks/:taskId', 'project/:projectId/tasks/:taskId'])
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor')
   @ApiOperation({ summary: 'Delete a task' })
   @ApiResponse({ status: 200, description: 'Task deletion confirmation' })
   async deleteTask(@Param('taskId') taskId: string) {
@@ -120,6 +130,8 @@ export class TaskController {
   }
 
   @Put(['tasks/:taskId/assign', 'project/:projectId/tasks/:taskId/assign'])
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor')
   @ApiOperation({ summary: 'Assign a user to a task' })
   @ApiResponse({ status: 200, description: 'Updated task with new assignee' })
   async assignTask(
@@ -131,6 +143,8 @@ export class TaskController {
 
   @Post(['tasks/:taskId/duplicate', 'project/:projectId/tasks/:taskId/duplicate'])
   @HttpCode(HttpStatus.CREATED)
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor')
   @ApiOperation({ summary: 'Duplicate an existing task' })
   @ApiResponse({ status: 201, description: 'New duplicated task object' })
   async duplicateTask(
@@ -141,9 +155,11 @@ export class TaskController {
   }
 
   @Get('tasks/:taskId/activity')
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get task audit and activity logs' })
   @ApiResponse({ status: 200, description: 'List of task activities' })
   async getAuditLog(@Param('taskId') taskId: string) {
-    return this.taskService.getAuditLog(taskId);
+    return this.activityService.getTaskActivity(taskId);
   }
 }

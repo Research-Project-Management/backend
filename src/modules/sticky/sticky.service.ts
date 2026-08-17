@@ -1,4 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { StickyRepository, StickyWithUser } from './sticky.repository';
 import { CreateStickyDto, UpdateStickyDto } from './dto/sticky.dto';
 import { StickyScope } from '@prisma/client';
@@ -24,13 +28,13 @@ export class StickyService {
     };
   }
 
-  async getWorkspaceStickies(workspaceId: string) {
-    const stickies = await this.stickyRepo.findWorkspaceStickies(workspaceId);
+  async getWorkspaceStickies(workspaceId: string, userId: string) {
+    const stickies = await this.stickyRepo.findWorkspaceStickies(workspaceId, userId);
     return { stickies: stickies.map((s) => this.formatSticky(s)) };
   }
 
-  async getProjectStickies(projectId: string) {
-    const stickies = await this.stickyRepo.findProjectStickies(projectId);
+  async getProjectStickies(projectId: string, userId: string) {
+    const stickies = await this.stickyRepo.findProjectStickies(projectId, userId);
     return { stickies: stickies.map((s) => this.formatSticky(s)) };
   }
 
@@ -39,7 +43,7 @@ export class StickyService {
     userId: string,
     dto: CreateStickyDto,
   ) {
-    const count = await this.stickyRepo.countWorkspaceStickies(workspaceId);
+    const count = await this.stickyRepo.countWorkspaceStickies(workspaceId, userId);
 
     const sticky = await this.stickyRepo.createSticky({
       title: dto.title || '',
@@ -67,7 +71,7 @@ export class StickyService {
       workspaceId = wsId;
     }
 
-    const count = await this.stickyRepo.countProjectStickies(projectId);
+    const count = await this.stickyRepo.countProjectStickies(projectId, userId);
 
     const sticky = await this.stickyRepo.createSticky({
       title: dto.title || '',
@@ -85,7 +89,15 @@ export class StickyService {
     return { sticky: this.formatSticky(sticky) };
   }
 
-  async updateSticky(stickyId: string, dto: UpdateStickyDto) {
+  async updateSticky(stickyId: string, userId: string, dto: UpdateStickyDto) {
+    const existing = await this.stickyRepo.findStickyById(stickyId);
+    if (!existing) {
+      throw new NotFoundException('Sticky note not found');
+    }
+    if (existing.userId !== userId) {
+      throw new ForbiddenException('You can only update your own sticky notes');
+    }
+
     const sticky = await this.stickyRepo.updateSticky(stickyId, {
       ...(dto.title !== undefined && { title: dto.title }),
       ...(dto.content !== undefined && { content: dto.content }),
@@ -99,9 +111,17 @@ export class StickyService {
     return { sticky: this.formatSticky(sticky) };
   }
 
-  async deleteSticky(stickyId: string) {
+  async deleteSticky(stickyId: string, userId: string) {
+    const existing = await this.stickyRepo.findStickyById(stickyId);
+    if (!existing) {
+      throw new NotFoundException('Sticky note not found');
+    }
+    if (existing.userId !== userId) {
+      throw new ForbiddenException('You can only delete your own sticky notes');
+    }
+
     await this.stickyRepo.deleteSticky(stickyId);
-    return { message: 'Sticky deleted successfully' };
+    return { message: 'Sticky deleted successfully', success: true };
   }
 
   async reorderStickies(stickyIds: string[]) {

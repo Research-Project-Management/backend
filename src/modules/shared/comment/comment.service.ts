@@ -175,4 +175,20 @@ export class CommentService {
 
     return { comment };
   }
+
+  async deletePageReply(commentId: string, replyId: string) {
+    const existing = await this.commentRepo.findPageCommentById(commentId);
+    if (!existing) {
+      throw new NotFoundException('Comment not found');
+    }
+
+    const replies = parseCommentReplies(existing.replies).filter(
+      (r) => r.id !== replyId,
+    );
+    const comment = await this.commentRepo.updatePageComment(commentId, {
+      replies: replies as unknown as Prisma.InputJsonValue,
+    });
+
+    return { comment };
+  }
 }

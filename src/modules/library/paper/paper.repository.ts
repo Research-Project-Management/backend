@@ -21,7 +21,7 @@ export type PaperWithRelations = Prisma.PaperGetPayload<{
 
 @Injectable()
 export class PaperRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(public readonly prisma: PrismaService) {}
 
   async findPapers(
     where: Prisma.PaperWhereInput,
@@ -105,3 +105,4 @@ export class PaperRepository {
     });
   }
 }
+

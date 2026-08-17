@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { ProjectRepository } from './project.repository';
-import { Prisma } from '@prisma/client';
+import { Prisma, ProjectMemberRole } from '@prisma/client';
 import { parseTaskColumns, TaskColumn } from '@/core/types/json-fields.type';
 import {
   CreateProjectDto,
@@ -14,6 +14,8 @@ import {
   AddColumnDto,
   UpdateColumnDto,
 } from './dto/project.dto';
+
+const VALID_PROJECT_ROLES = new Set<string>(Object.values(ProjectMemberRole));
 
 @Injectable()
 export class ProjectService {
@@ -37,11 +39,11 @@ export class ProjectService {
 
     return {
       project,
-      yourRole: member?.role || 'member',
+      yourRole: member?.role || ProjectMemberRole.viewer,
     };
   }
 
-    async createProject(
+  async createProject(
     workspaceId: string,
     userId: string,
     dto: CreateProjectDto,
@@ -72,7 +74,7 @@ export class ProjectService {
       members: {
         create: {
           userId,
-          role: 'admin',
+          role: ProjectMemberRole.admin,
         },
       },
     });
@@ -113,10 +115,17 @@ export class ProjectService {
       throw new BadRequestException('User is already a member of this project');
     }
 
+    const role = dto.role || ProjectMemberRole.contributor;
+    if (!VALID_PROJECT_ROLES.has(role)) {
+      throw new BadRequestException(
+        `Invalid project role "${role}". Valid roles are: ${Object.values(ProjectMemberRole).join(', ')}`,
+      );
+    }
+
     const member = await this.projectRepo.createProjectMember(
       projectId,
       dto.userId,
-      dto.role || 'member',
+      role,
     );
 
     return {
@@ -130,6 +139,12 @@ export class ProjectService {
     targetUserId: string,
     dto: UpdateProjectMemberDto,
   ) {
+    if (!VALID_PROJECT_ROLES.has(dto.role)) {
+      throw new BadRequestException(
+        `Invalid project role "${dto.role}". Valid roles are: ${Object.values(ProjectMemberRole).join(', ')}`,
+      );
+    }
+
     const member = await this.projectRepo.updateProjectMemberRole(
       projectId,
       targetUserId,

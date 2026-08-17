@@ -1,4 +1,5 @@
-import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { WorkspaceMemberRole } from '@prisma/client';
 
 export class CreateWorkspaceDto {
   @IsString()
@@ -41,15 +42,19 @@ export class AddWorkspaceMemberDto {
   @IsNotEmpty({ message: 'User ID or Email is required' })
   userId!: string;
 
-  @IsString()
+  @IsEnum(WorkspaceMemberRole, {
+    message: 'Role must be one of: owner, admin, member, viewer',
+  })
   @IsOptional()
-  role?: 'owner' | 'admin' | 'member' | 'viewer';
+  role?: WorkspaceMemberRole;
 }
 
 export class UpdateWorkspaceMemberDto {
-  @IsString()
+  @IsEnum(WorkspaceMemberRole, {
+    message: 'Role must be one of: owner, admin, member, viewer',
+  })
   @IsNotEmpty({ message: 'Role is required' })
-  role!: 'owner' | 'admin' | 'member' | 'viewer';
+  role!: WorkspaceMemberRole;
 
   @IsString()
   @IsOptional()

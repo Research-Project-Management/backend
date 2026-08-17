@@ -1,8 +1,13 @@
 import { Controller, Get, Param, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { AnalyticsService } from './analytics.service';
-import { JwtAuthGuard } from '@/modules/iam/authentication';
-import { CurrentUser } from '@/modules/iam/authentication';
+import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authentication';
+import {
+  WorkspaceRoleGuard,
+  WorkspaceRoles,
+  ProjectRoleGuard,
+  ProjectRoles,
+} from '@/modules/iam/authorization';
 
 @ApiTags('Analytics')
 @ApiBearerAuth('JWT-auth')
@@ -12,18 +17,26 @@ export class AnalyticsController {
   constructor(private readonly analyticsService: AnalyticsService) {}
 
   @Get('projects/:projectId')
-  @ApiOperation({ summary: 'Get project dimensional insights (State, Priority, Assignee)' })
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
+  @ApiOperation({
+    summary: 'Get project dimensional insights (State, Priority, Assignee)',
+  })
   async getProjectAnalytics(@Param('projectId') projectId: string) {
     return this.analyticsService.getProjectAnalytics(projectId);
   }
 
   @Get('cycles/:cycleId')
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get cycle burndown and velocity analytics' })
   async getCycleAnalytics(@Param('cycleId') cycleId: string) {
     return this.analyticsService.getCycleAnalytics(cycleId);
   }
 
   @Get(['your-work/:workspaceId', 'workspaces/:workspaceId/your-work'])
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'Get user summary workload and metrics' })
   async getYourWork(
     @Param('workspaceId') workspaceId: string,
@@ -33,6 +46,8 @@ export class AnalyticsController {
   }
 
   @Get('workspaces/:workspaceId/overview')
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'Get workspace aggregate metrics overview' })
   async getWorkspaceOverview(@Param('workspaceId') workspaceId: string) {
     return this.analyticsService.getWorkspaceOverview(workspaceId);

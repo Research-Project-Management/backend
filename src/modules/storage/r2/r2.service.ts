@@ -8,6 +8,8 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getErrorMessage } from '@/core/utils/error.util';
+import * as fs from 'fs';
+import * as path from 'path';
 
 @Injectable()
 export class R2Service {
@@ -16,17 +18,38 @@ export class R2Service {
   private readonly logger = new Logger(R2Service.name);
 
   constructor(private readonly configService: ConfigService) {
-    const accountId = this.configService.get<string>('R2_ACCOUNT_ID') || '';
+    const apiUrl =
+      this.configService.get<string>('R2_API_URL') ||
+      process.env.R2_API_URL ||
+      '';
+    const accountId =
+      this.configService.get<string>('R2_ACCOUNT_ID') ||
+      process.env.R2_ACCOUNT_ID ||
+      '';
     const accessKeyId =
-      this.configService.get<string>('R2_ACCESS_KEY_ID') || '';
+      this.configService.get<string>('R2_ACCESS_KEY') ||
+      process.env.R2_ACCESS_KEY ||
+      this.configService.get<string>('R2_ACCESS_KEY_ID') ||
+      process.env.R2_ACCESS_KEY_ID ||
+      '';
     const secretAccessKey =
-      this.configService.get<string>('R2_SECRET_ACCESS_KEY') || '';
+      this.configService.get<string>('R2_SECRET_KEY') ||
+      process.env.R2_SECRET_KEY ||
+      this.configService.get<string>('R2_SECRET_ACCESS_KEY') ||
+      process.env.R2_SECRET_ACCESS_KEY ||
+      '';
     this.bucket =
-      this.configService.get<string>('R2_BUCKET_NAME') || 'rpm-storage';
+      this.configService.get<string>('R2_BUCKET_NAME') ||
+      process.env.R2_BUCKET_NAME ||
+      'flux';
 
-    const endpoint = accountId
-      ? `https://${accountId}.r2.cloudflarestorage.com`
-      : 'http://localhost:9000';
+    const endpoint = apiUrl
+      ? apiUrl
+      : accountId
+        ? `https://${accountId}.r2.cloudflarestorage.com`
+        : 'http://localhost:9000';
+
+    this.logger.log(`R2 initialized with endpoint: ${endpoint}, bucket: ${this.bucket}`);
 
     this.s3Client = new S3Client({
       region: 'auto',
@@ -67,14 +90,33 @@ export class R2Service {
     buffer: Buffer,
     contentType = 'application/octet-stream',
   ) {
-    const command = new PutObjectCommand({
-      Bucket: this.bucket,
-      Key: key,
-      Body: buffer,
-      ContentType: contentType,
-    });
-    await this.s3Client.send(command);
-    return { path: key, url: `/api/files/r2/${key}` };
+    try {
+      const command = new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        Body: buffer,
+        ContentType: contentType,
+      });
+      await this.s3Client.send(command);
+      return { path: key, url: `/api/files/r2/${key}` };
+    } catch (s3Err) {
+      this.logger.warn(
+        `R2 upload failed (${getErrorMessage(s3Err)}), fallback saving to local storage`,
+      );
+      try {
+        const localDir = path.join(process.cwd(), 'uploads');
+        const filePath = path.join(localDir, key);
+        const parentDir = path.dirname(filePath);
+        if (!fs.existsSync(parentDir)) {
+          fs.mkdirSync(parentDir, { recursive: true });
+        }
+        fs.writeFileSync(filePath, buffer);
+        return { path: key, url: `/api/files/r2/${key}` };
+      } catch (localErr) {
+        this.logger.error(`Local fallback also failed: ${getErrorMessage(localErr)}`);
+        throw s3Err;
+      }
+    }
   }
 
   async deleteObject(key: string) {
@@ -87,13 +129,36 @@ export class R2Service {
         `Failed to delete object ${key}: ${getErrorMessage(err)}`,
       );
     });
+
+    const localDir = path.join(process.cwd(), 'uploads');
+    const filePath = path.join(localDir, key);
+    if (fs.existsSync(filePath)) {
+      try {
+        fs.unlinkSync(filePath);
+      } catch {}
+    }
   }
 
   async getObjectStream(key: string) {
-    const command = new GetObjectCommand({
-      Bucket: this.bucket,
-      Key: key,
-    });
-    return this.s3Client.send(command);
+    try {
+      const command = new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+      });
+      return await this.s3Client.send(command);
+    } catch (s3Err) {
+      const localDir = path.join(process.cwd(), 'uploads');
+      const filePath = path.join(localDir, key);
+      if (fs.existsSync(filePath)) {
+        const stream = fs.createReadStream(filePath);
+        const stat = fs.statSync(filePath);
+        return {
+          Body: stream as any,
+          ContentLength: stat.size,
+          ContentType: 'application/octet-stream',
+        };
+      }
+      throw s3Err;
+    }
   }
 }

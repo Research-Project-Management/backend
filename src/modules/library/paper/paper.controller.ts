@@ -11,7 +11,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { PaperService } from './paper.service';
 import {
   IngestPaperDto,
@@ -20,10 +20,10 @@ import {
   UpdatePaperDto,
   ImportStoragePaperDto,
 } from './dto/paper.dto';
-import { JwtAuthGuard } from '@/modules/iam/authentication';
-import { CurrentUser } from '@/modules/iam/authentication';
+import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authentication';
+import { WorkspaceRoleGuard, WorkspaceRoles } from '@/modules/iam/authorization';
 
-@ApiTags('Library')
+@ApiTags('Library Papers')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/library')
 @UseGuards(JwtAuthGuard)
@@ -32,6 +32,9 @@ export class PaperController {
 
   @Post(['papers/:workspaceId/ingest', ':workspaceId/ingest'])
   @HttpCode(HttpStatus.CREATED)
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Ingest research paper into workspace library' })
   async ingestPaper(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
@@ -41,6 +44,9 @@ export class PaperController {
   }
 
   @Get(['papers/:workspaceId', ':workspaceId/papers'])
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'Get workspace library papers' })
   async getPapers(
     @Param('workspaceId') workspaceId: string,
     @Query('collectionId') collectionId?: string,
@@ -57,6 +63,9 @@ export class PaperController {
   }
 
   @Get(':workspaceId/collections/:collectionId/papers')
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'Get collection papers' })
   async getCollectionPapers(
     @Param('workspaceId') workspaceId: string,
     @Param('collectionId') collectionId: string,
@@ -74,6 +83,9 @@ export class PaperController {
     ':workspaceId/upload',
   ])
   @HttpCode(HttpStatus.CREATED)
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Upload research paper PDF' })
   async uploadPaper(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
@@ -84,6 +96,9 @@ export class PaperController {
 
   @Post(':workspaceId/collections/:collectionId/papers')
   @HttpCode(HttpStatus.CREATED)
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Upload paper to specific collection' })
   async uploadPaperToCollection(
     @Param('workspaceId') workspaceId: string,
     @Param('collectionId') collectionId: string,
@@ -100,6 +115,9 @@ export class PaperController {
     ':workspaceId/import-storage',
   ])
   @HttpCode(HttpStatus.CREATED)
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Import paper from storage file' })
   async importFromStorage(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
@@ -109,6 +127,9 @@ export class PaperController {
   }
 
   @Get(['papers/:workspaceId/:paperId', ':workspaceId/:paperId'])
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'Get paper by ID' })
   async getPaperById(@Param('paperId') paperId: string) {
     return this.paperService.getPaperById(paperId);
   }
@@ -119,6 +140,9 @@ export class PaperController {
     ':workspaceId/:paperId/attachments',
   ])
   @HttpCode(HttpStatus.CREATED)
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Add paper attachment' })
   async addAttachment(
     @Param('paperId') paperId: string,
     @Body() dto: AddAttachmentDto,
@@ -131,6 +155,9 @@ export class PaperController {
     ':workspaceId/papers/:paperId/attachments/:attachmentId',
     ':workspaceId/:paperId/attachments/:attachmentId',
   ])
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Remove paper attachment' })
   async removeAttachment(
     @Param('paperId') paperId: string,
     @Param('attachmentId') attachmentId: string,
@@ -144,6 +171,9 @@ export class PaperController {
     ':workspaceId/:paperId/reindex',
   ])
   @HttpCode(HttpStatus.OK)
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Trigger paper reindexing for search and AI' })
   async triggerReindex(
     @Param('paperId') paperId: string,
     @CurrentUser('id') userId: string,
@@ -156,6 +186,9 @@ export class PaperController {
     ':workspaceId/papers/:paperId',
     ':workspaceId/:paperId',
   ])
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Update paper metadata' })
   async updatePaper(
     @Param('paperId') paperId: string,
     @Body() dto: UpdatePaperDto,
@@ -168,11 +201,17 @@ export class PaperController {
     ':workspaceId/papers/:paperId',
     ':workspaceId/:paperId',
   ])
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Delete paper' })
   async deletePaper(@Param('paperId') paperId: string) {
     return this.paperService.deletePaper(paperId);
   }
 
   @Get('papers/:workspaceId/:paperId/bibtex')
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'Export paper BibTeX' })
   async exportBibtex(@Param('paperId') paperId: string) {
     return this.paperService.exportBibtex(paperId);
   }

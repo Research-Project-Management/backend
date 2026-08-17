@@ -53,4 +53,21 @@ describe('CycleService', () => {
     expect(result.cycle.name).toBe('Sprint 1');
     expect(result.cycle.id).toBe('cyc-1');
   });
+
+  it('should get cycles as a pure read without triggering database update writes', async () => {
+    const mockCycles = [
+      {
+        id: 'cyc-1',
+        name: 'Sprint 1',
+        status: 'active',
+        endDate: new Date('2020-01-01'),
+      },
+    ];
+    (repo.findProjectCycles as jest.Mock).mockResolvedValue(mockCycles);
+
+    const result = await service.getCycles('proj-1');
+
+    expect(result.cycles).toHaveLength(1);
+    expect(repo.updateCycle).not.toHaveBeenCalled();
+  });
 });

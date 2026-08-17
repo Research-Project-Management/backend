@@ -77,6 +77,6 @@ export class HistoryService {
 
   async getHistory(pageId: string) {
     const history = await this.historyRepo.findPageVersions(pageId);
-    return { history };
+    return { history, events: history };
   }
 }

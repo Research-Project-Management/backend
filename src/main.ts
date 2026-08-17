@@ -7,6 +7,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
+import multipart from '@fastify/multipart';
 import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './core/filters/global-exception.filter';
 import { AppLogger } from './core/logger/app-logger.service';
@@ -22,6 +23,13 @@ async function bootstrap() {
       bufferLogs: true,
     },
   );
+
+  // Multipart file uploads (Cloudflare R2 / S3 streaming)
+  await app.register(multipart as any, {
+    limits: {
+      fileSize: 100 * 1024 * 1024, // 100MB
+    },
+  });
 
   // Security Headers (Helmet)
   await app.register(helmet as any, {
@@ -68,10 +76,21 @@ async function bootstrap() {
       'http://localhost:2916',
       'http://127.0.0.1:3000',
       'http://127.0.0.1:3001',
+      'http://127.0.0.1:2915',
       ...(process.env.ORIGINS
         ? process.env.ORIGINS.split(',').map((o) => o.trim())
         : []),
     ],
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Accept',
+      'Authorization',
+      'X-Requested-With',
+      'Range',
+      'Origin',
+    ],
+    exposedHeaders: ['Content-Range', 'X-Total-Count'],
     credentials: true,
   });
 

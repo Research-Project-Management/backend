@@ -163,5 +163,53 @@ describe('IAM Authorization Guards', () => {
         ForbiddenException,
       );
     });
+
+    it('should resolve projectId from cycleId param and authorize', async () => {
+      const context = createMockContext({ id: 'user-contrib' }, { cycleId: 'cycle-1' });
+      prismaService.cycle = {
+        findUnique: jest.fn().mockResolvedValue({ projectId: 'p-1' }),
+      } as any;
+      prismaService.project.findUnique.mockResolvedValue({
+        id: 'p-1',
+        workspaceId: 'ws-1',
+        members: [{ role: ProjectRole.CONTRIBUTOR, joinedAt: new Date() }],
+      });
+      prismaService.workspaceMember.findFirst.mockResolvedValue({
+        role: WorkspaceRole.MEMBER,
+      });
+
+      jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([ProjectRole.CONTRIBUTOR]);
+
+      const result = await guard.canActivate(context);
+      expect(result).toBe(true);
+      expect(prismaService.cycle.findUnique).toHaveBeenCalledWith({
+        where: { id: 'cycle-1' },
+        select: { projectId: true },
+      });
+    });
+
+    it('should resolve projectId from taskId param and authorize', async () => {
+      const context = createMockContext({ id: 'user-contrib' }, { taskId: 'task-1' });
+      prismaService.task = {
+        findUnique: jest.fn().mockResolvedValue({ projectId: 'p-1' }),
+      } as any;
+      prismaService.project.findUnique.mockResolvedValue({
+        id: 'p-1',
+        workspaceId: 'ws-1',
+        members: [{ role: ProjectRole.CONTRIBUTOR, joinedAt: new Date() }],
+      });
+      prismaService.workspaceMember.findFirst.mockResolvedValue({
+        role: WorkspaceRole.MEMBER,
+      });
+
+      jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([ProjectRole.CONTRIBUTOR]);
+
+      const result = await guard.canActivate(context);
+      expect(result).toBe(true);
+      expect(prismaService.task.findUnique).toHaveBeenCalledWith({
+        where: { id: 'task-1' },
+        select: { projectId: true },
+      });
+    });
   });
 });

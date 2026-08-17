@@ -60,11 +60,44 @@ export class ActivityService {
    * Entity Timeline for TaskActivities modal (Plane.so style).
    */
   async getEntityActivity(entityType: EntityType, entityId: string, limit = 50) {
-    return this.activityRepo.findEntityFeed(entityType, entityId, limit);
+    const items = await this.activityRepo.findEntityFeed(entityType, entityId, limit);
+    return {
+      activities: items.map((item) => ({
+        id: item.id,
+        _id: item.id,
+        entityType: item.entityType,
+        entityId: item.entityId,
+        verb: item.verb,
+        action: item.verb,
+        field: item.field,
+        oldValue: item.oldValue,
+        newValue: item.newValue,
+        actorId: item.actorId,
+        author: item.actor
+          ? {
+              id: item.actor.id,
+              _id: item.actor.id,
+              name: item.actor.name,
+              email: item.actor.email,
+              avatar: item.actor.avatar,
+            }
+          : undefined,
+        user: item.actor
+          ? {
+              id: item.actor.id,
+              _id: item.actor.id,
+              name: item.actor.name,
+              email: item.actor.email,
+              avatar: item.actor.avatar,
+            }
+          : undefined,
+        createdAt: item.createdAt,
+      })),
+    };
   }
 
   async getTaskActivity(taskId: string, limit = 50) {
-    return this.getEntityActivity('task', taskId, limit);
+    return this.getEntityActivity(EntityType.task, taskId, limit);
   }
 
   /**

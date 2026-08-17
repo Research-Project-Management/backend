@@ -36,7 +36,10 @@ export class LatexService {
   async compile(dto: CompileLatexDto): Promise<CompileResult> {
     const payload = {
       project_id: dto.project_id || dto.page_id,
+      main_file: dto.main_file,
       engine: dto.engine || 'pdflatex',
+      draft: dto.draft ?? false,
+      use_cache: dto.use_cache ?? true,
       source: dto.source || '',
     };
 

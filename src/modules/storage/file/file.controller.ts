@@ -7,11 +7,16 @@ import {
   Body,
   Param,
   Query,
+  Req,
+  Res,
   UseGuards,
   HttpCode,
   HttpStatus,
+  BadRequestException,
+  NotFoundException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { FastifyRequest, FastifyReply } from 'fastify';
 import { FileService } from './file.service';
 import {
   PresignDto,
@@ -22,10 +27,15 @@ import {
   MoveFileDto,
   ShareFileDto,
 } from './dto/file.dto';
-import { JwtAuthGuard } from '@/modules/iam/authentication';
-import { CurrentUser } from '@/modules/iam/authentication';
+import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authentication';
+import {
+  WorkspaceRoleGuard,
+  WorkspaceRoles,
+  ProjectRoleGuard,
+  ProjectRoles,
+} from '@/modules/iam/authorization';
 
-@ApiTags('Storage')
+@ApiTags('Storage & Assets')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/files')
 @UseGuards(JwtAuthGuard)
@@ -38,10 +48,76 @@ export class FileController {
     return this.fileService.presign(dto);
   }
 
+  /**
+   * Multipart Upload endpoint streaming directly to Cloudflare R2 / S3.
+   */
+  @Post('upload-r2')
+  @HttpCode(HttpStatus.CREATED)
+  async uploadR2(
+    @Req() req: FastifyRequest,
+    @CurrentUser('id') userId: string,
+  ) {
+    const isMultipart = req.isMultipart();
+    if (!isMultipart) {
+      throw new BadRequestException('Request must be multipart/form-data');
+    }
+
+    const data = await req.file();
+    if (!data) {
+      throw new BadRequestException('No file found in request');
+    }
+
+    const buffer = await data.toBuffer();
+    const filename = data.filename || 'unnamed-file';
+    const mimeType = data.mimetype || 'application/octet-stream';
+
+    // Parse additional fields if any
+    const authorId = userId || (req as any)?.user?.id || (req as any)?.user?.sub || '';
+    const fields = (data.fields || {}) as Record<string, any>;
+    const workspaceId = typeof fields?.workspaceId?.value === 'string' ? fields.workspaceId.value : (typeof fields?.workspaceId === 'string' ? fields.workspaceId : undefined);
+    const projectId = typeof fields?.projectId?.value === 'string' ? fields.projectId.value : (typeof fields?.projectId === 'string' ? fields.projectId : undefined);
+    const pageId = typeof fields?.pageId?.value === 'string' ? fields.pageId.value : (typeof fields?.pageId === 'string' ? fields.pageId : undefined);
+
+    return this.fileService.uploadR2Buffer(authorId, filename, buffer, mimeType, {
+      workspaceId,
+      projectId,
+      pageId,
+    });
+  }
+
+  /**
+   * Serve / Stream R2 File by storage key
+   */
+  @Get('r2/*')
+  async getR2File(
+    @Param('*') key: string,
+    @Res({ passthrough: true }) res: FastifyReply,
+  ) {
+    if (!key) {
+      throw new NotFoundException('Storage key is required');
+    }
+
+    const output = await this.fileService.getR2Stream(key);
+    if (!output?.Body) {
+      throw new NotFoundException('File not found in storage');
+    }
+
+    if (output.ContentType) {
+      res.header('Content-Type', output.ContentType);
+    }
+    if (output.ContentLength) {
+      res.header('Content-Length', output.ContentLength);
+    }
+
+    return output.Body;
+  }
+
   // ── Workspace Scoped ────────────────────────────────────────────────────────
 
   @Post('workspace/:workspaceId/upload')
   @HttpCode(HttpStatus.CREATED)
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member')
   async uploadWorkspaceFile(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
@@ -52,6 +128,8 @@ export class FileController {
 
   @Post('workspace/:workspaceId/folder')
   @HttpCode(HttpStatus.CREATED)
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member')
   async createWorkspaceFolder(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
@@ -61,11 +139,15 @@ export class FileController {
   }
 
   @Get('workspace/:workspaceId/home')
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async getWorkspaceHome(@Param('workspaceId') workspaceId: string) {
     return this.fileService.getHomeFiles(workspaceId);
   }
 
   @Get('workspace/:workspaceId/all')
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async getWorkspaceAll(
     @Param('workspaceId') workspaceId: string,
     @Query('parentId') parentId?: string,
@@ -74,6 +156,8 @@ export class FileController {
   }
 
   @Get('workspace/:workspaceId/my-files')
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async getWorkspaceMyFiles(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
@@ -82,11 +166,15 @@ export class FileController {
   }
 
   @Get('workspace/:workspaceId/starred')
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async getWorkspaceStarred(@Param('workspaceId') workspaceId: string) {
     return this.fileService.getStarredFiles(workspaceId);
   }
 
   @Get('workspace/:workspaceId/shared')
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async getWorkspaceShared(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
@@ -95,11 +183,15 @@ export class FileController {
   }
 
   @Get('workspace/:workspaceId/trash')
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async getWorkspaceTrash(@Param('workspaceId') workspaceId: string) {
     return this.fileService.getTrashedFiles(workspaceId);
   }
 
   @Get('workspace/:workspaceId')
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async getWorkspaceFiles(
     @Param('workspaceId') workspaceId: string,
     @Query('parentId') parentId?: string,
@@ -111,6 +203,8 @@ export class FileController {
 
   @Post('project/:projectId/upload')
   @HttpCode(HttpStatus.CREATED)
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor')
   async uploadProjectFile(
     @Param('projectId') projectId: string,
     @CurrentUser('id') userId: string,
@@ -121,6 +215,8 @@ export class FileController {
 
   @Post('project/:projectId/folder')
   @HttpCode(HttpStatus.CREATED)
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor')
   async createProjectFolder(
     @Param('projectId') projectId: string,
     @CurrentUser('id') userId: string,
@@ -130,6 +226,8 @@ export class FileController {
   }
 
   @Get('project/:projectId/my-files')
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   async getProjectMyFiles(
     @Param('projectId') projectId: string,
     @CurrentUser('id') userId: string,
@@ -138,11 +236,15 @@ export class FileController {
   }
 
   @Get('project/:projectId/starred')
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   async getProjectStarred(@Param('projectId') projectId: string) {
     return this.fileService.getStarredFiles(undefined, projectId);
   }
 
   @Get('project/:projectId/shared')
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   async getProjectShared(
     @Param('projectId') projectId: string,
     @CurrentUser('id') userId: string,
@@ -151,11 +253,15 @@ export class FileController {
   }
 
   @Get('project/:projectId/trash')
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   async getProjectTrash(@Param('projectId') projectId: string) {
     return this.fileService.getTrashedFiles(undefined, projectId);
   }
 
   @Get('project/:projectId')
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   async getProjectFiles(
     @Param('projectId') projectId: string,
     @Query('parentId') parentId?: string,
@@ -283,3 +389,5 @@ export class FileController {
     return this.fileService.shareFile(fileId, dto);
   }
 }
+
+

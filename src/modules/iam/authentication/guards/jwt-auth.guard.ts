@@ -16,15 +16,33 @@ export class JwtAuthGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
-    const authHeader = request.headers?.authorization;
+    const url = request.raw?.url || request.url || '';
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    // Allow public access to streamed R2 files (avatars, images, PDF streams)
+    if (url.includes('/api/files/r2/')) {
+      return true;
+    }
+
+    const authHeader = request.headers?.authorization;
+    let token =
+      authHeader && authHeader.startsWith('Bearer ')
+        ? authHeader.split(' ')[1]
+        : null;
+
+    if (!token) {
+      token =
+        request.query?.token ||
+        request.cookies?.token ||
+        request.cookies?.accessToken ||
+        null;
+    }
+
+    if (!token) {
       throw new UnauthorizedException(
         'Missing or invalid Authorization header',
       );
     }
 
-    const token = authHeader.split(' ')[1];
     try {
       const secret =
         this.configService.get<string>('JWT_SECRET') || process.env.JWT_SECRET;

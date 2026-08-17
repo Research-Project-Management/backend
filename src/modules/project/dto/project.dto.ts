@@ -1,10 +1,12 @@
 import {
   IsArray,
   IsBoolean,
+  IsEnum,
   IsNotEmpty,
   IsOptional,
   IsString,
 } from 'class-validator';
+import { ProjectMemberRole } from '@prisma/client';
 
 export class CreateProjectDto {
   @IsString()
@@ -58,15 +60,15 @@ export class AddProjectMemberDto {
   @IsNotEmpty({ message: 'User ID is required' })
   userId!: string;
 
-  @IsString()
+  @IsEnum(ProjectMemberRole, { message: 'Invalid project member role' })
   @IsOptional()
-  role?: 'owner' | 'admin' | 'member' | 'viewer';
+  role?: ProjectMemberRole;
 }
 
 export class UpdateProjectMemberDto {
-  @IsString()
+  @IsEnum(ProjectMemberRole, { message: 'Invalid project member role' })
   @IsNotEmpty({ message: 'Role is required' })
-  role!: 'owner' | 'admin' | 'member' | 'viewer';
+  role!: ProjectMemberRole;
 
   @IsString()
   @IsOptional()

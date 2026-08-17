@@ -117,8 +117,8 @@ describe('ActivityService', () => {
 
   it('should return task specific activity timeline (Plane.so style)', async () => {
     const feed = await service.getTaskActivity('task-1', 10);
-    expect(feed.length).toBe(1);
-    expect(feed[0].verb).toBe('status_changed');
+    expect(feed.activities.length).toBe(1);
+    expect(feed.activities[0].verb).toBe('status_changed');
   });
 
   it('should return recent items resolved with titles', async () => {

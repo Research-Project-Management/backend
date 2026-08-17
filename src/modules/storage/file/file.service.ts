@@ -1,7 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FileRepository } from './file.repository';
 import { R2Service } from '../r2/r2.service';
-import { Prisma } from '@prisma/client';
+import { Prisma, EntityType } from '@prisma/client';
+import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
 import {
   PresignDto,
   UploadFileDto,
@@ -24,6 +26,7 @@ export class FileService {
   constructor(
     private readonly fileRepo: FileRepository,
     private readonly r2Service: R2Service,
+    @Optional() private readonly eventEmitter?: EventEmitter2,
   ) {}
 
   private formatFile<
@@ -57,6 +60,72 @@ export class FileService {
       ? dto.filename.slice(1)
       : dto.filename;
     return this.r2Service.getPresignedUploadUrl(key, dto.mimeType);
+  }
+
+  async uploadR2Buffer(
+    userId: string,
+    filename: string,
+    buffer: Buffer,
+    mimeType = 'application/octet-stream',
+    scope: { workspaceId?: string; projectId?: string; pageId?: string } = {},
+  ) {
+    const cleanName = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const key = `uploads/${Date.now()}-${cleanName}`;
+    const uploadRes = await this.r2Service.uploadBuffer(key, buffer, mimeType);
+
+    const linkedToType = scope.pageId
+      ? 'Page'
+      : scope.projectId
+        ? 'Project'
+        : scope.workspaceId
+          ? 'Workspace'
+          : null;
+    const linkedToId =
+      scope.pageId || scope.projectId || scope.workspaceId || null;
+
+    let file = null;
+    try {
+      if (userId) {
+        file = await this.fileRepo.createFile({
+          filename,
+          isFolder: false,
+          size: buffer.length,
+          mimeType,
+          url: uploadRes.url,
+          thumbnail: null,
+          parentId: null,
+          metaData: {},
+          authorId: userId,
+          workspaceId: scope.workspaceId || null,
+          linkedToType,
+          linkedToId,
+        });
+
+        this.eventEmitter?.emit(
+          'file.created',
+          new DomainActivityEvent({
+            entityType: 'file' as unknown as EntityType,
+            entityId: file.id,
+            verb: 'uploaded',
+            actorId: userId,
+            workspaceId: scope.workspaceId || '',
+            projectId: scope.projectId || undefined,
+          }),
+        );
+      }
+    } catch (dbErr) {
+      // Database record creation is optional for raw asset uploads (e.g. avatars, temp files)
+    }
+
+    return {
+      file: file ? this.formatFile(file) : null,
+      url: uploadRes.url,
+      path: uploadRes.path,
+    };
+  }
+
+  async getR2Stream(key: string) {
+    return this.r2Service.getObjectStream(key);
   }
 
   async upload(
@@ -317,3 +386,4 @@ export class FileService {
     return { files: files.map((f) => this.formatFile(f)) };
   }
 }
+

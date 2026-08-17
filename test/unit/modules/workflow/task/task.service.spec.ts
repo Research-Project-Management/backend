@@ -27,7 +27,6 @@ describe('TaskService', () => {
             findColumnTasks: jest.fn(),
             updateTasksRank: jest.fn(),
             bulkUpdateTasks: jest.fn(),
-            getAuditLog: jest.fn(),
           },
         },
       ],
@@ -56,5 +55,48 @@ describe('TaskService', () => {
 
     expect(result.task?.title).toBe('Write literature review');
     expect(result.task?.id).toBe('t-1');
+  });
+
+  it('should update task and mark completed when column is done', async () => {
+    (repo.updateTask as jest.Mock).mockResolvedValue({
+      id: 't-1',
+      title: 'Write literature review',
+      columnId: 'done',
+      completed: true,
+    });
+
+    const result = await service.updateTask('t-1', {
+      columnId: 'done',
+    });
+
+    expect(repo.updateTask).toHaveBeenCalledWith(
+      't-1',
+      expect.objectContaining({
+        columnId: 'done',
+        completed: true,
+      }),
+    );
+    expect(result.task?.completed).toBe(true);
+  });
+
+  it('should throw NotFoundException when deleting non-existent task', async () => {
+    (repo.findTaskById as jest.Mock).mockResolvedValue(null);
+
+    await expect(service.deleteTask('non-existing-task')).rejects.toThrow();
+  });
+
+  it('should delete existing task and return success', async () => {
+    (repo.findTaskById as jest.Mock).mockResolvedValue({
+      id: 't-1',
+      projectId: 'proj-1',
+      authorId: 'user-1',
+      project: { id: 'proj-1', workspaceId: 'ws-1' },
+    });
+    (repo.deleteTask as jest.Mock).mockResolvedValue(undefined);
+
+    const result = await service.deleteTask('t-1');
+
+    expect(repo.deleteTask).toHaveBeenCalledWith('t-1');
+    expect(result.success).toBe(true);
   });
 });

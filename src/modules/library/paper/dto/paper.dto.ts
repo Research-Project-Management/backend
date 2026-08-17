@@ -101,6 +101,66 @@ export class UploadPaperDto {
 
   @IsString()
   @IsOptional()
+  abstract?: string;
+
+  @IsString()
+  @IsOptional()
+  journal?: string;
+
+  @IsString()
+  @IsOptional()
+  publisher?: string;
+
+  @IsArray()
+  @IsOptional()
+  keywords?: string[];
+
+  @IsString()
+  @IsOptional()
+  volume?: string;
+
+  @IsString()
+  @IsOptional()
+  issue?: string;
+
+  @IsString()
+  @IsOptional()
+  pages?: string;
+
+  @IsString()
+  @IsOptional()
+  issn?: string;
+
+  @IsString()
+  @IsOptional()
+  isbn?: string;
+
+  @IsString()
+  @IsOptional()
+  url?: string;
+
+  @IsString()
+  @IsOptional()
+  type?: string;
+
+  @IsString()
+  @IsOptional()
+  language?: string;
+
+  @IsString()
+  @IsOptional()
+  journalAbbr?: string;
+
+  @IsString()
+  @IsOptional()
+  shortTitle?: string;
+
+  @IsString()
+  @IsOptional()
+  rights?: string;
+
+  @IsString()
+  @IsOptional()
   citationKey?: string;
 
   @IsArray()
@@ -251,3 +311,4 @@ export class UpdatePaperDto {
   @IsOptional()
   notes?: string[];
 }
+

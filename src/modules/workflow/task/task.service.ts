@@ -180,6 +180,7 @@ export class TaskService {
     });
 
     const formatted = this.formatTask(task);
+    const workspaceId = (task as any).project?.workspaceId || '';
 
     this.eventEmitter?.emit(
       'task.created',
@@ -189,7 +190,7 @@ export class TaskService {
         verb: 'created',
         actorId: userId,
         projectId,
-        workspaceId: '',
+        workspaceId,
         newIdentifier: task.identifier || undefined,
       }),
     );
@@ -256,6 +257,7 @@ export class TaskService {
     });
 
     const formatted = this.formatTask(task);
+    const workspaceId = (task as any).project?.workspaceId || '';
 
     this.eventEmitter?.emit(
       'task.updated',
@@ -267,7 +269,7 @@ export class TaskService {
         newValue: dto.columnId,
         actorId: task.authorId,
         projectId: task.projectId,
-        workspaceId: '',
+        workspaceId,
       }),
     );
 
@@ -275,7 +277,14 @@ export class TaskService {
   }
 
   async deleteTask(taskId: string) {
+    const task = await this.taskRepo.findTaskById(taskId);
+    if (!task) {
+      throw new NotFoundException('Task not found');
+    }
+
     await this.taskRepo.deleteTask(taskId);
+
+    const workspaceId = (task as any).project?.workspaceId || '';
 
     this.eventEmitter?.emit(
       'task.deleted',
@@ -283,8 +292,9 @@ export class TaskService {
         entityType: EntityType.task,
         entityId: taskId,
         verb: 'deleted',
-        actorId: '',
-        workspaceId: '',
+        actorId: task.authorId,
+        projectId: task.projectId,
+        workspaceId,
       }),
     );
 
@@ -396,10 +406,5 @@ export class TaskService {
     });
 
     return { task: this.formatTask(task) };
-  }
-
-  async getAuditLog(taskId: string) {
-    const task = await this.taskRepo.getAuditLog(taskId);
-    return { activity: task ? [task] : [] };
   }
 }

@@ -117,6 +117,7 @@ export class TaskRepository {
         cycle: { select: CYCLE_SELECT },
         parentTask: { select: { id: true, title: true, identifier: true } },
         subtasks: { select: SUBTASK_SELECT, orderBy: { rank: 'asc' } },
+        project: { select: { id: true, workspaceId: true } },
       },
     });
   }
@@ -137,6 +138,7 @@ export class TaskRepository {
         cycle: { select: CYCLE_SELECT },
         parentTask: { select: { id: true, title: true, identifier: true } },
         subtasks: { select: SUBTASK_SELECT, orderBy: { rank: 'asc' } },
+        project: { select: { id: true, workspaceId: true } },
       },
     });
   }
@@ -153,6 +155,7 @@ export class TaskRepository {
         cycle: { select: CYCLE_SELECT },
         parentTask: { select: { id: true, title: true, identifier: true } },
         subtasks: { select: SUBTASK_SELECT, orderBy: { rank: 'asc' } },
+        project: { select: { id: true, workspaceId: true } },
       },
     });
   }
@@ -216,13 +219,6 @@ export class TaskRepository {
         projectId,
       },
       data,
-    });
-  }
-
-  async getAuditLog(taskId: string) {
-    return this.prisma.task.findUnique({
-      where: { id: taskId },
-      select: { createdAt: true, updatedAt: true, authorId: true },
     });
   }
 }

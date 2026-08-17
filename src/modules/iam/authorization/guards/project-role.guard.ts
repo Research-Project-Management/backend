@@ -68,6 +68,16 @@ export class ProjectRoleGuard implements CanActivate {
       }
     }
 
+    if (!projectId && request.params?.cycleId) {
+      const cycle = await this.prisma.cycle.findUnique({
+        where: { id: request.params.cycleId },
+        select: { projectId: true },
+      });
+      if (cycle?.projectId) {
+        projectId = cycle.projectId;
+      }
+    }
+
     if (!projectId) {
       if (requiredRoles && requiredRoles.length > 0) {
         throw new ForbiddenException(

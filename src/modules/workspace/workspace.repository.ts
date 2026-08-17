@@ -143,13 +143,13 @@ export class WorkspaceRepository {
   async createMember(
     workspaceId: string,
     userId: string,
-    role: WorkspaceMemberRole | (string & {}),
+    role: WorkspaceMemberRole = WorkspaceMemberRole.member,
   ) {
     return this.prisma.workspaceMember.create({
       data: {
         workspaceId,
         userId,
-        role: role as WorkspaceMemberRole,
+        role,
       },
       include: {
         user: { select: USER_SELECT },
@@ -160,7 +160,7 @@ export class WorkspaceRepository {
   async updateMemberRole(
     workspaceId: string,
     userId: string,
-    role: WorkspaceMemberRole | (string & {}),
+    role: WorkspaceMemberRole,
   ) {
     return this.prisma.workspaceMember.update({
       where: {
@@ -169,7 +169,7 @@ export class WorkspaceRepository {
           userId,
         },
       },
-      data: { role: role as WorkspaceMemberRole },
+      data: { role },
       include: {
         user: { select: USER_SELECT },
       },
