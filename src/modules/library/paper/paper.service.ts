@@ -28,10 +28,7 @@ export class PaperService {
       skip?: number;
     },
   ) {
-    const ws = await this.paperRepo.prisma.workspace.findFirst({
-      where: { OR: [{ id: workspaceId }, { url: workspaceId }] },
-      select: { id: true },
-    });
+    const ws = await this.paperRepo.resolveWorkspace(workspaceId);
     const targetWsId = ws?.id || workspaceId;
 
     const where: Prisma.PaperWhereInput = {
@@ -74,10 +71,7 @@ export class PaperService {
   }
 
   async uploadPaper(workspaceId: string, userId: string, dto: UploadPaperDto) {
-    const ws = await this.paperRepo.prisma.workspace.findFirst({
-      where: { OR: [{ id: workspaceId }, { url: workspaceId }] },
-      select: { id: true },
-    });
+    const ws = await this.paperRepo.resolveWorkspace(workspaceId);
     const targetWsId = ws?.id || workspaceId;
 
     let targetUserId = userId;
@@ -138,6 +132,9 @@ export class PaperService {
   }
 
   async ingestPaper(workspaceId: string, userId: string, dto: IngestPaperDto) {
+    const ws = await this.paperRepo.resolveWorkspace(workspaceId);
+    const targetWsId = ws?.id || workspaceId;
+
     const citationKey =
       dto.citationKey ||
       this.bibtexFormatter.generateCitationKey(
@@ -156,7 +153,7 @@ export class PaperService {
       year: dto.year || null,
       doi: dto.doi || '',
       citationKey,
-      workspaceId,
+      workspaceId: targetWsId,
       uploadedById: userId,
       collectionId: dto.collectionId || null,
       primaryFile: {
@@ -176,6 +173,9 @@ export class PaperService {
     userId: string,
     dto: ImportStoragePaperDto,
   ) {
+    const ws = await this.paperRepo.resolveWorkspace(workspaceId);
+    const targetWsId = ws?.id || workspaceId;
+
     const fileResult = await this.fileService.getFile(dto.fileId);
     const file = fileResult?.file;
 
@@ -197,7 +197,7 @@ export class PaperService {
       authors: dto.authors || [],
       doi: dto.doi || '',
       citationKey,
-      workspaceId,
+      workspaceId: targetWsId,
       uploadedById: userId,
       collectionId: dto.collectionId || null,
       primaryFile: {

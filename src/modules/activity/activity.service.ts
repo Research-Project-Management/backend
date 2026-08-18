@@ -33,12 +33,14 @@ export class ActivityService {
       limit?: number;
     },
   ) {
+    const ws = await this.activityRepo.resolveWorkspace(workspaceId);
+    const targetWsId = ws?.id || workspaceId;
     const page = Math.max(1, options?.page ?? 1);
     const limit = Math.min(100, Math.max(1, options?.limit ?? 50));
     const offset = (page - 1) * limit;
 
     const { items, total } = await this.activityRepo.findWorkspaceFeed(
-      workspaceId,
+      targetWsId,
       {
         projectId: options?.projectId,
         entityType: options?.entityType,
@@ -116,8 +118,11 @@ export class ActivityService {
     userId: string,
     limit: number = 10,
   ): Promise<RecentItemResponse[]> {
+    const ws = await this.activityRepo.resolveWorkspace(workspaceId);
+    const targetWsId = ws?.id || workspaceId;
+
     const recentEvents = await this.activityRepo.findRecentByActor(
-      workspaceId,
+      targetWsId,
       userId,
       50,
     );
@@ -145,7 +150,7 @@ export class ActivityService {
     }
 
     if (uniqueTargets.length === 0) {
-      return this.fetchFallbackRecent(workspaceId, userId, limit);
+      return this.fetchFallbackRecent(targetWsId, userId, limit);
     }
 
     const taskIds = uniqueTargets
@@ -167,13 +172,13 @@ export class ActivityService {
         : [],
       paperIds.length
         ? this.prisma.paper.findMany({
-            where: { id: { in: paperIds } },
+            where: { id: { in: paperIds }, deletedAt: null },
             select: { id: true, title: true },
           })
         : [],
       pageIds.length
         ? this.prisma.page.findMany({
-            where: { id: { in: pageIds } },
+            where: { id: { in: pageIds }, deletedAt: null },
             select: { id: true, title: true },
           })
         : [],
@@ -191,7 +196,7 @@ export class ActivityService {
       title:
         titleMap.get(`${target.entityType}:${target.entityId}`) ||
         `Untitled ${target.entityType}`,
-      workspaceId,
+      workspaceId: targetWsId,
       projectId: target.projectId,
       lastInteractedAt: target.lastInteractedAt,
     }));
@@ -202,10 +207,13 @@ export class ActivityService {
     userId: string,
     limit: number,
   ): Promise<RecentItemResponse[]> {
+    const ws = await this.activityRepo.resolveWorkspace(workspaceId);
+    const targetWsId = ws?.id || workspaceId;
+
     const [tasks, papers, pages] = await Promise.all([
       this.prisma.task.findMany({
         where: {
-          project: { workspaceId },
+          project: { workspaceId: targetWsId },
           OR: [{ authorId: userId }, { assigneeId: userId }],
         },
         orderBy: { updatedAt: 'desc' },
@@ -213,16 +221,17 @@ export class ActivityService {
         select: { id: true, title: true, projectId: true, updatedAt: true },
       }),
       this.prisma.paper.findMany({
-        where: { workspaceId, uploadedById: userId },
+        where: { workspaceId: targetWsId, uploadedById: userId, deletedAt: null },
         orderBy: { updatedAt: 'desc' },
         take: limit,
         select: { id: true, title: true, updatedAt: true },
       }),
       this.prisma.page.findMany({
         where: {
+          deletedAt: null,
           OR: [
-            { workspaceId, authorId: userId },
-            { project: { workspaceId }, authorId: userId },
+            { workspaceId: targetWsId, authorId: userId },
+            { project: { workspaceId: targetWsId }, authorId: userId },
           ],
         },
         orderBy: { updatedAt: 'desc' },
@@ -237,7 +246,7 @@ export class ActivityService {
         entityType: 'task' as const,
         entityId: t.id,
         title: t.title,
-        workspaceId,
+        workspaceId: targetWsId,
         projectId: t.projectId,
         lastInteractedAt: t.updatedAt,
       })),
@@ -246,7 +255,7 @@ export class ActivityService {
         entityType: 'paper' as const,
         entityId: p.id,
         title: p.title,
-        workspaceId,
+        workspaceId: targetWsId,
         projectId: null,
         lastInteractedAt: p.updatedAt,
       })),
@@ -255,7 +264,7 @@ export class ActivityService {
         entityType: 'page' as const,
         entityId: p.id,
         title: p.title,
-        workspaceId,
+        workspaceId: targetWsId,
         projectId: p.projectId,
         lastInteractedAt: p.updatedAt,
       })),

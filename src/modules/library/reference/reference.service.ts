@@ -31,6 +31,9 @@ export class ReferenceService {
     userId: string,
     dto: CreateReferenceDto,
   ) {
+    const ws = await this.paperRepo.resolveWorkspace(workspaceId);
+    const targetWsId = ws?.id || workspaceId;
+
     const citationKey =
       dto.citationKey?.trim() ||
       this.bibtexFormatter.generateCitationKey(
@@ -55,7 +58,7 @@ export class ReferenceService {
       url: dto.url || '',
       filename: `${citationKey}.pdf`,
       fileUrl: '', // Reference-only item (no uploaded PDF file initially)
-      workspaceId,
+      workspaceId: targetWsId,
       uploadedById: userId,
       collectionId: dto.collectionId || null,
     });
@@ -91,8 +94,11 @@ export class ReferenceService {
     workspaceId: string,
     collectionId?: string,
   ): Promise<{ bibtex: string; total: number; filename: string }> {
+    const ws = await this.paperRepo.resolveWorkspace(workspaceId);
+    const targetWsId = ws?.id || workspaceId;
+
     const where = {
-      workspaceId,
+      workspaceId: targetWsId,
       deletedAt: null,
       ...(collectionId && { collectionId }),
     };

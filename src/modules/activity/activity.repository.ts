@@ -32,6 +32,15 @@ export class ActivityRepository {
     });
   }
 
+  async resolveWorkspace(workspaceIdOrSlug: string) {
+    return this.prisma.workspace.findFirst({
+      where: {
+        OR: [{ id: workspaceIdOrSlug }, { url: workspaceIdOrSlug }],
+      },
+      select: { id: true },
+    });
+  }
+
   async findWorkspaceFeed(
     workspaceId: string,
     options?: {
@@ -41,10 +50,12 @@ export class ActivityRepository {
       offset?: number;
     },
   ) {
+    const ws = await this.resolveWorkspace(workspaceId);
+    const targetWsId = ws?.id || workspaceId;
     const limit = options?.limit ?? 50;
     const offset = options?.offset ?? 0;
 
-    const where: any = { workspaceId };
+    const where: any = { workspaceId: targetWsId };
     if (options?.projectId) {
       where.projectId = options.projectId;
     }
@@ -84,9 +95,11 @@ export class ActivityRepository {
   }
 
   async findRecentByActor(workspaceId: string, actorId: string, limit = 50) {
+    const ws = await this.resolveWorkspace(workspaceId);
+    const targetWsId = ws?.id || workspaceId;
     return this.prisma.activityEvent.findMany({
       where: {
-        workspaceId,
+        workspaceId: targetWsId,
         actorId,
       },
       orderBy: { createdAt: 'desc' },

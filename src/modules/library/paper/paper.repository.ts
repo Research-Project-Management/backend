@@ -23,6 +23,15 @@ export type PaperWithRelations = Prisma.PaperGetPayload<{
 export class PaperRepository {
   constructor(public readonly prisma: PrismaService) {}
 
+  async resolveWorkspace(workspaceIdOrSlug: string) {
+    return this.prisma.workspace.findFirst({
+      where: {
+        OR: [{ id: workspaceIdOrSlug }, { url: workspaceIdOrSlug }],
+      },
+      select: { id: true },
+    });
+  }
+
   async findPapers(
     where: Prisma.PaperWhereInput,
     options?: {

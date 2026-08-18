@@ -23,6 +23,7 @@ describe('PaperService', () => {
                 findFirst: jest.fn().mockResolvedValue({ id: 'user-1' }),
               },
             },
+            resolveWorkspace: jest.fn().mockResolvedValue({ id: 'ws-1' }),
             findPapers: jest.fn(),
             countPapers: jest.fn(),
             findPaperById: jest.fn(),

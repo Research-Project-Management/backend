@@ -51,3 +51,29 @@ export class UpdateCollectionDto {
   @IsOptional()
   parentId?: string;
 }
+
+export class MovePapersDto {
+  @IsNotEmpty({ message: 'paperIds array is required' })
+  paperIds!: string[];
+}
+
+export class ReorderItemDto {
+  @IsString()
+  @IsNotEmpty()
+  id!: string;
+
+  @IsString()
+  @IsOptional()
+  parentId?: string | null;
+}
+
+export class ReorderCollectionsDto {
+  @IsNotEmpty({ message: 'collections array is required' })
+  collections!: ReorderItemDto[];
+}
+
+export class DeleteCollectionQueryDto {
+  @IsString()
+  @IsOptional()
+  strategy?: 'cascade' | 'move-to-parent' | 'orphan';
+}

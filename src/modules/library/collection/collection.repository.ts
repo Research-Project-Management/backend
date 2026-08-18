@@ -14,9 +14,20 @@ export type CollectionWithCount = Prisma.CollectionGetPayload<{
 export class CollectionRepository {
   constructor(private readonly prisma: PrismaService) {}
 
+  async resolveWorkspace(workspaceIdOrSlug: string) {
+    return this.prisma.workspace.findFirst({
+      where: {
+        OR: [{ id: workspaceIdOrSlug }, { url: workspaceIdOrSlug }],
+      },
+      select: { id: true },
+    });
+  }
+
   async findWorkspaceCollections(workspaceId: string) {
+    const ws = await this.resolveWorkspace(workspaceId);
+    const targetWsId = ws?.id || workspaceId;
     return this.prisma.collection.findMany({
-      where: { workspaceId },
+      where: { workspaceId: targetWsId },
       include: {
         _count: {
           select: { papers: { where: { deletedAt: null } } },
@@ -52,6 +63,31 @@ export class CollectionRepository {
     return this.prisma.collection.update({
       where: { id: collectionId },
       data: data,
+    });
+  }
+
+  async reparentChildren(oldParentId: string, newParentId: string | null) {
+    return this.prisma.collection.updateMany({
+      where: { parentId: oldParentId },
+      data: { parentId: newParentId },
+    });
+  }
+
+  async movePapers(
+    workspaceId: string,
+    targetCollectionId: string | null,
+    paperIds: string[],
+  ) {
+    const ws = await this.resolveWorkspace(workspaceId);
+    const targetWsId = ws?.id || workspaceId;
+    return this.prisma.paper.updateMany({
+      where: {
+        workspaceId: targetWsId,
+        id: { in: paperIds },
+      },
+      data: {
+        collectionId: targetCollectionId,
+      },
     });
   }
 

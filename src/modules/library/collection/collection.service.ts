@@ -1,6 +1,14 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { CollectionRepository } from './collection.repository';
-import { CreateCollectionDto, UpdateCollectionDto } from './dto/collection.dto';
+import {
+  CreateCollectionDto,
+  UpdateCollectionDto,
+  ReorderItemDto,
+} from './dto/collection.dto';
 
 export type FormattedCollection<
   T extends {
@@ -48,8 +56,10 @@ export class CollectionService {
   }
 
   async getCollections(workspaceId: string) {
+    const ws = await this.collectionRepo.resolveWorkspace(workspaceId);
+    const targetWsId = ws?.id || workspaceId;
     const collections =
-      await this.collectionRepo.findWorkspaceCollections(workspaceId);
+      await this.collectionRepo.findWorkspaceCollections(targetWsId);
 
     return {
       collections: collections.map((c) => this.formatCollection(c)),
@@ -72,14 +82,24 @@ export class CollectionService {
     userId: string,
     dto: CreateCollectionDto,
   ) {
+    const ws = await this.collectionRepo.resolveWorkspace(workspaceId);
+    const targetWsId = ws?.id || workspaceId;
+
     const parentId = dto.parentId || dto.parent || null;
+    if (parentId) {
+      const parent = await this.collectionRepo.findCollectionById(parentId);
+      if (!parent || parent.workspaceId !== targetWsId) {
+        throw new NotFoundException('Parent collection not found in workspace');
+      }
+    }
+
     const collection = await this.collectionRepo.createCollection({
       name: dto.name,
       description: dto.description || '',
       color: dto.color || '#3370ff',
       icon: dto.icon || '',
       parentId,
-      workspaceId,
+      workspaceId: targetWsId,
       createdById: userId,
     });
 
@@ -87,12 +107,30 @@ export class CollectionService {
   }
 
   async updateCollection(collectionId: string, dto: UpdateCollectionDto) {
+    const existing =
+      await this.collectionRepo.findCollectionById(collectionId);
+    if (!existing) {
+      throw new NotFoundException('Collection not found');
+    }
+
     const parentId =
       dto.parentId !== undefined
         ? dto.parentId
         : dto.parent !== undefined
           ? dto.parent
           : undefined;
+
+    if (parentId !== undefined && parentId !== null) {
+      if (parentId === collectionId) {
+        throw new BadRequestException('A collection cannot be its own parent');
+      }
+
+      await this.validateNoCircularHierarchy(
+        collectionId,
+        parentId,
+        existing.workspaceId,
+      );
+    }
 
     const collection = await this.collectionRepo.updateCollection(
       collectionId,
@@ -108,8 +146,105 @@ export class CollectionService {
     return { collection: this.formatCollection(collection) };
   }
 
-  async deleteCollection(collectionId: string) {
+  /**
+   * Prevents circular parent-child relationships (e.g., A -> B -> A)
+   */
+  private async validateNoCircularHierarchy(
+    collectionId: string,
+    targetParentId: string,
+    workspaceId: string,
+  ) {
+    const allCollections =
+      await this.collectionRepo.findWorkspaceCollections(workspaceId);
+    const map = new Map(allCollections.map((c) => [c.id, c.parentId]));
+
+    let current: string | null | undefined = targetParentId;
+    const visited = new Set<string>();
+
+    while (current) {
+      if (current === collectionId) {
+        throw new BadRequestException(
+          'Circular hierarchy detected: cannot set a collection as child of its own descendant',
+        );
+      }
+      if (visited.has(current)) break;
+      visited.add(current);
+      current = map.get(current);
+    }
+  }
+
+  async deleteCollection(
+    collectionId: string,
+    strategy: 'cascade' | 'move-to-parent' | 'orphan' = 'cascade',
+  ) {
+    const existing =
+      await this.collectionRepo.findCollectionById(collectionId);
+    if (!existing) {
+      throw new NotFoundException('Collection not found');
+    }
+
+    if (strategy === 'move-to-parent') {
+      await this.collectionRepo.reparentChildren(
+        collectionId,
+        existing.parentId || null,
+      );
+    } else if (strategy === 'orphan') {
+      await this.collectionRepo.reparentChildren(collectionId, null);
+    }
+
     await this.collectionRepo.deleteCollection(collectionId);
     return { message: 'Collection deleted successfully' };
+  }
+
+  async movePapers(
+    workspaceId: string,
+    targetCollectionId: string | null,
+    paperIds: string[],
+  ) {
+    const ws = await this.collectionRepo.resolveWorkspace(workspaceId);
+    const targetWsId = ws?.id || workspaceId;
+
+    const normalizedTargetId =
+      targetCollectionId === 'unfiled' ||
+      targetCollectionId === 'root' ||
+      !targetCollectionId
+        ? null
+        : targetCollectionId;
+
+    if (normalizedTargetId) {
+      const targetCol =
+        await this.collectionRepo.findCollectionById(normalizedTargetId);
+      if (!targetCol || targetCol.workspaceId !== targetWsId) {
+        throw new NotFoundException('Target collection not found in workspace');
+      }
+    }
+
+    const result = await this.collectionRepo.movePapers(
+      targetWsId,
+      normalizedTargetId,
+      paperIds,
+    );
+
+    return {
+      message: 'Papers moved successfully',
+      count: result.count,
+      targetCollectionId: normalizedTargetId,
+    };
+  }
+
+  async reorderCollections(workspaceId: string, items: ReorderItemDto[]) {
+    const ws = await this.collectionRepo.resolveWorkspace(workspaceId);
+    const targetWsId = ws?.id || workspaceId;
+
+    for (const item of items) {
+      if (item.parentId && item.parentId === item.id) continue;
+      await this.collectionRepo.updateCollection(item.id, {
+        ...(item.parentId !== undefined && {
+          parentId: item.parentId || null,
+        }),
+      });
+    }
+
+    return this.getCollections(targetWsId);
   }
 }

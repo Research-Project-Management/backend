@@ -17,6 +17,7 @@ describe('ActivityService', () => {
         {
           provide: ActivityRepository,
           useValue: {
+            resolveWorkspace: jest.fn().mockResolvedValue({ id: 'ws-1' }),
             create: jest.fn().mockImplementation((dto) =>
               Promise.resolve({
                 id: 'evt-1',

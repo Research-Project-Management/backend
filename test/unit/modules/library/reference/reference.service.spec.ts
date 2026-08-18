@@ -10,6 +10,7 @@ describe('ReferenceService & BibtexFormatter', () => {
   let paperRepo: PaperRepository;
 
   const mockPaperRepo = {
+    resolveWorkspace: jest.fn().mockResolvedValue({ id: 'ws-1' }),
     createPaper: jest.fn(),
     findPapers: jest.fn(),
   };

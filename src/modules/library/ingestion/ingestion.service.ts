@@ -131,8 +131,11 @@ export class IngestionService {
     );
 
     // 3. Persist Paper / Reference entity in database
+    const ws = await this.paperRepo.resolveWorkspace(dto.workspaceId);
+    const targetWsId = ws?.id || dto.workspaceId;
+
     const paper = await this.paperRepo.createPaper({
-      workspaceId: dto.workspaceId,
+      workspaceId: targetWsId,
       uploadedById: userId,
       title,
       filename,

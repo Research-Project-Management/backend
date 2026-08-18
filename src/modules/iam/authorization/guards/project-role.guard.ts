@@ -50,32 +50,44 @@ export class ProjectRoleGuard implements CanActivate {
     }
 
     if (!projectId && request.params?.pageId) {
-      const page = await this.prisma.page.findUnique({
-        where: { id: request.params.pageId },
-        select: { projectId: true },
-      });
-      if (page?.projectId) {
-        projectId = page.projectId;
+      try {
+        const page = await this.prisma.page.findUnique({
+          where: { id: request.params.pageId },
+          select: { projectId: true },
+        });
+        if (page?.projectId) {
+          projectId = page.projectId;
+        }
+      } catch {
+        // Ignore invalid UUID or lookup failure
       }
     }
 
     if (!projectId && request.params?.taskId) {
-      const task = await this.prisma.task.findUnique({
-        where: { id: request.params.taskId },
-        select: { projectId: true },
-      });
-      if (task?.projectId) {
-        projectId = task.projectId;
+      try {
+        const task = await this.prisma.task.findUnique({
+          where: { id: request.params.taskId },
+          select: { projectId: true },
+        });
+        if (task?.projectId) {
+          projectId = task.projectId;
+        }
+      } catch {
+        // Ignore invalid UUID or lookup failure
       }
     }
 
     if (!projectId && request.params?.cycleId) {
-      const cycle = await this.prisma.cycle.findUnique({
-        where: { id: request.params.cycleId },
-        select: { projectId: true },
-      });
-      if (cycle?.projectId) {
-        projectId = cycle.projectId;
+      try {
+        const cycle = await this.prisma.cycle.findUnique({
+          where: { id: request.params.cycleId },
+          select: { projectId: true },
+        });
+        if (cycle?.projectId) {
+          projectId = cycle.projectId;
+        }
+      } catch {
+        // Ignore invalid UUID or lookup failure
       }
     }
 

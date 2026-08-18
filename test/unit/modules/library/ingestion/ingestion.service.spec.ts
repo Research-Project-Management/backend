@@ -17,6 +17,7 @@ describe('IngestionService', () => {
         {
           provide: PaperRepository,
           useValue: {
+            resolveWorkspace: jest.fn().mockResolvedValue({ id: 'ws-1' }),
             createPaper: jest.fn(),
           },
         },
