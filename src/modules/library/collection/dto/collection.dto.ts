@@ -77,3 +77,15 @@ export class DeleteCollectionQueryDto {
   @IsOptional()
   strategy?: 'cascade' | 'move-to-parent' | 'orphan';
 }
+
+export class AssignPapersToCollectionDto {
+  @IsNotEmpty({ message: 'paperIds array is required' })
+  paperIds!: string[];
+}
+
+export class ProjectCollectionQueryDto {
+  @IsString()
+  @IsOptional()
+  projectId?: string;
+}
+

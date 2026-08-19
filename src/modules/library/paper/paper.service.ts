@@ -7,7 +7,9 @@ import {
   AddAttachmentDto,
   UpdatePaperDto,
   ImportStoragePaperDto,
+  MergePapersDto,
 } from './dto/paper.dto';
+
 import { FileService } from '@/modules/storage/file/file.service';
 import { BibtexFormatter } from '../reference/formatters/bibtex.formatter';
 
@@ -24,6 +26,7 @@ export class PaperService {
     query?: {
       collectionId?: string;
       search?: string;
+      smartFilter?: string;
       limit?: number;
       skip?: number;
     },
@@ -37,12 +40,48 @@ export class PaperService {
       ...(query?.collectionId && { collectionId: query.collectionId }),
     };
 
-    if (query?.search) {
-      where.OR = [
-        { title: { contains: query.search, mode: 'insensitive' } },
-        { doi: { contains: query.search, mode: 'insensitive' } },
-        { abstract: { contains: query.search, mode: 'insensitive' } },
-      ];
+    const andFilters: Prisma.PaperWhereInput[] = [];
+
+    // Apply Zotero Smart Virtual Filters
+    if (query?.smartFilter) {
+      switch (query.smartFilter) {
+        case 'unfiled':
+          andFilters.push({ collectionId: null });
+          break;
+        case 'missing-doi':
+          andFilters.push({ OR: [{ doi: null }, { doi: '' }] });
+          break;
+        case 'missing-pdf':
+          andFilters.push({
+            attachments: {
+              none: {
+                mimeType: { contains: 'pdf', mode: 'insensitive' },
+              },
+            },
+          });
+          break;
+        case 'with-notes':
+          andFilters.push({ NOT: { notes: { equals: [] } } });
+          break;
+      }
+    }
+
+    if (query?.search && query.search.trim()) {
+      const s = query.search.trim();
+      andFilters.push({
+        OR: [
+          { title: { contains: s, mode: 'insensitive' } },
+          { doi: { contains: s, mode: 'insensitive' } },
+          { abstract: { contains: s, mode: 'insensitive' } },
+          { journal: { contains: s, mode: 'insensitive' } },
+          { publisher: { contains: s, mode: 'insensitive' } },
+          { citationKey: { contains: s, mode: 'insensitive' } },
+        ],
+      });
+    }
+
+    if (andFilters.length > 0) {
+      where.AND = andFilters;
     }
 
     const [papers, total] = await Promise.all([
@@ -82,13 +121,17 @@ export class PaperService {
       targetUserId = u?.id || '';
     }
 
-    const citationKey =
+    const rawKey =
       dto.citationKey ||
       this.bibtexFormatter.generateCitationKey(
         dto.title,
         dto.authors,
         dto.year,
       );
+    const citationKey = await this.paperRepo.resolveUniqueCitationKey(
+      targetWsId,
+      rawKey,
+    );
 
     const paper = await this.paperRepo.createPaper({
       title: dto.title,
@@ -135,13 +178,17 @@ export class PaperService {
     const ws = await this.paperRepo.resolveWorkspace(workspaceId);
     const targetWsId = ws?.id || workspaceId;
 
-    const citationKey =
+    const rawKey =
       dto.citationKey ||
       this.bibtexFormatter.generateCitationKey(
         dto.title || 'Paper',
         dto.authors,
         dto.year,
       );
+    const citationKey = await this.paperRepo.resolveUniqueCitationKey(
+      targetWsId,
+      rawKey,
+    );
 
     const paper = await this.paperRepo.createPaper({
       title: dto.title || 'Untitled Paper',
@@ -297,4 +344,27 @@ export class PaperService {
 
     return { message: 'RAG indexing queued' };
   }
+
+  async getWorkspaceTags(workspaceId: string): Promise<string[]> {
+    const ws = await this.paperRepo.resolveWorkspace(workspaceId);
+    const targetWsId = ws?.id || workspaceId;
+    const papers = await this.paperRepo.findPapers(
+      { workspaceId: targetWsId, deletedAt: null },
+      { take: 1000 },
+    );
+    const tagSet = new Set<string>();
+    for (const p of papers) {
+      if (Array.isArray(p.labels)) {
+        for (const l of p.labels) {
+          if (l && typeof l === 'string' && l.trim()) {
+            tagSet.add(l.trim());
+          }
+        }
+      }
+    }
+    return Array.from(tagSet).sort();
+  }
 }
+
+
+

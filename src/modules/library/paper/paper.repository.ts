@@ -113,4 +113,41 @@ export class PaperRepository {
       where: { id: attachmentId },
     });
   }
+
+  /**
+   * Deterministically resolve unique citationKey within workspace
+   */
+  async resolveUniqueCitationKey(
+    workspaceId: string,
+    baseKey: string,
+    excludePaperId?: string,
+  ): Promise<string> {
+    const existing = await this.prisma.paper.findMany({
+      where: {
+        workspaceId,
+        deletedAt: null,
+        citationKey: {
+          startsWith: baseKey,
+        },
+        ...(excludePaperId && { id: { not: excludePaperId } }),
+      },
+      select: { citationKey: true },
+    });
+
+    const keySet = new Set(existing.map((p) => p.citationKey));
+    if (!keySet.has(baseKey)) {
+      return baseKey;
+    }
+
+    const alphabet = 'abcdefghijklmnopqrstuvwxyz';
+    for (let i = 0; i < alphabet.length; i++) {
+      const candidate = `${baseKey}${alphabet[i]}`;
+      if (!keySet.has(candidate)) {
+        return candidate;
+      }
+    }
+
+    return `${baseKey}-${Date.now().toString(36)}`;
+  }
 }
+

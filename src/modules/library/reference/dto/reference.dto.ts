@@ -7,6 +7,16 @@ import {
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
+export class ResolveQueryDto {
+  @ApiProperty({
+    description: 'Academic query string (DOI, arXiv ID, arXiv URL, DOI URL, or Title)',
+    example: '1706.03762',
+  })
+  @IsString()
+  @IsNotEmpty()
+  query!: string;
+}
+
 export class ResolveDoiDto {
   @ApiProperty({
     description: 'DOI identifier (e.g. 10.1038/s41586-020-2649-2 or full URL)',
@@ -97,3 +107,48 @@ export class ExportBibtexDto {
   @IsOptional()
   collectionId?: string;
 }
+
+export class ImportBibtexDto {
+  @ApiProperty({ description: 'Raw BibTeX text string to import' })
+  @IsString()
+  @IsNotEmpty()
+  bibtex!: string;
+
+  @ApiPropertyOptional({ description: 'Target Collection ID' })
+  @IsString()
+  @IsOptional()
+  collectionId?: string;
+}
+
+export class FormatCitationQueryDto {
+  @ApiPropertyOptional({
+    description: 'Citation style (apa, ieee, nature, harvard, chicago, mla, vancouver)',
+    example: 'apa',
+    default: 'apa',
+  })
+  @IsString()
+  @IsOptional()
+  style?: string;
+}
+
+export class FormatBatchCitationDto {
+  @ApiProperty({
+    description: 'Array of paper IDs to format',
+    type: [String],
+    example: ['paper-id-1', 'paper-id-2'],
+  })
+  @IsArray()
+  @IsNotEmpty()
+  paperIds!: string[];
+
+  @ApiPropertyOptional({
+    description: 'Citation style (apa, ieee, nature, harvard, chicago, mla, vancouver)',
+    example: 'apa',
+    default: 'apa',
+  })
+  @IsString()
+  @IsOptional()
+  style?: string;
+}
+
+

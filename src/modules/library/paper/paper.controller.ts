@@ -20,6 +20,7 @@ import {
   UpdatePaperDto,
   ImportStoragePaperDto,
 } from './dto/paper.dto';
+
 import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authentication';
 import {
   WorkspaceRoleGuard,
@@ -49,20 +50,33 @@ export class PaperController {
   @Get(['papers/:workspaceId', ':workspaceId/papers'])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
-  @ApiOperation({ summary: 'Get workspace library papers' })
+  @ApiOperation({
+    summary:
+      'Get workspace library papers with optional search, collection, and smart filters (unfiled, missing-doi, missing-pdf, with-notes)',
+  })
   async getPapers(
     @Param('workspaceId') workspaceId: string,
     @Query('collectionId') collectionId?: string,
     @Query('search') search?: string,
+    @Query('smartFilter') smartFilter?: string,
     @Query('limit') limit?: number,
     @Query('skip') skip?: number,
   ) {
     return this.paperService.getPapers(workspaceId, {
       collectionId,
       search,
+      smartFilter,
       limit,
       skip,
     });
+  }
+
+  @Get(['papers/:workspaceId/tags', ':workspaceId/tags'])
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'Get all distinct labels/tags used across workspace papers' })
+  async getWorkspaceTags(@Param('workspaceId') workspaceId: string) {
+    return this.paperService.getWorkspaceTags(workspaceId);
   }
 
   @Get(':workspaceId/collections/:collectionId/papers')
@@ -97,7 +111,10 @@ export class PaperController {
     return this.paperService.uploadPaper(workspaceId, userId, dto);
   }
 
-  @Post(':workspaceId/collections/:collectionId/papers')
+  @Post([
+    'papers/:workspaceId/collections/:collectionId/upload',
+    ':workspaceId/collections/:collectionId/upload',
+  ])
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member')
@@ -219,3 +236,5 @@ export class PaperController {
     return this.paperService.exportBibtex(paperId);
   }
 }
+
+

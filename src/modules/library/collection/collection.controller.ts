@@ -19,7 +19,9 @@ import {
   UpdateCollectionDto,
   MovePapersDto,
   ReorderCollectionsDto,
+  AssignPapersToCollectionDto,
 } from './dto/collection.dto';
+
 import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authentication';
 import {
   WorkspaceRoleGuard,
@@ -130,4 +132,85 @@ export class CollectionController {
       dto.collections,
     );
   }
+
+  @Post([
+    'collections/:workspaceId/:collectionId/papers',
+    ':workspaceId/collections/:collectionId/papers',
+  ])
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Link papers from library to a collection' })
+  async assignPapersToCollection(
+    @Param('workspaceId') workspaceId: string,
+    @Param('collectionId') collectionId: string,
+    @Body() dto: AssignPapersToCollectionDto,
+  ) {
+    return this.collectionService.assignPapersToCollection(
+      workspaceId,
+      collectionId,
+      dto,
+    );
+  }
+
+  @Delete([
+    'collections/:workspaceId/:collectionId/papers/:paperId',
+    ':workspaceId/collections/:collectionId/papers/:paperId',
+  ])
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({
+    summary: 'Soft-detach paper from collection (preserves paper in library)',
+  })
+  async detachPaperFromCollection(
+    @Param('workspaceId') workspaceId: string,
+    @Param('collectionId') collectionId: string,
+    @Param('paperId') paperId: string,
+  ) {
+    return this.collectionService.detachPaperFromCollection(
+      workspaceId,
+      collectionId,
+      paperId,
+    );
+  }
+
+  @Get([
+    'collections/:workspaceId/:collectionId/bibtex',
+    ':workspaceId/collections/:collectionId/bibtex',
+  ])
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({
+    summary: 'Export all references in a collection to BibTeX format',
+  })
+  async exportCollectionBibtex(
+    @Param('workspaceId') workspaceId: string,
+    @Param('collectionId') collectionId: string,
+  ) {
+    return this.collectionService.exportCollectionBibtex(
+      workspaceId,
+      collectionId,
+    );
+  }
+
+  @Get([
+    'collections/:workspaceId/:collectionId/export-bundle',
+    ':workspaceId/collections/:collectionId/export-bundle',
+  ])
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({
+    summary:
+      'Export complete collection archive bundle (BibTeX + PDF files manifest)',
+  })
+  async exportCollectionBundle(
+    @Param('workspaceId') workspaceId: string,
+    @Param('collectionId') collectionId: string,
+  ) {
+    return this.collectionService.getCollectionExportBundle(
+      workspaceId,
+      collectionId,
+    );
+  }
 }
+

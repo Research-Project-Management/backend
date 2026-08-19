@@ -311,3 +311,15 @@ export class UpdatePaperDto {
   @IsOptional()
   notes?: string[];
 }
+
+export class MergePapersDto {
+  @IsString()
+  @IsNotEmpty({ message: 'Master paper ID is required' })
+  masterPaperId!: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsNotEmpty({ message: 'Source paper IDs array is required' })
+  sourcePaperIds!: string[];
+}
+

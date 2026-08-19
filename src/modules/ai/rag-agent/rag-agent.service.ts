@@ -1,11 +1,15 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { FastifyReply } from 'fastify';
 import { EngineService } from '../engine/engine.service';
 import { RagAgentQueryDto } from './dto/rag-agent.dto';
+import { PaperRepository } from '@/modules/library/paper/paper.repository';
 
 @Injectable()
 export class RagAgentService {
-  constructor(private readonly engineService: EngineService) {}
+  constructor(
+    private readonly engineService: EngineService,
+    private readonly paperRepo: PaperRepository,
+  ) {}
 
   private normalizeMessages(dto: RagAgentQueryDto) {
     if (Array.isArray(dto.messages) && dto.messages.length > 0) {
@@ -81,4 +85,83 @@ export class RagAgentService {
   async getDocuments() {
     return this.engineService.getDocuments();
   }
+
+  /**
+   * Paper-Scoped Streaming RAG Chat: Contextualizes conversation with the specific paper
+   */
+  async streamPaperChat(
+    userId: string,
+    paperId: string,
+    dto: RagAgentQueryDto,
+    reply: FastifyReply,
+  ): Promise<void> {
+    const paper = await this.paperRepo.findPaperById(paperId);
+    if (!paper || paper.deletedAt) {
+      throw new NotFoundException(`Paper with ID ${paperId} not found`);
+    }
+
+    const messages = this.normalizeMessages(dto);
+    const documentIds = paper.ragDocId ? [paper.ragDocId] : this.extractDocIds(dto);
+    const workspaceId = dto.workspace_id || dto.workspaceId || paper.workspaceId;
+    const chatId = dto.chat_id || dto.chatId || `paper-${paperId}`;
+
+    // Prepend system context with paper groundings
+    const authorsStr = Array.isArray(paper.authors) ? paper.authors.join(', ') : '';
+    const paperContext = `Paper Context: Title: "${paper.title}", Authors: "${authorsStr}", Year: ${paper.year || 'N/A'}, DOI: ${paper.doi || 'N/A'}.\nAbstract: ${paper.abstract || 'N/A'}`;
+
+    const enrichedMessages = [
+      { role: 'system' as const, content: paperContext },
+      ...messages,
+    ];
+
+    const payload = {
+      messages: enrichedMessages,
+      user_id: userId,
+      workspace_id: workspaceId,
+      chat_id: chatId,
+      document_ids: documentIds,
+      intent_hint: 'paper_rag_qa',
+    };
+
+    return this.engineService.streamChat(payload, reply);
+  }
+
+  /**
+   * Paper-Scoped Synchronous RAG Chat
+   */
+  async syncPaperChat(
+    userId: string,
+    paperId: string,
+    dto: RagAgentQueryDto,
+  ) {
+    const paper = await this.paperRepo.findPaperById(paperId);
+    if (!paper || paper.deletedAt) {
+      throw new NotFoundException(`Paper with ID ${paperId} not found`);
+    }
+
+    const messages = this.normalizeMessages(dto);
+    const documentIds = paper.ragDocId ? [paper.ragDocId] : this.extractDocIds(dto);
+    const workspaceId = dto.workspace_id || dto.workspaceId || paper.workspaceId;
+    const chatId = dto.chat_id || dto.chatId || `paper-${paperId}`;
+
+    const authorsStr = Array.isArray(paper.authors) ? paper.authors.join(', ') : '';
+    const paperContext = `Paper Context: Title: "${paper.title}", Authors: "${authorsStr}", Year: ${paper.year || 'N/A'}, DOI: ${paper.doi || 'N/A'}.\nAbstract: ${paper.abstract || 'N/A'}`;
+
+    const enrichedMessages = [
+      { role: 'system' as const, content: paperContext },
+      ...messages,
+    ];
+
+    const payload = {
+      messages: enrichedMessages,
+      user_id: userId,
+      workspace_id: workspaceId,
+      chat_id: chatId,
+      document_ids: documentIds,
+      intent_hint: 'paper_rag_qa',
+    };
+
+    return this.engineService.syncChat(payload);
+  }
 }
+

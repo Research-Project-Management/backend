@@ -1,3 +1,4 @@
+import { IsNotEmpty, IsString } from 'class-validator';
 import {
   Controller,
   Post,
@@ -9,8 +10,9 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  BadRequestException,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -20,6 +22,12 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { JwtAuthGuard } from '@/modules/iam/authentication';
 import { CurrentUser } from '@/modules/iam/authentication';
+
+export class OAuthExchangeDto {
+  @IsString()
+  @IsNotEmpty()
+  code!: string;
+}
 
 @ApiTags('Identity')
 @Controller('auth')
@@ -44,6 +52,7 @@ export class AuthController {
     const clientId = process.env.GOOGLE_CLIENT_ID;
     const apiUrl = process.env.API_URL || 'http://localhost:3000';
     const redirectUri = apiUrl + '/auth/google/callback';
+    const state = this.authService.createOAuthState();
     const url =
       'https://accounts.google.com/o/oauth2/v2/auth?client_id=' +
       clientId +
@@ -51,6 +60,8 @@ export class AuthController {
       encodeURIComponent(redirectUri) +
       '&response_type=code&scope=' +
       encodeURIComponent('openid email profile') +
+      '&state=' +
+      encodeURIComponent(state) +
       '&access_type=offline&prompt=consent';
     return { url, statusCode: 302 };
   }
@@ -59,12 +70,20 @@ export class AuthController {
   @Redirect()
   async googleCallback(
     @Query('code') code: string,
+    @Query('state') state: string,
     @Query('error') error: string,
   ) {
     const clientUrl = process.env.CLIENT_URL || 'http://localhost:2915';
     if (error || !code) {
       return {
         url: clientUrl + '/login?error=' + (error || 'no_code'),
+        statusCode: 302,
+      };
+    }
+
+    if (!this.authService.verifyOAuthState(state)) {
+      return {
+        url: clientUrl + '/login?error=invalid_csrf_state',
         statusCode: 302,
       };
     }
@@ -116,13 +135,10 @@ export class AuthController {
         provider: 'google',
       });
 
+      const ticket = this.authService.createOAuthExchangeTicket(result);
+
       return {
-        url:
-          clientUrl +
-          '/auth/callback?accessToken=' +
-          result.accessToken +
-          '&refreshToken=' +
-          result.refreshToken,
+        url: clientUrl + '/auth/callback?code=' + ticket,
         statusCode: 302,
       };
     } catch (err) {
@@ -136,11 +152,14 @@ export class AuthController {
     const clientId = process.env.GITHUB_CLIENT_ID;
     const apiUrl = process.env.API_URL || 'http://localhost:3000';
     const redirectUri = apiUrl + '/auth/github/callback';
+    const state = this.authService.createOAuthState();
     const url =
       'https://github.com/login/oauth/authorize?client_id=' +
       clientId +
       '&redirect_uri=' +
       encodeURIComponent(redirectUri) +
+      '&state=' +
+      encodeURIComponent(state) +
       '&scope=' +
       encodeURIComponent('read:user user:email');
     return { url, statusCode: 302 };
@@ -150,12 +169,20 @@ export class AuthController {
   @Redirect()
   async githubCallback(
     @Query('code') code: string,
+    @Query('state') state: string,
     @Query('error') error: string,
   ) {
     const clientUrl = process.env.CLIENT_URL || 'http://localhost:2915';
     if (error || !code) {
       return {
         url: clientUrl + '/login?error=' + (error || 'no_code'),
+        statusCode: 302,
+      };
+    }
+
+    if (!this.authService.verifyOAuthState(state)) {
+      return {
+        url: clientUrl + '/login?error=invalid_csrf_state',
         statusCode: 302,
       };
     }
@@ -228,18 +255,25 @@ export class AuthController {
         provider: 'github',
       });
 
+      const ticket = this.authService.createOAuthExchangeTicket(result);
+
       return {
-        url:
-          clientUrl +
-          '/auth/callback?accessToken=' +
-          result.accessToken +
-          '&refreshToken=' +
-          result.refreshToken,
+        url: clientUrl + '/auth/callback?code=' + ticket,
         statusCode: 302,
       };
     } catch (err) {
       return { url: clientUrl + '/login?error=oauth_error', statusCode: 302 };
     }
+  }
+
+  @Post('oauth/exchange')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Exchange single-use OAuth ticket for JWT credentials securely in POST body' })
+  async exchangeOAuthCode(@Body() body: OAuthExchangeDto) {
+    if (!body?.code) {
+      throw new BadRequestException('Exchange code is required');
+    }
+    return this.authService.exchangeOAuthTicket(body.code);
   }
 
   @Post('refresh')

@@ -45,6 +45,28 @@ export class RagAgentController {
     return this.ragAgentService.syncRagChat(userId, dto);
   }
 
+  @Post('rag/papers/:paperId/stream')
+  @ApiOperation({ summary: 'Stream AI Copilot RAG chat responses for a specific paper via SSE' })
+  async streamPaperChat(
+    @CurrentUser('id') userId: string,
+    @Param('paperId') paperId: string,
+    @Body() dto: RagAgentQueryDto,
+    @Res() reply: FastifyReply,
+  ) {
+    return this.ragAgentService.streamPaperChat(userId, paperId, dto, reply);
+  }
+
+  @Post('rag/papers/:paperId/chat')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Execute synchronous AI Copilot RAG query for a specific paper' })
+  async syncPaperChat(
+    @CurrentUser('id') userId: string,
+    @Param('paperId') paperId: string,
+    @Body() dto: RagAgentQueryDto,
+  ) {
+    return this.ragAgentService.syncPaperChat(userId, paperId, dto);
+  }
+
   @Post(['documents/upload', 'rag/documents/upload'])
   @ApiOperation({ summary: 'Upload reference document for AI RAG groundings' })
   async uploadDocument(@Req() req: FastifyRequest) {

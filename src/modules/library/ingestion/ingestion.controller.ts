@@ -1,7 +1,9 @@
 import {
   Controller,
+  Get,
   Post,
   Body,
+  Param,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -44,4 +46,24 @@ export class IngestionController {
   ) {
     return this.ingestionService.batchIngest(userId, dto);
   }
+
+  @Post('batch-async')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary:
+      'Enqueues an asynchronous batch ingestion job (non-blocking) and returns a trackable Job ID',
+  })
+  async createAsyncBatchJob(
+    @CurrentUser('id') userId: string,
+    @Body() dto: BatchIngestDto,
+  ) {
+    return this.ingestionService.createAsyncBatchJob(userId, dto);
+  }
+
+  @Get('jobs/:jobId')
+  @ApiOperation({ summary: 'Poll status and results of an async batch ingestion job' })
+  async getJobStatus(@Param('jobId') jobId: string) {
+    return this.ingestionService.getJobStatus(jobId);
+  }
 }
+

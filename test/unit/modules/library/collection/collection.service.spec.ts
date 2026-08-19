@@ -3,6 +3,8 @@ import { CollectionService } from '@/modules/library/collection/collection.servi
 import { CollectionRepository } from '@/modules/library/collection/collection.repository';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 
+import { BibtexFormatter } from '@/modules/library/reference/formatters/bibtex.formatter';
+
 describe('CollectionService', () => {
   let service: CollectionService;
   let repo: CollectionRepository;
@@ -11,9 +13,15 @@ describe('CollectionService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CollectionService,
+        BibtexFormatter,
         {
           provide: CollectionRepository,
           useValue: {
+            prisma: {
+              paper: {
+                findMany: jest.fn(),
+              },
+            },
             resolveWorkspace: jest.fn().mockResolvedValue({ id: 'ws-1' }),
             findWorkspaceCollections: jest.fn(),
             findCollectionById: jest.fn(),
@@ -30,6 +38,7 @@ describe('CollectionService', () => {
     service = module.get<CollectionService>(CollectionService);
     repo = module.get<CollectionRepository>(CollectionRepository);
   });
+
 
   it('should be defined', () => {
     expect(service).toBeDefined();
@@ -109,4 +118,49 @@ describe('CollectionService', () => {
     expect(res.count).toBe(3);
     expect(res.targetCollectionId).toBe('c-target');
   });
+
+  it('should assign papers to a collection (Playlist assignment)', async () => {
+    (repo.findCollectionById as jest.Mock).mockResolvedValue({
+      id: 'c-1',
+      workspaceId: 'ws-1',
+    });
+    (repo.movePapers as jest.Mock).mockResolvedValue({ count: 2 });
+
+    const res = await service.assignPapersToCollection('ws-1', 'c-1', {
+      paperIds: ['p-1', 'p-2'],
+    });
+
+    expect(res.message).toContain('successfully');
+    expect(res.count).toBe(2);
+    expect(repo.movePapers).toHaveBeenCalledWith('ws-1', 'c-1', ['p-1', 'p-2']);
+  });
+
+  it('should soft-detach paper from collection without deleting paper record', async () => {
+    (repo.movePapers as jest.Mock).mockResolvedValue({ count: 1 });
+
+    const res = await service.detachPaperFromCollection('ws-1', 'c-1', 'p-1');
+    expect(res.message).toContain('successfully');
+    expect(repo.movePapers).toHaveBeenCalledWith('ws-1', null, ['p-1']);
+  });
+
+  it('should export all papers in collection as formatted BibTeX', async () => {
+    (repo.findCollectionById as jest.Mock).mockResolvedValue({
+      id: 'c-1',
+      workspaceId: 'ws-1',
+    });
+    (repo.prisma.paper.findMany as jest.Mock).mockResolvedValue([
+      {
+        title: 'Attention Is All You Need',
+        authors: ['Vaswani, Ashish'],
+        year: 2017,
+        citationKey: 'vaswani2017attention',
+      },
+    ]);
+
+    const res = await service.exportCollectionBibtex('ws-1', 'c-1');
+    expect(res.total).toBe(1);
+    expect(res.filename).toBe('collection-c-1.bib');
+    expect(res.bibtex).toContain('@article{vaswani2017attention,');
+  });
 });
+

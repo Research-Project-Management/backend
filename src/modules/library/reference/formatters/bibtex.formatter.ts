@@ -1,5 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { Paper } from '@prisma/client';
+import {
+  extractFamilyName,
+  extractMeaningfulTitleWord,
+} from '../utils/name-parser.util';
 
 export type BibtexSource = Partial<
   Pick<
@@ -38,29 +42,23 @@ export class BibtexFormatter {
 
   /**
    * Generates a standard AuthorYearTitle CitationKey (e.g. vaswani2017attention)
+
    */
   generateCitationKey(
     title: string,
     authors: string[] = [],
     year?: number | null,
   ): string {
-    let firstAuthor = 'author';
-    if (authors && authors.length > 0 && typeof authors[0] === 'string') {
-      const name = authors[0].trim();
-      const parts = name.split(/[\s,]+/);
-      firstAuthor =
-        parts[0].toLowerCase().replace(/[^a-z0-9]/g, '') || 'author';
-    }
+    const firstAuthor =
+      authors && authors.length > 0
+        ? extractFamilyName(authors[0])
+        : 'author';
     const cleanYear = year ? String(year) : new Date().getFullYear().toString();
-    const cleanTitleWord =
-      (title || 'paper')
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, '')
-        .split(/\s+/)
-        .find((w) => w.length > 3) || 'doc';
+    const cleanTitleWord = extractMeaningfulTitleWord(title);
 
     return `${firstAuthor}${cleanYear}${cleanTitleWord}`;
   }
+
 
   /**
    * Maps itemType to standard BibTeX entry type

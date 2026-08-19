@@ -24,6 +24,9 @@ describe('PaperService', () => {
               },
             },
             resolveWorkspace: jest.fn().mockResolvedValue({ id: 'ws-1' }),
+            resolveUniqueCitationKey: jest
+              .fn()
+              .mockResolvedValue('vaswani2017attention'),
             findPapers: jest.fn(),
             countPapers: jest.fn(),
             findPaperById: jest.fn(),
@@ -31,6 +34,7 @@ describe('PaperService', () => {
             updatePaper: jest.fn(),
             createAttachment: jest.fn(),
             deleteAttachment: jest.fn(),
+
           },
         },
         {

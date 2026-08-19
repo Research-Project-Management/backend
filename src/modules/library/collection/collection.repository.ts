@@ -12,7 +12,8 @@ export type CollectionWithCount = Prisma.CollectionGetPayload<{
 
 @Injectable()
 export class CollectionRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(public readonly prisma: PrismaService) {}
+
 
   async resolveWorkspace(workspaceIdOrSlug: string) {
     return this.prisma.workspace.findFirst({

@@ -2,13 +2,40 @@ import { Module } from '@nestjs/common';
 import { ReferenceController } from './reference.controller';
 import { ReferenceService } from './reference.service';
 import { BibtexFormatter } from './formatters/bibtex.formatter';
+import { BibtexParser } from './parsers/bibtex.parser';
 import { DoiResolver } from './resolvers/doi.resolver';
+import { SemanticScholarFetcher } from './fetchers/semantic-scholar.fetcher';
+import { ArxivFetcher } from './fetchers/arxiv.fetcher';
+import { UnifiedFetcherService } from './fetchers/unified-fetcher.service';
+import { CslFormatter } from './formatters/csl.formatter';
+import { RisFormatter } from './formatters/ris.formatter';
 import { PaperModule } from '../paper/paper.module';
 
 @Module({
   imports: [PaperModule],
   controllers: [ReferenceController],
-  providers: [ReferenceService, BibtexFormatter, DoiResolver],
-  exports: [ReferenceService, BibtexFormatter, DoiResolver],
+  providers: [
+    ReferenceService,
+    BibtexFormatter,
+    CslFormatter,
+    RisFormatter,
+    BibtexParser,
+    DoiResolver,
+    SemanticScholarFetcher,
+    ArxivFetcher,
+    UnifiedFetcherService,
+  ],
+  exports: [
+    ReferenceService,
+    BibtexFormatter,
+    CslFormatter,
+    RisFormatter,
+    BibtexParser,
+    DoiResolver,
+    SemanticScholarFetcher,
+    ArxivFetcher,
+    UnifiedFetcherService,
+  ],
 })
 export class ReferenceModule {}
+

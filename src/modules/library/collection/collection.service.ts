@@ -4,10 +4,12 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { CollectionRepository } from './collection.repository';
+import { BibtexFormatter } from '../reference/formatters/bibtex.formatter';
 import {
   CreateCollectionDto,
   UpdateCollectionDto,
   ReorderItemDto,
+  AssignPapersToCollectionDto,
 } from './dto/collection.dto';
 
 export type FormattedCollection<
@@ -23,7 +25,11 @@ export type FormattedCollection<
 
 @Injectable()
 export class CollectionService {
-  constructor(private readonly collectionRepo: CollectionRepository) {}
+  constructor(
+    private readonly collectionRepo: CollectionRepository,
+    private readonly bibtexFormatter: BibtexFormatter,
+  ) {}
+
 
   private formatCollection<
     T extends {
@@ -247,4 +253,146 @@ export class CollectionService {
 
     return this.getCollections(targetWsId);
   }
+
+  /**
+   * Playlist Assignment: Link papers to collection
+   */
+  async assignPapersToCollection(
+    workspaceId: string,
+    collectionId: string,
+    dto: AssignPapersToCollectionDto,
+  ) {
+    const ws = await this.collectionRepo.resolveWorkspace(workspaceId);
+    const targetWsId = ws?.id || workspaceId;
+
+    const collection =
+      await this.collectionRepo.findCollectionById(collectionId);
+    if (!collection || collection.workspaceId !== targetWsId) {
+      throw new NotFoundException('Collection not found in workspace');
+    }
+
+    const result = await this.collectionRepo.movePapers(
+      targetWsId,
+      collectionId,
+      dto.paperIds,
+    );
+
+    return {
+      message: 'Papers linked to collection successfully',
+      count: result.count,
+      collectionId,
+    };
+  }
+
+  /**
+   * Soft-Detach: Remove paper from collection without deleting paper record from Library
+   */
+  async detachPaperFromCollection(
+    workspaceId: string,
+    collectionId: string,
+    paperId: string,
+  ) {
+    const ws = await this.collectionRepo.resolveWorkspace(workspaceId);
+    const targetWsId = ws?.id || workspaceId;
+
+    const result = await this.collectionRepo.movePapers(
+      targetWsId,
+      null, // Move to unfiled
+      [paperId],
+    );
+
+    return {
+      message: 'Paper detached from collection successfully',
+      count: result.count,
+    };
+  }
+
+  /**
+   * Project/Collection-scoped BibTeX export
+   */
+  async exportCollectionBibtex(
+    workspaceId: string,
+    collectionId: string,
+  ): Promise<{ bibtex: string; total: number; filename: string }> {
+    const ws = await this.collectionRepo.resolveWorkspace(workspaceId);
+    const targetWsId = ws?.id || workspaceId;
+
+    const collection =
+      await this.collectionRepo.findCollectionById(collectionId);
+    if (!collection || collection.workspaceId !== targetWsId) {
+      throw new NotFoundException('Collection not found in workspace');
+    }
+
+    const papers = await this.collectionRepo.prisma.paper.findMany({
+      where: {
+        workspaceId: targetWsId,
+        collectionId,
+        deletedAt: null,
+      },
+      orderBy: [{ createdAt: 'desc' }],
+    });
+
+    const bibtex = this.bibtexFormatter.formatMultiple(papers);
+    const filename = `collection-${collectionId}.bib`;
+
+    return {
+      bibtex,
+      total: papers.length,
+      filename,
+    };
+  }
+
+  /**
+   * Generates a complete collection export bundle (BibTeX + Manifest of all PDFs)
+   */
+  async getCollectionExportBundle(
+    workspaceId: string,
+    collectionId: string,
+  ) {
+    const ws = await this.collectionRepo.resolveWorkspace(workspaceId);
+    const targetWsId = ws?.id || workspaceId;
+
+    const collection =
+      await this.collectionRepo.findCollectionById(collectionId);
+    if (!collection || collection.workspaceId !== targetWsId) {
+      throw new NotFoundException('Collection not found in workspace');
+    }
+
+    const papers = await this.collectionRepo.prisma.paper.findMany({
+      where: {
+        workspaceId: targetWsId,
+        collectionId,
+        deletedAt: null,
+      },
+      include: {
+        attachments: true,
+      },
+      orderBy: [{ createdAt: 'desc' }],
+    });
+
+    const bibtex = this.bibtexFormatter.formatMultiple(papers);
+
+    const files = papers
+      .map((p) => ({
+        paperId: p.id,
+        title: p.title,
+        citationKey: p.citationKey || '',
+        fileUrl: p.fileUrl || '',
+        filename: p.filename || `${p.citationKey || p.id}.pdf`,
+        attachments: p.attachments,
+      }))
+      .filter((p) => Boolean(p.fileUrl || p.attachments.length > 0));
+
+    return {
+      collection: {
+        id: collection.id,
+        name: collection.name,
+      },
+      totalPapers: papers.length,
+      totalFiles: files.length,
+      bibtex,
+      files,
+    };
+  }
 }
+

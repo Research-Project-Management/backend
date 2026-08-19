@@ -1,4 +1,5 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { PaperRepository } from '../paper/paper.repository';
 import { BibtexFormatter } from '../reference/formatters/bibtex.formatter';
 import { DoiResolver } from '../reference/resolvers/doi.resolver';
@@ -227,4 +228,90 @@ export class IngestionService {
       failed,
     };
   }
+
+  // ── In-Memory Job Store for Async Batch Processing ───────────────────────
+  private readonly jobs = new Map<string, IngestionJobStatus>();
+
+  /**
+   * Enqueues an asynchronous batch ingestion job and starts background processing
+   */
+  async createAsyncBatchJob(
+    userId: string,
+    dto: BatchIngestDto,
+  ): Promise<{ jobId: string; status: string; total: number }> {
+    const jobId = randomUUID();
+    const items = dto.items || [];
+
+    const job: IngestionJobStatus = {
+      jobId,
+      status: 'processing',
+      total: items.length,
+      processed: 0,
+      successCount: 0,
+      failedCount: 0,
+      progressPercentage: 0,
+      successful: [],
+      failed: [],
+      createdAt: new Date().toISOString(),
+    };
+
+    this.jobs.set(jobId, job);
+
+    // Process asynchronously without blocking HTTP response
+    setImmediate(async () => {
+      for (const item of items) {
+        try {
+          const res = await this.ingest(userId, item);
+          job.successful.push(res);
+          job.successCount++;
+        } catch (err: any) {
+          job.failed.push({
+            item,
+            error: err?.message || 'Failed to ingest item',
+          });
+          job.failedCount++;
+        } finally {
+          job.processed++;
+          job.progressPercentage = Math.round(
+            (job.processed / job.total) * 100,
+          );
+        }
+      }
+      job.status = job.failedCount === job.total ? 'failed' : 'completed';
+      job.completedAt = new Date().toISOString();
+      this.logger.log(`Async Ingestion Job ${jobId} finished (${job.successCount}/${job.total} success)`);
+    });
+
+    return {
+      jobId,
+      status: 'processing',
+      total: items.length,
+    };
+  }
+
+  /**
+   * Poll status of an async batch ingestion job
+   */
+  getJobStatus(jobId: string): IngestionJobStatus {
+    const job = this.jobs.get(jobId);
+    if (!job) {
+      throw new BadRequestException(`Ingestion job with ID ${jobId} not found`);
+    }
+    return job;
+  }
 }
+
+export interface IngestionJobStatus {
+  jobId: string;
+  status: 'queued' | 'processing' | 'completed' | 'failed';
+  total: number;
+  processed: number;
+  successCount: number;
+  failedCount: number;
+  progressPercentage: number;
+  successful: IngestionResult[];
+  failed: Array<{ item: IngestDocumentDto; error: string }>;
+  createdAt: string;
+  completedAt?: string;
+}
+

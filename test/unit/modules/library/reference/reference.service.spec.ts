@@ -4,6 +4,11 @@ import { BibtexFormatter } from '@/modules/library/reference/formatters/bibtex.f
 import { DoiResolver } from '@/modules/library/reference/resolvers/doi.resolver';
 import { PaperRepository } from '@/modules/library/paper/paper.repository';
 
+import { BibtexParser } from '@/modules/library/reference/parsers/bibtex.parser';
+import { UnifiedFetcherService } from '@/modules/library/reference/fetchers/unified-fetcher.service';
+
+import { CslFormatter } from '@/modules/library/reference/formatters/csl.formatter';
+
 describe('ReferenceService & BibtexFormatter', () => {
   let service: ReferenceService;
   let formatter: BibtexFormatter;
@@ -20,10 +25,17 @@ describe('ReferenceService & BibtexFormatter', () => {
       providers: [
         ReferenceService,
         BibtexFormatter,
+        CslFormatter,
+        BibtexParser,
         DoiResolver,
+        {
+          provide: UnifiedFetcherService,
+          useValue: { resolve: jest.fn() },
+        },
         { provide: PaperRepository, useValue: mockPaperRepo },
       ],
     }).compile();
+
 
     service = module.get<ReferenceService>(ReferenceService);
     formatter = module.get<BibtexFormatter>(BibtexFormatter);
