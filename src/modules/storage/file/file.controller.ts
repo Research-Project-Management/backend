@@ -26,6 +26,8 @@ import {
   RenameFileDto,
   MoveFileDto,
   ShareFileDto,
+  BatchFileIdsDto,
+  BatchStarDto,
 } from './dto/file.dto';
 import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authentication';
 import {
@@ -33,6 +35,7 @@ import {
   WorkspaceRoles,
   ProjectRoleGuard,
   ProjectRoles,
+  CurrentWorkspace,
 } from '@/modules/iam/authorization';
 
 @ApiTags('Storage & Assets')
@@ -112,16 +115,34 @@ export class FileController {
    */
   @Get('r2/*')
   async getR2File(
-    @Param('*') key: string,
-    @Res({ passthrough: true }) res: FastifyReply,
+    @Req() req: FastifyRequest,
+    @Res() res: FastifyReply,
   ) {
-    if (!key) {
-      throw new NotFoundException('Storage key is required');
+    const rawUrl = req.raw?.url || req.url || '';
+    const prefix = '/api/files/r2/';
+    const idx = rawUrl.indexOf(prefix);
+    const rawKey =
+      idx !== -1
+        ? rawUrl.slice(idx + prefix.length).split('?')[0]
+        : (req.params as any)?.['*'] || '';
+
+    if (!rawKey) {
+      return res.status(404).send({ message: 'Storage key is required' });
     }
 
-    const output = await this.fileService.getR2Stream(key);
+    const key = decodeURIComponent(rawKey);
+
+    let output = null;
+    try {
+      output = await this.fileService.getR2Stream(key);
+    } catch {
+      try {
+        output = await this.fileService.getR2Stream(rawKey);
+      } catch {}
+    }
+
     if (!output?.Body) {
-      throw new NotFoundException('File not found in storage');
+      return res.status(404).send({ message: 'File not found in storage' });
     }
 
     if (output.ContentType) {
@@ -130,8 +151,9 @@ export class FileController {
     if (output.ContentLength) {
       res.header('Content-Length', output.ContentLength);
     }
+    res.header('Cache-Control', 'public, max-age=31536000, immutable');
 
-    return output.Body;
+    return res.send(output.Body);
   }
 
   // ── Workspace Scoped ────────────────────────────────────────────────────────
@@ -142,10 +164,15 @@ export class FileController {
   @WorkspaceRoles('owner', 'admin', 'member')
   async uploadWorkspaceFile(
     @Param('workspaceId') workspaceId: string,
+    @CurrentWorkspace() currentWorkspaceId: string,
     @CurrentUser('id') userId: string,
     @Body() dto: UploadFileDto,
   ) {
-    return this.fileService.upload(userId, { workspaceId }, dto);
+    return this.fileService.upload(
+      userId,
+      { workspaceId: currentWorkspaceId || workspaceId },
+      dto,
+    );
   }
 
   @Post('workspace/:workspaceId/folder')
@@ -154,10 +181,15 @@ export class FileController {
   @WorkspaceRoles('owner', 'admin', 'member')
   async createWorkspaceFolder(
     @Param('workspaceId') workspaceId: string,
+    @CurrentWorkspace() currentWorkspaceId: string,
     @CurrentUser('id') userId: string,
     @Body() dto: CreateFolderDto,
   ) {
-    return this.fileService.createFolder(userId, { workspaceId }, dto);
+    return this.fileService.createFolder(
+      userId,
+      { workspaceId: currentWorkspaceId || workspaceId },
+      dto,
+    );
   }
 
   @Get('workspace/:workspaceId/home')
@@ -209,6 +241,11 @@ export class FileController {
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async getWorkspaceTrash(@Param('workspaceId') workspaceId: string) {
     return this.fileService.getTrashedFiles(workspaceId);
+  }
+
+  @Get('folder/:folderId/path')
+  async getFolderPath(@Param('folderId') folderId: string) {
+    return this.fileService.getFolderPath(folderId);
   }
 
   @Get('workspace/:workspaceId')
@@ -355,6 +392,32 @@ export class FileController {
       },
       dto,
     );
+  }
+
+  // ── Batch Operations ──────────────────────────────────────────────────────
+
+  @Post('batch/delete')
+  @HttpCode(HttpStatus.OK)
+  async batchDelete(@Body() dto: BatchFileIdsDto) {
+    return this.fileService.batchDeleteFiles(dto.ids);
+  }
+
+  @Post('batch/restore')
+  @HttpCode(HttpStatus.OK)
+  async batchRestore(@Body() dto: BatchFileIdsDto) {
+    return this.fileService.batchRestoreFiles(dto.ids);
+  }
+
+  @Post('batch/permanent-delete')
+  @HttpCode(HttpStatus.OK)
+  async batchPermanentDelete(@Body() dto: BatchFileIdsDto) {
+    return this.fileService.batchPermanentlyDeleteFiles(dto.ids);
+  }
+
+  @Post('batch/star')
+  @HttpCode(HttpStatus.OK)
+  async batchStar(@Body() dto: BatchStarDto) {
+    return this.fileService.batchToggleStar(dto.ids, dto.starred);
   }
 
   @Get(':fileId')

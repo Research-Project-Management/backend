@@ -8,6 +8,7 @@ import { BibtexParser } from '@/modules/library/reference/parsers/bibtex.parser'
 import { UnifiedFetcherService } from '@/modules/library/reference/fetchers/unified-fetcher.service';
 
 import { CslFormatter } from '@/modules/library/reference/formatters/csl.formatter';
+import { RisFormatter } from '@/modules/library/reference/formatters/ris.formatter';
 
 describe('ReferenceService & BibtexFormatter', () => {
   let service: ReferenceService;
@@ -17,6 +18,7 @@ describe('ReferenceService & BibtexFormatter', () => {
   const mockPaperRepo = {
     resolveWorkspace: jest.fn().mockResolvedValue({ id: 'ws-1' }),
     createPaper: jest.fn(),
+    findPaperById: jest.fn(),
     findPapers: jest.fn(),
   };
 
@@ -26,6 +28,7 @@ describe('ReferenceService & BibtexFormatter', () => {
         ReferenceService,
         BibtexFormatter,
         CslFormatter,
+        RisFormatter,
         BibtexParser,
         DoiResolver,
         {

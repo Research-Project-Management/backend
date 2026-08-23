@@ -110,4 +110,30 @@ export class FileRepository {
       },
     });
   }
+
+  async findFilesByIds(fileIds: string[]): Promise<FileWithAuthor[]> {
+    return this.prisma.file.findMany({
+      where: { id: { in: fileIds } },
+      include: {
+        author: { select: USER_SELECT },
+      },
+    });
+  }
+
+  async batchUpdateFiles(
+    fileIds: string[],
+    data: Prisma.FileUpdateManyMutationInput,
+  ) {
+    return this.prisma.file.updateMany({
+      where: { id: { in: fileIds } },
+      data,
+    });
+  }
+
+  async batchDeleteFiles(fileIds: string[]) {
+    return this.prisma.file.deleteMany({
+      where: { id: { in: fileIds } },
+    });
+  }
 }
+

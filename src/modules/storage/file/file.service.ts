@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FileRepository } from './file.repository';
 import { R2Service } from '../r2/r2.service';
+import { PrismaService } from '@/core/database/prisma.service';
 import { Prisma, EntityType } from '@prisma/client';
 import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
 import {
@@ -26,8 +27,41 @@ export class FileService {
   constructor(
     private readonly fileRepo: FileRepository,
     private readonly r2Service: R2Service,
+    private readonly prisma: PrismaService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
   ) {}
+
+  private async resolveWorkspaceId(scope: {
+    workspaceId?: string;
+    projectId?: string;
+    pageId?: string;
+  }): Promise<string | null> {
+    if (scope.workspaceId) {
+      const ws = await this.prisma.workspace.findFirst({
+        where: { OR: [{ id: scope.workspaceId }, { url: scope.workspaceId }] },
+        select: { id: true },
+      });
+      if (ws) return ws.id;
+    }
+
+    if (scope.projectId) {
+      const project = await this.prisma.project.findUnique({
+        where: { id: scope.projectId },
+        select: { workspaceId: true },
+      });
+      if (project) return project.workspaceId;
+    }
+
+    if (scope.pageId) {
+      const page = await this.prisma.page.findUnique({
+        where: { id: scope.pageId },
+        select: { workspaceId: true },
+      });
+      if (page) return page.workspaceId;
+    }
+
+    return null;
+  }
 
   private formatFile<
     T extends {
@@ -73,52 +107,7 @@ export class FileService {
     const key = `uploads/${Date.now()}-${cleanName}`;
     const uploadRes = await this.r2Service.uploadBuffer(key, buffer, mimeType);
 
-    const linkedToType = scope.pageId
-      ? 'Page'
-      : scope.projectId
-        ? 'Project'
-        : scope.workspaceId
-          ? 'Workspace'
-          : null;
-    const linkedToId =
-      scope.pageId || scope.projectId || scope.workspaceId || null;
-
-    let file = null;
-    try {
-      if (userId) {
-        file = await this.fileRepo.createFile({
-          filename,
-          isFolder: false,
-          size: buffer.length,
-          mimeType,
-          url: uploadRes.url,
-          thumbnail: null,
-          parentId: null,
-          metaData: {},
-          authorId: userId,
-          workspaceId: scope.workspaceId || null,
-          linkedToType,
-          linkedToId,
-        });
-
-        this.eventEmitter?.emit(
-          'file.created',
-          new DomainActivityEvent({
-            entityType: 'file' as unknown as EntityType,
-            entityId: file.id,
-            verb: 'uploaded',
-            actorId: userId,
-            workspaceId: scope.workspaceId || '',
-            projectId: scope.projectId || undefined,
-          }),
-        );
-      }
-    } catch (dbErr) {
-      // Database record creation is optional for raw asset uploads (e.g. avatars, temp files)
-    }
-
     return {
-      file: file ? this.formatFile(file) : null,
       url: uploadRes.url,
       path: uploadRes.path,
     };
@@ -133,15 +122,20 @@ export class FileService {
     scope: { workspaceId?: string; projectId?: string; pageId?: string },
     dto: UploadFileDto,
   ) {
+    const workspaceId = await this.resolveWorkspaceId(scope);
     const linkedToType = scope.pageId
       ? 'Page'
       : scope.projectId
         ? 'Project'
-        : scope.workspaceId
+        : workspaceId
           ? 'Workspace'
           : null;
     const linkedToId =
-      scope.pageId || scope.projectId || scope.workspaceId || null;
+      scope.pageId || scope.projectId || workspaceId || null;
+    const parentId =
+      dto.parentId === 'null' || dto.parentId === 'undefined' || !dto.parentId
+        ? null
+        : dto.parentId;
 
     const file = await this.fileRepo.createFile({
       filename: dto.filename,
@@ -150,10 +144,10 @@ export class FileService {
       mimeType: dto.mimeType || 'application/octet-stream',
       url: dto.url || '',
       thumbnail: dto.thumbnail || null,
-      parentId: dto.parentId || null,
+      parentId,
       metaData: (dto.metaData as Prisma.InputJsonValue) || {},
       authorId: userId,
-      workspaceId: scope.workspaceId || null,
+      workspaceId,
       linkedToType,
       linkedToId,
     });
@@ -166,22 +160,27 @@ export class FileService {
     scope: { workspaceId?: string; projectId?: string; pageId?: string },
     dto: CreateFolderDto,
   ) {
+    const workspaceId = await this.resolveWorkspaceId(scope);
     const linkedToType = scope.pageId
       ? 'Page'
       : scope.projectId
         ? 'Project'
-        : scope.workspaceId
+        : workspaceId
           ? 'Workspace'
           : null;
     const linkedToId =
-      scope.pageId || scope.projectId || scope.workspaceId || null;
+      scope.pageId || scope.projectId || workspaceId || null;
+    const parentId =
+      dto.parentId === 'null' || dto.parentId === 'undefined' || !dto.parentId
+        ? null
+        : dto.parentId;
 
     const folder = await this.fileRepo.createFile({
       filename: dto.filename || dto.name || 'Untitled Folder',
       isFolder: true,
-      parentId: dto.parentId || null,
+      parentId,
       authorId: userId,
-      workspaceId: scope.workspaceId || null,
+      workspaceId,
       linkedToType,
       linkedToId,
     });
@@ -197,6 +196,23 @@ export class FileService {
     }
 
     return { file: this.formatFile(file) };
+  }
+
+  async getFolderPath(folderId: string) {
+    const path: { id: string | null; name: string }[] = [];
+    let currentId: string | null = folderId;
+    let depth = 0;
+    const maxDepth = 20;
+
+    while (currentId && depth < maxDepth) {
+      const file = await this.fileRepo.findFileById(currentId);
+      if (!file) break;
+      path.unshift({ id: file.id, name: file.filename });
+      currentId = file.parentId;
+      depth++;
+    }
+
+    return { path };
   }
 
   async updateFile(fileId: string, dto: UpdateFileDto) {
@@ -219,11 +235,27 @@ export class FileService {
     return { message: 'File moved to trash' };
   }
 
+  async batchDeleteFiles(ids: string[]) {
+    if (!ids || ids.length === 0) return { message: 'No files provided', count: 0 };
+    const res = await this.fileRepo.batchUpdateFiles(ids, {
+      trashedAt: new Date(),
+    });
+    return { message: 'Files moved to trash', count: res.count };
+  }
+
   async restoreFile(fileId: string) {
     await this.fileRepo.updateFile(fileId, {
       trashedAt: null,
     });
     return { message: 'File restored successfully' };
+  }
+
+  async batchRestoreFiles(ids: string[]) {
+    if (!ids || ids.length === 0) return { message: 'No files provided', count: 0 };
+    const res = await this.fileRepo.batchUpdateFiles(ids, {
+      trashedAt: null,
+    });
+    return { message: 'Files restored successfully', count: res.count };
   }
 
   async permanentlyDeleteFile(fileId: string) {
@@ -243,6 +275,25 @@ export class FileService {
     return { message: 'File permanently deleted' };
   }
 
+  async batchPermanentlyDeleteFiles(ids: string[]) {
+    if (!ids || ids.length === 0) return { message: 'No files provided', count: 0 };
+    const files = await this.fileRepo.findFilesByIds(ids);
+
+    const deletePromises: Promise<unknown>[] = [
+      this.fileRepo.batchDeleteFiles(ids),
+    ];
+
+    for (const file of files) {
+      if (file.url && file.url.includes('/api/files/r2/')) {
+        const key = file.url.replace('/api/files/r2/', '');
+        deletePromises.push(this.r2Service.deleteObject(key));
+      }
+    }
+
+    await Promise.all(deletePromises);
+    return { message: 'Files permanently deleted', count: files.length };
+  }
+
   async toggleStar(fileId: string) {
     const file = await this.fileRepo.findFileById(fileId);
     if (!file) throw new NotFoundException('File not found');
@@ -252,6 +303,14 @@ export class FileService {
     });
 
     return { file: this.formatFile(updated) };
+  }
+
+  async batchToggleStar(ids: string[], starred: boolean) {
+    if (!ids || ids.length === 0) return { message: 'No files provided', count: 0 };
+    const res = await this.fileRepo.batchUpdateFiles(ids, {
+      starred,
+    });
+    return { message: `Files ${starred ? 'starred' : 'unstarred'} successfully`, count: res.count };
   }
 
   async renameFile(fileId: string, filename: string) {
@@ -286,29 +345,38 @@ export class FileService {
     pageId?: string;
     parentId?: string;
   }) {
-    const linkedToType = scope.pageId
-      ? 'Page'
-      : scope.projectId
-        ? 'Project'
-        : scope.workspaceId
-          ? 'Workspace'
-          : undefined;
-    const linkedToId = scope.pageId || scope.projectId || scope.workspaceId;
+    const workspaceId = await this.resolveWorkspaceId(scope);
+    const where: Prisma.FileWhereInput = {
+      trashedAt: null,
+    };
+
+    if (scope.pageId) {
+      where.linkedToId = scope.pageId;
+      where.linkedToType = 'Page';
+    } else if (scope.projectId) {
+      where.linkedToId = scope.projectId;
+      where.linkedToType = 'Project';
+    } else if (workspaceId) {
+      where.workspaceId = workspaceId;
+    }
+
+    if (scope.parentId !== undefined) {
+      where.parentId =
+        scope.parentId === 'null' || scope.parentId === 'undefined' || scope.parentId === ''
+          ? null
+          : scope.parentId;
+    }
 
     const files = await this.fileRepo.findFiles(
-      {
-        trashedAt: null,
-        ...(linkedToId && { linkedToId, linkedToType }),
-        ...(scope.workspaceId && { workspaceId: scope.workspaceId }),
-        ...(scope.parentId !== undefined && { parentId: scope.parentId }),
-      },
+      where,
       [{ isFolder: 'desc' }, { filename: 'asc' }],
     );
 
     return { files: files.map((f) => this.formatFile(f)) };
   }
 
-  async getHomeFiles(workspaceId: string) {
+  async getHomeFiles(workspaceParam: string) {
+    const workspaceId = (await this.resolveWorkspaceId({ workspaceId: workspaceParam })) || workspaceParam;
     const files = await this.fileRepo.findFiles(
       {
         workspaceId,
@@ -322,7 +390,10 @@ export class FileService {
     return { files: files.map((f) => this.formatFile(f)) };
   }
 
-  async getMyFiles(userId: string, workspaceId?: string, projectId?: string) {
+  async getMyFiles(userId: string, workspaceParam?: string, projectId?: string) {
+    const workspaceId = workspaceParam
+      ? (await this.resolveWorkspaceId({ workspaceId: workspaceParam })) || workspaceParam
+      : undefined;
     const files = await this.fileRepo.findFiles(
       {
         authorId: userId,
@@ -336,7 +407,10 @@ export class FileService {
     return { files: files.map((f) => this.formatFile(f)) };
   }
 
-  async getStarredFiles(workspaceId?: string, projectId?: string) {
+  async getStarredFiles(workspaceParam?: string, projectId?: string) {
+    const workspaceId = workspaceParam
+      ? (await this.resolveWorkspaceId({ workspaceId: workspaceParam })) || workspaceParam
+      : undefined;
     const files = await this.fileRepo.findFiles(
       {
         starred: true,
@@ -352,9 +426,12 @@ export class FileService {
 
   async getSharedFiles(
     userId: string,
-    workspaceId?: string,
+    workspaceParam?: string,
     projectId?: string,
   ) {
+    const workspaceId = workspaceParam
+      ? (await this.resolveWorkspaceId({ workspaceId: workspaceParam })) || workspaceParam
+      : undefined;
     const shares = await this.fileRepo.findFileShares(userId);
 
     const files = shares
@@ -373,7 +450,10 @@ export class FileService {
     return { files: files.map((f) => this.formatFile(f)) };
   }
 
-  async getTrashedFiles(workspaceId?: string, projectId?: string) {
+  async getTrashedFiles(workspaceParam?: string, projectId?: string) {
+    const workspaceId = workspaceParam
+      ? (await this.resolveWorkspaceId({ workspaceId: workspaceParam })) || workspaceParam
+      : undefined;
     const files = await this.fileRepo.findFiles(
       {
         trashedAt: { not: null },

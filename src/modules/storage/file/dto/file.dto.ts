@@ -128,3 +128,17 @@ export class ShareFileDto {
   @IsOptional()
   permission?: 'view' | 'edit';
 }
+
+export class BatchFileIdsDto {
+  @IsNotEmpty({ message: 'File IDs array is required' })
+  ids!: string[];
+}
+
+export class BatchStarDto {
+  @IsNotEmpty({ message: 'File IDs array is required' })
+  ids!: string[];
+
+  @IsBoolean()
+  starred!: boolean;
+}
+
