@@ -1,4 +1,12 @@
 onlyBuiltDependencies:
   - '@prisma/engines'
+  - '@scarf/scarf'
+  - bcrypt
   - prisma
   - unrs-resolver
+allowBuilds:
+  '@prisma/engines': true
+  '@scarf/scarf': true
+  bcrypt: true
+  prisma: true
+  unrs-resolver: true
