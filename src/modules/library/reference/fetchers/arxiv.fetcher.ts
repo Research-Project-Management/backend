@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { getErrorMessage, tryCatch } from '@/core/utils/error.util';
+import { getErrorMessage, tryCatch } from '../../../../core/utils/error.util';
 import { UnifiedAcademicMetadata } from './types/fetcher.types';
+import { createHash } from 'crypto';
 
 @Injectable()
 export class ArxivFetcher {
@@ -19,7 +20,7 @@ export class ArxivFetcher {
     const responseResult = await tryCatch(
       fetch(url, {
         headers: {
-          'User-Agent': 'ResearchManagement/1.0 (academic-research-bot)',
+          'User-Agent': 'ResearchManagement/1.0 (mailto:admin@researchmanagement.local; academic-research-bot)',
         },
         signal: AbortSignal.timeout(8000),
       }),
@@ -41,7 +42,6 @@ export class ArxivFetcher {
     }
 
     const titleMatch = xml.match(/<title>([\s\S]*?)<\/title>/gi);
-    // index 0 is feed title, index 1 is entry title
     const entryTitle = titleMatch && titleMatch[1]
       ? titleMatch[1].replace(/<\/?title>/gi, '').replace(/\s+/g, ' ').trim()
       : 'Untitled arXiv Preprint';
@@ -65,6 +65,16 @@ export class ArxivFetcher {
     const doiMatch = xml.match(/<arxiv:doi[^>]*>([\s\S]*?)<\/arxiv:doi>/i);
     const doi = doiMatch && doiMatch[1] ? doiMatch[1].trim() : undefined;
 
+    const keywords: string[] = [];
+    const catMatches = xml.matchAll(/<category\s+term="([^"]+)"/gi);
+    for (const cm of catMatches) {
+      if (cm[1] && !keywords.includes(cm[1])) {
+        keywords.push(cm[1]);
+      }
+    }
+
+    const rawSnapshotHash = createHash('md5').update(xml).digest('hex');
+
     return {
       title: entryTitle,
       authors,
@@ -73,9 +83,20 @@ export class ArxivFetcher {
       doi,
       journal: 'arXiv preprint',
       abstract,
+      keywords: keywords.length ? keywords : undefined,
       openAccessPdfUrl: `https://arxiv.org/pdf/${cleanId}.pdf`,
       itemType: 'preprint',
       url: `https://arxiv.org/abs/${cleanId}`,
+      provenance: {
+        originProvider: 'arXiv',
+        resolvedAt: new Date().toISOString(),
+        canonicalId: `arxiv:${cleanId}`,
+        canonicalUrl: `https://arxiv.org/abs/${cleanId}`,
+        confidenceScore: 1.0,
+        rawSnapshotHash,
+        isOpenAccess: true,
+        openAccessPdfUrl: `https://arxiv.org/pdf/${cleanId}.pdf`,
+      },
     };
   }
 }

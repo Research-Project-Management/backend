@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { Prisma } from '@prisma/client';
 
@@ -148,6 +148,51 @@ export class PaperRepository {
     }
 
     return `${baseKey}-${Date.now().toString(36)}`;
+  }
+
+  /**
+   * Concurrency-safe atomic mutation for JSON facets stored in paper.extra (annotations, relations, etc.)
+   */
+  async mutatePaperExtra(
+    paperId: string,
+    mutator: (
+      currentExtra: Record<string, any>,
+    ) => Record<string, any> | Promise<Record<string, any>>,
+  ): Promise<{ paper: PaperWithRelations; extraObj: Record<string, any> }> {
+    return this.prisma.$transaction(async (tx) => {
+      const currentPaper = await tx.paper.findUnique({
+        where: { id: paperId },
+        select: { id: true, extra: true },
+      });
+
+      if (!currentPaper) {
+        throw new NotFoundException(`Paper with ID ${paperId} not found`);
+      }
+
+      let extraObj: Record<string, any> = {};
+      if (currentPaper.extra && currentPaper.extra.trim()) {
+        try {
+          extraObj = JSON.parse(currentPaper.extra);
+        } catch {
+          extraObj = {};
+        }
+      }
+
+      const updatedExtraObj = await mutator(extraObj);
+      const updatedExtraString = JSON.stringify(updatedExtraObj);
+
+      const paper = (await tx.paper.update({
+        where: { id: paperId },
+        data: { extra: updatedExtraString },
+        include: {
+          uploadedBy: { select: USER_SELECT },
+          collection: true,
+          attachments: true,
+        },
+      })) as PaperWithRelations;
+
+      return { paper, extraObj: updatedExtraObj };
+    });
   }
 }
 

@@ -3,6 +3,7 @@ import { PaperService } from '@/modules/library/paper/paper.service';
 import { PaperRepository } from '@/modules/library/paper/paper.repository';
 import { FileService } from '@/modules/storage/file/file.service';
 import { BibtexFormatter } from '@/modules/library/reference/formatters/bibtex.formatter';
+import { IngestionService } from '@/modules/library/ingestion/ingestion.service';
 
 describe('PaperService', () => {
   let service: PaperService;
@@ -34,7 +35,6 @@ describe('PaperService', () => {
             updatePaper: jest.fn(),
             createAttachment: jest.fn(),
             deleteAttachment: jest.fn(),
-
           },
         },
         {
@@ -56,6 +56,25 @@ describe('PaperService', () => {
               ),
           },
         },
+        {
+          provide: IngestionService,
+          useValue: {
+            ingest: jest.fn().mockImplementation(async (userId, dto) => ({
+              id: 'p-1',
+              title: dto.title,
+              authors: dto.authors || [],
+              year: dto.year || null,
+              citationKey: dto.citationKey || 'vaswani2017attention',
+              paper: {
+                id: 'p-1',
+                title: dto.title,
+                authors: dto.authors || [],
+                year: dto.year || null,
+                citationKey: dto.citationKey || 'vaswani2017attention',
+              },
+            })),
+          },
+        },
       ],
     }).compile();
 
@@ -68,14 +87,6 @@ describe('PaperService', () => {
   });
 
   it('should upload paper successfully with generated citation key', async () => {
-    (repo.createPaper as jest.Mock).mockResolvedValue({
-      id: 'p-1',
-      title: 'Attention is All You Need',
-      authors: ['Vaswani', 'Shazeer'],
-      year: 2017,
-      citationKey: 'vaswani2017attention',
-    });
-
     const result = await service.uploadPaper('ws-1', 'user-1', {
       title: 'Attention is All You Need',
       filename: 'vaswani.pdf',
@@ -84,8 +95,8 @@ describe('PaperService', () => {
       year: 2017,
     });
 
-    expect(result.paper.title).toBe('Attention is All You Need');
-    expect(result.paper.id).toBe('p-1');
+    expect(result.paper?.title).toBe('Attention is All You Need');
+    expect(result.paper?.id).toBe('p-1');
   });
 
   it('should export BibTeX correctly', async () => {

@@ -11,7 +11,7 @@ export class AnnotationService {
   constructor(private readonly paperRepo: PaperRepository) {}
 
   /**
-   * Helper: Parse annotations from paper.extra
+   * Helper: Parse annotations from paper.extra safely
    */
   private parseStoredAnnotations(extraString: string | null): PdfAnnotation[] {
     if (!extraString || !extraString.trim()) return [];
@@ -24,20 +24,6 @@ export class AnnotationService {
       // Return empty if parsing fails
     }
     return [];
-  }
-
-  /**
-   * Helper: Serialize annotations to string
-   */
-  private serializeAnnotations(existingExtra: string | null, annotations: PdfAnnotation[]): string {
-    let baseObj: Record<string, any> = {};
-    if (existingExtra && existingExtra.trim()) {
-      try {
-        baseObj = JSON.parse(existingExtra);
-      } catch {}
-    }
-    baseObj.annotations = annotations;
-    return JSON.stringify(baseObj);
   }
 
   /**
@@ -63,7 +49,7 @@ export class AnnotationService {
   }
 
   /**
-   * Create a new PDF highlight / note / box annotation
+   * Create a new PDF highlight / note / box annotation (concurrency-safe)
    */
   async createAnnotation(
     workspaceId: string,
@@ -79,36 +65,38 @@ export class AnnotationService {
       throw new NotFoundException('Paper not found in this workspace');
     }
 
-    const annotations = this.parseStoredAnnotations(paper.extra);
+    let newAnnotation: PdfAnnotation | null = null;
     const now = new Date().toISOString();
 
-    const newAnnotation: PdfAnnotation = {
-      id: randomUUID(),
-      paperId,
-      attachmentId: dto.attachmentId,
-      type: dto.type,
-      pageNumber: dto.pageNumber,
-      color: dto.color,
-      quote: dto.quote || undefined,
-      comment: dto.comment || undefined,
-      rect: dto.rect || undefined,
-      authorId: userId,
-      createdAt: now,
-      updatedAt: now,
-    };
+    await this.paperRepo.mutatePaperExtra(paperId, (extraObj) => {
+      const annotations: PdfAnnotation[] = Array.isArray(extraObj.annotations)
+        ? extraObj.annotations
+        : [];
 
-    annotations.push(newAnnotation);
-    const updatedExtra = this.serializeAnnotations(paper.extra, annotations);
+      newAnnotation = {
+        id: randomUUID(),
+        paperId,
+        attachmentId: dto.attachmentId,
+        type: dto.type,
+        pageNumber: dto.pageNumber,
+        color: dto.color,
+        quote: dto.quote || undefined,
+        comment: dto.comment || undefined,
+        rect: dto.rect || undefined,
+        authorId: userId,
+        createdAt: now,
+        updatedAt: now,
+      };
 
-    await this.paperRepo.updatePaper(paperId, {
-      extra: updatedExtra,
+      extraObj.annotations = [...annotations, newAnnotation];
+      return extraObj;
     });
 
-    return { annotation: newAnnotation };
+    return { annotation: newAnnotation! };
   }
 
   /**
-   * Update an annotation's comment or color
+   * Update an annotation's comment or color (concurrency-safe)
    */
   async updateAnnotation(
     workspaceId: string,
@@ -124,29 +112,33 @@ export class AnnotationService {
       throw new NotFoundException('Paper not found in this workspace');
     }
 
-    const annotations = this.parseStoredAnnotations(paper.extra);
-    const targetIndex = annotations.findIndex((a) => a.id === annotationId);
-    if (targetIndex === -1) {
-      throw new NotFoundException('Annotation not found');
-    }
+    let updatedAnnotation: PdfAnnotation | null = null;
 
-    const current = annotations[targetIndex];
-    if (dto.comment !== undefined) current.comment = dto.comment;
-    if (dto.color !== undefined) current.color = dto.color;
-    current.updatedAt = new Date().toISOString();
+    await this.paperRepo.mutatePaperExtra(paperId, (extraObj) => {
+      const annotations: PdfAnnotation[] = Array.isArray(extraObj.annotations)
+        ? extraObj.annotations
+        : [];
+      const targetIndex = annotations.findIndex((a) => a.id === annotationId);
+      if (targetIndex === -1) {
+        throw new NotFoundException('Annotation not found');
+      }
 
-    annotations[targetIndex] = current;
-    const updatedExtra = this.serializeAnnotations(paper.extra, annotations);
+      const current = { ...annotations[targetIndex] };
+      if (dto.comment !== undefined) current.comment = dto.comment;
+      if (dto.color !== undefined) current.color = dto.color;
+      current.updatedAt = new Date().toISOString();
 
-    await this.paperRepo.updatePaper(paperId, {
-      extra: updatedExtra,
+      annotations[targetIndex] = current;
+      extraObj.annotations = annotations;
+      updatedAnnotation = current;
+      return extraObj;
     });
 
-    return { annotation: current };
+    return { annotation: updatedAnnotation! };
   }
 
   /**
-   * Delete an annotation
+   * Delete an annotation (concurrency-safe)
    */
   async deleteAnnotation(
     workspaceId: string,
@@ -161,27 +153,29 @@ export class AnnotationService {
       throw new NotFoundException('Paper not found in this workspace');
     }
 
-    let annotations = this.parseStoredAnnotations(paper.extra);
-    const initialLen = annotations.length;
-    annotations = annotations.filter((a) => a.id !== annotationId);
+    let remainingCount = 0;
 
-    if (annotations.length === initialLen) {
-      throw new NotFoundException('Annotation not found');
-    }
-
-    const updatedExtra = this.serializeAnnotations(paper.extra, annotations);
-    await this.paperRepo.updatePaper(paperId, {
-      extra: updatedExtra,
+    await this.paperRepo.mutatePaperExtra(paperId, (extraObj) => {
+      const annotations: PdfAnnotation[] = Array.isArray(extraObj.annotations)
+        ? extraObj.annotations
+        : [];
+      const filtered = annotations.filter((a) => a.id !== annotationId);
+      if (filtered.length === annotations.length) {
+        throw new NotFoundException('Annotation not found');
+      }
+      extraObj.annotations = filtered;
+      remainingCount = filtered.length;
+      return extraObj;
     });
 
     return {
       deleted: true,
-      remainingCount: annotations.length,
+      remainingCount,
     };
   }
 
   /**
-   * Zotero 7 Killer Feature: "Add Note from Annotations"
+   * Zotero 7 Parity: "Add Note from Annotations"
    * Synthesizes all highlights, underlines, and comments into an organized Markdown Literature Note
    * and appends it to paper.notes
    */

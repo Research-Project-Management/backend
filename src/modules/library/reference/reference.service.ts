@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { PaperRepository } from '../paper/paper.repository';
 import { BibtexFormatter, BibtexSource } from './formatters/bibtex.formatter';
 import { BibtexParser, ParsedBibtexEntry } from './parsers/bibtex.parser';
@@ -7,10 +7,13 @@ import { CreateReferenceDto, ImportBibtexDto, FormatBatchCitationDto } from './d
 import { UnifiedFetcherService, ResolveResult } from './fetchers/unified-fetcher.service';
 import { CslFormatter, CitationStyle, FormattedCitation } from './formatters/csl.formatter';
 import { RisFormatter } from './formatters/ris.formatter';
+import { IngestionService } from '../ingestion/ingestion.service';
+import { IngestionSourceType } from '../ingestion/dto/ingestion.dto';
 
 @Injectable()
 export class ReferenceService {
   constructor(
+    @Inject(forwardRef(() => PaperRepository))
     private readonly paperRepo: PaperRepository,
     private readonly bibtexFormatter: BibtexFormatter,
     private readonly bibtexParser: BibtexParser,
@@ -18,6 +21,8 @@ export class ReferenceService {
     private readonly unifiedFetcher: UnifiedFetcherService,
     private readonly cslFormatter: CslFormatter,
     private readonly risFormatter: RisFormatter,
+    @Inject(forwardRef(() => IngestionService))
+    private readonly ingestionService: IngestionService,
   ) {}
 
   /**
@@ -97,18 +102,9 @@ export class ReferenceService {
     userId: string,
     dto: CreateReferenceDto,
   ) {
-    const ws = await this.paperRepo.resolveWorkspace(workspaceId);
-    const targetWsId = ws?.id || workspaceId;
-
-    const citationKey =
-      dto.citationKey?.trim() ||
-      this.bibtexFormatter.generateCitationKey(
-        dto.title,
-        dto.authors || [],
-        dto.year,
-      );
-
-    const paper = await this.paperRepo.createPaper({
+    const res = await this.ingestionService.ingest(userId, {
+      workspaceId,
+      sourceType: IngestionSourceType.MANUAL,
       title: dto.title,
       authors: dto.authors || [],
       year: dto.year || null,
@@ -120,16 +116,12 @@ export class ReferenceService {
       pages: dto.pages || '',
       abstract: dto.abstract || '',
       itemType: dto.itemType || 'journalArticle',
-      citationKey,
+      citationKey: dto.citationKey,
       url: dto.url || '',
-      filename: `${citationKey}.pdf`,
-      fileUrl: '', // Reference-only item (no uploaded PDF file initially)
-      workspaceId: targetWsId,
-      uploadedById: userId,
       collectionId: dto.collectionId || null,
     });
 
-    return { reference: paper };
+    return { reference: res.paper };
   }
 
   /**
@@ -193,9 +185,6 @@ export class ReferenceService {
     userId: string,
     dto: ImportBibtexDto,
   ) {
-    const ws = await this.paperRepo.resolveWorkspace(workspaceId);
-    const targetWsId = ws?.id || workspaceId;
-
     const parsedEntries = this.bibtexParser.parse(dto.bibtex);
     if (!parsedEntries || parsedEntries.length === 0) {
       return { imported: 0, papers: [] };
@@ -203,15 +192,9 @@ export class ReferenceService {
 
     const createdPapers = [];
     for (const entry of parsedEntries) {
-      const citationKey =
-        entry.citationKey?.trim() ||
-        this.bibtexFormatter.generateCitationKey(
-          entry.title,
-          entry.authors,
-          entry.year,
-        );
-
-      const paper = await this.paperRepo.createPaper({
+      const res = await this.ingestionService.ingest(userId, {
+        workspaceId,
+        sourceType: IngestionSourceType.BIBTEX,
         title: entry.title,
         authors: entry.authors || [],
         year: entry.year || null,
@@ -226,14 +209,10 @@ export class ReferenceService {
         isbn: entry.isbn || '',
         issn: entry.issn || '',
         url: entry.url || '',
-        citationKey,
-        filename: `${citationKey}.pdf`,
-        fileUrl: '',
-        workspaceId: targetWsId,
-        uploadedById: userId,
+        citationKey: entry.citationKey,
         collectionId: dto.collectionId || null,
       });
-      createdPapers.push(paper);
+      if (res.paper) createdPapers.push(res.paper);
     }
 
     return {
@@ -261,9 +240,6 @@ export class ReferenceService {
     userId: string,
     dto: { content: string; collectionId?: string },
   ) {
-    const ws = await this.paperRepo.resolveWorkspace(workspaceId);
-    const targetWsId = ws?.id || workspaceId;
-
     const entries = this.risFormatter.parse(dto.content);
     if (!entries || entries.length === 0) {
       throw new NotFoundException('No valid RIS records found in content');
@@ -271,13 +247,9 @@ export class ReferenceService {
 
     const createdPapers = [];
     for (const entry of entries) {
-      const citationKey = this.bibtexFormatter.generateCitationKey(
-        entry.title,
-        entry.authors,
-        entry.year,
-      );
-
-      const paper = await this.paperRepo.createPaper({
+      const res = await this.ingestionService.ingest(userId, {
+        workspaceId,
+        sourceType: IngestionSourceType.RIS,
         title: entry.title,
         authors: entry.authors || [],
         year: entry.year || null,
@@ -290,14 +262,9 @@ export class ReferenceService {
         abstract: entry.abstract || '',
         itemType: entry.itemType || 'journalArticle',
         url: entry.url || '',
-        citationKey,
-        filename: `${citationKey}.pdf`,
-        fileUrl: '',
-        workspaceId: targetWsId,
-        uploadedById: userId,
         collectionId: dto.collectionId || null,
       });
-      createdPapers.push(paper);
+      if (res.paper) createdPapers.push(res.paper);
     }
 
     return {

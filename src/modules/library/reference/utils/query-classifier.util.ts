@@ -1,4 +1,4 @@
-export type AcademicQueryType = 'DOI' | 'ARXIV' | 'PMID' | 'URL' | 'TITLE';
+export type AcademicQueryType = 'DOI' | 'ARXIV' | 'PMID' | 'ISBN' | 'URL' | 'TITLE';
 
 export interface ClassifiedQuery {
   raw: string;
@@ -14,7 +14,10 @@ export class QueryClassifierUtil {
     /^(?:https?:\/\/arxiv\.org\/(?:abs|pdf)\/|arxiv:\s*)?(\d{4}\.\d{4,5}(?:v\d+)?|[a-z\-]+(?:\.[a-z]{2})?\/\d{7})(?:\.pdf)?$/i;
 
   private static readonly PMID_REGEX =
-    /^(?:https?:\/\/pubmed\.ncbi\.nlm\.nih\.gov\/|pmid:\s*)?(\d{7,9})\/?$/i;
+    /^(?:https?:\/\/pubmed\.ncbi\.nlm\.nih\.gov\/|pmid:\s*)?(\d{1,9})\/?$/i;
+
+  private static readonly ISBN_REGEX =
+    /^(?:isbn:?\s*|urn:isbn:)?(97[89][-\s]?(?:\d[-\s]?){9}\d|(?:\d[-\s]?){9}[\dX])$/i;
 
   private static readonly GENERIC_URL_REGEX = /^https?:\/\/[^\s$.?#].[^\s]*$/i;
 
@@ -58,7 +61,17 @@ export class QueryClassifierUtil {
       };
     }
 
-    // 4. Test Generic URL
+    // 4. Test ISBN
+    const isbnMatch = trimmed.match(this.ISBN_REGEX);
+    if (isbnMatch && isbnMatch[1]) {
+      return {
+        raw: trimmed,
+        clean: isbnMatch[1].replace(/[-\s]/g, ''),
+        type: 'ISBN',
+      };
+    }
+
+    // 5. Test Generic URL
     if (this.GENERIC_URL_REGEX.test(trimmed)) {
       return {
         raw: trimmed,
@@ -67,7 +80,7 @@ export class QueryClassifierUtil {
       };
     }
 
-    // 5. Default to Title / Keyword search
+    // 6. Default to Title / Keyword search
     return {
       raw: trimmed,
       clean: trimmed,

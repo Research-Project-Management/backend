@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { getErrorMessage, tryCatch } from '@/core/utils/error.util';
+import { getErrorMessage, tryCatch } from '../../../../core/utils/error.util';
 import { UnifiedAcademicMetadata } from './types/fetcher.types';
 
 @Injectable()
@@ -18,8 +18,9 @@ export class SemanticScholarFetcher {
     let cleanId = paperId.trim();
     if (cleanId.startsWith('10.')) {
       cleanId = `DOI:${cleanId}`;
-    } else if (/^\d{4}\.\d{4,5}/.test(cleanId)) {
-      cleanId = `ARXIV:${cleanId}`;
+    } else if (/^\d{4}\.\d{4,5}/i.test(cleanId)) {
+      const bareArxiv = cleanId.replace(/v\d+$/i, '');
+      cleanId = `ARXIV:${bareArxiv}`;
     }
 
     const url = `${this.BASE_URL}/${encodeURIComponent(cleanId)}?fields=${this.FIELDS}`;
@@ -99,6 +100,22 @@ export class SemanticScholarFetcher {
       }
     }
 
+    const canonicalId = doi ? `doi:${doi}` : arxivId ? `arxiv:${arxivId}` : data.paperId || 's2:unknown';
+    const isOpenAccess = Boolean(data.openAccessPdf?.url || arxivId);
+    const openAccessPdfUrl = data.openAccessPdf?.url || (arxivId ? `https://arxiv.org/pdf/${arxivId}.pdf` : undefined);
+
+    const keywords: string[] = [];
+    if (Array.isArray(data.fieldsOfStudy)) {
+      keywords.push(...data.fieldsOfStudy.filter(Boolean));
+    }
+    if (Array.isArray(data.s2FieldsOfStudy)) {
+      for (const f of data.s2FieldsOfStudy) {
+        if (f?.category && !keywords.includes(f.category)) {
+          keywords.push(f.category);
+        }
+      }
+    }
+
     return {
       title: data.title || 'Untitled',
       authors,
@@ -108,10 +125,20 @@ export class SemanticScholarFetcher {
       journal: data.venue || data.publicationVenue?.name || undefined,
       abstract: data.abstract || undefined,
       tldr: data.tldr?.text || undefined,
+      keywords: keywords.length ? keywords : undefined,
       citationCount: typeof data.citationCount === 'number' ? data.citationCount : undefined,
-      openAccessPdfUrl: data.openAccessPdf?.url || (arxivId ? `https://arxiv.org/pdf/${arxivId}.pdf` : undefined),
+      openAccessPdfUrl,
       itemType,
       url: doi ? `https://doi.org/${doi}` : arxivId ? `https://arxiv.org/abs/${arxivId}` : undefined,
+      provenance: {
+        originProvider: 'SemanticScholar',
+        resolvedAt: new Date().toISOString(),
+        canonicalId,
+        canonicalUrl: doi ? `https://doi.org/${doi}` : arxivId ? `https://arxiv.org/abs/${arxivId}` : undefined,
+        confidenceScore: doi || arxivId ? 1.0 : 0.85,
+        isOpenAccess,
+        openAccessPdfUrl,
+      },
     };
   }
 }

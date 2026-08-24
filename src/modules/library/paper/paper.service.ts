@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { PaperRepository } from './paper.repository';
 import { Prisma, AttachmentType, RagStatus } from '@prisma/client';
 import {
@@ -12,6 +12,8 @@ import {
 
 import { FileService } from '@/modules/storage/file/file.service';
 import { BibtexFormatter } from '../reference/formatters/bibtex.formatter';
+import { IngestionService } from '../ingestion/ingestion.service';
+import { IngestionSourceType } from '../ingestion/dto/ingestion.dto';
 
 @Injectable()
 export class PaperService {
@@ -19,6 +21,8 @@ export class PaperService {
     private readonly paperRepo: PaperRepository,
     private readonly fileService: FileService,
     private readonly bibtexFormatter: BibtexFormatter,
+    @Inject(forwardRef(() => IngestionService))
+    private readonly ingestionService: IngestionService,
   ) {}
 
   async getPapers(
@@ -110,9 +114,6 @@ export class PaperService {
   }
 
   async uploadPaper(workspaceId: string, userId: string, dto: UploadPaperDto) {
-    const ws = await this.paperRepo.resolveWorkspace(workspaceId);
-    const targetWsId = ws?.id || workspaceId;
-
     let targetUserId = userId;
     if (!targetUserId) {
       const u = await this.paperRepo.prisma.user.findFirst({
@@ -121,19 +122,9 @@ export class PaperService {
       targetUserId = u?.id || '';
     }
 
-    const rawKey =
-      dto.citationKey ||
-      this.bibtexFormatter.generateCitationKey(
-        dto.title,
-        dto.authors,
-        dto.year,
-      );
-    const citationKey = await this.paperRepo.resolveUniqueCitationKey(
-      targetWsId,
-      rawKey,
-    );
-
-    const paper = await this.paperRepo.createPaper({
+    const res = await this.ingestionService.ingest(targetUserId, {
+      workspaceId,
+      sourceType: IngestionSourceType.PDF,
       title: dto.title,
       filename: dto.filename,
       fileUrl: dto.fileUrl,
@@ -145,23 +136,17 @@ export class PaperService {
       abstract: dto.abstract || '',
       journal: dto.journal || '',
       publisher: dto.publisher || '',
-      keywords: dto.keywords || [],
+      tags: dto.keywords || [],
       volume: dto.volume || '',
       issue: dto.issue || '',
       pages: dto.pages || '',
       issn: dto.issn || '',
       isbn: dto.isbn || '',
       url: dto.url || '',
-      type: dto.type || '',
-      language: dto.language || '',
-      journalAbbr: dto.journalAbbr || '',
-      shortTitle: dto.shortTitle || '',
-      rights: dto.rights || '',
-      citationKey,
-      notes: (dto.notes as any) || [],
-      workspaceId: targetWsId,
-      uploadedById: targetUserId,
-      collectionId: dto.collectionId || null,
+      itemType: dto.type || 'journalArticle',
+      citationKey: dto.citationKey,
+      notes: dto.notes,
+      collectionId: dto.collectionId,
       primaryFile: {
         fileId: dto.fileId || null,
         filename: dto.filename,
@@ -171,26 +156,13 @@ export class PaperService {
       },
     });
 
-    return { paper };
+    return { paper: res.paper };
   }
 
   async ingestPaper(workspaceId: string, userId: string, dto: IngestPaperDto) {
-    const ws = await this.paperRepo.resolveWorkspace(workspaceId);
-    const targetWsId = ws?.id || workspaceId;
-
-    const rawKey =
-      dto.citationKey ||
-      this.bibtexFormatter.generateCitationKey(
-        dto.title || 'Paper',
-        dto.authors,
-        dto.year,
-      );
-    const citationKey = await this.paperRepo.resolveUniqueCitationKey(
-      targetWsId,
-      rawKey,
-    );
-
-    const paper = await this.paperRepo.createPaper({
+    const res = await this.ingestionService.ingest(userId, {
+      workspaceId,
+      sourceType: IngestionSourceType.PDF,
       title: dto.title || 'Untitled Paper',
       filename: dto.filename || 'paper.pdf',
       fileUrl: dto.fileUrl || '',
@@ -199,10 +171,8 @@ export class PaperService {
       authors: dto.authors || [],
       year: dto.year || null,
       doi: dto.doi || '',
-      citationKey,
-      workspaceId: targetWsId,
-      uploadedById: userId,
-      collectionId: dto.collectionId || null,
+      citationKey: dto.citationKey,
+      collectionId: dto.collectionId,
       primaryFile: {
         fileId: dto.fileId || null,
         filename: dto.filename || 'paper.pdf',
@@ -212,7 +182,7 @@ export class PaperService {
       },
     });
 
-    return { paper };
+    return { paper: res.paper };
   }
 
   async importFromStorage(
@@ -220,9 +190,6 @@ export class PaperService {
     userId: string,
     dto: ImportStoragePaperDto,
   ) {
-    const ws = await this.paperRepo.resolveWorkspace(workspaceId);
-    const targetWsId = ws?.id || workspaceId;
-
     const fileResult = await this.fileService.getFile(dto.fileId);
     const file = fileResult?.file;
 
@@ -231,11 +198,9 @@ export class PaperService {
     }
 
     const title = dto.title || file.filename.replace(/\.[^/.]+$/, '');
-    const citationKey =
-      dto.citationKey ||
-      this.bibtexFormatter.generateCitationKey(title, dto.authors);
-
-    const paper = await this.paperRepo.createPaper({
+    const res = await this.ingestionService.ingest(userId, {
+      workspaceId,
+      sourceType: IngestionSourceType.STORAGE,
       title,
       filename: file.filename,
       fileUrl: file.url || '',
@@ -243,10 +208,9 @@ export class PaperService {
       mimeType: file.mimeType || 'application/pdf',
       authors: dto.authors || [],
       doi: dto.doi || '',
-      citationKey,
-      workspaceId: targetWsId,
-      uploadedById: userId,
-      collectionId: dto.collectionId || null,
+      citationKey: dto.citationKey,
+      collectionId: dto.collectionId,
+      storageFileId: file.id,
       primaryFile: {
         fileId: file.id,
         filename: file.filename,
@@ -256,7 +220,7 @@ export class PaperService {
       },
     });
 
-    return { paper };
+    return { paper: res.paper };
   }
 
   async updatePaper(paperId: string, dto: UpdatePaperDto) {

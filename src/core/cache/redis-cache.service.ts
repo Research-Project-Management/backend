@@ -7,7 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 
-import { getErrorMessage } from '@/core/utils/error.util';
+import { getErrorMessage } from '../utils/error.util';
 
 @Injectable()
 export class RedisCacheService implements OnModuleInit, OnModuleDestroy {

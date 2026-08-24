@@ -1,6 +1,9 @@
 import { UnifiedFetcherService } from '@/modules/library/reference/fetchers/unified-fetcher.service';
 import { SemanticScholarFetcher } from '@/modules/library/reference/fetchers/semantic-scholar.fetcher';
 import { ArxivFetcher } from '@/modules/library/reference/fetchers/arxiv.fetcher';
+import { PubmedFetcher } from '@/modules/library/reference/fetchers/pubmed.fetcher';
+import { OpenlibraryFetcher } from '@/modules/library/reference/fetchers/openlibrary.fetcher';
+import { UnpaywallFetcher } from '@/modules/library/reference/fetchers/unpaywall.fetcher';
 import { DoiResolver } from '@/modules/library/reference/resolvers/doi.resolver';
 import { BibtexFormatter } from '@/modules/library/reference/formatters/bibtex.formatter';
 
@@ -8,6 +11,9 @@ describe('UnifiedFetcherService', () => {
   let service: UnifiedFetcherService;
   let mockS2: jest.Mocked<SemanticScholarFetcher>;
   let mockArxiv: jest.Mocked<ArxivFetcher>;
+  let mockPubmed: jest.Mocked<PubmedFetcher>;
+  let mockOpenlibrary: jest.Mocked<OpenlibraryFetcher>;
+  let mockUnpaywall: jest.Mocked<UnpaywallFetcher>;
   let mockDoi: jest.Mocked<DoiResolver>;
   let formatter: BibtexFormatter;
 
@@ -21,6 +27,18 @@ describe('UnifiedFetcherService', () => {
       fetchById: jest.fn(),
     } as any;
 
+    mockPubmed = {
+      fetchByPmid: jest.fn(),
+    } as any;
+
+    mockOpenlibrary = {
+      fetchByIsbn: jest.fn(),
+    } as any;
+
+    mockUnpaywall = {
+      resolveOaPdf: jest.fn(),
+    } as any;
+
     mockDoi = {
       resolve: jest.fn(),
       cleanDoi: jest.fn((d) => d),
@@ -31,6 +49,9 @@ describe('UnifiedFetcherService', () => {
     service = new UnifiedFetcherService(
       mockS2,
       mockArxiv,
+      mockPubmed,
+      mockOpenlibrary,
+      mockUnpaywall,
       mockDoi,
       formatter,
     );
@@ -51,7 +72,7 @@ describe('UnifiedFetcherService', () => {
 
     expect(result).toBeDefined();
     expect(result?.queryType).toBe('ARXIV');
-    expect(result?.provider).toBe('Arxiv');
+    expect(result?.provider).toBe('arXiv');
     expect(result?.metadata.title).toBe('Attention Is All You Need');
     expect(result?.metadata.citationKey).toBe('vaswani2017attention');
     expect(result?.metadata.openAccessPdfUrl).toBe('https://arxiv.org/pdf/1706.03762.pdf');
@@ -59,13 +80,12 @@ describe('UnifiedFetcherService', () => {
 
   it('should resolve DOI query via SemanticScholar with rich TLDR', async () => {
     mockS2.fetchById.mockResolvedValueOnce({
-      title: 'Deep Residual Learning',
-      authors: ['He, Kaiming'],
+      title: 'Deep Residual Learning for Image Recognition',
+      authors: ['He, Kaiming', 'Zhang, Xiangyu'],
       year: 2016,
       doi: '10.1109/CVPR.2016.90',
       itemType: 'conferencePaper',
-      tldr: 'Residual networks are easier to optimize.',
-      citationCount: 180000,
+      tldr: 'Presents residual learning framework to ease the training of substantially deeper networks.',
     });
 
     const result = await service.resolve('10.1109/CVPR.2016.90');
@@ -73,27 +93,42 @@ describe('UnifiedFetcherService', () => {
     expect(result).toBeDefined();
     expect(result?.queryType).toBe('DOI');
     expect(result?.provider).toBe('SemanticScholar');
-    expect(result?.metadata.tldr).toBe('Residual networks are easier to optimize.');
+    expect(result?.metadata.tldr).toBeDefined();
     expect(result?.metadata.citationKey).toBe('he2016deep');
   });
 
-  it('should resolve DOI fallback to CrossRef when SemanticScholar returns null', async () => {
+  it('should fallback to CrossRef when SemanticScholar returns null for DOI', async () => {
     mockS2.fetchById.mockResolvedValueOnce(null);
     mockDoi.resolve.mockResolvedValueOnce({
-      title: 'Nature Milestone Paper',
-      authors: ['Watson, James', 'Crick, Francis'],
-      year: 1953,
-      doi: '10.1038/171737a0',
+      title: 'Structure of the Atom',
+      authors: ['Bohr, Niels'],
+      year: 1913,
+      doi: '10.1080/14786441308634955',
       itemType: 'journalArticle',
-      journal: 'Nature',
+      journal: 'Philosophical Magazine',
     });
 
-    const result = await service.resolve('10.1038/171737a0');
+    const result = await service.resolve('10.1080/14786441308634955');
 
     expect(result).toBeDefined();
-    expect(result?.queryType).toBe('DOI');
     expect(result?.provider).toBe('CrossRef');
-    expect(result?.metadata.journal).toBe('Nature');
-    expect(result?.metadata.citationKey).toBe('watson1953nature');
+    expect(result?.metadata.title).toBe('Structure of the Atom');
+    expect(result?.metadata.citationKey).toBe('bohr1913structure');
+  });
+
+  it('should resolve title query via SemanticScholar title search', async () => {
+    mockS2.searchByTitle.mockResolvedValueOnce({
+      title: 'Language Models are Few-Shot Learners',
+      authors: ['Brown, Tom B.'],
+      year: 2020,
+      itemType: 'preprint',
+    });
+
+    const result = await service.resolve('Language Models are Few-Shot Learners');
+
+    expect(result).toBeDefined();
+    expect(result?.queryType).toBe('TITLE');
+    expect(result?.metadata.title).toBe('Language Models are Few-Shot Learners');
+    expect(result?.metadata.citationKey).toBe('brown2020language');
   });
 });

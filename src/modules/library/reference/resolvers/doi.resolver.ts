@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { getErrorMessage, tryCatch } from '@/core/utils/error.util';
+import { getErrorMessage, tryCatch } from '../../../../core/utils/error.util';
+import { ProvenanceMetadata } from '../fetchers/types/fetcher.types';
+import { createHash } from 'crypto';
 
 export interface ResolvedDoiMetadata {
   doi: string;
@@ -15,7 +17,9 @@ export interface ResolvedDoiMetadata {
   isbn?: string;
   url?: string;
   abstract?: string;
+  keywords?: string[];
   itemType: string;
+  provenance?: ProvenanceMetadata;
 }
 
 @Injectable()
@@ -75,8 +79,45 @@ export class DoiResolver {
       return null;
     }
 
-    const message = jsonResult.value.message;
+    return this.transformMessage(jsonResult.value.message, doi);
+  }
 
+  /**
+   * Search academic literature by Title via CrossRef bibliographic search
+   */
+  async searchByTitle(title: string): Promise<ResolvedDoiMetadata | null> {
+    if (!title || !title.trim()) return null;
+
+    const url = `https://api.crossref.org/works?query.bibliographic=${encodeURIComponent(title.trim())}&rows=1&mailto=admin@researchmanagement.local`;
+    const responseResult = await tryCatch(
+      fetch(url, {
+        headers: {
+          'User-Agent':
+            'ResearchManagement/1.0 (mailto:admin@research-management.local)',
+          Accept: 'application/json',
+        },
+        signal: AbortSignal.timeout(8000),
+      }),
+    );
+
+    if (!responseResult.ok || !responseResult.value.ok) {
+      return null;
+    }
+
+    const jsonResult = await tryCatch(
+      responseResult.value.json() as Promise<{ message?: { items?: Record<string, any>[] } }>,
+    );
+
+    if (!jsonResult.ok || !jsonResult.value.message?.items?.length) {
+      return null;
+    }
+
+    const item = jsonResult.value.message.items[0];
+    const doi = item.DOI || '';
+    return this.transformMessage(item, doi);
+  }
+
+  private transformMessage(message: Record<string, any>, doi: string): ResolvedDoiMetadata {
     const title = Array.isArray(message.title)
       ? message.title[0] || 'Untitled'
       : message.title || 'Untitled';
@@ -110,7 +151,18 @@ export class DoiResolver {
     const itemType =
       message.type === 'journal-article'
         ? 'journalArticle'
-        : message.type || 'journalArticle';
+        : message.type === 'proceedings-article'
+          ? 'conferencePaper'
+          : message.type === 'book'
+            ? 'book'
+            : message.type || 'journalArticle';
+
+    const keywords: string[] = [];
+    if (Array.isArray(message.subject)) {
+      keywords.push(...message.subject.filter(Boolean));
+    }
+
+    const rawSnapshotHash = createHash('md5').update(JSON.stringify(message)).digest('hex');
 
     return {
       doi,
@@ -124,11 +176,21 @@ export class DoiResolver {
       pages: message.page,
       issn: Array.isArray(message.ISSN) ? message.ISSN[0] : message.ISSN,
       isbn: Array.isArray(message.ISBN) ? message.ISBN[0] : message.ISBN,
-      url: message.URL || `https://doi.org/${doi}`,
+      url: message.URL || (doi ? `https://doi.org/${doi}` : undefined),
       abstract: message.abstract
-        ? message.abstract.replace(/<[^>]*>/g, '')
+        ? message.abstract.replace(/<[^>]*>/g, '').trim()
         : undefined,
+      keywords: keywords.length ? keywords : undefined,
       itemType,
+      provenance: {
+        originProvider: 'CrossRef',
+        resolvedAt: new Date().toISOString(),
+        canonicalId: doi ? `doi:${doi}` : `crossref:${title}`,
+        canonicalUrl: message.URL || (doi ? `https://doi.org/${doi}` : undefined),
+        confidenceScore: 0.95,
+        rawSnapshotHash,
+        isOpenAccess: Boolean(message.link?.some((l: any) => l['content-type'] === 'application/pdf')),
+      },
     };
   }
 }

@@ -1,7 +1,8 @@
 import { QualityService } from '@/modules/library/quality/quality.service';
 import { PaperRepository } from '@/modules/library/paper/paper.repository';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 
-describe('QualityService', () => {
+describe('Seam 4: QualityService (2-Tier Deduplication, Safe Merge, Integrity Diagnostics)', () => {
   let service: QualityService;
   let mockPaperRepo: any;
 
@@ -28,13 +29,13 @@ describe('QualityService', () => {
     service = new QualityService(mockPaperRepo);
   });
 
-  describe('getDuplicateGroups', () => {
-    it('should detect Tier 1 duplicates with identical DOIs', async () => {
+  describe('Vertical Slice 4.1: 2-Tier Duplicate Detection Engine', () => {
+    it('should detect Tier 1 duplicates with case-insensitive identical DOIs', async () => {
       mockPaperRepo.findPapers.mockResolvedValueOnce([
         {
           id: 'p1',
-          title: 'Attention Is All You Need (v1)',
-          doi: '10.1145/3290605',
+          title: 'Attention Is All You Need (ArXiv Version)',
+          doi: '10.1145/3290605.A12',
           authors: ['Vaswani, Ashish'],
           year: 2017,
           citationKey: 'vaswani2017attention',
@@ -44,8 +45,8 @@ describe('QualityService', () => {
         },
         {
           id: 'p2',
-          title: 'Attention Is All You Need (v2)',
-          doi: '10.1145/3290605',
+          title: 'Attention Is All You Need (NeurIPS Camera Ready)',
+          doi: '10.1145/3290605.a12',
           authors: ['Vaswani, Ashish'],
           year: 2017,
           citationKey: 'vaswani2017attentiona',
@@ -63,7 +64,7 @@ describe('QualityService', () => {
       expect(result.duplicateGroups[0].papers).toHaveLength(2);
     });
 
-    it('should detect Tier 2 duplicates matching Title, Year +/- 1, and Author', async () => {
+    it('should detect Tier 2 duplicates matching Title, Year +/- 1, and First Author', async () => {
       mockPaperRepo.findPapers.mockResolvedValueOnce([
         {
           id: 'p1',
@@ -98,14 +99,34 @@ describe('QualityService', () => {
     });
   });
 
-  describe('mergePapers', () => {
-    it('should consolidate notes and transfer attachments into master paper', async () => {
+  describe('Vertical Slice 4.2: Safe Merge Protocol', () => {
+    it('should reject merging when master paper is included in sourcePaperIds', async () => {
+      await expect(
+        service.mergePapers('ws-1', 'u-1', {
+          masterPaperId: 'p-master',
+          sourcePaperIds: ['p-master', 'p-other'],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should throw NotFoundException when master paper does not exist', async () => {
+      mockPaperRepo.findPaperById.mockResolvedValue(null);
+
+      await expect(
+        service.mergePapers('ws-1', 'u-1', {
+          masterPaperId: 'p-nonexistent',
+          sourcePaperIds: ['p-src'],
+        }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should consolidate notes, merge unique tags, and re-assign attachments to master', async () => {
       const master = {
         id: 'p-master',
         workspaceId: 'ws-1',
         title: 'Master Paper',
         notes: [{ title: 'Note 1', content: 'C1' }],
-        labels: ['ai'],
+        labels: ['ai', 'nlp'],
         deletedAt: null,
       };
 
@@ -114,7 +135,7 @@ describe('QualityService', () => {
         workspaceId: 'ws-1',
         title: 'Source Paper',
         notes: [{ title: 'Note 2', content: 'C2' }],
-        labels: ['transformer', 'ai'],
+        labels: ['transformer', 'nlp'],
         deletedAt: null,
       };
 
@@ -132,8 +153,8 @@ describe('QualityService', () => {
     });
   });
 
-  describe('getIntegrityReport', () => {
-    it('should correctly flag papers missing DOI, Year, or PDF attachments', async () => {
+  describe('Vertical Slice 4.3: Library Health & Integrity Diagnostics', () => {
+    it('should accurately categorize missing metadata issues and compute health stats', async () => {
       mockPaperRepo.findPapers.mockResolvedValueOnce([
         {
           id: 'p1',
@@ -167,6 +188,7 @@ describe('QualityService', () => {
       expect(report.missingPdfCount).toBe(1);
       expect(report.flaggedItems).toHaveLength(1);
       expect(report.flaggedItems[0].paperId).toBe('p1');
+      expect(report.flaggedItems[0].issues).toContain('Missing DOI identifier');
     });
   });
 });

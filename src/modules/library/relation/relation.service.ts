@@ -31,20 +31,6 @@ export class RelationService {
     return [];
   }
 
-  private serializeRelations(
-    existingExtra: string | null,
-    relations: StoredRelation[],
-  ): string {
-    let baseObj: Record<string, any> = {};
-    if (existingExtra && existingExtra.trim()) {
-      try {
-        baseObj = JSON.parse(existingExtra);
-      } catch {}
-    }
-    baseObj.relations = relations;
-    return JSON.stringify(baseObj);
-  }
-
   /**
    * Get all papers related to a specific paper
    */
@@ -99,7 +85,7 @@ export class RelationService {
   }
 
   /**
-   * Create a symmetric bi-directional link between two papers
+   * Create a symmetric bi-directional link between two papers (concurrency-safe)
    */
   async linkPapers(
     workspaceId: string,
@@ -127,55 +113,52 @@ export class RelationService {
 
     const now = new Date().toISOString();
     const relationType = dto.relationType || 'related';
+    let sourceLink: StoredRelation | null = null;
 
-    // 1. Update source paper relations
-    const sourceRelations = this.parseStoredRelations(source.extra).filter(
-      (r) => r.targetPaperId !== dto.targetPaperId,
-    );
-    const newSourceLink: StoredRelation = {
-      targetPaperId: dto.targetPaperId,
-      type: relationType,
-      note: dto.note || undefined,
-      linkedAt: now,
-    };
-    sourceRelations.push(newSourceLink);
-    const updatedSourceExtra = this.serializeRelations(
-      source.extra,
-      sourceRelations,
-    );
+    // 1. Atomic update for Source Paper
+    await this.paperRepo.mutatePaperExtra(sourcePaperId, (extraObj) => {
+      const sourceRelations: StoredRelation[] = Array.isArray(extraObj.relations)
+        ? extraObj.relations.filter((r) => r.targetPaperId !== dto.targetPaperId)
+        : [];
 
-    // 2. Update target paper relations (symmetric link)
-    const targetRelations = this.parseStoredRelations(target.extra).filter(
-      (r) => r.targetPaperId !== sourcePaperId,
-    );
-    const newTargetLink: StoredRelation = {
-      targetPaperId: sourcePaperId,
-      type: relationType,
-      note: dto.note || undefined,
-      linkedAt: now,
-    };
-    targetRelations.push(newTargetLink);
-    const updatedTargetExtra = this.serializeRelations(
-      target.extra,
-      targetRelations,
-    );
+      sourceLink = {
+        targetPaperId: dto.targetPaperId,
+        type: relationType,
+        note: dto.note || undefined,
+        linkedAt: now,
+      };
 
-    // Persist both
-    await Promise.all([
-      this.paperRepo.updatePaper(sourcePaperId, { extra: updatedSourceExtra }),
-      this.paperRepo.updatePaper(dto.targetPaperId, {
-        extra: updatedTargetExtra,
-      }),
-    ]);
+      sourceRelations.push(sourceLink);
+      extraObj.relations = sourceRelations;
+      return extraObj;
+    });
+
+    // 2. Atomic update for Target Paper (symmetric)
+    await this.paperRepo.mutatePaperExtra(dto.targetPaperId, (extraObj) => {
+      const targetRelations: StoredRelation[] = Array.isArray(extraObj.relations)
+        ? extraObj.relations.filter((r) => r.targetPaperId !== sourcePaperId)
+        : [];
+
+      const targetLink: StoredRelation = {
+        targetPaperId: sourcePaperId,
+        type: relationType,
+        note: dto.note || undefined,
+        linkedAt: now,
+      };
+
+      targetRelations.push(targetLink);
+      extraObj.relations = targetRelations;
+      return extraObj;
+    });
 
     return {
       success: true,
-      link: newSourceLink,
+      link: sourceLink!,
     };
   }
 
   /**
-   * Remove a symmetric bi-directional link between two papers
+   * Remove a symmetric bi-directional link between two papers (concurrency-safe)
    */
   async unlinkPapers(
     workspaceId: string,
@@ -191,28 +174,24 @@ export class RelationService {
     ]);
 
     if (source && source.workspaceId === targetWsId) {
-      const sourceRelations = this.parseStoredRelations(source.extra).filter(
-        (r) => r.targetPaperId !== targetPaperId,
-      );
-      const updatedSourceExtra = this.serializeRelations(
-        source.extra,
-        sourceRelations,
-      );
-      await this.paperRepo.updatePaper(sourcePaperId, {
-        extra: updatedSourceExtra,
+      await this.paperRepo.mutatePaperExtra(sourcePaperId, (extraObj) => {
+        if (Array.isArray(extraObj.relations)) {
+          extraObj.relations = extraObj.relations.filter(
+            (r) => r.targetPaperId !== targetPaperId,
+          );
+        }
+        return extraObj;
       });
     }
 
     if (target && target.workspaceId === targetWsId) {
-      const targetRelations = this.parseStoredRelations(target.extra).filter(
-        (r) => r.targetPaperId !== sourcePaperId,
-      );
-      const updatedTargetExtra = this.serializeRelations(
-        target.extra,
-        targetRelations,
-      );
-      await this.paperRepo.updatePaper(targetPaperId, {
-        extra: updatedTargetExtra,
+      await this.paperRepo.mutatePaperExtra(targetPaperId, (extraObj) => {
+        if (Array.isArray(extraObj.relations)) {
+          extraObj.relations = extraObj.relations.filter(
+            (r) => r.targetPaperId !== sourcePaperId,
+          );
+        }
+        return extraObj;
       });
     }
 
