@@ -11,8 +11,7 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { WorklogService } from './worklog.service';
 import { CreateWorklogDto, QueryWorklogDto } from './dto/worklog.dto';
-import { JwtAuthGuard } from '@/modules/iam/authentication';
-import { CurrentUser } from '@/modules/iam/authentication';
+import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
 
 @ApiTags('Workflow - Worklogs')
 @ApiBearerAuth('JWT-auth')

@@ -10,7 +10,7 @@ import {
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { LatexService } from './latex.service';
 import { CompileLatexDto, SyncIncrementalDto } from './dto/latex.dto';
-import { JwtAuthGuard } from '@/modules/iam/authentication';
+import { JwtAuthGuard } from '@/modules/iam/authn';
 
 @ApiTags('Manuscript')
 @ApiBearerAuth('JWT-auth')

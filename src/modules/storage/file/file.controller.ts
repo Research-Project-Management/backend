@@ -27,13 +27,13 @@ import {
   MoveFileDto,
   ShareFileDto,
 } from './dto/file.dto';
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authentication';
+import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
 import {
   WorkspaceRoleGuard,
   WorkspaceRoles,
   ProjectRoleGuard,
   ProjectRoles,
-} from '@/modules/iam/authorization';
+} from '@/modules/iam/authz';
 
 @ApiTags('Storage & Assets')
 @ApiBearerAuth('JWT-auth')
@@ -57,54 +57,7 @@ export class FileController {
     @Req() req: FastifyRequest,
     @CurrentUser('id') userId: string,
   ) {
-    const isMultipart = req.isMultipart();
-    if (!isMultipart) {
-      throw new BadRequestException('Request must be multipart/form-data');
-    }
-
-    const data = await req.file();
-    if (!data) {
-      throw new BadRequestException('No file found in request');
-    }
-
-    const buffer = await data.toBuffer();
-    const filename = data.filename || 'unnamed-file';
-    const mimeType = data.mimetype || 'application/octet-stream';
-
-    // Parse additional fields if any
-    const authorId =
-      userId || (req as any)?.user?.id || (req as any)?.user?.sub || '';
-    const fields = (data.fields || {}) as Record<string, any>;
-    const workspaceId =
-      typeof fields?.workspaceId?.value === 'string'
-        ? fields.workspaceId.value
-        : typeof fields?.workspaceId === 'string'
-          ? fields.workspaceId
-          : undefined;
-    const projectId =
-      typeof fields?.projectId?.value === 'string'
-        ? fields.projectId.value
-        : typeof fields?.projectId === 'string'
-          ? fields.projectId
-          : undefined;
-    const pageId =
-      typeof fields?.pageId?.value === 'string'
-        ? fields.pageId.value
-        : typeof fields?.pageId === 'string'
-          ? fields.pageId
-          : undefined;
-
-    return this.fileService.uploadR2Buffer(
-      authorId,
-      filename,
-      buffer,
-      mimeType,
-      {
-        workspaceId,
-        projectId,
-        pageId,
-      },
-    );
+    return this.fileService.uploadMultipartStream(req, userId);
   }
 
   /**
@@ -129,6 +82,16 @@ export class FileController {
     }
     if (output.ContentLength) {
       res.header('Content-Length', output.ContentLength);
+    }
+
+    // Attach stream error safety to prevent uncaught error events if client closes connection early
+    const streamBody = output.Body as {
+      on?: (event: string, listener: (...args: any[]) => void) => void;
+    };
+    if (typeof streamBody?.on === 'function') {
+      streamBody.on('error', () => {
+        // Suppress stream error when client disconnects early
+      });
     }
 
     return output.Body;
@@ -295,6 +258,8 @@ export class FileController {
 
   @Post('page/:pageId/upload')
   @HttpCode(HttpStatus.CREATED)
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor')
   async uploadPageFile(
     @Param('pageId') pageId: string,
     @CurrentUser('id') userId: string,
@@ -305,6 +270,8 @@ export class FileController {
 
   @Post('page/:pageId/folder')
   @HttpCode(HttpStatus.CREATED)
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor')
   async createPageFolder(
     @Param('pageId') pageId: string,
     @CurrentUser('id') userId: string,
@@ -314,6 +281,8 @@ export class FileController {
   }
 
   @Get('page/:pageId')
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   async getPageFiles(
     @Param('pageId') pageId: string,
     @Query('parentId') parentId?: string,
@@ -358,56 +327,82 @@ export class FileController {
   }
 
   @Get(':fileId')
-  async getFile(@Param('fileId') fileId: string) {
-    return this.fileService.getFile(fileId);
+  async getFile(
+    @Param('fileId') fileId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.fileService.getFile(fileId, userId);
   }
 
   @Put(':fileId')
   async updateFile(
     @Param('fileId') fileId: string,
+    @CurrentUser('id') userId: string,
     @Body() dto: UpdateFileDto,
   ) {
-    return this.fileService.updateFile(fileId, dto);
+    return this.fileService.updateFile(fileId, userId, dto);
   }
 
   @Delete(':fileId')
-  async deleteFile(@Param('fileId') fileId: string) {
-    return this.fileService.deleteFile(fileId);
+  async deleteFile(
+    @Param('fileId') fileId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.fileService.deleteFile(fileId, userId);
   }
 
   @Put(':fileId/star')
-  async toggleStar(@Param('fileId') fileId: string) {
-    return this.fileService.toggleStar(fileId);
+  async toggleStar(
+    @Param('fileId') fileId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.fileService.toggleStar(fileId, userId);
   }
 
   @Put(':fileId/restore')
-  async restoreFile(@Param('fileId') fileId: string) {
-    return this.fileService.restoreFile(fileId);
+  async restoreFile(
+    @Param('fileId') fileId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.fileService.restoreFile(fileId, userId);
   }
 
   @Delete(':fileId/permanent')
-  async permanentlyDeleteFile(@Param('fileId') fileId: string) {
-    return this.fileService.permanentlyDeleteFile(fileId);
+  async permanentlyDeleteFile(
+    @Param('fileId') fileId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.fileService.permanentlyDeleteFile(fileId, userId);
   }
 
   @Put(':fileId/rename')
   async renameFile(
     @Param('fileId') fileId: string,
+    @CurrentUser('id') userId: string,
     @Body() dto: RenameFileDto,
   ) {
     return this.fileService.renameFile(
       fileId,
+      userId,
       dto.filename || dto.name || 'Untitled',
     );
   }
 
   @Put(':fileId/move')
-  async moveFile(@Param('fileId') fileId: string, @Body() dto: MoveFileDto) {
-    return this.fileService.moveFile(fileId, dto.parentId);
+  async moveFile(
+    @Param('fileId') fileId: string,
+    @CurrentUser('id') userId: string,
+    @Body() dto: MoveFileDto,
+  ) {
+    return this.fileService.moveFile(fileId, userId, dto.parentId);
   }
 
   @Put(':fileId/share')
-  async shareFile(@Param('fileId') fileId: string, @Body() dto: ShareFileDto) {
-    return this.fileService.shareFile(fileId, dto);
+  async shareFile(
+    @Param('fileId') fileId: string,
+    @CurrentUser('id') userId: string,
+    @Body() dto: ShareFileDto,
+  ) {
+    return this.fileService.shareFile(fileId, userId, dto);
   }
 }

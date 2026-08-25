@@ -1,6 +1,11 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
-import { PaperRepository } from '../paper/paper.repository';
-import { extractFamilyName } from '../reference/utils/name-parser.util';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
+import { CatalogRepository } from '../catalog/catalog.repository';
+import { extractFamilyName } from '../citation/citation.util';
 import {
   MergePapersDto,
   DuplicateGroup,
@@ -8,100 +13,97 @@ import {
   IntegrityReport,
   IntegrityIssue,
 } from './dto/quality.dto';
+import { normalizeQualityTitle } from './quality.util';
 
 @Injectable()
 export class QualityService {
   private readonly logger = new Logger(QualityService.name);
 
-  constructor(private readonly paperRepo: PaperRepository) {}
+  /**
+   * Maximum number of papers scanned for the flagged-items list in getIntegrityReport().
+   * Capped to prevent OOM on large workspaces; the aggregate summary counts (DOI, Year, Authors)
+   * are always exact (SQL aggregates), only the per-paper issue list is capped.
+   */
+  private readonly MAX_INTEGRITY_ITEMS = 200;
+
+  constructor(private readonly catalogRepo: CatalogRepository) {}
 
   /**
    * 2-Tier Duplicate Detection:
-   * Tier 1 (High Confidence): Identical normalized DOI strings.
-   * Tier 2 (Medium Confidence): Cleaned Title + Publication Year (+/- 1) + First Author Family Name.
+   * - Tier 1 (High Confidence): SQL GROUP BY normalised DOI — O(1) round-trip.
+   * - Tier 2 (Medium Confidence): Cleaned Title + Year (±1) + First Author Family Name.
+   *   Only runs on Papers not already grouped in Tier 1.
    */
-  async getDuplicateGroups(workspaceId: string): Promise<{ duplicateGroups: DuplicateGroup[] }> {
-    const ws = await this.paperRepo.resolveWorkspace(workspaceId);
-    const targetWsId = ws?.id || workspaceId;
-
-    const papers = await this.paperRepo.findPapers({
-      workspaceId: targetWsId,
-      deletedAt: null,
-    });
+  async getDuplicateGroups(
+    workspaceId: string,
+  ): Promise<{ duplicateGroups: DuplicateGroup[] }> {
+    const targetWsId = await this.catalogRepo.resolveWorkspaceId(workspaceId);
 
     const duplicateGroups: DuplicateGroup[] = [];
     const processedPaperIds = new Set<string>();
 
-    // Helper: Map paper to DuplicateGroupItem
-    const toGroupItem = (p: any): DuplicateGroupItem => ({
-      id: p.id,
-      title: p.title,
-      doi: p.doi || undefined,
-      authors: p.authors || [],
-      year: p.year || null,
-      citationKey: p.citationKey || '',
-      collectionId: p.collectionId,
-      createdAt: p.createdAt,
-      attachmentsCount: p.attachments?.length || 0,
+    // --- Tier 1: SQL GROUP BY normalised DOI (High Confidence) ---
+    const doiGroups = await this.catalogRepo.findDoiDuplicates(targetWsId);
+
+    // Collect all duplicated IDs so we can fetch full Paper records in one query
+    const tier1Ids = doiGroups.flatMap((g) => g.paperIds);
+
+    if (tier1Ids.length > 0) {
+      const tier1Papers = await this.catalogRepo.findItems({
+        id: { in: tier1Ids },
+        workspaceId: targetWsId,
+        deletedAt: null,
+      });
+      const paperById = new Map(tier1Papers.map((p) => [p.id, p]));
+
+      for (const group of doiGroups) {
+        const groupPapers = group.paperIds
+          .map((id) => paperById.get(id))
+          .filter((p): p is NonNullable<typeof p> => p !== undefined);
+
+        if (groupPapers.length > 1) {
+          duplicateGroups.push({
+            matchType: 'DOI',
+            confidence: 'high',
+            matchKey: group.doi,
+            items: groupPapers.map((p) => this.toGroupItem(p)),
+            papers: groupPapers.map((p) => this.toGroupItem(p)),
+          });
+          groupPapers.forEach((p) => processedPaperIds.add(p.id));
+        }
+      }
+    }
+
+    // --- Tier 2: Title + Year (±1) + Author (Medium Confidence) ---
+    // Only fetch Papers not already in a Tier 1 group
+    const allPapers = await this.catalogRepo.findItems({
+      workspaceId: targetWsId,
+      deletedAt: null,
+      ...(processedPaperIds.size > 0 && {
+        NOT: { id: { in: Array.from(processedPaperIds) } },
+      }),
     });
 
-    // Helper: Clean and normalize title
-    const normalizeTitle = (title: string): string => {
-      return (title || '')
-        .toLowerCase()
-        .replace(/[^a-z0-9]/g, '')
-        .trim();
-    };
-
-    // --- Tier 1: Match by DOI (High Confidence) ---
-    const doiMap = new Map<string, typeof papers>();
-    for (const paper of papers) {
-      if (paper.doi && paper.doi.trim().length > 3) {
-        const cleanDoi = paper.doi.trim().toLowerCase();
-        const existing = doiMap.get(cleanDoi) || [];
-        existing.push(paper);
-        doiMap.set(cleanDoi, existing);
-      }
-    }
-
-    for (const [doi, groupPapers] of doiMap.entries()) {
-      if (groupPapers.length > 1) {
-        duplicateGroups.push({
-          matchType: 'DOI',
-          confidence: 'high',
-          matchKey: doi,
-          papers: groupPapers.map(toGroupItem),
-        });
-        groupPapers.forEach((p) => processedPaperIds.add(p.id));
-      }
-    }
-
-    // --- Tier 2: Match by Title + Year (+/- 1) + Author (Medium Confidence) ---
-    const remainingPapers = papers.filter((p) => !processedPaperIds.has(p.id));
-
-    for (let i = 0; i < remainingPapers.length; i++) {
-      const p1 = remainingPapers[i];
+    for (let i = 0; i < allPapers.length; i++) {
+      const p1 = allPapers[i];
       if (processedPaperIds.has(p1.id)) continue;
 
-      const normTitle1 = normalizeTitle(p1.title);
+      const normTitle1 = normalizeQualityTitle(p1.title);
       if (normTitle1.length < 5) continue;
 
       const auth1 = p1.authors?.[0] ? extractFamilyName(p1.authors[0]) : '';
       const matchingGroup = [p1];
 
-      for (let j = i + 1; j < remainingPapers.length; j++) {
-        const p2 = remainingPapers[j];
+      for (let j = i + 1; j < allPapers.length; j++) {
+        const p2 = allPapers[j];
         if (processedPaperIds.has(p2.id)) continue;
 
-        const normTitle2 = normalizeTitle(p2.title);
+        const normTitle2 = normalizeQualityTitle(p2.title);
         if (normTitle1 === normTitle2) {
           const auth2 = p2.authors?.[0] ? extractFamilyName(p2.authors[0]) : '';
           const authorMatch = !auth1 || !auth2 || auth1 === auth2;
-
-          let yearMatch = true;
-          if (p1.year && p2.year) {
-            yearMatch = Math.abs(p1.year - p2.year) <= 1;
-          }
+          const yearMatch =
+            !p1.year || !p2.year || Math.abs(p1.year - p2.year) <= 1;
 
           if (authorMatch && yearMatch) {
             matchingGroup.push(p2);
@@ -114,7 +116,8 @@ export class QualityService {
           matchType: 'TITLE_AUTHOR_YEAR',
           confidence: 'medium',
           matchKey: `${normTitle1.slice(0, 30)}_${p1.year || 'noyear'}`,
-          papers: matchingGroup.map(toGroupItem),
+          items: matchingGroup.map((p) => this.toGroupItem(p)),
+          papers: matchingGroup.map((p) => this.toGroupItem(p)),
         });
         matchingGroup.forEach((p) => processedPaperIds.add(p.id));
       }
@@ -129,41 +132,53 @@ export class QualityService {
    * 2. Re-assigns all attachments from source papers to master paper.
    * 3. Soft-deletes source papers (deletedAt = now()).
    */
-  async mergePapers(
-    workspaceId: string,
-    userId: string,
-    dto: MergePapersDto,
-  ) {
-    const ws = await this.paperRepo.resolveWorkspace(workspaceId);
-    const targetWsId = ws?.id || workspaceId;
+  async mergePapers(workspaceId: string, userId: string, dto: MergePapersDto) {
+    const targetWsId = await this.catalogRepo.resolveWorkspaceId(workspaceId);
 
-    if (!dto.masterPaperId || !dto.sourcePaperIds || dto.sourcePaperIds.length === 0) {
-      throw new BadRequestException('Must specify a masterPaperId and at least one sourcePaperId');
+    if (
+      !(dto.masterId || dto.masterPaperId || '') ||
+      !(dto.sourceItemIds || dto.sourcePaperIds || []) ||
+      (dto.sourceItemIds || dto.sourcePaperIds || []).length === 0
+    ) {
+      throw new BadRequestException(
+        'Must specify a masterPaperId and at least one sourcePaperId',
+      );
     }
 
-    if (dto.sourcePaperIds.includes(dto.masterPaperId)) {
-      throw new BadRequestException('Master paper cannot be included in sourcePaperIds');
+    if (
+      (dto.sourceItemIds || dto.sourcePaperIds || []).includes(
+        dto.masterId || dto.masterPaperId || '',
+      )
+    ) {
+      throw new BadRequestException(
+        'Master paper cannot be included in sourcePaperIds',
+      );
     }
 
-    const master = await this.paperRepo.findPaperById(dto.masterPaperId);
+    const master = await this.catalogRepo.findItemById(
+      dto.masterId || dto.masterPaperId || '',
+    );
     if (!master || master.deletedAt || master.workspaceId !== targetWsId) {
       throw new NotFoundException('Master paper not found in this workspace');
     }
 
-    const sources = await this.paperRepo.findPapers({
-      id: { in: dto.sourcePaperIds },
+    const sources = await this.catalogRepo.findItems({
+      id: { in: dto.sourceItemIds || dto.sourcePaperIds || [] },
       workspaceId: targetWsId,
       deletedAt: null,
     });
 
-    if (sources.length !== dto.sourcePaperIds.length) {
-      throw new NotFoundException('One or more source papers could not be found');
+    if (
+      sources.length !== (dto.sourceItemIds || dto.sourcePaperIds || []).length
+    ) {
+      throw new NotFoundException(
+        'One or more source papers could not be found',
+      );
     }
 
     // Consolidate notes and labels
-    const consolidatedNotes: Array<{ title: string; content: string }> = Array.isArray(master.notes)
-      ? [...(master.notes as any[])]
-      : [];
+    const consolidatedNotes: Array<{ title: string; content: string }> =
+      Array.isArray(master.notes) ? [...(master.notes as any[])] : [];
 
     const consolidatedLabels = new Set<string>(master.labels || []);
 
@@ -178,84 +193,63 @@ export class QualityService {
       }
     }
 
-    // Execute atomic transaction
+    // Execute atomic transaction via repository seam (no direct Prisma access from service layer)
     const now = new Date();
-    await this.paperRepo.prisma.$transaction(async (tx) => {
-      // 1. Update master paper notes & labels
-      await tx.paper.update({
-        where: { id: master.id },
-        data: {
-          notes: consolidatedNotes as any,
-          labels: Array.from(consolidatedLabels),
-        },
-      });
-
-      // 2. Transfer attachments from sources to master
-      await tx.paperAttachment.updateMany({
-        where: {
-          paperId: { in: dto.sourcePaperIds },
-        },
-        data: {
-          paperId: master.id,
-        },
-      });
-
-      // 3. Soft-delete source papers
-      await tx.paper.updateMany({
-        where: {
-          id: { in: dto.sourcePaperIds },
-        },
-        data: {
-          deletedAt: now,
-        },
-      });
+    await this.catalogRepo.executeMergePapersTransaction({
+      masterId: master.id,
+      sourcePaperIds: dto.sourceItemIds || dto.sourcePaperIds || [],
+      consolidatedNotes,
+      consolidatedLabels: Array.from(consolidatedLabels),
+      now,
     });
 
-    const updatedMaster = await this.paperRepo.findPaperById(master.id);
+    const updatedMaster = await this.catalogRepo.findItemById(master.id);
     return {
       masterPaper: updatedMaster,
       mergedCount: sources.length,
-      softDeletedPaperIds: dto.sourcePaperIds,
+      softDeletedPaperIds: dto.sourceItemIds || dto.sourcePaperIds || [],
     };
   }
 
   /**
-   * Scans library for missing fields and metadata health metrics
+   * Scans library for missing fields and metadata health metrics.
+   * Aggregate counts (DOI, Year, Authors) use a single SQL round-trip via findIntegrityStats().
+   * Flagged items list is capped at 200 to prevent OOM on large workspaces.
    */
   async getIntegrityReport(workspaceId: string): Promise<IntegrityReport> {
-    const ws = await this.paperRepo.resolveWorkspace(workspaceId);
-    const targetWsId = ws?.id || workspaceId;
+    const targetWsId = await this.catalogRepo.resolveWorkspaceId(workspaceId);
 
-    const papers = await this.paperRepo.findPapers({
-      workspaceId: targetWsId,
-      deletedAt: null,
-    });
+    // SQL aggregates — O(1) round-trip for summary counts
+    const stats = await this.catalogRepo.findIntegrityStats(targetWsId);
 
-    let missingDoiCount = 0;
-    let missingYearCount = 0;
-    let missingAuthorsCount = 0;
+    // Flagged items list — limited to MAX_INTEGRITY_ITEMS to prevent OOM; PDF check requires attachment join
+    const flaggedPapers = await this.catalogRepo.findItems(
+      { workspaceId: targetWsId, deletedAt: null },
+      { take: this.MAX_INTEGRITY_ITEMS, orderBy: [{ createdAt: 'desc' }] },
+    );
+
     let missingPdfCount = 0;
     const flaggedItems: IntegrityIssue[] = [];
 
-    for (const p of papers) {
+    for (const p of flaggedPapers) {
       const issues: string[] = [];
 
       if (!p.doi || p.doi.trim().length === 0) {
-        missingDoiCount++;
         issues.push('Missing DOI identifier');
       }
-
       if (!p.year) {
-        missingYearCount++;
         issues.push('Missing publication year');
       }
-
       if (!p.authors || p.authors.length === 0) {
-        missingAuthorsCount++;
         issues.push('Missing author list');
       }
 
-      const hasPdf = p.fileUrl || (p.attachments as any[])?.some((a: any) => a.mimeType?.includes('pdf') || a.filename?.endsWith('.pdf'));
+      const hasPdf =
+        p.fileUrl ||
+        (p.attachments as any[])?.some(
+          (a: any) =>
+            a.mimeType?.includes('pdf') || a.filename?.endsWith('.pdf'),
+        );
       if (!hasPdf) {
         missingPdfCount++;
         issues.push('Missing primary PDF attachment');
@@ -263,6 +257,7 @@ export class QualityService {
 
       if (issues.length > 0) {
         flaggedItems.push({
+          itemId: p.id,
           paperId: p.id,
           title: p.title,
           citationKey: p.citationKey || '',
@@ -271,14 +266,35 @@ export class QualityService {
       }
     }
 
+    const totalItems = stats.totalPapers;
+    const healthyItems = stats.totalPapers - flaggedItems.length;
+
     return {
-      totalPapers: papers.length,
-      healthyPapers: papers.length - flaggedItems.length,
-      missingDoiCount,
-      missingYearCount,
-      missingAuthorsCount,
+      totalItems,
+      healthyItems,
+      totalPapers: totalItems,
+      healthyPapers: healthyItems,
+      missingDoiCount: stats.missingDoiCount,
+      missingYearCount: stats.missingYearCount,
+      missingAuthorsCount: stats.missingAuthorsCount,
       missingPdfCount,
       flaggedItems,
+    };
+  }
+
+  // ─── Private helpers ──────────────────────────────────────────────────────
+
+  private toGroupItem(p: any): DuplicateGroupItem {
+    return {
+      id: p.id,
+      title: p.title,
+      doi: p.doi || undefined,
+      authors: p.authors || [],
+      year: p.year || null,
+      citationKey: p.citationKey || '',
+      collectionId: p.collectionId,
+      createdAt: p.createdAt,
+      attachmentsCount: p.attachments?.length || 0,
     };
   }
 }

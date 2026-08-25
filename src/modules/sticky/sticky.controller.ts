@@ -17,7 +17,7 @@ import {
   UpdateStickyDto,
   ReorderStickiesDto,
 } from './dto/sticky.dto';
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authentication';
+import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
 
 @ApiTags('Personal Sticky Notes')
 @ApiBearerAuth('JWT-auth')

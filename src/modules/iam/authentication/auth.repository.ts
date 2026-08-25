@@ -44,33 +44,6 @@ export class AuthRepository {
     });
   }
 
-  async searchUsers(query: string, currentUserId?: string) {
-    if (!query || query.trim().length === 0) {
-      return [];
-    }
-
-    return this.prisma.user.findMany({
-      where: {
-        AND: [
-          currentUserId ? { id: { not: currentUserId } } : {},
-          {
-            OR: [
-              { name: { contains: query, mode: 'insensitive' } },
-              { email: { contains: query, mode: 'insensitive' } },
-            ],
-          },
-        ],
-      },
-      take: 20,
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        avatar: true,
-      },
-    });
-  }
-
   async createRefreshToken(data: {
     userId: string;
     token: string;

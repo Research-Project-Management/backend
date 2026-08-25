@@ -26,13 +26,13 @@ import {
   ReorderTaskDto,
   BulkUpdateTaskDto,
 } from './dto/task.dto';
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authentication';
+import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
 import {
   WorkspaceRoleGuard,
   WorkspaceRoles,
   ProjectRoleGuard,
   ProjectRoles,
-} from '@/modules/iam/authorization';
+} from '@/modules/iam/authz';
 import { ActivityService } from '@/modules/activity/activity.service';
 
 @ApiTags('Planning Tasks')
@@ -102,7 +102,7 @@ export class TaskController {
     return this.taskService.reorderTasks(projectId, dto);
   }
 
-  @Put('project/:projectId/tasks/bulk')
+  @Put(['project/:projectId/tasks/bulk', 'tasks/bulk'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor')
   @ApiOperation({ summary: 'Bulk update multiple tasks in a project' })
@@ -111,9 +111,10 @@ export class TaskController {
     description: 'Bulk update status with affected count',
   })
   async bulkUpdateTasks(
-    @Param('projectId') projectId: string,
+    @Param('projectId') paramProjectId: string | undefined,
     @Body() dto: BulkUpdateTaskDto,
   ) {
+    const projectId = paramProjectId || '';
     return this.taskService.bulkUpdateTasks(projectId, dto);
   }
 

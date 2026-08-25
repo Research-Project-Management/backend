@@ -44,17 +44,35 @@ export class ActivityListener {
     }
   }
 
+  @OnEvent('project.*', { async: true })
+  async handleProjectEvents(event: DomainActivityEvent) {
+    if (event?.entityType) {
+      await this.handleGenericActivity(event);
+    }
+  }
+
+  @OnEvent('cycle.*', { async: true })
+  async handleCycleEvents(event: DomainActivityEvent) {
+    if (event?.entityType) {
+      await this.handleGenericActivity(event);
+    }
+  }
+
   private async invalidateAnalyticsCache(
     workspaceId: string,
     projectId?: string | null,
   ) {
     try {
       if (workspaceId) {
+        await this.redisCache.del(
+          `analytics:workspace:${workspaceId}:overview`,
+        );
         await this.redisCache.delPattern(
           `analytics:workspace:${workspaceId}:*`,
         );
       }
       if (projectId) {
+        await this.redisCache.del(`analytics:project:${projectId}:insights`);
         await this.redisCache.delPattern(`analytics:project:${projectId}:*`);
       }
     } catch (err: unknown) {

@@ -2,10 +2,14 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  Optional,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ProjectRepository } from './project.repository';
-import { Prisma, ProjectMemberRole } from '@prisma/client';
+import { Prisma, ProjectMemberRole, EntityType } from '@prisma/client';
 import { parseTaskColumns, TaskColumn } from '@/core/types/json-fields.type';
+import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
+import { RedisCacheService } from '@/core/cache/redis-cache.service';
 import {
   CreateProjectDto,
   UpdateProjectDto,
@@ -19,9 +23,25 @@ const VALID_PROJECT_ROLES = new Set<string>(Object.values(ProjectMemberRole));
 
 @Injectable()
 export class ProjectService {
-  constructor(private readonly projectRepo: ProjectRepository) {}
+  constructor(
+    private readonly projectRepo: ProjectRepository,
+    @Optional() private readonly eventEmitter?: EventEmitter2,
+    @Optional() private readonly cache?: RedisCacheService,
+  ) {}
 
   async getProjects(workspaceId: string) {
+    const cacheKey = `projects:${workspaceId}:list`;
+    if (this.cache) {
+      return this.cache.wrap(
+        cacheKey,
+        async () => {
+          const projects =
+            await this.projectRepo.findWorkspaceProjects(workspaceId);
+          return { projects };
+        },
+        120,
+      );
+    }
     const projects = await this.projectRepo.findWorkspaceProjects(workspaceId);
     return { projects };
   }
@@ -39,6 +59,22 @@ export class ProjectService {
 
     return {
       project,
+      yourRole: member?.role || ProjectMemberRole.viewer,
+    };
+  }
+
+  async getProjectOverview(projectId: string, userId?: string) {
+    const overview = await this.projectRepo.findProjectOverview(projectId);
+    if (!overview) {
+      throw new NotFoundException('Project not found');
+    }
+
+    const member = userId
+      ? overview.project.members.find((m) => m.userId === userId)
+      : undefined;
+
+    return {
+      ...overview,
       yourRole: member?.role || ProjectMemberRole.viewer,
     };
   }
@@ -79,6 +115,18 @@ export class ProjectService {
       },
     });
 
+    this.eventEmitter?.emit(
+      'project.created',
+      new DomainActivityEvent({
+        entityType: 'project' as unknown as EntityType,
+        entityId: project.id,
+        verb: 'created',
+        actorId: userId,
+        workspaceId: project.workspaceId,
+        projectId: project.id,
+      }),
+    );
+
     return { project };
   }
 
@@ -92,11 +140,41 @@ export class ProjectService {
       ...(dto.settings !== undefined && { settings: dto.settings }),
     });
 
+    this.eventEmitter?.emit(
+      'project.updated',
+      new DomainActivityEvent({
+        entityType: 'project' as unknown as EntityType,
+        entityId: project.id,
+        verb: 'updated',
+        actorId: '',
+        workspaceId: project.workspaceId,
+        projectId: project.id,
+      }),
+    );
+
     return { project };
   }
 
   async deleteProject(projectId: string) {
+    const existing = await this.projectRepo.findProjectById(projectId);
+    if (!existing) {
+      throw new NotFoundException('Project not found');
+    }
+
     await this.projectRepo.updateProject(projectId, { isActive: false });
+
+    this.eventEmitter?.emit(
+      'project.deleted',
+      new DomainActivityEvent({
+        entityType: 'project' as unknown as EntityType,
+        entityId: projectId,
+        verb: 'deleted',
+        actorId: '',
+        workspaceId: existing.workspaceId,
+        projectId: projectId,
+      }),
+    );
+
     return { message: 'Project deleted successfully' };
   }
 
@@ -183,6 +261,18 @@ export class ProjectService {
       taskColumns: updatedColumns as unknown as Prisma.InputJsonValue,
     });
 
+    this.eventEmitter?.emit(
+      'project.updated',
+      new DomainActivityEvent({
+        entityType: 'project' as unknown as EntityType,
+        entityId: projectId,
+        verb: 'updated',
+        actorId: '',
+        workspaceId: project.workspaceId,
+        projectId,
+      }),
+    );
+
     return { columns: updatedColumns };
   }
 
@@ -215,6 +305,18 @@ export class ProjectService {
       taskColumns: updatedColumns as unknown as Prisma.InputJsonValue,
     });
 
+    this.eventEmitter?.emit(
+      'project.updated',
+      new DomainActivityEvent({
+        entityType: 'project' as unknown as EntityType,
+        entityId: projectId,
+        verb: 'updated',
+        actorId: '',
+        workspaceId: project.workspaceId,
+        projectId,
+      }),
+    );
+
     return { columns: updatedColumns };
   }
 
@@ -232,14 +334,18 @@ export class ProjectService {
       taskColumns: updatedColumns as unknown as Prisma.InputJsonValue,
     });
 
-    return { columns: updatedColumns };
-  }
+    this.eventEmitter?.emit(
+      'project.updated',
+      new DomainActivityEvent({
+        entityType: 'project' as unknown as EntityType,
+        entityId: projectId,
+        verb: 'updated',
+        actorId: '',
+        workspaceId: project.workspaceId,
+        projectId,
+      }),
+    );
 
-  async getProjectOverview(projectId: string, _userId?: string) {
-    const overview = await this.projectRepo.findProjectOverview(projectId);
-    if (!overview) {
-      throw new NotFoundException('Project not found');
-    }
-    return overview;
+    return { columns: updatedColumns };
   }
 }

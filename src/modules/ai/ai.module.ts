@@ -4,7 +4,6 @@ import { ThreadModule } from './thread/thread.module';
 import { ProjectAgentModule } from './project-agent/project-agent.module';
 import { RagAgentModule } from './rag-agent/rag-agent.module';
 import { WritingAgentModule } from './writing-agent/writing-agent.module';
-import { AiHealthController } from './ai-health.controller';
 
 @Module({
   imports: [
@@ -14,7 +13,7 @@ import { AiHealthController } from './ai-health.controller';
     RagAgentModule,
     WritingAgentModule,
   ],
-  controllers: [AiHealthController],
+  controllers: [],
   exports: [
     EngineModule,
     ThreadModule,

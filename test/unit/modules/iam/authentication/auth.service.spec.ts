@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { AuthService } from '@/modules/iam/authentication/auth.service';
 import { AuthRepository } from '@/modules/iam/authentication/auth.repository';
+import { RedisCacheService } from '@/core/cache/redis-cache.service';
 import * as bcrypt from 'bcrypt';
 
 jest.mock('bcrypt');
@@ -11,6 +12,7 @@ jest.mock('bcrypt');
 describe('AuthService', () => {
   let service: AuthService;
   let authRepo: AuthRepository;
+  let redis: RedisCacheService;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -24,10 +26,10 @@ describe('AuthService', () => {
             findUserByOAuth: jest.fn(),
             createUser: jest.fn(),
             updateUser: jest.fn(),
-            searchUsers: jest.fn(),
             createRefreshToken: jest.fn(),
             findRefreshToken: jest.fn(),
             revokeRefreshToken: jest.fn(),
+            revokeAllUserTokens: jest.fn(),
           },
         },
         {
@@ -46,11 +48,20 @@ describe('AuthService', () => {
             }),
           },
         },
+        {
+          provide: RedisCacheService,
+          useValue: {
+            get: jest.fn(),
+            set: jest.fn(),
+            del: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
     service = module.get<AuthService>(AuthService);
     authRepo = module.get<AuthRepository>(AuthRepository);
+    redis = module.get<RedisCacheService>(RedisCacheService);
   });
 
   it('should be defined', () => {
@@ -79,6 +90,8 @@ describe('AuthService', () => {
       email: 'new@example.com',
       name: 'New User',
       password: 'hashed-password',
+      avatar: null,
+      isVerified: true,
     });
 
     const result = await service.registerUser({
@@ -104,5 +117,16 @@ describe('AuthService', () => {
     await expect(
       service.login({ email: 'user@example.com', password: 'wrong-password' }),
     ).rejects.toThrow(UnauthorizedException);
+  });
+
+  it('should create and verify OAuth state in Redis', async () => {
+    const state = await service.createOAuthState();
+    expect(typeof state).toBe('string');
+    expect(redis.set).toHaveBeenCalled();
+
+    (redis.get as jest.Mock).mockResolvedValue({ createdAt: Date.now() });
+    const isValid = await service.verifyOAuthState(state);
+    expect(isValid).toBe(true);
+    expect(redis.del).toHaveBeenCalled();
   });
 });

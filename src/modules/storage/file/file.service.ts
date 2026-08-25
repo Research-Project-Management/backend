@@ -1,8 +1,16 @@
-import { Injectable, NotFoundException, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+  Optional,
+} from '@nestjs/common';
+import { FastifyRequest } from 'fastify';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FileRepository } from './file.repository';
 import { R2Service } from '../r2/r2.service';
 import { Prisma, EntityType } from '@prisma/client';
+import { PrismaService } from '@/core/database/prisma.service';
 import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
 import {
   PresignDto,
@@ -26,8 +34,78 @@ export class FileService {
   constructor(
     private readonly fileRepo: FileRepository,
     private readonly r2Service: R2Service,
+    private readonly prisma: PrismaService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
   ) {}
+
+  private async assertCanWriteScope(
+    userId: string,
+    scope: { workspaceId?: string; projectId?: string; pageId?: string },
+  ): Promise<void> {
+    if (scope.pageId) {
+      const page = await this.prisma.page.findUnique({
+        where: { id: scope.pageId },
+        select: { projectId: true, workspaceId: true },
+      });
+      if (!page) throw new NotFoundException('Page not found');
+      return this.assertCanWriteScope(userId, {
+        projectId: page.projectId || undefined,
+        workspaceId: page.workspaceId,
+      });
+    }
+
+    if (scope.projectId) {
+      const project = await this.prisma.project.findUnique({
+        where: { id: scope.projectId },
+        select: { workspaceId: true },
+      });
+      if (!project) throw new NotFoundException('Project not found');
+
+      const workspaceMember = await this.prisma.workspaceMember.findFirst({
+        where: { workspaceId: project.workspaceId, userId },
+        select: { role: true },
+      });
+      if (workspaceMember?.role === 'owner' || workspaceMember?.role === 'admin') {
+        return;
+      }
+
+      const projectMember = await this.prisma.projectMember.findFirst({
+        where: { projectId: scope.projectId, userId },
+        select: { role: true },
+      });
+      if (
+        projectMember?.role === 'admin' ||
+        projectMember?.role === 'contributor'
+      ) {
+        return;
+      }
+      throw new ForbiddenException('Insufficient file permissions');
+    }
+
+    if (scope.workspaceId) {
+      const member = await this.prisma.workspaceMember.findFirst({
+        where: { workspaceId: scope.workspaceId, userId },
+        select: { role: true },
+      });
+      if (member && member.role !== 'viewer') return;
+      throw new ForbiddenException('Insufficient file permissions');
+    }
+  }
+
+  private async assertCanAccessFile(
+    userId: string,
+    fileId: string,
+    mode: 'read' | 'write',
+  ) {
+    const file = await this.fileRepo.findFileById(fileId);
+    if (!file) throw new NotFoundException('File not found');
+    if (file.authorId === userId) return file;
+
+    const share = await this.fileRepo.findFileShare(fileId, userId);
+    if (share && (mode === 'read' || share.permission === 'edit')) return file;
+
+    throw new ForbiddenException('Insufficient file permissions');
+  }
 
   private formatFile<
     T extends {
@@ -60,6 +138,50 @@ export class FileService {
       ? dto.filename.slice(1)
       : dto.filename;
     return this.r2Service.getPresignedUploadUrl(key, dto.mimeType);
+  }
+
+  /**
+   * Deepened entry point for parsing and storing raw multipart stream uploads.
+   */
+  async uploadMultipartStream(req: FastifyRequest, userId?: string) {
+    if (!req.isMultipart || !req.isMultipart()) {
+      throw new BadRequestException('Request must be multipart/form-data');
+    }
+
+    const data = await req.file();
+    if (!data) {
+      throw new BadRequestException('No file found in request');
+    }
+
+    const buffer = await data.toBuffer();
+    const filename = data.filename || 'unnamed-file';
+    const mimeType = data.mimetype || 'application/octet-stream';
+
+    // Parse additional form fields safely
+    const reqUser = (req as unknown as { user?: { id?: string; sub?: string } })
+      ?.user;
+    const authorId = userId || reqUser?.id || reqUser?.sub || '';
+    const fields = (data.fields || {}) as Record<
+      string,
+      { value?: string } | string | undefined
+    >;
+    const getFieldValue = (
+      field: { value?: string } | string | undefined,
+    ): string | undefined => {
+      if (typeof field === 'string') return field;
+      if (field && typeof field.value === 'string') return field.value;
+      return undefined;
+    };
+
+    const workspaceId = getFieldValue(fields.workspaceId);
+    const projectId = getFieldValue(fields.projectId);
+    const pageId = getFieldValue(fields.pageId);
+
+    return this.uploadR2Buffer(authorId, filename, buffer, mimeType, {
+      workspaceId,
+      projectId,
+      pageId,
+    });
   }
 
   async uploadR2Buffer(
@@ -133,6 +255,8 @@ export class FileService {
     scope: { workspaceId?: string; projectId?: string; pageId?: string },
     dto: UploadFileDto,
   ) {
+    await this.assertCanWriteScope(userId, scope);
+
     const linkedToType = scope.pageId
       ? 'Page'
       : scope.projectId
@@ -166,6 +290,8 @@ export class FileService {
     scope: { workspaceId?: string; projectId?: string; pageId?: string },
     dto: CreateFolderDto,
   ) {
+    await this.assertCanWriteScope(userId, scope);
+
     const linkedToType = scope.pageId
       ? 'Page'
       : scope.projectId
@@ -189,17 +315,13 @@ export class FileService {
     return { folder: this.formatFile(folder) };
   }
 
-  async getFile(fileId: string) {
-    const file = await this.fileRepo.findFileById(fileId);
-
-    if (!file) {
-      throw new NotFoundException('File not found');
-    }
-
+  async getFile(fileId: string, userId: string) {
+    const file = await this.assertCanAccessFile(userId, fileId, 'read');
     return { file: this.formatFile(file) };
   }
 
-  async updateFile(fileId: string, dto: UpdateFileDto) {
+  async updateFile(fileId: string, userId: string, dto: UpdateFileDto) {
+    await this.assertCanAccessFile(userId, fileId, 'write');
     const file = await this.fileRepo.updateFile(fileId, {
       ...(dto.filename !== undefined && { filename: dto.filename }),
       ...(dto.starred !== undefined && { starred: dto.starred }),
@@ -212,40 +334,37 @@ export class FileService {
     return { file: this.formatFile(file) };
   }
 
-  async deleteFile(fileId: string) {
+  async deleteFile(fileId: string, userId: string) {
+    await this.assertCanAccessFile(userId, fileId, 'write');
     await this.fileRepo.updateFile(fileId, {
       trashedAt: new Date(),
     });
     return { message: 'File moved to trash' };
   }
 
-  async restoreFile(fileId: string) {
+  async restoreFile(fileId: string, userId: string) {
+    await this.assertCanAccessFile(userId, fileId, 'write');
     await this.fileRepo.updateFile(fileId, {
       trashedAt: null,
     });
     return { message: 'File restored successfully' };
   }
 
-  async permanentlyDeleteFile(fileId: string) {
-    const file = await this.fileRepo.findFileById(fileId);
+  async permanentlyDeleteFile(fileId: string, userId: string) {
+    const file = await this.assertCanAccessFile(userId, fileId, 'write');
 
-    if (file) {
-      const deletePromises: Promise<unknown>[] = [
-        this.fileRepo.deleteFile(fileId),
-      ];
-      if (file.url && file.url.includes('/api/files/r2/')) {
-        const key = file.url.replace('/api/files/r2/', '');
-        deletePromises.push(this.r2Service.deleteObject(key));
-      }
-      await Promise.all(deletePromises);
+    const deletePromises: Promise<unknown>[] = [this.fileRepo.deleteFile(fileId)];
+    if (file.url && file.url.includes('/api/files/r2/')) {
+      const key = file.url.replace('/api/files/r2/', '');
+      deletePromises.push(this.r2Service.deleteObject(key));
     }
+    await Promise.all(deletePromises);
 
     return { message: 'File permanently deleted' };
   }
 
-  async toggleStar(fileId: string) {
-    const file = await this.fileRepo.findFileById(fileId);
-    if (!file) throw new NotFoundException('File not found');
+  async toggleStar(fileId: string, userId: string) {
+    const file = await this.assertCanAccessFile(userId, fileId, 'write');
 
     const updated = await this.fileRepo.updateFile(fileId, {
       starred: !file.starred,
@@ -254,21 +373,24 @@ export class FileService {
     return { file: this.formatFile(updated) };
   }
 
-  async renameFile(fileId: string, filename: string) {
+  async renameFile(fileId: string, userId: string, filename: string) {
+    await this.assertCanAccessFile(userId, fileId, 'write');
     const file = await this.fileRepo.updateFile(fileId, {
       filename,
     });
     return { file: this.formatFile(file) };
   }
 
-  async moveFile(fileId: string, parentId?: string) {
+  async moveFile(fileId: string, userId: string, parentId?: string) {
+    await this.assertCanAccessFile(userId, fileId, 'write');
     const file = await this.fileRepo.updateFile(fileId, {
       parentId: parentId || null,
     });
     return { file: this.formatFile(file) };
   }
 
-  async shareFile(fileId: string, dto: ShareFileDto) {
+  async shareFile(fileId: string, userId: string, dto: ShareFileDto) {
+    await this.assertCanAccessFile(userId, fileId, 'write');
     const share = await this.fileRepo.upsertFileShare(
       fileId,
       dto.userId,

@@ -1,297 +1,184 @@
-import { IsNotEmpty, IsString } from 'class-validator';
 import {
   Controller,
   Post,
   Get,
-  Put,
   Body,
   Query,
   Redirect,
-  UseGuards,
   HttpCode,
   HttpStatus,
   BadRequestException,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBadRequestResponse,
+  ApiUnauthorizedResponse,
+} from '@nestjs/swagger';
+
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
-import { ChangePasswordDto } from './dto/change-password.dto';
-import { UpdateProfileDto } from './dto/update-profile.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
-import { JwtAuthGuard } from '@/modules/iam/authentication';
-import { CurrentUser } from '@/modules/iam/authentication';
-
-export class OAuthExchangeDto {
-  @IsString()
-  @IsNotEmpty()
-  code!: string;
-}
+import { OAuthExchangeDto } from './dto/oauth-exchange.dto';
+import {
+  AuthResponseDto,
+  TokenRefreshResponseDto,
+  MessageResponseDto,
+} from './dto/auth-response.dto';
+import { Public } from './decorators/public.decorator';
 
 @ApiTags('Identity')
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  @Public()
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
-  async register(@Body() dto: RegisterDto) {
+  @ApiOperation({ summary: 'Register a new user account' })
+  @ApiResponse({
+    status: HttpStatus.CREATED,
+    description: 'User registered successfully',
+    type: AuthResponseDto,
+  })
+  @ApiBadRequestResponse({ description: 'Email already exists or invalid data' })
+  async register(@Body() dto: RegisterDto): Promise<AuthResponseDto> {
     return this.authService.registerUser(dto);
   }
 
+  @Public()
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  async login(@Body() dto: LoginDto) {
+  @ApiOperation({ summary: 'Authenticate user with email and password' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Login successful',
+    type: AuthResponseDto,
+  })
+  @ApiUnauthorizedResponse({ description: 'Invalid email or password' })
+  async login(@Body() dto: LoginDto): Promise<AuthResponseDto> {
     return this.authService.login(dto);
   }
 
+  @Public()
   @Get('google')
   @Redirect()
-  googleAuthMethod() {
-    const clientId = process.env.GOOGLE_CLIENT_ID;
-    const apiUrl = process.env.API_URL || 'http://localhost:3000';
-    const redirectUri = apiUrl + '/auth/google/callback';
-    const state = this.authService.createOAuthState();
-    const url =
-      'https://accounts.google.com/o/oauth2/v2/auth?client_id=' +
-      clientId +
-      '&redirect_uri=' +
-      encodeURIComponent(redirectUri) +
-      '&response_type=code&scope=' +
-      encodeURIComponent('openid email profile') +
-      '&state=' +
-      encodeURIComponent(state) +
-      '&access_type=offline&prompt=consent';
+  @ApiOperation({ summary: 'Initiate Google OAuth2 authentication flow' })
+  async googleAuth() {
+    const url = await this.authService.getGoogleAuthUrl();
     return { url, statusCode: 302 };
   }
 
+  @Public()
   @Get('google/callback')
   @Redirect()
+  @ApiOperation({ summary: 'Handle Google OAuth2 callback' })
   async googleCallback(
-    @Query('code') code: string,
-    @Query('state') state: string,
-    @Query('error') error: string,
+    @Query('code') code?: string,
+    @Query('state') state?: string,
+    @Query('error') error?: string,
   ) {
-    const clientUrl = process.env.CLIENT_URL || 'http://localhost:2915';
-    if (error || !code) {
-      return {
-        url: clientUrl + '/login?error=' + (error || 'no_code'),
-        statusCode: 302,
-      };
-    }
-
-    if (!this.authService.verifyOAuthState(state)) {
-      return {
-        url: clientUrl + '/login?error=invalid_csrf_state',
-        statusCode: 302,
-      };
-    }
-
-    try {
-      const clientId = process.env.GOOGLE_CLIENT_ID;
-      const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-      const apiUrl = process.env.API_URL || 'http://localhost:3000';
-      const redirectUri = apiUrl + '/auth/google/callback';
-
-      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          code,
-          client_id: clientId || '',
-          client_secret: clientSecret || '',
-          redirect_uri: redirectUri,
-          grant_type: 'authorization_code',
-        }),
-      });
-
-      const tokenData = (await tokenRes.json()) as { access_token?: string };
-      if (!tokenData.access_token) {
-        return {
-          url: clientUrl + '/login?error=google_token_failed',
-          statusCode: 302,
-        };
-      }
-
-      const userRes = await fetch(
-        'https://www.googleapis.com/oauth2/v2/userinfo',
-        {
-          headers: { Authorization: 'Bearer ' + tokenData.access_token },
-        },
-      );
-      const googleUser = (await userRes.json()) as {
-        id: string;
-        email?: string;
-        name?: string;
-        picture?: string;
-      };
-
-      const result = await this.authService.handleOAuth({
-        id: googleUser.id,
-        email: googleUser.email,
-        name: googleUser.name,
-        avatar: googleUser.picture,
-        provider: 'google',
-      });
-
-      const ticket = this.authService.createOAuthExchangeTicket(result);
-
-      return {
-        url: clientUrl + '/auth/callback?code=' + ticket,
-        statusCode: 302,
-      };
-    } catch (err) {
-      return { url: clientUrl + '/login?error=oauth_error', statusCode: 302 };
-    }
+    const result = await this.authService.handleGoogleCallback(
+      code,
+      state,
+      error,
+    );
+    return { url: result.redirectUrl, statusCode: 302 };
   }
 
+  @Public()
   @Get('github')
   @Redirect()
-  githubAuthMethod() {
-    const clientId = process.env.GITHUB_CLIENT_ID;
-    const apiUrl = process.env.API_URL || 'http://localhost:3000';
-    const redirectUri = apiUrl + '/auth/github/callback';
-    const state = this.authService.createOAuthState();
-    const url =
-      'https://github.com/login/oauth/authorize?client_id=' +
-      clientId +
-      '&redirect_uri=' +
-      encodeURIComponent(redirectUri) +
-      '&state=' +
-      encodeURIComponent(state) +
-      '&scope=' +
-      encodeURIComponent('read:user user:email');
+  @ApiOperation({ summary: 'Initiate GitHub OAuth authentication flow' })
+  async githubAuth() {
+    const url = await this.authService.getGithubAuthUrl();
     return { url, statusCode: 302 };
   }
 
+  @Public()
   @Get('github/callback')
   @Redirect()
+  @ApiOperation({ summary: 'Handle GitHub OAuth callback' })
   async githubCallback(
-    @Query('code') code: string,
-    @Query('state') state: string,
-    @Query('error') error: string,
+    @Query('code') code?: string,
+    @Query('state') state?: string,
+    @Query('error') error?: string,
   ) {
-    const clientUrl = process.env.CLIENT_URL || 'http://localhost:2915';
-    if (error || !code) {
-      return {
-        url: clientUrl + '/login?error=' + (error || 'no_code'),
-        statusCode: 302,
-      };
-    }
-
-    if (!this.authService.verifyOAuthState(state)) {
-      return {
-        url: clientUrl + '/login?error=invalid_csrf_state',
-        statusCode: 302,
-      };
-    }
-
-    try {
-      const clientId = process.env.GITHUB_CLIENT_ID;
-      const clientSecret = process.env.GITHUB_CLIENT_SECRET;
-
-      const tokenRes = await fetch(
-        'https://github.com/login/oauth/access_token',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-          },
-          body: JSON.stringify({
-            client_id: clientId,
-            client_secret: clientSecret,
-            code,
-          }),
-        },
-      );
-
-      const tokenData = (await tokenRes.json()) as { access_token?: string };
-      if (!tokenData.access_token) {
-        return {
-          url: clientUrl + '/login?error=github_token_failed',
-          statusCode: 302,
-        };
-      }
-
-      const userRes = await fetch('https://api.github.com/user', {
-        headers: {
-          Authorization: 'Bearer ' + tokenData.access_token,
-          'User-Agent': 'RPM-App',
-        },
-      });
-      const githubUser = (await userRes.json()) as {
-        id: number;
-        email?: string;
-        name?: string;
-        login?: string;
-        avatar_url?: string;
-      };
-
-      let email = githubUser.email;
-      if (!email) {
-        const emailsRes = await fetch('https://api.github.com/user/emails', {
-          headers: {
-            Authorization: 'Bearer ' + tokenData.access_token,
-            'User-Agent': 'RPM-App',
-          },
-        });
-        const emails = (await emailsRes.json()) as Array<{
-          email: string;
-          primary: boolean;
-        }>;
-        if (Array.isArray(emails)) {
-          const primary = emails.find((ei) => ei.primary);
-          email = primary?.email || emails[0]?.email;
-        }
-      }
-
-      const result = await this.authService.handleOAuth({
-        id: String(githubUser.id),
-        email,
-        name: githubUser.name || githubUser.login,
-        avatar: githubUser.avatar_url,
-        provider: 'github',
-      });
-
-      const ticket = this.authService.createOAuthExchangeTicket(result);
-
-      return {
-        url: clientUrl + '/auth/callback?code=' + ticket,
-        statusCode: 302,
-      };
-    } catch (err) {
-      return { url: clientUrl + '/login?error=oauth_error', statusCode: 302 };
-    }
+    const result = await this.authService.handleGithubCallback(
+      code,
+      state,
+      error,
+    );
+    return { url: result.redirectUrl, statusCode: 302 };
   }
 
+  @Public()
   @Post('oauth/exchange')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Exchange single-use OAuth ticket for JWT credentials securely in POST body' })
-  async exchangeOAuthCode(@Body() body: OAuthExchangeDto) {
+  @ApiOperation({
+    summary:
+      'Exchange single-use OAuth ticket for JWT credentials securely in POST body',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'OAuth ticket successfully exchanged',
+    type: AuthResponseDto,
+  })
+  @ApiUnauthorizedResponse({ description: 'Invalid or expired ticket' })
+  async exchangeOAuthCode(
+    @Body() body: OAuthExchangeDto,
+  ): Promise<AuthResponseDto> {
     if (!body?.code) {
       throw new BadRequestException('Exchange code is required');
     }
     return this.authService.exchangeOAuthTicket(body.code);
   }
 
+  @Public()
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  async refresh(@Body() dto: RefreshTokenDto) {
+  @ApiOperation({
+    summary: 'Refresh access token with refresh token rotation',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'New tokens issued',
+    type: TokenRefreshResponseDto,
+  })
+  @ApiUnauthorizedResponse({ description: 'Invalid or expired refresh token' })
+  async refresh(
+    @Body() dto: RefreshTokenDto,
+  ): Promise<TokenRefreshResponseDto> {
     return this.authService.refresh(dto.refreshToken);
   }
 
+  @Public()
   @Get('logout')
   @Post('logout')
   @HttpCode(HttpStatus.OK)
-  async logout(@Body() dto?: RefreshTokenDto) {
+  @ApiOperation({ summary: 'Revoke refresh token and terminate session' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Logged out successfully',
+    type: MessageResponseDto,
+  })
+  async logout(@Body() dto?: RefreshTokenDto): Promise<MessageResponseDto> {
     return this.authService.logout(dto?.refreshToken);
   }
 
+  @Public()
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
-  forgotPassword(@Body() _dto: ForgotPasswordDto) {
+  @ApiOperation({ summary: 'Request password reset email' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Password reset request acknowledged',
+    type: MessageResponseDto,
+  })
+  forgotPassword(@Body() _dto: ForgotPasswordDto): MessageResponseDto {
     return {
       message: 'If this email is registered, a reset link will be sent.',
     };

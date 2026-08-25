@@ -27,10 +27,8 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
       this.redisClient = new Redis(redisUrl, {
         maxRetriesPerRequest: 1,
         retryStrategy: (times) => {
-          if (times > 3) {
-            return null; // Stop retrying after 3 attempts
-          }
-          return Math.min(times * 200, 1000);
+          // Bounded exponential backoff: retry periodically without giving up permanently
+          return Math.min(times * 500, 3000);
         },
         lazyConnect: true,
         enableOfflineQueue: false,
@@ -120,13 +118,51 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Non-blocking pattern deletion using Redis SCAN stream to prevent event-loop blocking.
+   */
   async delPattern(pattern: string): Promise<void> {
     if (!this.isReady() || !this.redisClient) return;
     try {
-      const keys = await this.redisClient.keys(pattern);
-      if (keys.length > 0) {
-        await this.redisClient.del(...keys);
-      }
+      const stream = this.redisClient.scanStream({
+        match: pattern,
+        count: 100,
+      });
+
+      const keysToDelete: string[] = [];
+      stream.on('data', (resultKeys: string[]) => {
+        if (resultKeys && resultKeys.length > 0) {
+          keysToDelete.push(...resultKeys);
+        }
+      });
+
+      await new Promise<void>((resolve) => {
+        stream.on('end', () => {
+          void (async () => {
+            if (keysToDelete.length > 0 && this.redisClient) {
+              try {
+                // Delete in batches of 100 keys
+                for (let i = 0; i < keysToDelete.length; i += 100) {
+                  const batch = keysToDelete.slice(i, i + 100);
+                  await this.redisClient.del(...batch);
+                }
+              } catch (delErr) {
+                this.logger.warn(
+                  `Batch cache del failed: ${getErrorMessage(delErr)}`,
+                );
+              }
+            }
+            resolve();
+          })();
+        });
+
+        stream.on('error', (err) => {
+          this.logger.warn(
+            `Cache SCAN stream warning for "${pattern}": ${getErrorMessage(err)}`,
+          );
+          resolve();
+        });
+      });
     } catch (err: unknown) {
       this.logger.warn(
         `Cache delPattern failed for "${pattern}": ${getErrorMessage(err)}`,
@@ -152,5 +188,43 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
       await this.set(key, fresh, ttlSeconds);
     }
     return fresh;
+  }
+
+  /**
+   * Helper to build standardized cache keys
+   */
+  buildKey(
+    domain: string,
+    ...segments: (string | number | undefined)[]
+  ): string {
+    const validSegments = segments.filter(
+      (s) => s !== undefined && s !== null && s !== '',
+    );
+    return [domain, ...validSegments].join(':');
+  }
+
+  /**
+   * Invalidate all keys matching a workspace scope
+   */
+  async invalidateWorkspace(workspaceId: string): Promise<void> {
+    if (!workspaceId) return;
+    await this.delPattern(`*${workspaceId}*`);
+  }
+
+  /**
+   * Invalidate all keys matching a project scope
+   */
+  async invalidateProject(projectId: string): Promise<void> {
+    if (!projectId) return;
+    await this.delPattern(`*${projectId}*`);
+  }
+
+  /**
+   * Invalidate a single entity key
+   */
+  async invalidateEntity(entityType: string, entityId: string): Promise<void> {
+    if (!entityType || !entityId) return;
+    await this.del(`${entityType}:${entityId}`);
+    await this.delPattern(`${entityType}:${entityId}:*`);
   }
 }

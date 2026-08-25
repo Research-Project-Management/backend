@@ -14,8 +14,7 @@ import {
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { LabelService } from './label.service';
 import { CreateLabelDto, UpdateLabelDto } from './dto/label.dto';
-import { JwtAuthGuard } from '@/modules/iam/authentication';
-import { CurrentUser } from '@/modules/iam/authentication';
+import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
 import { LabelType } from '@prisma/client';
 
 @ApiTags('Organization')

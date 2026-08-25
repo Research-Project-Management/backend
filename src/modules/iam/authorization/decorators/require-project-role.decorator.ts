@@ -7,7 +7,9 @@ import { ProjectRole } from '../enums/project-role.enum';
 /**
  * Composite meta-decorator combining JwtAuthGuard, ProjectRoleGuard and required project role metadata.
  */
-export function RequireProjectRole(...roles: (ProjectRole | keyof typeof ProjectRole)[]) {
+export function RequireProjectRole(
+  ...roles: (ProjectRole | keyof typeof ProjectRole)[]
+) {
   return applyDecorators(
     SetMetadata(PROJECT_ROLES_KEY, roles),
     UseGuards(JwtAuthGuard, ProjectRoleGuard),

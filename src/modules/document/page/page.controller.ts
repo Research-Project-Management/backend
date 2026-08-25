@@ -18,13 +18,13 @@ import {
   SetMainFileDto,
   UpdateThumbnailDto,
 } from './dto/page.dto';
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authentication';
+import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
 import {
   WorkspaceRoleGuard,
   WorkspaceRoles,
   ProjectRoleGuard,
   ProjectRoles,
-} from '@/modules/iam/authorization';
+} from '@/modules/iam/authz';
 
 @ApiTags('Manuscript')
 @ApiBearerAuth('JWT-auth')

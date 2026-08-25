@@ -110,4 +110,15 @@ export class FileRepository {
       },
     });
   }
+
+  async findFileShare(fileId: string, userId: string) {
+    return this.prisma.fileShare.findUnique({
+      where: {
+        fileId_userId: {
+          fileId,
+          userId,
+        },
+      },
+    });
+  }
 }

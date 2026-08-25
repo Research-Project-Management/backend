@@ -4,7 +4,9 @@ import {
   BadRequestException,
   Inject,
   forwardRef,
+  Optional,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CycleRepository } from './cycle.repository';
 import { TaskService } from '../task/task.service';
 import {
@@ -13,7 +15,8 @@ import {
   CompleteCycleDto,
   IncompleteTaskAction,
 } from './dto/cycle.dto';
-import { CycleStatus, CyclePhase, Prisma } from '@prisma/client';
+import { CycleStatus, CyclePhase, Prisma, EntityType } from '@prisma/client';
+import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
 
 @Injectable()
 export class CycleService {
@@ -21,6 +24,7 @@ export class CycleService {
     private readonly cycleRepo: CycleRepository,
     @Inject(forwardRef(() => TaskService))
     private readonly taskService: TaskService,
+    @Optional() private readonly eventEmitter?: EventEmitter2,
   ) {}
 
   private calculateStats(
@@ -65,6 +69,17 @@ export class CycleService {
       authorId: userId,
     });
 
+    this.eventEmitter?.emit(
+      'cycle.created',
+      new DomainActivityEvent({
+        entityType: 'cycle' as unknown as EntityType,
+        entityId: cycle.id,
+        verb: 'created',
+        actorId: userId,
+        projectId,
+      }),
+    );
+
     return { cycle };
   }
 
@@ -96,11 +111,39 @@ export class CycleService {
       ...(endedAt !== undefined && { endedAt }),
     });
 
+    this.eventEmitter?.emit(
+      'cycle.updated',
+      new DomainActivityEvent({
+        entityType: 'cycle' as unknown as EntityType,
+        entityId: cycle.id,
+        verb: isCompleting ? 'completed' : 'updated',
+        actorId: '',
+        projectId: cycle.projectId,
+      }),
+    );
+
     return { cycle };
   }
 
   async deleteCycle(cycleId: string) {
+    const existing = await this.cycleRepo.findCycleById(cycleId);
+    if (!existing) {
+      throw new NotFoundException('Cycle not found');
+    }
+
     await this.cycleRepo.deleteCycle(cycleId);
+
+    this.eventEmitter?.emit(
+      'cycle.deleted',
+      new DomainActivityEvent({
+        entityType: 'cycle' as unknown as EntityType,
+        entityId: cycleId,
+        verb: 'deleted',
+        actorId: '',
+        projectId: existing.projectId,
+      }),
+    );
+
     return { message: 'Cycle deleted successfully' };
   }
 
@@ -170,6 +213,17 @@ export class CycleService {
       endedAt: new Date(),
       statsAtCompletion: stats as Prisma.InputJsonValue,
     });
+
+    this.eventEmitter?.emit(
+      'cycle.completed',
+      new DomainActivityEvent({
+        entityType: 'cycle' as unknown as EntityType,
+        entityId: cycleId,
+        verb: 'completed',
+        actorId: '',
+        projectId: cycle.projectId,
+      }),
+    );
 
     return {
       cycle: updatedCycle,

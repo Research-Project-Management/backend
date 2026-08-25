@@ -1,38 +1,41 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { IngestionService } from '@/modules/library/ingestion/ingestion.service';
-import { PaperRepository } from '@/modules/library/paper/paper.repository';
-import { BibtexFormatter } from '@/modules/library/reference/formatters/bibtex.formatter';
-import { BibtexParser } from '@/modules/library/reference/parsers/bibtex.parser';
-import { RisFormatter } from '@/modules/library/reference/formatters/ris.formatter';
-import { DoiResolver } from '@/modules/library/reference/resolvers/doi.resolver';
-import { UnifiedFetcherService } from '@/modules/library/reference/fetchers/unified-fetcher.service';
+import { CatalogRepository } from '@/modules/library/catalog/catalog.repository';
+import { BibtexFormatter } from '@/modules/library/citation/formatters/bibtex.formatter';
+import { BibtexParser } from '@/modules/library/citation/parsers/bibtex.parser';
+import { RisFormatter } from '@/modules/library/citation/formatters/ris.formatter';
+import { DoiResolver } from '@/modules/library/citation/resolvers/doi.resolver';
+import { MetadataService } from '@/modules/library/metadata/metadata.service';
+import { PdfDoiExtractor } from '@/modules/library/attachments/pdf-extractor.service';
 import { IngestionSourceType } from '@/modules/library/ingestion/dto/ingestion.dto';
 
-describe('Seam 1: IngestionService (Universal Ingestion Engine)', () => {
+describe('IngestionService', () => {
   let service: IngestionService;
-  let paperRepo: PaperRepository;
+  let paperRepo: CatalogRepository;
   let bibtexParser: BibtexParser;
   let risFormatter: RisFormatter;
-  let unifiedFetcher: UnifiedFetcherService;
+  let unifiedFetcher: MetadataService;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         IngestionService,
         {
-          provide: PaperRepository,
+          provide: CatalogRepository,
           useValue: {
             resolveWorkspace: jest.fn().mockResolvedValue({ id: 'ws-1' }),
+            resolveWorkspaceId: jest.fn().mockResolvedValue('ws-1'),
             resolveUniqueCitationKey: jest
               .fn()
               .mockImplementation((wsId, baseKey) => Promise.resolve(baseKey)),
-            createPaper: jest.fn().mockImplementation((data) =>
+            createItem: jest.fn().mockImplementation((data) =>
               Promise.resolve({
                 id: 'paper-auto-id',
                 ...data,
                 ragStatus: 'indexed',
               }),
             ),
+            findItemByDoi: jest.fn().mockResolvedValue(null),
           },
         },
         {
@@ -41,7 +44,8 @@ describe('Seam 1: IngestionService (Universal Ingestion Engine)', () => {
             generateCitationKey: jest
               .fn()
               .mockImplementation((title, authors = [], year) => {
-                const author = authors[0]?.split(',')[0]?.split(' ').pop() || 'item';
+                const author =
+                  authors[0]?.split(',')[0]?.split(' ').pop() || 'item';
                 return `${author.toLowerCase()}${year || 'nd'}${title.slice(0, 5).toLowerCase()}`;
               }),
           },
@@ -65,22 +69,29 @@ describe('Seam 1: IngestionService (Universal Ingestion Engine)', () => {
           },
         },
         {
-          provide: UnifiedFetcherService,
+          provide: MetadataService,
           useValue: {
             resolve: jest.fn(),
+          },
+        },
+        {
+          provide: PdfDoiExtractor,
+          useValue: {
+            extractFromUrl: jest.fn().mockResolvedValue(null),
+            extractFromText: jest.fn().mockReturnValue(null),
           },
         },
       ],
     }).compile();
 
     service = module.get<IngestionService>(IngestionService);
-    paperRepo = module.get<PaperRepository>(PaperRepository);
+    paperRepo = module.get<CatalogRepository>(CatalogRepository);
     bibtexParser = module.get<BibtexParser>(BibtexParser);
     risFormatter = module.get<RisFormatter>(RisFormatter);
-    unifiedFetcher = module.get<UnifiedFetcherService>(UnifiedFetcherService);
+    unifiedFetcher = module.get<MetadataService>(MetadataService);
   });
 
-  describe('Vertical Slice 1.1: Academic Identifier Resolution (DOI, arXiv, PubMed, URL)', () => {
+  describe('Academic Identifier Resolution (DOI, arXiv, PubMed, URL)', () => {
     it('should resolve metadata from DOI and persist normalized paper', async () => {
       (unifiedFetcher.resolve as jest.Mock).mockResolvedValue({
         metadata: {
@@ -105,7 +116,7 @@ describe('Seam 1: IngestionService (Universal Ingestion Engine)', () => {
       expect(result.doi).toBe('10.5555/3295222.3295349');
       expect(result.authors).toEqual(['Vaswani, Ashish', 'Shazeer, Noam']);
       expect(result.year).toBe(2017);
-      expect(paperRepo.createPaper).toHaveBeenCalledWith(
+      expect(paperRepo.createItem).toHaveBeenCalledWith(
         expect.objectContaining({
           workspaceId: 'ws-1',
           title: 'Attention Is All You Need',
@@ -139,7 +150,7 @@ describe('Seam 1: IngestionService (Universal Ingestion Engine)', () => {
     });
   });
 
-  describe('Vertical Slice 1.2: Raw Structured Payload Ingestion (BibTeX & RIS)', () => {
+  describe('Raw Structured Payload Ingestion (BibTeX & RIS)', () => {
     it('should ingest and parse raw BibTeX text string into paper record', async () => {
       (bibtexParser.parse as jest.Mock).mockReturnValue([
         {
@@ -180,13 +191,15 @@ describe('Seam 1: IngestionService (Universal Ingestion Engine)', () => {
         ris: `TY  - JOUR\nTI  - BERT: Pre-training of Deep Bidirectional Transformers\nER  - `,
       });
 
-      expect(result.title).toBe('BERT: Pre-training of Deep Bidirectional Transformers');
+      expect(result.title).toBe(
+        'BERT: Pre-training of Deep Bidirectional Transformers',
+      );
       expect(result.year).toBe(2019);
       expect(result.doi).toBe('10.18653/v1/N19-1423');
     });
   });
 
-  describe('Vertical Slice 1.3: Deterministic Citation Key Resolution & Deduplication', () => {
+  describe('Deterministic Citation Key Resolution & Deduplication', () => {
     it('should preserve explicit custom citationKey if supplied by user', async () => {
       const result = await service.ingest('user-1', {
         workspaceId: 'ws-1',
@@ -199,7 +212,9 @@ describe('Seam 1: IngestionService (Universal Ingestion Engine)', () => {
     });
 
     it('should invoke resolveUniqueCitationKey to avoid workspace collisions', async () => {
-      (paperRepo.resolveUniqueCitationKey as jest.Mock).mockResolvedValue('vaswani2017attenb');
+      (paperRepo.resolveUniqueCitationKey as jest.Mock).mockResolvedValue(
+        'vaswani2017attenb',
+      );
 
       const result = await service.ingest('user-1', {
         workspaceId: 'ws-1',
@@ -217,7 +232,7 @@ describe('Seam 1: IngestionService (Universal Ingestion Engine)', () => {
     });
   });
 
-  describe('Vertical Slice 1.4: Resilient Fallback Handling', () => {
+  describe('Resilient Fallback Handling', () => {
     it('should gracefully fallback to default title when external resolver fails', async () => {
       (unifiedFetcher.resolve as jest.Mock).mockResolvedValue(null);
 

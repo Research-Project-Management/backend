@@ -11,7 +11,7 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { FastifyReply } from 'fastify';
 import { WritingAgentService } from './writing-agent.service';
 import { WritingAgentQueryDto } from './dto/writing-agent.dto';
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authentication';
+import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
 
 @ApiTags('AI - Writing Agent')
 @ApiBearerAuth('JWT-auth')

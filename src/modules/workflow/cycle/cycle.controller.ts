@@ -23,8 +23,8 @@ import {
   AddCycleTaskDto,
   CompleteCycleDto,
 } from './dto/cycle.dto';
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authentication';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/iam/authorization';
+import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
+import { ProjectRoleGuard, ProjectRoles } from '@/modules/iam/authz';
 
 @ApiTags('Planning Cycles')
 @ApiBearerAuth('JWT-auth')

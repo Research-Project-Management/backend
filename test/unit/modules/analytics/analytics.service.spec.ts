@@ -6,7 +6,7 @@ import { RedisCacheService } from '@/core/cache/redis-cache.service';
 
 describe('AnalyticsService', () => {
   let service: AnalyticsService;
-  let repo: AnalyticsRepository;
+  let _repo: AnalyticsRepository;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -107,7 +107,7 @@ describe('AnalyticsService', () => {
     }).compile();
 
     service = module.get<AnalyticsService>(AnalyticsService);
-    repo = module.get<AnalyticsRepository>(AnalyticsRepository);
+    _repo = module.get<AnalyticsRepository>(AnalyticsRepository);
   });
 
   it('should be defined', () => {

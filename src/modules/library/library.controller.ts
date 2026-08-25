@@ -1,9 +1,4 @@
-import {
-  Controller,
-  Get,
-  Param,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Param, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { LibraryService } from './library.service';
 import { JwtAuthGuard } from '@/modules/iam/authentication';
@@ -19,17 +14,20 @@ import {
 export class LibraryController {
   constructor(private readonly libraryService: LibraryService) {}
 
-  @Get(':workspaceId/papers/:paperId/bundle')
+  @Get(':workspaceId/catalog/:itemId/bundle')
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({
     summary:
-      'Deep Facade: Get unified academic bundle for a paper (Metadata, CSL APA/IEEE, PDF Annotations, Related Papers) in a single call',
+      'Deep Facade: Get unified academic bundle for a catalog item (Metadata, CSL APA/IEEE, PDF Annotations, Related Items) in a single call',
   })
-  async getPaperAcademicBundle(
+  async getCatalogItemAcademicBundle(
     @Param('workspaceId') workspaceId: string,
-    @Param('paperId') paperId: string,
+    @Param('itemId') itemId: string,
   ) {
-    return this.libraryService.getPaperAcademicBundle(workspaceId, paperId);
+    return this.libraryService.getCatalogItemAcademicBundle(
+      workspaceId,
+      itemId,
+    );
   }
 }

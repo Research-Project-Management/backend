@@ -15,7 +15,10 @@ import type { AuthenticatedUser, JwtPayload } from '../../types/iam.types';
  * ```
  */
 export const CurrentUser = createParamDecorator(
-  (data: keyof JwtPayload | keyof AuthenticatedUser | undefined, ctx: ExecutionContext) => {
+  (
+    data: keyof JwtPayload | keyof AuthenticatedUser | undefined,
+    ctx: ExecutionContext,
+  ) => {
     const request = ctx.switchToHttp().getRequest();
     const user = request.user;
     if (!user) return null;

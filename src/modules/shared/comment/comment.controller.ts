@@ -16,8 +16,7 @@ import {
   AddReplyDto,
   ReactCommentDto,
 } from './dto/comment.dto';
-import { JwtAuthGuard } from '@/modules/iam/authentication';
-import { CurrentUser } from '@/modules/iam/authentication';
+import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
 
 @ApiTags('Shared - Comments')
 @ApiBearerAuth('JWT-auth')

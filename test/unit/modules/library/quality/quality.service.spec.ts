@@ -1,37 +1,36 @@
 import { QualityService } from '@/modules/library/quality/quality.service';
-import { PaperRepository } from '@/modules/library/paper/paper.repository';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 
-describe('Seam 4: QualityService (2-Tier Deduplication, Safe Merge, Integrity Diagnostics)', () => {
+describe('QualityService', () => {
   let service: QualityService;
   let mockPaperRepo: any;
 
   beforeEach(() => {
     mockPaperRepo = {
       resolveWorkspace: jest.fn().mockResolvedValue({ id: 'ws-1' }),
-      findPapers: jest.fn(),
-      findPaperById: jest.fn(),
-      prisma: {
-        $transaction: jest.fn((callback) =>
-          callback({
-            paper: {
-              update: jest.fn().mockResolvedValue({}),
-              updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-            },
-            paperAttachment: {
-              updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-            },
-          }),
-        ),
-      },
+      resolveWorkspaceId: jest.fn().mockResolvedValue('ws-1'),
+      findItems: jest.fn(),
+      findItemById: jest.fn(),
+      executeMergePapersTransaction: jest.fn().mockResolvedValue(undefined),
+      findDoiDuplicates: jest.fn().mockResolvedValue([]),
+      findIntegrityStats: jest.fn().mockResolvedValue({
+        totalPapers: 0,
+        missingDoiCount: 0,
+        missingYearCount: 0,
+        missingAuthorsCount: 0,
+      }),
     };
 
     service = new QualityService(mockPaperRepo);
   });
 
-  describe('Vertical Slice 4.1: 2-Tier Duplicate Detection Engine', () => {
+  describe('2-Tier Duplicate Detection Engine', () => {
     it('should detect Tier 1 duplicates with case-insensitive identical DOIs', async () => {
-      mockPaperRepo.findPapers.mockResolvedValueOnce([
+      mockPaperRepo.findDoiDuplicates.mockResolvedValueOnce([
+        { normalizedDoi: '10.1145/3290605.a12', paperIds: ['p1', 'p2'] },
+      ]);
+      // Tier 1: fetch paper records for duplicate group
+      mockPaperRepo.findItems.mockResolvedValueOnce([
         {
           id: 'p1',
           title: 'Attention Is All You Need (ArXiv Version)',
@@ -55,6 +54,8 @@ describe('Seam 4: QualityService (2-Tier Deduplication, Safe Merge, Integrity Di
           attachments: [],
         },
       ]);
+      // Tier 2: allPapers query returns empty (both papers already processed)
+      mockPaperRepo.findItems.mockResolvedValueOnce([]);
 
       const result = await service.getDuplicateGroups('ws-1');
 
@@ -65,7 +66,8 @@ describe('Seam 4: QualityService (2-Tier Deduplication, Safe Merge, Integrity Di
     });
 
     it('should detect Tier 2 duplicates matching Title, Year +/- 1, and First Author', async () => {
-      mockPaperRepo.findPapers.mockResolvedValueOnce([
+      mockPaperRepo.findDoiDuplicates.mockResolvedValueOnce([]);
+      mockPaperRepo.findItems.mockResolvedValueOnce([
         {
           id: 'p1',
           title: 'Deep Residual Learning for Image Recognition',
@@ -99,7 +101,7 @@ describe('Seam 4: QualityService (2-Tier Deduplication, Safe Merge, Integrity Di
     });
   });
 
-  describe('Vertical Slice 4.2: Safe Merge Protocol', () => {
+  describe('Safe Merge Protocol', () => {
     it('should reject merging when master paper is included in sourcePaperIds', async () => {
       await expect(
         service.mergePapers('ws-1', 'u-1', {
@@ -110,7 +112,7 @@ describe('Seam 4: QualityService (2-Tier Deduplication, Safe Merge, Integrity Di
     });
 
     it('should throw NotFoundException when master paper does not exist', async () => {
-      mockPaperRepo.findPaperById.mockResolvedValue(null);
+      mockPaperRepo.findItemById.mockResolvedValue(null);
 
       await expect(
         service.mergePapers('ws-1', 'u-1', {
@@ -139,8 +141,8 @@ describe('Seam 4: QualityService (2-Tier Deduplication, Safe Merge, Integrity Di
         deletedAt: null,
       };
 
-      mockPaperRepo.findPaperById.mockResolvedValue(master);
-      mockPaperRepo.findPapers.mockResolvedValue([source]);
+      mockPaperRepo.findItemById.mockResolvedValue(master);
+      mockPaperRepo.findItems.mockResolvedValue([source]);
 
       const result = await service.mergePapers('ws-1', 'u-1', {
         masterPaperId: 'p-master',
@@ -149,13 +151,19 @@ describe('Seam 4: QualityService (2-Tier Deduplication, Safe Merge, Integrity Di
 
       expect(result.mergedCount).toBe(1);
       expect(result.softDeletedPaperIds).toContain('p-src');
-      expect(mockPaperRepo.prisma.$transaction).toHaveBeenCalled();
+      expect(mockPaperRepo.executeMergePapersTransaction).toHaveBeenCalled();
     });
   });
 
-  describe('Vertical Slice 4.3: Library Health & Integrity Diagnostics', () => {
+  describe('Library Health & Integrity Diagnostics', () => {
     it('should accurately categorize missing metadata issues and compute health stats', async () => {
-      mockPaperRepo.findPapers.mockResolvedValueOnce([
+      mockPaperRepo.findIntegrityStats.mockResolvedValueOnce({
+        totalPapers: 2,
+        missingDoiCount: 1,
+        missingYearCount: 1,
+        missingAuthorsCount: 1,
+      });
+      mockPaperRepo.findItems.mockResolvedValueOnce([
         {
           id: 'p1',
           title: 'Incomplete Paper',

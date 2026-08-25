@@ -1,35 +1,30 @@
 import { Module } from '@nestjs/common';
-import { PaperModule } from './paper/paper.module';
-import { CollectionModule } from './collection/collection.module';
-import { ReferenceModule } from './reference/reference.module';
+import { CatalogModule } from './catalog/catalog.module';
+import { CollectionsModule } from './collections/collections.module';
 import { IngestionModule } from './ingestion/ingestion.module';
+import { MetadataModule } from './metadata/metadata.module';
+import { CitationModule } from './citation/citation.module';
+import { AttachmentsModule } from './attachments/attachments.module';
+import { KnowledgeModule } from './knowledge/knowledge.module';
 import { QualityModule } from './quality/quality.module';
-import { AnnotationModule } from './annotation/annotation.module';
-import { RelationModule } from './relation/relation.module';
+import { SearchModule } from './search/search.module';
 import { LibraryController } from './library.controller';
 import { LibraryService } from './library.service';
 
 @Module({
   imports: [
-    PaperModule,
-    CollectionModule,
-    ReferenceModule,
+    CatalogModule,
+    CollectionsModule,
     IngestionModule,
+    MetadataModule,
+    CitationModule,
+    AttachmentsModule,
+    KnowledgeModule,
     QualityModule,
-    AnnotationModule,
-    RelationModule,
+    SearchModule,
   ],
   controllers: [LibraryController],
   providers: [LibraryService],
-  exports: [
-    LibraryService,
-    PaperModule,
-    CollectionModule,
-    ReferenceModule,
-    IngestionModule,
-    QualityModule,
-    AnnotationModule,
-    RelationModule,
-  ],
+  exports: [LibraryService],
 })
 export class LibraryModule {}

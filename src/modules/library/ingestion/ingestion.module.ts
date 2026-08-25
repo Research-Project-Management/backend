@@ -1,13 +1,21 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { IngestionController } from './ingestion.controller';
 import { IngestionService } from './ingestion.service';
-import { ReferenceModule } from '../reference/reference.module';
-import { PaperModule } from '../paper/paper.module';
+import { IngestionJobService } from './ingestion-job.service';
+import { MetadataModule } from '../metadata/metadata.module';
+import { CitationModule } from '../citation/citation.module';
+import { CatalogModule } from '../catalog/catalog.module';
+import { AttachmentsModule } from '../attachments/attachments.module';
 
 @Module({
-  imports: [forwardRef(() => ReferenceModule), forwardRef(() => PaperModule)],
+  imports: [
+    forwardRef(() => MetadataModule),
+    forwardRef(() => CitationModule),
+    forwardRef(() => CatalogModule),
+    forwardRef(() => AttachmentsModule),
+  ],
   controllers: [IngestionController],
-  providers: [IngestionService],
-  exports: [IngestionService],
+  providers: [IngestionService, IngestionJobService],
+  exports: [IngestionService, IngestionJobService],
 })
 export class IngestionModule {}

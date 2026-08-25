@@ -171,7 +171,7 @@ export class ActivityService {
           })
         : [],
       paperIds.length
-        ? this.prisma.paper.findMany({
+        ? this.prisma.catalogItem.findMany({
             where: { id: { in: paperIds }, deletedAt: null },
             select: { id: true, title: true },
           })
@@ -220,8 +220,12 @@ export class ActivityService {
         take: limit,
         select: { id: true, title: true, projectId: true, updatedAt: true },
       }),
-      this.prisma.paper.findMany({
-        where: { workspaceId: targetWsId, uploadedById: userId, deletedAt: null },
+      this.prisma.catalogItem.findMany({
+        where: {
+          workspaceId: targetWsId,
+          uploadedById: userId,
+          deletedAt: null,
+        },
         orderBy: { updatedAt: 'desc' },
         take: limit,
         select: { id: true, title: true, updatedAt: true },

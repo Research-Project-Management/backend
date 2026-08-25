@@ -20,13 +20,13 @@ import {
   AddColumnDto,
   UpdateColumnDto,
 } from './dto/project.dto';
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authentication';
+import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
 import {
   WorkspaceRoleGuard,
   WorkspaceRoles,
   ProjectRoleGuard,
   ProjectRoles,
-} from '@/modules/iam/authorization';
+} from '@/modules/iam/authz';
 
 @ApiTags('Organization')
 @ApiBearerAuth('JWT-auth')

@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  Optional,
+} from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PageRepository } from './page.repository';
 import { CreatePageDto, UpdatePageDto } from './dto/page.dto';
@@ -90,13 +95,19 @@ export class PageService {
         (await this.pageRepo.findProjectWorkspaceId(targetProjectId)) || '';
     }
 
+    if (!wsId) {
+      throw new BadRequestException(
+        'Workspace context is required to create a page',
+      );
+    }
+
     const parentPageId = dto.parentPageId || dto.parentPage || null;
 
     const page = await this.pageRepo.createPage({
       title: dto.title,
       content: dto.content !== undefined ? dto.content : Prisma.JsonNull,
       status: dto.status || PageStatus.draft,
-      workspaceId: wsId || '',
+      workspaceId: wsId,
       projectId: targetProjectId || '',
       authorId: userId,
       parentPageId,
@@ -112,7 +123,7 @@ export class PageService {
         verb: 'created',
         actorId: userId,
         workspaceId: page.workspaceId,
-        projectId: page.projectId,
+        projectId: page.projectId || undefined,
       }),
     );
 
@@ -160,6 +171,11 @@ export class PageService {
   }
 
   async deletePage(pageId: string) {
+    const existing = await this.pageRepo.findPageById(pageId);
+    if (!existing || existing.deletedAt) {
+      throw new NotFoundException('Page not found');
+    }
+
     await this.pageRepo.deletePage(pageId);
 
     this.eventEmitter?.emit(
@@ -168,8 +184,9 @@ export class PageService {
         entityType: EntityType.page,
         entityId: pageId,
         verb: 'deleted',
-        actorId: '',
-        workspaceId: '',
+        actorId: existing.authorId || '',
+        workspaceId: existing.workspaceId,
+        projectId: existing.projectId || undefined,
       }),
     );
 

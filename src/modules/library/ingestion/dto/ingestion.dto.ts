@@ -37,7 +37,8 @@ export class IngestDocumentDto {
   sourceType!: IngestionSourceType;
 
   @ApiPropertyOptional({
-    description: 'General query identifier (DOI, arXiv ID, PMID, ISBN, URL, or Title)',
+    description:
+      'General query identifier (DOI, arXiv ID, PMID, ISBN, URL, or Title)',
   })
   @IsString()
   @IsOptional()
@@ -147,7 +148,9 @@ export class IngestDocumentDto {
   @IsOptional()
   abstract?: string | null;
 
-  @ApiPropertyOptional({ description: 'Item type (journalArticle, book, etc.)' })
+  @ApiPropertyOptional({
+    description: 'Item type (journalArticle, book, etc.)',
+  })
   @IsString()
   @IsOptional()
   itemType?: string | null;
@@ -201,4 +204,23 @@ export class BatchIngestDto {
   @ValidateNested({ each: true })
   @Type(() => IngestDocumentDto)
   items!: IngestDocumentDto[];
+}
+
+/**
+ * Represents the live state of an async batch ingestion job.
+ * Stored in Redis (TTL 24h) and falls back to in-process Map in dev.
+ */
+export interface IngestionJobStatus {
+  jobId: string;
+  status: 'queued' | 'processing' | 'completed' | 'failed';
+  total: number;
+  processed: number;
+  successCount: number;
+  failedCount: number;
+  progressPercentage: number;
+  /** Populated at runtime from IngestionResult — kept as any to avoid circular import */
+  successful: any[];
+  failed: Array<{ item: IngestDocumentDto; error: string }>;
+  createdAt: string;
+  completedAt?: string;
 }

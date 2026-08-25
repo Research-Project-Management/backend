@@ -2,13 +2,13 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { FastifyReply } from 'fastify';
 import { EngineService } from '../engine/engine.service';
 import { RagAgentQueryDto } from './dto/rag-agent.dto';
-import { PaperRepository } from '@/modules/library/paper/paper.repository';
+import { CatalogRepository } from '@/modules/library/catalog/catalog.repository';
 
 @Injectable()
 export class RagAgentService {
   constructor(
     private readonly engineService: EngineService,
-    private readonly paperRepo: PaperRepository,
+    private readonly catalogRepo: CatalogRepository,
   ) {}
 
   private normalizeMessages(dto: RagAgentQueryDto) {
@@ -95,18 +95,23 @@ export class RagAgentService {
     dto: RagAgentQueryDto,
     reply: FastifyReply,
   ): Promise<void> {
-    const paper = await this.paperRepo.findPaperById(paperId);
+    const paper = await this.catalogRepo.findItemById(paperId);
     if (!paper || paper.deletedAt) {
       throw new NotFoundException(`Paper with ID ${paperId} not found`);
     }
 
     const messages = this.normalizeMessages(dto);
-    const documentIds = paper.ragDocId ? [paper.ragDocId] : this.extractDocIds(dto);
-    const workspaceId = dto.workspace_id || dto.workspaceId || paper.workspaceId;
+    const documentIds = paper.ragDocId
+      ? [paper.ragDocId]
+      : this.extractDocIds(dto);
+    const workspaceId =
+      dto.workspace_id || dto.workspaceId || paper.workspaceId;
     const chatId = dto.chat_id || dto.chatId || `paper-${paperId}`;
 
     // Prepend system context with paper groundings
-    const authorsStr = Array.isArray(paper.authors) ? paper.authors.join(', ') : '';
+    const authorsStr = Array.isArray(paper.authors)
+      ? paper.authors.join(', ')
+      : '';
     const paperContext = `Paper Context: Title: "${paper.title}", Authors: "${authorsStr}", Year: ${paper.year || 'N/A'}, DOI: ${paper.doi || 'N/A'}.\nAbstract: ${paper.abstract || 'N/A'}`;
 
     const enrichedMessages = [
@@ -129,22 +134,23 @@ export class RagAgentService {
   /**
    * Paper-Scoped Synchronous RAG Chat
    */
-  async syncPaperChat(
-    userId: string,
-    paperId: string,
-    dto: RagAgentQueryDto,
-  ) {
-    const paper = await this.paperRepo.findPaperById(paperId);
+  async syncPaperChat(userId: string, paperId: string, dto: RagAgentQueryDto) {
+    const paper = await this.catalogRepo.findItemById(paperId);
     if (!paper || paper.deletedAt) {
       throw new NotFoundException(`Paper with ID ${paperId} not found`);
     }
 
     const messages = this.normalizeMessages(dto);
-    const documentIds = paper.ragDocId ? [paper.ragDocId] : this.extractDocIds(dto);
-    const workspaceId = dto.workspace_id || dto.workspaceId || paper.workspaceId;
+    const documentIds = paper.ragDocId
+      ? [paper.ragDocId]
+      : this.extractDocIds(dto);
+    const workspaceId =
+      dto.workspace_id || dto.workspaceId || paper.workspaceId;
     const chatId = dto.chat_id || dto.chatId || `paper-${paperId}`;
 
-    const authorsStr = Array.isArray(paper.authors) ? paper.authors.join(', ') : '';
+    const authorsStr = Array.isArray(paper.authors)
+      ? paper.authors.join(', ')
+      : '';
     const paperContext = `Paper Context: Title: "${paper.title}", Authors: "${authorsStr}", Year: ${paper.year || 'N/A'}, DOI: ${paper.doi || 'N/A'}.\nAbstract: ${paper.abstract || 'N/A'}`;
 
     const enrichedMessages = [
@@ -164,4 +170,3 @@ export class RagAgentService {
     return this.engineService.syncChat(payload);
   }
 }
-

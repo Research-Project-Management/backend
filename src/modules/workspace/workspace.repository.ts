@@ -227,7 +227,7 @@ export class WorkspaceRepository {
   }
 
   async searchPapers(workspaceId: string, query: string) {
-    return this.prisma.paper.findMany({
+    return this.prisma.catalogItem.findMany({
       where: {
         workspaceId,
         deletedAt: null,

@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { StickyService } from '@/modules/sticky/sticky.service';
 import { StickyRepository } from '@/modules/sticky/sticky.repository';
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { ForbiddenException } from '@nestjs/common';
 
 describe('StickyService', () => {
   let service: StickyService;

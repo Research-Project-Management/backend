@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
 import { QualityController } from './quality.controller';
 import { QualityService } from './quality.service';
-import { PaperModule } from '../paper/paper.module';
+import { CatalogModule } from '../catalog/catalog.module';
 
 @Module({
-  imports: [PaperModule],
+  imports: [CatalogModule],
   controllers: [QualityController],
   providers: [QualityService],
   exports: [QualityService],

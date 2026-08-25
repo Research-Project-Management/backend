@@ -4,7 +4,6 @@ import {
   Post,
   Body,
   Param,
-  Query,
   Req,
   Res,
   UseGuards,
@@ -15,8 +14,12 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { RagAgentService } from './rag-agent.service';
-import { RagAgentQueryDto, BulkDocumentsDto } from './dto/rag-agent.dto';
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authentication';
+import { RagAgentQueryDto } from './dto/rag-agent.dto';
+import {
+  JwtAuthGuard,
+  CurrentUser,
+  Public,
+} from '@/modules/iam/authn';
 
 @ApiTags('AI - RAG Agent')
 @ApiBearerAuth('JWT-auth')
@@ -25,11 +28,23 @@ import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authentication';
 export class RagAgentController {
   constructor(private readonly ragAgentService: RagAgentService) {}
 
+  @Public()
+  @Get('health')
+  @ApiOperation({ summary: 'AI service health check' })
+  health() {
+    return {
+      status: 'ok',
+      service: 'flux-ai-engine',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
   @Post(['chat/rag', 'rag/chat'])
   @ApiOperation({ summary: 'Stream RAG Agent chat responses via SSE' })
   async chatStream(
     @CurrentUser('id') userId: string,
     @Body() dto: RagAgentQueryDto,
+    @Req() _req: FastifyRequest,
     @Res() reply: FastifyReply,
   ) {
     return this.ragAgentService.streamRagChat(userId, dto, reply);
@@ -37,7 +52,7 @@ export class RagAgentController {
 
   @Post(['chat/rag/sync', 'rag/chat/sync'])
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Execute synchronous RAG Agent query' })
+  @ApiOperation({ summary: 'Synchronous RAG Agent chat' })
   async chatSync(
     @CurrentUser('id') userId: string,
     @Body() dto: RagAgentQueryDto,
@@ -45,21 +60,22 @@ export class RagAgentController {
     return this.ragAgentService.syncRagChat(userId, dto);
   }
 
-  @Post('rag/papers/:paperId/stream')
-  @ApiOperation({ summary: 'Stream AI Copilot RAG chat responses for a specific paper via SSE' })
-  async streamPaperChat(
+  @Post('paper/:paperId/chat')
+  @ApiOperation({ summary: 'Stream paper-scoped RAG chat responses via SSE' })
+  async paperChatStream(
     @CurrentUser('id') userId: string,
     @Param('paperId') paperId: string,
     @Body() dto: RagAgentQueryDto,
+    @Req() _req: FastifyRequest,
     @Res() reply: FastifyReply,
   ) {
     return this.ragAgentService.streamPaperChat(userId, paperId, dto, reply);
   }
 
-  @Post('rag/papers/:paperId/chat')
+  @Post('paper/:paperId/chat/sync')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Execute synchronous AI Copilot RAG query for a specific paper' })
-  async syncPaperChat(
+  @ApiOperation({ summary: 'Synchronous paper-scoped RAG chat' })
+  async paperChatSync(
     @CurrentUser('id') userId: string,
     @Param('paperId') paperId: string,
     @Body() dto: RagAgentQueryDto,
@@ -67,66 +83,15 @@ export class RagAgentController {
     return this.ragAgentService.syncPaperChat(userId, paperId, dto);
   }
 
-  @Post(['documents/upload', 'rag/documents/upload'])
-  @ApiOperation({ summary: 'Upload reference document for AI RAG groundings' })
-  async uploadDocument(@Req() req: FastifyRequest) {
-    const isMultipart = req.isMultipart();
-    if (!isMultipart) {
-      throw new BadRequestException('Request must be multipart/form-data');
-    }
-
-    const file = await req.file();
-    if (!file) {
-      throw new BadRequestException('No file found in request');
-    }
-
-    const buffer = await file.toBuffer();
-    const filename = file.filename || 'uploaded-doc';
-    const mimetype = file.mimetype || 'application/octet-stream';
-
-    const boundary =
-      '----WebKitFormBoundary' + Math.random().toString(36).substring(2);
-    const prefix = Buffer.from(
-      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: ${mimetype}\r\n\r\n`,
-    );
-    const suffix = Buffer.from(`\r\n--${boundary}--\r\n`);
-    const fullBuffer = Buffer.concat([prefix, buffer, suffix]);
-
-    return this.ragAgentService.uploadDocument(
-      fullBuffer,
-      `multipart/form-data; boundary=${boundary}`,
-    );
-  }
-
-  @Get(['documents/bulk', 'rag/documents/bulk'])
-  @ApiOperation({ summary: 'Get metadata for multiple documents' })
-  async getDocumentsBulkGet(@Query('ids') ids: string) {
-    const list = ids
-      ? ids
-          .split(',')
-          .map((id) => id.trim())
-          .filter(Boolean)
-      : [];
-    return this.ragAgentService.getDocumentsBulk(list);
-  }
-
-  @Post(['documents/bulk', 'rag/documents/bulk'])
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Post list of IDs for bulk document metadata' })
-  async getDocumentsBulkPost(@Body() dto: BulkDocumentsDto) {
-    const list = dto.ids || [];
-    return this.ragAgentService.getDocumentsBulk(list);
-  }
-
-  @Get(['documents/:docId', 'documents/:docId/content', 'rag/documents/:docId'])
-  @ApiOperation({ summary: 'Get document details and extracted content' })
-  async getDocument(@Param('docId') docId: string) {
-    return this.ragAgentService.getDocument(docId);
-  }
-
-  @Get(['documents', 'rag/documents'])
-  @ApiOperation({ summary: 'Get all indexed reference documents' })
+  @Get('documents')
+  @ApiOperation({ summary: 'List all RAG documents' })
   async getDocuments() {
     return this.ragAgentService.getDocuments();
+  }
+
+  @Get('documents/:docId')
+  @ApiOperation({ summary: 'Get document details from RAG engine' })
+  async getDocument(@Param('docId') docId: string) {
+    return this.ragAgentService.getDocument(docId);
   }
 }

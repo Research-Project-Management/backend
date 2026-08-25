@@ -21,11 +21,11 @@ import {
   UpdateWorkspaceMemberDto,
   JoinWorkspaceDto,
 } from './dto/workspace.dto';
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authentication';
+import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
 import {
   WorkspaceRoleGuard,
   WorkspaceRoles,
-} from '@/modules/iam/authorization';
+} from '@/modules/iam/authz';
 
 @ApiTags('Organization')
 @ApiBearerAuth('JWT-auth')

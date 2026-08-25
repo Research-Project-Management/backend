@@ -16,6 +16,16 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<FastifyReply>();
 
+    // If headers or reply were already sent (e.g. streaming SSE, R2 file streaming aborted by client), skip sending duplicate reply
+    if (response.sent || response.raw?.headersSent) {
+      this.logger.warn(
+        `[GlobalExceptionFilter] Reply already sent or connection closed. Suppressed: ${
+          exception instanceof Error ? exception.message : String(exception)
+        }`,
+      );
+      return;
+    }
+
     let statusCode = HttpStatus.INTERNAL_SERVER_ERROR;
     let message: unknown = 'Internal server error';
     let details: unknown = undefined;

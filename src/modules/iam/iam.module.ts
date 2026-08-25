@@ -1,11 +1,11 @@
 import { Global, Module } from '@nestjs/common';
 import { UserModule } from './user/user.module';
-import { AuthenticationModule } from './authentication/authentication.module';
-import { AuthorizationModule } from './authorization/authorization.module';
+import { AuthnModule } from './authn/authn.module';
+import { AuthzModule } from './authz/authz.module';
 
 @Global()
 @Module({
-  imports: [UserModule, AuthenticationModule, AuthorizationModule],
-  exports: [UserModule, AuthenticationModule, AuthorizationModule],
+  imports: [UserModule, AuthnModule, AuthzModule],
+  exports: [UserModule, AuthnModule, AuthzModule],
 })
 export class IamModule {}

@@ -318,6 +318,22 @@ export class TaskService {
 
   async assignTask(taskId: string, assigneeId: string | null) {
     const task = await this.taskRepo.assignTask(taskId, assigneeId);
+    const workspaceId = (task as any).project?.workspaceId || '';
+
+    this.eventEmitter?.emit(
+      'task.updated',
+      new DomainActivityEvent({
+        entityType: EntityType.task,
+        entityId: task.id,
+        verb: 'assigned',
+        field: 'assigneeId',
+        newValue: assigneeId || undefined,
+        actorId: '',
+        projectId: task.projectId,
+        workspaceId,
+      }),
+    );
+
     return { task: this.formatTask(task) };
   }
 
@@ -373,6 +389,17 @@ export class TaskService {
       }
     }
 
+    this.eventEmitter?.emit(
+      'task.reordered',
+      new DomainActivityEvent({
+        entityType: EntityType.task,
+        verb: 'reordered',
+        projectId,
+        field: 'columnId',
+        newValue: destinationColumnId,
+      }),
+    );
+
     return { success: true, ...dto };
   }
 
@@ -387,6 +414,16 @@ export class TaskService {
     }
 
     await this.taskRepo.bulkUpdateTasks(projectId, dto.taskIds, payload);
+
+    this.eventEmitter?.emit(
+      'task.bulk_updated',
+      new DomainActivityEvent({
+        entityType: EntityType.task,
+        verb: 'bulk_updated',
+        projectId,
+      }),
+    );
+
     return { success: true, count: dto.taskIds.length };
   }
 
@@ -419,6 +456,18 @@ export class TaskService {
       cycleId: original.cycleId,
       parentTaskId: original.parentTaskId,
     });
+
+    this.eventEmitter?.emit(
+      'task.created',
+      new DomainActivityEvent({
+        entityType: EntityType.task,
+        entityId: task.id,
+        verb: 'created',
+        actorId: userId,
+        projectId: original.projectId,
+        newIdentifier: task.identifier || undefined,
+      }),
+    );
 
     return { task: this.formatTask(task) };
   }

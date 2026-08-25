@@ -1,63 +1,66 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { PaperRepository } from './paper/paper.repository';
-import { CslFormatter, FormattedCitation } from './reference/formatters/csl.formatter';
-import { AnnotationService } from './annotation/annotation.service';
-import { RelationService } from './relation/relation.service';
-import { PdfAnnotation } from './annotation/types/annotation.types';
-import { RelatedPaperItem } from './relation/types/relation.types';
+import { CatalogRepository } from './catalog/catalog.repository';
+import {
+  CslFormatter,
+  FormattedCitation,
+} from './citation/formatters/csl.formatter';
+import { AnnotationsService } from './attachments/annotations/annotations.service';
+import { KnowledgeService } from './knowledge/knowledge.service';
+import { PdfAnnotation } from './attachments/annotations/annotations.types';
+import { RelatedPaperItem } from './knowledge/types/knowledge.types';
 
-export interface PaperAcademicBundle {
-  paper: any;
+export interface CatalogItemAcademicBundle {
+  item: any;
   citationApa: FormattedCitation;
   citationIeee: FormattedCitation;
   annotations: PdfAnnotation[];
   totalAnnotations: number;
-  relatedPapers: RelatedPaperItem[];
-  totalRelatedPapers: number;
+  relatedItems: RelatedPaperItem[];
+  totalRelatedItems: number;
 }
 
 @Injectable()
 export class LibraryService {
   constructor(
-    private readonly paperRepo: PaperRepository,
+    private readonly catalogRepo: CatalogRepository,
     private readonly cslFormatter: CslFormatter,
-    private readonly annotationService: AnnotationService,
-    private readonly relationService: RelationService,
+    private readonly annotationsService: AnnotationsService,
+    private readonly knowledgeService: KnowledgeService,
   ) {}
 
   /**
-   * Deep Facade: Retrieves the entire academic context of a paper in a single call
-   * Returns: Master metadata, APA & IEEE citations, PDF annotations, and bi-directional related papers
+   * Deep Facade: Retrieves the entire academic context of a catalog item in a single call
+   * Returns: Master metadata, APA & IEEE citations, PDF annotations, and bi-directional related items
    */
-  async getPaperAcademicBundle(
+  async getCatalogItemAcademicBundle(
     workspaceId: string,
-    paperId: string,
-  ): Promise<PaperAcademicBundle> {
-    const ws = await this.paperRepo.resolveWorkspace(workspaceId);
+    itemId: string,
+  ): Promise<CatalogItemAcademicBundle> {
+    const ws = await this.catalogRepo.resolveWorkspace(workspaceId);
     const targetWsId = ws?.id || workspaceId;
 
-    const paper = await this.paperRepo.findPaperById(paperId);
-    if (!paper || paper.deletedAt || paper.workspaceId !== targetWsId) {
-      throw new NotFoundException('Paper not found in this workspace');
+    const item = await this.catalogRepo.findItemById(itemId);
+    if (!item || item.deletedAt || item.workspaceId !== targetWsId) {
+      throw new NotFoundException('Catalog item not found in this workspace');
     }
 
     // Parallel resolution of all sub-domain facets
     const [citationApa, citationIeee, annotationsResult, relationsResult] =
       await Promise.all([
-        Promise.resolve(this.cslFormatter.formatEntry(paper, 'apa')),
-        Promise.resolve(this.cslFormatter.formatEntry(paper, 'ieee', 1)),
-        this.annotationService.getAnnotations(workspaceId, paperId),
-        this.relationService.getRelatedPapers(workspaceId, paperId),
+        Promise.resolve(this.cslFormatter.formatEntry(item, 'apa')),
+        Promise.resolve(this.cslFormatter.formatEntry(item, 'ieee', 1)),
+        this.annotationsService.getAnnotations(workspaceId, itemId),
+        this.knowledgeService.getRelatedPapers(workspaceId, itemId),
       ]);
 
     return {
-      paper,
+      item,
       citationApa,
       citationIeee,
       annotations: annotationsResult.annotations,
       totalAnnotations: annotationsResult.total,
-      relatedPapers: relationsResult.relatedPapers,
-      totalRelatedPapers: relationsResult.total,
+      relatedItems: relationsResult.relatedPapers,
+      totalRelatedItems: relationsResult.total,
     };
   }
 }

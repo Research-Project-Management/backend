@@ -156,7 +156,7 @@ model User {
   authoredFiles       File[]            @relation("FileAuthor")
   sharedFiles         FileShare[]
   createdLabels       Label[]
-  uploadedPapers      Paper[]           @relation("PaperUploader")
+  uploadedCatalogItems CatalogItem[]     @relation("CatalogItemUploader")
   createdCollections  Collection[]
   authoredPages       Page[]            @relation("PageAuthor")
   authoredTasks       Task[]            @relation("TaskAuthor")
@@ -208,7 +208,7 @@ model Workspace {
   projects    Project[]
   files       File[]
   labels      Label[]
-  papers      Paper[]
+  catalogItems CatalogItem[]
   collections Collection[]
   pages       Page[]
   stickies    Sticky[]
@@ -305,7 +305,7 @@ model File {
 
   // Relations
   sharedWith     FileShare[]
-  attachments    PaperAttachment[]
+  attachments    CatalogAttachment[]
 
   @@index([workspaceId, parentId, trashedAt])
   @@index([linkedToId, linkedToType])
@@ -345,7 +345,7 @@ model Label {
 
 // ── 4. Library Context (Academic Research) ──────────────────────────────────
 
-model Paper {
+model CatalogItem {
   id               String            @id @default(uuid())
   title            String
   authors          String[]          @default([])
@@ -403,7 +403,7 @@ model Paper {
   workspaceId      String
   workspace        Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   uploadedById     String
-  uploadedBy       User              @relation("PaperUploader", fields: [uploadedById], references: [id], onDelete: Cascade)
+  uploadedBy       User              @relation("CatalogItemUploader", fields: [uploadedById], references: [id], onDelete: Cascade)
   collectionId     String?
   collection       Collection?       @relation(fields: [collectionId], references: [id], onDelete: SetNull)
   deletedAt        DateTime?
@@ -411,19 +411,20 @@ model Paper {
   updatedAt        DateTime          @updatedAt
 
   // Relations
-  attachments      PaperAttachment[]
+  attachments      CatalogAttachment[]
 
   @@index([workspaceId, collectionId, deletedAt, createdAt])
   @@index([workspaceId, deletedAt])
+  @@index([workspaceId, ragStatus])
   @@index([doi])
   @@index([citationKey])
   @@map("papers")
 }
 
-model PaperAttachment {
+model CatalogAttachment {
   id             String          @id @default(uuid())
-  paperId        String
-  paper          Paper           @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  catalogItemId  String          @map("paperId")
+  catalogItem    CatalogItem     @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
   fileId         String?
   file           File?           @relation(fields: [fileId], references: [id], onDelete: SetNull)
   filename       String
@@ -433,7 +434,7 @@ model PaperAttachment {
   attachmentType AttachmentType  @default(supplementary)
   uploadedAt     DateTime        @default(now())
 
-  @@index([paperId])
+  @@index([catalogItemId])
   @@index([fileId])
   @@map("paper_attachments")
 }
@@ -455,7 +456,7 @@ model Collection {
   updatedAt   DateTime    @updatedAt
 
   // Relations
-  papers      Paper[]
+  catalogItems CatalogItem[]
 
   @@index([workspaceId, parentId, createdAt])
   @@map("collections")
@@ -492,6 +493,7 @@ model Page {
   comments       PageComment[]
 
   @@index([workspaceId, projectId, status])
+  @@index([workspaceId, projectId, deletedAt])
   @@index([parentPageId])
   @@index([authorId])
   @@map("pages")
@@ -553,6 +555,7 @@ model Task {
   comments     TaskComment[]
 
   @@index([projectId, columnId, rank])
+  @@index([projectId, completed])
   @@index([projectId, assigneeId, dueDate])
   @@index([projectId, identifier])
   @@index([cycleId])
@@ -713,6 +716,7 @@ model ActivityEvent {
   createdAt     DateTime    @default(now())
 
   @@index([workspaceId, createdAt])
+  @@index([workspaceId, entityType, createdAt])
   @@index([projectId, createdAt])
   @@index([entityType, entityId])
   @@index([actorId, createdAt])

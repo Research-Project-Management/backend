@@ -16,6 +16,18 @@ import { LoggingInterceptor } from './core/logger/logging.interceptor';
 
 async function bootstrap() {
   const logger = AppLogger.getInstance('Bootstrap');
+
+  // Process-level safety nets to prevent unexpected crashes from background promises or async events
+  process.on('unhandledRejection', (reason: unknown) => {
+    logger.error(
+      `[Unhandled Rejection]: ${reason instanceof Error ? reason.stack : String(reason)}`,
+    );
+  });
+
+  process.on('uncaughtException', (error: Error) => {
+    logger.error(`[Uncaught Exception]: ${error.stack || error.message}`);
+  });
+
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter({ trustProxy: true }),
@@ -57,7 +69,7 @@ async function bootstrap() {
     new ValidationPipe({
       whitelist: true,
       transform: true,
-      forbidNonWhitelisted: false,
+      forbidNonWhitelisted: true,
       transformOptions: {
         enableImplicitConversion: true,
       },
@@ -152,8 +164,9 @@ async function bootstrap() {
     },
   });
 
-  const port = process.env.PORT || 3000;
-  await app.listen(port, '0.0.0.0');
+  const port = Number(process.env.PORT) || 3000;
+  const host = process.env.HOST || '0.0.0.0';
+  await app.listen(port, host);
   logger.log(`🚀 NestJS + Fastify running on http://localhost:${port}`);
   logger.log(`📚 Swagger Documentation ready at http://localhost:${port}/docs`);
 }

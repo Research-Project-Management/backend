@@ -18,8 +18,7 @@ import {
   AppendMessagesDto,
   RenameThreadDto,
 } from './dto/thread.dto';
-import { JwtAuthGuard } from '@/modules/iam/authentication';
-import { CurrentUser } from '@/modules/iam/authentication';
+import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
 
 @ApiTags('AI - Threads')
 @ApiBearerAuth('JWT-auth')

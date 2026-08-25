@@ -18,6 +18,9 @@ export class PrismaService
       'postgresql://localhost:5432/rpm';
 
     const pool = new Pool({ connectionString });
+    pool.on('error', (err) => {
+      console.warn('[Prisma pg pool error]:', err.message);
+    });
     const adapter = new PrismaPg(pool);
     super({ adapter });
     this.pool = pool;

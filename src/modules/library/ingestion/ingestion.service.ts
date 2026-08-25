@@ -1,16 +1,28 @@
-import { Injectable, BadRequestException, Logger, Inject, forwardRef } from '@nestjs/common';
-import { randomUUID } from 'crypto';
-import { PaperRepository, PaperWithRelations } from '../paper/paper.repository';
-import { BibtexFormatter } from '../reference/formatters/bibtex.formatter';
-import { BibtexParser } from '../reference/parsers/bibtex.parser';
-import { RisFormatter } from '../reference/formatters/ris.formatter';
-import { DoiResolver } from '../reference/resolvers/doi.resolver';
-import { UnifiedFetcherService } from '../reference/fetchers/unified-fetcher.service';
+import {
+  Injectable,
+  BadRequestException,
+  Logger,
+  Inject,
+  forwardRef,
+  Optional,
+} from '@nestjs/common';
+import {
+  CatalogRepository,
+  CatalogItemWithRelations,
+} from '../catalog/catalog.repository';
+import { BibtexFormatter } from '../citation/formatters/bibtex.formatter';
+import { BibtexParser } from '../citation/parsers/bibtex.parser';
+import { RisFormatter } from '../citation/formatters/ris.formatter';
+import { DoiResolver } from '../citation/resolvers/doi.resolver';
+import { MetadataService } from '../metadata/metadata.service';
+import { RedisCacheService } from '../../../core/cache/redis-cache.service';
+import { PdfDoiExtractor } from '../attachments/pdf-extractor.service';
 import {
   IngestDocumentDto,
   BatchIngestDto,
   IngestionSourceType,
 } from './dto/ingestion.dto';
+import { AcademicMetadataReducer } from '../metadata/metadata-reducer';
 
 export interface IngestionResult {
   id: string;
@@ -23,21 +35,25 @@ export interface IngestionResult {
   ragStatus?: string;
   collectionId?: string | null;
   fileUrl?: string | null;
-  paper?: PaperWithRelations;
+  item?: CatalogItemWithRelations;
+  paper?: CatalogItemWithRelations;
 }
 
 @Injectable()
 export class IngestionService {
   private readonly logger = new Logger(IngestionService.name);
+  private readonly BATCH_CONCURRENCY = 5;
 
   constructor(
-    @Inject(forwardRef(() => PaperRepository))
-    private readonly paperRepo: PaperRepository,
+    @Inject(forwardRef(() => CatalogRepository))
+    private readonly catalogRepo: CatalogRepository,
     private readonly bibtexFormatter: BibtexFormatter,
     private readonly bibtexParser: BibtexParser,
     private readonly risFormatter: RisFormatter,
     private readonly doiResolver: DoiResolver,
-    private readonly unifiedFetcher: UnifiedFetcherService,
+    private readonly metadataService: MetadataService,
+    private readonly PdfDoiExtractor: PdfDoiExtractor,
+    @Optional() private readonly redisCache?: RedisCacheService,
   ) {}
 
   /**
@@ -47,27 +63,7 @@ export class IngestionService {
     userId: string,
     dto: IngestDocumentDto,
   ): Promise<IngestionResult> {
-    let title = dto.title?.trim() || '';
-    let authors = dto.authors || [];
-    let year = dto.year || null;
-    let doi = dto.doi?.trim() || '';
-    let journal = dto.journal || '';
-    let publisher = dto.publisher || '';
-    let volume = dto.volume || '';
-    let issue = dto.issue || '';
-    let pages = dto.pages || '';
-    let issn = dto.issn || '';
-    let isbn = dto.isbn || '';
-    let url = dto.url || '';
-    let abstract = dto.abstract || '';
-    let itemType = dto.itemType || 'journalArticle';
-    let fileUrl = dto.fileUrl || '';
-    let filename =
-      dto.filename || (fileUrl ? fileUrl.split('/').pop() || 'paper.pdf' : 'document.pdf');
-    const storageId = dto.storageFileId || dto.primaryFile?.fileId || null;
-    let labels: string[] = dto.tags || [];
-    let notes: any[] = dto.notes || [];
-    let explicitCitationKey = dto.citationKey?.trim() || '';
+    let draft = AcademicMetadataReducer.fromDto(dto);
 
     // 1. Multi-source Metadata Resolution & Parsing
     switch (dto.sourceType) {
@@ -79,45 +75,18 @@ export class IngestionService {
         }
 
         try {
-          const resolved = await this.unifiedFetcher.resolve(query);
+          const resolved = await this.metadataService.resolve(query);
           if (resolved?.metadata) {
-            const m = resolved.metadata;
-            title = title || m.title;
-            authors = authors.length ? authors : m.authors || [];
-            year = year || m.year || null;
-            doi = doi || m.doi || '';
-            journal = journal || m.journal || '';
-            publisher = publisher || m.publisher || '';
-            volume = volume || m.volume || '';
-            issue = issue || m.issue || '';
-            pages = pages || m.pages || '';
-            issn = issn || m.issn || '';
-            isbn = isbn || m.isbn || '';
-            url = url || m.url || '';
-            abstract = abstract || m.abstract || '';
-            itemType = itemType || m.itemType || 'journalArticle';
-            if (!labels.length && m.keywords?.length) {
-              labels = m.keywords;
-            }
-            if (!notes.length && m.tldr) {
-              notes = [
-                {
-                  id: randomUUID(),
-                  content: `💡 **TL;DR Summary**:\n${m.tldr}`,
-                  createdAt: new Date().toISOString(),
-                },
-              ];
-            }
-            if (!fileUrl && m.openAccessPdfUrl) {
-              fileUrl = m.openAccessPdfUrl;
-            }
+            draft = AcademicMetadataReducer.merge(draft, resolved.metadata);
           }
         } catch (err: any) {
-          this.logger.warn(`Failed to resolve identifier (${query}): ${err.message}`);
+          this.logger.warn(
+            `Failed to resolve identifier (${query}): ${err.message}`,
+          );
         }
 
-        if (!title) {
-          title = query;
+        if (!draft.title) {
+          draft.title = query;
         }
         break;
       }
@@ -128,38 +97,9 @@ export class IngestionService {
         }
         const parsedEntries = this.bibtexParser.parse(dto.bibtex);
         if (parsedEntries && parsedEntries.length > 0) {
-          const entry = parsedEntries[0];
-          title = title || entry.title;
-          authors = authors.length ? authors : entry.authors || [];
-          year = year || entry.year || null;
-          doi = doi || entry.doi || '';
-          journal = journal || entry.journal || '';
-          publisher = publisher || entry.publisher || '';
-          volume = volume || entry.volume || '';
-          issue = issue || entry.issue || '';
-          pages = pages || entry.pages || '';
-          issn = issn || entry.issn || '';
-          isbn = isbn || entry.isbn || '';
-          url = url || entry.url || '';
-          abstract = abstract || entry.abstract || '';
-          itemType = itemType || entry.itemType || 'journalArticle';
-          if (!labels.length && (entry as any).keywords?.length) {
-            labels = (entry as any).keywords;
-          }
-          if (!notes.length && (entry as any).annote) {
-            notes = [
-              {
-                id: randomUUID(),
-                content: (entry as any).annote,
-                createdAt: new Date().toISOString(),
-              },
-            ];
-          }
-          if (!explicitCitationKey && entry.citationKey?.trim()) {
-            explicitCitationKey = entry.citationKey.trim();
-          }
+          draft = AcademicMetadataReducer.mergeBibtex(draft, parsedEntries[0]);
         }
-        if (!title) title = 'BibTeX Entry';
+        if (!draft.title) draft.title = 'BibTeX Entry';
         break;
       }
 
@@ -169,24 +109,9 @@ export class IngestionService {
         }
         const parsedEntries = this.risFormatter.parse(dto.ris);
         if (parsedEntries && parsedEntries.length > 0) {
-          const entry = parsedEntries[0];
-          title = title || entry.title;
-          authors = authors.length ? authors : entry.authors || [];
-          year = year || entry.year || null;
-          doi = doi || entry.doi || '';
-          journal = journal || entry.journal || '';
-          publisher = publisher || entry.publisher || '';
-          volume = volume || entry.volume || '';
-          issue = issue || entry.issue || '';
-          pages = pages || entry.pages || '';
-          url = url || entry.url || '';
-          abstract = abstract || entry.abstract || '';
-          itemType = itemType || entry.itemType || 'journalArticle';
-          if (!labels.length && (entry as any).keywords?.length) {
-            labels = (entry as any).keywords;
-          }
+          draft = AcademicMetadataReducer.merge(draft, parsedEntries[0]);
         }
-        if (!title) title = 'RIS Entry';
+        if (!draft.title) draft.title = 'RIS Entry';
         break;
       }
 
@@ -194,56 +119,101 @@ export class IngestionService {
       case IngestionSourceType.STORAGE:
       case IngestionSourceType.MANUAL:
       default: {
-        if (!title) {
-          title = filename ? filename.replace(/\.[^/.]+$/, '') : 'Untitled Paper';
+        if (!draft.title) {
+          draft.title = draft.filename
+            ? AcademicMetadataReducer.cleanFilenameForTitleSearch(
+                draft.filename,
+              )
+            : 'Untitled Paper';
         }
 
-        // Auto-enrich metadata if fields are missing (e.g. uploaded from PDF or filename)
-        const queryCandidate =
-          doi ||
-          dto.query ||
-          (title && title.length > 4 && !title.toLowerCase().startsWith('untitled') ? title : '');
-
-        if (queryCandidate && (authors.length === 0 || !year || !journal || !abstract)) {
+        // Step 1: Deep PDF extraction (Zotero-grade XMP & Text Analysis)
+        if (draft.fileUrl) {
           try {
-            const resolved = await this.unifiedFetcher.resolve(queryCandidate);
-            if (resolved?.metadata) {
-              const m = resolved.metadata;
-              // If current title looks like an arXiv ID or raw filename, adopt real authoritative title
-              if (/^\d{4}\.\d{4,5}/i.test(title) || title.includes('_') || title.toLowerCase().endsWith('.pdf')) {
-                if (m.title && m.title.length > 5) {
-                  title = m.title;
-                }
+            const pdfMeta = await this.PdfDoiExtractor.extractMetadataFromUrl(
+              draft.fileUrl,
+            );
+            if (pdfMeta) {
+              if (pdfMeta.doi && !draft.doi) {
+                draft.doi = pdfMeta.doi;
               }
-              if (!authors.length && m.authors?.length) authors = m.authors;
-              if (!year && m.year) year = m.year;
-              if (!doi && m.doi) doi = m.doi;
-              if (!journal && m.journal) journal = m.journal;
-              if (!publisher && m.publisher) publisher = m.publisher;
-              if (!volume && m.volume) volume = m.volume;
-              if (!issue && m.issue) issue = m.issue;
-              if (!pages && m.pages) pages = m.pages;
-              if (!issn && m.issn) issn = m.issn;
-              if (!isbn && m.isbn) isbn = m.isbn;
-              if (!url && m.url) url = m.url;
-              if (!abstract && m.abstract) abstract = m.abstract;
-              if (itemType === 'journalArticle' && m.itemType) itemType = m.itemType;
-              if (!labels.length && m.keywords?.length) {
-                labels = m.keywords;
+              if (pdfMeta.arxivId && !draft.arxivId) {
+                draft.arxivId = pdfMeta.arxivId;
               }
-              if (!notes.length && m.tldr) {
-                notes = [
-                  {
-                    id: randomUUID(),
-                    content: `💡 **TL;DR Summary**:\n${m.tldr}`,
-                    createdAt: new Date().toISOString(),
-                  },
-                ];
+              if (pdfMeta.pmid && !draft.pmid) {
+                draft.pmid = pdfMeta.pmid;
               }
-              if (!fileUrl && m.openAccessPdfUrl) fileUrl = m.openAccessPdfUrl;
+              if (pdfMeta.keywords && pdfMeta.keywords.length > 0) {
+                draft.labels = Array.from(
+                  new Set([...draft.labels, ...pdfMeta.keywords]),
+                );
+              }
+              if (pdfMeta.abstract && !draft.abstract) {
+                draft.abstract = pdfMeta.abstract;
+              }
+              if (
+                pdfMeta.title &&
+                (!draft.title ||
+                  draft.title.toLowerCase().startsWith('untitled') ||
+                  draft.title.toLowerCase().endsWith('.pdf') ||
+                  draft.title.includes('_'))
+              ) {
+                draft.title = pdfMeta.title;
+              }
+              if (pdfMeta.authors?.length && draft.authors.length === 0) {
+                draft.authors = [...pdfMeta.authors];
+              }
+              if (pdfMeta.year && !draft.year) {
+                draft.year = pdfMeta.year;
+              }
+              this.logger.debug(
+                `Deep PDF extraction completed for ${draft.filename} — DOI: ${draft.doi || 'none'}, arXiv: ${draft.arxivId || 'none'}, Tags: ${draft.labels.length}, Title: ${draft.title}`,
+              );
             }
           } catch (err: any) {
-            this.logger.debug(`Background metadata enrichment skipped for "${queryCandidate}": ${err.message}`);
+            this.logger.debug(`PDF deep extraction skipped: ${err?.message}`);
+          }
+        }
+
+        // Step 2: Authoritative resolution via CrossRef, OpenAlex, arXiv, PubMed, Semantic Scholar
+        const queryCandidate =
+          draft.doi ||
+          draft.arxivId ||
+          draft.pmid ||
+          dto.query ||
+          (draft.title &&
+          draft.title.length > 8 &&
+          !draft.title.toLowerCase().startsWith('untitled') &&
+          !draft.title.toLowerCase().endsWith('.pdf')
+            ? draft.title
+            : '');
+
+        if (
+          queryCandidate &&
+          (draft.authors.length === 0 ||
+            !draft.year ||
+            !draft.journal ||
+            !draft.abstract ||
+            draft.labels.length === 0)
+        ) {
+          try {
+            const resolved = await this.metadataService.resolve(queryCandidate);
+            if (resolved?.metadata) {
+              const m = resolved.metadata;
+              if (
+                /^\d{4}\.\d{4,5}/i.test(draft.title) ||
+                draft.title.includes('_') ||
+                draft.title.toLowerCase().endsWith('.pdf') ||
+                draft.title.toLowerCase().startsWith('untitled')
+              ) {
+                if (m.title && m.title.length > 5) draft.title = m.title;
+              }
+              draft = AcademicMetadataReducer.merge(draft, m);
+            }
+          } catch (err: any) {
+            this.logger.debug(
+              `Background metadata enrichment skipped for "${queryCandidate}": ${err.message}`,
+            );
           }
         }
 
@@ -252,14 +222,19 @@ export class IngestionService {
     }
 
     // 2. Resolve Workspace and Unique Citation Key
-    const ws = await this.paperRepo.resolveWorkspace(dto.workspaceId);
-    const targetWsId = ws?.id || dto.workspaceId;
+    const targetWsId = await this.catalogRepo.resolveWorkspaceId(
+      dto.workspaceId,
+    );
 
     const baseCitationKey =
-      explicitCitationKey ||
-      this.bibtexFormatter.generateCitationKey(title, authors, year);
+      draft.explicitCitationKey ||
+      this.bibtexFormatter.generateCitationKey(
+        draft.title,
+        draft.authors,
+        draft.year,
+      );
 
-    const citationKey = await this.paperRepo.resolveUniqueCitationKey(
+    const citationKey = await this.catalogRepo.resolveUniqueCitationKey(
       targetWsId,
       baseCitationKey,
     );
@@ -267,44 +242,89 @@ export class IngestionService {
     // 3. Construct Primary File Payload
     const primaryFilePayload = dto.primaryFile
       ? dto.primaryFile
-      : storageId || fileUrl
+      : draft.storageId || draft.fileUrl
         ? {
-            fileId: storageId,
-            filename,
-            url: fileUrl,
+            fileId: draft.storageId,
+            filename: draft.filename,
+            url: draft.fileUrl,
             size: dto.size || 0,
             mimeType: dto.mimeType || 'application/pdf',
           }
         : undefined;
 
-    // 4. Persist Master Paper Entity
-    const paper = (await this.paperRepo.createPaper({
+    // 4. DOI dedup guard (Zotero pattern) — return existing paper silently if DOI already in workspace.
+    if (draft.doi && draft.doi.trim().length > 3) {
+      const existing = await this.catalogRepo.findItemByDoi(
+        targetWsId,
+        draft.doi,
+      );
+      if (existing) {
+        this.logger.debug(
+          `DOI dedup: paper "${existing.title}" (${existing.id}) already exists for DOI ${draft.doi} — skipping creation`,
+        );
+        return {
+          id: existing.id,
+          title: existing.title,
+          citationKey: existing.citationKey || citationKey,
+          sourceType: dto.sourceType,
+          doi: existing.doi || undefined,
+          year: existing.year,
+          authors: Array.isArray(existing.authors) ? existing.authors : [],
+          ragStatus: 'none',
+          collectionId: existing.collectionId,
+          fileUrl: existing.fileUrl,
+          paper: existing,
+        };
+      }
+    }
+
+    // 5. Persist Master Paper Entity
+    const paper = await this.catalogRepo.createItem({
       workspaceId: targetWsId,
       uploadedById: userId,
-      title,
-      filename,
-      fileUrl,
+      title: draft.title,
+      shortTitle: draft.shortTitle || undefined,
+      filename: draft.filename,
+      fileUrl: draft.fileUrl,
       size: dto.size || 0,
       mimeType: dto.mimeType || 'application/pdf',
-      authors,
-      year,
-      doi,
-      journal,
-      publisher,
-      volume,
-      issue,
-      pages,
-      issn,
-      isbn,
-      url,
-      abstract,
-      itemType,
+      authors: draft.authors,
+      editors: draft.editors || [],
+      year: draft.year,
+      publicationDate: draft.publicationDate || undefined,
+      doi: draft.doi,
+      journal: draft.journal,
+      publicationTitle: draft.publicationTitle || draft.journal,
+      journalAbbr: draft.journalAbbr || undefined,
+      publisher: draft.publisher,
+      place: draft.place || undefined,
+      volume: draft.volume,
+      issue: draft.issue,
+      section: draft.section || undefined,
+      pages: draft.pages,
+      series: draft.series || undefined,
+      seriesTitle: draft.seriesTitle || undefined,
+      issn: draft.issn,
+      isbn: draft.isbn,
+      pmid: draft.pmid || undefined,
+      pmcid: draft.pmcid || undefined,
+      url: draft.url,
+      language: draft.language || undefined,
+      abstract: draft.abstract,
+      itemType: draft.itemType,
       citationKey,
-      labels,
-      notes,
+      labels: draft.labels,
+      notes: draft.notes,
+      rights: draft.rights || undefined,
+      license: draft.license || undefined,
+      archive: draft.archive || undefined,
+      archiveLocation: draft.archiveLocation || undefined,
+      callNumber: draft.callNumber || undefined,
+      libraryCatalog: draft.libraryCatalog || undefined,
+      extra: draft.extra || undefined,
       ...(dto.collectionId && { collectionId: dto.collectionId }),
       ...(primaryFilePayload && { primaryFile: primaryFilePayload }),
-    })) as PaperWithRelations;
+    });
 
     return {
       id: paper.id,
@@ -321,8 +341,19 @@ export class IngestionService {
     };
   }
 
+  // ─── Batch helpers ────────────────────────────────────────────────────────
+
+  /** Split an array into fixed-size chunks for rate-limited concurrent processing. */
+  private chunked<T>(items: T[], size: number): T[][] {
+    const chunks: T[][] = [];
+    for (let i = 0; i < items.length; i += size) {
+      chunks.push(items.slice(i, i + size));
+    }
+    return chunks;
+  }
+
   /**
-   * Deep Seam: Batch ingest multiple items in parallel
+   * Batch ingest multiple items with chunked concurrency.
    */
   async batchIngest(userId: string, dto: BatchIngestDto) {
     if (!dto.items || dto.items.length === 0) {
@@ -335,23 +366,24 @@ export class IngestionService {
       };
     }
 
-    const results = await Promise.allSettled(
-      dto.items.map((item) => this.ingest(userId, item)),
-    );
-
     const successful: IngestionResult[] = [];
     const failed: Array<{ item: IngestDocumentDto; error: string }> = [];
 
-    results.forEach((res, index) => {
-      if (res.status === 'fulfilled') {
-        successful.push(res.value);
-      } else {
-        failed.push({
-          item: dto.items[index],
-          error: (res.reason as Error)?.message || 'Unknown ingestion error',
-        });
-      }
-    });
+    for (const chunk of this.chunked(dto.items, this.BATCH_CONCURRENCY)) {
+      const results = await Promise.allSettled(
+        chunk.map((item) => this.ingest(userId, item)),
+      );
+      results.forEach((res, index) => {
+        if (res.status === 'fulfilled') {
+          successful.push(res.value);
+        } else {
+          failed.push({
+            item: chunk[index],
+            error: (res.reason as Error)?.message || 'Unknown ingestion error',
+          });
+        }
+      });
+    }
 
     return {
       total: dto.items.length,
@@ -361,91 +393,4 @@ export class IngestionService {
       failed,
     };
   }
-
-  // ── In-Memory Job Store for Async Batch Processing ───────────────────────
-  private readonly jobs = new Map<string, IngestionJobStatus>();
-
-  /**
-   * Enqueues an asynchronous batch ingestion job and starts background processing
-   */
-  async createAsyncBatchJob(
-    userId: string,
-    dto: BatchIngestDto,
-  ): Promise<{ jobId: string; status: string; total: number }> {
-    const jobId = randomUUID();
-    const items = dto.items || [];
-
-    const job: IngestionJobStatus = {
-      jobId,
-      status: 'processing',
-      total: items.length,
-      processed: 0,
-      successCount: 0,
-      failedCount: 0,
-      progressPercentage: 0,
-      successful: [],
-      failed: [],
-      createdAt: new Date().toISOString(),
-    };
-
-    this.jobs.set(jobId, job);
-
-    // Process asynchronously without blocking HTTP response
-    setImmediate(async () => {
-      for (const item of items) {
-        try {
-          const res = await this.ingest(userId, item);
-          job.successful.push(res);
-          job.successCount++;
-        } catch (err: any) {
-          job.failed.push({
-            item,
-            error: err?.message || 'Failed to ingest item',
-          });
-          job.failedCount++;
-        } finally {
-          job.processed++;
-          job.progressPercentage = Math.round(
-            (job.processed / job.total) * 100,
-          );
-        }
-      }
-      job.status = job.failedCount === job.total ? 'failed' : 'completed';
-      job.completedAt = new Date().toISOString();
-      this.logger.log(
-        `Async Ingestion Job ${jobId} finished (${job.successCount}/${job.total} success)`,
-      );
-    });
-
-    return {
-      jobId,
-      status: 'processing',
-      total: items.length,
-    };
-  }
-
-  /**
-   * Poll status of an async batch ingestion job
-   */
-  getJobStatus(jobId: string): IngestionJobStatus {
-    const job = this.jobs.get(jobId);
-    if (!job) {
-      throw new BadRequestException(`Ingestion job with ID ${jobId} not found`);
-    }
-    return job;
-  }
-}
-
-export interface IngestionJobStatus {
-  jobId: string;
-  status: 'queued' | 'processing' | 'completed' | 'failed';
-  total: number;
-  processed: number;
-  successCount: number;
-  failedCount: number;
-  progressPercentage: number;
-  successful: IngestionResult[];
-  failed: Array<{ item: IngestDocumentDto; error: string }>;
-  createdAt: string;
-  completedAt?: string;
 }

@@ -66,7 +66,7 @@ export class WorklogRepository {
     }
 
     // Fallback: Query via ActivityEvent with entityType 'task' or project tasks
-    const project = await this.prisma.project.findUnique({
+    const _project = await this.prisma.project.findUnique({
       where: { id: projectId },
       include: {
         members: {

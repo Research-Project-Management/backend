@@ -15,7 +15,9 @@ import { WorkspaceRole } from '../enums/workspace-role.enum';
  * removeWorkspace() { ... }
  * ```
  */
-export function RequireWorkspaceRole(...roles: (WorkspaceRole | keyof typeof WorkspaceRole)[]) {
+export function RequireWorkspaceRole(
+  ...roles: (WorkspaceRole | keyof typeof WorkspaceRole)[]
+) {
   return applyDecorators(
     SetMetadata(WORKSPACE_ROLES_KEY, roles),
     UseGuards(JwtAuthGuard, WorkspaceRoleGuard),

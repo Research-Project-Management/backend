@@ -1,6 +1,6 @@
 import { RagAgentService } from '@/modules/ai/rag-agent/rag-agent.service';
 import { EngineService } from '@/modules/ai/engine/engine.service';
-import { PaperRepository } from '@/modules/library/paper/paper.repository';
+import { CatalogRepository } from '@/modules/library/catalog/catalog.repository';
 
 describe('RagAgentService (Paper-Scoped AI Copilot)', () => {
   let service: RagAgentService;
@@ -17,7 +17,7 @@ describe('RagAgentService (Paper-Scoped AI Copilot)', () => {
     } as any;
 
     mockPaperRepo = {
-      findPaperById: jest.fn(),
+      findItemById: jest.fn(),
     };
 
     service = new RagAgentService(mockEngine, mockPaperRepo);
@@ -36,7 +36,7 @@ describe('RagAgentService (Paper-Scoped AI Copilot)', () => {
       deletedAt: null,
     };
 
-    mockPaperRepo.findPaperById.mockResolvedValueOnce(mockPaper);
+    mockPaperRepo.findItemById.mockResolvedValueOnce(mockPaper);
 
     const mockReply = {} as any;
     const dto = {
@@ -46,15 +46,21 @@ describe('RagAgentService (Paper-Scoped AI Copilot)', () => {
 
     await service.streamPaperChat('user-1', 'paper-vaswani', dto, mockReply);
 
-    expect(mockPaperRepo.findPaperById).toHaveBeenCalledWith('paper-vaswani');
+    expect(mockPaperRepo.findItemById).toHaveBeenCalledWith('paper-vaswani');
     expect(mockEngine.streamChat).toHaveBeenCalledWith(
       expect.objectContaining({
         document_ids: ['rag-doc-999'],
         intent_hint: 'paper_rag_qa',
         workspace_id: 'ws-ai-lab',
         messages: expect.arrayContaining([
-          expect.objectContaining({ role: 'system', content: expect.stringContaining('Attention Is All You Need') }),
-          expect.objectContaining({ role: 'user', content: 'What is Multi-Head Attention?' }),
+          expect.objectContaining({
+            role: 'system',
+            content: expect.stringContaining('Attention Is All You Need'),
+          }),
+          expect.objectContaining({
+            role: 'user',
+            content: 'What is Multi-Head Attention?',
+          }),
         ]),
       }),
       mockReply,
@@ -72,7 +78,7 @@ describe('RagAgentService (Paper-Scoped AI Copilot)', () => {
       deletedAt: null,
     };
 
-    mockPaperRepo.findPaperById.mockResolvedValueOnce(mockPaper);
+    mockPaperRepo.findItemById.mockResolvedValueOnce(mockPaper);
 
     const dto = {
       query: 'Explain residual connection benefit',

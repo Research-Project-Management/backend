@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { IngestionService } from './ingestion.service';
+import { IngestionJobService } from './ingestion-job.service';
 import { IngestDocumentDto, BatchIngestDto } from './dto/ingestion.dto';
 import { JwtAuthGuard } from '@/modules/iam/authentication';
 import { CurrentUser } from '@/modules/iam/authentication';
@@ -19,7 +20,10 @@ import { CurrentUser } from '@/modules/iam/authentication';
 @Controller('api/library/ingest')
 @UseGuards(JwtAuthGuard)
 export class IngestionController {
-  constructor(private readonly ingestionService: IngestionService) {}
+  constructor(
+    private readonly ingestionService: IngestionService,
+    private readonly jobService: IngestionJobService,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
@@ -57,13 +61,14 @@ export class IngestionController {
     @CurrentUser('id') userId: string,
     @Body() dto: BatchIngestDto,
   ) {
-    return this.ingestionService.createAsyncBatchJob(userId, dto);
+    return this.jobService.createAsyncBatchJob(userId, dto);
   }
 
   @Get('jobs/:jobId')
-  @ApiOperation({ summary: 'Poll status and results of an async batch ingestion job' })
+  @ApiOperation({
+    summary: 'Poll status and results of an async batch ingestion job',
+  })
   async getJobStatus(@Param('jobId') jobId: string) {
-    return this.ingestionService.getJobStatus(jobId);
+    return this.jobService.getJobStatus(jobId);
   }
 }
-

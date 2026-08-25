@@ -39,4 +39,21 @@ describe('RedisCacheService', () => {
     await expect(service.del('key')).resolves.not.toThrow();
     await expect(service.delPattern('key:*')).resolves.not.toThrow();
   });
+
+  it('should format keys correctly via buildKey helper', () => {
+    expect(service.buildKey('papers', 'ws-123', 'filter')).toBe(
+      'papers:ws-123:filter',
+    );
+    expect(service.buildKey('tasks', 'proj-1', undefined, 'status')).toBe(
+      'tasks:proj-1:status',
+    );
+  });
+
+  it('should handle invalidateWorkspace, invalidateProject, invalidateEntity safely', async () => {
+    await expect(service.invalidateWorkspace('ws-123')).resolves.not.toThrow();
+    await expect(service.invalidateProject('proj-123')).resolves.not.toThrow();
+    await expect(
+      service.invalidateEntity('paper', 'pap-123'),
+    ).resolves.not.toThrow();
+  });
 });

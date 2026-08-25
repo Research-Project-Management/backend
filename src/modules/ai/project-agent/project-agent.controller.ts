@@ -11,7 +11,7 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { FastifyReply } from 'fastify';
 import { ProjectAgentService } from './project-agent.service';
 import { ProjectAgentQueryDto } from './dto/project-agent.dto';
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authentication';
+import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
 
 @ApiTags('AI - Project Agent')
 @ApiBearerAuth('JWT-auth')

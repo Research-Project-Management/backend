@@ -175,6 +175,7 @@ export class TaskRepository {
         cycle: { select: CYCLE_SELECT },
         parentTask: { select: { id: true, title: true, identifier: true } },
         subtasks: { select: SUBTASK_SELECT, orderBy: { rank: 'asc' } },
+        project: { select: { id: true, workspaceId: true } },
       },
     });
   }
@@ -216,7 +217,7 @@ export class TaskRepository {
     return this.prisma.task.updateMany({
       where: {
         id: { in: taskIds },
-        projectId,
+        ...(projectId ? { projectId } : {}),
       },
       data,
     });

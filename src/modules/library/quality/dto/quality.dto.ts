@@ -1,22 +1,43 @@
 import { IsString, IsArray, IsNotEmpty, IsOptional } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
-export class MergePapersDto {
-  @ApiProperty({
-    description: 'The master paper ID that will retain all merged data and attachments',
+export class MergeCatalogItemsDto {
+  @ApiPropertyOptional({
+    description:
+      'The master catalog item ID that will retain all merged data and attachments',
   })
   @IsString()
-  @IsNotEmpty()
-  masterPaperId!: string;
+  @IsOptional()
+  masterId?: string;
 
-  @ApiProperty({
-    description: 'Array of paper IDs to be merged into master and soft-deleted',
+  @ApiPropertyOptional({
+    description: 'Legacy alias for masterId',
+  })
+  @IsString()
+  @IsOptional()
+  masterPaperId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Array of catalog item IDs to be merged into master and soft-deleted',
     type: [String],
   })
   @IsArray()
-  @IsNotEmpty()
-  sourcePaperIds!: string[];
+  @IsOptional()
+  sourceItemIds?: string[];
+
+  @ApiPropertyOptional({
+    description: 'Legacy alias for sourceItemIds',
+    type: [String],
+  })
+  @IsArray()
+  @IsOptional()
+  sourcePaperIds?: string[];
 }
+
+// Backward compatibility alias
+export const MergePapersDto = MergeCatalogItemsDto;
+export type MergePapersDto = MergeCatalogItemsDto;
 
 export interface DuplicateGroupItem {
   id: string;
@@ -34,19 +55,23 @@ export interface DuplicateGroup {
   matchType: 'DOI' | 'TITLE_AUTHOR_YEAR';
   confidence: 'high' | 'medium';
   matchKey: string;
-  papers: DuplicateGroupItem[];
+  items: DuplicateGroupItem[];
+  papers?: DuplicateGroupItem[]; // compatibility alias
 }
 
 export interface IntegrityIssue {
-  paperId: string;
+  itemId: string;
+  paperId?: string; // compatibility alias
   title: string;
   citationKey: string;
   issues: string[];
 }
 
 export interface IntegrityReport {
-  totalPapers: number;
-  healthyPapers: number;
+  totalItems: number;
+  healthyItems: number;
+  totalPapers?: number; // compatibility alias
+  healthyPapers?: number; // compatibility alias
   missingDoiCount: number;
   missingYearCount: number;
   missingAuthorsCount: number;

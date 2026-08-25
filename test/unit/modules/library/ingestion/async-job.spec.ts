@@ -1,50 +1,28 @@
-import { IngestionService } from '@/modules/library/ingestion/ingestion.service';
-import { PaperRepository } from '@/modules/library/paper/paper.repository';
-import { BibtexFormatter } from '@/modules/library/reference/formatters/bibtex.formatter';
-import { BibtexParser } from '@/modules/library/reference/parsers/bibtex.parser';
-import { RisFormatter } from '@/modules/library/reference/formatters/ris.formatter';
-import { DoiResolver } from '@/modules/library/reference/resolvers/doi.resolver';
-import { UnifiedFetcherService } from '@/modules/library/reference/fetchers/unified-fetcher.service';
+import { IngestionJobService } from '@/modules/library/ingestion/ingestion-job.service';
 import { IngestionSourceType } from '@/modules/library/ingestion/dto/ingestion.dto';
 
-describe('IngestionService (Async Batch Job Tracker)', () => {
-  let service: IngestionService;
-  let mockPaperRepo: any;
-  let mockBibtexFormatter: BibtexFormatter;
-  let mockBibtexParser: BibtexParser;
-  let mockRisFormatter: RisFormatter;
-  let mockDoiResolver: any;
-  let mockUnifiedFetcher: any;
+describe('IngestionJobService (Async Batch Job Tracker)', () => {
+  let jobService: IngestionJobService;
+  let mockIngestionService: any;
 
   beforeEach(() => {
-    mockPaperRepo = {
-      resolveWorkspace: jest.fn().mockResolvedValue({ id: 'ws-1' }),
-      resolveUniqueCitationKey: jest.fn().mockResolvedValue('Doe2026'),
-      createPaper: jest.fn().mockImplementation((data) =>
+    // IngestionJobService delegates actual ingestion to IngestionService.ingest()
+    mockIngestionService = {
+      ingest: jest.fn().mockImplementation((userId, item) =>
         Promise.resolve({
           id: 'paper-new-id',
-          ...data,
+          title: item.title || 'Batch Paper',
+          citationKey: 'doe2026batch',
+          sourceType: item.sourceType,
+          authors: [],
         }),
       ),
     };
 
-    mockBibtexFormatter = new BibtexFormatter();
-    mockBibtexParser = new BibtexParser();
-    mockRisFormatter = new RisFormatter();
-    mockDoiResolver = {
-      resolve: jest.fn().mockResolvedValue(null),
-    };
-    mockUnifiedFetcher = {
-      resolve: jest.fn().mockResolvedValue(null),
-    };
-
-    service = new IngestionService(
-      mockPaperRepo,
-      mockBibtexFormatter,
-      mockBibtexParser,
-      mockRisFormatter,
-      mockDoiResolver,
-      mockUnifiedFetcher,
+    // Inject mock IngestionService via forwardRef token
+    jobService = new (IngestionJobService as any)(
+      mockIngestionService,
+      undefined /* no Redis in unit tests */,
     );
   });
 
@@ -67,13 +45,13 @@ describe('IngestionService (Async Batch Job Tracker)', () => {
       ],
     };
 
-    const res = await service.createAsyncBatchJob('user-1', dto);
+    const res = await jobService.createAsyncBatchJob('user-1', dto);
 
     expect(res.jobId).toBeDefined();
     expect(res.status).toBe('processing');
     expect(res.total).toBe(2);
 
-    const status = service.getJobStatus(res.jobId);
+    const status = await jobService.getJobStatus(res.jobId);
     expect(status).toBeDefined();
     expect(status.jobId).toBe(res.jobId);
   });

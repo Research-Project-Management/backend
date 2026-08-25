@@ -29,7 +29,7 @@ export class AnalyticsRepository {
       this.prisma.task.count({
         where: { project: { workspaceId } },
       }),
-      this.prisma.paper.count({
+      this.prisma.catalogItem.count({
         where: { workspaceId, deletedAt: null },
       }),
       this.prisma.page.count({
