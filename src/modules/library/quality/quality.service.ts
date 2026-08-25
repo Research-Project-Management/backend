@@ -292,18 +292,28 @@ export class QualityService {
       }
     }
 
-    const totalItems = stats.totalPapers;
-    const healthyItems = Math.max(0, totalItems - stats.unhealthyCount);
+    const totalItems = stats.totalPapers || 0;
+    const unhealthyCount =
+      typeof stats.unhealthyCount === 'number'
+        ? stats.unhealthyCount
+        : flaggedItems.length;
+    const healthyItems = Math.max(0, totalItems - unhealthyCount);
+    const missingPdfCount =
+      typeof stats.missingPdfCount === 'number'
+        ? stats.missingPdfCount
+        : flaggedItems.filter((f) =>
+            f.issues.includes('Missing primary PDF attachment'),
+          ).length;
 
     return {
       totalItems,
       healthyItems,
       totalPapers: totalItems,
       healthyPapers: healthyItems,
-      missingDoiCount: stats.missingDoiCount,
-      missingYearCount: stats.missingYearCount,
-      missingAuthorsCount: stats.missingAuthorsCount,
-      missingPdfCount: stats.missingPdfCount,
+      missingDoiCount: stats.missingDoiCount || 0,
+      missingYearCount: stats.missingYearCount || 0,
+      missingAuthorsCount: stats.missingAuthorsCount || 0,
+      missingPdfCount,
       flaggedItems,
     };
   }

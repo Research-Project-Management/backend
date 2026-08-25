@@ -160,6 +160,7 @@ export class R2Service {
         Key: key,
       });
       return await this.s3Client.send(command);
+    } catch (s3Err) {
       this.logger.debug(
         `R2 getObject failed for ${key}, checking local fallback: ${getErrorMessage(s3Err)}`,
       );
