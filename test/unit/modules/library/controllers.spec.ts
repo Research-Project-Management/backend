@@ -243,28 +243,34 @@ describe('Library Subsystem: Complete Controllers & Endpoints Verification', () 
 
   describe('3. IngestionController Endpoints', () => {
     it('should route ingest, batchIngest, createAsyncBatchJob, and getJobStatus', async () => {
-      await ingestionController.ingest('u-1', {
+      await ingestionController.ingest('ws-1', 'u-1', {
         workspaceId: 'ws-1',
         sourceType: IngestionSourceType.DOI,
         doi: '10.1000/182',
       });
       expect(mockIngestionService.ingest).toHaveBeenCalledWith(
+        'ws-1',
         'u-1',
         expect.any(Object),
       );
 
-      await ingestionController.batchIngest('u-1', { items: [] });
-      expect(mockIngestionService.batchIngest).toHaveBeenCalledWith('u-1', {
-        items: [],
-      });
-
-      await ingestionController.createAsyncBatchJob('u-1', { items: [] });
-      expect(mockIngestionJobService.createAsyncBatchJob).toHaveBeenCalledWith(
+      await ingestionController.batchIngest('ws-1', 'u-1', { items: [] });
+      expect(mockIngestionService.batchIngest).toHaveBeenCalledWith(
+        'ws-1',
         'u-1',
-        { items: [] },
+        {
+          items: [],
+        },
       );
 
-      await ingestionController.getJobStatus('job-123', 'u-1');
+      await ingestionController.createAsyncBatchJob('ws-1', 'u-1', {
+        items: [],
+      });
+      expect(
+        mockIngestionJobService.createAsyncBatchJob,
+      ).toHaveBeenCalledWith('ws-1', 'u-1', { items: [] });
+
+      await ingestionController.getJobStatus('ws-1', 'job-123', 'u-1');
       expect(mockIngestionJobService.getJobStatus).toHaveBeenCalledWith(
         'job-123',
         'u-1',

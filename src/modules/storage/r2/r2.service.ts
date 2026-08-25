@@ -87,6 +87,14 @@ export class R2Service {
     return getSignedUrl(this.s3Client, command, { expiresIn });
   }
 
+  private getLocalFilePath(key: string): string {
+    const cleanKey = key.startsWith('/') ? key.slice(1) : key;
+    if (cleanKey.startsWith('uploads/') || cleanKey.startsWith('uploads\\')) {
+      return path.join(process.cwd(), cleanKey);
+    }
+    return path.join(process.cwd(), 'uploads', cleanKey);
+  }
+
   async uploadBuffer(
     key: string,
     buffer: Buffer,
@@ -106,8 +114,7 @@ export class R2Service {
         `R2 upload failed (${getErrorMessage(s3Err)}), fallback saving to local storage`,
       );
       try {
-        const localDir = path.join(process.cwd(), 'uploads');
-        const filePath = path.join(localDir, key);
+        const filePath = this.getLocalFilePath(key);
         const parentDir = path.dirname(filePath);
         if (!fs.existsSync(parentDir)) {
           fs.mkdirSync(parentDir, { recursive: true });
@@ -134,8 +141,7 @@ export class R2Service {
       );
     });
 
-    const localDir = path.join(process.cwd(), 'uploads');
-    const filePath = path.join(localDir, key);
+    const filePath = this.getLocalFilePath(key);
     if (fs.existsSync(filePath)) {
       try {
         fs.unlinkSync(filePath);
@@ -154,12 +160,10 @@ export class R2Service {
         Key: key,
       });
       return await this.s3Client.send(command);
-    } catch (s3Err) {
       this.logger.debug(
         `R2 getObject failed for ${key}, checking local fallback: ${getErrorMessage(s3Err)}`,
       );
-      const localDir = path.join(process.cwd(), 'uploads');
-      const filePath = path.join(localDir, key);
+      const filePath = this.getLocalFilePath(key);
       if (fs.existsSync(filePath)) {
         const stream = fs.createReadStream(filePath);
         const stat = fs.statSync(filePath);

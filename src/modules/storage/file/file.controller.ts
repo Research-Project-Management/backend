@@ -1,4 +1,4 @@
-﻿import {
+import {
   Controller,
   Get,
   Post,
@@ -26,6 +26,8 @@ import {
   RenameFileDto,
   MoveFileDto,
   ShareFileDto,
+  BatchFileIdsDto,
+  BatchStarDto,
 } from './dto/file.dto';
 import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
 import {
@@ -33,6 +35,7 @@ import {
   WorkspaceRoles,
   ProjectRoleGuard,
   ProjectRoles,
+  CurrentWorkspace,
 } from '@/modules/iam/authz';
 
 @ApiTags('Storage & Assets')
@@ -40,7 +43,7 @@ import {
 @Controller('api/files')
 @UseGuards(JwtAuthGuard)
 export class FileController {
-  constructor(private readonly fileService: FileService) {}
+  constructor(private readonly fileService: FileService) { }
 
   @Post('presign')
   @HttpCode(HttpStatus.OK)
@@ -68,16 +71,34 @@ export class FileController {
   @Get('r2/*')
   @ApiOperation({ summary: 'Stream R2 stored file by storage key' })
   async getR2File(
-    @Param('*') key: string,
-    @Res({ passthrough: true }) res: FastifyReply,
+    @Req() req: FastifyRequest,
+    @Res() res: FastifyReply,
   ) {
-    if (!key) {
-      throw new NotFoundException('Storage key is required');
+    const rawUrl = req.raw?.url || req.url || '';
+    const prefix = '/api/files/r2/';
+    const idx = rawUrl.indexOf(prefix);
+    const rawKey =
+      idx !== -1
+        ? rawUrl.slice(idx + prefix.length).split('?')[0]
+        : (req.params as any)?.['*'] || '';
+
+    if (!rawKey) {
+      return res.status(404).send({ message: 'Storage key is required' });
     }
 
-    const output = await this.fileService.getR2Stream(key);
+    const key = decodeURIComponent(rawKey);
+
+    let output = null;
+    try {
+      output = await this.fileService.getR2Stream(key);
+    } catch {
+      try {
+        output = await this.fileService.getR2Stream(rawKey);
+      } catch { }
+    }
+
     if (!output?.Body) {
-      throw new NotFoundException('File not found in storage');
+      return res.status(404).send({ message: 'File not found in storage' });
     }
 
     if (output.ContentType) {
@@ -86,6 +107,7 @@ export class FileController {
     if (output.ContentLength) {
       res.header('Content-Length', output.ContentLength);
     }
+    res.header('Cache-Control', 'public, max-age=31536000, immutable');
 
     // Attach stream error safety to prevent uncaught error events if client closes connection early
     const streamBody = output.Body as {
@@ -97,10 +119,10 @@ export class FileController {
       });
     }
 
-    return output.Body;
+    return res.send(output.Body);
   }
 
-  // â”€â”€ Workspace Scoped â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Workspace Scoped ────────────────────────────────────────────────────────
 
   @Post('workspace/:workspaceId/upload')
   @HttpCode(HttpStatus.CREATED)
@@ -109,10 +131,15 @@ export class FileController {
   @ApiOperation({ summary: 'Upload file to workspace storage' })
   async uploadWorkspaceFile(
     @Param('workspaceId') workspaceId: string,
+    @CurrentWorkspace() currentWorkspaceId: string,
     @CurrentUser('id') userId: string,
     @Body() dto: UploadFileDto,
   ) {
-    return this.fileService.upload(userId, { workspaceId }, dto);
+    return this.fileService.upload(
+      userId,
+      { workspaceId: currentWorkspaceId || workspaceId },
+      dto,
+    );
   }
 
   @Post('workspace/:workspaceId/folder')
@@ -122,10 +149,15 @@ export class FileController {
   @ApiOperation({ summary: 'Create folder in workspace' })
   async createWorkspaceFolder(
     @Param('workspaceId') workspaceId: string,
+    @CurrentWorkspace() currentWorkspaceId: string,
     @CurrentUser('id') userId: string,
     @Body() dto: CreateFolderDto,
   ) {
-    return this.fileService.createFolder(userId, { workspaceId }, dto);
+    return this.fileService.createFolder(
+      userId,
+      { workspaceId: currentWorkspaceId || workspaceId },
+      dto,
+    );
   }
 
   @Get('workspace/:workspaceId/home')
@@ -185,6 +217,11 @@ export class FileController {
     return this.fileService.getTrashedFiles(workspaceId);
   }
 
+  @Get('folder/:folderId/path')
+  async getFolderPath(@Param('folderId') folderId: string) {
+    return this.fileService.getFolderPath(folderId);
+  }
+
   @Get('workspace/:workspaceId')
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
@@ -196,7 +233,7 @@ export class FileController {
     return this.fileService.getFiles({ workspaceId, parentId });
   }
 
-  // â”€â”€ Project Scoped â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Project Scoped ──────────────────────────────────────────────────────────
 
   @Post('project/:projectId/upload')
   @HttpCode(HttpStatus.CREATED)
@@ -273,7 +310,7 @@ export class FileController {
     return this.fileService.getFiles({ projectId, parentId });
   }
 
-  // â”€â”€ Page Scoped â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Page Scoped ────────────────────────────────────────────────────────────
 
   @Post('page/:pageId/upload')
   @HttpCode(HttpStatus.CREATED)
@@ -312,7 +349,7 @@ export class FileController {
     return this.fileService.getFiles({ pageId, parentId });
   }
 
-  // â”€â”€ General File Operations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── General File Operations ────────────────────────────────────────────────
 
   @ApiOperation({ summary: 'Upload a general file (workspace-level)' })
   @Post('upload')
@@ -348,6 +385,32 @@ export class FileController {
       },
       dto,
     );
+  }
+
+  // ── Batch Operations ──────────────────────────────────────────────────────
+
+  @Post('batch/delete')
+  @HttpCode(HttpStatus.OK)
+  async batchDelete(@Body() dto: BatchFileIdsDto) {
+    return this.fileService.batchDeleteFiles(dto.ids);
+  }
+
+  @Post('batch/restore')
+  @HttpCode(HttpStatus.OK)
+  async batchRestore(@Body() dto: BatchFileIdsDto) {
+    return this.fileService.batchRestoreFiles(dto.ids);
+  }
+
+  @Post('batch/permanent-delete')
+  @HttpCode(HttpStatus.OK)
+  async batchPermanentDelete(@Body() dto: BatchFileIdsDto) {
+    return this.fileService.batchPermanentlyDeleteFiles(dto.ids);
+  }
+
+  @Post('batch/star')
+  @HttpCode(HttpStatus.OK)
+  async batchStar(@Body() dto: BatchStarDto) {
+    return this.fileService.batchToggleStar(dto.ids, dto.starred);
   }
 
   @Get(':fileId')

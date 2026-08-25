@@ -21,9 +21,12 @@ export function normalizeDoi(doi?: string | null): string | undefined {
 
   // Valid DOI must start with '10.' followed by registrant code and suffix
   if (/^10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+$/i.test(cleaned)) {
-    return cleaned.toLowerCase();
+    const slashIdx = cleaned.indexOf('/');
+    const prefix = cleaned.slice(0, slashIdx).toLowerCase();
+    const suffix = cleaned.slice(slashIdx + 1);
+    return `${prefix}/${suffix}`;
   }
-  return cleaned.length > 3 ? cleaned : undefined;
+  return undefined;
 }
 
 /**

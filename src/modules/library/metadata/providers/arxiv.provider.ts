@@ -45,15 +45,17 @@ export class ArxivProvider {
   }
 
   parseXmlPayload(xml: string, cleanId: string): UnifiedAcademicMetadata | null {
-    // Check if entry exists
+    const entryMatch = xml.match(/<entry>([\s\S]*?)<\/entry>/i);
     if (
-      !xml.includes('<entry>') ||
-      xml.includes('<entry>\n    <id>http://arxiv.org/api/errors/')
+      !entryMatch ||
+      !entryMatch[1] ||
+      entryMatch[1].includes('http://arxiv.org/api/errors/')
     ) {
       return null;
     }
+    const entryXml = entryMatch[1];
 
-    const titleMatch = xml.match(/<title>([\s\S]*?)<\/title>/gi);
+    const titleMatch = entryXml.match(/<title>([\s\S]*?)<\/title>/i);
     const entryTitle =
       titleMatch && titleMatch[1]
         ? titleMatch[1]
@@ -62,13 +64,13 @@ export class ArxivProvider {
             .trim()
         : 'Untitled arXiv Preprint';
 
-    const summaryMatch = xml.match(/<summary>([\s\S]*?)<\/summary>/i);
+    const summaryMatch = entryXml.match(/<summary>([\s\S]*?)<\/summary>/i);
     const abstract =
       summaryMatch && summaryMatch[1]
         ? summaryMatch[1].replace(/\s+/g, ' ').trim()
         : undefined;
 
-    const publishedMatch = xml.match(/<published>(\d{4})-\d{2}-\d{2}/i);
+    const publishedMatch = entryXml.match(/<published>(\d{4})-\d{2}-\d{2}/i);
     const year =
       publishedMatch && publishedMatch[1] ? Number(publishedMatch[1]) : null;
 

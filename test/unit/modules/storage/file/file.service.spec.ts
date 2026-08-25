@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { FileService } from '@/modules/storage/file/file.service';
 import { FileRepository } from '@/modules/storage/file/file.repository';
 import { R2Service } from '@/modules/storage/r2/r2.service';
+import { PrismaService } from '@/core/database/prisma.service';
 
 describe('FileService', () => {
   let service: FileService;
@@ -36,6 +37,14 @@ describe('FileService', () => {
               url: '/api/files/r2/workspace/ws-1/test.pdf',
             }),
             deleteObject: jest.fn().mockResolvedValue(undefined),
+          },
+        },
+        {
+          provide: PrismaService,
+          useValue: {
+            workspace: { findFirst: jest.fn().mockResolvedValue({ id: 'ws-1' }) },
+            project: { findUnique: jest.fn().mockResolvedValue({ workspaceId: 'ws-1' }) },
+            page: { findUnique: jest.fn().mockResolvedValue({ workspaceId: 'ws-1' }) },
           },
         },
       ],
