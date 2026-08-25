@@ -10,7 +10,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { PageService } from './page.service';
 import {
   CreatePageDto,
@@ -36,6 +36,7 @@ export class PageController {
   @Get('workspace/:workspaceId/pages')
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'List all pages in a workspace' })
   async getWorkspacePages(@Param('workspaceId') workspaceId: string) {
     return this.pageService.getWorkspacePages(workspaceId);
   }
@@ -43,6 +44,7 @@ export class PageController {
   @Get('project/:projectId/pages')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
+  @ApiOperation({ summary: 'List all pages in a project' })
   async getProjectPages(@Param('projectId') projectId: string) {
     return this.pageService.getProjectPages(projectId);
   }
@@ -51,6 +53,7 @@ export class PageController {
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor')
+  @ApiOperation({ summary: 'Create a new page in a project' })
   async createPage(
     @Param('projectId') projectId: string,
     @CurrentUser('id') userId: string,
@@ -62,6 +65,7 @@ export class PageController {
   @Get(['project/:projectId/pages/:pageId', 'pages/:pageId'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
+  @ApiOperation({ summary: 'Get a single page by ID' })
   async getPage(@Param('pageId') pageId: string) {
     return this.pageService.getPage(pageId);
   }
@@ -69,6 +73,7 @@ export class PageController {
   @Put(['project/:projectId/pages/:pageId', 'pages/:pageId'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor')
+  @ApiOperation({ summary: 'Update page content or metadata' })
   async updatePage(
     @Param('pageId') pageId: string,
     @Body() dto: UpdatePageDto,
@@ -79,6 +84,7 @@ export class PageController {
   @Delete(['project/:projectId/pages/:pageId', 'pages/:pageId'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
+  @ApiOperation({ summary: 'Delete a page (soft delete)' })
   async deletePage(@Param('pageId') pageId: string) {
     return this.pageService.deletePage(pageId);
   }
@@ -90,6 +96,7 @@ export class PageController {
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor')
+  @ApiOperation({ summary: 'Duplicate an existing page' })
   async duplicatePage(
     @Param('pageId') pageId: string,
     @CurrentUser('id') userId: string,
@@ -100,6 +107,7 @@ export class PageController {
   @Get(['project/:projectId/pages/:pageId/files', 'pages/:pageId/files'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
+  @ApiOperation({ summary: 'List files attached to a page' })
   async getPageFiles(@Param('pageId') pageId: string) {
     return this.pageService.getPageFiles(pageId);
   }
@@ -108,6 +116,7 @@ export class PageController {
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor')
+  @ApiOperation({ summary: 'Create a sub-file (child page) within a page' })
   async createPageFile(
     @Param('pageId') pageId: string,
     @CurrentUser('id') userId: string,
@@ -127,6 +136,7 @@ export class PageController {
   ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor')
+  @ApiOperation({ summary: 'Set the main/root file of a page' })
   async setMainFile(
     @Param('pageId') pageId: string,
     @Body() dto: SetMainFileDto,
@@ -140,6 +150,7 @@ export class PageController {
   ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor')
+  @ApiOperation({ summary: 'Update page PDF thumbnail' })
   async updateThumbnail(
     @Param('pageId') pageId: string,
     @Body() dto: UpdateThumbnailDto,

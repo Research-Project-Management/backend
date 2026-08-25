@@ -1,7 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ActivityService } from '@/modules/activity/activity.service';
 import { ActivityRepository } from '@/modules/activity/activity.repository';
-import { PrismaService } from '@/core/database/prisma.service';
 import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
 
 describe('ActivityService', () => {
@@ -72,35 +71,10 @@ describe('ActivityService', () => {
                 createdAt: mockDate,
               },
             ]),
-          },
-        },
-        {
-          provide: PrismaService,
-          useValue: {
-            task: {
-              findUnique: jest
-                .fn()
-                .mockResolvedValue({ id: 'task-1', title: 'Test Task' }),
-              findMany: jest
-                .fn()
-                .mockResolvedValue([{ id: 'task-1', title: 'Test Task' }]),
-            },
-            paper: {
-              findUnique: jest
-                .fn()
-                .mockResolvedValue({ id: 'paper-1', title: 'Test Paper' }),
-              findMany: jest
-                .fn()
-                .mockResolvedValue([{ id: 'paper-1', title: 'Test Paper' }]),
-            },
-            page: {
-              findUnique: jest
-                .fn()
-                .mockResolvedValue({ id: 'page-1', title: 'Test Page' }),
-              findMany: jest
-                .fn()
-                .mockResolvedValue([{ id: 'page-1', title: 'Test Page' }]),
-            },
+            findEntitiesTitleMap: jest.fn().mockResolvedValue(
+              new Map([['task:task-1', 'Test Task']]),
+            ),
+            findFallbackRecentItems: jest.fn().mockResolvedValue([]),
           },
         },
       ],

@@ -25,6 +25,7 @@ describe('IngestionService', () => {
           useValue: {
             resolveWorkspace: jest.fn().mockResolvedValue({ id: 'ws-1' }),
             resolveWorkspaceId: jest.fn().mockResolvedValue('ws-1'),
+            findWorkspaceMemberRole: jest.fn().mockResolvedValue('member'),
             resolveUniqueCitationKey: jest
               .fn()
               .mockImplementation((wsId, baseKey) => Promise.resolve(baseKey)),

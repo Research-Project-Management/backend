@@ -74,3 +74,5 @@ export interface UnifiedAcademicMetadata {
   // Provenance trace
   provenance?: ProvenanceMetadata;
 }
+
+export * from './item-types';

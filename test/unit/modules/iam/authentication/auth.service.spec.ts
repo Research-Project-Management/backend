@@ -1,25 +1,25 @@
-import { Test, TestingModule } from '@nestjs/testing';
+﻿import { Test, TestingModule } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { BadRequestException, UnauthorizedException } from '@nestjs/common';
-import { AuthService } from '@/modules/iam/authentication/auth.service';
-import { AuthRepository } from '@/modules/iam/authentication/auth.repository';
+import { AuthnService } from '@/modules/iam/authn/authn.service';
+import { AuthnRepository } from '@/modules/iam/authn/authn.repository';
 import { RedisCacheService } from '@/core/cache/redis-cache.service';
 import * as bcrypt from 'bcrypt';
 
 jest.mock('bcrypt');
 
-describe('AuthService', () => {
-  let service: AuthService;
-  let authRepo: AuthRepository;
+describe('AuthnService', () => {
+  let service: AuthnService;
+  let authRepo: AuthnRepository;
   let redis: RedisCacheService;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        AuthService,
+        AuthnService,
         {
-          provide: AuthRepository,
+          provide: AuthnRepository,
           useValue: {
             findUserByEmail: jest.fn(),
             findUserById: jest.fn(),
@@ -59,8 +59,8 @@ describe('AuthService', () => {
       ],
     }).compile();
 
-    service = module.get<AuthService>(AuthService);
-    authRepo = module.get<AuthRepository>(AuthRepository);
+    service = module.get<AuthnService>(AuthnService);
+    authRepo = module.get<AuthnRepository>(AuthnRepository);
     redis = module.get<RedisCacheService>(RedisCacheService);
   });
 
@@ -130,3 +130,4 @@ describe('AuthService', () => {
     expect(redis.del).toHaveBeenCalled();
   });
 });
+

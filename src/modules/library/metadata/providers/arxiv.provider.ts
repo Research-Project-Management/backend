@@ -1,6 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { getErrorMessage, tryCatch } from '../../../../core/utils/error.util';
-import { UnifiedAcademicMetadata } from '../types/metadata.types';
+import { UnifiedAcademicMetadata } from '../metadata.types';
+import {
+  normalizeArxivId,
+  normalizeDoi,
+} from '../canonical-identifiers.util';
+import { validateAcademicMetadata } from '../metadata.validator';
 import { createHash } from 'crypto';
 
 @Injectable()
@@ -14,7 +19,7 @@ export class ArxivProvider {
   async fetchById(arxivId: string): Promise<UnifiedAcademicMetadata | null> {
     if (!arxivId) return null;
 
-    const cleanId = arxivId.replace(/^arxiv:\s*/i, '').trim();
+    const cleanId = normalizeArxivId(arxivId) || arxivId.replace(/^arxiv:\s*/i, '').trim();
     const url = `${this.BASE_URL}?id_list=${encodeURIComponent(cleanId)}&max_results=1`;
 
     const responseResult = await tryCatch(
@@ -36,7 +41,10 @@ export class ArxivProvider {
     if (!xmlResult.ok || !xmlResult.value) return null;
 
     const xml = xmlResult.value;
+    return this.parseXmlPayload(xml, cleanId);
+  }
 
+  parseXmlPayload(xml: string, cleanId: string): UnifiedAcademicMetadata | null {
     // Check if entry exists
     if (
       !xml.includes('<entry>') ||
@@ -75,7 +83,8 @@ export class ArxivProvider {
     }
 
     const doiMatch = xml.match(/<arxiv:doi[^>]*>([\s\S]*?)<\/arxiv:doi>/i);
-    const doi = doiMatch && doiMatch[1] ? doiMatch[1].trim() : undefined;
+    const rawDoi = doiMatch && doiMatch[1] ? doiMatch[1].trim() : undefined;
+    const doi = normalizeDoi(rawDoi);
 
     const keywords: string[] = [];
     const catMatches = xml.matchAll(/<category\s+term="([^"]+)"/gi);
@@ -121,7 +130,7 @@ export class ArxivProvider {
 
     const rawSnapshotHash = createHash('md5').update(xml).digest('hex');
 
-    return {
+    const result: UnifiedAcademicMetadata = {
       title: entryTitle,
       authors,
       year,
@@ -147,5 +156,7 @@ export class ArxivProvider {
         openAccessPdfUrl: `https://arxiv.org/pdf/${cleanId}.pdf`,
       },
     };
+
+    return validateAcademicMetadata(result) || result;
   }
 }

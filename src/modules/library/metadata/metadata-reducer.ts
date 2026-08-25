@@ -4,6 +4,20 @@ import {
   extractFamilyName,
   extractMeaningfulTitleWord,
 } from '../citation/citation.util';
+import {
+  extractYearFromDate,
+  normalizeCreators,
+  normalizeLibraryItemType,
+  normalizeTags,
+} from './metadata.types';
+import {
+  normalizeDoi,
+  normalizeArxivId,
+  normalizePmid,
+  normalizePmcid,
+  normalizeIsbn,
+  normalizeIssn,
+} from './canonical-identifiers.util';
 
 export interface PaperDraft {
   // Identifiers
@@ -104,9 +118,15 @@ export class AcademicMetadataReducer {
       (fileUrl ? fileUrl.split('/').pop() || 'paper.pdf' : 'document.pdf');
     const storageId = dto.storageFileId || dto.primaryFile?.fileId || null;
 
+    const creatorLists = normalizeCreators((dto as any).creators);
     const title = dto.title?.trim() || '';
-    const authors = dto.authors ? [...dto.authors] : [];
-    const year = dto.year || null;
+    const authors =
+      dto.authors && dto.authors.length > 0
+        ? [...dto.authors]
+        : creatorLists.authors;
+    const publicationDate =
+      (dto as any).publicationDate || (dto as any).date || undefined;
+    const year = dto.year || extractYearFromDate(publicationDate) || null;
 
     let explicitCitationKey = dto.citationKey?.trim() || undefined;
     if (!explicitCitationKey && (title || authors.length)) {
@@ -117,13 +137,16 @@ export class AcademicMetadataReducer {
       title,
       shortTitle: (dto as any).shortTitle || undefined,
       authors,
-      editors: (dto as any).editors ? [...(dto as any).editors] : [],
+      editors:
+        (dto as any).editors && (dto as any).editors.length > 0
+          ? [...(dto as any).editors]
+          : creatorLists.editors,
       year,
-      publicationDate: (dto as any).publicationDate || undefined,
-      doi: dto.doi?.trim() || '',
-      arxivId: (dto as any).arxivId || undefined,
-      pmid: (dto as any).pmid || undefined,
-      pmcid: (dto as any).pmcid || undefined,
+      publicationDate,
+      doi: normalizeDoi(dto.doi) || dto.doi?.trim() || '',
+      arxivId: normalizeArxivId((dto as any).arxivId) || (dto as any).arxivId || undefined,
+      pmid: normalizePmid((dto as any).pmid) || (dto as any).pmid || undefined,
+      pmcid: normalizePmcid((dto as any).pmcid) || (dto as any).pmcid || undefined,
       journal: dto.journal || (dto as any).publicationTitle || '',
       publicationTitle: (dto as any).publicationTitle || dto.journal || '',
       journalAbbr: (dto as any).journalAbbr || undefined,
@@ -135,13 +158,17 @@ export class AcademicMetadataReducer {
       pages: dto.pages || '',
       series: (dto as any).series || undefined,
       seriesTitle: (dto as any).seriesTitle || undefined,
-      issn: dto.issn || '',
-      isbn: dto.isbn || '',
+      issn: normalizeIssn(dto.issn) || dto.issn || '',
+      isbn: normalizeIsbn(dto.isbn) || dto.isbn || '',
       url: dto.url || '',
       language: (dto as any).language || undefined,
-      abstract: dto.abstract || '',
-      itemType: dto.itemType || 'journalArticle',
-      labels: dto.tags ? [...dto.tags] : [],
+      abstract: dto.abstract || (dto as any).abstractNote || '',
+      itemType: normalizeLibraryItemType(dto.itemType || (dto as any).type),
+      labels: normalizeTags([
+        ...((dto.tags as string[] | null | undefined) ?? []),
+        ...(((dto as any).labels as string[] | null | undefined) ?? []),
+        ...(((dto as any).keywords as string[] | null | undefined) ?? []),
+      ]),
       notes: dto.notes ? [...dto.notes] : [],
       rights: (dto as any).rights || undefined,
       license: (dto as any).license || undefined,
@@ -187,10 +214,12 @@ export class AcademicMetadataReducer {
     if (!next.publicationDate && incoming.publicationDate) {
       next.publicationDate = incoming.publicationDate;
     }
-    if (!next.doi && incoming.doi) next.doi = incoming.doi;
-    if (!next.arxivId && incoming.arxivId) next.arxivId = incoming.arxivId;
-    if (!next.pmid && incoming.pmid) next.pmid = incoming.pmid;
-    if (!next.pmcid && incoming.pmcid) next.pmcid = incoming.pmcid;
+    if (!next.doi && incoming.doi) next.doi = normalizeDoi(incoming.doi) || incoming.doi;
+    if (!next.arxivId && incoming.arxivId) next.arxivId = normalizeArxivId(incoming.arxivId) || incoming.arxivId;
+    if (!next.pmid && incoming.pmid) next.pmid = normalizePmid(incoming.pmid) || incoming.pmid;
+    if (!next.pmcid && incoming.pmcid) next.pmcid = normalizePmcid(incoming.pmcid) || incoming.pmcid;
+    if (!next.issn && incoming.issn) next.issn = normalizeIssn(incoming.issn) || incoming.issn;
+    if (!next.isbn && incoming.isbn) next.isbn = normalizeIsbn(incoming.isbn) || incoming.isbn;
 
     if (!next.journal && (incoming.journal || incoming.publicationTitle)) {
       next.journal = incoming.journal || incoming.publicationTitle;

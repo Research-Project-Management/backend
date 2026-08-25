@@ -1,12 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { AuthorizationService } from '@/modules/iam/authorization/authorization.service';
+import { AuthzService } from '@/modules/iam/authz/authz.service';
 import { PrismaService } from '@/core/database/prisma.service';
-import { Permission } from '@/modules/iam/authorization/enums/permissions.enum';
-import { WorkspaceRole } from '@/modules/iam/authorization/enums/workspace-role.enum';
-import { ProjectRole } from '@/modules/iam/authorization/enums/project-role.enum';
+import { Permission } from '@/modules/iam/authz/enums/permissions.enum';
+import { WorkspaceRole } from '@/modules/iam/authz/enums/workspace-role.enum';
+import { ProjectRole } from '@/modules/iam/authz/enums/project-role.enum';
 
-describe('AuthorizationService', () => {
-  let service: AuthorizationService;
+describe('AuthzService', () => {
+  let service: AuthzService;
   let prismaService: any;
 
   beforeEach(async () => {
@@ -21,12 +21,12 @@ describe('AuthorizationService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        AuthorizationService,
+        AuthzService,
         { provide: PrismaService, useValue: prismaService },
       ],
     }).compile();
 
-    service = module.get<AuthorizationService>(AuthorizationService);
+    service = module.get<AuthzService>(AuthzService);
   });
 
   it('should be defined', () => {

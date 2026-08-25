@@ -21,6 +21,10 @@ describe('FileService', () => {
             upsertFileShare: jest.fn(),
             findFiles: jest.fn(),
             findFileShares: jest.fn(),
+            findWorkspaceMemberRole: jest.fn().mockResolvedValue('member'),
+            findProjectMemberRole: jest.fn().mockResolvedValue('contributor'),
+            findPageScope: jest.fn().mockResolvedValue({ workspaceId: 'ws-1', projectId: null }),
+            findProjectScope: jest.fn().mockResolvedValue({ workspaceId: 'ws-1' }),
           },
         },
         {

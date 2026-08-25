@@ -83,6 +83,16 @@ export class FileRepository {
     });
   }
 
+  async getFileShares(fileId: string) {
+    return this.prisma.fileShare.findMany({
+      where: { fileId },
+      include: {
+        user: { select: { id: true, name: true, email: true, avatar: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
   async findFiles(
     where: Prisma.FileWhereInput,
     orderBy?: Prisma.FileOrderByWithRelationInput[],
@@ -120,5 +130,49 @@ export class FileRepository {
         },
       },
     });
+  }
+
+  // ── Scope Resolution (replaces direct Prisma calls in FileService) ──────────
+
+  async findPageScope(
+    pageId: string,
+  ): Promise<{ projectId: string | null; workspaceId: string } | null> {
+    const page = await this.prisma.page.findUnique({
+      where: { id: pageId },
+      select: { projectId: true, workspaceId: true },
+    });
+    return page ?? null;
+  }
+
+  async findProjectScope(
+    projectId: string,
+  ): Promise<{ workspaceId: string } | null> {
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { workspaceId: true },
+    });
+    return project ?? null;
+  }
+
+  async findWorkspaceMemberRole(
+    workspaceId: string,
+    userId: string,
+  ): Promise<string | null> {
+    const member = await this.prisma.workspaceMember.findFirst({
+      where: { workspaceId, userId },
+      select: { role: true },
+    });
+    return member?.role ?? null;
+  }
+
+  async findProjectMemberRole(
+    projectId: string,
+    userId: string,
+  ): Promise<string | null> {
+    const member = await this.prisma.projectMember.findFirst({
+      where: { projectId, userId },
+      select: { role: true },
+    });
+    return member?.role ?? null;
   }
 }

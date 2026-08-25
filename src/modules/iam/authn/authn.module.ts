@@ -5,9 +5,11 @@ import { AuthnService } from './authn.service';
 import { AuthnController } from './authn.controller';
 import { AuthnRepository } from './authn.repository';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { CacheModule } from '@/core/cache/cache.module';
 
 @Module({
   imports: [
+    CacheModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

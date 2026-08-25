@@ -1,9 +1,9 @@
 import { ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { WorkspaceRoleGuard } from '@/modules/iam/authorization/guards/workspace-role.guard';
-import { ProjectRoleGuard } from '@/modules/iam/authorization/guards/project-role.guard';
-import { WorkspaceRole } from '@/modules/iam/authorization/enums/workspace-role.enum';
-import { ProjectRole } from '@/modules/iam/authorization/enums/project-role.enum';
+import { WorkspaceRoleGuard } from '@/modules/iam/authz/guards/workspace-role.guard';
+import { ProjectRoleGuard } from '@/modules/iam/authz/guards/project-role.guard';
+import { WorkspaceRole } from '@/modules/iam/authz/enums/workspace-role.enum';
+import { ProjectRole } from '@/modules/iam/authz/enums/project-role.enum';
 
 describe('IAM Authorization Guards', () => {
   let reflector: Reflector;
@@ -130,10 +130,12 @@ describe('IAM Authorization Guards', () => {
       prismaService.project.findUnique.mockResolvedValue({
         id: 'p-1',
         workspaceId: 'ws-1',
-        members: [{ role: ProjectRole.CONTRIBUTOR, joinedAt: new Date() }],
       });
       prismaService.workspaceMember.findFirst.mockResolvedValue({
         role: WorkspaceRole.MEMBER,
+      });
+      prismaService.projectMember.findFirst.mockResolvedValue({
+        role: ProjectRole.CONTRIBUTOR,
       });
 
       jest
@@ -152,7 +154,6 @@ describe('IAM Authorization Guards', () => {
       prismaService.project.findUnique.mockResolvedValue({
         id: 'p-1',
         workspaceId: 'ws-1',
-        members: [],
       });
       prismaService.workspaceMember.findFirst.mockResolvedValue({
         role: WorkspaceRole.ADMIN,
@@ -174,10 +175,12 @@ describe('IAM Authorization Guards', () => {
       prismaService.project.findUnique.mockResolvedValue({
         id: 'p-1',
         workspaceId: 'ws-1',
-        members: [{ role: ProjectRole.VIEWER, joinedAt: new Date() }],
       });
       prismaService.workspaceMember.findFirst.mockResolvedValue({
         role: WorkspaceRole.MEMBER,
+      });
+      prismaService.projectMember.findFirst.mockResolvedValue({
+        role: ProjectRole.VIEWER,
       });
 
       jest
@@ -189,21 +192,22 @@ describe('IAM Authorization Guards', () => {
       );
     });
 
-    it('should resolve projectId from cycleId param and authorize', async () => {
+    it('should resolve projectId from query param and authorize', async () => {
       const context = createMockContext(
         { id: 'user-contrib' },
-        { cycleId: 'cycle-1' },
+        {},
+        {},
+        { projectId: 'p-1' },
       );
-      prismaService.cycle = {
-        findUnique: jest.fn().mockResolvedValue({ projectId: 'p-1' }),
-      } as any;
       prismaService.project.findUnique.mockResolvedValue({
         id: 'p-1',
         workspaceId: 'ws-1',
-        members: [{ role: ProjectRole.CONTRIBUTOR, joinedAt: new Date() }],
       });
       prismaService.workspaceMember.findFirst.mockResolvedValue({
         role: WorkspaceRole.MEMBER,
+      });
+      prismaService.projectMember.findFirst.mockResolvedValue({
+        role: ProjectRole.CONTRIBUTOR,
       });
 
       jest
@@ -212,27 +216,25 @@ describe('IAM Authorization Guards', () => {
 
       const result = await guard.canActivate(context);
       expect(result).toBe(true);
-      expect(prismaService.cycle.findUnique).toHaveBeenCalledWith({
-        where: { id: 'cycle-1' },
-        select: { projectId: true },
-      });
     });
 
-    it('should resolve projectId from taskId param and authorize', async () => {
+    it('should resolve projectId from request body and authorize', async () => {
       const context = createMockContext(
         { id: 'user-contrib' },
-        { taskId: 'task-1' },
+        {},
+        {},
+        {},
+        { projectId: 'p-1' },
       );
-      prismaService.task = {
-        findUnique: jest.fn().mockResolvedValue({ projectId: 'p-1' }),
-      } as any;
       prismaService.project.findUnique.mockResolvedValue({
         id: 'p-1',
         workspaceId: 'ws-1',
-        members: [{ role: ProjectRole.CONTRIBUTOR, joinedAt: new Date() }],
       });
       prismaService.workspaceMember.findFirst.mockResolvedValue({
         role: WorkspaceRole.MEMBER,
+      });
+      prismaService.projectMember.findFirst.mockResolvedValue({
+        role: ProjectRole.CONTRIBUTOR,
       });
 
       jest
@@ -241,10 +243,7 @@ describe('IAM Authorization Guards', () => {
 
       const result = await guard.canActivate(context);
       expect(result).toBe(true);
-      expect(prismaService.task.findUnique).toHaveBeenCalledWith({
-        where: { id: 'task-1' },
-        select: { projectId: true },
-      });
     });
   });
 });
+

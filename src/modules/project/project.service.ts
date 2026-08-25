@@ -240,6 +240,12 @@ export class ProjectService {
     return { message: 'Project member removed successfully' };
   }
 
+  async getColumns(projectId: string) {
+    const project = await this.projectRepo.findProjectById(projectId);
+    if (!project) throw new NotFoundException('Project not found');
+    return { columns: parseTaskColumns(project.taskColumns) };
+  }
+
   async addColumn(projectId: string, dto: AddColumnDto) {
     const project = await this.projectRepo.findProjectById(projectId);
 

@@ -1,6 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { WorklogRepository } from './worklog.repository';
-import { CreateWorklogDto, QueryWorklogDto } from './dto/worklog.dto';
+import {
+  CreateWorklogDto,
+  UpdateWorklogDto,
+  QueryWorklogDto,
+} from './dto/worklog.dto';
 
 @Injectable()
 export class WorklogService {
@@ -98,5 +102,16 @@ export class WorklogService {
   async deleteWorklog(id: string) {
     await this.worklogRepo.deleteWorklog(id);
     return { success: true, message: 'Worklog deleted successfully' };
+  }
+
+  async updateWorklog(id: string, dto: UpdateWorklogDto) {
+    const log = await this.worklogRepo.updateWorklog(id, {
+      ...(dto.hours !== undefined && { hours: dto.hours }),
+      ...(dto.description !== undefined && { description: dto.description }),
+      ...(dto.date !== undefined && { date: new Date(dto.date) }),
+      ...(dto.taskId !== undefined && { taskId: dto.taskId }),
+      ...(dto.taskTitle !== undefined && { taskTitle: dto.taskTitle }),
+    });
+    return { success: true, data: log };
   }
 }

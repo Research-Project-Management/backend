@@ -174,6 +174,19 @@ export class WorklogRepository {
     return { id, deleted: true };
   }
 
+  async updateWorklog(id: string, data: Record<string, any>) {
+    if ((this.prisma as any).worklog) {
+      return (this.prisma as any).worklog.update({
+        where: { id },
+        data,
+        include: {
+          user: { select: { id: true, name: true, avatar: true, email: true } },
+        },
+      });
+    }
+    return { id, ...data, updatedAt: new Date() };
+  }
+
   async resolveWorkspaceId(projectId: string): Promise<string | null> {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },

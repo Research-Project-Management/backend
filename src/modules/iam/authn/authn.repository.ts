@@ -74,6 +74,19 @@ export class AuthnRepository {
       data: { revokedAt: new Date() },
     });
   }
+
+  /** Explicit alias used by the password-reset flow. */
+  async revokeAllUserRefreshTokens(userId: string) {
+    return this.revokeAllUserTokens(userId);
+  }
+
+  /** Update only the password field for a given user. */
+  async updateUserPassword(userId: string, hashedPassword: string) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { password: hashedPassword },
+    });
+  }
 }
 
 // Backward compatibility alias

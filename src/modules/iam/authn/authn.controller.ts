@@ -23,6 +23,7 @@ import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { OAuthExchangeDto } from './dto/oauth-exchange.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import {
   AuthnResponseDto,
   TokenRefreshResponseDto,
@@ -156,7 +157,6 @@ export class AuthnController {
   }
 
   @Public()
-  @Get('logout')
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Revoke refresh token and terminate session' })
@@ -178,10 +178,21 @@ export class AuthnController {
     description: 'Password reset request acknowledged',
     type: MessageResponseDto,
   })
-  forgotPassword(@Body() _dto: ForgotPasswordDto): MessageResponseDto {
-    return {
-      message: 'If this email is registered, a reset link will be sent.',
-    };
+  async forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authnService.forgotPassword(dto.email);
+  }
+
+  @Public()
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Confirm password reset using token from email' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Password reset successfully',
+    type: MessageResponseDto,
+  })
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authnService.resetPassword(dto.token, dto.newPassword);
   }
 }
 

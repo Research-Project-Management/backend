@@ -129,4 +129,67 @@ describe('AuthnService', () => {
     expect(isValid).toBe(true);
     expect(redis.del).toHaveBeenCalled();
   });
+
+  describe('forgotPassword', () => {
+    it('should return generic message even if user does not exist (prevent enumeration)', async () => {
+      (authnRepo.findUserByEmail as jest.Mock).mockResolvedValue(null);
+
+      const result = await service.forgotPassword('ghost@example.com');
+      expect(result.message).toContain('reset link');
+      expect(redis.set).not.toHaveBeenCalled();
+    });
+
+    it('should store hashed token in Redis when user exists', async () => {
+      (authnRepo.findUserByEmail as jest.Mock).mockResolvedValue({
+        id: 'user-1',
+        email: 'user@example.com',
+      });
+
+      const result = await service.forgotPassword('user@example.com');
+      expect(redis.set).toHaveBeenCalledWith(
+        expect.stringContaining('flux:iam:pwd_reset:'),
+        expect.objectContaining({ userId: 'user-1', email: 'user@example.com' }),
+        3600,
+      );
+      expect(result.message).toContain('reset link');
+      // _devToken only present in non-production
+      if (process.env.NODE_ENV !== 'production') {
+        expect(result._devToken).toBeDefined();
+      }
+    });
+  });
+
+  describe('resetPassword', () => {
+    it('should throw BadRequestException when token not in Redis (expired or invalid)', async () => {
+      (redis.get as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        service.resetPassword('invalid-token', 'newpassword123'),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should throw BadRequestException when password is too short', async () => {
+      await expect(
+        service.resetPassword('some-token', 'short'),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should update password and revoke tokens on valid reset', async () => {
+      const mockRepo = authnRepo as jest.Mocked<AuthnRepository>;
+      (redis.get as jest.Mock).mockResolvedValue({
+        userId: 'user-1',
+        email: 'user@example.com',
+      });
+      (bcrypt.hash as jest.Mock).mockResolvedValue('new-hashed-password');
+      mockRepo.updateUserPassword = jest.fn().mockResolvedValue({});
+      mockRepo.revokeAllUserRefreshTokens = jest.fn().mockResolvedValue({});
+
+      const result = await service.resetPassword('valid-token', 'newpassword123');
+
+      expect(mockRepo.updateUserPassword).toHaveBeenCalledWith('user-1', 'new-hashed-password');
+      expect(redis.del).toHaveBeenCalled();
+      expect(mockRepo.revokeAllUserRefreshTokens).toHaveBeenCalledWith('user-1');
+      expect(result.message).toContain('reset successfully');
+    });
+  });
 });

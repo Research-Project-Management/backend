@@ -18,15 +18,15 @@ import {
   UpdateAnnotationDto,
   ExtractPdfMetadataDto,
 } from './dto/attachments.dto';
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authentication';
+import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
 import {
   WorkspaceRoleGuard,
   WorkspaceRoles,
-} from '@/modules/iam/authorization';
+} from '@/modules/iam/authz';
 
 @ApiTags('Library - Attachments & Annotations')
 @ApiBearerAuth('JWT-auth')
-@Controller('api/library/attachments')
+@Controller('api')
 @UseGuards(JwtAuthGuard)
 export class AttachmentsController {
   constructor(
@@ -34,7 +34,44 @@ export class AttachmentsController {
     private readonly attachmentsService: AttachmentsService,
   ) {}
 
-  @Get(['annotations/:workspaceId/:itemId', ':workspaceId/:itemId'])
+  @Get([
+    'workspace/:workspaceId/library/items/:itemId/attachments',
+    'library/:workspaceId/items/:itemId/attachments',
+  ])
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'List attachments for a catalog item' })
+  async getItemAttachments(
+    @Param('workspaceId') workspaceId: string,
+    @Param('itemId') itemId: string,
+  ) {
+    return this.attachmentsService.getItemAttachments(workspaceId, itemId);
+  }
+
+  @Get([
+    'workspace/:workspaceId/library/items/:itemId/attachments/:attachmentId',
+    'library/:workspaceId/items/:itemId/attachments/:attachmentId',
+  ])
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'Get attachment details for a catalog item' })
+  async getItemAttachment(
+    @Param('workspaceId') workspaceId: string,
+    @Param('itemId') itemId: string,
+    @Param('attachmentId') attachmentId: string,
+  ) {
+    return this.attachmentsService.getItemAttachment(
+      workspaceId,
+      itemId,
+      attachmentId,
+    );
+  }
+
+  @Get([
+    'workspace/:workspaceId/library/items/:itemId/annotations',
+    'library/attachments/annotations/:workspaceId/:itemId',
+    'library/attachments/:workspaceId/:itemId',
+  ])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'Get all PDF annotations for a catalog item' })
@@ -45,7 +82,11 @@ export class AttachmentsController {
     return this.annotationsService.getAnnotations(workspaceId, itemId);
   }
 
-  @Post(['annotations/:workspaceId/:itemId', ':workspaceId/:itemId'])
+  @Post([
+    'workspace/:workspaceId/library/items/:itemId/annotations',
+    'library/attachments/annotations/:workspaceId/:itemId',
+    'library/attachments/:workspaceId/:itemId',
+  ])
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member')
@@ -68,8 +109,9 @@ export class AttachmentsController {
   }
 
   @Put([
-    'annotations/:workspaceId/:itemId/:annotationId',
-    ':workspaceId/:itemId/:annotationId',
+    'workspace/:workspaceId/library/items/:itemId/annotations/:annotationId',
+    'library/attachments/annotations/:workspaceId/:itemId/:annotationId',
+    'library/attachments/:workspaceId/:itemId/:annotationId',
   ])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member')
@@ -91,8 +133,9 @@ export class AttachmentsController {
   }
 
   @Delete([
-    'annotations/:workspaceId/:itemId/:annotationId',
-    ':workspaceId/:itemId/:annotationId',
+    'workspace/:workspaceId/library/items/:itemId/annotations/:annotationId',
+    'library/attachments/annotations/:workspaceId/:itemId/:annotationId',
+    'library/attachments/:workspaceId/:itemId/:annotationId',
   ])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member')
@@ -109,7 +152,11 @@ export class AttachmentsController {
     );
   }
 
-  @Get(['annotations/:workspaceId/:itemId/notes', ':workspaceId/:itemId/notes'])
+  @Get([
+    'workspace/:workspaceId/library/items/:itemId/annotations/notes',
+    'library/attachments/annotations/:workspaceId/:itemId/notes',
+    'library/attachments/:workspaceId/:itemId/notes',
+  ])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({
@@ -123,12 +170,20 @@ export class AttachmentsController {
     return this.annotationsService.extractLiteratureNotes(workspaceId, itemId);
   }
 
-  @Post('extract')
+  @Post([
+    'workspace/:workspaceId/library/attachments/extract',
+    'library/attachments/extract',
+  ])
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Extract academic metadata from a PDF file URL',
   })
-  async extractFromPdf(@Body() dto: ExtractPdfMetadataDto) {
+  async extractFromPdf(
+    @Param('workspaceId') workspaceId: string | undefined,
+    @Body() dto: ExtractPdfMetadataDto,
+  ) {
     return this.attachmentsService.extractFromPdf(dto.fileUrl);
   }
 }

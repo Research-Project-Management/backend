@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { getErrorMessage, tryCatch } from '../../../../core/utils/error.util';
-import { ProvenanceMetadata } from '../../metadata/types/metadata.types';
+import { ProvenanceMetadata } from '../../metadata/metadata.types';
+import { normalizeDoi } from '../../metadata/canonical-identifiers.util';
 import { createHash } from 'crypto';
 
 export interface ResolvedDoiMetadata {
@@ -36,10 +37,14 @@ export class DoiResolver {
    */
   cleanDoi(rawDoi: string): string {
     if (!rawDoi || typeof rawDoi !== 'string') return '';
-    return rawDoi
-      .trim()
-      .replace(/^https?:\/\/(dx\.)?doi\.org\//i, '')
-      .replace(/^doi:\s*/i, '');
+    return (
+      normalizeDoi(rawDoi) ||
+      rawDoi
+        .trim()
+        .replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '')
+        .replace(/^doi:\s*/i, '')
+        .trim()
+    );
   }
 
   /**

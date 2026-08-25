@@ -84,8 +84,17 @@ export class QualityService {
       }),
     });
 
-    for (let i = 0; i < allPapers.length; i++) {
-      const p1 = allPapers[i];
+    const MAX_TIER2_PAPERS = 500;
+    let scanPapers = allPapers;
+    if (allPapers.length > MAX_TIER2_PAPERS) {
+      this.logger.warn(
+        `Workspace ${targetWsId} has ${allPapers.length} papers. Capping Tier 2 fuzzy duplicate scan to ${MAX_TIER2_PAPERS} items to prevent event-loop starvation.`,
+      );
+      scanPapers = allPapers.slice(0, MAX_TIER2_PAPERS);
+    }
+
+    for (let i = 0; i < scanPapers.length; i++) {
+      const p1 = scanPapers[i];
       if (processedPaperIds.has(p1.id)) continue;
 
       const normTitle1 = normalizeQualityTitle(p1.title);
@@ -94,8 +103,8 @@ export class QualityService {
       const auth1 = p1.authors?.[0] ? extractFamilyName(p1.authors[0]) : '';
       const matchingGroup = [p1];
 
-      for (let j = i + 1; j < allPapers.length; j++) {
-        const p2 = allPapers[j];
+      for (let j = i + 1; j < scanPapers.length; j++) {
+        const p2 = scanPapers[j];
         if (processedPaperIds.has(p2.id)) continue;
 
         const normTitle2 = normalizeQualityTitle(p2.title);
@@ -203,6 +212,25 @@ export class QualityService {
       now,
     });
 
+    // Consolidate citation keys into master extra for citation identity preservation
+    const sourceCitationKeys = sources
+      .map((s) => s.citationKey)
+      .filter(
+        (k): k is string => Boolean(k?.trim() && k !== master.citationKey),
+      );
+
+    if (sourceCitationKeys.length > 0) {
+      await this.catalogRepo.mutatePaperExtra(master.id, (extra) => {
+        const existingAliases: string[] = Array.isArray(extra.mergedCitationKeys)
+          ? extra.mergedCitationKeys
+          : [];
+        extra.mergedCitationKeys = Array.from(
+          new Set([...existingAliases, ...sourceCitationKeys]),
+        );
+        return extra;
+      });
+    }
+
     const updatedMaster = await this.catalogRepo.findItemById(master.id);
     return {
       masterPaper: updatedMaster,
@@ -228,7 +256,6 @@ export class QualityService {
       { take: this.MAX_INTEGRITY_ITEMS, orderBy: [{ createdAt: 'desc' }] },
     );
 
-    let missingPdfCount = 0;
     const flaggedItems: IntegrityIssue[] = [];
 
     for (const p of flaggedPapers) {
@@ -251,7 +278,6 @@ export class QualityService {
             a.mimeType?.includes('pdf') || a.filename?.endsWith('.pdf'),
         );
       if (!hasPdf) {
-        missingPdfCount++;
         issues.push('Missing primary PDF attachment');
       }
 
@@ -267,7 +293,7 @@ export class QualityService {
     }
 
     const totalItems = stats.totalPapers;
-    const healthyItems = stats.totalPapers - flaggedItems.length;
+    const healthyItems = Math.max(0, totalItems - stats.unhealthyCount);
 
     return {
       totalItems,
@@ -277,8 +303,48 @@ export class QualityService {
       missingDoiCount: stats.missingDoiCount,
       missingYearCount: stats.missingYearCount,
       missingAuthorsCount: stats.missingAuthorsCount,
-      missingPdfCount,
+      missingPdfCount: stats.missingPdfCount,
       flaggedItems,
+    };
+  }
+
+  async getMissingMetadata(workspaceId: string) {
+    const report = await this.getIntegrityReport(workspaceId);
+    const metadataIssues = new Set([
+      'Missing DOI identifier',
+      'Missing publication year',
+      'Missing author list',
+    ]);
+    const items = report.flaggedItems
+      .map((item) => ({
+        ...item,
+        issues: item.issues.filter((issue) => metadataIssues.has(issue)),
+      }))
+      .filter((item) => item.issues.length > 0);
+
+    return {
+      total: items.length,
+      missingDoiCount: report.missingDoiCount,
+      missingYearCount: report.missingYearCount,
+      missingAuthorsCount: report.missingAuthorsCount,
+      items,
+    };
+  }
+
+  async getMissingAttachments(workspaceId: string) {
+    const report = await this.getIntegrityReport(workspaceId);
+    const issue = 'Missing primary PDF attachment';
+    const items = report.flaggedItems
+      .map((item) => ({
+        ...item,
+        issues: item.issues.filter((candidate) => candidate === issue),
+      }))
+      .filter((item) => item.issues.length > 0);
+
+    return {
+      total: items.length,
+      missingPdfCount: report.missingPdfCount,
+      items,
     };
   }
 

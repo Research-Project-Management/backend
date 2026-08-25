@@ -1,4 +1,4 @@
-import {
+﻿import {
   Controller,
   Get,
   Post,
@@ -11,16 +11,24 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { QualityService } from './quality.service';
 import { MergeCatalogItemsDto } from './dto/quality.dto';
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authentication';
+import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
+import {
+  WorkspaceRoleGuard,
+  WorkspaceRoles,
+} from '@/modules/iam/authz';
 
 @ApiTags('Library - Quality & Duplicates')
 @ApiBearerAuth('JWT-auth')
-@Controller('api/library/quality')
-@UseGuards(JwtAuthGuard)
+@Controller('api')
+@UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
 export class QualityController {
   constructor(private readonly qualityService: QualityService) {}
 
-  @Get(':workspaceId/duplicates')
+  @Get([
+    'workspace/:workspaceId/library/quality/duplicates',
+    'library/quality/:workspaceId/duplicates',
+  ])
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({
     summary:
       'Get 2-tier duplicate paper groups in workspace (DOI and Fuzzy Title/Year/Author matching)',
@@ -29,7 +37,11 @@ export class QualityController {
     return this.qualityService.getDuplicateGroups(workspaceId);
   }
 
-  @Post(':workspaceId/merge')
+  @Post([
+    'workspace/:workspaceId/library/quality/merge',
+    'library/quality/:workspaceId/merge',
+  ])
+  @WorkspaceRoles('owner', 'admin', 'member')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
@@ -43,12 +55,40 @@ export class QualityController {
     return this.qualityService.mergePapers(workspaceId, userId, dto);
   }
 
-  @Get(':workspaceId/integrity')
+  @Get([
+    'workspace/:workspaceId/library/quality/integrity',
+    'library/quality/:workspaceId/integrity',
+  ])
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({
     summary:
       'Scan library metadata integrity and return diagnostic health report',
   })
   async getIntegrityReport(@Param('workspaceId') workspaceId: string) {
     return this.qualityService.getIntegrityReport(workspaceId);
+  }
+
+  @Get([
+    'workspace/:workspaceId/library/quality/missing-metadata',
+    'library/quality/:workspaceId/missing-metadata',
+  ])
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({
+    summary: 'List catalog items missing core academic metadata',
+  })
+  async getMissingMetadata(@Param('workspaceId') workspaceId: string) {
+    return this.qualityService.getMissingMetadata(workspaceId);
+  }
+
+  @Get([
+    'workspace/:workspaceId/library/quality/missing-attachments',
+    'library/quality/:workspaceId/missing-attachments',
+  ])
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({
+    summary: 'List catalog items missing primary PDF attachments',
+  })
+  async getMissingAttachments(@Param('workspaceId') workspaceId: string) {
+    return this.qualityService.getMissingAttachments(workspaceId);
   }
 }

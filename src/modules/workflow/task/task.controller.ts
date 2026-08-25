@@ -184,4 +184,28 @@ export class TaskController {
   async getAuditLog(@Param('taskId') taskId: string) {
     return this.activityService.getTaskActivity(taskId);
   }
+
+  @Get('tasks/:taskId/subtasks')
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
+  @ApiOperation({ summary: 'List all subtasks of a task' })
+  async getSubtasks(@Param('taskId') taskId: string) {
+    return this.taskService.getSubtasks(taskId);
+  }
+
+  @Post('tasks/:taskId/subtasks')
+  @HttpCode(HttpStatus.CREATED)
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor')
+  @ApiOperation({ summary: 'Create a subtask under a parent task' })
+  async createSubtask(
+    @Param('taskId') taskId: string,
+    @CurrentUser('id') userId: string,
+    @Body() dto: CreateTaskDto,
+  ) {
+    dto.parentTaskId = taskId;
+    const parent = await this.taskService.getTask(taskId);
+    const projectId = (parent.task as any)?.projectId;
+    return this.taskService.createTask(projectId, userId, dto);
+  }
 }

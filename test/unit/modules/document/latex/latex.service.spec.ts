@@ -1,8 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { LatexService } from '@/modules/document/latex/latex.service';
-
+import { PageRepository } from '@/modules/document/page/page.repository';
 import { ConfigService } from '@nestjs/config';
-import { PrismaService } from '@/core/database/prisma.service';
 
 describe('LatexService', () => {
   let service: LatexService;
@@ -18,12 +17,10 @@ describe('LatexService', () => {
           },
         },
         {
-          provide: PrismaService,
+          provide: PageRepository,
           useValue: {
-            page: {
-              findUnique: jest.fn(),
-              findMany: jest.fn(),
-            },
+            findPageById: jest.fn(),
+            findChildPages: jest.fn(),
           },
         },
       ],

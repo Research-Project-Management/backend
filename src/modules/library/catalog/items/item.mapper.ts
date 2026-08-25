@@ -2,12 +2,14 @@ import {
   LibraryItemListResult,
   LibraryItemRecord,
   LibraryItemResponse,
+  LibraryItemView,
 } from './item.types';
 
 export function toLibraryItemResponse(
   item: LibraryItemRecord,
 ): LibraryItemResponse {
-  return { item, paper: item };
+  const view = toLibraryItemView(item);
+  return { item: view, paper: view };
 }
 
 export function toLibraryItemListResult(
@@ -20,11 +22,12 @@ export function toLibraryItemListResult(
 ): LibraryItemListResult {
   const limit = options?.limit ?? items.length;
   const skip = options?.skip ?? 0;
+  const views = items.map(toLibraryItemView);
 
   return {
-    data: items,
-    items,
-    papers: items,
+    data: views,
+    items: views,
+    papers: views,
     total,
     pagination: {
       limit,
@@ -32,5 +35,26 @@ export function toLibraryItemListResult(
       totalItems: total,
       hasNextPage: skip + items.length < total,
     },
+  };
+}
+
+export function toLibraryItemView(item: LibraryItemRecord): LibraryItemView {
+  const creators = [
+    ...(item.authors ?? []).map((name) => ({
+      creatorType: 'author',
+      name,
+    })),
+    ...(item.editors ?? []).map((name) => ({
+      creatorType: 'editor',
+      name,
+    })),
+  ];
+
+  return {
+    ...item,
+    creators,
+    tags: item.labels ?? [],
+    abstractNote: item.abstract ?? '',
+    date: item.publicationDate ?? (item.year ? String(item.year) : ''),
   };
 }

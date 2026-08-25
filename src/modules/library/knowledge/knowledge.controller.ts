@@ -1,4 +1,4 @@
-import {
+﻿import {
   Controller,
   Get,
   Post,
@@ -12,16 +12,38 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { KnowledgeService } from './knowledge.service';
 import { LinkPaperDto } from './dto/knowledge.dto';
-import { JwtAuthGuard } from '@/modules/iam/authentication';
+import { JwtAuthGuard } from '@/modules/iam/authn';
+import {
+  WorkspaceRoleGuard,
+  WorkspaceRoles,
+} from '@/modules/iam/authz';
 
 @ApiTags('Library - Related Items & Knowledge Graph')
 @ApiBearerAuth('JWT-auth')
-@Controller('api/library/knowledge')
-@UseGuards(JwtAuthGuard)
+@Controller('api')
+@UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
 export class KnowledgeController {
   constructor(private readonly knowledgeService: KnowledgeService) {}
 
-  @Get(':workspaceId/:paperId')
+  @Get([
+    'workspace/:workspaceId/library/knowledge/graph',
+    'workspace/:workspaceId/library/graph',
+    'library/knowledge/:workspaceId/graph',
+  ])
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({
+    summary:
+      'Get full knowledge graph (nodes and semantic edges) for the workspace library',
+  })
+  async getWorkspaceKnowledgeGraph(@Param('workspaceId') workspaceId: string) {
+    return this.knowledgeService.getWorkspaceKnowledgeGraph(workspaceId);
+  }
+
+  @Get([
+    'workspace/:workspaceId/library/items/:paperId/related',
+    'library/knowledge/:workspaceId/:paperId',
+  ])
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'Get all papers related to a specific paper' })
   async getRelatedPapers(
     @Param('workspaceId') workspaceId: string,
@@ -30,7 +52,11 @@ export class KnowledgeController {
     return this.knowledgeService.getRelatedPapers(workspaceId, paperId);
   }
 
-  @Post(':workspaceId/:paperId/link')
+  @Post([
+    'workspace/:workspaceId/library/items/:paperId/related',
+    'library/knowledge/:workspaceId/:paperId/link',
+  ])
+  @WorkspaceRoles('owner', 'admin', 'member')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary:
@@ -44,7 +70,11 @@ export class KnowledgeController {
     return this.knowledgeService.linkPapers(workspaceId, paperId, dto);
   }
 
-  @Delete(':workspaceId/:paperId/link/:targetPaperId')
+  @Delete([
+    'workspace/:workspaceId/library/items/:paperId/related/:targetPaperId',
+    'library/knowledge/:workspaceId/:paperId/link/:targetPaperId',
+  ])
+  @WorkspaceRoles('owner', 'admin', 'member')
   @ApiOperation({
     summary: 'Remove a bi-directional relationship between two papers',
   })
@@ -58,14 +88,5 @@ export class KnowledgeController {
       paperId,
       targetPaperId,
     );
-  }
-
-  @Get(':workspaceId/graph')
-  @ApiOperation({
-    summary:
-      'Get full knowledge graph (nodes and semantic edges) for the workspace library',
-  })
-  async getWorkspaceKnowledgeGraph(@Param('workspaceId') workspaceId: string) {
-    return this.knowledgeService.getWorkspaceKnowledgeGraph(workspaceId);
   }
 }

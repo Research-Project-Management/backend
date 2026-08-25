@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { LibraryCreatorInput } from '../../metadata/metadata.types';
 
 export type LibraryItemId = string & { readonly __brand: 'LibraryItemId' };
 export type WorkspaceId = string & { readonly __brand: 'WorkspaceId' };
@@ -22,6 +23,13 @@ export type LibraryItemRecord = Prisma.CatalogItemGetPayload<{
   include: typeof LIBRARY_ITEM_INCLUDE;
 }>;
 
+export type LibraryItemView = LibraryItemRecord & {
+  creators: LibraryCreatorInput[];
+  tags: string[];
+  abstractNote: string;
+  date: string;
+};
+
 export interface LibraryItemListQuery {
   collectionId?: string;
   search?: string;
@@ -38,14 +46,14 @@ export interface LibraryItemPagination {
 }
 
 export interface LibraryItemListResult {
-  data: LibraryItemRecord[];
-  items: LibraryItemRecord[];
-  papers: LibraryItemRecord[];
+  data: LibraryItemView[];
+  items: LibraryItemView[];
+  papers: LibraryItemView[];
   total: number;
   pagination: LibraryItemPagination;
 }
 
 export interface LibraryItemResponse {
-  item: LibraryItemRecord;
-  paper: LibraryItemRecord;
+  item: LibraryItemView;
+  paper: LibraryItemView;
 }

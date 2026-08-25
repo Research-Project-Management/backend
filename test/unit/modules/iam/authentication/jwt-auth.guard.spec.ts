@@ -1,9 +1,9 @@
-import { Test, TestingModule } from '@nestjs/testing';
+﻿import { Test, TestingModule } from '@nestjs/testing';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
-import { JwtAuthGuard } from '@/modules/iam/authentication/guards/jwt-auth.guard';
+import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
 
 describe('JwtAuthGuard', () => {
   let guard: JwtAuthGuard;
@@ -95,3 +95,4 @@ describe('JwtAuthGuard', () => {
     expect(request.user).toEqual(payload);
   });
 });
+

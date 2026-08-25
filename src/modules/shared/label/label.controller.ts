@@ -11,7 +11,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { LabelService } from './label.service';
 import { CreateLabelDto, UpdateLabelDto } from './dto/label.dto';
 import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
@@ -25,6 +25,7 @@ export class LabelController {
   constructor(private readonly labelService: LabelService) {}
 
   @Get(['workspace/:workspaceId/labels', 'labels/:workspaceId'])
+  @ApiOperation({ summary: 'List labels in a workspace (optionally filter by type)' })
   async getLabels(
     @Param('workspaceId') workspaceId: string,
     @Query('type') type?: LabelType,
@@ -34,6 +35,7 @@ export class LabelController {
 
   @Post(['workspace/:workspaceId/labels', 'labels/:workspaceId'])
   @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Create a new label in a workspace' })
   async createLabel(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
@@ -43,6 +45,7 @@ export class LabelController {
   }
 
   @Put('labels/:labelId')
+  @ApiOperation({ summary: 'Update a label name or color' })
   async updateLabel(
     @Param('labelId') labelId: string,
     @Body() dto: UpdateLabelDto,
@@ -51,6 +54,7 @@ export class LabelController {
   }
 
   @Delete('labels/:labelId')
+  @ApiOperation({ summary: 'Delete a label' })
   async deleteLabel(@Param('labelId') labelId: string) {
     return this.labelService.deleteLabel(labelId);
   }

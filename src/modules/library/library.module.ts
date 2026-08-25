@@ -8,8 +8,8 @@ import { AttachmentsModule } from './attachments/attachments.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
 import { QualityModule } from './quality/quality.module';
 import { SearchModule } from './search/search.module';
-import { LibraryController } from './library.controller';
-import { LibraryService } from './library.service';
+import { AcademicBundleModule } from './academic-bundle/academic-bundle.module';
+import { LibraryReportModule } from './report/report.module';
 
 @Module({
   imports: [
@@ -22,9 +22,9 @@ import { LibraryService } from './library.service';
     KnowledgeModule,
     QualityModule,
     SearchModule,
+    AcademicBundleModule,
+    LibraryReportModule,
   ],
-  controllers: [LibraryController],
-  providers: [LibraryService],
-  exports: [LibraryService],
+  exports: [AcademicBundleModule, LibraryReportModule],
 })
 export class LibraryModule {}

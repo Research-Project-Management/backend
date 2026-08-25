@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { tryCatch } from '../../../../core/utils/error.util';
+import { normalizeDoi } from '../canonical-identifiers.util';
 
 export interface UnpaywallResult {
   doi: string;
@@ -22,10 +23,8 @@ export class UnpaywallProvider {
   async resolveOaPdf(doi: string): Promise<UnpaywallResult | null> {
     if (!doi) return null;
 
-    const cleanDoi = doi
-      .trim()
-      .replace(/^https?:\/\/(dx\.)?doi\.org\//i, '')
-      .replace(/^doi:\s*/i, '');
+    const cleanDoi = normalizeDoi(doi);
+    if (!cleanDoi) return null;
 
     const url = `${this.BASE_URL}/${encodeURIComponent(cleanDoi)}?email=${encodeURIComponent(this.EMAIL)}`;
 

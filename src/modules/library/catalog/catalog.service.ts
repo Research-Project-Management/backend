@@ -25,9 +25,18 @@ import { FileService } from '@/modules/storage/file/file.service';
 import { BibtexFormatter } from '../citation/formatters/bibtex.formatter';
 import { IngestionService } from '../ingestion/ingestion.service';
 import { IngestionSourceType } from '../ingestion/dto/ingestion.dto';
+import {
+  extractYearFromDate,
+  normalizeCreators,
+  normalizeLibraryItemType,
+  normalizeTags,
+} from '../metadata/metadata.types';
 
 @Injectable()
 export class CatalogService {
+  private static readonly DEFAULT_LIST_LIMIT = 50;
+  private static readonly MAX_LIST_LIMIT = 100;
+
   constructor(
     private readonly catalogRepo: CatalogRepository,
     private readonly fileService: FileService,
@@ -54,8 +63,8 @@ export class CatalogService {
   async getPapers(workspaceId: string, query?: LibraryItemListQuery) {
     const targetWsId = await this.catalogRepo.resolveWorkspaceId(workspaceId);
     const where = this.buildWhereClause(targetWsId, query);
-    const limit = query?.limit ? Number(query.limit) : 50;
-    const skip = query?.skip ? Number(query.skip) : 0;
+    const limit = this.clampListLimit(query?.limit);
+    const skip = Math.max(Number(query?.skip ?? 0), 0);
 
     const [papers, total] = await Promise.all([
       this.catalogRepo.findItems(where, {
@@ -67,6 +76,12 @@ export class CatalogService {
     ]);
 
     return toLibraryItemListResult(papers, total, { limit, skip });
+  }
+
+  private clampListLimit(limit?: number): number {
+    const parsed = Number(limit ?? CatalogService.DEFAULT_LIST_LIMIT);
+    if (!Number.isFinite(parsed)) return CatalogService.DEFAULT_LIST_LIMIT;
+    return Math.min(Math.max(parsed, 1), CatalogService.MAX_LIST_LIMIT);
   }
 
   async getItems(workspaceId: string, query?: LibraryItemListQuery) {
@@ -107,19 +122,23 @@ export class CatalogService {
       size: dto.size || 0,
       mimeType: dto.mimeType || 'application/pdf',
       authors: dto.authors || [],
+      creators: dto.creators || [],
       year: dto.year || null,
       doi: dto.doi || '',
-      abstract: dto.abstract || '',
+      abstract: dto.abstract || dto.abstractNote || '',
+      abstractNote: dto.abstractNote,
       journal: dto.journal || '',
       publisher: dto.publisher || '',
-      tags: dto.keywords || [],
+      tags: dto.tags || dto.keywords || [],
       volume: dto.volume || '',
       issue: dto.issue || '',
       pages: dto.pages || '',
       issn: dto.issn || '',
       isbn: dto.isbn || '',
       url: dto.url || '',
-      itemType: dto.type || 'journalArticle',
+      itemType: dto.itemType || dto.type || 'journalArticle',
+      date: dto.date,
+      accessDate: dto.accessDate,
       citationKey: dto.citationKey,
       notes: dto.notes,
       collectionId: dto.collectionId,
@@ -156,8 +175,14 @@ export class CatalogService {
       size: dto.size || 0,
       mimeType: dto.mimeType || 'application/pdf',
       authors: dto.authors || [],
+      creators: dto.creators || [],
       year: dto.year || null,
       doi: dto.doi || '',
+      itemType: dto.itemType,
+      abstractNote: dto.abstractNote,
+      date: dto.date,
+      accessDate: dto.accessDate,
+      tags: dto.tags || [],
       citationKey: dto.citationKey,
       collectionId: dto.collectionId,
       primaryFile: {
@@ -197,7 +222,9 @@ export class CatalogService {
       size: file.size || 0,
       mimeType: file.mimeType || 'application/pdf',
       authors: dto.authors || [],
+      creators: dto.creators || [],
       doi: dto.doi || '',
+      tags: dto.tags || [],
       citationKey: dto.citationKey,
       collectionId: dto.collectionId,
       storageFileId: file.id,
@@ -246,6 +273,31 @@ export class CatalogService {
         updateData.collection = value
           ? { connect: { id: String(value) } }
           : { disconnect: true };
+      } else if (key === 'creators') {
+        const creators = normalizeCreators(value as any[]);
+        if (creators.authors.length > 0) {
+          updateData.authors = creators.authors;
+        }
+        if (creators.editors.length > 0) {
+          updateData.editors = creators.editors;
+        }
+      } else if (key === 'tags') {
+        updateData.labels = normalizeTags(value as string[]);
+      } else if (key === 'abstractNote') {
+        updateData.abstract = String(value);
+      } else if (key === 'date') {
+        updateData.publicationDate = String(value);
+        const parsedYear = extractYearFromDate(String(value));
+        if (parsedYear && dto.year === undefined) {
+          updateData.year = parsedYear;
+        }
+      } else if (key === 'accessDate') {
+        const date = new Date(String(value));
+        if (!Number.isNaN(date.getTime())) {
+          updateData.accessedAt = date;
+        }
+      } else if (key === 'itemType') {
+        updateData.itemType = normalizeLibraryItemType(String(value));
       } else {
         assignableUpdateData[String(key)] = value;
       }
@@ -289,6 +341,48 @@ export class CatalogService {
     });
 
     return { message: 'Catalog item deleted successfully' };
+  }
+
+  async restoreItemInWorkspace(workspaceId: string, itemId: string) {
+    const targetWsId = await this.catalogRepo.resolveWorkspaceId(workspaceId);
+    const item = await this.catalogRepo.findItemByIdInWorkspace(
+      targetWsId,
+      itemId,
+    );
+    if (!item) {
+      throw new NotFoundException('Catalog item not found in this workspace');
+    }
+    await this.catalogRepo.updateItem(item.id, { deletedAt: null });
+
+    this.eventEmitter?.emit('paper.restored', {
+      entityType: 'paper',
+      entityId: item.id,
+      verb: 'restored',
+      workspaceId: item.workspaceId,
+    });
+
+    return { message: 'Catalog item restored successfully' };
+  }
+
+  async purgeItemInWorkspace(workspaceId: string, itemId: string) {
+    const targetWsId = await this.catalogRepo.resolveWorkspaceId(workspaceId);
+    const item = await this.catalogRepo.findItemByIdInWorkspace(
+      targetWsId,
+      itemId,
+    );
+    if (!item) {
+      throw new NotFoundException('Catalog item not found in this workspace');
+    }
+    await this.catalogRepo.purgeItemInWorkspace(targetWsId, item.id);
+
+    this.eventEmitter?.emit('paper.purged', {
+      entityType: 'paper',
+      entityId: item.id,
+      verb: 'purged',
+      workspaceId: item.workspaceId,
+    });
+
+    return { message: 'Catalog item permanently purged' };
   }
 
   async restorePaper(itemId: string) {
@@ -419,8 +513,9 @@ export class CatalogService {
     query?: LibraryItemListQuery,
   ): Prisma.CatalogItemWhereInput {
     const andFilters: Prisma.CatalogItemWhereInput[] = [];
+    const isTrash = query?.smartFilter === 'trash';
 
-    if (query?.smartFilter) {
+    if (query?.smartFilter && !isTrash) {
       const smart = this.buildSmartFilter(query.smartFilter);
       if (smart) andFilters.push(smart);
     }
@@ -435,13 +530,15 @@ export class CatalogService {
           { journal: { contains: s, mode: 'insensitive' } },
           { publisher: { contains: s, mode: 'insensitive' } },
           { citationKey: { contains: s, mode: 'insensitive' } },
+          { authors: { has: s } },
+          { labels: { has: s } },
         ],
       });
     }
 
     return {
       workspaceId,
-      deletedAt: null,
+      deletedAt: isTrash ? { not: null } : null,
       ...(query?.collectionId && { collectionId: query.collectionId }),
       ...(andFilters.length > 0 && { AND: andFilters }),
     };
@@ -463,6 +560,8 @@ export class CatalogService {
         };
       case 'with-notes':
         return { NOT: { notes: { equals: [] } } };
+      case 'trash':
+        return { deletedAt: { not: null } };
       default:
         return null;
     }

@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Put, Delete, Body, Query, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { UserService } from './user.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -65,5 +65,13 @@ export class UserController {
     @CurrentUser('id') userId: string,
   ) {
     return this.userService.searchUsers(query, userId);
+  }
+
+  @Delete(['api/users/me', 'auth/me'])
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Permanently delete current user account' })
+  @ApiResponse({ status: 200, description: 'Account deleted' })
+  async deleteMe(@CurrentUser('id') userId: string) {
+    return this.userService.deleteMe(userId);
   }
 }

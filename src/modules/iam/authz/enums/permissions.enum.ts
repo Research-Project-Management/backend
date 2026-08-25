@@ -1,5 +1,6 @@
 export enum Permission {
   // Workspace Permissions
+  WORKSPACE_READ = 'workspace:read',
   WORKSPACE_VIEW = 'workspace:view',
   WORKSPACE_EDIT = 'workspace:edit',
   WORKSPACE_DELETE = 'workspace:delete',
@@ -7,11 +8,17 @@ export enum Permission {
   WORKSPACE_MANAGE_ROLES = 'workspace:manage_roles',
 
   // Project Permissions
+  PROJECT_READ = 'project:read',
   PROJECT_VIEW = 'project:view',
   PROJECT_CREATE = 'project:create',
   PROJECT_EDIT = 'project:edit',
+  PROJECT_UPDATE = 'project:update',
   PROJECT_DELETE = 'project:delete',
   PROJECT_MANAGE_MEMBERS = 'project:manage_members',
+
+  // Comment Permissions
+  COMMENT_CREATE = 'comment:create',
+  COMMENT_DELETE = 'comment:delete',
 
   // Document & Manuscript Permissions
   DOCUMENT_VIEW = 'document:view',

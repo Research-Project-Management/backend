@@ -10,6 +10,7 @@ import {
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
+import { LibraryCreatorInput } from '../../metadata/metadata.types';
 
 export enum IngestionSourceType {
   DOI = 'doi',
@@ -98,6 +99,13 @@ export class IngestDocumentDto {
   @IsOptional()
   authors?: string[] | null;
 
+  @ApiPropertyOptional({
+    description: 'Zotero-style creators with creatorType and split/name fields',
+  })
+  @IsArray()
+  @IsOptional()
+  creators?: LibraryCreatorInput[] | null;
+
   @ApiPropertyOptional({ description: 'Publication year' })
   @IsNumber()
   @IsOptional()
@@ -149,6 +157,23 @@ export class IngestDocumentDto {
   abstract?: string | null;
 
   @ApiPropertyOptional({
+    description: 'Zotero-compatible alias for abstract',
+  })
+  @IsString()
+  @IsOptional()
+  abstractNote?: string | null;
+
+  @ApiPropertyOptional({ description: 'Publication date string' })
+  @IsString()
+  @IsOptional()
+  date?: string | null;
+
+  @ApiPropertyOptional({ description: 'Access date string' })
+  @IsString()
+  @IsOptional()
+  accessDate?: string | null;
+
+  @ApiPropertyOptional({
     description: 'Item type (journalArticle, book, etc.)',
   })
   @IsString()
@@ -167,6 +192,14 @@ export class IngestDocumentDto {
   @IsOptional()
   collectionId?: string | null;
 
+  @ApiPropertyOptional({
+    description: 'Zotero-style collection IDs; the first value is used as collectionId',
+    type: [String],
+  })
+  @IsArray()
+  @IsOptional()
+  collections?: string[] | null;
+
   @ApiPropertyOptional({ description: 'Tags / labels array', type: [String] })
   @IsArray()
   @IsOptional()
@@ -184,6 +217,9 @@ export class IngestDocumentDto {
     url?: string | null;
     size?: number | null;
     mimeType?: string | null;
+    linkMode?: 'imported_file' | 'imported_url' | 'linked_file' | 'linked_url';
+    md5?: string | null;
+    mtime?: number | null;
   } | null;
 
   @ApiPropertyOptional({
@@ -212,6 +248,7 @@ export class BatchIngestDto {
  */
 export interface IngestionJobStatus {
   jobId: string;
+  userId: string;
   status: 'queued' | 'processing' | 'completed' | 'failed';
   total: number;
   processed: number;

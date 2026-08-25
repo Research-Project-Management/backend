@@ -5,7 +5,7 @@ import { CitationController } from '@/modules/library/citation/citation.controll
 import { AttachmentsController } from '@/modules/library/attachments/attachments.controller';
 import { KnowledgeController } from '@/modules/library/knowledge/knowledge.controller';
 import { QualityController } from '@/modules/library/quality/quality.controller';
-import { LibraryController } from '@/modules/library/library.controller';
+import { AcademicBundleController } from '@/modules/library/academic-bundle/academic-bundle.controller';
 import { IngestionSourceType } from '@/modules/library/ingestion/dto/ingestion.dto';
 
 describe('Library Subsystem: Complete Controllers & Endpoints Verification', () => {
@@ -16,7 +16,7 @@ describe('Library Subsystem: Complete Controllers & Endpoints Verification', () 
   let attachmentsController: AttachmentsController;
   let knowledgeController: KnowledgeController;
   let qualityController: QualityController;
-  let libraryController: LibraryController;
+  let academicBundleController: AcademicBundleController;
 
   const mockCatalogService: any = {
     ingestPaper: jest.fn().mockResolvedValue({ id: 'p1', title: 'Paper 1' }),
@@ -134,8 +134,8 @@ describe('Library Subsystem: Complete Controllers & Endpoints Verification', () 
       .mockResolvedValue({ totalPapers: 1, healthyPapers: 1 }),
   };
 
-  const mockLibraryService: any = {
-    getCatalogItemAcademicBundle: jest.fn().mockResolvedValue({
+  const mockAcademicBundleService: any = {
+    getItemAcademicBundle: jest.fn().mockResolvedValue({
       item: { id: 'p1', title: 'Attention' },
       citations: { apa: { inText: '(Vaswani, 2017)' } },
       annotations: [],
@@ -158,7 +158,9 @@ describe('Library Subsystem: Complete Controllers & Endpoints Verification', () 
     );
     knowledgeController = new KnowledgeController(mockKnowledgeService);
     qualityController = new QualityController(mockQualityService);
-    libraryController = new LibraryController(mockLibraryService);
+    academicBundleController = new AcademicBundleController(
+      mockAcademicBundleService,
+    );
   });
 
   describe('1. CatalogController Endpoints', () => {
@@ -192,20 +194,14 @@ describe('Library Subsystem: Complete Controllers & Endpoints Verification', () 
         expect.any(Object),
       );
 
-      await catalogController.triggerReindex(
-        { workspaceId: 'ws-1', itemId: 'p-1' },
-        'u-1',
-      );
+      await catalogController.triggerReindex('ws-1', 'p-1', 'u-1');
       expect(mockCatalogService.triggerReindexInWorkspace).toHaveBeenCalledWith(
         'ws-1',
         'p-1',
         'u-1',
       );
 
-      await catalogController.deleteItem({
-        workspaceId: 'ws-1',
-        itemId: 'p-1',
-      });
+      await catalogController.deleteItem('ws-1', 'p-1');
       expect(mockCatalogService.deleteItemInWorkspace).toHaveBeenCalledWith(
         'ws-1',
         'p-1',
@@ -268,9 +264,10 @@ describe('Library Subsystem: Complete Controllers & Endpoints Verification', () 
         { items: [] },
       );
 
-      await ingestionController.getJobStatus('job-123');
+      await ingestionController.getJobStatus('job-123', 'u-1');
       expect(mockIngestionJobService.getJobStatus).toHaveBeenCalledWith(
         'job-123',
+        'u-1',
       );
     });
   });
@@ -416,14 +413,14 @@ describe('Library Subsystem: Complete Controllers & Endpoints Verification', () 
     });
   });
 
-  describe('8. LibraryController (Unified Facade) Endpoint', () => {
-    it('should route getCatalogItemAcademicBundle', async () => {
-      const bundle = await libraryController.getCatalogItemAcademicBundle(
+  describe('8. AcademicBundleController Endpoint', () => {
+    it('should route getItemAcademicBundle', async () => {
+      const bundle = await academicBundleController.getItemAcademicBundle(
         'ws-1',
         'p-1',
       );
       expect(
-        mockLibraryService.getCatalogItemAcademicBundle,
+        mockAcademicBundleService.getItemAcademicBundle,
       ).toHaveBeenCalledWith('ws-1', 'p-1');
       expect(bundle.item.id).toBe('p1');
     });

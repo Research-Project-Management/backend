@@ -51,7 +51,7 @@ describe('IngestionJobService (Async Batch Job Tracker)', () => {
     expect(res.status).toBe('processing');
     expect(res.total).toBe(2);
 
-    const status = await jobService.getJobStatus(res.jobId);
+    const status = await jobService.getJobStatus(res.jobId, 'user-1');
     expect(status).toBeDefined();
     expect(status.jobId).toBe(res.jobId);
   });

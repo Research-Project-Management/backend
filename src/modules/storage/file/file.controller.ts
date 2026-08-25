@@ -1,4 +1,4 @@
-import {
+﻿import {
   Controller,
   Get,
   Post,
@@ -15,7 +15,7 @@ import {
   BadRequestException,
   NotFoundException,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { FileService } from './file.service';
 import {
@@ -44,6 +44,7 @@ export class FileController {
 
   @Post('presign')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Generate presigned URL for direct client upload' })
   async presign(@Body() dto: PresignDto) {
     return this.fileService.presign(dto);
   }
@@ -53,6 +54,7 @@ export class FileController {
    */
   @Post('upload-r2')
   @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Multipart stream upload directly to R2/S3' })
   async uploadR2(
     @Req() req: FastifyRequest,
     @CurrentUser('id') userId: string,
@@ -64,6 +66,7 @@ export class FileController {
    * Serve / Stream R2 File by storage key
    */
   @Get('r2/*')
+  @ApiOperation({ summary: 'Stream R2 stored file by storage key' })
   async getR2File(
     @Param('*') key: string,
     @Res({ passthrough: true }) res: FastifyReply,
@@ -97,12 +100,13 @@ export class FileController {
     return output.Body;
   }
 
-  // ── Workspace Scoped ────────────────────────────────────────────────────────
+  // â”€â”€ Workspace Scoped â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   @Post('workspace/:workspaceId/upload')
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Upload file to workspace storage' })
   async uploadWorkspaceFile(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
@@ -115,6 +119,7 @@ export class FileController {
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Create folder in workspace' })
   async createWorkspaceFolder(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
@@ -126,6 +131,7 @@ export class FileController {
   @Get('workspace/:workspaceId/home')
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'Get workspace home/root files' })
   async getWorkspaceHome(@Param('workspaceId') workspaceId: string) {
     return this.fileService.getHomeFiles(workspaceId);
   }
@@ -133,6 +139,7 @@ export class FileController {
   @Get('workspace/:workspaceId/all')
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'List all workspace files with optional parent filter' })
   async getWorkspaceAll(
     @Param('workspaceId') workspaceId: string,
     @Query('parentId') parentId?: string,
@@ -143,6 +150,7 @@ export class FileController {
   @Get('workspace/:workspaceId/my-files')
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'Get files uploaded by current user in workspace' })
   async getWorkspaceMyFiles(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
@@ -153,6 +161,7 @@ export class FileController {
   @Get('workspace/:workspaceId/starred')
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'Get starred files in workspace' })
   async getWorkspaceStarred(@Param('workspaceId') workspaceId: string) {
     return this.fileService.getStarredFiles(workspaceId);
   }
@@ -160,6 +169,7 @@ export class FileController {
   @Get('workspace/:workspaceId/shared')
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'Get files shared with current user in workspace' })
   async getWorkspaceShared(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
@@ -170,6 +180,7 @@ export class FileController {
   @Get('workspace/:workspaceId/trash')
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'Get trashed files in workspace' })
   async getWorkspaceTrash(@Param('workspaceId') workspaceId: string) {
     return this.fileService.getTrashedFiles(workspaceId);
   }
@@ -177,6 +188,7 @@ export class FileController {
   @Get('workspace/:workspaceId')
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'List workspace files by parent folder' })
   async getWorkspaceFiles(
     @Param('workspaceId') workspaceId: string,
     @Query('parentId') parentId?: string,
@@ -184,12 +196,13 @@ export class FileController {
     return this.fileService.getFiles({ workspaceId, parentId });
   }
 
-  // ── Project Scoped ──────────────────────────────────────────────────────────
+  // â”€â”€ Project Scoped â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   @Post('project/:projectId/upload')
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor')
+  @ApiOperation({ summary: 'Upload file to project storage' })
   async uploadProjectFile(
     @Param('projectId') projectId: string,
     @CurrentUser('id') userId: string,
@@ -202,6 +215,7 @@ export class FileController {
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor')
+  @ApiOperation({ summary: 'Create folder in project' })
   async createProjectFolder(
     @Param('projectId') projectId: string,
     @CurrentUser('id') userId: string,
@@ -211,6 +225,7 @@ export class FileController {
   }
 
   @Get('project/:projectId/my-files')
+  @ApiOperation({ summary: 'Get files uploaded by current user in project' })
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   async getProjectMyFiles(
@@ -221,6 +236,7 @@ export class FileController {
   }
 
   @Get('project/:projectId/starred')
+  @ApiOperation({ summary: 'Get starred files in project' })
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   async getProjectStarred(@Param('projectId') projectId: string) {
@@ -228,6 +244,7 @@ export class FileController {
   }
 
   @Get('project/:projectId/shared')
+  @ApiOperation({ summary: 'Get files shared with current user in project' })
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   async getProjectShared(
@@ -238,6 +255,7 @@ export class FileController {
   }
 
   @Get('project/:projectId/trash')
+  @ApiOperation({ summary: 'Get trashed files in project' })
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   async getProjectTrash(@Param('projectId') projectId: string) {
@@ -247,6 +265,7 @@ export class FileController {
   @Get('project/:projectId')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
+  @ApiOperation({ summary: 'List project files' })
   async getProjectFiles(
     @Param('projectId') projectId: string,
     @Query('parentId') parentId?: string,
@@ -254,12 +273,13 @@ export class FileController {
     return this.fileService.getFiles({ projectId, parentId });
   }
 
-  // ── Page Scoped ────────────────────────────────────────────────────────────
+  // â”€â”€ Page Scoped â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   @Post('page/:pageId/upload')
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor')
+  @ApiOperation({ summary: 'Upload file attached to a page' })
   async uploadPageFile(
     @Param('pageId') pageId: string,
     @CurrentUser('id') userId: string,
@@ -270,6 +290,7 @@ export class FileController {
 
   @Post('page/:pageId/folder')
   @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Create folder in page' })
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor')
   async createPageFolder(
@@ -283,6 +304,7 @@ export class FileController {
   @Get('page/:pageId')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
+  @ApiOperation({ summary: 'List files attached to a page' })
   async getPageFiles(
     @Param('pageId') pageId: string,
     @Query('parentId') parentId?: string,
@@ -290,8 +312,9 @@ export class FileController {
     return this.fileService.getFiles({ pageId, parentId });
   }
 
-  // ── General File Operations ────────────────────────────────────────────────
+  // â”€â”€ General File Operations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+  @ApiOperation({ summary: 'Upload a general file (workspace-level)' })
   @Post('upload')
   @HttpCode(HttpStatus.CREATED)
   async uploadGeneralFile(
@@ -309,6 +332,7 @@ export class FileController {
     );
   }
 
+  @ApiOperation({ summary: 'Create a general folder' })
   @Post('folder')
   @HttpCode(HttpStatus.CREATED)
   async createGeneralFolder(
@@ -327,6 +351,7 @@ export class FileController {
   }
 
   @Get(':fileId')
+  @ApiOperation({ summary: 'Get file metadata by ID' })
   async getFile(
     @Param('fileId') fileId: string,
     @CurrentUser('id') userId: string,
@@ -335,6 +360,7 @@ export class FileController {
   }
 
   @Put(':fileId')
+  @ApiOperation({ summary: 'Update file metadata' })
   async updateFile(
     @Param('fileId') fileId: string,
     @CurrentUser('id') userId: string,
@@ -344,12 +370,14 @@ export class FileController {
   }
 
   @Delete(':fileId')
+  @ApiOperation({ summary: 'Move file to trash' })
   async deleteFile(
     @Param('fileId') fileId: string,
     @CurrentUser('id') userId: string,
   ) {
     return this.fileService.deleteFile(fileId, userId);
   }
+  @ApiOperation({ summary: 'Toggle star on file (alias)' })
 
   @Put(':fileId/star')
   async toggleStar(
@@ -360,6 +388,7 @@ export class FileController {
   }
 
   @Put(':fileId/restore')
+  @ApiOperation({ summary: 'Restore file from trash' })
   async restoreFile(
     @Param('fileId') fileId: string,
     @CurrentUser('id') userId: string,
@@ -368,6 +397,7 @@ export class FileController {
   }
 
   @Delete(':fileId/permanent')
+  @ApiOperation({ summary: 'Permanently delete file from storage' })
   async permanentlyDeleteFile(
     @Param('fileId') fileId: string,
     @CurrentUser('id') userId: string,
@@ -376,6 +406,7 @@ export class FileController {
   }
 
   @Put(':fileId/rename')
+  @ApiOperation({ summary: 'Rename a file or folder' })
   async renameFile(
     @Param('fileId') fileId: string,
     @CurrentUser('id') userId: string,
@@ -389,6 +420,7 @@ export class FileController {
   }
 
   @Put(':fileId/move')
+  @ApiOperation({ summary: 'Move file to a different folder' })
   async moveFile(
     @Param('fileId') fileId: string,
     @CurrentUser('id') userId: string,
@@ -398,11 +430,21 @@ export class FileController {
   }
 
   @Put(':fileId/share')
+  @ApiOperation({ summary: 'Share file with a workspace member' })
   async shareFile(
     @Param('fileId') fileId: string,
     @CurrentUser('id') userId: string,
     @Body() dto: ShareFileDto,
   ) {
     return this.fileService.shareFile(fileId, userId, dto);
+  }
+
+  @Get(':fileId/share')
+  @ApiOperation({ summary: 'Get share settings and permissions for a file' })
+  async getShareSettings(
+    @Param('fileId') fileId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.fileService.getShareSettings(fileId, userId);
   }
 }

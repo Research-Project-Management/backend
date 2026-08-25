@@ -91,6 +91,23 @@ export class CollectionsRepository {
     });
   }
 
+  async detachPaperFromCollection(
+    workspaceId: string,
+    collectionId: string,
+    paperId: string,
+  ) {
+    return this.prisma.catalogItem.updateMany({
+      where: {
+        workspaceId,
+        collectionId,
+        id: paperId,
+      },
+      data: {
+        collectionId: null,
+      },
+    });
+  }
+
   async deleteCollection(collectionId: string) {
     return this.prisma.collection.delete({
       where: { id: collectionId },

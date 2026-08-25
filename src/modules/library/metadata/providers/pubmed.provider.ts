@@ -1,6 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { getErrorMessage, tryCatch } from '../../../../core/utils/error.util';
-import { UnifiedAcademicMetadata } from '../types/metadata.types';
+import { UnifiedAcademicMetadata } from '../metadata.types';
+import {
+  normalizePmid,
+  normalizePmcid,
+  normalizeDoi,
+} from '../canonical-identifiers.util';
+import { validateAcademicMetadata } from '../metadata.validator';
 import { createHash } from 'crypto';
 
 @Injectable()
@@ -15,8 +21,8 @@ export class PubmedProvider {
   async fetchByPmid(pmid: string): Promise<UnifiedAcademicMetadata | null> {
     if (!pmid) return null;
 
-    const cleanPmid = pmid.replace(/^pmid:?\s*/i, '').trim();
-    if (!/^\d+$/.test(cleanPmid)) return null;
+    const cleanPmid = normalizePmid(pmid);
+    if (!cleanPmid) return null;
 
     const url = `${this.BASE_URL}?db=pubmed&id=${encodeURIComponent(cleanPmid)}&retmode=json`;
 
@@ -44,6 +50,10 @@ export class PubmedProvider {
     const item = jsonResult.value.result[cleanPmid];
     if (item.error) return null;
 
+    return this.transformPayload(item, cleanPmid);
+  }
+
+  transformPayload(item: any, cleanPmid: string): UnifiedAcademicMetadata {
     const title = (item.title || 'Untitled PubMed Article')
       .replace(/\.$/, '')
       .trim();
@@ -62,21 +72,18 @@ export class PubmedProvider {
     let pmcid: string | undefined;
     if (Array.isArray(item.articleids)) {
       const doiObj = item.articleids.find((id: any) => id.idtype === 'doi');
-      if (doiObj?.value) doi = doiObj.value;
+      if (doiObj?.value) doi = normalizeDoi(doiObj.value);
       const pmcObj = item.articleids.find(
         (id: any) => id.idtype === 'pmc' || id.idtype === 'pmcid',
       );
-      if (pmcObj?.value)
-        pmcid = pmcObj.value.startsWith('PMC')
-          ? pmcObj.value
-          : `PMC${pmcObj.value}`;
+      if (pmcObj?.value) pmcid = normalizePmcid(pmcObj.value);
     }
 
     const rawSnapshotHash = createHash('md5')
       .update(JSON.stringify(item))
       .digest('hex');
 
-    return {
+    const result: UnifiedAcademicMetadata = {
       title,
       authors,
       year,
@@ -101,5 +108,7 @@ export class PubmedProvider {
         isOpenAccess: Boolean(pmcid),
       },
     };
+
+    return validateAcademicMetadata(result) || result;
   }
 }

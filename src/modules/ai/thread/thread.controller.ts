@@ -93,6 +93,23 @@ export class ThreadController {
     return chat;
   }
 
+  @Get(['chats/:chatId/messages', 'ai/chats/:chatId/messages'])
+  @ApiOperation({ summary: 'Get paginated messages of a chat thread' })
+  async getChatMessages(
+    @Param('chatId') chatId: string,
+    @Query('limit') limit?: number,
+    @Query('skip') skip?: number,
+  ) {
+    const chat = await this.threadService.getChat(chatId);
+    const messages = chat.messages || [];
+    const s = Number(skip) || 0;
+    const l = Number(limit) || messages.length;
+    return {
+      messages: messages.slice(s, s + l),
+      total: messages.length,
+    };
+  }
+
   @Post(['chats/:chatId/messages', 'ai/chats/:chatId/messages'])
   @Patch(['chats/:chatId/messages', 'ai/chats/:chatId/messages'])
   @HttpCode(HttpStatus.OK)

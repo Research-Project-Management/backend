@@ -15,7 +15,22 @@ import { BibtexFormatter } from '../citation/formatters/bibtex.formatter';
 import {
   UnifiedAcademicMetadata,
   ProvenanceMetadata,
-} from './types/metadata.types';
+  CREATOR_TYPE_LABELS,
+  FIELD_LABELS,
+  ITEM_TYPE_CREATOR_KEYS,
+  ITEM_TYPE_FIELD_KEYS,
+  ITEM_TYPE_LABELS,
+  SELECTABLE_LIBRARY_ITEM_TYPES,
+  SUPPORTED_LIBRARY_ITEM_TYPES,
+  SYSTEM_LIBRARY_ITEM_TYPES,
+  SupportedLibraryItemType,
+  ZOTERO_SCHEMA_VERSION,
+  extractYearFromDate,
+  normalizeCreators,
+  normalizeLibraryItemType,
+  normalizeTags,
+} from './metadata.types';
+import { NormalizeMetadataDto } from './dto/metadata.dto';
 import { RedisCacheService } from '../../../core/cache/redis-cache.service';
 import { createHash } from 'crypto';
 
@@ -58,6 +73,72 @@ export class MetadataService {
     private readonly bibtexFormatter: BibtexFormatter,
     @Optional() private readonly redisCache?: RedisCacheService,
   ) {}
+
+  getItemTypes() {
+    return {
+      version: ZOTERO_SCHEMA_VERSION,
+      selectable: SELECTABLE_LIBRARY_ITEM_TYPES.map((itemType) =>
+        this.toItemType(itemType),
+      ),
+      system: SYSTEM_LIBRARY_ITEM_TYPES.map((itemType) =>
+        this.toItemType(itemType),
+      ),
+      supported: SUPPORTED_LIBRARY_ITEM_TYPES.map((itemType) =>
+        this.toItemType(itemType),
+      ),
+    };
+  }
+
+  getItemType(itemType: string) {
+    const normalized = normalizeLibraryItemType(itemType);
+    return {
+      version: ZOTERO_SCHEMA_VERSION,
+      itemType: normalized,
+      localized: ITEM_TYPE_LABELS[normalized],
+      selectable: SELECTABLE_LIBRARY_ITEM_TYPES.includes(normalized as any),
+      fields: this.getItemTypeFields(normalized),
+      creators: this.getItemTypeCreators(normalized),
+    };
+  }
+
+  getItemTypeFields(itemType: string) {
+    const normalized = normalizeLibraryItemType(itemType);
+    const fieldKeys =
+      ITEM_TYPE_FIELD_KEYS[normalized] ??
+      ITEM_TYPE_FIELD_KEYS.document ??
+      ['title', 'abstractNote'];
+
+    return fieldKeys.map((key) => ({
+      key,
+      label: FIELD_LABELS[key] ?? key,
+      required: key === 'title',
+    }));
+  }
+
+  getItemTypeCreators(itemType: string) {
+    const normalized = normalizeLibraryItemType(itemType);
+    const creators = ITEM_TYPE_CREATOR_KEYS[normalized] ?? [
+      { creatorType: 'author', primary: true },
+      { creatorType: 'contributor' },
+    ];
+
+    return creators.map((creator) => ({
+      creatorType: creator.creatorType,
+      localized: CREATOR_TYPE_LABELS[creator.creatorType] ?? creator.creatorType,
+      primary: Boolean(creator.primary),
+    }));
+  }
+
+  normalize(dto: NormalizeMetadataDto) {
+    const itemType = normalizeLibraryItemType(dto.itemType);
+    return {
+      itemType,
+      itemTypeLabel: ITEM_TYPE_LABELS[itemType],
+      creators: normalizeCreators(dto.creators),
+      tags: normalizeTags(dto.tags ?? []),
+      year: extractYearFromDate(dto.date),
+    };
+  }
 
   /**
    * Unified entry point: Resolves academic metadata with 7-day Redis caching & provenance stamping
@@ -378,6 +459,16 @@ export class MetadataService {
       queryType: classified.type,
       provider,
       metadata: meta,
+    };
+  }
+
+  private toItemType(itemType: SupportedLibraryItemType) {
+    const system = SYSTEM_LIBRARY_ITEM_TYPES.includes(itemType as any);
+    return {
+      itemType,
+      localized: ITEM_TYPE_LABELS[itemType],
+      selectable: !system,
+      system,
     };
   }
 

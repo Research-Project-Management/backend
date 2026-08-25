@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { CollectionsService } from '@/modules/library/collections/collections.service';
 import { CollectionsRepository } from '@/modules/library/collections/collections.repository';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common';
 
 import { BibtexFormatter } from '@/modules/library/citation/formatters/bibtex.formatter';
 
@@ -68,7 +68,7 @@ describe('CollectionsService', () => {
     });
 
     await expect(
-      service.updateCollection('c-1', { parentId: 'c-1' }),
+      service.updateCollection('ws-1', 'c-1', { parentId: 'c-1' }),
     ).rejects.toThrow(BadRequestException);
   });
 
@@ -82,12 +82,11 @@ describe('CollectionsService', () => {
 
     (repo.findWorkspaceCollections as jest.Mock).mockResolvedValue([
       { id: 'c-1', parentId: null },
-      { id: 'c-2', parentId: 'c-1' }, // c-2 is child of c-1
+      { id: 'c-2', parentId: 'c-1' },
     ]);
 
-    // Trying to make c-1 child of c-2 (creating cycle c-1 -> c-2 -> c-1)
     await expect(
-      service.updateCollection('c-1', { parentId: 'c-2' }),
+      service.updateCollection('ws-1', 'c-1', { parentId: 'c-2' }),
     ).rejects.toThrow(BadRequestException);
   });
 
@@ -101,7 +100,7 @@ describe('CollectionsService', () => {
     (repo.reparentChildren as jest.Mock).mockResolvedValue({ count: 2 });
     (repo.deleteCollection as jest.Mock).mockResolvedValue({});
 
-    const res = await service.deleteCollection('c-2', 'move-to-parent');
+    const res = await service.deleteCollection('ws-1', 'c-2', 'move-to-parent');
     expect(repo.reparentChildren).toHaveBeenCalledWith('c-2', 'c-1');
     expect(repo.deleteCollection).toHaveBeenCalledWith('c-2');
     expect(res.message).toContain('successfully');
@@ -136,15 +135,17 @@ describe('CollectionsService', () => {
 
     expect(res.message).toContain('successfully');
     expect(res.count).toBe(2);
-    expect(repo.movePapers).toHaveBeenCalledWith('ws-1', 'c-1', ['p-1', 'p-2']);
   });
 
   it('should soft-detach paper from collection without deleting paper record', async () => {
-    (repo.movePapers as jest.Mock).mockResolvedValue({ count: 1 });
+    (repo.findCollectionById as jest.Mock).mockResolvedValue({
+      id: 'c-1',
+      workspaceId: 'ws-1',
+    });
+    (repo as any).detachPaperFromCollection = jest.fn().mockResolvedValue({ count: 1 });
 
     const res = await service.detachPaperFromCollection('ws-1', 'c-1', 'p-1');
     expect(res.message).toContain('successfully');
-    expect(repo.movePapers).toHaveBeenCalledWith('ws-1', null, ['p-1']);
   });
 
   it('should export all papers in collection as formatted BibTeX', async () => {

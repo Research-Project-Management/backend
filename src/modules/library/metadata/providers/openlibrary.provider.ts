@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { getErrorMessage, tryCatch } from '../../../../core/utils/error.util';
-import { UnifiedAcademicMetadata } from '../types/metadata.types';
+import { UnifiedAcademicMetadata } from '../metadata.types';
+import { normalizeIsbn } from '../canonical-identifiers.util';
+import { validateAcademicMetadata } from '../metadata.validator';
 import { createHash } from 'crypto';
 
 @Injectable()
@@ -14,8 +16,8 @@ export class OpenlibraryProvider {
   async fetchByIsbn(isbn: string): Promise<UnifiedAcademicMetadata | null> {
     if (!isbn) return null;
 
-    const cleanIsbn = isbn.replace(/[^0-9X]/gi, '').trim();
-    if (cleanIsbn.length !== 10 && cleanIsbn.length !== 13) return null;
+    const cleanIsbn = normalizeIsbn(isbn);
+    if (!cleanIsbn) return null;
 
     const bibKey = `ISBN:${cleanIsbn}`;
     const url = `${this.BASE_URL}?bibkeys=${encodeURIComponent(bibKey)}&format=json&jscmd=data`;
@@ -42,6 +44,10 @@ export class OpenlibraryProvider {
     }
 
     const item = jsonResult.value[bibKey];
+    return this.transformPayload(item, cleanIsbn);
+  }
+
+  transformPayload(item: any, cleanIsbn: string): UnifiedAcademicMetadata {
     const title = item.title || 'Untitled Book';
 
     const authors: string[] = Array.isArray(item.authors)
@@ -66,7 +72,7 @@ export class OpenlibraryProvider {
       .update(JSON.stringify(item))
       .digest('hex');
 
-    return {
+    const result: UnifiedAcademicMetadata = {
       title,
       authors,
       year,
@@ -85,5 +91,7 @@ export class OpenlibraryProvider {
         isOpenAccess: false,
       },
     };
+
+    return validateAcademicMetadata(result) || result;
   }
 }

@@ -60,4 +60,9 @@ export class UserService {
     const users = await this.userRepo.searchUsers(query, currentUserId);
     return { users };
   }
+
+  async deleteMe(userId: string) {
+    await this.userRepo.deleteUser(userId);
+    return { success: true, message: 'Account deleted successfully' };
+  }
 }

@@ -30,6 +30,17 @@ export class CatalogRepository {
     return ws?.id ?? workspaceIdOrSlug;
   }
 
+  async findWorkspaceMemberRole(
+    workspaceId: string,
+    userId: string,
+  ): Promise<string | null> {
+    const member = await this.prisma.workspaceMember.findFirst({
+      where: { workspaceId, userId },
+      select: { role: true },
+    });
+    return member?.role ?? null;
+  }
+
   async findItems(
     where: Prisma.CatalogItemWhereInput,
     options?: {
@@ -66,6 +77,12 @@ export class CatalogRepository {
     return this.prisma.catalogItem.findFirst({
       where: { id: itemId, workspaceId },
       include: LIBRARY_ITEM_INCLUDE,
+    });
+  }
+
+  async findCollectionById(collectionId: string) {
+    return this.prisma.collection.findUnique({
+      where: { id: collectionId },
     });
   }
 
@@ -112,6 +129,26 @@ export class CatalogRepository {
     return this.prisma.catalogItem.update({
       where: { id: paperId },
       data: data,
+      include: LIBRARY_ITEM_INCLUDE,
+    });
+  }
+
+  async purgeItem(itemId: string) {
+    return this.prisma.catalogItem.delete({
+      where: { id: itemId },
+    });
+  }
+
+  async purgeItemInWorkspace(workspaceId: string, itemId: string) {
+    return this.prisma.catalogItem.deleteMany({
+      where: { id: itemId, workspaceId },
+    });
+  }
+
+  async restoreItem(itemId: string) {
+    return this.prisma.catalogItem.update({
+      where: { id: itemId },
+      data: { deletedAt: null },
       include: LIBRARY_ITEM_INCLUDE,
     });
   }
@@ -290,24 +327,56 @@ export class CatalogRepository {
     missingDoiCount: number;
     missingYearCount: number;
     missingAuthorsCount: number;
+    missingPdfCount: number;
+    unhealthyCount: number;
   }> {
-    const rows = await this.prisma.$queryRaw<
-      {
-        total_papers: bigint;
-        missing_doi: bigint;
-        missing_year: bigint;
-        missing_authors: bigint;
-      }[]
-    >`
-      SELECT
-        COUNT(*)                                                           AS total_papers,
-        COUNT(*) FILTER (WHERE doi IS NULL OR TRIM(doi) = '')             AS missing_doi,
-        COUNT(*) FILTER (WHERE year IS NULL)                              AS missing_year,
-        COUNT(*) FILTER (WHERE authors = '{}' OR authors IS NULL)         AS missing_authors
-      FROM "papers"
-      WHERE workspace_id = ${workspaceId}
-        AND deleted_at IS NULL
-    `;
+    const missingPdfWhere: Prisma.CatalogItemWhereInput = {
+      workspaceId,
+      deletedAt: null,
+      fileUrl: '',
+      attachments: {
+        none: {
+          OR: [
+            { mimeType: { contains: 'pdf', mode: 'insensitive' } },
+            { filename: { endsWith: '.pdf', mode: 'insensitive' } },
+          ],
+        },
+      },
+    };
+
+    const [rows, missingPdfCount, unhealthyCount] = await Promise.all([
+      this.prisma.$queryRaw<
+        {
+          total_papers: bigint;
+          missing_doi: bigint;
+          missing_year: bigint;
+          missing_authors: bigint;
+        }[]
+      >`
+        SELECT
+          COUNT(*)                                                           AS total_papers,
+          COUNT(*) FILTER (WHERE doi IS NULL OR TRIM(doi) = '')             AS missing_doi,
+          COUNT(*) FILTER (WHERE year IS NULL)                              AS missing_year,
+          COUNT(*) FILTER (WHERE authors = '{}' OR authors IS NULL)         AS missing_authors
+        FROM "papers"
+        WHERE workspace_id = ${workspaceId}
+          AND deleted_at IS NULL
+      `,
+      this.prisma.catalogItem.count({ where: missingPdfWhere }),
+      this.prisma.catalogItem.count({
+        where: {
+          workspaceId,
+          deletedAt: null,
+          OR: [
+            { doi: null },
+            { doi: '' },
+            { year: null },
+            { authors: { isEmpty: true } },
+            missingPdfWhere,
+          ],
+        },
+      }),
+    ]);
     const r = rows[0] ?? {
       total_papers: 0n,
       missing_doi: 0n,
@@ -319,6 +388,8 @@ export class CatalogRepository {
       missingDoiCount: Number(r.missing_doi),
       missingYearCount: Number(r.missing_year),
       missingAuthorsCount: Number(r.missing_authors),
+      missingPdfCount,
+      unhealthyCount,
     };
   }
 

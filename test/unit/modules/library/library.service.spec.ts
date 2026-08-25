@@ -1,8 +1,8 @@
-import { LibraryService } from '@/modules/library/library.service';
+import { AcademicBundleService } from '@/modules/library/academic-bundle/academic-bundle.service';
 import { CslFormatter } from '@/modules/library/citation/formatters/csl.formatter';
 
-describe('LibraryService (Unified Academic Facade)', () => {
-  let service: LibraryService;
+describe('AcademicBundleService', () => {
+  let service: AcademicBundleService;
   let mockCatalogRepo: any;
   let cslFormatter: CslFormatter;
   let mockAnnotationsService: any;
@@ -11,6 +11,7 @@ describe('LibraryService (Unified Academic Facade)', () => {
   beforeEach(() => {
     mockCatalogRepo = {
       resolveWorkspace: jest.fn().mockResolvedValue({ id: 'ws-1' }),
+      resolveWorkspaceId: jest.fn().mockResolvedValue('ws-1'),
       findItemById: jest.fn(),
     };
 
@@ -44,7 +45,7 @@ describe('LibraryService (Unified Academic Facade)', () => {
       }),
     };
 
-    service = new LibraryService(
+    service = new AcademicBundleService(
       mockCatalogRepo,
       cslFormatter,
       mockAnnotationsService,
@@ -64,7 +65,7 @@ describe('LibraryService (Unified Academic Facade)', () => {
 
     mockCatalogRepo.findItemById.mockResolvedValue(mockPaper);
 
-    const bundle = await service.getCatalogItemAcademicBundle(
+    const bundle = await service.getItemAcademicBundle(
       'ws-1',
       'paper-transformer',
     );

@@ -139,8 +139,10 @@ export class R2Service {
     if (fs.existsSync(filePath)) {
       try {
         fs.unlinkSync(filePath);
-      } catch {
-        // Silently ignore if file removal fails
+      } catch (unlinkErr) {
+        this.logger.warn(
+          `Failed to remove local file ${filePath}: ${getErrorMessage(unlinkErr)}`,
+        );
       }
     }
   }
@@ -153,6 +155,9 @@ export class R2Service {
       });
       return await this.s3Client.send(command);
     } catch (s3Err) {
+      this.logger.debug(
+        `R2 getObject failed for ${key}, checking local fallback: ${getErrorMessage(s3Err)}`,
+      );
       const localDir = path.join(process.cwd(), 'uploads');
       const filePath = path.join(localDir, key);
       if (fs.existsSync(filePath)) {

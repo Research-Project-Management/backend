@@ -1,6 +1,7 @@
 import {
   Injectable,
   BadRequestException,
+  ForbiddenException,
   Logger,
   Inject,
   forwardRef,
@@ -63,6 +64,10 @@ export class IngestionService {
     userId: string,
     dto: IngestDocumentDto,
   ): Promise<IngestionResult> {
+    const targetWsId = await this.assertCanIngestIntoWorkspace(
+      userId,
+      dto.workspaceId,
+    );
     let draft = AcademicMetadataReducer.fromDto(dto);
 
     // 1. Multi-source Metadata Resolution & Parsing
@@ -127,7 +132,7 @@ export class IngestionService {
             : 'Untitled Paper';
         }
 
-        // Step 1: Deep PDF extraction (Zotero-grade XMP & Text Analysis)
+        // Step 1: Deep PDF extraction (XMP & Text Analysis)
         if (draft.fileUrl) {
           try {
             const pdfMeta = await this.PdfDoiExtractor.extractMetadataFromUrl(
@@ -222,10 +227,6 @@ export class IngestionService {
     }
 
     // 2. Resolve Workspace and Unique Citation Key
-    const targetWsId = await this.catalogRepo.resolveWorkspaceId(
-      dto.workspaceId,
-    );
-
     const baseCitationKey =
       draft.explicitCitationKey ||
       this.bibtexFormatter.generateCitationKey(
@@ -322,7 +323,9 @@ export class IngestionService {
       callNumber: draft.callNumber || undefined,
       libraryCatalog: draft.libraryCatalog || undefined,
       extra: draft.extra || undefined,
-      ...(dto.collectionId && { collectionId: dto.collectionId }),
+      ...((dto.collectionId || dto.collections?.[0]) && {
+        collectionId: dto.collectionId || dto.collections?.[0],
+      }),
       ...(primaryFilePayload && { primaryFile: primaryFilePayload }),
     });
 
@@ -342,6 +345,22 @@ export class IngestionService {
   }
 
   // ─── Batch helpers ────────────────────────────────────────────────────────
+
+  private async assertCanIngestIntoWorkspace(
+    userId: string,
+    workspaceIdOrSlug: string,
+  ): Promise<string> {
+    const workspaceId = await this.catalogRepo.resolveWorkspaceId(workspaceIdOrSlug);
+    const role = await this.catalogRepo.findWorkspaceMemberRole(workspaceId, userId);
+
+    if (!role || !['owner', 'admin', 'member'].includes(role)) {
+      throw new ForbiddenException(
+        'Insufficient workspace permissions for ingestion',
+      );
+    }
+
+    return workspaceId;
+  }
 
   /** Split an array into fixed-size chunks for rate-limited concurrent processing. */
   private chunked<T>(items: T[], size: number): T[][] {

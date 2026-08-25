@@ -106,4 +106,81 @@ export class ActivityRepository {
       take: limit,
     });
   }
+
+  /**
+   * Batch-resolve titles for recent entities (task / paper / page).
+   * Returns a Map<"type:id", title>.
+   */
+  async findEntitiesTitleMap(
+    taskIds: string[],
+    paperIds: string[],
+    pageIds: string[],
+  ): Promise<Map<string, string>> {
+    const [tasks, papers, pages] = await Promise.all([
+      taskIds.length
+        ? this.prisma.task.findMany({
+            where: { id: { in: taskIds } },
+            select: { id: true, title: true },
+          })
+        : [],
+      paperIds.length
+        ? this.prisma.catalogItem.findMany({
+            where: { id: { in: paperIds }, deletedAt: null },
+            select: { id: true, title: true },
+          })
+        : [],
+      pageIds.length
+        ? this.prisma.page.findMany({
+            where: { id: { in: pageIds }, deletedAt: null },
+            select: { id: true, title: true },
+          })
+        : [],
+    ]);
+
+    const map = new Map<string, string>();
+    tasks.forEach((t) => map.set(`task:${t.id}`, t.title));
+    papers.forEach((p) => map.set(`paper:${p.id}`, p.title));
+    pages.forEach((pg) => map.set(`page:${pg.id}`, pg.title));
+    return map;
+  }
+
+  /**
+   * Fallback: get recently updated items owned by user across all entity types.
+   */
+  async findFallbackRecentItems(
+    workspaceId: string,
+    userId: string,
+    limit: number,
+  ) {
+    const [tasks, papers, pages] = await Promise.all([
+      this.prisma.task.findMany({
+        where: {
+          project: { workspaceId },
+          OR: [{ authorId: userId }, { assigneeId: userId }],
+        },
+        orderBy: { updatedAt: 'desc' },
+        take: limit,
+        select: { id: true, title: true, projectId: true, updatedAt: true },
+      }),
+      this.prisma.catalogItem.findMany({
+        where: { workspaceId, uploadedById: userId, deletedAt: null },
+        orderBy: { updatedAt: 'desc' },
+        take: limit,
+        select: { id: true, title: true, updatedAt: true },
+      }),
+      this.prisma.page.findMany({
+        where: {
+          deletedAt: null,
+          OR: [
+            { workspaceId, authorId: userId },
+            { project: { workspaceId }, authorId: userId },
+          ],
+        },
+        orderBy: { updatedAt: 'desc' },
+        take: limit,
+        select: { id: true, title: true, projectId: true, updatedAt: true },
+      }),
+    ]);
+    return { tasks, papers, pages };
+  }
 }

@@ -152,6 +152,13 @@ export class TaskService {
     return { task: this.formatTask(task) };
   }
 
+  async getSubtasks(taskId: string) {
+    const task = await this.taskRepo.findTaskById(taskId);
+    if (!task) throw new NotFoundException('Task not found');
+    const subtasks = (task.subtasks || []).map((s: any) => this.formatTask(s));
+    return { subtasks, count: subtasks.length };
+  }
+
   async createTask(projectId: string, userId: string, dto: CreateTaskDto) {
     const assigneeId = dto.assigneeId || dto.assignee || null;
     let cycleId = dto.cycleId || dto.cycle || null;

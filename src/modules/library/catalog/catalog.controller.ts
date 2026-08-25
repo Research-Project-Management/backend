@@ -22,30 +22,25 @@ import {
   ImportStoragePaperDto,
 } from './dto/catalog.dto';
 
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authentication';
+import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
 import {
   WorkspaceRoleGuard,
   WorkspaceRoles,
-} from '@/modules/iam/authorization';
+} from '@/modules/iam/authz';
 
 @ApiTags('Library Catalog')
 @ApiBearerAuth('JWT-auth')
-@Controller('api/library')
+@Controller('api')
 @UseGuards(JwtAuthGuard)
 export class CatalogController {
   constructor(private readonly catalogService: CatalogService) {}
 
-  private getRouteItemId(params: {
-    itemId?: string;
-    paperId?: string;
-  }): string {
-    return params.itemId ?? params.paperId ?? '';
-  }
+  // ─── Ingest ────────────────────────────────────────────────────────────────
 
   @Post([
-    'papers/:workspaceId/ingest',
-    'items/:workspaceId/ingest',
-    ':workspaceId/ingest',
+    'workspace/:workspaceId/library/items/ingest',
+    'library/papers/:workspaceId/ingest', // legacy prefix — used by frontend
+    'library/:workspaceId/items/ingest', // legacy REST
   ])
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(WorkspaceRoleGuard)
@@ -59,11 +54,12 @@ export class CatalogController {
     return this.catalogService.ingestPaper(workspaceId, userId, dto);
   }
 
+  // ─── List items ────────────────────────────────────────────────────────────
+
   @Get([
-    'papers/:workspaceId',
-    'items/:workspaceId',
-    ':workspaceId/papers',
-    ':workspaceId/items',
+    'workspace/:workspaceId/library/items',
+    'library/papers/:workspaceId', // legacy prefix — used by frontend
+    'library/:workspaceId/items', // legacy REST
   ])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
@@ -88,10 +84,12 @@ export class CatalogController {
     });
   }
 
+  // ─── Tags ──────────────────────────────────────────────────────────────────
+
   @Get([
-    'papers/:workspaceId/tags',
-    'items/:workspaceId/tags',
-    ':workspaceId/tags',
+    'workspace/:workspaceId/library/items/tags',
+    'library/papers/:workspaceId/tags', // legacy prefix — used by frontend
+    'library/:workspaceId/items/tags', // legacy REST
   ])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
@@ -102,14 +100,16 @@ export class CatalogController {
     return this.catalogService.getWorkspaceTags(workspaceId);
   }
 
+  // ─── Collection items ──────────────────────────────────────────────────────
+
   @Get([
-    ':workspaceId/collections/:collectionId/papers',
-    ':workspaceId/collections/:collectionId/items',
+    'workspace/:workspaceId/library/collections/:collectionId/items',
+    'library/:workspaceId/collections/:collectionId/items',
   ])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'Get collection library items' })
-  async getCollectionPapers(
+  async getCollectionItems(
     @Param('workspaceId') workspaceId: string,
     @Param('collectionId') collectionId: string,
     @Query('search') search?: string,
@@ -120,12 +120,12 @@ export class CatalogController {
     });
   }
 
+  // ─── Upload ────────────────────────────────────────────────────────────────
+
   @Post([
-    'papers/:workspaceId/upload',
-    'items/:workspaceId/upload',
-    ':workspaceId/papers/upload',
-    ':workspaceId/items/upload',
-    ':workspaceId/upload',
+    'workspace/:workspaceId/library/items/upload',
+    'library/papers/:workspaceId/upload', // legacy prefix — used by frontend
+    'library/:workspaceId/items/upload', // legacy REST
   ])
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(WorkspaceRoleGuard)
@@ -140,9 +140,9 @@ export class CatalogController {
   }
 
   @Post([
-    'papers/:workspaceId/collections/:collectionId/upload',
-    'items/:workspaceId/collections/:collectionId/upload',
-    ':workspaceId/collections/:collectionId/upload',
+    'workspace/:workspaceId/library/collections/:collectionId/upload',
+    'library/papers/:workspaceId/collections/:collectionId/upload', // legacy
+    'library/:workspaceId/collections/:collectionId/upload', // legacy REST
   ])
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(WorkspaceRoleGuard)
@@ -158,12 +158,12 @@ export class CatalogController {
     return this.catalogService.uploadPaper(workspaceId, userId, dto);
   }
 
+  // ─── Import from Storage ───────────────────────────────────────────────────
+
   @Post([
-    'papers/:workspaceId/import-storage',
-    'items/:workspaceId/import-storage',
-    ':workspaceId/papers/import-storage',
-    ':workspaceId/items/import-storage',
-    ':workspaceId/import-storage',
+    'workspace/:workspaceId/library/items/import-storage',
+    'library/papers/:workspaceId/import-storage', // legacy prefix — used by frontend
+    'library/:workspaceId/items/import-storage', // legacy REST
   ])
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(WorkspaceRoleGuard)
@@ -177,70 +177,139 @@ export class CatalogController {
     return this.catalogService.importFromStorage(workspaceId, userId, dto);
   }
 
+  // ─── Single item CRUD ──────────────────────────────────────────────────────
+
   @Get([
-    'papers/:workspaceId/:paperId',
-    'items/:workspaceId/:itemId',
-    ':workspaceId/papers/:paperId',
-    ':workspaceId/items/:itemId',
+    'workspace/:workspaceId/library/items/:itemId',
+    'library/papers/:workspaceId/:itemId', // legacy prefix — used by frontend
+    'library/:workspaceId/items/:itemId', // legacy REST
   ])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'Get library item by ID' })
-  async getPaperById(
-    @Param() params: { workspaceId: string; itemId?: string; paperId?: string },
+  async getItemById(
+    @Param('workspaceId') workspaceId: string,
+    @Param('itemId') itemId: string,
   ) {
-    return this.catalogService.getItemByIdInWorkspace(
-      params.workspaceId,
-      this.getRouteItemId(params),
-    );
+    return this.catalogService.getItemByIdInWorkspace(workspaceId, itemId);
+  }
+
+  @Put([
+    'workspace/:workspaceId/library/items/:itemId',
+    'library/papers/:workspaceId/:itemId', // legacy prefix — used by frontend
+    'library/:workspaceId/items/:itemId', // legacy REST
+  ])
+  @Patch([
+    'workspace/:workspaceId/library/items/:itemId',
+    'library/papers/:workspaceId/:itemId',
+    'library/:workspaceId/items/:itemId',
+  ])
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Update library item metadata' })
+  async updateItem(
+    @Param('workspaceId') workspaceId: string,
+    @Param('itemId') itemId: string,
+    @Body() dto: UpdatePaperDto,
+  ) {
+    return this.catalogService.updateItemInWorkspace(workspaceId, itemId, dto);
+  }
+
+  @Delete([
+    'workspace/:workspaceId/library/items/:itemId',
+    'library/papers/:workspaceId/:itemId', // legacy prefix — used by frontend
+    'library/:workspaceId/items/:itemId', // legacy REST
+  ])
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Delete library item (soft delete)' })
+  async deleteItem(
+    @Param('workspaceId') workspaceId: string,
+    @Param('itemId') itemId: string,
+  ) {
+    return this.catalogService.deleteItemInWorkspace(workspaceId, itemId);
   }
 
   @Post([
-    'papers/:workspaceId/:paperId/attachments',
-    'items/:workspaceId/:itemId/attachments',
-    ':workspaceId/papers/:paperId/attachments',
-    ':workspaceId/items/:itemId/attachments',
+    'workspace/:workspaceId/library/items/:itemId/restore',
+    'library/papers/:workspaceId/:itemId/restore',
+    'library/:workspaceId/items/:itemId/restore',
+  ])
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Restore a soft-deleted catalog item' })
+  async restoreItem(
+    @Param('workspaceId') workspaceId: string,
+    @Param('itemId') itemId: string,
+  ) {
+    return this.catalogService.restoreItemInWorkspace(workspaceId, itemId);
+  }
+
+  @Delete([
+    'workspace/:workspaceId/library/items/:itemId/purge',
+    'library/papers/:workspaceId/:itemId/purge',
+    'library/:workspaceId/items/:itemId/purge',
+  ])
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin')
+  @ApiOperation({ summary: 'Permanently purge a catalog item from workspace' })
+  async purgeItem(
+    @Param('workspaceId') workspaceId: string,
+    @Param('itemId') itemId: string,
+  ) {
+    return this.catalogService.purgeItemInWorkspace(workspaceId, itemId);
+  }
+
+  // ─── Attachments ───────────────────────────────────────────────────────────
+
+  @Post([
+    'workspace/:workspaceId/library/items/:itemId/attachments',
+    'library/papers/:workspaceId/:itemId/attachments', // legacy
+    'library/:workspaceId/items/:itemId/attachments', // legacy REST
   ])
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member')
   @ApiOperation({ summary: 'Add library item attachment' })
   async addAttachment(
-    @Param() params: { workspaceId: string; itemId?: string; paperId?: string },
+    @Param('workspaceId') workspaceId: string,
+    @Param('itemId') itemId: string,
     @Body() dto: AddAttachmentDto,
   ) {
     return this.catalogService.addAttachmentInWorkspace(
-      params.workspaceId,
-      this.getRouteItemId(params),
+      workspaceId,
+      itemId,
       dto,
     );
   }
 
   @Delete([
-    'papers/:workspaceId/:paperId/attachments/:attachmentId',
-    'items/:workspaceId/:itemId/attachments/:attachmentId',
-    ':workspaceId/papers/:paperId/attachments/:attachmentId',
-    ':workspaceId/items/:itemId/attachments/:attachmentId',
+    'workspace/:workspaceId/library/items/:itemId/attachments/:attachmentId',
+    'library/papers/:workspaceId/:itemId/attachments/:attachmentId', // legacy
+    'library/:workspaceId/items/:itemId/attachments/:attachmentId', // legacy REST
   ])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member')
   @ApiOperation({ summary: 'Remove library item attachment' })
   async removeAttachment(
-    @Param() params: { workspaceId: string; itemId?: string; paperId?: string },
+    @Param('workspaceId') workspaceId: string,
+    @Param('itemId') itemId: string,
     @Param('attachmentId') attachmentId: string,
   ) {
     return this.catalogService.removeAttachmentInWorkspace(
-      params.workspaceId,
-      this.getRouteItemId(params),
+      workspaceId,
+      itemId,
       attachmentId,
     );
   }
 
+  // ─── Reindex ───────────────────────────────────────────────────────────────
+
   @Post([
-    'papers/:workspaceId/:paperId/reindex',
-    'items/:workspaceId/:itemId/reindex',
-    ':workspaceId/papers/:paperId/reindex',
-    ':workspaceId/items/:itemId/reindex',
+    'workspace/:workspaceId/library/items/:itemId/reindex',
+    'library/papers/:workspaceId/:itemId/reindex', // legacy
+    'library/:workspaceId/items/:itemId/reindex', // legacy REST
   ])
   @HttpCode(HttpStatus.OK)
   @UseGuards(WorkspaceRoleGuard)
@@ -249,73 +318,31 @@ export class CatalogController {
     summary: 'Trigger library item reindexing for search and AI',
   })
   async triggerReindex(
-    @Param() params: { workspaceId: string; itemId?: string; paperId?: string },
+    @Param('workspaceId') workspaceId: string,
+    @Param('itemId') itemId: string,
     @CurrentUser('id') userId: string,
   ) {
     return this.catalogService.triggerReindexInWorkspace(
-      params.workspaceId,
-      this.getRouteItemId(params),
+      workspaceId,
+      itemId,
       userId,
     );
   }
 
-  @Put([
-    'papers/:workspaceId/:paperId',
-    'items/:workspaceId/:itemId',
-    ':workspaceId/papers/:paperId',
-    ':workspaceId/items/:itemId',
-  ])
-  @Patch([
-    'papers/:workspaceId/:paperId',
-    'items/:workspaceId/:itemId',
-    ':workspaceId/papers/:paperId',
-    ':workspaceId/items/:itemId',
-  ])
-  @UseGuards(WorkspaceRoleGuard)
-  @WorkspaceRoles('owner', 'admin', 'member')
-  @ApiOperation({ summary: 'Update library item metadata' })
-  async updateItem(
-    @Param() params: { workspaceId: string; itemId?: string; paperId?: string },
-    @Body() dto: UpdatePaperDto,
-  ) {
-    return this.catalogService.updateItemInWorkspace(
-      params.workspaceId,
-      this.getRouteItemId(params),
-      dto,
-    );
-  }
-
-  @Delete([
-    'papers/:workspaceId/:paperId',
-    'items/:workspaceId/:itemId',
-    ':workspaceId/papers/:paperId',
-    ':workspaceId/items/:itemId',
-  ])
-  @UseGuards(WorkspaceRoleGuard)
-  @WorkspaceRoles('owner', 'admin', 'member')
-  @ApiOperation({ summary: 'Delete library item' })
-  async deleteItem(
-    @Param() params: { workspaceId: string; itemId?: string; paperId?: string },
-  ) {
-    return this.catalogService.deleteItemInWorkspace(
-      params.workspaceId,
-      this.getRouteItemId(params),
-    );
-  }
+  // ─── BibTeX ────────────────────────────────────────────────────────────────
 
   @Get([
-    'papers/:workspaceId/:paperId/bibtex',
-    'items/:workspaceId/:itemId/bibtex',
+    'workspace/:workspaceId/library/items/:itemId/bibtex',
+    'library/papers/:workspaceId/:itemId/bibtex', // legacy
+    'library/:workspaceId/items/:itemId/bibtex', // legacy REST
   ])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'Export library item BibTeX' })
   async exportBibtex(
-    @Param() params: { workspaceId: string; itemId?: string; paperId?: string },
+    @Param('workspaceId') workspaceId: string,
+    @Param('itemId') itemId: string,
   ) {
-    return this.catalogService.exportBibtexInWorkspace(
-      params.workspaceId,
-      this.getRouteItemId(params),
-    );
+    return this.catalogService.exportBibtexInWorkspace(workspaceId, itemId);
   }
 }

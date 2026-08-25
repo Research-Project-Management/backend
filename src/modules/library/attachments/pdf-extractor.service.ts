@@ -17,7 +17,7 @@ export interface ExtractedPdfMetadata {
 }
 
 /**
- * Deep Zotero-Grade PDF Metadata and Academic Content Extractor.
+ * Academic PDF Metadata and Content Extractor (aligned with XMP and Dublin Core specifications).
  *
  * Extraction Strategy:
  *  1. Parse embedded PDF XMP / Dublin Core & Info dictionary (Title, Author, Subject, Keywords, CreationDate).

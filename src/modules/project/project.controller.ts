@@ -10,7 +10,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ProjectService } from './project.service';
 import {
   CreateProjectDto,
@@ -43,6 +43,7 @@ export class ProjectController {
   ])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'List all projects in a workspace' })
   async getProjects(@Param('workspaceId') workspaceId: string) {
     return this.projectService.getProjects(workspaceId);
   }
@@ -56,6 +57,7 @@ export class ProjectController {
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Create a new project in a workspace' })
   async createProject(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
@@ -67,6 +69,7 @@ export class ProjectController {
   @Get('project/:projectId')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
+  @ApiOperation({ summary: 'Get a project by ID' })
   async getProject(
     @Param('projectId') projectId: string,
     @CurrentUser('id') userId: string,
@@ -81,6 +84,7 @@ export class ProjectController {
   ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
+  @ApiOperation({ summary: 'Get project overview and statistics' })
   async getProjectOverview(
     @Param('projectId') projectId: string,
     @CurrentUser('id') userId: string,
@@ -91,6 +95,7 @@ export class ProjectController {
   @Put('project/:projectId')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
+  @ApiOperation({ summary: 'Update project settings' })
   async updateProject(
     @Param('projectId') projectId: string,
     @Body() dto: UpdateProjectDto,
@@ -101,6 +106,7 @@ export class ProjectController {
   @Delete('project/:projectId')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
+  @ApiOperation({ summary: 'Delete a project permanently' })
   async deleteProject(@Param('projectId') projectId: string) {
     return this.projectService.deleteProject(projectId);
   }
@@ -108,14 +114,15 @@ export class ProjectController {
   @Get('project/:projectId/members')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
+  @ApiOperation({ summary: 'List project members' })
   async getProjectMembers(@Param('projectId') projectId: string) {
     return this.projectService.getProjectMembers(projectId);
   }
 
   @Post('project/:projectId/members')
-  @Put('project/:projectId/add-member')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
+  @ApiOperation({ summary: 'Add a member to the project' })
   async addProjectMember(
     @Param('projectId') projectId: string,
     @Body() dto: AddProjectMemberDto,
@@ -124,38 +131,40 @@ export class ProjectController {
   }
 
   @Put('project/:projectId/members/:userId')
-  @Put('project/:projectId/update-member-role')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
+  @ApiOperation({ summary: 'Update project member role' })
   async updateProjectMember(
     @Param('projectId') projectId: string,
-    @Param('userId') paramUserId: string,
+    @Param('userId') userId: string,
     @Body() dto: UpdateProjectMemberDto,
   ) {
-    const targetUserId = paramUserId || dto.userId || '';
-    return this.projectService.updateProjectMember(
-      projectId,
-      targetUserId,
-      dto,
-    );
+    return this.projectService.updateProjectMember(projectId, userId, dto);
   }
 
   @Delete('project/:projectId/members/:userId')
-  @Put('project/:projectId/remove-member')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
+  @ApiOperation({ summary: 'Remove a member from the project' })
   async removeProjectMember(
     @Param('projectId') projectId: string,
-    @Param('userId') paramUserId: string,
-    @Body() body?: { userId?: string },
+    @Param('userId') userId: string,
   ) {
-    const targetUserId = paramUserId || body?.userId;
-    return this.projectService.removeProjectMember(projectId, targetUserId!);
+    return this.projectService.removeProjectMember(projectId, userId);
+  }
+
+  @Get('project/:projectId/columns')
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
+  @ApiOperation({ summary: 'List project columns (task board lanes)' })
+  async getColumns(@Param('projectId') projectId: string) {
+    return this.projectService.getColumns(projectId);
   }
 
   @Post('project/:projectId/columns')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
+  @ApiOperation({ summary: 'Add a new column to the project board' })
   async addColumn(
     @Param('projectId') projectId: string,
     @Body() dto: AddColumnDto,
@@ -166,6 +175,7 @@ export class ProjectController {
   @Put('project/:projectId/columns/:columnId')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
+  @ApiOperation({ summary: 'Update a project board column' })
   async updateColumn(
     @Param('projectId') projectId: string,
     @Param('columnId') columnId: string,
@@ -177,6 +187,7 @@ export class ProjectController {
   @Delete('project/:projectId/columns/:columnId')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
+  @ApiOperation({ summary: 'Delete a project board column' })
   async deleteColumn(
     @Param('projectId') projectId: string,
     @Param('columnId') columnId: string,

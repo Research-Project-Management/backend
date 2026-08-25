@@ -7,6 +7,7 @@ import {
   IsString,
 } from 'class-validator';
 import { AttachmentType } from '@prisma/client';
+import { LibraryCreatorInput } from '../../metadata/metadata.types';
 
 export class IngestCatalogItemDto {
   @IsString()
@@ -45,6 +46,10 @@ export class IngestCatalogItemDto {
   @IsOptional()
   authors?: string[];
 
+  @IsArray()
+  @IsOptional()
+  creators?: LibraryCreatorInput[];
+
   @IsNumber()
   @IsOptional()
   year?: number;
@@ -56,6 +61,26 @@ export class IngestCatalogItemDto {
   @IsString()
   @IsOptional()
   citationKey?: string;
+
+  @IsArray()
+  @IsOptional()
+  tags?: string[];
+
+  @IsString()
+  @IsOptional()
+  itemType?: string;
+
+  @IsString()
+  @IsOptional()
+  abstractNote?: string;
+
+  @IsString()
+  @IsOptional()
+  date?: string;
+
+  @IsString()
+  @IsOptional()
+  accessDate?: string;
 }
 
 export class UploadCatalogItemDto {
@@ -91,6 +116,10 @@ export class UploadCatalogItemDto {
   @IsOptional()
   authors?: string[];
 
+  @IsArray()
+  @IsOptional()
+  creators?: LibraryCreatorInput[];
+
   @IsNumber()
   @IsOptional()
   year?: number;
@@ -105,6 +134,10 @@ export class UploadCatalogItemDto {
 
   @IsString()
   @IsOptional()
+  abstractNote?: string;
+
+  @IsString()
+  @IsOptional()
   journal?: string;
 
   @IsString()
@@ -114,6 +147,10 @@ export class UploadCatalogItemDto {
   @IsArray()
   @IsOptional()
   keywords?: string[];
+
+  @IsArray()
+  @IsOptional()
+  tags?: string[];
 
   @IsString()
   @IsOptional()
@@ -142,6 +179,18 @@ export class UploadCatalogItemDto {
   @IsString()
   @IsOptional()
   type?: string;
+
+  @IsString()
+  @IsOptional()
+  itemType?: string;
+
+  @IsString()
+  @IsOptional()
+  date?: string;
+
+  @IsString()
+  @IsOptional()
+  accessDate?: string;
 
   @IsString()
   @IsOptional()
@@ -212,6 +261,10 @@ export class ImportStorageCatalogItemDto {
   @IsOptional()
   authors?: string[];
 
+  @IsArray()
+  @IsOptional()
+  creators?: LibraryCreatorInput[];
+
   @IsString()
   @IsOptional()
   doi?: string;
@@ -219,6 +272,10 @@ export class ImportStorageCatalogItemDto {
   @IsString()
   @IsOptional()
   citationKey?: string;
+
+  @IsArray()
+  @IsOptional()
+  tags?: string[];
 }
 
 export class UpdateCatalogItemDto {
@@ -229,6 +286,10 @@ export class UpdateCatalogItemDto {
   @IsArray()
   @IsOptional()
   authors?: string[];
+
+  @IsArray()
+  @IsOptional()
+  creators?: LibraryCreatorInput[];
 
   @IsNumber()
   @IsOptional()
@@ -242,9 +303,25 @@ export class UpdateCatalogItemDto {
   @IsOptional()
   abstract?: string;
 
+  @IsString()
+  @IsOptional()
+  abstractNote?: string;
+
   @IsArray()
   @IsOptional()
   keywords?: string[];
+
+  @IsArray()
+  @IsOptional()
+  tags?: string[];
+
+  @IsString()
+  @IsOptional()
+  date?: string;
+
+  @IsString()
+  @IsOptional()
+  accessDate?: string;
 
   @IsString()
   @IsOptional()

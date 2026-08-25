@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Delete,
   Param,
   Body,
@@ -10,7 +11,11 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { WorklogService } from './worklog.service';
-import { CreateWorklogDto, QueryWorklogDto } from './dto/worklog.dto';
+import {
+  CreateWorklogDto,
+  UpdateWorklogDto,
+  QueryWorklogDto,
+} from './dto/worklog.dto';
 import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
 
 @ApiTags('Workflow - Worklogs')
@@ -54,5 +59,14 @@ export class WorklogController {
   @ApiOperation({ summary: 'Delete a worklog entry' })
   async deleteWorklog(@Param('id') id: string) {
     return this.worklogService.deleteWorklog(id);
+  }
+
+  @Put('worklogs/:id')
+  @ApiOperation({ summary: 'Update a worklog entry (hours, description, date)' })
+  async updateWorklog(
+    @Param('id') id: string,
+    @Body() dto: UpdateWorklogDto,
+  ) {
+    return this.worklogService.updateWorklog(id, dto);
   }
 }

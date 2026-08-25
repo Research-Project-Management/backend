@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ActivityRepository } from './activity.repository';
 import { DomainActivityEvent } from './events/activity.events';
-import { PrismaService } from '@/core/database/prisma.service';
 import { EntityType } from '@prisma/client';
 import { RecentItemResponse } from './dto/activity.dto';
 
@@ -11,7 +10,6 @@ export class ActivityService {
 
   constructor(
     private readonly activityRepo: ActivityRepository,
-    private readonly prisma: PrismaService,
   ) {}
 
   async recordEvent(event: DomainActivityEvent) {
@@ -163,31 +161,11 @@ export class ActivityService {
       .filter((t) => t.entityType === 'page')
       .map((t) => t.entityId);
 
-    const [tasks, papers, pages] = await Promise.all([
-      taskIds.length
-        ? this.prisma.task.findMany({
-            where: { id: { in: taskIds } },
-            select: { id: true, title: true },
-          })
-        : [],
-      paperIds.length
-        ? this.prisma.catalogItem.findMany({
-            where: { id: { in: paperIds }, deletedAt: null },
-            select: { id: true, title: true },
-          })
-        : [],
-      pageIds.length
-        ? this.prisma.page.findMany({
-            where: { id: { in: pageIds }, deletedAt: null },
-            select: { id: true, title: true },
-          })
-        : [],
-    ]);
-
-    const titleMap = new Map<string, string>();
-    tasks.forEach((t) => titleMap.set(`task:${t.id}`, t.title));
-    papers.forEach((p) => titleMap.set(`paper:${p.id}`, p.title));
-    pages.forEach((pg) => titleMap.set(`page:${pg.id}`, pg.title));
+    const titleMap = await this.activityRepo.findEntitiesTitleMap(
+      taskIds,
+      paperIds,
+      pageIds,
+    );
 
     return uniqueTargets.map((target) => ({
       id: `${target.entityType}-${target.entityId}`,
@@ -210,39 +188,8 @@ export class ActivityService {
     const ws = await this.activityRepo.resolveWorkspace(workspaceId);
     const targetWsId = ws?.id || workspaceId;
 
-    const [tasks, papers, pages] = await Promise.all([
-      this.prisma.task.findMany({
-        where: {
-          project: { workspaceId: targetWsId },
-          OR: [{ authorId: userId }, { assigneeId: userId }],
-        },
-        orderBy: { updatedAt: 'desc' },
-        take: limit,
-        select: { id: true, title: true, projectId: true, updatedAt: true },
-      }),
-      this.prisma.catalogItem.findMany({
-        where: {
-          workspaceId: targetWsId,
-          uploadedById: userId,
-          deletedAt: null,
-        },
-        orderBy: { updatedAt: 'desc' },
-        take: limit,
-        select: { id: true, title: true, updatedAt: true },
-      }),
-      this.prisma.page.findMany({
-        where: {
-          deletedAt: null,
-          OR: [
-            { workspaceId: targetWsId, authorId: userId },
-            { project: { workspaceId: targetWsId }, authorId: userId },
-          ],
-        },
-        orderBy: { updatedAt: 'desc' },
-        take: limit,
-        select: { id: true, title: true, projectId: true, updatedAt: true },
-      }),
-    ]);
+    const { tasks, papers, pages } =
+      await this.activityRepo.findFallbackRecentItems(targetWsId, userId, limit);
 
     const combined: RecentItemResponse[] = [
       ...tasks.map((t) => ({

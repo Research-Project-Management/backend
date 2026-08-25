@@ -4,13 +4,13 @@ import {
   BadRequestException,
   ForbiddenException,
   Optional,
+  Logger,
 } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FileRepository } from './file.repository';
 import { R2Service } from '../r2/r2.service';
 import { Prisma, EntityType } from '@prisma/client';
-import { PrismaService } from '@/core/database/prisma.service';
 import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
 import {
   PresignDto,
@@ -31,10 +31,11 @@ export type FormattedFile<
 
 @Injectable()
 export class FileService {
+  private readonly logger = new Logger(FileService.name);
+
   constructor(
     private readonly fileRepo: FileRepository,
     private readonly r2Service: R2Service,
-    private readonly prisma: PrismaService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
   ) {}
 
@@ -43,10 +44,7 @@ export class FileService {
     scope: { workspaceId?: string; projectId?: string; pageId?: string },
   ): Promise<void> {
     if (scope.pageId) {
-      const page = await this.prisma.page.findUnique({
-        where: { id: scope.pageId },
-        select: { projectId: true, workspaceId: true },
-      });
+      const page = await this.fileRepo.findPageScope(scope.pageId);
       if (!page) throw new NotFoundException('Page not found');
       return this.assertCanWriteScope(userId, {
         projectId: page.projectId || undefined,
@@ -55,39 +53,29 @@ export class FileService {
     }
 
     if (scope.projectId) {
-      const project = await this.prisma.project.findUnique({
-        where: { id: scope.projectId },
-        select: { workspaceId: true },
-      });
+      const project = await this.fileRepo.findProjectScope(scope.projectId);
       if (!project) throw new NotFoundException('Project not found');
 
-      const workspaceMember = await this.prisma.workspaceMember.findFirst({
-        where: { workspaceId: project.workspaceId, userId },
-        select: { role: true },
-      });
-      if (workspaceMember?.role === 'owner' || workspaceMember?.role === 'admin') {
-        return;
-      }
+      const wsRole = await this.fileRepo.findWorkspaceMemberRole(
+        project.workspaceId,
+        userId,
+      );
+      if (wsRole === 'owner' || wsRole === 'admin') return;
 
-      const projectMember = await this.prisma.projectMember.findFirst({
-        where: { projectId: scope.projectId, userId },
-        select: { role: true },
-      });
-      if (
-        projectMember?.role === 'admin' ||
-        projectMember?.role === 'contributor'
-      ) {
-        return;
-      }
+      const projRole = await this.fileRepo.findProjectMemberRole(
+        scope.projectId,
+        userId,
+      );
+      if (projRole === 'admin' || projRole === 'contributor') return;
       throw new ForbiddenException('Insufficient file permissions');
     }
 
     if (scope.workspaceId) {
-      const member = await this.prisma.workspaceMember.findFirst({
-        where: { workspaceId: scope.workspaceId, userId },
-        select: { role: true },
-      });
-      if (member && member.role !== 'viewer') return;
+      const role = await this.fileRepo.findWorkspaceMemberRole(
+        scope.workspaceId,
+        userId,
+      );
+      if (role && role !== 'viewer') return;
       throw new ForbiddenException('Insufficient file permissions');
     }
   }
@@ -237,6 +225,9 @@ export class FileService {
       }
     } catch (dbErr) {
       // Database record creation is optional for raw asset uploads (e.g. avatars, temp files)
+      this.logger.warn(
+        `Failed to create database record for uploaded file: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`,
+      );
     }
 
     return {
@@ -398,6 +389,12 @@ export class FileService {
     );
 
     return { message: 'File shared successfully', share };
+  }
+
+  async getShareSettings(fileId: string, userId: string) {
+    await this.assertCanAccessFile(userId, fileId, 'read');
+    const shares = await this.fileRepo.getFileShares(fileId);
+    return { shares };
   }
 
   // ── Scoped Queries ──────────────────────────────────────────────────────────

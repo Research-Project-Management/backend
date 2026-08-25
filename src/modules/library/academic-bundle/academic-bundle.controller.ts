@@ -1,31 +1,34 @@
-import { Controller, Get, Param, UseGuards } from '@nestjs/common';
+﻿import { Controller, Get, Param, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { LibraryService } from './library.service';
-import { JwtAuthGuard } from '@/modules/iam/authentication';
+import { AcademicBundleService } from './academic-bundle.service';
+import { JwtAuthGuard } from '@/modules/iam/authn';
 import {
   WorkspaceRoleGuard,
   WorkspaceRoles,
-} from '@/modules/iam/authorization';
+} from '@/modules/iam/authz';
 
 @ApiTags('Library - Unified Facade')
 @ApiBearerAuth('JWT-auth')
-@Controller('api/library')
+@Controller('api')
 @UseGuards(JwtAuthGuard)
-export class LibraryController {
-  constructor(private readonly libraryService: LibraryService) {}
+export class AcademicBundleController {
+  constructor(private readonly academicBundleService: AcademicBundleService) {}
 
-  @Get(':workspaceId/catalog/:itemId/bundle')
+  @Get([
+    'workspace/:workspaceId/library/items/:itemId/bundle',
+    'library/:workspaceId/catalog/:itemId/bundle',
+  ])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({
     summary:
       'Deep Facade: Get unified academic bundle for a catalog item (Metadata, CSL APA/IEEE, PDF Annotations, Related Items) in a single call',
   })
-  async getCatalogItemAcademicBundle(
+  async getItemAcademicBundle(
     @Param('workspaceId') workspaceId: string,
     @Param('itemId') itemId: string,
   ) {
-    return this.libraryService.getCatalogItemAcademicBundle(
+    return this.academicBundleService.getItemAcademicBundle(
       workspaceId,
       itemId,
     );

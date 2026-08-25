@@ -1,5 +1,6 @@
-import { IsString, IsNotEmpty } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsArray, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { LibraryCreatorInput } from '../metadata.types';
 
 export class ResolveQueryDto {
   @ApiProperty({
@@ -20,4 +21,30 @@ export class ResolveDoiDto {
   @IsString()
   @IsNotEmpty()
   doi!: string;
+}
+
+export class NormalizeMetadataDto {
+  @ApiPropertyOptional({
+    description: 'Item type label/key to normalize (e.g. Journal Article, journalArticle)',
+  })
+  @IsString()
+  @IsOptional()
+  itemType?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Zotero-style creators to normalize into authors/editors/otherCreators',
+  })
+  @IsArray()
+  @IsOptional()
+  creators?: LibraryCreatorInput[] | null;
+
+  @ApiPropertyOptional({ description: 'Tags/labels to trim and dedupe' })
+  @IsArray()
+  @IsOptional()
+  tags?: Array<string | null | undefined> | null;
+
+  @ApiPropertyOptional({ description: 'Publication date string for year extraction' })
+  @IsString()
+  @IsOptional()
+  date?: string | null;
 }

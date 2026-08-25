@@ -1,4 +1,4 @@
-import {
+﻿import {
   Controller,
   Get,
   Post,
@@ -17,17 +17,26 @@ import {
   FormatCitationQueryDto,
   FormatBatchCitationDto,
 } from './dto/citation.dto';
-import { JwtAuthGuard } from '@/modules/iam/authentication';
-import { CurrentUser } from '@/modules/iam/authentication';
+import { JwtAuthGuard } from '@/modules/iam/authn';
+import { CurrentUser } from '@/modules/iam/authn';
+import {
+  WorkspaceRoleGuard,
+  WorkspaceRoles,
+} from '@/modules/iam/authz';
 
 @ApiTags('Library - Citations')
 @ApiBearerAuth('JWT-auth')
-@Controller('api/library/citations')
-@UseGuards(JwtAuthGuard)
+@Controller('api')
+@UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
 export class CitationController {
   constructor(private readonly citationService: CitationService) {}
 
-  @Get(':workspaceId/items/:itemId/citation')
+  @Get([
+    'workspace/:workspaceId/library/citations/items/:itemId',
+    'workspace/:workspaceId/library/items/:itemId/citation',
+    'library/citations/:workspaceId/items/:itemId/citation',
+  ])
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({
     summary:
       'Format catalog item into standard citation style (APA, IEEE, Nature, Harvard, Chicago, MLA, Vancouver)',
@@ -44,7 +53,11 @@ export class CitationController {
     );
   }
 
-  @Post(':workspaceId/batch')
+  @Post([
+    'workspace/:workspaceId/library/citations/batch',
+    'library/citations/:workspaceId/batch',
+  ])
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Batch format multiple items into standard citation style',
@@ -56,7 +69,11 @@ export class CitationController {
     return this.citationService.formatBatchCitations(workspaceId, dto);
   }
 
-  @Get(':workspaceId/bibtex')
+  @Get([
+    'workspace/:workspaceId/library/citations/bibtex',
+    'library/citations/:workspaceId/bibtex',
+  ])
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({
     summary: 'Export workspace or collection items to BibTeX format',
   })
@@ -70,7 +87,11 @@ export class CitationController {
     );
   }
 
-  @Post(':workspaceId/import-bibtex')
+  @Post([
+    'workspace/:workspaceId/library/citations/import-bibtex',
+    'library/citations/:workspaceId/import-bibtex',
+  ])
+  @WorkspaceRoles('owner', 'admin', 'member')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Bulk import raw BibTeX text entries into workspace library',
@@ -83,14 +104,22 @@ export class CitationController {
     return this.citationService.importBibtex(workspaceId, userId, dto);
   }
 
-  @Post('parse-ris')
+  @Post([
+    'workspace/:workspaceId/library/citations/parse-ris',
+    'library/citations/parse-ris',
+  ])
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Parse raw RIS text without saving' })
   async parseRis(@Body('content') content: string) {
     return this.citationService.parseRis(content);
   }
 
-  @Post(':workspaceId/import-ris')
+  @Post([
+    'workspace/:workspaceId/library/citations/import-ris',
+    'library/citations/:workspaceId/import-ris',
+  ])
+  @WorkspaceRoles('owner', 'admin', 'member')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Bulk import RIS text entries into workspace library',
@@ -103,7 +132,12 @@ export class CitationController {
     return this.citationService.importRis(workspaceId, userId, dto);
   }
 
-  @Get(':workspaceId/items/:itemId/ris')
+  @Get([
+    'workspace/:workspaceId/library/citations/items/:itemId/ris',
+    'workspace/:workspaceId/library/items/:itemId/ris',
+    'library/citations/:workspaceId/items/:itemId/ris',
+  ])
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'Export single item into RIS format' })
   async exportRis(
     @Param('workspaceId') workspaceId: string,

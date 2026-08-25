@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PrismaService } from '@/core/database/prisma.service';
+import { PageRepository } from '../page/page.repository';
 import { CompileLatexDto, SyncIncrementalDto } from './dto/latex.dto';
 import { getErrorMessage, tryCatch } from '@/core/utils/error.util';
 
@@ -27,7 +27,7 @@ export class LatexService {
 
   constructor(
     private readonly configService: ConfigService,
-    private readonly prisma: PrismaService,
+    private readonly pageRepo: PageRepository,
   ) {
     this.latexUrl =
       this.configService.get<string>('LATEX_URL') || 'http://localhost:2918';
@@ -91,12 +91,8 @@ export class LatexService {
 
   async syncProject(rootPageId: string) {
     const [rootPage, childPages] = await Promise.all([
-      this.prisma.page.findUnique({
-        where: { id: rootPageId },
-      }),
-      this.prisma.page.findMany({
-        where: { parentPageId: rootPageId, deletedAt: null },
-      }),
+      this.pageRepo.findPageById(rootPageId),
+      this.pageRepo.findChildPages(rootPageId),
     ]);
 
     if (!rootPage) {
@@ -119,9 +115,7 @@ export class LatexService {
       };
     }
 
-    const rootPage = await this.prisma.page.findUnique({
-      where: { id: rootPageId },
-    });
+    const rootPage = await this.pageRepo.findPageById(rootPageId);
 
     if (!rootPage) {
       throw new NotFoundException('Page not found');

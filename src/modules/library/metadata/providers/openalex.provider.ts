@@ -1,6 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { getErrorMessage, tryCatch } from '../../../../core/utils/error.util';
-import { UnifiedAcademicMetadata } from '../types/metadata.types';
+import { UnifiedAcademicMetadata } from '../metadata.types';
+import { normalizeDoi } from '../canonical-identifiers.util';
+import { validateAcademicMetadata } from '../metadata.validator';
+import { createHash } from 'crypto';
 
 @Injectable()
 export class OpenAlexProvider {
@@ -12,10 +15,7 @@ export class OpenAlexProvider {
    */
   async fetchByDoi(doi: string): Promise<UnifiedAcademicMetadata | null> {
     if (!doi) return null;
-    const cleanDoi = doi
-      .replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '')
-      .replace(/^doi:\s*/i, '')
-      .trim();
+    const cleanDoi = normalizeDoi(doi) || doi.trim();
     const url = `${this.BASE_URL}/https://doi.org/${encodeURIComponent(cleanDoi)}?mailto=contact@flux.academic`;
 
     const responseResult = await tryCatch(
@@ -70,7 +70,7 @@ export class OpenAlexProvider {
     return this.transformPayload(jsonResult.value.results[0]);
   }
 
-  private transformPayload(data: any): UnifiedAcademicMetadata {
+  transformPayload(data: any): UnifiedAcademicMetadata {
     const authors: string[] = [];
     if (Array.isArray(data.authorships)) {
       for (const a of data.authorships) {
@@ -80,10 +80,7 @@ export class OpenAlexProvider {
       }
     }
 
-    let rawDoi = data.doi || data.ids?.doi;
-    if (rawDoi) {
-      rawDoi = rawDoi.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '');
-    }
+    const rawDoi = normalizeDoi(data.doi || data.ids?.doi);
 
     // Invert OpenAlex inverted index abstract if available
     let abstract: string | undefined = undefined;
@@ -130,12 +127,15 @@ export class OpenAlexProvider {
 
     const isOpenAccess = Boolean(data.open_access?.is_oa);
     const openAccessPdfUrl = data.open_access?.oa_url || undefined;
+    const rawSnapshotHash = createHash('md5')
+      .update(JSON.stringify(data))
+      .digest('hex');
 
-    return {
+    const result: UnifiedAcademicMetadata = {
       title: data.title || data.display_name || 'Untitled',
       authors,
       year: data.publication_year ? Number(data.publication_year) : null,
-      doi: rawDoi || undefined,
+      doi: rawDoi,
       journal,
       publisher,
       volume: data.biblio?.volume || undefined,
@@ -160,14 +160,17 @@ export class OpenAlexProvider {
             : 'journalArticle',
       url: rawDoi ? `https://doi.org/${rawDoi}` : data.id || undefined,
       provenance: {
-        originProvider: 'OpenLibrary',
+        originProvider: 'OpenAlex',
         resolvedAt: new Date().toISOString(),
-        canonicalId: rawDoi ? `doi:${rawDoi}` : data.id,
+        canonicalId: rawDoi ? `doi:${rawDoi}` : data.id || 'openalex:unknown',
         canonicalUrl: rawDoi ? `https://doi.org/${rawDoi}` : data.id,
         confidenceScore: 0.95,
+        rawSnapshotHash,
         isOpenAccess,
         openAccessPdfUrl,
       },
     };
+
+    return validateAcademicMetadata(result) || result;
   }
 }

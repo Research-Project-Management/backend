@@ -1,6 +1,7 @@
 import {
   Injectable,
   BadRequestException,
+  ForbiddenException,
   Logger,
   Optional,
 } from '@nestjs/common';
@@ -73,6 +74,7 @@ export class IngestionJobService {
 
     const job: IngestionJobStatus = {
       jobId,
+      userId,
       status: 'processing',
       total: items.length,
       processed: 0,
@@ -126,10 +128,45 @@ export class IngestionJobService {
    * Poll status of an async batch ingestion job.
    * Checks Redis first, then falls back to in-process Map.
    */
-  async getJobStatus(jobId: string): Promise<IngestionJobStatus> {
+  async getJobStatus(
+    jobId: string,
+    userId: string,
+  ): Promise<IngestionJobStatus> {
     const job = await this.loadJob(jobId);
     if (!job)
       throw new BadRequestException(`Ingestion job with ID ${jobId} not found`);
+    if (job.userId !== userId) {
+      throw new ForbiddenException('You do not have access to this job');
+    }
     return job;
+  }
+
+  async listUserJobs(userId: string): Promise<IngestionJobStatus[]> {
+    const jobs: IngestionJobStatus[] = [];
+    for (const job of this.localJobs.values()) {
+      if (job.userId === userId) jobs.push(job);
+    }
+    return jobs.sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+  }
+
+  async cancelJob(jobId: string, userId: string): Promise<{ success: boolean }> {
+    const job = await this.loadJob(jobId);
+    if (!job)
+      throw new BadRequestException(`Ingestion job with ID ${jobId} not found`);
+    if (job.userId !== userId) {
+      throw new ForbiddenException('You do not have access to this job');
+    }
+    // Mark as cancelled — actual processing cannot be stopped mid-flight
+    // but the job record will no longer be considered active
+    job.status = 'cancelled' as any;
+    await this.persistJob(job);
+    this.localJobs.delete(jobId);
+    if (this.redisCache?.isReady()) {
+      await this.redisCache.del(`${this.JOB_KEY_PREFIX}${jobId}`);
+    }
+    return { success: true };
   }
 }

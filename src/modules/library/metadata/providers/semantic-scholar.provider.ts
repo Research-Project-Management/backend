@@ -1,6 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { getErrorMessage, tryCatch } from '../../../../core/utils/error.util';
-import { UnifiedAcademicMetadata } from '../types/metadata.types';
+import { UnifiedAcademicMetadata } from '../metadata.types';
+import {
+  normalizeDoi,
+  normalizeArxivId,
+} from '../canonical-identifiers.util';
+import { validateAcademicMetadata } from '../metadata.validator';
+import { createHash } from 'crypto';
 
 @Injectable()
 export class SemanticScholarProvider {
@@ -79,6 +85,7 @@ export class SemanticScholarProvider {
     const jsonResult = await tryCatch(responseResult.value.json());
     if (
       !jsonResult.ok ||
+      !jsonResult.value ||
       !jsonResult.value.data ||
       jsonResult.value.data.length === 0
     ) {
@@ -88,14 +95,14 @@ export class SemanticScholarProvider {
     return this.transformPayload(jsonResult.value.data[0]);
   }
 
-  private transformPayload(data: any): UnifiedAcademicMetadata {
+  transformPayload(data: any): UnifiedAcademicMetadata {
     const authors = Array.isArray(data.authors)
       ? data.authors.map((a: any) => a.name).filter(Boolean)
       : [];
 
     const externalIds = data.externalIds || {};
-    const doi = externalIds.DOI || undefined;
-    const arxivId = externalIds.ArXiv || undefined;
+    const doi = normalizeDoi(externalIds.DOI);
+    const arxivId = normalizeArxivId(externalIds.ArXiv);
 
     let itemType = 'journalArticle';
     if (Array.isArray(data.publicationTypes)) {
@@ -131,7 +138,11 @@ export class SemanticScholarProvider {
       }
     }
 
-    return {
+    const rawSnapshotHash = createHash('md5')
+      .update(JSON.stringify(data))
+      .digest('hex');
+
+    const result: UnifiedAcademicMetadata = {
       title: data.title || 'Untitled',
       authors,
       year: data.year || null,
@@ -160,9 +171,12 @@ export class SemanticScholarProvider {
             ? `https://arxiv.org/abs/${arxivId}`
             : undefined,
         confidenceScore: doi || arxivId ? 1.0 : 0.85,
+        rawSnapshotHash,
         isOpenAccess,
         openAccessPdfUrl,
       },
     };
+
+    return validateAcademicMetadata(result) || result;
   }
 }

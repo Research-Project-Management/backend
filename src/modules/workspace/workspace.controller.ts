@@ -35,12 +35,14 @@ export class WorkspaceController {
   constructor(private readonly workspaceService: WorkspaceService) {}
 
   @Get()
+  @ApiOperation({ summary: 'List workspaces for current user' })
   async getMyWorkspaces(@CurrentUser('id') userId: string) {
     return this.workspaceService.getMyWorkspaces(userId);
   }
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Create a new workspace' })
   async createWorkspace(
     @CurrentUser('id') userId: string,
     @Body() dto: CreateWorkspaceDto,
@@ -50,6 +52,7 @@ export class WorkspaceController {
 
   @Post('join/code')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Join a workspace via invite code' })
   async joinWorkspace(
     @CurrentUser('id') userId: string,
     @Body() dto: JoinWorkspaceDto,
@@ -60,6 +63,7 @@ export class WorkspaceController {
   @Get(':workspaceId')
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'Get workspace details by ID or slug' })
   async getWorkspace(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
@@ -70,6 +74,7 @@ export class WorkspaceController {
   @Put(':workspaceId')
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin')
+  @ApiOperation({ summary: 'Update workspace settings' })
   async updateWorkspace(
     @Param('workspaceId') workspaceId: string,
     @Body() dto: UpdateWorkspaceDto,
@@ -80,6 +85,7 @@ export class WorkspaceController {
   @Delete(':workspaceId')
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner')
+  @ApiOperation({ summary: 'Delete a workspace permanently' })
   async deleteWorkspace(@Param('workspaceId') workspaceId: string) {
     return this.workspaceService.deleteWorkspace(workspaceId);
   }
@@ -87,14 +93,15 @@ export class WorkspaceController {
   @Get(':workspaceId/members')
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'List all workspace members' })
   async getMembers(@Param('workspaceId') workspaceId: string) {
     return this.workspaceService.getMembers(workspaceId);
   }
 
   @Post(':workspaceId/members')
-  @Put(':workspaceId/add-member')
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin')
+  @ApiOperation({ summary: 'Add a member to the workspace' })
   async addMember(
     @Param('workspaceId') workspaceId: string,
     @Body() dto: AddWorkspaceMemberDto,
@@ -103,34 +110,32 @@ export class WorkspaceController {
   }
 
   @Put(':workspaceId/members/:userId')
-  @Put(':workspaceId/update-member-role')
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin')
+  @ApiOperation({ summary: 'Update workspace member role' })
   async updateMember(
     @Param('workspaceId') workspaceId: string,
-    @Param('userId') paramUserId: string,
+    @Param('userId') userId: string,
     @Body() dto: UpdateWorkspaceMemberDto,
   ) {
-    const targetUserId = paramUserId || dto.userId || '';
-    return this.workspaceService.updateMember(workspaceId, targetUserId, dto);
+    return this.workspaceService.updateMember(workspaceId, userId, dto);
   }
 
   @Delete(':workspaceId/members/:userId')
-  @Put(':workspaceId/remove-member')
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin')
+  @ApiOperation({ summary: 'Remove a member from the workspace' })
   async removeMember(
     @Param('workspaceId') workspaceId: string,
-    @Param('userId') paramUserId: string,
-    @Body() body?: { userId?: string },
+    @Param('userId') userId: string,
   ) {
-    const targetUserId = paramUserId || body?.userId;
-    return this.workspaceService.removeMember(workspaceId, targetUserId!);
+    return this.workspaceService.removeMember(workspaceId, userId);
   }
 
   @Post(':workspaceId/leave')
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'Leave a workspace' })
   async leaveWorkspace(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,

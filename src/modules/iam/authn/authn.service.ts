@@ -498,6 +498,78 @@ export class AuthnService {
     }
     return { message: 'Logged out successfully' };
   }
+
+  // ─── Password Reset Flow ──────────────────────────────────────────────────
+
+  private static readonly RESET_TOKEN_PREFIX = 'flux:iam:pwd_reset';
+  private static readonly RESET_TOKEN_TTL_S = 60 * 60; // 1 hour
+
+  /**
+   * Generate a cryptographically secure reset token, store its hash in Redis,
+   * and return the raw token so the caller can include it in an email link.
+   * The actual email dispatch is the responsibility of a Notification/Mailer
+   * service (not yet wired) — the token is logged at DEBUG level for dev testing.
+   */
+  async forgotPassword(email: string): Promise<{ message: string; _devToken?: string }> {
+    // Always return the same generic message to prevent user enumeration.
+    const genericResponse = {
+      message: 'If this email is registered, a reset link will be sent.',
+    };
+
+    const user = await this.authnRepo.findUserByEmail(email);
+    if (!user || !user.email) return genericResponse;
+
+    // Generate a 32-byte random token (URL-safe base64)
+    const rawToken = crypto.randomBytes(32).toString('base64url');
+    const tokenHash = this.hashToken(rawToken);
+
+    const redisKey = `${AuthnService.RESET_TOKEN_PREFIX}:${tokenHash}`;
+    await this.redis.set(redisKey, { userId: user.id, email: user.email }, AuthnService.RESET_TOKEN_TTL_S);
+
+    this.logger.debug(`[dev] Password reset token for ${email}: ${rawToken}`);
+
+    // TODO: dispatch email via MailerService when available
+    // await this.mailerService.sendPasswordReset(user.email, rawToken);
+
+    return {
+      ...genericResponse,
+      // Only exposed in non-production for testing — strip in prod via response interceptor or remove when mailer is wired
+      ...(process.env.NODE_ENV !== 'production' && { _devToken: rawToken }),
+    };
+  }
+
+  /**
+   * Validate the reset token from Redis, hash the new password, update the user,
+   * and revoke the token so it cannot be reused.
+   */
+  async resetPassword(token: string, newPassword: string): Promise<{ message: string }> {
+    if (!token || !newPassword) {
+      throw new BadRequestException('Token and new password are required');
+    }
+    if (newPassword.length < 8) {
+      throw new BadRequestException('Password must be at least 8 characters');
+    }
+
+    const tokenHash = this.hashToken(token);
+    const redisKey = `${AuthnService.RESET_TOKEN_PREFIX}:${tokenHash}`;
+    const stored = await this.redis.get<{ userId: string; email: string }>(redisKey);
+
+    if (!stored) {
+      throw new BadRequestException('Reset token is invalid or has expired');
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await this.authnRepo.updateUserPassword(stored.userId, hashedPassword);
+
+    // Revoke the token immediately — single-use only
+    await this.redis.del(redisKey);
+
+    // Revoke all active refresh tokens for extra security
+    await this.authnRepo.revokeAllUserRefreshTokens(stored.userId);
+
+    this.logger.log(`Password reset completed for user ${stored.userId}`);
+    return { message: 'Password has been reset successfully.' };
+  }
 }
 
 // Backward compatibility aliases
