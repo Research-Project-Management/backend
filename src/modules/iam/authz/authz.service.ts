@@ -1,16 +1,24 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
+import { RedisCacheService } from '@/core/cache/redis-cache.service';
 import { Permission } from './enums/permissions.enum';
 import { WorkspaceRole } from './enums/workspace-role.enum';
 import { ProjectRole } from './enums/project-role.enum';
 import {
   WORKSPACE_ROLE_PERMISSIONS,
   PROJECT_ROLE_PERMISSIONS,
-} from './constants/permission-matrix';
+} from './constants/permission-matrix.constant';
+import { IAM_REDIS_KEYS } from '../constants/redis-keys.constant';
 
 @Injectable()
 export class AuthzService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(AuthzService.name);
+  private static readonly ROLE_CACHE_TTL = 600; // 10 minutes
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisCacheService,
+  ) {}
 
   /**
    * Check if a workspace role has a specific permission
@@ -42,31 +50,83 @@ export class AuthzService {
   }
 
   /**
-   * Fetch a user's role in a given workspace
+   * Fetch a user's role in a given workspace with Redis caching.
    */
   async getWorkspaceMemberRole(
     workspaceId: string,
     userId: string,
   ): Promise<WorkspaceRole | null> {
-    const member = await this.prisma.workspaceMember.findFirst({
-      where: { workspaceId, userId },
+    if (!workspaceId || !userId) return null;
+
+    const cacheKey = IAM_REDIS_KEYS.workspaceRole(workspaceId, userId);
+    const cachedRole = await this.redis.get<WorkspaceRole>(cacheKey);
+    if (cachedRole) return cachedRole;
+
+    const member = await this.prisma.workspaceMember.findUnique({
+      where: {
+        workspaceId_userId: {
+          workspaceId,
+          userId,
+        },
+      },
       select: { role: true },
     });
-    return (member?.role as WorkspaceRole) ?? null;
+    if (!member) return null;
+
+    const role = member.role as unknown as WorkspaceRole;
+    await this.redis.set(cacheKey, role, AuthzService.ROLE_CACHE_TTL);
+    return role;
   }
 
   /**
-   * Fetch a user's role in a given project
+   * Fetch a user's role in a given project with Redis caching.
    */
   async getProjectMemberRole(
     projectId: string,
     userId: string,
   ): Promise<ProjectRole | null> {
-    const member = await this.prisma.projectMember.findFirst({
-      where: { projectId, userId },
+    if (!projectId || !userId) return null;
+
+    const cacheKey = IAM_REDIS_KEYS.projectRole(projectId, userId);
+    const cachedRole = await this.redis.get<ProjectRole>(cacheKey);
+    if (cachedRole) return cachedRole;
+
+    const member = await this.prisma.projectMember.findUnique({
+      where: {
+        projectId_userId: {
+          projectId,
+          userId,
+        },
+      },
       select: { role: true },
     });
-    return (member?.role as ProjectRole) ?? null;
+    if (!member) return null;
+
+    const role = member.role as unknown as ProjectRole;
+    await this.redis.set(cacheKey, role, AuthzService.ROLE_CACHE_TTL);
+    return role;
+  }
+
+  /**
+   * Invalidate cached role for a user in a workspace.
+   */
+  async invalidateWorkspaceRoleCache(
+    workspaceId: string,
+    userId: string,
+  ): Promise<void> {
+    const cacheKey = IAM_REDIS_KEYS.workspaceRole(workspaceId, userId);
+    await this.redis.del(cacheKey);
+  }
+
+  /**
+   * Invalidate cached role for a user in a project.
+   */
+  async invalidateProjectRoleCache(
+    projectId: string,
+    userId: string,
+  ): Promise<void> {
+    const cacheKey = IAM_REDIS_KEYS.projectRole(projectId, userId);
+    await this.redis.del(cacheKey);
   }
 
   /**

@@ -40,7 +40,7 @@ describe('LatexService', () => {
     });
     if (result.success === false) {
       expect(result.fallback).toBe(true);
-      expect(result.error).toBe('LaTeX compilation fallback');
+      expect(result.error).toBe('LaTeX compiler unreachable');
     }
   });
 });

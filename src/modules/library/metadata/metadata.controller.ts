@@ -1,9 +1,10 @@
-﻿import {
+import {
   Controller,
   Post,
   Get,
   Body,
   Param,
+  Query,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -15,16 +16,13 @@ import {
   ResolveDoiDto,
   ResolveQueryDto,
 } from './dto/metadata.dto';
-import { JwtAuthGuard } from '@/modules/iam/authn';
-import {
-  WorkspaceRoleGuard,
-  WorkspaceRoles,
-} from '@/modules/iam/authz';
+
+import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
 
 @ApiTags('Library - Metadata')
 @ApiBearerAuth('JWT-auth')
 @Controller('api')
-@UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
+@UseGuards(JwtAuthGuard)
 export class MetadataController {
   constructor(private readonly metadataService: MetadataService) {}
 
@@ -32,7 +30,6 @@ export class MetadataController {
     'workspace/:workspaceId/library/metadata/item-types',
     'library/metadata/item-types',
   ])
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'List supported library metadata item types' })
   getItemTypes() {
     return this.metadataService.getItemTypes();
@@ -42,7 +39,6 @@ export class MetadataController {
     'workspace/:workspaceId/library/metadata/item-types/:itemType',
     'library/metadata/item-types/:itemType',
   ])
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({
     summary: 'Get metadata fields and creator roles for one item type',
   })
@@ -54,7 +50,6 @@ export class MetadataController {
     'workspace/:workspaceId/library/metadata/item-types/:itemType/fields',
     'library/metadata/item-types/:itemType/fields',
   ])
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'Get metadata fields for one item type' })
   getItemTypeFields(@Param('itemType') itemType: string) {
     return {
@@ -67,7 +62,6 @@ export class MetadataController {
     'workspace/:workspaceId/library/metadata/item-types/:itemType/creators',
     'library/metadata/item-types/:itemType/creators',
   ])
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'Get creator roles for one item type' })
   getItemTypeCreators(@Param('itemType') itemType: string) {
     return {
@@ -80,7 +74,6 @@ export class MetadataController {
     'workspace/:workspaceId/library/metadata/normalize',
     'library/metadata/normalize',
   ])
-  @WorkspaceRoles('owner', 'admin', 'member')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Normalize library metadata input without saving' })
   normalize(@Body() dto: NormalizeMetadataDto) {
@@ -90,8 +83,8 @@ export class MetadataController {
   @Post([
     'workspace/:workspaceId/library/metadata/resolve',
     'library/metadata/resolve',
+    'library/references/resolve',
   ])
-  @WorkspaceRoles('owner', 'admin', 'member')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
@@ -104,8 +97,8 @@ export class MetadataController {
   @Post([
     'workspace/:workspaceId/library/metadata/resolve-doi',
     'library/metadata/resolve-doi',
+    'library/references/resolve-doi',
   ])
-  @WorkspaceRoles('owner', 'admin', 'member')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Resolve academic metadata from a DOI string via CrossRef',
@@ -117,10 +110,42 @@ export class MetadataController {
   @Get([
     'workspace/:workspaceId/library/metadata/doi/:doi',
     'library/metadata/doi/:doi',
+    'library/references/doi/:doi',
   ])
-  @WorkspaceRoles('owner', 'admin', 'member')
   @ApiOperation({ summary: 'Lookup academic metadata from a DOI' })
   async resolveDoiParam(@Param('doi') doi: string) {
-    return this.metadataService.resolve(doi);
+    const result = await this.metadataService.resolve(doi);
+    const work = result?.metadata || null;
+    return {
+      ...result,
+      work,
+      metadata: work,
+    };
+  }
+
+  @Get([
+    'library/references/crossref/search',
+    'library/references/search',
+    'workspace/:workspaceId/library/references/search',
+  ])
+  @ApiOperation({
+    summary:
+      'Search academic literature metadata via CrossRef/OpenAlex/SemanticScholar',
+  })
+  async searchReferences(
+    @Query('query') query: string,
+    @Query('rows') _rows?: number,
+  ) {
+    if (!query) {
+      return { works: [], totalResults: 0, work: null };
+    }
+    const result = await this.metadataService.resolve(query);
+    const work = result?.metadata || null;
+    return {
+      works: work ? [work] : [],
+      totalResults: work ? 1 : 0,
+      work,
+      metadata: work,
+    };
   }
 }

@@ -95,4 +95,3 @@ describe('JwtAuthGuard', () => {
     expect(request.user).toEqual(payload);
   });
 });
-

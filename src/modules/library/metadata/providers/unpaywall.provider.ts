@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { tryCatch } from '../../../../core/utils/error.util';
-import { normalizeDoi } from '../canonical-identifiers.util';
+import { getErrorMessage, tryCatch } from '@/core/utils/error.util';
+import { normalizeDoi } from '../utils/metadata.util';
 
 export interface UnpaywallResult {
   doi: string;

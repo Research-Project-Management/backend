@@ -52,6 +52,7 @@ export class UserService {
     await this.userRepo.updateUser(userId, {
       password: hashedPassword,
     });
+    await this.userRepo.revokeAllUserRefreshTokens(userId);
 
     return { message: 'Password updated successfully' };
   }
@@ -62,7 +63,8 @@ export class UserService {
   }
 
   async deleteMe(userId: string) {
-    await this.userRepo.deleteUser(userId);
+    await this.userRepo.softDelete(userId);
+    await this.userRepo.revokeAllUserRefreshTokens(userId);
     return { success: true, message: 'Account deleted successfully' };
   }
 }

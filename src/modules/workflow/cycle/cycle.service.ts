@@ -17,6 +17,8 @@ import {
 } from './dto/cycle.dto';
 import { CycleStatus, CyclePhase, Prisma, EntityType } from '@prisma/client';
 import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
+import { RedisCacheService } from '@/core/cache/redis-cache.service';
+import { WORKFLOW_REDIS_KEYS } from '../constants/redis-keys.constant';
 
 @Injectable()
 export class CycleService {
@@ -25,14 +27,25 @@ export class CycleService {
     @Inject(forwardRef(() => TaskService))
     private readonly taskService: TaskService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
+    @Optional() private readonly cache?: RedisCacheService,
   ) {}
+
+  private async invalidateCycleCache(projectId: string, cycleId?: string) {
+    if (!this.cache) return;
+    await Promise.all([
+      this.cache.del(WORKFLOW_REDIS_KEYS.projectCycles(projectId)),
+      cycleId
+        ? this.cache.del(WORKFLOW_REDIS_KEYS.cycle(cycleId))
+        : Promise.resolve(),
+    ]);
+  }
 
   private calculateStats(
     tasks: Array<{ columnId: string; completed?: boolean }>,
   ) {
     const total = tasks.length;
     const completed = tasks.filter(
-      (t) => t.columnId === 'done' || t.completed === true,
+      (taskItem) => taskItem.columnId === 'done' || taskItem.completed === true,
     ).length;
     const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
     return {
@@ -43,15 +56,35 @@ export class CycleService {
   }
 
   async getCycles(projectId: string) {
+    const cacheKey = WORKFLOW_REDIS_KEYS.projectCycles(projectId);
+
+    if (this.cache) {
+      return this.cache.wrap(
+        cacheKey,
+        async () => {
+          const cycles = await this.cycleRepo.findProjectCycles(projectId);
+          return { cycles };
+        },
+        3600,
+      );
+    }
+
     const cycles = await this.cycleRepo.findProjectCycles(projectId);
     return { cycles };
   }
 
   async getCycle(cycleId: string) {
-    const cycle = await this.cycleRepo.findCycleById(cycleId);
+    const cacheKey = WORKFLOW_REDIS_KEYS.cycle(cycleId);
+    let cycle = this.cache ? await this.cache.get<any>(cacheKey) : null;
 
     if (!cycle) {
-      throw new NotFoundException('Cycle not found');
+      cycle = await this.cycleRepo.findCycleById(cycleId);
+      if (!cycle) {
+        throw new NotFoundException('Cycle not found');
+      }
+      if (this.cache) {
+        await this.cache.set(cacheKey, cycle, 1800);
+      }
     }
 
     return { cycle };
@@ -65,9 +98,11 @@ export class CycleService {
       endDate: dto.endDate ? new Date(dto.endDate) : null,
       status: dto.status || CycleStatus.planned,
       phase: dto.phase || CyclePhase.custom,
-      projectId,
-      authorId: userId,
+      project: { connect: { id: projectId } },
+      author: { connect: { id: userId } },
     });
+
+    await this.invalidateCycleCache(projectId, cycle.id);
 
     this.eventEmitter?.emit(
       'cycle.created',
@@ -84,6 +119,11 @@ export class CycleService {
   }
 
   async updateCycle(cycleId: string, dto: UpdateCycleDto) {
+    const existing = await this.cycleRepo.findCycleById(cycleId);
+    if (!existing) {
+      throw new NotFoundException('Cycle not found');
+    }
+
     const isCompleting = dto.status === CycleStatus.completed;
     let statsAtCompletion: any = undefined;
     let endedAt: Date | undefined = undefined;
@@ -111,6 +151,8 @@ export class CycleService {
       ...(endedAt !== undefined && { endedAt }),
     });
 
+    await this.invalidateCycleCache(existing.projectId, cycleId);
+
     this.eventEmitter?.emit(
       'cycle.updated',
       new DomainActivityEvent({
@@ -131,7 +173,8 @@ export class CycleService {
       throw new NotFoundException('Cycle not found');
     }
 
-    await this.cycleRepo.deleteCycle(cycleId);
+    await this.cycleRepo.softDeleteCycle(cycleId);
+    await this.invalidateCycleCache(existing.projectId, cycleId);
 
     this.eventEmitter?.emit(
       'cycle.deleted',
@@ -144,7 +187,16 @@ export class CycleService {
       }),
     );
 
-    return { message: 'Cycle deleted successfully' };
+    return { message: 'Cycle soft-deleted successfully' };
+  }
+
+  async restoreCycle(cycleId: string) {
+    const restored = await this.cycleRepo.restoreCycle(cycleId);
+    await this.invalidateCycleCache(restored.projectId, cycleId);
+    return {
+      message: 'Cycle restored successfully',
+      cycle: restored,
+    };
   }
 
   async addTask(cycleId: string, taskId: string) {
@@ -213,6 +265,15 @@ export class CycleService {
       endedAt: new Date(),
       statsAtCompletion: stats as Prisma.InputJsonValue,
     });
+
+    await Promise.all([
+      this.invalidateCycleCache(cycle.projectId, cycleId),
+      ...(dto.targetCycleId
+        ? [this.invalidateCycleCache(cycle.projectId, dto.targetCycleId)]
+        : []),
+      this.cache?.del(WORKFLOW_REDIS_KEYS.projectTasks(cycle.projectId)),
+      this.cache?.del(`flux:proj:overview:${cycle.projectId}`),
+    ]);
 
     this.eventEmitter?.emit(
       'cycle.completed',

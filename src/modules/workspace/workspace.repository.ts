@@ -1,6 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
-import { Prisma, WorkspaceMemberRole } from '@prisma/client';
+import { Prisma, WorkspaceMemberRole, Workspace } from '@prisma/client';
+import {
+  IWorkspaceRepository,
+  WorkspaceWithMembers,
+} from './types/workspace-repository.interface';
 
 const USER_SELECT = {
   id: true,
@@ -9,25 +13,18 @@ const USER_SELECT = {
   avatar: true,
 } as const;
 
-export type WorkspaceWithMembers = Prisma.WorkspaceGetPayload<{
-  include: {
-    members: {
-      include: {
-        user: {
-          select: typeof USER_SELECT;
-        };
-      };
-    };
-  };
-}>;
-
 @Injectable()
-export class WorkspaceRepository {
+export class WorkspaceRepository implements IWorkspaceRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findUserWorkspaces(userId: string) {
+  async findUserWorkspaces(userId: string): Promise<WorkspaceWithMembers[]> {
     const members = await this.prisma.workspaceMember.findMany({
-      where: { userId },
+      where: {
+        userId,
+        workspace: {
+          deletedAt: null,
+        },
+      },
       include: {
         workspace: {
           include: {
@@ -44,12 +41,11 @@ export class WorkspaceRepository {
     return members.map((m) => m.workspace);
   }
 
-  async findWorkspaceByIdOrUrl(
-    workspaceIdOrUrl: string,
-  ): Promise<WorkspaceWithMembers | null> {
+  async findById(id: string): Promise<WorkspaceWithMembers | null> {
     return this.prisma.workspace.findFirst({
       where: {
-        OR: [{ id: workspaceIdOrUrl }, { url: workspaceIdOrUrl }],
+        id,
+        deletedAt: null,
       },
       include: {
         members: {
@@ -61,15 +57,63 @@ export class WorkspaceRepository {
     });
   }
 
+  async findBySlug(slug: string): Promise<WorkspaceWithMembers | null> {
+    return this.prisma.workspace.findFirst({
+      where: {
+        OR: [{ slug }, { url: slug }],
+        deletedAt: null,
+      },
+      include: {
+        members: {
+          include: {
+            user: { select: USER_SELECT },
+          },
+        },
+      },
+    });
+  }
+
+  async findByIdOrSlug(idOrSlug: string): Promise<WorkspaceWithMembers | null> {
+    return this.prisma.workspace.findFirst({
+      where: {
+        OR: [{ id: idOrSlug }, { slug: idOrSlug }, { url: idOrSlug }],
+        deletedAt: null,
+      },
+      include: {
+        members: {
+          include: {
+            user: { select: USER_SELECT },
+          },
+        },
+      },
+    });
+  }
+
+  async findWorkspaceByIdOrUrl(
+    workspaceIdOrUrl: string,
+  ): Promise<WorkspaceWithMembers | null> {
+    return this.findByIdOrSlug(workspaceIdOrUrl);
+  }
+
   async findWorkspaceByUrl(url: string) {
-    return this.prisma.workspace.findUnique({
-      where: { url },
+    return this.prisma.workspace.findFirst({
+      where: {
+        OR: [{ url }, { slug: url }],
+        deletedAt: null,
+      },
     });
   }
 
   async findWorkspaceByInviteCode(inviteCode: string) {
-    return this.prisma.workspace.findUnique({
-      where: { inviteCode },
+    return this.findByInviteCode(inviteCode);
+  }
+
+  async findByInviteCode(inviteCode: string): Promise<Workspace | null> {
+    return this.prisma.workspace.findFirst({
+      where: {
+        inviteCode,
+        deletedAt: null,
+      },
     });
   }
 
@@ -105,10 +149,26 @@ export class WorkspaceRepository {
     });
   }
 
-  async deleteWorkspace(id: string) {
-    return this.prisma.workspace.delete({
+  async softDeleteWorkspace(id: string): Promise<Workspace> {
+    return this.prisma.workspace.update({
       where: { id },
+      data: {
+        deletedAt: new Date(),
+      },
     });
+  }
+
+  async restoreWorkspace(id: string): Promise<Workspace> {
+    return this.prisma.workspace.update({
+      where: { id },
+      data: {
+        deletedAt: null,
+      },
+    });
+  }
+
+  async deleteWorkspace(id: string) {
+    return this.softDeleteWorkspace(id);
   }
 
   async findMembers(workspaceId: string) {
@@ -117,6 +177,7 @@ export class WorkspaceRepository {
       include: {
         user: { select: USER_SELECT },
       },
+      orderBy: { joinedAt: 'asc' },
     });
   }
 
@@ -136,7 +197,7 @@ export class WorkspaceRepository {
 
   async countOwners(workspaceId: string): Promise<number> {
     return this.prisma.workspaceMember.count({
-      where: { workspaceId, role: 'owner' },
+      where: { workspaceId, role: WorkspaceMemberRole.owner },
     });
   }
 
@@ -176,8 +237,8 @@ export class WorkspaceRepository {
     });
   }
 
-  async deleteMember(workspaceId: string, userId: string) {
-    return this.prisma.workspaceMember.delete({
+  async deleteMember(workspaceId: string, userId: string): Promise<void> {
+    await this.prisma.workspaceMember.delete({
       where: {
         workspaceId_userId: {
           workspaceId,
@@ -190,6 +251,7 @@ export class WorkspaceRepository {
   async findUserByEmail(email: string) {
     return this.prisma.user.findUnique({
       where: { email: email.toLowerCase() },
+      select: { id: true, email: true },
     });
   }
 
@@ -199,6 +261,7 @@ export class WorkspaceRepository {
         workspaceId,
         name: { contains: query, mode: 'insensitive' },
         isActive: true,
+        deletedAt: null,
       },
       select: { id: true, name: true, avatar: true, updatedAt: true },
       take: 10,
@@ -208,7 +271,8 @@ export class WorkspaceRepository {
   async searchTasks(workspaceId: string, query: string) {
     return this.prisma.task.findMany({
       where: {
-        project: { workspaceId },
+        project: { workspaceId, deletedAt: null },
+        deletedAt: null,
         OR: [
           { title: { contains: query, mode: 'insensitive' } },
           { identifier: { contains: query, mode: 'insensitive' } },
@@ -306,5 +370,11 @@ export class WorkspaceRepository {
       },
       take: 10,
     });
+  }
+
+  async withTransaction<T>(
+    fn: (tx: Prisma.TransactionClient) => Promise<T>,
+  ): Promise<T> {
+    return this.prisma.$transaction(fn);
   }
 }

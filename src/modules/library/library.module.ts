@@ -1,30 +1,60 @@
 import { Module } from '@nestjs/common';
-import { CatalogModule } from './catalog/catalog.module';
+import { ItemsModule } from './items/items.module';
 import { CollectionsModule } from './collections/collections.module';
-import { IngestionModule } from './ingestion/ingestion.module';
-import { MetadataModule } from './metadata/metadata.module';
-import { CitationModule } from './citation/citation.module';
+import { TranslationModule } from './translation/translation.module';
+import { CiteModule } from './cite/cite.module';
 import { AttachmentsModule } from './attachments/attachments.module';
-import { KnowledgeModule } from './knowledge/knowledge.module';
-import { QualityModule } from './quality/quality.module';
+import { MetadataModule } from './metadata/metadata.module';
+import { AnnotationsModule } from './annotations/annotations.module';
+import { NotesModule } from './notes/notes.module';
 import { SearchModule } from './search/search.module';
-import { AcademicBundleModule } from './academic-bundle/academic-bundle.module';
-import { LibraryReportModule } from './report/report.module';
+import { RelationsModule } from './relations/relations.module';
+import { QualityModule } from './quality/quality.module';
+import { ReportModule } from './report/report.module';
+import { ContextModule } from './context/context.module';
+import { SyncModule } from './sync/sync.module';
+
+import { APP_INTERCEPTOR } from '@nestjs/core';
+import { LibraryDeprecationInterceptor } from './common/library-deprecation.interceptor';
 
 @Module({
   imports: [
-    CatalogModule,
+    ItemsModule,
     CollectionsModule,
-    IngestionModule,
+    TranslationModule,
     MetadataModule,
-    CitationModule,
+    CiteModule,
     AttachmentsModule,
-    KnowledgeModule,
-    QualityModule,
+    NotesModule,
+    AnnotationsModule,
     SearchModule,
-    AcademicBundleModule,
-    LibraryReportModule,
+    RelationsModule,
+    QualityModule,
+    ReportModule,
+    ContextModule,
+    SyncModule,
   ],
-  exports: [AcademicBundleModule, LibraryReportModule],
+  providers: [
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: LibraryDeprecationInterceptor,
+    },
+  ],
+  exports: [
+    ItemsModule,
+    CollectionsModule,
+    TranslationModule,
+    MetadataModule,
+    CiteModule,
+    AttachmentsModule,
+    NotesModule,
+    AnnotationsModule,
+    SearchModule,
+    RelationsModule,
+    QualityModule,
+    ReportModule,
+    ContextModule,
+    SyncModule,
+  ],
 })
 export class LibraryModule {}

@@ -1,9 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { CatalogService } from '@/modules/library/catalog/catalog.service';
-import { CatalogRepository } from '@/modules/library/catalog/catalog.repository';
+import { ItemsService as CatalogService } from '@/modules/library/items/items.service';
+import { ItemsRepository as CatalogRepository } from '@/modules/library/items/items.repository';
 import { FileService } from '@/modules/storage/file/file.service';
-import { BibtexFormatter } from '@/modules/library/citation/formatters/bibtex.formatter';
-import { IngestionService } from '@/modules/library/ingestion/ingestion.service';
+import { BibtexFormatter } from '@/modules/library/cite/formatters/bibtex.formatter';
+import { TranslationService as IngestionService } from '@/modules/library/translation/translation.service';
 
 describe('CatalogService', () => {
   let service: CatalogService;
@@ -25,18 +25,38 @@ describe('CatalogService', () => {
               },
             },
             resolveWorkspace: jest.fn().mockResolvedValue({ id: 'ws-1' }),
+            resolveWorkspaceId: jest.fn().mockResolvedValue('ws-1'),
             resolveUniqueCitationKey: jest
               .fn()
               .mockResolvedValue('vaswani2017attention'),
             findItems: jest.fn(),
             countPapers: jest.fn(),
             findItemById: jest.fn(),
+            createItem: jest.fn().mockImplementation((data) =>
+              Promise.resolve({
+                id: 'p-1',
+                title: data.title,
+                authors: data.authors || [],
+                year: data.year || null,
+                citationKey: data.citationKey || 'vaswani2017attention',
+                fileUrl: data.fileUrl || '',
+                filename: data.filename || '',
+                uploadedBy: {
+                  id: 'user-1',
+                  name: 'Alice',
+                  email: 'alice@test.com',
+                  avatar: null,
+                },
+                collection: null,
+              }),
+            ),
             createPaper: jest.fn(),
             updatePaper: jest.fn(),
             createAttachment: jest.fn(),
             deleteAttachment: jest.fn(),
           },
         },
+
         {
           provide: FileService,
           useValue: {
@@ -59,20 +79,22 @@ describe('CatalogService', () => {
         {
           provide: IngestionService,
           useValue: {
-            ingest: jest.fn().mockImplementation(async (userId, dto) => ({
-              id: 'p-1',
-              title: dto.title,
-              authors: dto.authors || [],
-              year: dto.year || null,
-              citationKey: dto.citationKey || 'vaswani2017attention',
-              paper: {
+            ingest: jest.fn().mockImplementation((_userId, dto) =>
+              Promise.resolve({
                 id: 'p-1',
                 title: dto.title,
                 authors: dto.authors || [],
                 year: dto.year || null,
                 citationKey: dto.citationKey || 'vaswani2017attention',
-              },
-            })),
+                paper: {
+                  id: 'p-1',
+                  title: dto.title,
+                  authors: dto.authors || [],
+                  year: dto.year || null,
+                  citationKey: dto.citationKey || 'vaswani2017attention',
+                },
+              }),
+            ),
           },
         },
       ],
@@ -97,20 +119,5 @@ describe('CatalogService', () => {
 
     expect(result.paper?.title).toBe('Attention is All You Need');
     expect(result.paper?.id).toBe('p-1');
-  });
-
-  it('should export BibTeX correctly', async () => {
-    (repo.findItemById as jest.Mock).mockResolvedValue({
-      id: 'p-1',
-      title: 'Deep Residual Learning',
-      authors: ['He', 'Zhang'],
-      year: 2016,
-      journal: 'CVPR',
-      citationKey: 'he2016deep',
-    });
-
-    const bibtex = await service.exportBibtex('p-1');
-    expect(bibtex).toContain('@article{he2016deep,');
-    expect(bibtex).toContain('title = {Deep Residual Learning}');
   });
 });

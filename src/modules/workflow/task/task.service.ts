@@ -4,6 +4,7 @@ import {
   BadRequestException,
   Optional,
 } from '@nestjs/common';
+import * as crypto from 'crypto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { TaskRepository } from './task.repository';
 import {
@@ -12,14 +13,77 @@ import {
   ReorderTaskDto,
   BulkUpdateTaskDto,
 } from './dto/task.dto';
-import { TaskPriority, Prisma, EntityType } from '@prisma/client';
-import { parseTaskColumns } from '@/core/types/json-fields.type';
+import {
+  TaskPriority,
+  TaskRecurrence,
+  TaskReminder,
+  Prisma,
+  EntityType,
+} from '@prisma/client';
+import { parseTaskColumns } from '@/modules/project/types/project.types';
 import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
+import { RedisCacheService } from '@/core/cache/redis-cache.service';
+import { WORKFLOW_REDIS_KEYS } from '../constants/redis-keys.constant';
+
+const PRIORITY_MAP: Record<string, TaskPriority> = {
+  none: TaskPriority.none,
+  low: TaskPriority.low,
+  medium: TaskPriority.medium,
+  high: TaskPriority.high,
+  urgent: TaskPriority.urgent,
+};
+
+const mapPriority = (priority?: string): TaskPriority => {
+  return priority
+    ? PRIORITY_MAP[priority] || TaskPriority.none
+    : TaskPriority.none;
+};
+
+const RECURRENCE_MAP: Record<string, TaskRecurrence> = {
+  none: TaskRecurrence.none,
+  daily: TaskRecurrence.daily,
+  'mon-fri': TaskRecurrence.mon_fri,
+  mon_fri: TaskRecurrence.mon_fri,
+  weekly: TaskRecurrence.weekly,
+  'monthly-day': TaskRecurrence.monthly_day,
+  monthly_day: TaskRecurrence.monthly_day,
+  'monthly-week': TaskRecurrence.monthly_week,
+  monthly_week: TaskRecurrence.monthly_week,
+};
+
+const mapRecurrence = (rec?: string): TaskRecurrence => {
+  return rec && RECURRENCE_MAP[rec] ? RECURRENCE_MAP[rec] : TaskRecurrence.none;
+};
+
+const REMINDER_MAP: Record<string, TaskReminder> = {
+  none: TaskReminder.none,
+  'at-time': TaskReminder.at_time,
+  at_time: TaskReminder.at_time,
+  '5m': TaskReminder.m5,
+  m5: TaskReminder.m5,
+  '10m': TaskReminder.m10,
+  m10: TaskReminder.m10,
+  '15m': TaskReminder.m15,
+  m15: TaskReminder.m15,
+  '1h': TaskReminder.h1,
+  h1: TaskReminder.h1,
+  '2h': TaskReminder.h2,
+  h2: TaskReminder.h2,
+  '1day': TaskReminder.d1,
+  d1: TaskReminder.d1,
+  '2day': TaskReminder.d2,
+  d2: TaskReminder.d2,
+};
+
+const mapReminder = (rem?: string): TaskReminder => {
+  return rem && REMINDER_MAP[rem] ? REMINDER_MAP[rem] : TaskReminder.d1;
+};
 
 export interface TaskResponse {
   id: string;
   _id: string;
   identifier?: string | null;
+  sequenceNumber?: number | null;
   title: string;
   content: string;
   description: string;
@@ -31,6 +95,7 @@ export interface TaskResponse {
   checklists: any;
   completed: boolean;
   rank: number;
+  timeSpent?: number | null;
   projectId: string;
   authorId: string;
   assigneeId?: any;
@@ -51,431 +116,486 @@ export class TaskService {
   constructor(
     private readonly taskRepo: TaskRepository,
     @Optional() private readonly eventEmitter?: EventEmitter2,
+    @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
-  private formatTask(t: any): TaskResponse | null {
-    if (!t) return null;
+  private async invalidateTaskCache(projectId: string, taskId?: string) {
+    if (!this.cache) return;
+    await Promise.all([
+      this.cache.del(WORKFLOW_REDIS_KEYS.projectTasks(projectId)),
+      taskId
+        ? this.cache.del(WORKFLOW_REDIS_KEYS.task(taskId))
+        : Promise.resolve(),
+      this.cache.del(`flux:proj:overview:${projectId}`),
+    ]);
+  }
 
-    const assignee = t.assignee
+  private formatTask(taskRecord: any): TaskResponse | null {
+    if (!taskRecord) return null;
+
+    const assignee = taskRecord.assignee
       ? {
-          id: t.assignee.id,
-          _id: t.assignee.id,
-          name: t.assignee.name,
-          email: t.assignee.email,
-          avatar: t.assignee.avatar,
+          id: taskRecord.assignee.id,
+          _id: taskRecord.assignee.id,
+          name: taskRecord.assignee.name,
+          email: taskRecord.assignee.email,
+          avatar: taskRecord.assignee.avatar,
         }
       : null;
 
-    const cycle = t.cycle
+    const cycle = taskRecord.cycle
       ? {
-          id: t.cycle.id,
-          _id: t.cycle.id,
-          name: t.cycle.name,
+          id: taskRecord.cycle.id,
+          _id: taskRecord.cycle.id,
+          name: taskRecord.cycle.name,
         }
-      : t.cycleId || null;
+      : taskRecord.cycleId || null;
 
-    const isCompleted = t.columnId === 'done';
+    const isCompleted = taskRecord.columnId === 'done';
 
-    const subtasks = Array.isArray(t.subtasks)
-      ? t.subtasks.map((s: any) => ({
-          ...s,
-          id: s.id,
-          _id: s.id,
-          completed: s.columnId === 'done' || Boolean(s.completed),
+    const subtasks = Array.isArray(taskRecord.subtasks)
+      ? taskRecord.subtasks.map((subtaskRecord: any) => ({
+          ...subtaskRecord,
+          id: subtaskRecord.id,
+          _id: subtaskRecord.id,
+          completed:
+            subtaskRecord.columnId === 'done' ||
+            Boolean(subtaskRecord.completed),
         }))
       : [];
 
     const subtaskCount = subtasks.length;
     const subtaskCompletedCount = subtasks.filter(
-      (s: any) => s.completed,
+      (subtaskRecord: any) => subtaskRecord.completed,
     ).length;
 
     return {
-      ...t,
-      id: t.id,
-      _id: t.id,
-      identifier: t.identifier || null,
-      description: t.content || '',
-      content: t.content || '',
+      ...taskRecord,
+      id: taskRecord.id,
+      _id: taskRecord.id,
+      identifier: taskRecord.identifier || null,
+      sequenceNumber: taskRecord.sequenceNumber || null,
+      description: taskRecord.content || '',
+      content: taskRecord.content || '',
       assignee,
-      assigneeId: assignee,
       cycle,
-      cycleId: t.cycleId || null,
-      parentTaskId: t.parentTaskId || null,
-      parentTask: t.parentTask || null,
+      completed: isCompleted,
       subtasks,
       subtaskCount,
       subtaskCompletedCount,
-      labels: Array.isArray(t.labels) ? t.labels : [],
-      checklists: Array.isArray(t.checklists) ? t.checklists : [],
-      completed: isCompleted,
-      startDate: t.startDate ? new Date(t.startDate).toISOString() : null,
-      dueDate: t.dueDate ? new Date(t.dueDate).toISOString() : null,
-      createdAt: t.createdAt
-        ? new Date(t.createdAt).toISOString()
-        : new Date().toISOString(),
-      updatedAt: t.updatedAt
-        ? new Date(t.updatedAt).toISOString()
-        : new Date().toISOString(),
+      createdAt: taskRecord.createdAt?.toISOString?.() || taskRecord.createdAt,
+      updatedAt: taskRecord.updatedAt?.toISOString?.() || taskRecord.updatedAt,
+      startDate:
+        taskRecord.startDate?.toISOString?.() || taskRecord.startDate || null,
+      dueDate:
+        taskRecord.dueDate?.toISOString?.() || taskRecord.dueDate || null,
     };
   }
 
   async getWorkspaceTasks(workspaceId: string) {
-    const tasks = await this.taskRepo.findWorkspaceTasks(workspaceId);
-    const formatted = tasks.map((t) => this.formatTask(t));
-    return { data: formatted, tasks: formatted };
+    const taskRecords = await this.taskRepo.findWorkspaceTasks(workspaceId);
+    const tasks = taskRecords
+      .map((taskRecord) => this.formatTask(taskRecord))
+      .filter((taskRecord): taskRecord is TaskResponse => taskRecord !== null);
+    return { tasks };
   }
 
-  async getTasks(projectId: string, cycleId?: string) {
-    const [tasks, project] = await Promise.all([
-      this.taskRepo.findProjectTasks(projectId, cycleId),
-      this.taskRepo.findProjectWithColumns(projectId),
-    ]);
+  async getProjectTasks(projectId: string, cycleId?: string) {
+    const cacheKey = WORKFLOW_REDIS_KEYS.projectTasks(projectId);
 
-    const formattedTasks = tasks.map((t) => this.formatTask(t));
-    const columns = parseTaskColumns(project?.taskColumns);
-
-    return {
-      tasks: formattedTasks,
-      columns,
-      projectName: project?.name,
+    const fetchTasks = async () => {
+      const taskRecords = await this.taskRepo.findProjectTasks(
+        projectId,
+        cycleId,
+      );
+      return taskRecords
+        .map((taskRecord) => this.formatTask(taskRecord))
+        .filter(
+          (taskRecord): taskRecord is TaskResponse => taskRecord !== null,
+        );
     };
+
+    if (this.cache && !cycleId) {
+      const tasks = await this.cache.wrap(cacheKey, fetchTasks, 1800);
+      return { tasks };
+    }
+
+    const tasks = await fetchTasks();
+    return { tasks };
   }
 
   async getTask(taskId: string) {
-    const task = await this.taskRepo.findTaskById(taskId);
+    const cacheKey = WORKFLOW_REDIS_KEYS.task(taskId);
+    let task = this.cache ? await this.cache.get<any>(cacheKey) : null;
 
     if (!task) {
-      throw new NotFoundException('Task not found');
-    }
-
-    return { task: this.formatTask(task) };
-  }
-
-  async getSubtasks(taskId: string) {
-    const task = await this.taskRepo.findTaskById(taskId);
-    if (!task) throw new NotFoundException('Task not found');
-    const subtasks = (task.subtasks || []).map((s: any) => this.formatTask(s));
-    return { subtasks, count: subtasks.length };
-  }
-
-  async createTask(projectId: string, userId: string, dto: CreateTaskDto) {
-    const assigneeId = dto.assigneeId || dto.assignee || null;
-    let cycleId = dto.cycleId || dto.cycle || null;
-    const parentTaskId = dto.parentTaskId || dto.parentTask || null;
-    const columnId = dto.columnId || 'backlog';
-    const isCompleted = columnId === 'done';
-
-    if (parentTaskId) {
-      const parent = await this.taskRepo.findTaskById(parentTaskId);
-      if (parent && !cycleId && parent.cycleId) {
-        cycleId = parent.cycleId;
+      const rawTask = await this.taskRepo.findTaskById(taskId);
+      if (!rawTask) {
+        throw new NotFoundException('Task not found');
+      }
+      task = this.formatTask(rawTask);
+      if (this.cache) {
+        await this.cache.set(cacheKey, task, 3600);
       }
     }
 
-    const [count, identifier] = await Promise.all([
-      this.taskRepo.countColumnTasks(projectId, columnId),
-      this.taskRepo.nextProjectTaskIdentifier(projectId),
-    ]);
+    return { task };
+  }
+
+  async createTask(projectId: string, authorId: string, dto: CreateTaskDto) {
+    const rawProject = await this.taskRepo.findProjectWithColumns(projectId);
+    if (!rawProject) {
+      throw new NotFoundException('Project not found');
+    }
+
+    const columns = parseTaskColumns(rawProject.taskColumns);
+    const targetColumn =
+      dto.columnId || (columns.length > 0 ? columns[0].id : 'backlog');
+
+    const columnCount = await this.taskRepo.countColumnTasks(
+      projectId,
+      targetColumn,
+    );
+
+    const { identifier, sequenceNumber } =
+      await this.taskRepo.nextProjectTaskIdentifier(projectId);
 
     const task = await this.taskRepo.createTask({
-      identifier,
       title: dto.title,
       content: dto.content || dto.description || '',
-      columnId,
-      completed: isCompleted,
-      priority: dto.priority || TaskPriority.none,
-      startDate: dto.startDate ? new Date(dto.startDate) : null,
-      dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+      columnId: targetColumn,
+      rank: dto.rank ?? columnCount,
+      priority: mapPriority(dto.priority),
+      estimate: dto.estimate,
+      identifier,
+      sequenceNumber,
       labels: dto.labels || [],
       checklists: dto.checklists || [],
-      rank: count,
-      projectId,
-      authorId: userId,
-      assigneeId,
-      cycleId,
-      parentTaskId,
+      attachments: dto.attachments || [],
+      completed: targetColumn === 'done',
+      startDate: dto.startDate ? new Date(dto.startDate) : null,
+      dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+      recurrence: mapRecurrence(dto.recurrence),
+      reminder: mapReminder(dto.reminder),
+      timeSpent: dto.timeSpent || 0,
+      project: { connect: { id: projectId } },
+      author: { connect: { id: authorId } },
+      ...(dto.assigneeId
+        ? { assignee: { connect: { id: dto.assigneeId } } }
+        : {}),
+      ...(dto.cycleId ? { cycle: { connect: { id: dto.cycleId } } } : {}),
+      ...(dto.parentTaskId
+        ? { parentTask: { connect: { id: dto.parentTaskId } } }
+        : {}),
     });
 
-    const formatted = this.formatTask(task);
-    const workspaceId = (task as any).project?.workspaceId || '';
+    await this.invalidateTaskCache(projectId, task.id);
 
     this.eventEmitter?.emit(
       'task.created',
       new DomainActivityEvent({
-        entityType: EntityType.task,
+        entityType: 'task' as unknown as EntityType,
         entityId: task.id,
         verb: 'created',
-        actorId: userId,
+        actorId: authorId,
         projectId,
-        workspaceId,
-        newIdentifier: task.identifier || undefined,
       }),
     );
 
-    return { task: formatted };
+    return { task: this.formatTask(task) };
   }
 
-  async updateTask(taskId: string, dto: UpdateTaskDto) {
-    const assigneeId =
-      dto.assigneeId !== undefined
-        ? dto.assigneeId
-        : dto.assignee !== undefined
-          ? dto.assignee
-          : undefined;
-
-    const cycleId =
-      dto.cycleId !== undefined
-        ? dto.cycleId
-        : dto.cycle !== undefined
-          ? dto.cycle
-          : undefined;
-
-    const parentTaskId =
-      dto.parentTaskId !== undefined
-        ? dto.parentTaskId
-        : dto.parentTask !== undefined
-          ? dto.parentTask
-          : undefined;
-
-    if (parentTaskId !== undefined && parentTaskId !== null) {
-      if (parentTaskId === taskId) {
-        throw new BadRequestException('A task cannot be its own parent');
-      }
-      const parent = await this.taskRepo.findTaskById(parentTaskId);
-      if (parent && parent.parentTaskId === taskId) {
-        throw new BadRequestException(
-          'Circular parent-child relationship detected',
-        );
-      }
+  async updateTask(taskId: string, dto: UpdateTaskDto, userId?: string) {
+    const existing = await this.taskRepo.findTaskById(taskId);
+    if (!existing) {
+      throw new NotFoundException('Task not found');
     }
 
-    const hasColumnChange = dto.columnId !== undefined;
-    const isCompleted = hasColumnChange ? dto.columnId === 'done' : undefined;
-
-    const task = await this.taskRepo.updateTask(taskId, {
+    const updated = await this.taskRepo.updateTask(taskId, {
       ...(dto.title !== undefined && { title: dto.title }),
       ...(dto.content !== undefined && { content: dto.content }),
       ...(dto.description !== undefined && { content: dto.description }),
-      ...(dto.columnId !== undefined && { columnId: dto.columnId }),
-      ...(isCompleted !== undefined && { completed: isCompleted }),
-      ...(dto.priority !== undefined && { priority: dto.priority }),
+      ...(dto.columnId !== undefined && {
+        columnId: dto.columnId,
+        completed: dto.columnId === 'done',
+      }),
+      ...(dto.completed !== undefined && { completed: dto.completed }),
+      ...(dto.rank !== undefined && { rank: dto.rank }),
+      ...(dto.priority !== undefined && {
+        priority: mapPriority(dto.priority),
+      }),
+      ...(dto.estimate !== undefined && { estimate: dto.estimate }),
+      ...(dto.labels !== undefined && { labels: dto.labels }),
+      ...(dto.checklists !== undefined && { checklists: dto.checklists }),
+      ...(dto.attachments !== undefined && { attachments: dto.attachments }),
+      ...(dto.recurrence !== undefined && {
+        recurrence: mapRecurrence(dto.recurrence),
+      }),
+      ...(dto.reminder !== undefined && {
+        reminder: mapReminder(dto.reminder),
+      }),
+      ...(dto.timeSpent !== undefined && { timeSpent: dto.timeSpent }),
       ...(dto.startDate !== undefined && {
         startDate: dto.startDate ? new Date(dto.startDate) : null,
       }),
       ...(dto.dueDate !== undefined && {
         dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
       }),
-      ...(dto.labels !== undefined && { labels: dto.labels }),
-      ...(dto.checklists !== undefined && {
-        checklists: dto.checklists,
+      ...(dto.assigneeId !== undefined && {
+        assignee: dto.assigneeId
+          ? { connect: { id: dto.assigneeId } }
+          : { disconnect: true },
       }),
-      ...(dto.rank !== undefined && { rank: dto.rank }),
-      ...(assigneeId !== undefined && { assigneeId: assigneeId || null }),
-      ...(cycleId !== undefined && { cycleId: cycleId || null }),
-      ...(parentTaskId !== undefined && {
-        parentTaskId: parentTaskId || null,
+      ...(dto.cycleId !== undefined && {
+        cycle: dto.cycleId
+          ? { connect: { id: dto.cycleId } }
+          : { disconnect: true },
       }),
     });
 
-    const formatted = this.formatTask(task);
-    const workspaceId = (task as any).project?.workspaceId || '';
+    await this.invalidateTaskCache(existing.projectId, taskId);
 
     this.eventEmitter?.emit(
       'task.updated',
       new DomainActivityEvent({
-        entityType: EntityType.task,
-        entityId: task.id,
-        verb: hasColumnChange ? 'moved' : 'updated',
-        field: hasColumnChange ? 'columnId' : undefined,
-        newValue: dto.columnId,
-        actorId: task.authorId,
-        projectId: task.projectId,
-        workspaceId,
+        entityType: 'task' as unknown as EntityType,
+        entityId: taskId,
+        verb: 'updated',
+        actorId: userId || '',
+        projectId: existing.projectId,
       }),
     );
 
-    return { task: formatted };
+    return { task: this.formatTask(updated) };
   }
 
-  async deleteTask(taskId: string) {
+  async deleteTask(taskId: string, userId?: string) {
+    const existing = await this.taskRepo.findTaskById(taskId);
+    if (!existing) {
+      throw new NotFoundException('Task not found');
+    }
+
+    await this.taskRepo.softDeleteTask(taskId);
+    await this.invalidateTaskCache(existing.projectId, taskId);
+
+    this.eventEmitter?.emit(
+      'task.deleted',
+      new DomainActivityEvent({
+        entityType: 'task' as unknown as EntityType,
+        entityId: taskId,
+        verb: 'deleted',
+        actorId: userId || '',
+        projectId: existing.projectId,
+      }),
+    );
+
+    return { message: 'Task soft-deleted successfully' };
+  }
+
+  async restoreTask(taskId: string) {
+    const restored = await this.taskRepo.restoreTask(taskId);
+    await this.invalidateTaskCache(restored.projectId, taskId);
+    return {
+      message: 'Task restored successfully',
+      task: restored,
+    };
+  }
+
+  async assignTask(taskId: string, assigneeId: string | null, userId?: string) {
+    const existing = await this.taskRepo.findTaskById(taskId);
+    if (!existing) {
+      throw new NotFoundException('Task not found');
+    }
+
+    const updated = await this.taskRepo.assignTask(taskId, assigneeId);
+    await this.invalidateTaskCache(existing.projectId, taskId);
+
+    this.eventEmitter?.emit(
+      'task.assigned',
+      new DomainActivityEvent({
+        entityType: 'task' as unknown as EntityType,
+        entityId: taskId,
+        verb: 'assigned',
+        actorId: userId || '',
+        projectId: existing.projectId,
+      }),
+    );
+
+    return { task: this.formatTask(updated) };
+  }
+
+  async reorderTask(taskId: string, dto: ReorderTaskDto) {
     const task = await this.taskRepo.findTaskById(taskId);
     if (!task) {
       throw new NotFoundException('Task not found');
     }
 
-    await this.taskRepo.deleteTask(taskId);
+    const targetColumn = dto.columnId || task.columnId;
+    const targetRank = dto.rank ?? 0;
 
-    const workspaceId = (task as any).project?.workspaceId || '';
-
-    this.eventEmitter?.emit(
-      'task.deleted',
-      new DomainActivityEvent({
-        entityType: EntityType.task,
-        entityId: taskId,
-        verb: 'deleted',
-        actorId: task.authorId,
-        projectId: task.projectId,
-        workspaceId,
-      }),
+    const columnTasks = await this.taskRepo.findColumnTasks(
+      task.projectId,
+      targetColumn,
     );
 
-    return { message: 'Task deleted successfully', success: true };
+    const otherTasks = columnTasks.filter((taskItem) => taskItem.id !== taskId);
+    otherTasks.splice(targetRank, 0, task);
+
+    const updates = otherTasks.map((taskItem, index) => ({
+      id: taskItem.id,
+      rank: index,
+      columnId: targetColumn,
+      completed: targetColumn === 'done',
+    }));
+
+    await this.taskRepo.updateTasksRank(updates);
+    await this.invalidateTaskCache(task.projectId, taskId);
+
+    return { message: 'Task reordered successfully' };
   }
 
-  async assignTask(taskId: string, assigneeId: string | null) {
-    const task = await this.taskRepo.assignTask(taskId, assigneeId);
-    const workspaceId = (task as any).project?.workspaceId || '';
+  async bulkUpdate(projectId: string, dto: BulkUpdateTaskDto, userId?: string) {
+    const payload = dto.data || (dto as any);
+    const data: any = {};
 
-    this.eventEmitter?.emit(
-      'task.updated',
-      new DomainActivityEvent({
-        entityType: EntityType.task,
-        entityId: task.id,
-        verb: 'assigned',
-        field: 'assigneeId',
-        newValue: assigneeId || undefined,
-        actorId: '',
-        projectId: task.projectId,
-        workspaceId,
-      }),
+    if (payload.columnId !== undefined) {
+      data.columnId = payload.columnId;
+      data.completed = payload.columnId === 'done';
+    }
+    if (payload.assigneeId !== undefined) {
+      data.assigneeId = payload.assigneeId;
+    }
+    if (payload.priority !== undefined) {
+      data.priority = mapPriority(payload.priority);
+    }
+    if (payload.cycleId !== undefined) {
+      data.cycleId = payload.cycleId;
+    }
+
+    const result = await this.taskRepo.bulkUpdateTasks(
+      projectId,
+      dto.taskIds,
+      data,
     );
 
-    return { task: this.formatTask(task) };
+    await this.invalidateTaskCache(projectId);
+
+    return {
+      message: `${result.count} tasks updated successfully`,
+      count: result.count,
+    };
   }
 
-  async reorderTasks(projectId: string, dto: ReorderTaskDto) {
-    const {
-      sourceColumnId,
-      destinationColumnId,
-      sourceIndex,
-      destinationIndex,
-    } = dto;
-
-    if (
-      sourceColumnId === destinationColumnId &&
-      sourceIndex === destinationIndex
-    ) {
-      return { success: true, ...dto };
-    }
-
-    const [sourceTasks, destTasks] = await Promise.all([
-      this.taskRepo.findColumnTasks(projectId, sourceColumnId),
-      sourceColumnId === destinationColumnId
-        ? Promise.resolve([])
-        : this.taskRepo.findColumnTasks(projectId, destinationColumnId),
-    ]);
-
-    const isDestCompleted = destinationColumnId === 'done';
-
-    if (sourceColumnId === destinationColumnId) {
-      if (sourceTasks.length > 0 && sourceIndex < sourceTasks.length) {
-        const [moved] = sourceTasks.splice(sourceIndex, 1);
-        if (moved) {
-          sourceTasks.splice(destinationIndex, 0, moved);
-          await this.taskRepo.updateTasksRank(
-            sourceTasks.map((t, idx) => ({ id: t.id, rank: idx })),
-          );
-        }
-      }
-    } else {
-      if (sourceTasks.length > 0 && sourceIndex < sourceTasks.length) {
-        const [moved] = sourceTasks.splice(sourceIndex, 1);
-        if (moved) {
-          destTasks.splice(destinationIndex, 0, moved);
-          await this.taskRepo.updateTasksRank([
-            ...sourceTasks.map((t, idx) => ({ id: t.id, rank: idx })),
-            ...destTasks.map((t, idx) => ({
-              id: t.id,
-              rank: idx,
-              columnId: destinationColumnId,
-              completed: isDestCompleted,
-            })),
-          ]);
-        }
-      }
-    }
-
-    this.eventEmitter?.emit(
-      'task.reordered',
-      new DomainActivityEvent({
-        entityType: EntityType.task,
-        verb: 'reordered',
-        projectId,
-        field: 'columnId',
-        newValue: destinationColumnId,
-      }),
-    );
-
-    return { success: true, ...dto };
-  }
-
-  async bulkUpdateTasks(projectId: string, dto: BulkUpdateTaskDto) {
-    if (!dto.taskIds || dto.taskIds.length === 0) {
-      return { success: true, count: 0 };
-    }
-
-    const payload: any = { ...dto.data };
-    if (payload.columnId) {
-      payload.completed = payload.columnId === 'done';
-    }
-
-    await this.taskRepo.bulkUpdateTasks(projectId, dto.taskIds, payload);
-
-    this.eventEmitter?.emit(
-      'task.bulk_updated',
-      new DomainActivityEvent({
-        entityType: EntityType.task,
-        verb: 'bulk_updated',
-        projectId,
-      }),
-    );
-
-    return { success: true, count: dto.taskIds.length };
-  }
-
-  async duplicateTask(taskId: string, userId: string) {
-    const original = await this.taskRepo.findTaskById(taskId);
-
-    if (!original) {
+  async duplicateTask(
+    taskId: string,
+    userId: string,
+    targetProjectId?: string,
+  ) {
+    const source = await this.taskRepo.findTaskById(taskId);
+    if (!source) {
       throw new NotFoundException('Task not found');
     }
 
-    const identifier = await this.taskRepo.nextProjectTaskIdentifier(
-      original.projectId,
+    const projectId = targetProjectId || source.projectId;
+    const { identifier, sequenceNumber } =
+      await this.taskRepo.nextProjectTaskIdentifier(projectId);
+
+    const columnCount = await this.taskRepo.countColumnTasks(
+      projectId,
+      source.columnId,
     );
 
-    const task = await this.taskRepo.createTask({
+    const cloned = await this.taskRepo.createTask({
+      title: `${source.title} (Copy)`,
+      content: source.content || source.description || '',
+      columnId: source.columnId,
+      rank: columnCount,
+      priority: source.priority,
+      estimate: source.estimate,
       identifier,
-      title: `${original.title} (Copy)`,
-      content: original.content,
-      columnId: original.columnId,
-      completed: original.columnId === 'done',
-      priority: original.priority,
-      startDate: original.startDate,
-      dueDate: original.dueDate,
-      labels: original.labels,
-      checklists: original.checklists ? original.checklists : Prisma.JsonNull,
-      rank: original.rank + 1,
-      projectId: original.projectId,
-      authorId: userId,
-      assigneeId: original.assigneeId,
-      cycleId: original.cycleId,
-      parentTaskId: original.parentTaskId,
+      sequenceNumber,
+      labels: source.labels || [],
+      checklists: (source.checklists as any) || [],
+      attachments: (source.attachments as any) || [],
+      completed: source.completed,
+      startDate: source.startDate,
+      dueDate: source.dueDate,
+      project: { connect: { id: projectId } },
+      author: { connect: { id: userId } },
+      ...(source.assigneeId
+        ? { assignee: { connect: { id: source.assigneeId } } }
+        : {}),
+      ...(source.cycleId ? { cycle: { connect: { id: source.cycleId } } } : {}),
+      ...(source.parentTaskId
+        ? { parentTask: { connect: { id: source.parentTaskId } } }
+        : {}),
     });
 
-    this.eventEmitter?.emit(
-      'task.created',
-      new DomainActivityEvent({
-        entityType: EntityType.task,
-        entityId: task.id,
-        verb: 'created',
-        actorId: userId,
-        projectId: original.projectId,
-        newIdentifier: task.identifier || undefined,
-      }),
+    await this.invalidateTaskCache(projectId, cloned.id);
+
+    return { task: this.formatTask(cloned) };
+  }
+
+  async addAttachment(
+    taskId: string,
+    attachment: {
+      name?: string;
+      url?: string;
+      size?: number;
+      mimeType?: string;
+      [key: string]: unknown;
+    },
+  ) {
+    const task = await this.taskRepo.findTaskById(taskId);
+    if (!task) {
+      throw new NotFoundException('Task not found');
+    }
+
+    const existingAttachments = Array.isArray(task.attachments)
+      ? (task.attachments as any[])
+      : [];
+    const newAttachment = {
+      id: crypto.randomUUID
+        ? crypto.randomUUID()
+        : Math.random().toString(36).substring(2, 9),
+      name: attachment.name || 'Attachment',
+      url: attachment.url || '',
+      size: attachment.size,
+      mimeType: attachment.mimeType,
+      createdAt: new Date().toISOString(),
+      ...attachment,
+    };
+
+    const updatedAttachments = [...existingAttachments, newAttachment];
+    const updated = await this.taskRepo.updateTask(taskId, {
+      attachments: updatedAttachments,
+    });
+
+    await this.invalidateTaskCache(task.projectId, taskId);
+    return { task: this.formatTask(updated), attachment: newAttachment };
+  }
+
+  async deleteAttachment(taskId: string, attachmentId: string) {
+    const task = await this.taskRepo.findTaskById(taskId);
+    if (!task) {
+      throw new NotFoundException('Task not found');
+    }
+
+    const existingAttachments = Array.isArray(task.attachments)
+      ? (task.attachments as any[])
+      : [];
+    const updatedAttachments = existingAttachments.filter(
+      (att) => att.id !== attachmentId && att.attachmentId !== attachmentId,
     );
 
-    return { task: this.formatTask(task) };
+    const updated = await this.taskRepo.updateTask(taskId, {
+      attachments: updatedAttachments,
+    });
+
+    await this.invalidateTaskCache(task.projectId, taskId);
+    return {
+      message: 'Attachment removed successfully',
+      task: this.formatTask(updated),
+    };
   }
 }

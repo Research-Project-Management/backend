@@ -16,7 +16,10 @@
         "src/*"
       ]
     },
-    "types": ["node", "jest"],
+    "types": [
+      "node",
+      "jest"
+    ],
     "incremental": false,
     "skipLibCheck": true,
     "strict": true,
@@ -24,7 +27,8 @@
     "strictNullChecks": true,
     "forceConsistentCasingInFileNames": true,
     "noFallthroughCasesInSwitch": true,
-    "moduleResolution": "node"
+    "moduleResolution": "node",
+    "resolveJsonModule": true
   },
   "include": [
     "src/**/*",

@@ -1,12 +1,13 @@
 import { MetadataService } from '@/modules/library/metadata/metadata.service';
-import { SemanticScholarProvider } from '@/modules/library/metadata/providers/semantic-scholar.provider';
+import { SemanticScholarProvider } from '@/modules/library/metadata/providers/semantic.provider';
 import { ArxivProvider } from '@/modules/library/metadata/providers/arxiv.provider';
 import { PubmedProvider } from '@/modules/library/metadata/providers/pubmed.provider';
 import { OpenlibraryProvider } from '@/modules/library/metadata/providers/openlibrary.provider';
 import { OpenAlexProvider } from '@/modules/library/metadata/providers/openalex.provider';
 import { UnpaywallProvider } from '@/modules/library/metadata/providers/unpaywall.provider';
-import { DoiResolver } from '@/modules/library/citation/resolvers/doi.resolver';
-import { BibtexFormatter } from '@/modules/library/citation/formatters/bibtex.formatter';
+
+import { DoiResolver } from '@/modules/library/cite/resolvers/doi.resolver';
+import { BibtexFormatter } from '@/modules/library/cite/formatters/bibtex.formatter';
 
 describe('MetadataService', () => {
   let service: MetadataService;

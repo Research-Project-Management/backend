@@ -10,7 +10,7 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { LatexService } from './latex.service';
 import { CompileLatexDto, SyncIncrementalDto } from './dto/latex.dto';
-import { JwtAuthGuard } from '@/modules/iam/authn';
+import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
 
 @ApiTags('Manuscript')
 @ApiBearerAuth('JWT-auth')
@@ -35,7 +35,9 @@ export class LatexController {
 
   @Post('pages/:pageId/sync-incremental')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Incrementally sync only dirty/changed files to LaTeX' })
+  @ApiOperation({
+    summary: 'Incrementally sync only dirty/changed files to LaTeX',
+  })
   async syncIncremental(
     @Param('pageId') pageId: string,
     @Body() dto: SyncIncrementalDto,

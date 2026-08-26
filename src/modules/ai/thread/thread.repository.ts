@@ -1,16 +1,22 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
-import { MessageRole, Prisma } from '@prisma/client';
+import { MessageRole, Prisma, AiChat, AiMessage } from '@prisma/client';
+import {
+  IAiRepository,
+  ChatWithMessages,
+} from './types/ai-repository.interface';
+
+export type { ChatWithMessages };
 
 @Injectable()
-export class ThreadRepository {
+export class ThreadRepository implements IAiRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async findUserChats(
     workspaceSlug: string,
     userId: string,
     projectId?: string | null,
-  ) {
+  ): Promise<ChatWithMessages[]> {
     const where: Prisma.AiChatWhereInput = {
       workspaceSlug,
       userId,
@@ -30,7 +36,7 @@ export class ThreadRepository {
     });
   }
 
-  async findChatById(chatId: string) {
+  async findChatById(chatId: string): Promise<ChatWithMessages | null> {
     return this.prisma.aiChat.findUnique({
       where: { id: chatId },
       include: {
@@ -41,7 +47,11 @@ export class ThreadRepository {
     });
   }
 
-  async findPageChat(pageId: string, workspaceSlug: string, userId: string) {
+  async findPageChat(
+    pageId: string,
+    workspaceSlug: string,
+    userId: string,
+  ): Promise<ChatWithMessages | null> {
     return this.prisma.aiChat.findFirst({
       where: {
         pageId,
@@ -57,36 +67,74 @@ export class ThreadRepository {
     });
   }
 
-  async deletePageChat(pageId: string, workspaceSlug: string, userId: string) {
+  async deletePageChat(
+    pageId: string,
+    workspaceSlug: string,
+    userId: string,
+  ): Promise<{ count: number }> {
     const chat = await this.findPageChat(pageId, workspaceSlug, userId);
     if (chat) {
       await this.prisma.aiChat.delete({
         where: { id: chat.id },
       });
+      return { count: 1 };
     }
+    return { count: 0 };
   }
 
-  async createChat(data: {
-    userId: string;
-    workspaceSlug: string;
-    projectId?: string;
-    pageId?: string;
-    title?: string;
-    documentIds?: string[];
-  }) {
+  async createChat(
+    data: Prisma.AiChatCreateInput | Prisma.AiChatUncheckedCreateInput,
+  ): Promise<ChatWithMessages> {
     return this.prisma.aiChat.create({
-      data: {
-        userId: data.userId,
-        workspaceSlug: data.workspaceSlug,
-        projectId: data.projectId,
-        pageId: data.pageId,
-        title: data.title || 'New Chat',
-        documentIds: data.documentIds || [],
-      },
+      data: data as Prisma.AiChatCreateInput,
       include: {
         messages: true,
       },
     });
+  }
+
+  async updateChat(
+    chatId: string,
+    data: Prisma.AiChatUpdateInput | Prisma.AiChatUncheckedUpdateInput,
+  ): Promise<ChatWithMessages> {
+    return this.prisma.aiChat.update({
+      where: { id: chatId },
+      data,
+      include: {
+        messages: {
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
+  }
+
+  async appendMessage(
+    chatId: string,
+    message: {
+      role: MessageRole;
+      content: string;
+      sources?: unknown;
+      widgets?: unknown;
+      selectionContext?: unknown;
+    },
+  ): Promise<AiMessage> {
+    const created = await this.prisma.aiMessage.create({
+      data: {
+        chatId,
+        role: message.role,
+        content: message.content || '',
+        sources: (message.sources as Prisma.InputJsonValue) || [],
+        widgets: (message.widgets as Prisma.InputJsonValue) || [],
+        selectionContext: message.selectionContext as Prisma.InputJsonValue,
+      },
+    });
+
+    await this.prisma.aiChat.update({
+      where: { id: chatId },
+      data: { updatedAt: new Date() },
+    });
+
+    return created;
   }
 
   async createMessages(
@@ -134,18 +182,10 @@ export class ThreadRepository {
   }
 
   async updateChatTitle(chatId: string, title: string) {
-    return this.prisma.aiChat.update({
-      where: { id: chatId },
-      data: { title },
-      include: {
-        messages: {
-          orderBy: { createdAt: 'asc' },
-        },
-      },
-    });
+    return this.updateChat(chatId, { title });
   }
 
-  async deleteChat(chatId: string) {
+  async deleteChat(chatId: string): Promise<AiChat> {
     return this.prisma.aiChat.delete({
       where: { id: chatId },
     });

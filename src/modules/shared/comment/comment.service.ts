@@ -12,7 +12,7 @@ import {
   parseCommentReplies,
   CommentReply,
   CommentAuthor,
-} from '@/core/types/json-fields.type';
+} from './types/comment.types';
 
 @Injectable()
 export class CommentService {

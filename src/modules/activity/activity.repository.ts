@@ -1,20 +1,18 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { DomainActivityEvent } from './events/activity.events';
-import { EntityType } from '@prisma/client';
-
-const ACTOR_SELECT = {
-  id: true,
-  name: true,
-  email: true,
-  avatar: true,
-} as const;
+import { EntityType, ActivityEvent } from '@prisma/client';
+import {
+  IActivityRepository,
+  ActivityEventWithActor,
+  ACTOR_MINIMAL_SELECT,
+} from './types/activity-repository.interface';
 
 @Injectable()
-export class ActivityRepository {
+export class ActivityRepository implements IActivityRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(event: DomainActivityEvent) {
+  async create(event: DomainActivityEvent): Promise<ActivityEvent> {
     return this.prisma.activityEvent.create({
       data: {
         entityType: event.entityType,
@@ -35,7 +33,12 @@ export class ActivityRepository {
   async resolveWorkspace(workspaceIdOrSlug: string) {
     return this.prisma.workspace.findFirst({
       where: {
-        OR: [{ id: workspaceIdOrSlug }, { url: workspaceIdOrSlug }],
+        OR: [
+          { id: workspaceIdOrSlug },
+          { slug: workspaceIdOrSlug },
+          { url: workspaceIdOrSlug },
+        ],
+        deletedAt: null,
       },
       select: { id: true },
     });
@@ -49,7 +52,7 @@ export class ActivityRepository {
       limit?: number;
       offset?: number;
     },
-  ) {
+  ): Promise<{ items: ActivityEventWithActor[]; total: number }> {
     const ws = await this.resolveWorkspace(workspaceId);
     const targetWsId = ws?.id || workspaceId;
     const limit = options?.limit ?? 50;
@@ -70,7 +73,7 @@ export class ActivityRepository {
         take: limit,
         skip: offset,
         include: {
-          actor: { select: ACTOR_SELECT },
+          actor: { select: ACTOR_MINIMAL_SELECT },
           project: { select: { id: true, name: true } },
         },
       }),
@@ -80,7 +83,11 @@ export class ActivityRepository {
     return { items, total };
   }
 
-  async findEntityFeed(entityType: EntityType, entityId: string, limit = 50) {
+  async findEntityFeed(
+    entityType: EntityType,
+    entityId: string,
+    limit = 50,
+  ): Promise<ActivityEventWithActor[]> {
     return this.prisma.activityEvent.findMany({
       where: {
         entityType,
@@ -89,12 +96,17 @@ export class ActivityRepository {
       orderBy: { createdAt: 'desc' },
       take: limit,
       include: {
-        actor: { select: ACTOR_SELECT },
+        actor: { select: ACTOR_MINIMAL_SELECT },
+        project: { select: { id: true, name: true } },
       },
     });
   }
 
-  async findRecentByActor(workspaceId: string, actorId: string, limit = 50) {
+  async findRecentByActor(
+    workspaceId: string,
+    actorId: string,
+    limit = 50,
+  ): Promise<ActivityEvent[]> {
     const ws = await this.resolveWorkspace(workspaceId);
     const targetWsId = ws?.id || workspaceId;
     return this.prisma.activityEvent.findMany({
@@ -119,7 +131,7 @@ export class ActivityRepository {
     const [tasks, papers, pages] = await Promise.all([
       taskIds.length
         ? this.prisma.task.findMany({
-            where: { id: { in: taskIds } },
+            where: { id: { in: taskIds }, deletedAt: null },
             select: { id: true, title: true },
           })
         : [],
@@ -156,6 +168,7 @@ export class ActivityRepository {
       this.prisma.task.findMany({
         where: {
           project: { workspaceId },
+          deletedAt: null,
           OR: [{ authorId: userId }, { assigneeId: userId }],
         },
         orderBy: { updatedAt: 'desc' },

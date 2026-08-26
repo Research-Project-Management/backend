@@ -10,7 +10,8 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { EngineService } from './engine.service';
 import { SaveAndSyncDto, CompileDocumentDto } from './dto/engine.dto';
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
+import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
+import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
 
 @ApiTags('Document - Engine')
 @ApiBearerAuth('JWT-auth')

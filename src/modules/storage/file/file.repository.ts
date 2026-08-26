@@ -1,24 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
-import { Prisma, FilePermission } from '@prisma/client';
-
-const USER_SELECT = {
-  id: true,
-  name: true,
-  email: true,
-  avatar: true,
-} as const;
-
-export type FileWithAuthor = Prisma.FileGetPayload<{
-  include: {
-    author: {
-      select: typeof USER_SELECT;
-    };
-  };
-}>;
+import { Prisma, FilePermission, File, FileShare } from '@prisma/client';
+import {
+  IFileRepository,
+  FileWithAuthor,
+  USER_MINIMAL_SELECT,
+} from './types/storage-repository.interface';
 
 @Injectable()
-export class FileRepository {
+export class FileRepository implements IFileRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async createFile(
@@ -27,7 +17,12 @@ export class FileRepository {
     return this.prisma.file.create({
       data: data as Prisma.FileCreateInput,
       include: {
-        author: { select: USER_SELECT },
+        author: { select: USER_MINIMAL_SELECT },
+        sharedWith: {
+          include: {
+            user: { select: USER_MINIMAL_SELECT },
+          },
+        },
       },
     });
   }
@@ -36,8 +31,47 @@ export class FileRepository {
     return this.prisma.file.findUnique({
       where: { id: fileId },
       include: {
-        author: { select: USER_SELECT },
+        author: { select: USER_MINIMAL_SELECT },
+        sharedWith: {
+          include: {
+            user: { select: USER_MINIMAL_SELECT },
+          },
+        },
       },
+    });
+  }
+
+  async findWorkspaceFiles(
+    workspaceId: string,
+    parentId?: string | null,
+    trashed = false,
+  ): Promise<FileWithAuthor[]> {
+    return this.prisma.file.findMany({
+      where: {
+        workspaceId,
+        parentId: parentId === undefined ? undefined : parentId,
+        trashedAt: trashed ? { not: null } : null,
+      },
+      include: {
+        author: { select: USER_MINIMAL_SELECT },
+        sharedWith: {
+          include: {
+            user: { select: USER_MINIMAL_SELECT },
+          },
+        },
+      },
+      orderBy: [{ isFolder: 'desc' }, { filename: 'asc' }],
+    });
+  }
+
+  async findFolderTree(workspaceId: string): Promise<File[]> {
+    return this.prisma.file.findMany({
+      where: {
+        workspaceId,
+        isFolder: true,
+        trashedAt: null,
+      },
+      orderBy: { filename: 'asc' },
     });
   }
 
@@ -47,30 +81,83 @@ export class FileRepository {
   ): Promise<FileWithAuthor> {
     return this.prisma.file.update({
       where: { id: fileId },
-      data: data,
+      data,
       include: {
-        author: { select: USER_SELECT },
+        author: { select: USER_MINIMAL_SELECT },
+        sharedWith: {
+          include: {
+            user: { select: USER_MINIMAL_SELECT },
+          },
+        },
       },
     });
   }
 
-  async deleteFile(fileId: string) {
+  async trashFile(fileId: string): Promise<File> {
+    return this.prisma.file.update({
+      where: { id: fileId },
+      data: { trashedAt: new Date() },
+    });
+  }
+
+  async restoreFile(fileId: string): Promise<File> {
+    return this.prisma.file.update({
+      where: { id: fileId },
+      data: { trashedAt: null },
+    });
+  }
+
+  async deleteFile(fileId: string): Promise<File> {
     return this.prisma.file.delete({
       where: { id: fileId },
     });
   }
 
-  async upsertFileShare(
+  async findUserStarredFiles(
+    userId: string,
+    workspaceId: string,
+  ): Promise<FileWithAuthor[]> {
+    return this.prisma.file.findMany({
+      where: {
+        workspaceId,
+        authorId: userId,
+        starred: true,
+        trashedAt: null,
+      },
+      include: {
+        author: { select: USER_MINIMAL_SELECT },
+        sharedWith: {
+          include: {
+            user: { select: USER_MINIMAL_SELECT },
+          },
+        },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+  }
+
+  async calculateWorkspaceStorageUsage(workspaceId: string): Promise<number> {
+    const aggregate = await this.prisma.file.aggregate({
+      where: {
+        workspaceId,
+        isFolder: false,
+        trashedAt: null,
+      },
+      _sum: {
+        size: true,
+      },
+    });
+    return aggregate._sum.size || 0;
+  }
+
+  async shareFile(
     fileId: string,
     userId: string,
-    permission: FilePermission | (string & {}),
-  ) {
+    permission: string,
+  ): Promise<FileShare> {
     return this.prisma.fileShare.upsert({
       where: {
-        fileId_userId: {
-          fileId,
-          userId,
-        },
+        fileId_userId: { fileId, userId },
       },
       create: {
         fileId,
@@ -83,11 +170,27 @@ export class FileRepository {
     });
   }
 
+  async unshareFile(fileId: string, userId: string): Promise<FileShare> {
+    return this.prisma.fileShare.delete({
+      where: {
+        fileId_userId: { fileId, userId },
+      },
+    });
+  }
+
+  async upsertFileShare(
+    fileId: string,
+    userId: string,
+    permission: FilePermission | (string & {}),
+  ) {
+    return this.shareFile(fileId, userId, permission);
+  }
+
   async getFileShares(fileId: string) {
     return this.prisma.fileShare.findMany({
       where: { fileId },
       include: {
-        user: { select: { id: true, name: true, email: true, avatar: true } },
+        user: { select: USER_MINIMAL_SELECT },
       },
       orderBy: { createdAt: 'asc' },
     });
@@ -101,7 +204,12 @@ export class FileRepository {
     return this.prisma.file.findMany({
       where,
       include: {
-        author: { select: USER_SELECT },
+        author: { select: USER_MINIMAL_SELECT },
+        sharedWith: {
+          include: {
+            user: { select: USER_MINIMAL_SELECT },
+          },
+        },
       },
       orderBy,
       take,
@@ -114,7 +222,7 @@ export class FileRepository {
       include: {
         file: {
           include: {
-            author: { select: USER_SELECT },
+            author: { select: USER_MINIMAL_SELECT },
           },
         },
       },
@@ -136,7 +244,12 @@ export class FileRepository {
     return this.prisma.file.findMany({
       where: { id: { in: fileIds } },
       include: {
-        author: { select: USER_SELECT },
+        author: { select: USER_MINIMAL_SELECT },
+        sharedWith: {
+          include: {
+            user: { select: USER_MINIMAL_SELECT },
+          },
+        },
       },
     });
   }
@@ -157,7 +270,7 @@ export class FileRepository {
     });
   }
 
-  // ── Scope Resolution (replaces direct Prisma calls in FileService) ──────────
+  // ── Scope Resolution ────────────────────────────────────────────────────────
 
   async findPageScope(
     pageId: string,
@@ -201,4 +314,3 @@ export class FileRepository {
     return member?.role ?? null;
   }
 }
-

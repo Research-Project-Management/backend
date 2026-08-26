@@ -1,6 +1,6 @@
 import { RagAgentService } from '@/modules/ai/rag-agent/rag-agent.service';
 import { EngineService } from '@/modules/ai/engine/engine.service';
-import { CatalogRepository } from '@/modules/library/catalog/catalog.repository';
+import { ItemsRepository } from '@/modules/library/items/items.repository';
 
 describe('RagAgentService (Paper-Scoped AI Copilot)', () => {
   let service: RagAgentService;

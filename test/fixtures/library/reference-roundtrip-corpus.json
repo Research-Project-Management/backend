@@ -1,0 +1,52 @@
+{
+  "description": "Round-Trip Reference Corpus for BibTeX, RIS, and CSL-JSON Import/Export Fidelity",
+  "version": "1.0.0",
+  "entries": [
+    {
+      "id": "ref-vaswani-2017",
+      "canonical": {
+        "itemType": "conferencePaper",
+        "title": "Attention Is All You Need",
+        "authors": [
+          "Ashish Vaswani",
+          "Noam Shazeer",
+          "Niki Parmar",
+          "Jakob Uszkoreit",
+          "Llion Jones",
+          "Aidan N. Gomez",
+          "Lukasz Kaiser",
+          "Illia Polosukhin"
+        ],
+        "publicationTitle": "Advances in Neural Information Processing Systems",
+        "volume": "30",
+        "year": 2017,
+        "citationKey": "vaswani2017attention",
+        "doi": "10.48550/arXiv.1706.03762",
+        "url": "https://arxiv.org/abs/1706.03762",
+        "abstract": "The dominant sequence transduction models are based on complex recurrent or convolutional neural networks that include an encoder and a decoder."
+      },
+      "bibtex": "@inproceedings{vaswani2017attention,\n  author = {Vaswani, Ashish and Shazeer, Noam and Parmar, Niki and Uszkoreit, Jakob and Jones, Llion and Gomez, Aidan N. and Kaiser, Lukasz and Polosukhin, Illia},\n  title = {Attention Is All You Need},\n  booktitle = {Advances in Neural Information Processing Systems},\n  volume = {30},\n  year = {2017},\n  doi = {10.48550/arXiv.1706.03762},\n  url = {https://arxiv.org/abs/1706.03762}\n}",
+      "ris": "TY  - CONF\nTI  - Attention Is All You Need\nAU  - Vaswani, Ashish\nAU  - Shazeer, Noam\nAU  - Parmar, Niki\nAU  - Uszkoreit, Jakob\nAU  - Jones, Llion\nAU  - Gomez, Aidan N.\nAU  - Kaiser, Lukasz\nAU  - Polosukhin, Illia\nT2  - Advances in Neural Information Processing Systems\nVL  - 30\nPY  - 2017\nDO  - 10.48550/arXiv.1706.03762\nUR  - https://arxiv.org/abs/1706.03762\nER  - \n",
+      "cslJson": {
+        "id": "vaswani2017attention",
+        "type": "paper-conference",
+        "title": "Attention Is All You Need",
+        "container-title": "Advances in Neural Information Processing Systems",
+        "volume": "30",
+        "author": [
+          { "given": "Ashish", "family": "Vaswani" },
+          { "given": "Noam", "family": "Shazeer" },
+          { "given": "Niki", "family": "Parmar" },
+          { "given": "Jakob", "family": "Uszkoreit" },
+          { "given": "Llion", "family": "Jones" },
+          { "given": "Aidan N.", "family": "Gomez" },
+          { "given": "Lukasz", "family": "Kaiser" },
+          { "given": "Illia", "family": "Polosukhin" }
+        ],
+        "issued": { "date-parts": [[2017]] },
+        "DOI": "10.48550/arXiv.1706.03762",
+        "URL": "https://arxiv.org/abs/1706.03762"
+      }
+    }
+  ]
+}

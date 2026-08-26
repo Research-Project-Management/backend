@@ -1,8 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ActivityRepository } from './activity.repository';
 import { DomainActivityEvent } from './events/activity.events';
 import { EntityType } from '@prisma/client';
 import { RecentItemResponse } from './dto/activity.dto';
+import { RedisCacheService } from '@/core/cache/redis-cache.service';
+import { ACTIVITY_REDIS_KEYS } from './constants/redis-keys.constant';
 
 @Injectable()
 export class ActivityService {
@@ -10,15 +12,44 @@ export class ActivityService {
 
   constructor(
     private readonly activityRepo: ActivityRepository,
+    @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
   async recordEvent(event: DomainActivityEvent) {
     try {
-      return await this.activityRepo.create(event);
+      const record = await this.activityRepo.create(event);
+      await this.invalidateFeedCache(event);
+      return record;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(`Failed to record activity event: ${message}`);
       return null;
+    }
+  }
+
+  async invalidateFeedCache(event: DomainActivityEvent) {
+    if (!this.cache) return;
+    try {
+      const deletions: Promise<any>[] = [
+        this.cache.del(ACTIVITY_REDIS_KEYS.workspaceFeed(event.workspaceId)),
+        this.cache.del(
+          ACTIVITY_REDIS_KEYS.entityFeed(event.entityType, event.entityId),
+        ),
+      ];
+      if (event.projectId) {
+        deletions.push(
+          this.cache.del(ACTIVITY_REDIS_KEYS.projectFeed(event.projectId)),
+        );
+      }
+      if (event.actorId) {
+        deletions.push(
+          this.cache.del(ACTIVITY_REDIS_KEYS.userRecent(event.actorId)),
+        );
+      }
+      await Promise.all(deletions);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Failed to invalidate activity cache: ${message}`);
     }
   }
 
@@ -31,14 +62,24 @@ export class ActivityService {
       limit?: number;
     },
   ) {
-    const ws = await this.activityRepo.resolveWorkspace(workspaceId);
-    const targetWsId = ws?.id || workspaceId;
+    const workspace = await this.activityRepo.resolveWorkspace(workspaceId);
+    const resolvedWorkspaceId = workspace?.id || workspaceId;
     const page = Math.max(1, options?.page ?? 1);
     const limit = Math.min(100, Math.max(1, options?.limit ?? 50));
     const offset = (page - 1) * limit;
 
+    const isDefaultQuery = page === 1 && !options?.entityType;
+    const cacheKey = options?.projectId
+      ? ACTIVITY_REDIS_KEYS.projectFeed(options.projectId)
+      : ACTIVITY_REDIS_KEYS.workspaceFeed(resolvedWorkspaceId);
+
+    if (this.cache && isDefaultQuery) {
+      const cached = await this.cache.get<any>(cacheKey);
+      if (cached) return cached;
+    }
+
     const { items, total } = await this.activityRepo.findWorkspaceFeed(
-      targetWsId,
+      resolvedWorkspaceId,
       {
         projectId: options?.projectId,
         entityType: options?.entityType,
@@ -47,13 +88,19 @@ export class ActivityService {
       },
     );
 
-    return {
+    const result = {
       items,
       total,
       page,
       limit,
       totalPages: Math.ceil(total / limit),
     };
+
+    if (this.cache && isDefaultQuery) {
+      await this.cache.set(cacheKey, result, 300); // 5m TTL
+    }
+
+    return result;
   }
 
   /**
@@ -64,12 +111,20 @@ export class ActivityService {
     entityId: string,
     limit = 50,
   ) {
+    const cacheKey = ACTIVITY_REDIS_KEYS.entityFeed(entityType, entityId);
+
+    if (this.cache && limit === 50) {
+      const cached = await this.cache.get<any>(cacheKey);
+      if (cached) return cached;
+    }
+
     const items = await this.activityRepo.findEntityFeed(
       entityType,
       entityId,
       limit,
     );
-    return {
+
+    const result = {
       activities: items.map((item) => ({
         id: item.id,
         _id: item.id,
@@ -102,6 +157,12 @@ export class ActivityService {
         createdAt: item.createdAt,
       })),
     };
+
+    if (this.cache && limit === 50) {
+      await this.cache.set(cacheKey, result, 1800); // 30m TTL
+    }
+
+    return result;
   }
 
   async getTaskActivity(taskId: string, limit = 50) {
@@ -116,11 +177,17 @@ export class ActivityService {
     userId: string,
     limit: number = 10,
   ): Promise<RecentItemResponse[]> {
-    const ws = await this.activityRepo.resolveWorkspace(workspaceId);
-    const targetWsId = ws?.id || workspaceId;
+    const workspace = await this.activityRepo.resolveWorkspace(workspaceId);
+    const resolvedWorkspaceId = workspace?.id || workspaceId;
+    const cacheKey = ACTIVITY_REDIS_KEYS.userRecent(userId);
+
+    if (this.cache && limit === 10) {
+      const cached = await this.cache.get<RecentItemResponse[]>(cacheKey);
+      if (cached) return cached;
+    }
 
     const recentEvents = await this.activityRepo.findRecentByActor(
-      targetWsId,
+      resolvedWorkspaceId,
       userId,
       50,
     );
@@ -147,37 +214,49 @@ export class ActivityService {
       }
     }
 
+    let items: RecentItemResponse[];
+
     if (uniqueTargets.length === 0) {
-      return this.fetchFallbackRecent(targetWsId, userId, limit);
+      items = await this.fetchFallbackRecent(
+        resolvedWorkspaceId,
+        userId,
+        limit,
+      );
+    } else {
+      const taskIds = uniqueTargets
+        .filter((target) => target.entityType === 'task')
+        .map((target) => target.entityId);
+      const paperIds = uniqueTargets
+        .filter((target) => target.entityType === 'paper')
+        .map((target) => target.entityId);
+      const pageIds = uniqueTargets
+        .filter((target) => target.entityType === 'page')
+        .map((target) => target.entityId);
+
+      const titleMap = await this.activityRepo.findEntitiesTitleMap(
+        taskIds,
+        paperIds,
+        pageIds,
+      );
+
+      items = uniqueTargets.map((target) => ({
+        id: `${target.entityType}-${target.entityId}`,
+        entityType: target.entityType,
+        entityId: target.entityId,
+        title:
+          titleMap.get(`${target.entityType}:${target.entityId}`) ||
+          `Untitled ${target.entityType}`,
+        workspaceId: resolvedWorkspaceId,
+        projectId: target.projectId,
+        lastInteractedAt: target.lastInteractedAt,
+      }));
     }
 
-    const taskIds = uniqueTargets
-      .filter((t) => t.entityType === 'task')
-      .map((t) => t.entityId);
-    const paperIds = uniqueTargets
-      .filter((t) => t.entityType === 'paper')
-      .map((t) => t.entityId);
-    const pageIds = uniqueTargets
-      .filter((t) => t.entityType === 'page')
-      .map((t) => t.entityId);
+    if (this.cache && limit === 10) {
+      await this.cache.set(cacheKey, items, 600); // 10m TTL
+    }
 
-    const titleMap = await this.activityRepo.findEntitiesTitleMap(
-      taskIds,
-      paperIds,
-      pageIds,
-    );
-
-    return uniqueTargets.map((target) => ({
-      id: `${target.entityType}-${target.entityId}`,
-      entityType: target.entityType,
-      entityId: target.entityId,
-      title:
-        titleMap.get(`${target.entityType}:${target.entityId}`) ||
-        `Untitled ${target.entityType}`,
-      workspaceId: targetWsId,
-      projectId: target.projectId,
-      lastInteractedAt: target.lastInteractedAt,
-    }));
+    return items;
   }
 
   private async fetchFallbackRecent(
@@ -185,39 +264,43 @@ export class ActivityService {
     userId: string,
     limit: number,
   ): Promise<RecentItemResponse[]> {
-    const ws = await this.activityRepo.resolveWorkspace(workspaceId);
-    const targetWsId = ws?.id || workspaceId;
+    const workspace = await this.activityRepo.resolveWorkspace(workspaceId);
+    const resolvedWorkspaceId = workspace?.id || workspaceId;
 
     const { tasks, papers, pages } =
-      await this.activityRepo.findFallbackRecentItems(targetWsId, userId, limit);
+      await this.activityRepo.findFallbackRecentItems(
+        resolvedWorkspaceId,
+        userId,
+        limit,
+      );
 
     const combined: RecentItemResponse[] = [
-      ...tasks.map((t) => ({
-        id: `task-${t.id}`,
+      ...tasks.map((taskRecord) => ({
+        id: `task-${taskRecord.id}`,
         entityType: 'task' as const,
-        entityId: t.id,
-        title: t.title,
-        workspaceId: targetWsId,
-        projectId: t.projectId,
-        lastInteractedAt: t.updatedAt,
+        entityId: taskRecord.id,
+        title: taskRecord.title,
+        workspaceId: resolvedWorkspaceId,
+        projectId: taskRecord.projectId,
+        lastInteractedAt: taskRecord.updatedAt,
       })),
-      ...papers.map((p) => ({
-        id: `paper-${p.id}`,
+      ...papers.map((paperRecord) => ({
+        id: `paper-${paperRecord.id}`,
         entityType: 'paper' as const,
-        entityId: p.id,
-        title: p.title,
-        workspaceId: targetWsId,
+        entityId: paperRecord.id,
+        title: paperRecord.title,
+        workspaceId: resolvedWorkspaceId,
         projectId: null,
-        lastInteractedAt: p.updatedAt,
+        lastInteractedAt: paperRecord.updatedAt,
       })),
-      ...pages.map((p) => ({
-        id: `page-${p.id}`,
+      ...pages.map((pageRecord) => ({
+        id: `page-${pageRecord.id}`,
         entityType: 'page' as const,
-        entityId: p.id,
-        title: p.title,
-        workspaceId: targetWsId,
-        projectId: p.projectId,
-        lastInteractedAt: p.updatedAt,
+        entityId: pageRecord.id,
+        title: pageRecord.title,
+        workspaceId: resolvedWorkspaceId,
+        projectId: pageRecord.projectId,
+        lastInteractedAt: pageRecord.updatedAt,
       })),
     ];
 

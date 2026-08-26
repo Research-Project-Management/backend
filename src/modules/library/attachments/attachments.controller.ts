@@ -11,18 +11,18 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { AnnotationsService } from './annotations/annotations.service';
+import { AnnotationsService } from '../annotations/annotations.service';
 import { AttachmentsService } from './attachments.service';
 import {
   CreateAnnotationDto,
   UpdateAnnotationDto,
   ExtractPdfMetadataDto,
 } from './dto/attachments.dto';
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
-import {
-  WorkspaceRoleGuard,
-  WorkspaceRoles,
-} from '@/modules/iam/authz';
+
+import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
+import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
+import { WorkspaceRoleGuard } from '@/modules/iam/authz/guards/workspace-role.guard';
+import { WorkspaceRoles } from '@/modules/iam/authz/decorators/workspace-roles.decorator';
 
 @ApiTags('Library - Attachments & Annotations')
 @ApiBearerAuth('JWT-auth')
@@ -71,6 +71,7 @@ export class AttachmentsController {
     'workspace/:workspaceId/library/items/:itemId/annotations',
     'library/attachments/annotations/:workspaceId/:itemId',
     'library/attachments/:workspaceId/:itemId',
+    'library/annotations/:workspaceId/:itemId',
   ])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
@@ -86,6 +87,7 @@ export class AttachmentsController {
     'workspace/:workspaceId/library/items/:itemId/annotations',
     'library/attachments/annotations/:workspaceId/:itemId',
     'library/attachments/:workspaceId/:itemId',
+    'library/annotations/:workspaceId/:itemId',
   ])
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(WorkspaceRoleGuard)
@@ -112,6 +114,7 @@ export class AttachmentsController {
     'workspace/:workspaceId/library/items/:itemId/annotations/:annotationId',
     'library/attachments/annotations/:workspaceId/:itemId/:annotationId',
     'library/attachments/:workspaceId/:itemId/:annotationId',
+    'library/annotations/:workspaceId/:itemId/:annotationId',
   ])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member')
@@ -136,6 +139,7 @@ export class AttachmentsController {
     'workspace/:workspaceId/library/items/:itemId/annotations/:annotationId',
     'library/attachments/annotations/:workspaceId/:itemId/:annotationId',
     'library/attachments/:workspaceId/:itemId/:annotationId',
+    'library/annotations/:workspaceId/:itemId/:annotationId',
   ])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member')
@@ -156,6 +160,13 @@ export class AttachmentsController {
     'workspace/:workspaceId/library/items/:itemId/annotations/notes',
     'library/attachments/annotations/:workspaceId/:itemId/notes',
     'library/attachments/:workspaceId/:itemId/notes',
+    'library/annotations/:workspaceId/:itemId/extract-notes',
+  ])
+  @Post([
+    'workspace/:workspaceId/library/items/:itemId/annotations/notes',
+    'library/attachments/annotations/:workspaceId/:itemId/notes',
+    'library/attachments/:workspaceId/:itemId/notes',
+    'library/annotations/:workspaceId/:itemId/extract-notes',
   ])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')

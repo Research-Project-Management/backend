@@ -1,12 +1,13 @@
-import { CatalogController } from '@/modules/library/catalog/catalog.controller';
+import { ItemsController as CatalogController } from '@/modules/library/items/items.controller';
 import { CollectionsController } from '@/modules/library/collections/collections.controller';
-import { IngestionController } from '@/modules/library/ingestion/ingestion.controller';
-import { CitationController } from '@/modules/library/citation/citation.controller';
+import { TranslationController as IngestionController } from '@/modules/library/translation/translation.controller';
+import { CiteController as CitationController } from '@/modules/library/cite/cite.controller';
+
 import { AttachmentsController } from '@/modules/library/attachments/attachments.controller';
-import { KnowledgeController } from '@/modules/library/knowledge/knowledge.controller';
+import { RelationsController as RelationGraphController } from '@/modules/library/relations/relations.controller';
 import { QualityController } from '@/modules/library/quality/quality.controller';
-import { AcademicBundleController } from '@/modules/library/academic-bundle/academic-bundle.controller';
-import { IngestionSourceType } from '@/modules/library/ingestion/dto/ingestion.dto';
+import { ContextController as ResearchContextController } from '@/modules/library/context/context.controller';
+import { TranslationSourceType as IngestionSourceType } from '@/modules/library/translation/dto/translation.dto';
 
 describe('Library Subsystem: Complete Controllers & Endpoints Verification', () => {
   let catalogController: CatalogController;
@@ -14,9 +15,9 @@ describe('Library Subsystem: Complete Controllers & Endpoints Verification', () 
   let ingestionController: IngestionController;
   let citationController: CitationController;
   let attachmentsController: AttachmentsController;
-  let knowledgeController: KnowledgeController;
+  let relationGraphController: RelationGraphController;
   let qualityController: QualityController;
-  let academicBundleController: AcademicBundleController;
+  let researchContextController: ResearchContextController;
 
   const mockCatalogService: any = {
     ingestPaper: jest.fn().mockResolvedValue({ id: 'p1', title: 'Paper 1' }),
@@ -111,15 +112,15 @@ describe('Library Subsystem: Complete Controllers & Endpoints Verification', () 
       .mockResolvedValue({ literatureNote: { title: 'Note', content: 'MD' } }),
   };
 
-  const mockKnowledgeService: any = {
-    getRelatedPapers: jest
+  const mockRelationGraphService: any = {
+    getRelatedItems: jest
       .fn()
-      .mockResolvedValue({ relatedItems: [], total: 0 }),
-    linkPapers: jest
+      .mockResolvedValue({ relatedItems: [], relatedPapers: [], total: 0 }),
+    linkItems: jest
       .fn()
       .mockResolvedValue({ success: true, link: { type: 'extends' } }),
-    unlinkPapers: jest.fn().mockResolvedValue({ success: true }),
-    getWorkspaceKnowledgeGraph: jest
+    unlinkItems: jest.fn().mockResolvedValue({ success: true }),
+    getWorkspaceRelationGraph: jest
       .fn()
       .mockResolvedValue({ nodes: [], edges: [] }),
   };
@@ -134,8 +135,8 @@ describe('Library Subsystem: Complete Controllers & Endpoints Verification', () 
       .mockResolvedValue({ totalPapers: 1, healthyPapers: 1 }),
   };
 
-  const mockAcademicBundleService: any = {
-    getItemAcademicBundle: jest.fn().mockResolvedValue({
+  const mockResearchContextService: any = {
+    getItemResearchContext: jest.fn().mockResolvedValue({
       item: { id: 'p1', title: 'Attention' },
       citations: { apa: { inText: '(Vaswani, 2017)' } },
       annotations: [],
@@ -156,10 +157,12 @@ describe('Library Subsystem: Complete Controllers & Endpoints Verification', () 
       mockAnnotationsService,
       mockAttachmentsService,
     );
-    knowledgeController = new KnowledgeController(mockKnowledgeService);
+    relationGraphController = new RelationGraphController(
+      mockRelationGraphService,
+    );
     qualityController = new QualityController(mockQualityService);
-    academicBundleController = new AcademicBundleController(
-      mockAcademicBundleService,
+    researchContextController = new ResearchContextController(
+      mockResearchContextService,
     );
   });
 
@@ -233,11 +236,6 @@ describe('Library Subsystem: Complete Controllers & Endpoints Verification', () 
         'col-1',
         ['p1'],
       );
-
-      await collectionsController.exportCollectionBundle('ws-1', 'col-1');
-      expect(
-        mockCollectionsService.getCollectionExportBundle,
-      ).toHaveBeenCalledWith('ws-1', 'col-1');
     });
   });
 
@@ -359,34 +357,34 @@ describe('Library Subsystem: Complete Controllers & Endpoints Verification', () 
     });
   });
 
-  describe('6. KnowledgeController Endpoints', () => {
-    it('should route getRelatedPapers, linkPapers, unlinkPapers, getWorkspaceKnowledgeGraph', async () => {
-      await knowledgeController.getRelatedPapers('ws-1', 'p-1');
-      expect(mockKnowledgeService.getRelatedPapers).toHaveBeenCalledWith(
+  describe('6. RelationGraphController endpoints', () => {
+    it('routes related item and graph operations', async () => {
+      await relationGraphController.getRelatedItems('ws-1', 'p-1');
+      expect(mockRelationGraphService.getRelatedItems).toHaveBeenCalledWith(
         'ws-1',
         'p-1',
       );
 
-      await knowledgeController.linkPapers('ws-1', 'p-1', {
-        targetPaperId: 'p-2',
+      await relationGraphController.linkItems('ws-1', 'p-1', {
+        targetItemId: 'p-2',
         relationType: 'extends',
       });
-      expect(mockKnowledgeService.linkPapers).toHaveBeenCalledWith(
+      expect(mockRelationGraphService.linkItems).toHaveBeenCalledWith(
         'ws-1',
         'p-1',
         expect.any(Object),
       );
 
-      await knowledgeController.unlinkPapers('ws-1', 'p-1', 'p-2');
-      expect(mockKnowledgeService.unlinkPapers).toHaveBeenCalledWith(
+      await relationGraphController.unlinkItems('ws-1', 'p-1', 'p-2');
+      expect(mockRelationGraphService.unlinkItems).toHaveBeenCalledWith(
         'ws-1',
         'p-1',
         'p-2',
       );
 
-      await knowledgeController.getWorkspaceKnowledgeGraph('ws-1');
+      await relationGraphController.getWorkspaceRelationGraph('ws-1');
       expect(
-        mockKnowledgeService.getWorkspaceKnowledgeGraph,
+        mockRelationGraphService.getWorkspaceRelationGraph,
       ).toHaveBeenCalledWith('ws-1');
     });
   });
@@ -415,14 +413,14 @@ describe('Library Subsystem: Complete Controllers & Endpoints Verification', () 
     });
   });
 
-  describe('8. AcademicBundleController Endpoint', () => {
-    it('should route getItemAcademicBundle', async () => {
-      const bundle = await academicBundleController.getItemAcademicBundle(
+  describe('8. ResearchContextController endpoint', () => {
+    it('routes getItemResearchContext', async () => {
+      const bundle = await researchContextController.getItemResearchContext(
         'ws-1',
         'p-1',
       );
       expect(
-        mockAcademicBundleService.getItemAcademicBundle,
+        mockResearchContextService.getItemResearchContext,
       ).toHaveBeenCalledWith('ws-1', 'p-1');
       expect(bundle.item.id).toBe('p1');
     });

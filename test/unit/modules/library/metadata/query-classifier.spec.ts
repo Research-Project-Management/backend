@@ -1,4 +1,4 @@
-import { QueryClassifierUtil } from '@/modules/library/metadata/query-classifier.util';
+import { QueryClassifierUtil } from '@/modules/library/metadata/utils/metadata.util';
 
 describe('QueryClassifierUtil', () => {
   it('should correctly classify raw DOI strings', () => {

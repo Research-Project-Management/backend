@@ -1,13 +1,12 @@
 import { Controller, Get, Param, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { AnalyticsService } from './analytics.service';
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
-import {
-  WorkspaceRoleGuard,
-  WorkspaceRoles,
-  ProjectRoleGuard,
-  ProjectRoles,
-} from '@/modules/iam/authz';
+import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
+import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
+import { WorkspaceRoleGuard } from '@/modules/iam/authz/guards/workspace-role.guard';
+import { WorkspaceRoles } from '@/modules/iam/authz/decorators/workspace-roles.decorator';
+import { ProjectRoleGuard } from '@/modules/iam/authz/guards/project-role.guard';
+import { ProjectRoles } from '@/modules/iam/authz/decorators/project-roles.decorator';
 
 @ApiTags('Analytics')
 @ApiBearerAuth('JWT-auth')

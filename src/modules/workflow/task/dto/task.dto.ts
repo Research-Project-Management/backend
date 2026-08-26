@@ -1,6 +1,5 @@
 import {
   IsArray,
-  IsBoolean,
   IsEnum,
   IsNotEmpty,
   IsNumber,
@@ -45,6 +44,14 @@ export class CreateTaskDto {
   @IsOptional()
   priority?: TaskPriority;
 
+  @IsNumber()
+  @IsOptional()
+  estimate?: number;
+
+  @IsNumber()
+  @IsOptional()
+  rank?: number;
+
   @IsString()
   @IsOptional()
   cycle?: string;
@@ -68,6 +75,22 @@ export class CreateTaskDto {
   @IsArray()
   @IsOptional()
   checklists?: Prisma.InputJsonValue;
+
+  @IsArray()
+  @IsOptional()
+  attachments?: Prisma.InputJsonValue;
+
+  @IsString()
+  @IsOptional()
+  recurrence?: string;
+
+  @IsString()
+  @IsOptional()
+  reminder?: string;
+
+  @IsNumber()
+  @IsOptional()
+  timeSpent?: number;
 }
 
 export class UpdateTaskDto {
@@ -105,6 +128,10 @@ export class UpdateTaskDto {
   @IsOptional()
   priority?: TaskPriority;
 
+  @IsNumber()
+  @IsOptional()
+  estimate?: number;
+
   @IsString()
   @IsOptional()
   cycle?: string | null;
@@ -129,9 +156,28 @@ export class UpdateTaskDto {
   @IsOptional()
   checklists?: Prisma.InputJsonValue;
 
+  @IsArray()
+  @IsOptional()
+  attachments?: Prisma.InputJsonValue;
+
   @IsNumber()
   @IsOptional()
   rank?: number;
+
+  @IsString()
+  @IsOptional()
+  recurrence?: string;
+
+  @IsString()
+  @IsOptional()
+  reminder?: string;
+
+  @IsNumber()
+  @IsOptional()
+  timeSpent?: number;
+
+  @IsOptional()
+  completed?: boolean;
 }
 
 export class AssignTaskDto {
@@ -142,18 +188,32 @@ export class AssignTaskDto {
 
 export class ReorderTaskDto {
   @IsNumber()
-  sourceIndex!: number;
+  @IsOptional()
+  sourceIndex?: number;
 
   @IsNumber()
-  destinationIndex!: number;
+  @IsOptional()
+  destinationIndex?: number;
 
   @IsString()
-  @IsNotEmpty()
-  sourceColumnId!: string;
+  @IsOptional()
+  sourceColumnId?: string;
 
   @IsString()
-  @IsNotEmpty()
-  destinationColumnId!: string;
+  @IsOptional()
+  destinationColumnId?: string;
+
+  @IsString()
+  @IsOptional()
+  taskId?: string;
+
+  @IsString()
+  @IsOptional()
+  columnId?: string;
+
+  @IsNumber()
+  @IsOptional()
+  rank?: number;
 }
 
 export class BulkUpdateTaskDto {
@@ -162,5 +222,11 @@ export class BulkUpdateTaskDto {
   taskIds!: string[];
 
   @IsObject()
-  data!: Record<string, unknown>;
+  data!: {
+    columnId?: string;
+    assigneeId?: string | null;
+    priority?: TaskPriority | (string & {});
+    cycleId?: string | null;
+    [key: string]: any;
+  };
 }

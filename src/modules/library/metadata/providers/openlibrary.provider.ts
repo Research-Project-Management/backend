@@ -1,8 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { getErrorMessage, tryCatch } from '../../../../core/utils/error.util';
-import { UnifiedAcademicMetadata } from '../metadata.types';
-import { normalizeIsbn } from '../canonical-identifiers.util';
-import { validateAcademicMetadata } from '../metadata.validator';
+import { getErrorMessage, tryCatch } from '@/core/utils/error.util';
+
+import { UnifiedAcademicMetadata } from '../types/metadata.types';
+import {
+  normalizeIsbn,
+  validateAcademicMetadata,
+} from '../utils/metadata.util';
+
 import { createHash } from 'crypto';
 
 @Injectable()

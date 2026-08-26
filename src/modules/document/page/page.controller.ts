@@ -18,13 +18,12 @@ import {
   SetMainFileDto,
   UpdateThumbnailDto,
 } from './dto/page.dto';
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
-import {
-  WorkspaceRoleGuard,
-  WorkspaceRoles,
-  ProjectRoleGuard,
-  ProjectRoles,
-} from '@/modules/iam/authz';
+import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
+import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
+import { WorkspaceRoleGuard } from '@/modules/iam/authz/guards/workspace-role.guard';
+import { WorkspaceRoles } from '@/modules/iam/authz/decorators/workspace-roles.decorator';
+import { ProjectRoleGuard } from '@/modules/iam/authz/guards/project-role.guard';
+import { ProjectRoles } from '@/modules/iam/authz/decorators/project-roles.decorator';
 
 @ApiTags('Manuscript')
 @ApiBearerAuth('JWT-auth')
@@ -47,6 +46,16 @@ export class PageController {
   @ApiOperation({ summary: 'List all pages in a project' })
   async getProjectPages(@Param('projectId') projectId: string) {
     return this.pageService.getProjectPages(projectId);
+  }
+
+  @Get('project/:projectId/pages/tree')
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
+  @ApiOperation({
+    summary: 'Get ordered document tree hierarchy for a project',
+  })
+  async getProjectPageTree(@Param('projectId') projectId: string) {
+    return this.pageService.getProjectPageTree(projectId);
   }
 
   @Post('project/:projectId/pages')
@@ -84,9 +93,17 @@ export class PageController {
   @Delete(['project/:projectId/pages/:pageId', 'pages/:pageId'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
-  @ApiOperation({ summary: 'Delete a page (soft delete)' })
+  @ApiOperation({ summary: 'Soft delete a page' })
   async deletePage(@Param('pageId') pageId: string) {
     return this.pageService.deletePage(pageId);
+  }
+
+  @Post(['project/:projectId/pages/:pageId/restore', 'pages/:pageId/restore'])
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin')
+  @ApiOperation({ summary: 'Restore a soft-deleted page' })
+  async restorePage(@Param('pageId') pageId: string) {
+    return this.pageService.restorePage(pageId);
   }
 
   @Post([

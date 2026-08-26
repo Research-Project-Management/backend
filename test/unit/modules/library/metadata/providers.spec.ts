@@ -6,15 +6,15 @@ import {
   normalizeIsbn,
   normalizeIssn,
   formatCanonicalId,
-} from '@/modules/library/metadata/canonical-identifiers.util';
-import { validateAcademicMetadata } from '@/modules/library/metadata/metadata.validator';
+  validateAcademicMetadata,
+} from '@/modules/library/metadata/utils/metadata.util';
 import { OpenAlexProvider } from '@/modules/library/metadata/providers/openalex.provider';
 import { ArxivProvider } from '@/modules/library/metadata/providers/arxiv.provider';
 import { PubmedProvider } from '@/modules/library/metadata/providers/pubmed.provider';
 import { OpenlibraryProvider } from '@/modules/library/metadata/providers/openlibrary.provider';
-import { SemanticScholarProvider } from '@/modules/library/metadata/providers/semantic-scholar.provider';
+import { SemanticScholarProvider } from '@/modules/library/metadata/providers/semantic.provider';
 import { UnpaywallProvider } from '@/modules/library/metadata/providers/unpaywall.provider';
-import { DoiResolver } from '@/modules/library/citation/resolvers/doi.resolver';
+import { DoiResolver } from '@/modules/library/cite/resolvers/doi.resolver';
 
 describe('Canonical Identifier Utilities', () => {
   describe('normalizeDoi', () => {
@@ -58,9 +58,9 @@ describe('Canonical Identifier Utilities', () => {
     });
 
     it('strips version when requested', () => {
-      expect(
-        normalizeArxivId('1706.03762v7', { stripVersion: true }),
-      ).toBe('1706.03762');
+      expect(normalizeArxivId('1706.03762v7', { stripVersion: true })).toBe(
+        '1706.03762',
+      );
     });
 
     it('normalizes legacy arXiv ID', () => {
@@ -79,9 +79,9 @@ describe('Canonical Identifier Utilities', () => {
     it('normalizes PMID from digits, prefix, and URL', () => {
       expect(normalizePmid('29124373')).toBe('29124373');
       expect(normalizePmid('pmid: 29124373')).toBe('29124373');
-      expect(
-        normalizePmid('https://pubmed.ncbi.nlm.nih.gov/29124373/'),
-      ).toBe('29124373');
+      expect(normalizePmid('https://pubmed.ncbi.nlm.nih.gov/29124373/')).toBe(
+        '29124373',
+      );
     });
 
     it('normalizes PMCID to uppercase PMC prefix with digits', () => {
@@ -89,9 +89,7 @@ describe('Canonical Identifier Utilities', () => {
       expect(normalizePmcid('pmc: 5780210')).toBe('PMC5780210');
       expect(normalizePmcid('5780210')).toBe('PMC5780210');
       expect(
-        normalizePmcid(
-          'https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5780210/',
-        ),
+        normalizePmcid('https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5780210/'),
       ).toBe('PMC5780210');
     });
   });
@@ -112,9 +110,9 @@ describe('Canonical Identifier Utilities', () => {
 
   describe('formatCanonicalId', () => {
     it('formats canonical URI representation with correct scheme', () => {
-      expect(formatCanonicalId('doi', 'https://doi.org/10.1038/nature12345')).toBe(
-        'doi:10.1038/nature12345',
-      );
+      expect(
+        formatCanonicalId('doi', 'https://doi.org/10.1038/nature12345'),
+      ).toBe('doi:10.1038/nature12345');
       expect(formatCanonicalId('arxiv', 'arxiv:1706.03762v1')).toBe(
         'arxiv:1706.03762v1',
       );
@@ -233,13 +231,14 @@ describe('Academic Metadata Providers', () => {
     it('fetches by DOI via mocked fetch', async () => {
       global.fetch = jest.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({
-          id: 'https://openalex.org/W123',
-          title: 'Quantum Advantage',
-          publication_year: 2021,
-          authorships: [],
-          type: 'journal-article',
-        }),
+        json: () =>
+          Promise.resolve({
+            id: 'https://openalex.org/W123',
+            title: 'Quantum Advantage',
+            publication_year: 2021,
+            authorships: [],
+            type: 'journal-article',
+          }),
       } as any);
 
       const res = await provider.fetchByDoi('10.1038/s41586-020-03102-4');
@@ -341,7 +340,10 @@ describe('Academic Metadata Providers', () => {
     it('transforms OpenLibrary book payload', () => {
       const mockItem = {
         title: 'Introduction to Algorithms',
-        authors: [{ name: 'Thomas H. Cormen' }, { name: 'Charles E. Leiserson' }],
+        authors: [
+          { name: 'Thomas H. Cormen' },
+          { name: 'Charles E. Leiserson' },
+        ],
         publish_date: '2009',
         publishers: [{ name: 'MIT Press' }],
         number_of_pages: 1292,
@@ -420,15 +422,16 @@ describe('Academic Metadata Providers', () => {
     it('resolves OA status and PDF URL via Unpaywall', async () => {
       global.fetch = jest.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({
-          doi: '10.1038/nature12345',
-          is_oa: true,
-          oa_status: 'gold',
-          best_oa_location: {
-            url_for_pdf: 'https://nature.com/articles/nature12345.pdf',
-          },
-          title: 'Genomic Discovery',
-        }),
+        json: () =>
+          Promise.resolve({
+            doi: '10.1038/nature12345',
+            is_oa: true,
+            oa_status: 'gold',
+            best_oa_location: {
+              url_for_pdf: 'https://nature.com/articles/nature12345.pdf',
+            },
+            title: 'Genomic Discovery',
+          }),
       } as any);
 
       const res = await provider.resolveOaPdf('10.1038/nature12345');
@@ -448,21 +451,22 @@ describe('Academic Metadata Providers', () => {
     it('resolves and cleans CrossRef work metadata', async () => {
       global.fetch = jest.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({
-          message: {
-            DOI: '10.1038/nature12345',
-            title: ['Single-cell RNA sequencing at scale'],
-            author: [
-              { given: 'John', family: 'Doe' },
-              { family: 'Smith', given: 'Jane' },
-            ],
-            'published-print': { 'date-parts': [[2021, 5, 12]] },
-            'container-title': ['Nature'],
-            publisher: 'Nature Publishing Group',
-            volume: '593',
-            page: '120-128',
-          },
-        }),
+        json: () =>
+          Promise.resolve({
+            message: {
+              DOI: '10.1038/nature12345',
+              title: ['Single-cell RNA sequencing at scale'],
+              author: [
+                { given: 'John', family: 'Doe' },
+                { family: 'Smith', given: 'Jane' },
+              ],
+              'published-print': { 'date-parts': [[2021, 5, 12]] },
+              'container-title': ['Nature'],
+              publisher: 'Nature Publishing Group',
+              volume: '593',
+              page: '120-128',
+            },
+          }),
       } as any);
 
       const res = await resolver.resolve('https://doi.org/10.1038/nature12345');

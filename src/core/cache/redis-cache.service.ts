@@ -13,6 +13,10 @@ import { getErrorMessage } from '../utils/error.util';
 export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
   private redisClient: Redis | null = null;
   private isConnected = false;
+  private memoryCache = new Map<
+    string,
+    { value: string; expiresAt?: number }
+  >();
   private readonly logger = new Logger(RedisCacheService.name);
 
   constructor(private readonly configService: ConfigService) {}
@@ -78,23 +82,50 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
   }
 
   async get<T>(key: string): Promise<T | null> {
-    if (!this.isReady() || !this.redisClient) return null;
-    try {
-      const data = await this.redisClient.get(key);
-      if (!data) return null;
-      return JSON.parse(data) as T;
-    } catch (err: unknown) {
-      this.logger.warn(
-        `Cache get failed for key "${key}": ${getErrorMessage(err)}`,
-      );
-      return null;
+    // 1. Instant in-memory cache lookup (0ms latency)
+    const item = this.memoryCache.get(key);
+    if (item) {
+      if (item.expiresAt && item.expiresAt < Date.now()) {
+        this.memoryCache.delete(key);
+      } else {
+        try {
+          return JSON.parse(item.value) as T;
+        } catch {
+          this.memoryCache.delete(key);
+        }
+      }
     }
+
+    // 2. Remote Redis lookup if available
+    if (this.isReady() && this.redisClient) {
+      try {
+        const data = await this.redisClient.get(key);
+        if (data) {
+          // Cache in memory for subsequent sub-millisecond reads
+          this.memoryCache.set(key, { value: data });
+          return JSON.parse(data) as T;
+        }
+      } catch (err: unknown) {
+        this.logger.warn(
+          `Cache get failed for key "${key}": ${getErrorMessage(err)}`,
+        );
+      }
+    }
+
+    return null;
   }
 
   async set<T>(key: string, value: T, ttlSeconds: number = 300): Promise<void> {
+    const serialized = JSON.stringify(value);
+
+    // Always maintain in-memory fallback
+    this.memoryCache.set(key, {
+      value: serialized,
+      expiresAt: ttlSeconds > 0 ? Date.now() + ttlSeconds * 1000 : undefined,
+    });
+
     if (!this.isReady() || !this.redisClient) return;
     try {
-      const serialized = JSON.stringify(value);
       if (ttlSeconds > 0) {
         await this.redisClient.set(key, serialized, 'EX', ttlSeconds);
       } else {
@@ -108,6 +139,7 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
   }
 
   async del(key: string): Promise<void> {
+    this.memoryCache.delete(key);
     if (!this.isReady() || !this.redisClient) return;
     try {
       await this.redisClient.del(key);
@@ -122,6 +154,18 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
    * Non-blocking pattern deletion using Redis SCAN stream to prevent event-loop blocking.
    */
   async delPattern(pattern: string): Promise<void> {
+    // Delete in-memory keys matching pattern
+    const regexPattern = new RegExp(
+      '^' +
+        pattern.replace(/[-/\\^$+?.()|[\]{}]/g, '\\$&').replace(/\*/g, '.*') +
+        '$',
+    );
+    for (const k of this.memoryCache.keys()) {
+      if (regexPattern.test(k)) {
+        this.memoryCache.delete(k);
+      }
+    }
+
     if (!this.isReady() || !this.redisClient) return;
     try {
       const stream = this.redisClient.scanStream({

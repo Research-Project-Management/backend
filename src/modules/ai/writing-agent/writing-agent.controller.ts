@@ -11,7 +11,9 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { FastifyReply } from 'fastify';
 import { WritingAgentService } from './writing-agent.service';
 import { WritingAgentQueryDto } from './dto/writing-agent.dto';
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
+import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
+import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
+import { BypassEnvelope } from '@/core/decorators/bypass-envelope.decorator';
 
 @ApiTags('AI - Writing Agent')
 @ApiBearerAuth('JWT-auth')
@@ -21,6 +23,7 @@ export class WritingAgentController {
   constructor(private readonly writingAgentService: WritingAgentService) {}
 
   @Post(['editor-chat', 'chat/writing', 'writing/chat'])
+  @BypassEnvelope()
   @ApiOperation({
     summary: 'Stream LaTeX Writing Agent chat responses via SSE',
   })

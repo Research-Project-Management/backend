@@ -1,13 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { IngestionService } from '@/modules/library/ingestion/ingestion.service';
-import { CatalogRepository } from '@/modules/library/catalog/catalog.repository';
-import { BibtexFormatter } from '@/modules/library/citation/formatters/bibtex.formatter';
-import { BibtexParser } from '@/modules/library/citation/parsers/bibtex.parser';
-import { RisFormatter } from '@/modules/library/citation/formatters/ris.formatter';
-import { DoiResolver } from '@/modules/library/citation/resolvers/doi.resolver';
+import { TranslationService as IngestionService } from '@/modules/library/translation/translation.service';
+import { ItemsRepository as CatalogRepository } from '@/modules/library/items/items.repository';
+import { BibtexFormatter } from '@/modules/library/cite/formatters/bibtex.formatter';
+import { BibtexParser } from '@/modules/library/cite/parsers/bibtex.parser';
+import { RisFormatter } from '@/modules/library/cite/formatters/ris.formatter';
+import { DoiResolver } from '@/modules/library/cite/resolvers/doi.resolver';
 import { MetadataService } from '@/modules/library/metadata/metadata.service';
-import { PdfDoiExtractor } from '@/modules/library/attachments/pdf-extractor.service';
-import { IngestionSourceType } from '@/modules/library/ingestion/dto/ingestion.dto';
+import { ExtractorService as PdfDoiExtractor } from '@/modules/library/attachments/extractor.service';
+import { TranslationSourceType as IngestionSourceType } from '@/modules/library/translation/dto/translation.dto';
 
 describe('IngestionService', () => {
   let service: IngestionService;

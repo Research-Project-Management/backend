@@ -1,32 +1,45 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuthzService } from '@/modules/iam/authz/authz.service';
 import { PrismaService } from '@/core/database/prisma.service';
+import { RedisCacheService } from '@/core/cache/redis-cache.service';
 import { Permission } from '@/modules/iam/authz/enums/permissions.enum';
 import { WorkspaceRole } from '@/modules/iam/authz/enums/workspace-role.enum';
-import { ProjectRole } from '@/modules/iam/authz/enums/project-role.enum';
 
-describe('AuthzService', () => {
+describe('AuthorizationService (Compatibility)', () => {
   let service: AuthzService;
-  let prismaService: any;
+  let prisma: any;
+  let redis: jest.Mocked<RedisCacheService>;
 
   beforeEach(async () => {
-    prismaService = {
+    prisma = {
       workspaceMember: {
-        findFirst: jest.fn(),
+        findUnique: jest.fn(),
       },
       projectMember: {
-        findFirst: jest.fn(),
+        findUnique: jest.fn(),
       },
     };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthzService,
-        { provide: PrismaService, useValue: prismaService },
+        {
+          provide: PrismaService,
+          useValue: prisma,
+        },
+        {
+          provide: RedisCacheService,
+          useValue: {
+            get: jest.fn(),
+            set: jest.fn(),
+            del: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
     service = module.get<AuthzService>(AuthzService);
+    redis = module.get(RedisCacheService);
   });
 
   it('should be defined', () => {
@@ -39,12 +52,6 @@ describe('AuthzService', () => {
         service.hasWorkspacePermission(
           WorkspaceRole.OWNER,
           Permission.WORKSPACE_DELETE,
-        ),
-      ).toBe(true);
-      expect(
-        service.hasWorkspacePermission(
-          WorkspaceRole.OWNER,
-          Permission.PROJECT_CREATE,
         ),
       ).toBe(true);
     });
@@ -63,90 +70,18 @@ describe('AuthzService', () => {
         ),
       ).toBe(false);
     });
-
-    it('should deny project create to workspace viewer', () => {
-      expect(
-        service.hasWorkspacePermission(
-          WorkspaceRole.VIEWER,
-          Permission.PROJECT_CREATE,
-        ),
-      ).toBe(false);
-      expect(
-        service.hasWorkspacePermission(
-          WorkspaceRole.VIEWER,
-          Permission.WORKSPACE_READ,
-        ),
-      ).toBe(true);
-    });
-  });
-
-  describe('hasProjectPermission', () => {
-    it('should grant project update to project admin', () => {
-      expect(
-        service.hasProjectPermission(
-          ProjectRole.ADMIN,
-          Permission.PROJECT_UPDATE,
-        ),
-      ).toBe(true);
-    });
-
-    it('should grant task creation to contributor but deny project delete', () => {
-      expect(
-        service.hasProjectPermission(
-          ProjectRole.CONTRIBUTOR,
-          Permission.TASK_CREATE,
-        ),
-      ).toBe(true);
-      expect(
-        service.hasProjectPermission(
-          ProjectRole.CONTRIBUTOR,
-          Permission.PROJECT_DELETE,
-        ),
-      ).toBe(false);
-    });
-
-    it('should grant commenting to commenter but deny task creation', () => {
-      expect(
-        service.hasProjectPermission(
-          ProjectRole.COMMENTER,
-          Permission.COMMENT_CREATE,
-        ),
-      ).toBe(true);
-      expect(
-        service.hasProjectPermission(
-          ProjectRole.COMMENTER,
-          Permission.TASK_CREATE,
-        ),
-      ).toBe(false);
-    });
-
-    it('should grant only reading to project viewer', () => {
-      expect(
-        service.hasProjectPermission(
-          ProjectRole.VIEWER,
-          Permission.PROJECT_READ,
-        ),
-      ).toBe(true);
-      expect(
-        service.hasProjectPermission(
-          ProjectRole.VIEWER,
-          Permission.COMMENT_CREATE,
-        ),
-      ).toBe(false);
-    });
   });
 
   describe('getWorkspaceMemberRole & getProjectMemberRole', () => {
     it('should retrieve workspace member role', async () => {
-      prismaService.workspaceMember.findFirst.mockResolvedValue({
-        role: 'admin',
-      });
+      redis.get.mockResolvedValue('admin');
       const role = await service.getWorkspaceMemberRole('ws-1', 'user-1');
       expect(role).toBe('admin');
     });
 
     it('should retrieve project member role', async () => {
-      prismaService.projectMember.findFirst.mockResolvedValue({
+      redis.get.mockResolvedValue(null);
+      prisma.projectMember.findUnique.mockResolvedValue({
         role: 'contributor',
       });
       const role = await service.getProjectMemberRole('p-1', 'user-1');

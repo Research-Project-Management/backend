@@ -84,13 +84,11 @@ export class WorklogService {
 
     const log = await this.worklogRepo.createWorklog({
       hours: dto.hours,
-      description: dto.description,
+      description: dto.description || '',
       date: dto.date ? new Date(dto.date) : new Date(),
-      userId,
-      projectId,
-      workspaceId,
-      taskId: dto.taskId,
-      taskTitle: dto.taskTitle,
+      user: { connect: { id: userId } },
+      project: { connect: { id: projectId } },
+      ...(dto.taskId ? { task: { connect: { id: dto.taskId } } } : {}),
     });
 
     return {
@@ -109,8 +107,11 @@ export class WorklogService {
       ...(dto.hours !== undefined && { hours: dto.hours }),
       ...(dto.description !== undefined && { description: dto.description }),
       ...(dto.date !== undefined && { date: new Date(dto.date) }),
-      ...(dto.taskId !== undefined && { taskId: dto.taskId }),
-      ...(dto.taskTitle !== undefined && { taskTitle: dto.taskTitle }),
+      ...(dto.taskId !== undefined && {
+        task: dto.taskId
+          ? { connect: { id: dto.taskId } }
+          : { disconnect: true },
+      }),
     });
     return { success: true, data: log };
   }

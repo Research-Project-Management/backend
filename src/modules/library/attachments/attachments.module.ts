@@ -1,14 +1,15 @@
-import { Module, forwardRef } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { AttachmentsController } from './attachments.controller';
 import { AttachmentsService } from './attachments.service';
-import { AnnotationsService } from './annotations/annotations.service';
-import { PdfExtractorService } from './pdf-extractor.service';
-import { CatalogModule } from '../catalog/catalog.module';
+import { ExtractorService, PdfExtractorService } from './extractor.service';
+import { ItemsModule } from '../items/items.module';
+import { AnnotationsModule } from '../annotations/annotations.module';
+import { NotesModule } from '../notes/notes.module';
 
 @Module({
-  imports: [forwardRef(() => CatalogModule)],
+  imports: [ItemsModule, AnnotationsModule, NotesModule],
   controllers: [AttachmentsController],
-  providers: [AttachmentsService, AnnotationsService, PdfExtractorService],
-  exports: [AttachmentsService, AnnotationsService, PdfExtractorService],
+  providers: [AttachmentsService, ExtractorService, PdfExtractorService],
+  exports: [AttachmentsService, ExtractorService, PdfExtractorService],
 })
 export class AttachmentsModule {}

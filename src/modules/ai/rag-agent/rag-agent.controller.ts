@@ -15,11 +15,10 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { RagAgentService } from './rag-agent.service';
 import { RagAgentQueryDto } from './dto/rag-agent.dto';
-import {
-  JwtAuthGuard,
-  CurrentUser,
-  Public,
-} from '@/modules/iam/authn';
+import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
+import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
+import { Public } from '@/modules/iam/authn/decorators/public.decorator';
+import { BypassEnvelope } from '@/core/decorators/bypass-envelope.decorator';
 
 @ApiTags('AI - RAG Agent')
 @ApiBearerAuth('JWT-auth')
@@ -39,7 +38,8 @@ export class RagAgentController {
     };
   }
 
-  @Post(['chat/rag', 'rag/chat'])
+  @Post(['chat', 'chat/rag', 'rag/chat'])
+  @BypassEnvelope()
   @ApiOperation({ summary: 'Stream RAG Agent chat responses via SSE' })
   async chatStream(
     @CurrentUser('id') userId: string,
@@ -50,7 +50,7 @@ export class RagAgentController {
     return this.ragAgentService.streamRagChat(userId, dto, reply);
   }
 
-  @Post(['chat/rag/sync', 'rag/chat/sync'])
+  @Post(['chat/sync', 'chat/rag/sync', 'rag/chat/sync'])
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Synchronous RAG Agent chat' })
   async chatSync(
@@ -89,9 +89,52 @@ export class RagAgentController {
     return this.ragAgentService.getDocuments();
   }
 
-  @Get('documents/:docId')
-  @ApiOperation({ summary: 'Get document details from RAG engine' })
+  @Post('documents/upload')
+  @ApiOperation({ summary: 'Upload document to RAG engine' })
+  async uploadDocument(@Req() req: FastifyRequest) {
+    const isMultipart = req.isMultipart && req.isMultipart();
+    if (isMultipart) {
+      const parts = (req as any).parts();
+      let buffer: Buffer | null = null;
+      let contentType = 'application/octet-stream';
+      for await (const part of parts) {
+        if (part.type === 'file') {
+          contentType = part.mimetype;
+          buffer = await part.toBuffer();
+        }
+      }
+      if (!buffer) {
+        throw new BadRequestException('No file provided in multipart request');
+      }
+      return this.ragAgentService.uploadDocument(buffer, contentType);
+    }
+    const rawBody = (req.body as Buffer) || Buffer.from('');
+    return this.ragAgentService.uploadDocument(
+      rawBody,
+      req.headers['content-type'] || 'application/octet-stream',
+    );
+  }
+
+  @Post('documents/bulk')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Bulk retrieve document details by IDs' })
+  async getDocumentsBulk(@Body() body: { ids?: string[] }) {
+    const ids = Array.isArray(body?.ids) ? body.ids : [];
+    return this.ragAgentService.getDocumentsBulk(ids);
+  }
+
+  @Get(['documents/:docId', 'documents/:docId/content'])
+  @ApiOperation({
+    summary: 'Get document details or text content from RAG engine',
+  })
   async getDocument(@Param('docId') docId: string) {
-    return this.ragAgentService.getDocument(docId);
+    const doc = await this.ragAgentService.getDocument(docId);
+    if (!doc) {
+      return { text: '', id: docId };
+    }
+    return {
+      text: (doc.content as string) || (doc.text as string) || '',
+      ...doc,
+    };
   }
 }

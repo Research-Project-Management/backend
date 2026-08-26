@@ -1,13 +1,12 @@
 import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ActivityService } from './activity.service';
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
-import {
-  WorkspaceRoleGuard,
-  ProjectRoleGuard,
-  WorkspaceRoles,
-  ProjectRoles,
-} from '@/modules/iam/authz';
+import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
+import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
+import { WorkspaceRoleGuard } from '@/modules/iam/authz/guards/workspace-role.guard';
+import { ProjectRoleGuard } from '@/modules/iam/authz/guards/project-role.guard';
+import { WorkspaceRoles } from '@/modules/iam/authz/decorators/workspace-roles.decorator';
+import { ProjectRoles } from '@/modules/iam/authz/decorators/project-roles.decorator';
 import { EntityType } from '@prisma/client';
 
 @ApiTags('Activity')

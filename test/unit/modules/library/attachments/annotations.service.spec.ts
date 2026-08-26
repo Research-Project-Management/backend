@@ -1,4 +1,4 @@
-import { AnnotationsService } from '@/modules/library/attachments/annotations/annotations.service';
+import { AnnotationsService } from '@/modules/library/annotations/annotations.service';
 
 describe('AnnotationsService', () => {
   let service: AnnotationsService;
@@ -72,9 +72,6 @@ describe('AnnotationsService', () => {
             extraObj: updated,
           };
         }),
-    };
-
-    service = new AnnotationsService(mockCatalogRepo, {
       getAnnotations: jest.fn().mockImplementation((_itemId: string) => {
         const extra = JSON.parse(mockCatalogItemWithRelations.extra);
         return extra.annotations ?? [];
@@ -82,7 +79,7 @@ describe('AnnotationsService', () => {
       putAnnotation: jest
         .fn()
         .mockImplementation((_itemId: string, annotation: any) => {
-          return { id: annotation.id, ...annotation };
+          return [{ id: annotation.id, ...annotation }];
         }),
       replaceAnnotation: jest
         .fn()
@@ -95,8 +92,10 @@ describe('AnnotationsService', () => {
             return ann ? { ...ann, ...patch } : null;
           },
         ),
-      removeAnnotation: jest.fn().mockResolvedValue(undefined),
-    } as any);
+      removeAnnotation: jest.fn().mockResolvedValue(1),
+    };
+
+    service = new AnnotationsService(mockCatalogRepo);
   });
 
   describe('Annotation Retrieval & Creation', () => {
@@ -127,7 +126,8 @@ describe('AnnotationsService', () => {
       expect(res.annotation.id).toBeDefined();
       expect(res.annotation.pageNumber).toBe(5);
       // CatalogExtraStore.putAnnotation should have been called once
-      const extraStore = (service as any).extraStore;
+      const extraStore = mockCatalogRepo;
+
       expect(extraStore.putAnnotation).toHaveBeenCalledWith(
         'paper-1',
         expect.objectContaining({ pageNumber: 5 }),
@@ -141,7 +141,7 @@ describe('AnnotationsService', () => {
         mockCatalogItemWithRelations,
       );
 
-      const extraStore = (service as any).extraStore;
+      const extraStore = mockCatalogRepo;
 
       const res = await service.updateAnnotation('ws-1', 'paper-1', 'ann-1', {
         comment: 'Updated critical insight',
@@ -160,7 +160,8 @@ describe('AnnotationsService', () => {
       );
 
       // removeAnnotation resolves: remaining count = 2 annotations - 1 deleted = 1
-      const extraStore = (service as any).extraStore;
+      const extraStore = mockCatalogRepo;
+
       extraStore.removeAnnotation.mockResolvedValueOnce(1);
 
       const res = await service.deleteAnnotation('ws-1', 'paper-1', 'ann-1');

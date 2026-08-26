@@ -1,11 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { getErrorMessage, tryCatch } from '../../../../core/utils/error.util';
-import { UnifiedAcademicMetadata } from '../metadata.types';
+import { getErrorMessage, tryCatch } from '@/core/utils/error.util';
+
+import { UnifiedAcademicMetadata } from '../types/metadata.types';
 import {
   normalizeArxivId,
   normalizeDoi,
-} from '../canonical-identifiers.util';
-import { validateAcademicMetadata } from '../metadata.validator';
+  validateAcademicMetadata,
+} from '../utils/metadata.util';
+
 import { createHash } from 'crypto';
 
 @Injectable()
@@ -19,7 +21,8 @@ export class ArxivProvider {
   async fetchById(arxivId: string): Promise<UnifiedAcademicMetadata | null> {
     if (!arxivId) return null;
 
-    const cleanId = normalizeArxivId(arxivId) || arxivId.replace(/^arxiv:\s*/i, '').trim();
+    const cleanId =
+      normalizeArxivId(arxivId) || arxivId.replace(/^arxiv:\s*/i, '').trim();
     const url = `${this.BASE_URL}?id_list=${encodeURIComponent(cleanId)}&max_results=1`;
 
     const responseResult = await tryCatch(
@@ -44,7 +47,10 @@ export class ArxivProvider {
     return this.parseXmlPayload(xml, cleanId);
   }
 
-  parseXmlPayload(xml: string, cleanId: string): UnifiedAcademicMetadata | null {
+  parseXmlPayload(
+    xml: string,
+    cleanId: string,
+  ): UnifiedAcademicMetadata | null {
     const entryMatch = xml.match(/<entry>([\s\S]*?)<\/entry>/i);
     if (
       !entryMatch ||

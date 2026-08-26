@@ -1,6 +1,6 @@
 import { QualityService } from '@/modules/library/quality/quality.service';
-import { normalizeQualityTitle } from '@/modules/library/quality/quality.util';
-import { extractFamilyName } from '@/modules/library/citation/citation.util';
+import { normalizeQualityTitle } from '@/modules/library/quality/utils/quality.util';
+import { extractFamilyName } from '@/modules/library/cite/utils/cite.util';
 
 describe('QualityService — Duplicate Detection Logic', () => {
   let service: QualityService;
@@ -15,7 +15,9 @@ describe('QualityService — Duplicate Detection Logic', () => {
         'attentionisallyouneed',
       );
       expect(
-        normalizeQualityTitle('Attention Is All You Need: Part 1 (NeurIPS 2017)'),
+        normalizeQualityTitle(
+          'Attention Is All You Need: Part 1 (NeurIPS 2017)',
+        ),
       ).toBe('attentionisallyouneedpart1neurips2017');
       expect(normalizeQualityTitle('')).toBe('');
     });

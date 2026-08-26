@@ -3,13 +3,18 @@
   "compilerOptions": {
     "rootDir": "./src"
   },
-  "include": ["src/**/*"],
+  "include": [
+    "src/**/*"
+  ],
   "exclude": [
     "node_modules",
     "test",
     "dist",
     "**/*spec.ts",
     "prisma",
-    "prisma.config.ts"
+    "prisma.config.ts",
+    "src/modules/library/discovery/**/*",
+    "src/modules/library/exports/**/*",
+    "src/modules/library/ingestion/metadata/**/*"
   ]
 }

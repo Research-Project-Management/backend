@@ -15,6 +15,10 @@ export class PresignDto {
   @IsString()
   @IsOptional()
   mimeType?: string;
+
+  @IsString()
+  @IsOptional()
+  contentType?: string;
 }
 
 export class UploadFileDto {
@@ -141,4 +145,3 @@ export class BatchStarDto {
   @IsBoolean()
   starred!: boolean;
 }
-

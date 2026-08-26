@@ -1,5 +1,5 @@
 import { Injectable, LoggerService, LogLevel } from '@nestjs/common';
-import { ANSI, ChocolateTheme } from './chocolate-theme';
+import { ANSI, ChocolateTheme } from './chocolate-theme.constant';
 
 @Injectable()
 export class AppLogger implements LoggerService {

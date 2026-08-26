@@ -17,7 +17,8 @@ import {
   UpdateStickyDto,
   ReorderStickiesDto,
 } from './dto/sticky.dto';
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
+import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
+import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
 
 @ApiTags('Personal Sticky Notes')
 @ApiBearerAuth('JWT-auth')
@@ -26,7 +27,7 @@ import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
 export class StickyController {
   constructor(private readonly stickyService: StickyService) {}
 
-  @Get('workspace/:workspaceId/stickies')
+  @Get(['workspaces/:workspaceId/stickies', 'workspace/:workspaceId/stickies'])
   @ApiOperation({ summary: 'Get personal stickies in workspace' })
   async getWorkspaceStickies(
     @Param('workspaceId') workspaceId: string,
@@ -35,7 +36,7 @@ export class StickyController {
     return this.stickyService.getWorkspaceStickies(workspaceId, userId);
   }
 
-  @Post('workspace/:workspaceId/stickies')
+  @Post(['workspaces/:workspaceId/stickies', 'workspace/:workspaceId/stickies'])
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create personal sticky in workspace' })
   async createWorkspaceSticky(
@@ -46,13 +47,19 @@ export class StickyController {
     return this.stickyService.createWorkspaceSticky(workspaceId, userId, dto);
   }
 
-  @Put('workspace/:workspaceId/stickies/reorder')
+  @Put([
+    'workspaces/:workspaceId/stickies/reorder',
+    'workspace/:workspaceId/stickies/reorder',
+  ])
   @ApiOperation({ summary: 'Reorder personal stickies in workspace' })
-  async reorderWorkspaceStickies(@Body() dto: ReorderStickiesDto) {
-    return this.stickyService.reorderStickies(dto.stickyIds);
+  async reorderWorkspaceStickies(
+    @CurrentUser('id') userId: string,
+    @Body() dto: ReorderStickiesDto,
+  ) {
+    return this.stickyService.reorderStickies(dto.stickyIds, userId);
   }
 
-  @Get('project/:projectId/stickies')
+  @Get(['projects/:projectId/stickies', 'project/:projectId/stickies'])
   @ApiOperation({ summary: 'Get personal stickies in project' })
   async getProjectStickies(
     @Param('projectId') projectId: string,
@@ -61,7 +68,7 @@ export class StickyController {
     return this.stickyService.getProjectStickies(projectId, userId);
   }
 
-  @Post('project/:projectId/stickies')
+  @Post(['projects/:projectId/stickies', 'project/:projectId/stickies'])
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create personal sticky in project' })
   async createProjectSticky(
@@ -72,10 +79,16 @@ export class StickyController {
     return this.stickyService.createProjectSticky(projectId, userId, dto);
   }
 
-  @Put('project/:projectId/stickies/reorder')
+  @Put([
+    'projects/:projectId/stickies/reorder',
+    'project/:projectId/stickies/reorder',
+  ])
   @ApiOperation({ summary: 'Reorder personal stickies in project' })
-  async reorderProjectStickies(@Body() dto: ReorderStickiesDto) {
-    return this.stickyService.reorderStickies(dto.stickyIds);
+  async reorderProjectStickies(
+    @CurrentUser('id') userId: string,
+    @Body() dto: ReorderStickiesDto,
+  ) {
+    return this.stickyService.reorderStickies(dto.stickyIds, userId);
   }
 
   @Put('stickies/:stickyId')

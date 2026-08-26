@@ -4,13 +4,24 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { CollectionsRepository } from './collections.repository';
-import { BibtexFormatter } from '../citation/formatters/bibtex.formatter';
 import {
   CreateCollectionDto,
   UpdateCollectionDto,
   ReorderItemDto,
-  AssignPapersToCollectionDto,
+  AssignItemsToCollectionDto,
 } from './dto/collections.dto';
+import {
+  CollectionRecord,
+  CollectionView,
+  CollectionNode,
+  CollectionDeleteStrategy,
+  CollectionMoveResult,
+} from './types/collections.types';
+
+import {
+  buildCollectionTree,
+  detectCollectionCycle,
+} from './utils/collections.util';
 
 export type FormattedCollection<
   T extends {
@@ -25,42 +36,44 @@ export type FormattedCollection<
 
 @Injectable()
 export class CollectionsService {
-  constructor(
-    private readonly collectionRepo: CollectionsRepository,
-    private readonly bibtexFormatter: BibtexFormatter,
-  ) {}
+  constructor(private readonly collectionRepo: CollectionsRepository) {}
 
-  private formatCollection<
-    T extends {
-      id: string;
-      parentId?: string | null;
-      _count?: { catalogItems?: number } | null;
-    },
-  >(c: T): FormattedCollection<T>;
-  private formatCollection(c: null | undefined): null;
-  private formatCollection<
-    T extends {
-      id: string;
-      parentId?: string | null;
-      _count?: { catalogItems?: number } | null;
-    },
-  >(c: T | null | undefined): FormattedCollection<T> | null;
-  private formatCollection<
-    T extends {
-      id: string;
-      parentId?: string | null;
-      _count?: { catalogItems?: number } | null;
-    },
-  >(c: T | null | undefined): FormattedCollection<T> | null {
-    if (!c) return null;
+  private async resolveWorkspaceId(workspaceId: string): Promise<string> {
+    if (typeof (this.collectionRepo as any).resolveWorkspaceId === 'function') {
+      return (this.collectionRepo as any).resolveWorkspaceId(workspaceId);
+    }
+    const ws = await this.collectionRepo.resolveWorkspace(workspaceId);
+    return ws?.id || workspaceId;
+  }
+
+  private formatCollection(record: CollectionRecord): CollectionView;
+  private formatCollection(record: null | undefined): null;
+  private formatCollection(
+    record: CollectionRecord | null | undefined,
+  ): CollectionView | null;
+  private formatCollection(
+    record: CollectionRecord | null | undefined,
+  ): CollectionView | null {
+    if (!record) return null;
     return {
-      ...c,
-      parent: c.parentId,
-      itemsCount: c._count?.catalogItems ?? 0,
+      id: record.id,
+      name: record.name,
+      description: record.description,
+      color: record.color,
+      icon: record.icon,
+      parentId: record.parentId,
+      parent: record.parentId,
+      workspaceId: record.workspaceId,
+      createdById: record.createdById,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+      itemsCount: record._count?.catalogItems ?? 0,
     };
   }
 
-  async getCollections(workspaceId: string) {
+  async getCollections(
+    workspaceId: string,
+  ): Promise<{ collections: CollectionView[] }> {
     const targetWsId = await this.resolveWorkspaceId(workspaceId);
     const collections =
       await this.collectionRepo.findWorkspaceCollections(targetWsId);
@@ -70,7 +83,19 @@ export class CollectionsService {
     };
   }
 
-  async getCollectionById(workspaceId: string, collectionId: string) {
+  async getCollectionTree(
+    workspaceId: string,
+  ): Promise<{ tree: CollectionNode[] }> {
+    const { collections } = await this.getCollections(workspaceId);
+    return {
+      tree: buildCollectionTree(collections),
+    };
+  }
+
+  async getCollectionById(
+    workspaceId: string,
+    collectionId: string,
+  ): Promise<{ collection: CollectionView }> {
     const collection = await this.getCollectionInWorkspace(
       workspaceId,
       collectionId,
@@ -83,7 +108,7 @@ export class CollectionsService {
     workspaceId: string,
     userId: string,
     dto: CreateCollectionDto,
-  ) {
+  ): Promise<{ collection: CollectionView }> {
     const targetWsId = await this.resolveWorkspaceId(workspaceId);
 
     const parentId = dto.parentId || dto.parent || null;
@@ -111,7 +136,7 @@ export class CollectionsService {
     workspaceId: string,
     collectionId: string,
     dto: UpdateCollectionDto,
-  ) {
+  ): Promise<{ collection: CollectionView }> {
     const existing = await this.getCollectionInWorkspace(
       workspaceId,
       collectionId,
@@ -155,37 +180,35 @@ export class CollectionsService {
   }
 
   /**
-   * Prevents circular parent-child relationships (e.g., A -> B -> A)
+   * Prevents circular parent-child relationships (e.g., A -> B -> C -> A)
    */
   private async validateNoCircularHierarchy(
     collectionId: string,
     targetParentId: string,
     workspaceId: string,
-  ) {
+  ): Promise<void> {
     const allCollections =
       await this.collectionRepo.findWorkspaceCollections(workspaceId);
-    const map = new Map(allCollections.map((c) => [c.id, c.parentId]));
 
-    let current: string | null | undefined = targetParentId;
-    const visited = new Set<string>();
+    const check = detectCollectionCycle(
+      collectionId,
+      targetParentId,
+      allCollections,
+    );
 
-    while (current) {
-      if (current === collectionId) {
-        throw new BadRequestException(
-          'Circular hierarchy detected: cannot set a collection as child of its own descendant',
-        );
-      }
-      if (visited.has(current)) break;
-      visited.add(current);
-      current = map.get(current);
+    if (check.hasCycle) {
+      const pathStr = check.cyclePath.join(' -> ');
+      throw new BadRequestException(
+        `Circular hierarchy detected: cannot set a collection as child of its own descendant (${pathStr})`,
+      );
     }
   }
 
   async deleteCollection(
     workspaceId: string,
     collectionId: string,
-    strategy: 'cascade' | 'move-to-parent' | 'orphan' = 'cascade',
-  ) {
+    strategy: CollectionDeleteStrategy = 'cascade',
+  ): Promise<{ message: string }> {
     const existing = await this.getCollectionInWorkspace(
       workspaceId,
       collectionId,
@@ -204,11 +227,11 @@ export class CollectionsService {
     return { message: 'Collection deleted successfully' };
   }
 
-  async movePapers(
+  async moveItems(
     workspaceId: string,
     targetCollectionId: string | null,
-    paperIds: string[],
-  ) {
+    itemIds: string[],
+  ): Promise<CollectionMoveResult> {
     const targetWsId = await this.resolveWorkspaceId(workspaceId);
 
     const normalizedTargetId =
@@ -226,20 +249,28 @@ export class CollectionsService {
       }
     }
 
-    const result = await this.collectionRepo.movePapers(
+    const moveFn =
+      (this.collectionRepo as any).moveItems ||
+      (this.collectionRepo as any).movePapers;
+
+    const result = await moveFn.call(
+      this.collectionRepo,
       targetWsId,
       normalizedTargetId,
-      paperIds,
+      itemIds,
     );
 
     return {
-      message: 'Papers moved successfully',
+      message: 'Items moved successfully',
       count: result.count,
       targetCollectionId: normalizedTargetId,
     };
   }
 
-  async reorderCollections(workspaceId: string, items: ReorderItemDto[]) {
+  async reorderCollections(
+    workspaceId: string,
+    items: ReorderItemDto[],
+  ): Promise<{ collections: CollectionView[] }> {
     const targetWsId = await this.resolveWorkspaceId(workspaceId);
 
     for (const item of items) {
@@ -250,10 +281,7 @@ export class CollectionsService {
       }
 
       if (item.parentId) {
-        await this.assertCollectionParentInWorkspace(
-          item.parentId,
-          targetWsId,
-        );
+        await this.assertCollectionParentInWorkspace(item.parentId, targetWsId);
         await this.validateNoCircularHierarchy(
           item.id,
           item.parentId,
@@ -272,13 +300,13 @@ export class CollectionsService {
   }
 
   /**
-   * Playlist Assignment: Link papers to collection
+   * Link items to a collection
    */
-  async assignPapersToCollection(
+  async assignItemsToCollection(
     workspaceId: string,
     collectionId: string,
-    dto: AssignPapersToCollectionDto,
-  ) {
+    dto: AssignItemsToCollectionDto,
+  ): Promise<{ message: string; count: number; collectionId: string }> {
     const targetWsId = await this.resolveWorkspaceId(workspaceId);
 
     const collection =
@@ -287,27 +315,33 @@ export class CollectionsService {
       throw new NotFoundException('Collection not found in workspace');
     }
 
-    const result = await this.collectionRepo.movePapers(
+    const itemIds = dto.itemIds || dto.paperIds || [];
+    const moveFn =
+      (this.collectionRepo as any).moveItems ||
+      (this.collectionRepo as any).movePapers;
+
+    const result = await moveFn.call(
+      this.collectionRepo,
       targetWsId,
       collectionId,
-      dto.itemIds || dto.paperIds || [],
+      itemIds,
     );
 
     return {
-      message: 'Papers linked to collection successfully',
+      message: 'Items linked to collection successfully',
       count: result.count,
       collectionId,
     };
   }
 
   /**
-   * Soft-Detach: Remove paper from collection without deleting paper record from Library
+   * Soft-Detach: Remove item from collection without deleting item record from Library
    */
-  async detachPaperFromCollection(
+  async detachItemFromCollection(
     workspaceId: string,
     collectionId: string,
-    paperId: string,
-  ) {
+    itemId: string,
+  ): Promise<{ message: string; count: number }> {
     const targetWsId = await this.resolveWorkspaceId(workspaceId);
 
     const collection =
@@ -316,104 +350,56 @@ export class CollectionsService {
       throw new NotFoundException('Collection not found in workspace');
     }
 
-    const result = await this.collectionRepo.detachPaperFromCollection(
+    const detachFn =
+      (this.collectionRepo as any).detachItemFromCollection ||
+      (this.collectionRepo as any).detachPaperFromCollection;
+
+    const result = await detachFn.call(
+      this.collectionRepo,
       targetWsId,
       collectionId,
-      paperId,
+      itemId,
     );
 
     if (result.count === 0) {
-      throw new NotFoundException('Paper not found in this collection');
+      throw new NotFoundException('Item not found in this collection');
     }
 
     return {
-      message: 'Paper detached from collection successfully',
+      message: 'Item detached from collection successfully',
       count: result.count,
     };
   }
 
-  /**
-   * Project/Collection-scoped BibTeX export
-   */
-  async exportCollectionBibtex(
+  // Compatibility aliases
+  async movePapers(
+    workspaceId: string,
+    targetCollectionId: string | null,
+    itemIds: string[],
+  ) {
+    return this.moveItems(workspaceId, targetCollectionId, itemIds);
+  }
+
+  async assignPapersToCollection(
     workspaceId: string,
     collectionId: string,
-  ): Promise<{ bibtex: string; total: number; filename: string }> {
-    const targetWsId = await this.resolveWorkspaceId(workspaceId);
-
-    const collection =
-      await this.collectionRepo.findCollectionById(collectionId);
-    if (!collection || collection.workspaceId !== targetWsId) {
-      throw new NotFoundException('Collection not found in workspace');
-    }
-
-    const papers = await this.collectionRepo.findPapersInCollection(
-      targetWsId,
-      collectionId,
-    );
-
-    const bibtex = this.bibtexFormatter.formatMultiple(papers);
-    const filename = `collection-${collectionId}.bib`;
-
-    return {
-      bibtex,
-      total: papers.length,
-      filename,
-    };
+    dto: AssignItemsToCollectionDto,
+  ) {
+    return this.assignItemsToCollection(workspaceId, collectionId, dto);
   }
 
-  /**
-   * Generates a complete collection export bundle (BibTeX + Manifest of all PDFs)
-   */
-  async getCollectionExportBundle(workspaceId: string, collectionId: string) {
-    const targetWsId = await this.resolveWorkspaceId(workspaceId);
-
-    const collection =
-      await this.collectionRepo.findCollectionById(collectionId);
-    if (!collection || collection.workspaceId !== targetWsId) {
-      throw new NotFoundException('Collection not found in workspace');
-    }
-
-    const papers = await this.collectionRepo.findPapersInCollection(
-      targetWsId,
-      collectionId,
-      true, // include attachments
-    );
-
-    const bibtex = this.bibtexFormatter.formatMultiple(papers);
-
-    const files = papers
-      .map((p) => ({
-        paperId: p.id,
-        title: p.title,
-        citationKey: p.citationKey || '',
-        fileUrl: p.fileUrl || '',
-        filename: p.filename || `${p.citationKey || p.id}.pdf`,
-        attachments: p.attachments,
-      }))
-      .filter((p) => Boolean(p.fileUrl || p.attachments.length > 0));
-
-    return {
-      collection: {
-        id: collection.id,
-        name: collection.name,
-      },
-      totalPapers: papers.length,
-      totalFiles: files.length,
-      bibtex,
-      files,
-    };
-  }
-
-  private async resolveWorkspaceId(workspaceId: string): Promise<string> {
-    const ws = await this.collectionRepo.resolveWorkspace(workspaceId);
-    return ws?.id || workspaceId;
+  async detachPaperFromCollection(
+    workspaceId: string,
+    collectionId: string,
+    itemId: string,
+  ) {
+    return this.detachItemFromCollection(workspaceId, collectionId, itemId);
   }
 
   private async getCollectionInWorkspace(
     workspaceId: string,
     collectionId: string,
-  ) {
+  ): Promise<CollectionRecord> {
     const targetWsId = await this.resolveWorkspaceId(workspaceId);
     const collection =
       await this.collectionRepo.findCollectionById(collectionId);
@@ -428,7 +414,7 @@ export class CollectionsService {
   private async assertCollectionParentInWorkspace(
     parentId: string,
     workspaceId: string,
-  ) {
+  ): Promise<void> {
     const parent = await this.collectionRepo.findCollectionById(parentId);
     if (!parent || parent.workspaceId !== workspaceId) {
       throw new NotFoundException('Parent collection not found in workspace');

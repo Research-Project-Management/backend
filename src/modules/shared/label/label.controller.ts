@@ -14,7 +14,8 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { LabelService } from './label.service';
 import { CreateLabelDto, UpdateLabelDto } from './dto/label.dto';
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
+import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
+import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
 import { LabelType } from '@prisma/client';
 
 @ApiTags('Organization')
@@ -25,7 +26,9 @@ export class LabelController {
   constructor(private readonly labelService: LabelService) {}
 
   @Get(['workspace/:workspaceId/labels', 'labels/:workspaceId'])
-  @ApiOperation({ summary: 'List labels in a workspace (optionally filter by type)' })
+  @ApiOperation({
+    summary: 'List labels in a workspace (optionally filter by type)',
+  })
   async getLabels(
     @Param('workspaceId') workspaceId: string,
     @Query('type') type?: LabelType,

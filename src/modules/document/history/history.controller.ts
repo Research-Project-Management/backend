@@ -12,7 +12,8 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { HistoryService } from './history.service';
 import { CreateVersionDto } from './dto/history.dto';
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
+import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
+import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
 
 @ApiTags('Document - History & Versions')
 @ApiBearerAuth('JWT-auth')

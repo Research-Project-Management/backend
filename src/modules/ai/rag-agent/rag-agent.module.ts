@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { EngineModule } from '../engine/engine.module';
 import { RagAgentController } from './rag-agent.controller';
 import { RagAgentService } from './rag-agent.service';
-import { CatalogModule } from '@/modules/library/catalog/catalog.module';
+import { ItemsModule as CatalogModule } from '@/modules/library/items/items.module';
 
 @Module({
   imports: [EngineModule, CatalogModule],

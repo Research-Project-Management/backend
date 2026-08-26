@@ -2,6 +2,8 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  Optional,
+  Logger,
 } from '@nestjs/common';
 import { ThreadRepository } from './thread.repository';
 import {
@@ -10,6 +12,8 @@ import {
   RenameThreadDto,
 } from './dto/thread.dto';
 import { MessageRole } from '@prisma/client';
+import { RedisCacheService } from '@/core/cache/redis-cache.service';
+import { AI_REDIS_KEYS } from './constants/redis-keys.constant';
 
 export interface FormattedChatSession {
   _id: string;
@@ -62,7 +66,31 @@ function formatChat(chat: any): FormattedChatSession {
 
 @Injectable()
 export class ThreadService {
-  constructor(private readonly threadRepo: ThreadRepository) {}
+  private readonly logger = new Logger(ThreadService.name);
+
+  constructor(
+    private readonly threadRepo: ThreadRepository,
+    @Optional() private readonly cache?: RedisCacheService,
+  ) {}
+
+  private async invalidateThreadCache(
+    userId: string,
+    workspaceSlug: string,
+    chatId?: string,
+    projectId?: string | null,
+  ) {
+    if (!this.cache) return;
+    const promises: Promise<any>[] = [
+      this.cache.del(AI_REDIS_KEYS.userChats(workspaceSlug, userId, projectId)),
+      this.cache.del(AI_REDIS_KEYS.userChats(workspaceSlug, userId, null)),
+    ];
+    if (chatId) {
+      promises.push(this.cache.del(AI_REDIS_KEYS.chatThread(chatId)));
+    }
+    await Promise.all(promises).catch((err) => {
+      this.logger.warn(`Failed to invalidate AI thread cache: ${err}`);
+    });
+  }
 
   async getChats(
     workspaceId: string,
@@ -72,12 +100,25 @@ export class ThreadService {
     if (!workspaceId) {
       throw new BadRequestException('workspaceId is required');
     }
+
+    const cacheKey = AI_REDIS_KEYS.userChats(workspaceId, userId, projectId);
+    if (this.cache) {
+      const cached = await this.cache.get<FormattedChatSession[]>(cacheKey);
+      if (cached) return cached;
+    }
+
     const rawChats = await this.threadRepo.findUserChats(
       workspaceId,
       userId,
       projectId,
     );
-    return rawChats.map(formatChat);
+    const result = rawChats.map(formatChat);
+
+    if (this.cache) {
+      await this.cache.set(cacheKey, result, 1800);
+    }
+
+    return result;
   }
 
   async getPageChat(pageId: string, workspaceId: string, userId: string) {
@@ -96,15 +137,28 @@ export class ThreadService {
       throw new BadRequestException('pageId and workspaceId are required');
     }
     await this.threadRepo.deletePageChat(pageId, workspaceId, userId);
+    await this.invalidateThreadCache(userId, workspaceId);
     return { success: true };
   }
 
   async getChat(chatId: string): Promise<FormattedChatSession> {
+    const cacheKey = AI_REDIS_KEYS.chatThread(chatId);
+    if (this.cache) {
+      const cached = await this.cache.get<FormattedChatSession>(cacheKey);
+      if (cached) return cached;
+    }
+
     const raw = await this.threadRepo.findChatById(chatId);
     if (!raw) {
       throw new NotFoundException('Chat not found');
     }
-    return formatChat(raw);
+
+    const result = formatChat(raw);
+    if (this.cache) {
+      await this.cache.set(cacheKey, result, 1800);
+    }
+
+    return result;
   }
 
   async createChat(
@@ -138,10 +192,24 @@ export class ThreadService {
         formattedMessages,
         dto.documentIds,
       );
-      return formatChat(updated);
+      const result = formatChat(updated);
+      await this.invalidateThreadCache(
+        userId,
+        workspaceSlug,
+        created.id,
+        dto.projectId,
+      );
+      return result;
     }
 
-    return formatChat(created);
+    const result = formatChat(created);
+    await this.invalidateThreadCache(
+      userId,
+      workspaceSlug,
+      created.id,
+      dto.projectId,
+    );
+    return result;
   }
 
   async appendMessages(
@@ -166,7 +234,16 @@ export class ThreadService {
       formattedMessages,
       dto.documentIds,
     );
-    return formatChat(updated);
+    const result = formatChat(updated);
+
+    await this.invalidateThreadCache(
+      chat.userId,
+      chat.workspaceSlug,
+      chatId,
+      chat.projectId,
+    );
+
+    return result;
   }
 
   async renameChat(
@@ -179,16 +256,37 @@ export class ThreadService {
     }
 
     const updated = await this.threadRepo.updateChatTitle(chatId, dto.title);
-    return formatChat(updated);
+    const result = formatChat(updated);
+
+    await this.invalidateThreadCache(
+      chat.userId,
+      chat.workspaceSlug,
+      chatId,
+      chat.projectId,
+    );
+
+    return result;
   }
 
   async deleteChat(chatId: string) {
+    const chat = await this.threadRepo.findChatById(chatId);
     await this.threadRepo.deleteChat(chatId);
+
+    if (chat) {
+      await this.invalidateThreadCache(
+        chat.userId,
+        chat.workspaceSlug,
+        chatId,
+        chat.projectId,
+      );
+    }
+
     return { success: true };
   }
 
   async clearMemory(workspaceId: string, userId: string) {
     await this.threadRepo.clearUserWorkspaceChats(workspaceId, userId);
+    await this.invalidateThreadCache(userId, workspaceId);
     return { success: true };
   }
 }

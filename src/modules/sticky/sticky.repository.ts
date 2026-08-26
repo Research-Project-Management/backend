@@ -1,27 +1,30 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
-import { Prisma, StickyScope } from '@prisma/client';
+import { Prisma, StickyScope, Sticky } from '@prisma/client';
+import {
+  IStickyRepository,
+  StickyWithUser,
+  USER_MINIMAL_SELECT,
+} from './types/sticky-repository.interface';
 
-const USER_SELECT = {
-  id: true,
-  name: true,
-  email: true,
-  avatar: true,
-} as const;
-
-export type StickyWithUser = Prisma.StickyGetPayload<{
-  include: {
-    user: { select: typeof USER_SELECT };
-  };
-}>;
+export type { StickyWithUser };
 
 @Injectable()
-export class StickyRepository {
+export class StickyRepository implements IStickyRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async resolveWorkspace(workspaceIdOrSlug: string) {
+  async resolveWorkspace(
+    workspaceIdOrSlug: string,
+  ): Promise<{ id: string } | null> {
     return this.prisma.workspace.findFirst({
-      where: { OR: [{ id: workspaceIdOrSlug }, { url: workspaceIdOrSlug }] },
+      where: {
+        OR: [
+          { id: workspaceIdOrSlug },
+          { slug: workspaceIdOrSlug },
+          { url: workspaceIdOrSlug },
+        ],
+        deletedAt: null,
+      },
       select: { id: true },
     });
   }
@@ -30,7 +33,7 @@ export class StickyRepository {
     return this.prisma.sticky.findUnique({
       where: { id: stickyId },
       include: {
-        user: { select: USER_SELECT },
+        user: { select: USER_MINIMAL_SELECT },
       },
     });
   }
@@ -48,7 +51,7 @@ export class StickyRepository {
         scope: StickyScope.workspace,
       },
       include: {
-        user: { select: USER_SELECT },
+        user: { select: USER_MINIMAL_SELECT },
       },
       orderBy: { order: 'asc' },
     });
@@ -65,7 +68,7 @@ export class StickyRepository {
         scope: StickyScope.project,
       },
       include: {
-        user: { select: USER_SELECT },
+        user: { select: USER_MINIMAL_SELECT },
       },
       orderBy: { order: 'asc' },
     });
@@ -105,7 +108,7 @@ export class StickyRepository {
     return this.prisma.sticky.create({
       data: data as Prisma.StickyCreateInput,
       include: {
-        user: { select: USER_SELECT },
+        user: { select: USER_MINIMAL_SELECT },
       },
     });
   }
@@ -118,18 +121,18 @@ export class StickyRepository {
       where: { id: stickyId },
       data: data,
       include: {
-        user: { select: USER_SELECT },
+        user: { select: USER_MINIMAL_SELECT },
       },
     });
   }
 
-  async deleteSticky(stickyId: string) {
+  async deleteSticky(stickyId: string): Promise<Sticky> {
     return this.prisma.sticky.delete({
       where: { id: stickyId },
     });
   }
 
-  async reorderStickies(stickyIds: string[]) {
+  async reorderStickies(stickyIds: string[]): Promise<Sticky[]> {
     const updates = stickyIds.map((id, index) =>
       this.prisma.sticky.update({
         where: { id },

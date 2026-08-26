@@ -16,7 +16,8 @@ import {
   UpdateWorklogDto,
   QueryWorklogDto,
 } from './dto/worklog.dto';
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
+import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
+import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
 
 @ApiTags('Workflow - Worklogs')
 @ApiBearerAuth('JWT-auth')
@@ -62,11 +63,10 @@ export class WorklogController {
   }
 
   @Put('worklogs/:id')
-  @ApiOperation({ summary: 'Update a worklog entry (hours, description, date)' })
-  async updateWorklog(
-    @Param('id') id: string,
-    @Body() dto: UpdateWorklogDto,
-  ) {
+  @ApiOperation({
+    summary: 'Update a worklog entry (hours, description, date)',
+  })
+  async updateWorklog(@Param('id') id: string, @Body() dto: UpdateWorklogDto) {
     return this.worklogService.updateWorklog(id, dto);
   }
 }

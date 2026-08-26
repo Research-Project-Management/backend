@@ -33,18 +33,10 @@ export class JwtAuthGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest();
     const authHeader = request.headers?.authorization;
-    let token =
+    const token =
       authHeader && authHeader.startsWith('Bearer ')
         ? authHeader.split(' ')[1]
         : null;
-
-    if (!token) {
-      token =
-        request.query?.token ||
-        request.cookies?.token ||
-        request.cookies?.accessToken ||
-        null;
-    }
 
     if (!token) {
       throw new UnauthorizedException(

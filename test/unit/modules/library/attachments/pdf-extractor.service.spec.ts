@@ -1,4 +1,4 @@
-import { PdfDoiExtractor } from '@/modules/library/attachments/pdf-extractor.service';
+import { PdfDoiExtractor } from '@/modules/library/attachments/extractor.service';
 
 /**
  * Tests for PdfDoiExtractor at two public seams:

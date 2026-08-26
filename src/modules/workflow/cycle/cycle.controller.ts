@@ -23,8 +23,10 @@ import {
   AddCycleTaskDto,
   CompleteCycleDto,
 } from './dto/cycle.dto';
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
-import { ProjectRoleGuard, ProjectRoles } from '@/modules/iam/authz';
+import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
+import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
+import { ProjectRoleGuard } from '@/modules/iam/authz/guards/project-role.guard';
+import { ProjectRoles } from '@/modules/iam/authz/decorators/project-roles.decorator';
 
 @ApiTags('Planning Cycles')
 @ApiBearerAuth('JWT-auth')
@@ -77,10 +79,20 @@ export class CycleController {
   }
 
   @Delete(['project/:projectId/cycles/:cycleId', 'cycles/:cycleId'])
-  @ApiOperation({ summary: 'Delete a cycle' })
+  @ApiOperation({ summary: 'Soft-delete a cycle' })
   @ApiResponse({ status: 200, description: 'Cycle deletion confirmation' })
   async deleteCycle(@Param('cycleId') cycleId: string) {
     return this.cycleService.deleteCycle(cycleId);
+  }
+
+  @Post([
+    'project/:projectId/cycles/:cycleId/restore',
+    'cycles/:cycleId/restore',
+  ])
+  @ApiOperation({ summary: 'Restore a soft-deleted cycle' })
+  @ApiResponse({ status: 200, description: 'Cycle restored' })
+  async restoreCycle(@Param('cycleId') cycleId: string) {
+    return this.cycleService.restoreCycle(cycleId);
   }
 
   @Post(['project/:projectId/cycles/:cycleId/tasks', 'cycles/:cycleId/tasks'])

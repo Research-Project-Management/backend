@@ -12,6 +12,7 @@ import { SharedModule } from './modules/shared/shared.module';
 import { StickyModule } from './modules/sticky/sticky.module';
 import { StorageModule } from './modules/storage/storage.module';
 import { LibraryModule } from './modules/library/library.module';
+import { LibraryContextModule } from './contexts/library/library.module';
 import { DocumentModule } from './modules/document/document.module';
 import { WorkflowModule } from './modules/workflow/workflow.module';
 import { AiModule } from './modules/ai/ai.module';
@@ -41,6 +42,7 @@ import { AppService } from './app.service';
     WorkflowModule,
     DocumentModule,
     LibraryModule,
+    LibraryContextModule,
     StorageModule,
     AiModule,
   ],

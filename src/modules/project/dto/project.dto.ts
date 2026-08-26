@@ -5,6 +5,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  MaxLength,
 } from 'class-validator';
 import { ProjectMemberRole } from '@prisma/client';
 
@@ -15,11 +16,24 @@ export class CreateProjectDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(20, { message: 'Identifier cannot exceed 20 characters' })
+  identifier?: string;
+
+  @IsString()
+  @IsOptional()
   avatar?: string;
 
   @IsString()
   @IsOptional()
+  coverImage?: string;
+
+  @IsString()
+  @IsOptional()
   description?: string;
+
+  @IsString()
+  @IsOptional()
+  leadId?: string;
 
   @IsArray()
   @IsOptional()
@@ -37,11 +51,24 @@ export class UpdateProjectDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(20, { message: 'Identifier cannot exceed 20 characters' })
+  identifier?: string;
+
+  @IsString()
+  @IsOptional()
   avatar?: string;
 
   @IsString()
   @IsOptional()
+  coverImage?: string;
+
+  @IsString()
+  @IsOptional()
   description?: string;
+
+  @IsString()
+  @IsOptional()
+  leadId?: string;
 
   @IsArray()
   @IsOptional()
@@ -53,6 +80,9 @@ export class UpdateProjectDto {
 
   @IsOptional()
   settings?: any;
+
+  @IsOptional()
+  taskColumns?: any;
 }
 
 export class AddProjectMemberDto {

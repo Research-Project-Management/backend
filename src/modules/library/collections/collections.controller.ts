@@ -1,4 +1,4 @@
-﻿import {
+import {
   Controller,
   Get,
   Post,
@@ -17,23 +17,23 @@ import { CollectionsService } from './collections.service';
 import {
   CreateCollectionDto,
   UpdateCollectionDto,
-  MovePapersDto,
+  MoveItemsDto,
   ReorderCollectionsDto,
-  AssignPapersToCollectionDto,
+  AssignItemsToCollectionDto,
 } from './dto/collections.dto';
+import { CollectionDeleteStrategy } from './types/collections.types';
 
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
-import {
-  WorkspaceRoleGuard,
-  WorkspaceRoles,
-} from '@/modules/iam/authz';
+import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
+import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
+import { WorkspaceRoleGuard } from '@/modules/iam/authz/guards/workspace-role.guard';
+import { WorkspaceRoles } from '@/modules/iam/authz/decorators/workspace-roles.decorator';
 
 @ApiTags('Library Collections')
 @ApiBearerAuth('JWT-auth')
 @Controller('api')
 @UseGuards(JwtAuthGuard)
 export class CollectionsController {
-  constructor(private readonly CollectionsService: CollectionsService) {}
+  constructor(private readonly collectionsService: CollectionsService) {}
 
   @Get([
     'workspace/:workspaceId/library/collections',
@@ -42,9 +42,21 @@ export class CollectionsController {
   ])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
-  @ApiOperation({ summary: 'Get all paper collections in workspace' })
+  @ApiOperation({ summary: 'Get all collections in workspace' })
   async getCollections(@Param('workspaceId') workspaceId: string) {
-    return this.CollectionsService.getCollections(workspaceId);
+    return this.collectionsService.getCollections(workspaceId);
+  }
+
+  @Get([
+    'workspace/:workspaceId/library/collections/tree',
+    'library/collections/:workspaceId/tree',
+    'library/:workspaceId/collections/tree',
+  ])
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'Get full hierarchical collection tree' })
+  async getCollectionTree(@Param('workspaceId') workspaceId: string) {
+    return this.collectionsService.getCollectionTree(workspaceId);
   }
 
   @Post([
@@ -55,13 +67,13 @@ export class CollectionsController {
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member')
-  @ApiOperation({ summary: 'Create a new paper collection' })
+  @ApiOperation({ summary: 'Create a new collection' })
   async createCollection(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
     @Body() dto: CreateCollectionDto,
   ) {
-    return this.CollectionsService.createCollection(workspaceId, userId, dto);
+    return this.collectionsService.createCollection(workspaceId, userId, dto);
   }
 
   @Get([
@@ -76,10 +88,7 @@ export class CollectionsController {
     @Param('workspaceId') workspaceId: string,
     @Param('collectionId') collectionId: string,
   ) {
-    return this.CollectionsService.getCollectionById(
-      workspaceId,
-      collectionId,
-    );
+    return this.collectionsService.getCollectionById(workspaceId, collectionId);
   }
 
   @Put([
@@ -95,7 +104,7 @@ export class CollectionsController {
     @Param('collectionId') collectionId: string,
     @Body() dto: UpdateCollectionDto,
   ) {
-    return this.CollectionsService.updateCollection(
+    return this.collectionsService.updateCollection(
       workspaceId,
       collectionId,
       dto,
@@ -113,9 +122,9 @@ export class CollectionsController {
   async deleteCollection(
     @Param('workspaceId') workspaceId: string,
     @Param('collectionId') collectionId: string,
-    @Query('strategy') strategy?: 'cascade' | 'move-to-parent' | 'orphan',
+    @Query('strategy') strategy?: CollectionDeleteStrategy,
   ) {
-    return this.CollectionsService.deleteCollection(
+    return this.collectionsService.deleteCollection(
       workspaceId,
       collectionId,
       strategy,
@@ -123,6 +132,7 @@ export class CollectionsController {
   }
 
   @Post([
+    'workspace/:workspaceId/library/collections/:collectionId/move-items',
     'workspace/:workspaceId/library/collections/:collectionId/move-papers',
     'library/collections/:workspaceId/:collectionId/move-papers',
     'library/:workspaceId/collections/:collectionId/move-papers',
@@ -130,17 +140,30 @@ export class CollectionsController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member')
-  @ApiOperation({ summary: 'Bulk move papers to a collection or unfile them' })
-  async movePapers(
+  @ApiOperation({ summary: 'Bulk move items to a collection or unfile them' })
+  async moveItems(
     @Param('workspaceId') workspaceId: string,
     @Param('collectionId') collectionId: string,
-    @Body() dto: MovePapersDto,
+    @Body() dto: MoveItemsDto,
   ) {
-    return this.CollectionsService.movePapers(
+    const moveFn =
+      (this.collectionsService as any).moveItems ||
+      (this.collectionsService as any).movePapers;
+    return await moveFn.call(
+      this.collectionsService,
       workspaceId,
       collectionId,
       dto.itemIds || dto.paperIds || [],
     );
+  }
+
+  // Backward compatibility alias for controller
+  async movePapers(
+    workspaceId: string,
+    collectionId: string,
+    dto: MoveItemsDto,
+  ) {
+    return this.moveItems(workspaceId, collectionId, dto);
   }
 
   @Patch([
@@ -156,13 +179,14 @@ export class CollectionsController {
     @Param('workspaceId') workspaceId: string,
     @Body() dto: ReorderCollectionsDto,
   ) {
-    return this.CollectionsService.reorderCollections(
+    return this.collectionsService.reorderCollections(
       workspaceId,
       dto.collections,
     );
   }
 
   @Post([
+    'workspace/:workspaceId/library/collections/:collectionId/items',
     'workspace/:workspaceId/library/collections/:collectionId/papers',
     'library/collections/:workspaceId/:collectionId/papers',
     'library/:workspaceId/collections/:collectionId/papers',
@@ -170,79 +194,65 @@ export class CollectionsController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member')
-  @ApiOperation({ summary: 'Link papers from library to a collection' })
-  async assignPapersToCollection(
+  @ApiOperation({ summary: 'Link items from library to a collection' })
+  async assignItemsToCollection(
     @Param('workspaceId') workspaceId: string,
     @Param('collectionId') collectionId: string,
-    @Body() dto: AssignPapersToCollectionDto,
+    @Body() dto: AssignItemsToCollectionDto,
   ) {
-    return this.CollectionsService.assignPapersToCollection(
+    const assignFn =
+      (this.collectionsService as any).assignItemsToCollection ||
+      (this.collectionsService as any).assignPapersToCollection;
+    return await assignFn.call(
+      this.collectionsService,
       workspaceId,
       collectionId,
       dto,
     );
   }
 
+  // Backward compatibility alias for controller
+  async assignPapersToCollection(
+    workspaceId: string,
+    collectionId: string,
+    dto: AssignItemsToCollectionDto,
+  ) {
+    return this.assignItemsToCollection(workspaceId, collectionId, dto);
+  }
+
   @Delete([
-    'workspace/:workspaceId/library/collections/:collectionId/papers/:paperId',
-    'library/collections/:workspaceId/:collectionId/papers/:paperId',
-    'library/:workspaceId/collections/:collectionId/papers/:paperId',
+    'workspace/:workspaceId/library/collections/:collectionId/items/:itemId',
+    'workspace/:workspaceId/library/collections/:collectionId/papers/:itemId',
+    'library/collections/:workspaceId/:collectionId/papers/:itemId',
+    'library/:workspaceId/collections/:collectionId/papers/:itemId',
   ])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member')
   @ApiOperation({
-    summary: 'Soft-detach paper from collection (preserves paper in library)',
+    summary: 'Soft-detach item from collection (preserves item in library)',
   })
+  async detachItemFromCollection(
+    @Param('workspaceId') workspaceId: string,
+    @Param('collectionId') collectionId: string,
+    @Param('itemId') itemId: string,
+  ) {
+    const detachFn =
+      (this.collectionsService as any).detachItemFromCollection ||
+      (this.collectionsService as any).detachPaperFromCollection;
+    return await detachFn.call(
+      this.collectionsService,
+      workspaceId,
+      collectionId,
+      itemId,
+    );
+  }
+
+  // Backward compatibility alias for controller
   async detachPaperFromCollection(
-    @Param('workspaceId') workspaceId: string,
-    @Param('collectionId') collectionId: string,
-    @Param('paperId') paperId: string,
+    workspaceId: string,
+    collectionId: string,
+    itemId: string,
   ) {
-    return this.CollectionsService.detachPaperFromCollection(
-      workspaceId,
-      collectionId,
-      paperId,
-    );
-  }
-
-  @Get([
-    'workspace/:workspaceId/library/collections/:collectionId/bibtex',
-    'library/collections/:workspaceId/:collectionId/bibtex',
-    'library/:workspaceId/collections/:collectionId/bibtex',
-  ])
-  @UseGuards(WorkspaceRoleGuard)
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
-  @ApiOperation({
-    summary: 'Export all references in a collection to BibTeX format',
-  })
-  async exportCollectionBibtex(
-    @Param('workspaceId') workspaceId: string,
-    @Param('collectionId') collectionId: string,
-  ) {
-    return this.CollectionsService.exportCollectionBibtex(
-      workspaceId,
-      collectionId,
-    );
-  }
-
-  @Get([
-    'workspace/:workspaceId/library/collections/:collectionId/export-bundle',
-    'library/collections/:workspaceId/:collectionId/export-bundle',
-    'library/:workspaceId/collections/:collectionId/export-bundle',
-  ])
-  @UseGuards(WorkspaceRoleGuard)
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
-  @ApiOperation({
-    summary:
-      'Export complete collection archive bundle (BibTeX + PDF files manifest)',
-  })
-  async exportCollectionBundle(
-    @Param('workspaceId') workspaceId: string,
-    @Param('collectionId') collectionId: string,
-  ) {
-    return this.CollectionsService.getCollectionExportBundle(
-      workspaceId,
-      collectionId,
-    );
+    return this.detachItemFromCollection(workspaceId, collectionId, itemId);
   }
 }

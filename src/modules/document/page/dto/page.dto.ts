@@ -1,10 +1,41 @@
-import { IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import {
+  IsBoolean,
+  IsEnum,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+} from 'class-validator';
 import { PageStatus, Prisma } from '@prisma/client';
 
 export class CreatePageDto {
   @IsString()
   @IsNotEmpty({ message: 'Page title is required' })
   title!: string;
+
+  @IsString()
+  @IsOptional()
+  slug?: string;
+
+  @IsString()
+  @IsOptional()
+  icon?: string;
+
+  @IsString()
+  @IsOptional()
+  coverImage?: string;
+
+  @IsNumber()
+  @IsOptional()
+  rank?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  isLocked?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  isPublished?: boolean;
 
   @IsOptional()
   content?: Prisma.InputJsonValue;
@@ -34,6 +65,30 @@ export class UpdatePageDto {
   @IsString()
   @IsOptional()
   title?: string;
+
+  @IsString()
+  @IsOptional()
+  slug?: string;
+
+  @IsString()
+  @IsOptional()
+  icon?: string;
+
+  @IsString()
+  @IsOptional()
+  coverImage?: string;
+
+  @IsNumber()
+  @IsOptional()
+  rank?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  isLocked?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  isPublished?: boolean;
 
   @IsOptional()
   content?: Prisma.InputJsonValue;

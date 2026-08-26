@@ -3,11 +3,13 @@ import {
   Post,
   Get,
   Body,
+  Param,
   Query,
   Redirect,
   HttpCode,
   HttpStatus,
   BadRequestException,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -30,9 +32,13 @@ import {
   MessageResponseDto,
 } from './dto/authn-response.dto';
 import { Public } from './decorators/public.decorator';
+import { CurrentUser } from './decorators/current-user.decorator';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { BypassEnvelope } from '@/core/decorators/bypass-envelope.decorator';
 
 @ApiTags('Identity')
 @Controller('auth')
+@UseGuards(JwtAuthGuard)
 export class AuthnController {
   constructor(private readonly authnService: AuthnService) {}
 
@@ -45,7 +51,9 @@ export class AuthnController {
     description: 'User registered successfully',
     type: AuthnResponseDto,
   })
-  @ApiBadRequestResponse({ description: 'Email already exists or invalid data' })
+  @ApiBadRequestResponse({
+    description: 'Email already exists or invalid data',
+  })
   async register(@Body() dto: RegisterDto): Promise<AuthnResponseDto> {
     return this.authnService.registerUser(dto);
   }
@@ -65,6 +73,7 @@ export class AuthnController {
   }
 
   @Public()
+  @BypassEnvelope()
   @Get('google')
   @Redirect()
   @ApiOperation({ summary: 'Initiate Google OAuth2 authentication flow' })
@@ -74,6 +83,7 @@ export class AuthnController {
   }
 
   @Public()
+  @BypassEnvelope()
   @Get('google/callback')
   @Redirect()
   @ApiOperation({ summary: 'Handle Google OAuth2 callback' })
@@ -91,6 +101,7 @@ export class AuthnController {
   }
 
   @Public()
+  @BypassEnvelope()
   @Get('github')
   @Redirect()
   @ApiOperation({ summary: 'Initiate GitHub OAuth authentication flow' })
@@ -100,6 +111,7 @@ export class AuthnController {
   }
 
   @Public()
+  @BypassEnvelope()
   @Get('github/callback')
   @Redirect()
   @ApiOperation({ summary: 'Handle GitHub OAuth callback' })
@@ -193,6 +205,35 @@ export class AuthnController {
   })
   async resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authnService.resetPassword(dto.token, dto.newPassword);
+  }
+
+  // ─── Active Sessions (User Story 3) ────────────────────────────────────────
+
+  @Get('sessions')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Get all active sessions for current user' })
+  async getActiveSessions(@CurrentUser('id') userId: string) {
+    return this.authnService.getActiveSessions(userId);
+  }
+
+  @Post('sessions/:id/revoke')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Revoke a specific active session' })
+  async revokeSession(
+    @CurrentUser('id') userId: string,
+    @Param('id') sessionId: string,
+  ) {
+    await this.authnService.revokeSession(userId, sessionId);
+    return { message: 'Session revoked successfully' };
+  }
+
+  @Post('sessions/revoke-all')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Revoke all active sessions (Sign out of all devices)',
+  })
+  async revokeAllSessions(@CurrentUser('id') userId: string) {
+    return this.authnService.revokeAllSessions(userId);
   }
 }
 

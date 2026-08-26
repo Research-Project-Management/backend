@@ -75,6 +75,34 @@ export class EngineService {
     };
   }
 
+  private assembleLatexSource(
+    title: string,
+    rootContent: unknown,
+    childPages: Array<{ title: string; content?: unknown }>,
+  ): string {
+    let mainContent = '';
+    if (typeof rootContent === 'string') {
+      mainContent = rootContent;
+    } else if (rootContent && typeof rootContent === 'object') {
+      mainContent = JSON.stringify(rootContent);
+    }
+
+    let source = `\\documentclass{article}\n\\title{${title}}\n\\begin{document}\n\\maketitle\n\n${mainContent}\n`;
+
+    for (const section of childPages) {
+      let secContent = '';
+      if (typeof section.content === 'string') {
+        secContent = section.content;
+      } else if (section.content && typeof section.content === 'object') {
+        secContent = JSON.stringify(section.content);
+      }
+      source += `\n\\section{${section.title}}\n${secContent}\n`;
+    }
+
+    source += `\n\\end{document}\n`;
+    return source;
+  }
+
   /**
    * Assembles the root document and all nested chapters/sections,
    * formatting and compiling through the LaTeX engine.
@@ -89,28 +117,9 @@ export class EngineService {
       throw new NotFoundException(`Document page ${pageId} not found`);
     }
 
-    // If source is not provided directly, assemble LaTeX document from page content
-    let assembledSource = dto.source;
-    if (!assembledSource) {
-      let mainContent = '';
-      if (typeof rootPage.content === 'string') {
-        mainContent = rootPage.content;
-      } else if (rootPage.content && typeof rootPage.content === 'object') {
-        mainContent = JSON.stringify(rootPage.content);
-      }
-
-      assembledSource = `\\documentclass{article}\n\\title{${rootPage.title}}\n\\begin{document}\n\\maketitle\n\n${mainContent}\n`;
-
-      for (const section of childPages) {
-        let secContent = '';
-        if (typeof section.content === 'string') {
-          secContent = section.content;
-        }
-        assembledSource += `\n\\section{${section.title}}\n${secContent}\n`;
-      }
-
-      assembledSource += `\n\\end{document}\n`;
-    }
+    const assembledSource =
+      dto.source ||
+      this.assembleLatexSource(rootPage.title, rootPage.content, childPages);
 
     const compileResult = await this.latexService.compile({
       project_id: pageId,

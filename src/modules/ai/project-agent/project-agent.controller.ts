@@ -11,7 +11,9 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { FastifyReply } from 'fastify';
 import { ProjectAgentService } from './project-agent.service';
 import { ProjectAgentQueryDto } from './dto/project-agent.dto';
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
+import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
+import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
+import { BypassEnvelope } from '@/core/decorators/bypass-envelope.decorator';
 
 @ApiTags('AI - Project Agent')
 @ApiBearerAuth('JWT-auth')
@@ -20,7 +22,8 @@ import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
 export class ProjectAgentController {
   constructor(private readonly projectAgentService: ProjectAgentService) {}
 
-  @Post(['chat', 'chat/project'])
+  @Post(['chat/project', 'project/chat'])
+  @BypassEnvelope()
   @ApiOperation({ summary: 'Stream Project Agent chat responses via SSE' })
   async chatStream(
     @CurrentUser('id') userId: string,
@@ -30,7 +33,7 @@ export class ProjectAgentController {
     return this.projectAgentService.streamProjectChat(userId, dto, reply);
   }
 
-  @Post('chat/sync')
+  @Post(['chat/project/sync', 'project/chat/sync'])
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Execute synchronous Project Agent query' })
   async chatSync(

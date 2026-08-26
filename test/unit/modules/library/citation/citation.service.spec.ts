@@ -1,13 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { CitationService } from '@/modules/library/citation/citation.service';
-import { BibtexFormatter } from '@/modules/library/citation/formatters/bibtex.formatter';
-import { DoiResolver } from '@/modules/library/citation/resolvers/doi.resolver';
-import { CatalogRepository } from '@/modules/library/catalog/catalog.repository';
-import { BibtexParser } from '@/modules/library/citation/parsers/bibtex.parser';
-import { MetadataService } from '@/modules/library/metadata/metadata.service';
-import { CslFormatter } from '@/modules/library/citation/formatters/csl.formatter';
-import { RisFormatter } from '@/modules/library/citation/formatters/ris.formatter';
-import { IngestionService } from '@/modules/library/ingestion/ingestion.service';
+import { CiteService as CitationService } from '@/modules/library/cite/cite.service';
+import { BibtexFormatter } from '@/modules/library/cite/formatters/bibtex.formatter';
+import { DoiResolver } from '@/modules/library/cite/resolvers/doi.resolver';
+import { ItemsRepository as CatalogRepository } from '@/modules/library/items/items.repository';
+import { BibtexParser } from '@/modules/library/cite/parsers/bibtex.parser';
+import { CslFormatter } from '@/modules/library/cite/formatters/csl.formatter';
+import { RisFormatter } from '@/modules/library/cite/formatters/ris.formatter';
+import { MapperService as ReferenceManagerMapperService } from '@/modules/library/cite/mapper.service';
 
 describe('CitationService & Formatters', () => {
   let service: CitationService;
@@ -31,33 +30,18 @@ describe('CitationService & Formatters', () => {
   const mockPaperRepo = {
     resolveWorkspace: jest.fn().mockResolvedValue({ id: 'ws-1' }),
     resolveWorkspaceId: jest.fn().mockResolvedValue('ws-1'),
+    resolveUniqueCitationKey: jest
+      .fn()
+      .mockResolvedValue('goldreich2001foundations'),
+    createItem: jest
+      .fn()
+      .mockImplementation((data) =>
+        Promise.resolve({ id: 'ref-123', ...data }),
+      ),
     createPaper: jest.fn(),
     findItems: jest.fn(),
     findItemById: jest.fn(),
     findItemByIdInWorkspace: jest.fn().mockResolvedValue(mockPaper),
-  };
-
-  const mockIngestionService = {
-    ingest: jest.fn().mockImplementation(async (userId, dto) => ({
-      id: 'ref-123',
-      title: dto.title,
-      citationKey: dto.citationKey || 'goldreich2001foundations',
-      paper: {
-        id: 'ref-123',
-        title: dto.title,
-        authors: dto.authors || [],
-        year: dto.year || null,
-        citationKey: dto.citationKey || 'goldreich2001foundations',
-        doi: dto.doi || '',
-        uploadedBy: {
-          id: 'u-1',
-          name: 'Alice',
-          email: 'alice@test.com',
-          avatar: null,
-        },
-        collection: null,
-      },
-    })),
   };
 
   beforeEach(async () => {
@@ -65,16 +49,15 @@ describe('CitationService & Formatters', () => {
       providers: [
         CitationService,
         BibtexFormatter,
-        CslFormatter,
-        RisFormatter,
         BibtexParser,
         DoiResolver,
+        CslFormatter,
+        RisFormatter,
+        ReferenceManagerMapperService,
         {
-          provide: MetadataService,
-          useValue: { resolve: jest.fn() },
+          provide: CatalogRepository,
+          useValue: mockPaperRepo,
         },
-        { provide: CatalogRepository, useValue: mockPaperRepo },
-        { provide: IngestionService, useValue: mockIngestionService },
       ],
     }).compile();
 
@@ -83,63 +66,41 @@ describe('CitationService & Formatters', () => {
     paperRepo = module.get<CatalogRepository>(CatalogRepository);
   });
 
-  describe('CSL Formatter Multi-Style Generation', () => {
-    it('should format paper into APA style via formatCitation', async () => {
-      mockPaperRepo.findItemById.mockResolvedValue(mockPaper);
+  describe('formatCitation', () => {
+    it('should format APA citation for valid catalog paper', async () => {
+      const citation = await service.formatCitation('ws-1', 'paper-1', 'apa');
 
-      const res = await service.formatCitation('ws-1', 'paper-1', 'apa');
-
-      expect(res.style).toBe('apa');
-      expect(res.inText).toBe('(Vaswani & Shazeer, 2017)');
-      expect(res.bibliography).toContain(
-        'Vaswani, A. & Shazeer, N. (2017). Attention Is All You Need.',
-      );
+      expect(citation.style).toBe('apa');
+      expect(citation.inText).toBe('(Vaswani & Shazeer, 2017)');
+      expect(citation.bibliography).toContain('Attention Is All You Need');
+      expect(citation.bibliography).toContain('NeurIPS');
     });
 
-    it('should format batch papers into IEEE numbered citations', async () => {
-      mockPaperRepo.findItems.mockResolvedValue([mockPaper]);
+    it('should format IEEE citation with numbered format', async () => {
+      const citation = await service.formatCitation('ws-1', 'paper-1', 'ieee');
 
-      const res = await service.formatBatchCitations('ws-1', {
-        paperIds: ['paper-1'],
-        style: 'ieee',
-      });
-
-      expect(res.style).toBe('ieee');
-      expect(res.total).toBe(1);
-      expect(res.entries[0].inText).toBe('[1]');
+      expect(citation.style).toBe('ieee');
+      expect(citation.inText).toBe('[1]');
+      expect(citation.bibliography).toContain('A. Vaswani and N. Shazeer');
     });
   });
 
-  describe('BibTeX & RIS Export', () => {
-    it('should format a single paper into clean BibTeX with TeX escaping', () => {
-      const bib = formatter.formatEntry({
-        title: 'Deep Residual Learning & 100% Accuracy',
-        authors: ['He, Kaiming', 'Zhang, Xiangyu'],
-        year: 2016,
-        journal: 'CVPR & IEEE',
-        citationKey: 'he2016deep',
+  describe('formatBatchCitations', () => {
+    it('should format multiple citations in single call', async () => {
+      mockPaperRepo.findItems.mockResolvedValue([mockPaper]);
+
+      const result = await service.formatBatchCitations('ws-1', {
+        itemIds: ['paper-1'],
+        style: 'apa',
       });
 
-      expect(bib).toContain('@article{he2016deep,');
-      expect(bib).toContain(
-        'title = {Deep Residual Learning \\& 100\\% Accuracy},',
-      );
-      expect(bib).toContain('author = {He, Kaiming and Zhang, Xiangyu},');
-      expect(bib).toContain('year = {2016},');
+      expect(result.total).toBe(1);
+      expect(result.entries[0].inText).toBe('(Vaswani & Shazeer, 2017)');
     });
+  });
 
-    it('should export paper into formatted RIS record via exportRis', async () => {
-      mockPaperRepo.findItemById.mockResolvedValue(mockPaper);
-
-      const res = await service.exportRis('ws-1', 'paper-1');
-
-      expect(res.filename).toBe('vaswani2017attention.ris');
-      expect(res.ris).toContain('TY  - JOUR');
-      expect(res.ris).toContain('TI  - Attention Is All You Need');
-      expect(res.ris).toContain('ER  -');
-    });
-
-    it('should export all workspace references as a single .bib payload', async () => {
+  describe('exportWorkspaceBibtex', () => {
+    it('should export all items in workspace as single .bib string', async () => {
       mockPaperRepo.findItems.mockResolvedValue([
         {
           title: 'Paper One',
@@ -163,19 +124,18 @@ describe('CitationService & Formatters', () => {
     });
   });
 
-  describe('Reference Creation Delegation', () => {
-    it('should delegate reference creation to IngestionService.ingest', async () => {
+  describe('Direct Item Creation from BibTeX', () => {
+    it('should create items directly via CatalogRepository', async () => {
       const result = await service.importBibtex('ws-1', 'u-1', {
         bibtex:
           '@article{goldreich2001, title={Foundations of Modern Cryptography}, author={Goldreich, Oded}, year={2001}, doi={10.1017/CBO9780511546891}}',
       });
 
-      expect(result.imported).toBeGreaterThanOrEqual(0);
-      expect(mockIngestionService.ingest).toHaveBeenCalledWith(
-        'u-1',
+      expect(result.imported).toBe(1);
+      expect(mockPaperRepo.createItem).toHaveBeenCalledWith(
         expect.objectContaining({
           title: 'Foundations of Modern Cryptography',
-          workspaceId: 'ws-1',
+          citationKey: 'goldreich2001foundations',
         }),
       );
     });

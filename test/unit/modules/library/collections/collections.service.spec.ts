@@ -3,7 +3,7 @@ import { CollectionsService } from '@/modules/library/collections/collections.se
 import { CollectionsRepository } from '@/modules/library/collections/collections.repository';
 import { BadRequestException } from '@nestjs/common';
 
-import { BibtexFormatter } from '@/modules/library/citation/formatters/bibtex.formatter';
+import { BibtexFormatter } from '@/modules/library/cite/formatters/bibtex.formatter';
 
 describe('CollectionsService', () => {
   let service: CollectionsService;
@@ -142,32 +142,36 @@ describe('CollectionsService', () => {
       id: 'c-1',
       workspaceId: 'ws-1',
     });
-    (repo as any).detachPaperFromCollection = jest.fn().mockResolvedValue({ count: 1 });
+    (repo as any).detachPaperFromCollection = jest
+      .fn()
+      .mockResolvedValue({ count: 1 });
 
     const res = await service.detachPaperFromCollection('ws-1', 'c-1', 'p-1');
     expect(res.message).toContain('successfully');
   });
 
-  it('should export all papers in collection as formatted BibTeX', async () => {
-    (repo.findCollectionById as jest.Mock).mockResolvedValue({
-      id: 'c-1',
-      workspaceId: 'ws-1',
-    });
-    (repo.findPapersInCollection as jest.Mock).mockResolvedValue([
+  it('should build hierarchical collection tree with depth and paths', async () => {
+    (repo.findWorkspaceCollections as jest.Mock).mockResolvedValue([
       {
-        title: 'Attention Is All You Need',
-        authors: ['Vaswani, Ashish'],
-        year: 2017,
-        citationKey: 'vaswani2017attention',
-        doi: '10.5555/3295222.3295349',
-        journal: 'NeurIPS',
-        abstract: '',
+        id: 'c-root',
+        name: 'Root',
+        parentId: null,
+        _count: { catalogItems: 5 },
+      },
+      {
+        id: 'c-child',
+        name: 'Child',
+        parentId: 'c-root',
+        _count: { catalogItems: 2 },
       },
     ]);
 
-    const res = await service.exportCollectionBibtex('ws-1', 'c-1');
-    expect(res.total).toBe(1);
-    expect(res.filename).toBe('collection-c-1.bib');
-    expect(res.bibtex).toContain('@article{vaswani2017attention,');
+    const { tree } = await service.getCollectionTree('ws-1');
+    expect(tree.length).toBe(1);
+    expect(tree[0].id).toBe('c-root');
+    expect(tree[0].children.length).toBe(1);
+    expect(tree[0].children[0].id).toBe('c-child');
+    expect(tree[0].children[0].depth).toBe(1);
+    expect(tree[0].children[0].path).toEqual(['Root', 'Child']);
   });
 });

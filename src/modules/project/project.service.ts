@@ -2,14 +2,17 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
   Optional,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ProjectRepository } from './project.repository';
 import { Prisma, ProjectMemberRole, EntityType } from '@prisma/client';
-import { parseTaskColumns, TaskColumn } from '@/core/types/json-fields.type';
+import { parseTaskColumns, TaskColumn } from './types/project.types';
 import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
 import { RedisCacheService } from '@/core/cache/redis-cache.service';
+import { PROJECT_REDIS_KEYS } from './constants/redis-keys.constant';
+import { WORKFLOW_REDIS_KEYS } from '@/modules/workflow/constants/redis-keys.constant';
 import {
   CreateProjectDto,
   UpdateProjectDto,
@@ -29,32 +32,61 @@ export class ProjectService {
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
+  private async invalidateProjectCache(
+    projectId: string,
+    workspaceId?: string,
+  ) {
+    if (!this.cache) return;
+    await Promise.all([
+      this.cache.del(PROJECT_REDIS_KEYS.project(projectId)),
+      this.cache.del(PROJECT_REDIS_KEYS.overview(projectId)),
+      workspaceId
+        ? this.cache.del(PROJECT_REDIS_KEYS.workspaceProjects(workspaceId))
+        : Promise.resolve(),
+    ]);
+  }
+
   async getProjects(workspaceId: string) {
-    const cacheKey = `projects:${workspaceId}:list`;
+    const workspace = await this.projectRepo.resolveWorkspace(workspaceId);
+    const resolvedWorkspaceId = workspace?.id || workspaceId;
+    const cacheKey = PROJECT_REDIS_KEYS.workspaceProjects(resolvedWorkspaceId);
+
     if (this.cache) {
       return this.cache.wrap(
         cacheKey,
         async () => {
           const projects =
-            await this.projectRepo.findWorkspaceProjects(workspaceId);
+            await this.projectRepo.findWorkspaceProjects(resolvedWorkspaceId);
           return { projects };
         },
-        120,
+        1800,
       );
     }
-    const projects = await this.projectRepo.findWorkspaceProjects(workspaceId);
+
+    const projects =
+      await this.projectRepo.findWorkspaceProjects(resolvedWorkspaceId);
     return { projects };
   }
 
   async getProject(projectId: string, userId?: string) {
-    const project = await this.projectRepo.findProjectById(projectId);
+    const cacheKey = PROJECT_REDIS_KEYS.project(projectId);
+    let project = this.cache ? await this.cache.get<any>(cacheKey) : null;
 
     if (!project) {
-      throw new NotFoundException('Project not found');
+      project = await this.projectRepo.findProjectById(projectId);
+      if (!project) {
+        throw new NotFoundException('Project not found');
+      }
+      if (this.cache) {
+        await this.cache.set(cacheKey, project, 3600);
+      }
     }
 
     const member = userId
-      ? project.members.find((m) => m.userId === userId)
+      ? project.members?.find(
+          (projectMember: { userId: string }) =>
+            projectMember.userId === userId,
+        )
       : undefined;
 
     return {
@@ -64,17 +96,29 @@ export class ProjectService {
   }
 
   async getProjectOverview(projectId: string, userId?: string) {
-    const overview = await this.projectRepo.findProjectOverview(projectId);
-    if (!overview) {
-      throw new NotFoundException('Project not found');
-    }
+    const cacheKey = PROJECT_REDIS_KEYS.overview(projectId);
+
+    const overviewFetch = async () => {
+      const overview = await this.projectRepo.findProjectOverview(projectId);
+      if (!overview) {
+        throw new NotFoundException('Project not found');
+      }
+      return overview as any;
+    };
+
+    const overviewData = this.cache
+      ? await this.cache.wrap(cacheKey, overviewFetch, 900)
+      : await overviewFetch();
 
     const member = userId
-      ? overview.project.members.find((m) => m.userId === userId)
+      ? overviewData.project?.members?.find(
+          (projectMember: { userId: string }) =>
+            projectMember.userId === userId,
+        )
       : undefined;
 
     return {
-      ...overview,
+      ...overviewData,
       yourRole: member?.role || ProjectMemberRole.viewer,
     };
   }
@@ -89,12 +133,28 @@ export class ProjectService {
       throw new BadRequestException('Workspace ID is required');
     }
 
-    const ws = await this.projectRepo.resolveWorkspace(targetWorkspaceId);
-    const resolvedWorkspaceId = ws?.id || targetWorkspaceId;
+    const workspace =
+      await this.projectRepo.resolveWorkspace(targetWorkspaceId);
+    const resolvedWorkspaceId = workspace?.id || targetWorkspaceId;
+
+    const identifier = dto.identifier?.trim().toUpperCase();
+    if (identifier) {
+      const existing = await this.projectRepo.findProjectByIdentifier(
+        resolvedWorkspaceId,
+        identifier,
+      );
+      if (existing) {
+        throw new BadRequestException(
+          `Project with identifier "${identifier}" already exists in this workspace`,
+        );
+      }
+    }
 
     const project = await this.projectRepo.createProject({
       name: dto.name,
+      identifier: identifier || null,
       avatar: dto.avatar || '',
+      coverImage: dto.coverImage || '',
       description: dto.description || '',
       modules: dto.modules || [
         'overview',
@@ -105,8 +165,9 @@ export class ProjectService {
         'stickies',
         'collection',
       ],
-      workspaceId: resolvedWorkspaceId,
-      createdById: userId,
+      workspace: { connect: { id: resolvedWorkspaceId } },
+      createdBy: { connect: { id: userId } },
+      ...(dto.leadId ? { lead: { connect: { id: dto.leadId } } } : {}),
       members: {
         create: {
           userId,
@@ -114,6 +175,8 @@ export class ProjectService {
         },
       },
     });
+
+    await this.invalidateProjectCache(project.id, resolvedWorkspaceId);
 
     this.eventEmitter?.emit(
       'project.created',
@@ -131,14 +194,42 @@ export class ProjectService {
   }
 
   async updateProject(projectId: string, dto: UpdateProjectDto) {
+    const existing = await this.projectRepo.findProjectById(projectId);
+    if (!existing) {
+      throw new NotFoundException('Project not found');
+    }
+
+    if (dto.identifier !== undefined && dto.identifier) {
+      const identifier = dto.identifier.trim().toUpperCase();
+      const duplicate = await this.projectRepo.findProjectByIdentifier(
+        existing.workspaceId,
+        identifier,
+      );
+      if (duplicate && duplicate.id !== projectId) {
+        throw new BadRequestException(
+          `Project with identifier "${identifier}" already exists in this workspace`,
+        );
+      }
+      dto.identifier = identifier;
+    }
+
     const project = await this.projectRepo.updateProject(projectId, {
       ...(dto.name !== undefined && { name: dto.name }),
+      ...(dto.identifier !== undefined && { identifier: dto.identifier }),
       ...(dto.avatar !== undefined && { avatar: dto.avatar }),
+      ...(dto.coverImage !== undefined && { coverImage: dto.coverImage }),
       ...(dto.description !== undefined && { description: dto.description }),
       ...(dto.modules !== undefined && { modules: dto.modules }),
       ...(dto.isActive !== undefined && { isActive: dto.isActive }),
       ...(dto.settings !== undefined && { settings: dto.settings }),
+      ...(dto.leadId !== undefined && {
+        lead: dto.leadId
+          ? { connect: { id: dto.leadId } }
+          : { disconnect: true },
+      }),
     });
+
+    await this.invalidateProjectCache(projectId, existing.workspaceId);
 
     this.eventEmitter?.emit(
       'project.updated',
@@ -161,7 +252,8 @@ export class ProjectService {
       throw new NotFoundException('Project not found');
     }
 
-    await this.projectRepo.updateProject(projectId, { isActive: false });
+    await this.projectRepo.softDeleteProject(projectId);
+    await this.invalidateProjectCache(projectId, existing.workspaceId);
 
     this.eventEmitter?.emit(
       'project.deleted',
@@ -175,7 +267,16 @@ export class ProjectService {
       }),
     );
 
-    return { message: 'Project deleted successfully' };
+    return { message: 'Project soft-deleted successfully' };
+  }
+
+  async restoreProject(projectId: string) {
+    const restored = await this.projectRepo.restoreProject(projectId);
+    await this.invalidateProjectCache(projectId, restored.workspaceId);
+    return {
+      message: 'Project restored successfully',
+      project: restored,
+    };
   }
 
   async getProjectMembers(projectId: string) {
@@ -206,6 +307,11 @@ export class ProjectService {
       role,
     );
 
+    await this.invalidateProjectCache(projectId);
+    if (this.cache) {
+      await this.cache.del(`flux:iam:proj_role:${projectId}:${dto.userId}`);
+    }
+
     return {
       message: 'Project member added successfully',
       member,
@@ -223,11 +329,37 @@ export class ProjectService {
       );
     }
 
+    const existing = await this.projectRepo.findProjectMember(
+      projectId,
+      targetUserId,
+    );
+    if (!existing) {
+      throw new NotFoundException('Project member not found');
+    }
+
+    // Single Admin Invariant check
+    if (
+      existing.role === ProjectMemberRole.admin &&
+      dto.role !== ProjectMemberRole.admin
+    ) {
+      const adminCount = await this.projectRepo.countAdmins(projectId);
+      if (adminCount <= 1) {
+        throw new ForbiddenException(
+          'Cannot demote the only admin of the project. Assign another admin first.',
+        );
+      }
+    }
+
     const member = await this.projectRepo.updateProjectMemberRole(
       projectId,
       targetUserId,
       dto.role,
     );
+
+    await this.invalidateProjectCache(projectId);
+    if (this.cache) {
+      await this.cache.del(`flux:iam:proj_role:${projectId}:${targetUserId}`);
+    }
 
     return {
       message: 'Project member role updated successfully',
@@ -236,8 +368,34 @@ export class ProjectService {
   }
 
   async removeProjectMember(projectId: string, targetUserId: string) {
+    const existing = await this.projectRepo.findProjectMember(
+      projectId,
+      targetUserId,
+    );
+    if (!existing) {
+      throw new NotFoundException('Project member not found');
+    }
+
+    if (existing.role === ProjectMemberRole.admin) {
+      const adminCount = await this.projectRepo.countAdmins(projectId);
+      if (adminCount <= 1) {
+        throw new ForbiddenException(
+          'Cannot remove the only admin of the project. Assign another admin first.',
+        );
+      }
+    }
+
     await this.projectRepo.deleteProjectMember(projectId, targetUserId);
+    await this.invalidateProjectCache(projectId);
+    if (this.cache) {
+      await this.cache.del(`flux:iam:proj_role:${projectId}:${targetUserId}`);
+    }
+
     return { message: 'Project member removed successfully' };
+  }
+
+  async leaveProject(projectId: string, userId: string) {
+    return this.removeProjectMember(projectId, userId);
   }
 
   async getColumns(projectId: string) {
@@ -266,6 +424,8 @@ export class ProjectService {
     await this.projectRepo.updateProject(projectId, {
       taskColumns: updatedColumns as unknown as Prisma.InputJsonValue,
     });
+
+    await this.invalidateProjectCache(projectId, project.workspaceId);
 
     this.eventEmitter?.emit(
       'project.updated',
@@ -311,6 +471,8 @@ export class ProjectService {
       taskColumns: updatedColumns as unknown as Prisma.InputJsonValue,
     });
 
+    await this.invalidateProjectCache(projectId, project.workspaceId);
+
     this.eventEmitter?.emit(
       'project.updated',
       new DomainActivityEvent({
@@ -326,7 +488,12 @@ export class ProjectService {
     return { columns: updatedColumns };
   }
 
-  async deleteColumn(projectId: string, columnId: string) {
+  async deleteColumn(
+    projectId: string,
+    columnId: string,
+    fallbackColumnId?: string,
+    userId?: string,
+  ) {
     const project = await this.projectRepo.findProjectById(projectId);
 
     if (!project) {
@@ -334,11 +501,31 @@ export class ProjectService {
     }
 
     const columns = parseTaskColumns(project.taskColumns);
-    const updatedColumns = columns.filter((col) => col.id !== columnId);
+    if (columns.length <= 1) {
+      throw new BadRequestException('Project must have at least one column');
+    }
 
-    await this.projectRepo.updateProject(projectId, {
-      taskColumns: updatedColumns as unknown as Prisma.InputJsonValue,
-    });
+    const updatedColumns = columns.filter((col) => col.id !== columnId);
+    const targetFallback =
+      fallbackColumnId &&
+      updatedColumns.some((col) => col.id === fallbackColumnId)
+        ? fallbackColumnId
+        : updatedColumns[0].id;
+
+    await this.projectRepo.deleteColumnWithTaskMigration(
+      projectId,
+      columnId,
+      targetFallback,
+      updatedColumns as unknown as Prisma.InputJsonValue,
+    );
+
+    await this.invalidateProjectCache(projectId, project.workspaceId);
+    if (this.cache) {
+      await Promise.all([
+        this.cache.del(WORKFLOW_REDIS_KEYS.projectTasks(projectId)),
+        this.cache.del(`flux:proj:overview:${projectId}`),
+      ]);
+    }
 
     this.eventEmitter?.emit(
       'project.updated',
@@ -346,12 +533,12 @@ export class ProjectService {
         entityType: 'project' as unknown as EntityType,
         entityId: projectId,
         verb: 'updated',
-        actorId: '',
+        actorId: userId || '',
         workspaceId: project.workspaceId,
         projectId,
       }),
     );
 
-    return { columns: updatedColumns };
+    return { columns: updatedColumns, migratedTo: targetFallback };
   }
 }

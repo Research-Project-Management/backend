@@ -4,8 +4,8 @@ import {
   BadRequestException,
   Logger,
 } from '@nestjs/common';
-import { CatalogRepository } from '../catalog/catalog.repository';
-import { extractFamilyName } from '../citation/citation.util';
+import { extractFamilyName } from '../cite/utils/cite.util';
+import { ItemsRepository } from '../items/items.repository';
 import {
   MergePapersDto,
   DuplicateGroup,
@@ -13,7 +13,8 @@ import {
   IntegrityReport,
   IntegrityIssue,
 } from './dto/quality.dto';
-import { normalizeQualityTitle } from './quality.util';
+
+import { normalizeQualityTitle } from './utils/quality.util';
 
 @Injectable()
 export class QualityService {
@@ -26,7 +27,7 @@ export class QualityService {
    */
   private readonly MAX_INTEGRITY_ITEMS = 200;
 
-  constructor(private readonly catalogRepo: CatalogRepository) {}
+  constructor(private readonly itemsRepo: ItemsRepository) {}
 
   /**
    * 2-Tier Duplicate Detection:
@@ -37,19 +38,19 @@ export class QualityService {
   async getDuplicateGroups(
     workspaceId: string,
   ): Promise<{ duplicateGroups: DuplicateGroup[] }> {
-    const targetWsId = await this.catalogRepo.resolveWorkspaceId(workspaceId);
+    const targetWsId = await this.itemsRepo.resolveWorkspaceId(workspaceId);
 
     const duplicateGroups: DuplicateGroup[] = [];
     const processedPaperIds = new Set<string>();
 
     // --- Tier 1: SQL GROUP BY normalised DOI (High Confidence) ---
-    const doiGroups = await this.catalogRepo.findDoiDuplicates(targetWsId);
+    const doiGroups = await this.itemsRepo.findDoiDuplicates(targetWsId);
 
     // Collect all duplicated IDs so we can fetch full Paper records in one query
-    const tier1Ids = doiGroups.flatMap((g) => g.paperIds);
+    const tier1Ids = doiGroups.flatMap((g: any) => g.itemIds || g.paperIds);
 
     if (tier1Ids.length > 0) {
-      const tier1Papers = await this.catalogRepo.findItems({
+      const tier1Papers = await this.itemsRepo.findItems({
         id: { in: tier1Ids },
         workspaceId: targetWsId,
         deletedAt: null,
@@ -57,26 +58,26 @@ export class QualityService {
       const paperById = new Map(tier1Papers.map((p) => [p.id, p]));
 
       for (const group of doiGroups) {
-        const groupPapers = group.paperIds
-          .map((id) => paperById.get(id))
-          .filter((p): p is NonNullable<typeof p> => p !== undefined);
+        const groupPapers = ((group as any).itemIds || (group as any).paperIds)
+          .map((id: string) => paperById.get(id))
+          .filter((p: any): p is NonNullable<typeof p> => p !== undefined);
 
         if (groupPapers.length > 1) {
           duplicateGroups.push({
             matchType: 'DOI',
             confidence: 'high',
             matchKey: group.doi,
-            items: groupPapers.map((p) => this.toGroupItem(p)),
-            papers: groupPapers.map((p) => this.toGroupItem(p)),
+            items: groupPapers.map((p: any) => this.toGroupItem(p)),
+            papers: groupPapers.map((p: any) => this.toGroupItem(p)),
           });
-          groupPapers.forEach((p) => processedPaperIds.add(p.id));
+          groupPapers.forEach((p: any) => processedPaperIds.add(p.id));
         }
       }
     }
 
     // --- Tier 2: Title + Year (±1) + Author (Medium Confidence) ---
     // Only fetch Papers not already in a Tier 1 group
-    const allPapers = await this.catalogRepo.findItems({
+    const allPapers = await this.itemsRepo.findItems({
       workspaceId: targetWsId,
       deletedAt: null,
       ...(processedPaperIds.size > 0 && {
@@ -142,7 +143,7 @@ export class QualityService {
    * 3. Soft-deletes source papers (deletedAt = now()).
    */
   async mergePapers(workspaceId: string, userId: string, dto: MergePapersDto) {
-    const targetWsId = await this.catalogRepo.resolveWorkspaceId(workspaceId);
+    const targetWsId = await this.itemsRepo.resolveWorkspaceId(workspaceId);
 
     if (
       !(dto.masterId || dto.masterPaperId || '') ||
@@ -164,14 +165,14 @@ export class QualityService {
       );
     }
 
-    const master = await this.catalogRepo.findItemById(
+    const master = await this.itemsRepo.findItemById(
       dto.masterId || dto.masterPaperId || '',
     );
     if (!master || master.deletedAt || master.workspaceId !== targetWsId) {
       throw new NotFoundException('Master paper not found in this workspace');
     }
 
-    const sources = await this.catalogRepo.findItems({
+    const sources = await this.itemsRepo.findItems({
       id: { in: dto.sourceItemIds || dto.sourcePaperIds || [] },
       workspaceId: targetWsId,
       deletedAt: null,
@@ -198,15 +199,15 @@ export class QualityService {
         }
       }
       if (Array.isArray(src.labels)) {
-        src.labels.forEach((lbl) => consolidatedLabels.add(lbl));
+        src.labels.forEach((lbl: string) => consolidatedLabels.add(lbl));
       }
     }
 
     // Execute atomic transaction via repository seam (no direct Prisma access from service layer)
     const now = new Date();
-    await this.catalogRepo.executeMergePapersTransaction({
+    await this.itemsRepo.executeMergeItemsTransaction({
       masterId: master.id,
-      sourcePaperIds: dto.sourceItemIds || dto.sourcePaperIds || [],
+      sourceIds: dto.sourceItemIds || dto.sourcePaperIds || [],
       consolidatedNotes,
       consolidatedLabels: Array.from(consolidatedLabels),
       now,
@@ -215,13 +216,15 @@ export class QualityService {
     // Consolidate citation keys into master extra for citation identity preservation
     const sourceCitationKeys = sources
       .map((s) => s.citationKey)
-      .filter(
-        (k): k is string => Boolean(k?.trim() && k !== master.citationKey),
+      .filter((k): k is string =>
+        Boolean(k?.trim() && k !== master.citationKey),
       );
 
     if (sourceCitationKeys.length > 0) {
-      await this.catalogRepo.mutatePaperExtra(master.id, (extra) => {
-        const existingAliases: string[] = Array.isArray(extra.mergedCitationKeys)
+      await this.itemsRepo.mutateItemExtra(master.id, (extra) => {
+        const existingAliases: string[] = Array.isArray(
+          extra.mergedCitationKeys,
+        )
           ? extra.mergedCitationKeys
           : [];
         extra.mergedCitationKeys = Array.from(
@@ -231,7 +234,7 @@ export class QualityService {
       });
     }
 
-    const updatedMaster = await this.catalogRepo.findItemById(master.id);
+    const updatedMaster = await this.itemsRepo.findItemById(master.id);
     return {
       masterPaper: updatedMaster,
       mergedCount: sources.length,
@@ -245,13 +248,13 @@ export class QualityService {
    * Flagged items list is capped at 200 to prevent OOM on large workspaces.
    */
   async getIntegrityReport(workspaceId: string): Promise<IntegrityReport> {
-    const targetWsId = await this.catalogRepo.resolveWorkspaceId(workspaceId);
+    const targetWsId = await this.itemsRepo.resolveWorkspaceId(workspaceId);
 
     // SQL aggregates — O(1) round-trip for summary counts
-    const stats = await this.catalogRepo.findIntegrityStats(targetWsId);
+    const stats = await this.itemsRepo.findIntegrityStats(targetWsId);
 
     // Flagged items list — limited to MAX_INTEGRITY_ITEMS to prevent OOM; PDF check requires attachment join
-    const flaggedPapers = await this.catalogRepo.findItems(
+    const flaggedPapers = await this.itemsRepo.findItems(
       { workspaceId: targetWsId, deletedAt: null },
       { take: this.MAX_INTEGRITY_ITEMS, orderBy: [{ createdAt: 'desc' }] },
     );
@@ -292,7 +295,7 @@ export class QualityService {
       }
     }
 
-    const totalItems = stats.totalPapers || 0;
+    const totalItems = stats.totalItems || 0;
     const unhealthyCount =
       typeof stats.unhealthyCount === 'number'
         ? stats.unhealthyCount

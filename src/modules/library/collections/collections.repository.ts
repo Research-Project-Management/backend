@@ -1,14 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { Prisma } from '@prisma/client';
-
-export type CollectionWithCount = Prisma.CollectionGetPayload<{
-  include: {
-    _count?: {
-      select: { catalogItems: true };
-    };
-  };
-}>;
+import {
+  CollectionRecord,
+  COLLECTION_INCLUDE_COUNT,
+} from './types/collections.types';
 
 @Injectable()
 export class CollectionsRepository {
@@ -23,46 +19,48 @@ export class CollectionsRepository {
     });
   }
 
-  async findWorkspaceCollections(workspaceId: string) {
-    const ws = await this.resolveWorkspace(workspaceId);
-    const targetWsId = ws?.id || workspaceId;
+  async resolveWorkspaceId(workspaceIdOrSlug: string): Promise<string> {
+    const ws = await this.resolveWorkspace(workspaceIdOrSlug);
+    return ws?.id || workspaceIdOrSlug;
+  }
+
+  async findWorkspaceCollections(
+    workspaceId: string,
+  ): Promise<CollectionRecord[]> {
+    const targetWsId = await this.resolveWorkspaceId(workspaceId);
     return this.prisma.collection.findMany({
       where: { workspaceId: targetWsId },
-      include: {
-        _count: {
-          select: { catalogItems: { where: { deletedAt: null } } },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
+      include: COLLECTION_INCLUDE_COUNT,
+      orderBy: [{ createdAt: 'asc' }],
     });
   }
 
-  async findCollectionById(collectionId: string) {
+  async findCollectionById(
+    collectionId: string,
+  ): Promise<CollectionRecord | null> {
     return this.prisma.collection.findUnique({
       where: { id: collectionId },
-      include: {
-        _count: {
-          select: { catalogItems: { where: { deletedAt: null } } },
-        },
-      },
+      include: COLLECTION_INCLUDE_COUNT,
     });
   }
 
   async createCollection(
     data: Prisma.CollectionCreateInput | Prisma.CollectionUncheckedCreateInput,
-  ) {
+  ): Promise<CollectionRecord> {
     return this.prisma.collection.create({
       data: data as Prisma.CollectionCreateInput,
+      include: COLLECTION_INCLUDE_COUNT,
     });
   }
 
   async updateCollection(
     collectionId: string,
     data: Prisma.CollectionUpdateInput | Prisma.CollectionUncheckedUpdateInput,
-  ) {
+  ): Promise<CollectionRecord> {
     return this.prisma.collection.update({
       where: { id: collectionId },
-      data: data,
+      data,
+      include: COLLECTION_INCLUDE_COUNT,
     });
   }
 
@@ -73,17 +71,16 @@ export class CollectionsRepository {
     });
   }
 
-  async movePapers(
+  async moveItems(
     workspaceId: string,
     targetCollectionId: string | null,
-    paperIds: string[],
+    itemIds: string[],
   ) {
-    const ws = await this.resolveWorkspace(workspaceId);
-    const targetWsId = ws?.id || workspaceId;
+    const targetWsId = await this.resolveWorkspaceId(workspaceId);
     return this.prisma.catalogItem.updateMany({
       where: {
         workspaceId: targetWsId,
-        id: { in: paperIds },
+        id: { in: itemIds },
       },
       data: {
         collectionId: targetCollectionId,
@@ -91,16 +88,17 @@ export class CollectionsRepository {
     });
   }
 
-  async detachPaperFromCollection(
+  async detachItemFromCollection(
     workspaceId: string,
     collectionId: string,
-    paperId: string,
+    itemId: string,
   ) {
+    const targetWsId = await this.resolveWorkspaceId(workspaceId);
     return this.prisma.catalogItem.updateMany({
       where: {
-        workspaceId,
+        workspaceId: targetWsId,
         collectionId,
-        id: paperId,
+        id: itemId,
       },
       data: {
         collectionId: null,
@@ -114,35 +112,49 @@ export class CollectionsRepository {
     });
   }
 
-  async findPapersInCollection(
+  async findItemsInCollection(
     workspaceId: string,
     collectionId: string,
-    includeAttachments?: false,
-  ): Promise<Prisma.CatalogItemGetPayload<Record<string, never>>[]>;
-
-  async findPapersInCollection(
-    workspaceId: string,
-    collectionId: string,
-    includeAttachments: true,
-  ): Promise<
-    Prisma.CatalogItemGetPayload<{ include: { attachments: true } }>[]
-  >;
-
-  async findPapersInCollection(
-    workspaceId: string,
-    collectionId: string,
-    includeAttachments = false,
+    includeAttachments?: boolean,
   ) {
-    if (includeAttachments) {
-      return this.prisma.catalogItem.findMany({
-        where: { workspaceId, collectionId, deletedAt: null },
-        include: { attachments: true },
-        orderBy: [{ createdAt: 'desc' }],
-      });
-    }
+    const targetWsId = await this.resolveWorkspaceId(workspaceId);
     return this.prisma.catalogItem.findMany({
-      where: { workspaceId, collectionId, deletedAt: null },
+      where: {
+        workspaceId: targetWsId,
+        collectionId,
+        deletedAt: null,
+      },
+      include: includeAttachments ? { attachments: true } : undefined,
       orderBy: [{ createdAt: 'desc' }],
     });
+  }
+
+  // Compatibility aliases
+  async movePapers(
+    workspaceId: string,
+    targetCollectionId: string | null,
+    itemIds: string[],
+  ) {
+    return this.moveItems(workspaceId, targetCollectionId, itemIds);
+  }
+
+  async detachPaperFromCollection(
+    workspaceId: string,
+    collectionId: string,
+    itemId: string,
+  ) {
+    return this.detachItemFromCollection(workspaceId, collectionId, itemId);
+  }
+
+  async findPapersInCollection(
+    workspaceId: string,
+    collectionId: string,
+    includeAttachments?: boolean,
+  ) {
+    return this.findItemsInCollection(
+      workspaceId,
+      collectionId,
+      includeAttachments,
+    );
   }
 }

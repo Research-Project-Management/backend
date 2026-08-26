@@ -1,18 +1,16 @@
 import { Controller, Get, Header, Param, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { JwtAuthGuard } from '@/modules/iam/authn';
-import {
-  WorkspaceRoleGuard,
-  WorkspaceRoles,
-} from '@/modules/iam/authz';
-import { LibraryReportService } from './report.service';
+import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
+import { WorkspaceRoleGuard } from '@/modules/iam/authz/guards/workspace-role.guard';
+import { WorkspaceRoles } from '@/modules/iam/authz/decorators/workspace-roles.decorator';
+import { ReportService } from './report.service';
 
 @ApiTags('Library - Reports')
 @ApiBearerAuth('JWT-auth')
 @Controller('api')
 @UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
-export class LibraryReportController {
-  constructor(private readonly reportService: LibraryReportService) {}
+export class ReportController {
+  constructor(private readonly reportService: ReportService) {}
 
   @Get([
     'workspace/:workspaceId/library/items/:itemId/report',
@@ -20,8 +18,7 @@ export class LibraryReportController {
   ])
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({
-    summary:
-      'Generate a Zotero-style structured report for one library catalog item',
+    summary: 'Generate a structured report for one library catalog item',
   })
   async getItemReport(
     @Param('workspaceId') workspaceId: string,
@@ -41,7 +38,7 @@ export class LibraryReportController {
   @Header('Content-Type', 'text/html; charset=utf-8')
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({
-    summary: 'Render a Zotero-style HTML report for one library catalog item',
+    summary: 'Render a structured HTML report for one library catalog item',
   })
   async getItemReportHtml(
     @Param('workspaceId') workspaceId: string,
@@ -57,8 +54,7 @@ export class LibraryReportController {
   ])
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({
-    summary:
-      'Generate a Zotero-style structured report for an entire collection',
+    summary: 'Generate a structured report for an entire collection',
   })
   async getCollectionReport(
     @Param('workspaceId') workspaceId: string,
@@ -81,8 +77,7 @@ export class LibraryReportController {
   @Header('Content-Type', 'text/html; charset=utf-8')
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({
-    summary:
-      'Render a Zotero-style HTML report for an entire collection',
+    summary: 'Render a structured HTML report for an entire collection',
   })
   async getCollectionReportHtml(
     @Param('workspaceId') workspaceId: string,
@@ -95,3 +90,5 @@ export class LibraryReportController {
     return this.reportService.renderCollectionHtml(report);
   }
 }
+
+export { ReportController as LibraryReportController };

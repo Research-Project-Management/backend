@@ -26,13 +26,12 @@ import {
   ReorderTaskDto,
   BulkUpdateTaskDto,
 } from './dto/task.dto';
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
-import {
-  WorkspaceRoleGuard,
-  WorkspaceRoles,
-  ProjectRoleGuard,
-  ProjectRoles,
-} from '@/modules/iam/authz';
+import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
+import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
+import { WorkspaceRoleGuard } from '@/modules/iam/authz/guards/workspace-role.guard';
+import { WorkspaceRoles } from '@/modules/iam/authz/decorators/workspace-roles.decorator';
+import { ProjectRoleGuard } from '@/modules/iam/authz/guards/project-role.guard';
+import { ProjectRoles } from '@/modules/iam/authz/decorators/project-roles.decorator';
 import { ActivityService } from '@/modules/activity/activity.service';
 
 @ApiTags('Planning Tasks')
@@ -73,7 +72,7 @@ export class TaskController {
     @Param('projectId') projectId: string,
     @Query('cycle') cycleId?: string,
   ) {
-    return this.taskService.getTasks(projectId, cycleId);
+    return this.taskService.getProjectTasks(projectId, cycleId);
   }
 
   @Post('project/:projectId/tasks')
@@ -90,16 +89,17 @@ export class TaskController {
     return this.taskService.createTask(projectId, userId, dto);
   }
 
-  @Put('project/:projectId/tasks/reorder/batch')
+  @Put(['project/:projectId/tasks/reorder', 'tasks/:taskId/reorder'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor')
   @ApiOperation({ summary: 'Reorder tasks in/between columns' })
   @ApiResponse({ status: 200, description: 'Reorder status' })
   async reorderTask(
-    @Param('projectId') projectId: string,
+    @Param('taskId') taskIdParam: string | undefined,
     @Body() dto: ReorderTaskDto,
   ) {
-    return this.taskService.reorderTasks(projectId, dto);
+    const taskId = taskIdParam || dto.taskId || '';
+    return this.taskService.reorderTask(taskId, dto);
   }
 
   @Put(['project/:projectId/tasks/bulk', 'tasks/bulk'])
@@ -113,9 +113,10 @@ export class TaskController {
   async bulkUpdateTasks(
     @Param('projectId') paramProjectId: string | undefined,
     @Body() dto: BulkUpdateTaskDto,
+    @CurrentUser('id') userId: string,
   ) {
     const projectId = paramProjectId || '';
-    return this.taskService.bulkUpdateTasks(projectId, dto);
+    return this.taskService.bulkUpdate(projectId, dto, userId);
   }
 
   @Get(['tasks/:taskId', 'project/:projectId/tasks/:taskId'])
@@ -135,17 +136,30 @@ export class TaskController {
   async updateTask(
     @Param('taskId') taskId: string,
     @Body() dto: UpdateTaskDto,
+    @CurrentUser('id') userId: string,
   ) {
-    return this.taskService.updateTask(taskId, dto);
+    return this.taskService.updateTask(taskId, dto, userId);
   }
 
   @Delete(['tasks/:taskId', 'project/:projectId/tasks/:taskId'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor')
-  @ApiOperation({ summary: 'Delete a task' })
+  @ApiOperation({ summary: 'Soft-delete a task' })
   @ApiResponse({ status: 200, description: 'Task deletion confirmation' })
-  async deleteTask(@Param('taskId') taskId: string) {
-    return this.taskService.deleteTask(taskId);
+  async deleteTask(
+    @Param('taskId') taskId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.taskService.deleteTask(taskId, userId);
+  }
+
+  @Post(['tasks/:taskId/restore', 'project/:projectId/tasks/:taskId/restore'])
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor')
+  @ApiOperation({ summary: 'Restore a soft-deleted task' })
+  @ApiResponse({ status: 200, description: 'Task restored' })
+  async restoreTask(@Param('taskId') taskId: string) {
+    return this.taskService.restoreTask(taskId);
   }
 
   @Put(['tasks/:taskId/assign', 'project/:projectId/tasks/:taskId/assign'])
@@ -156,24 +170,9 @@ export class TaskController {
   async assignTask(
     @Param('taskId') taskId: string,
     @Body() dto: AssignTaskDto,
-  ) {
-    return this.taskService.assignTask(taskId, dto.assignee);
-  }
-
-  @Post([
-    'tasks/:taskId/duplicate',
-    'project/:projectId/tasks/:taskId/duplicate',
-  ])
-  @HttpCode(HttpStatus.CREATED)
-  @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('admin', 'contributor')
-  @ApiOperation({ summary: 'Duplicate an existing task' })
-  @ApiResponse({ status: 201, description: 'New duplicated task object' })
-  async duplicateTask(
-    @Param('taskId') taskId: string,
     @CurrentUser('id') userId: string,
   ) {
-    return this.taskService.duplicateTask(taskId, userId);
+    return this.taskService.assignTask(taskId, dto.assignee, userId);
   }
 
   @Get('tasks/:taskId/activity')
@@ -183,14 +182,6 @@ export class TaskController {
   @ApiResponse({ status: 200, description: 'List of task activities' })
   async getAuditLog(@Param('taskId') taskId: string) {
     return this.activityService.getTaskActivity(taskId);
-  }
-
-  @Get('tasks/:taskId/subtasks')
-  @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
-  @ApiOperation({ summary: 'List all subtasks of a task' })
-  async getSubtasks(@Param('taskId') taskId: string) {
-    return this.taskService.getSubtasks(taskId);
   }
 
   @Post('tasks/:taskId/subtasks')
@@ -205,7 +196,52 @@ export class TaskController {
   ) {
     dto.parentTaskId = taskId;
     const parent = await this.taskService.getTask(taskId);
-    const projectId = (parent.task as any)?.projectId;
+    const projectId = parent.task?.projectId;
     return this.taskService.createTask(projectId, userId, dto);
+  }
+
+  @Post([
+    'tasks/:taskId/duplicate',
+    'project/:projectId/tasks/:taskId/duplicate',
+  ])
+  @HttpCode(HttpStatus.CREATED)
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor')
+  @ApiOperation({ summary: 'Duplicate an existing task' })
+  async duplicateTask(
+    @Param('taskId') taskId: string,
+    @CurrentUser('id') userId: string,
+    @Body() body?: { projectId?: string },
+  ) {
+    return this.taskService.duplicateTask(taskId, userId, body?.projectId);
+  }
+
+  @Post([
+    'tasks/:taskId/attachments',
+    'project/:projectId/tasks/:taskId/attachments',
+  ])
+  @HttpCode(HttpStatus.CREATED)
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor')
+  @ApiOperation({ summary: 'Attach a file or metadata to a task' })
+  async addAttachment(
+    @Param('taskId') taskId: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    return this.taskService.addAttachment(taskId, body);
+  }
+
+  @Delete([
+    'tasks/:taskId/attachments/:attachmentId',
+    'project/:projectId/tasks/:taskId/attachments/:attachmentId',
+  ])
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor')
+  @ApiOperation({ summary: 'Delete an attachment from a task' })
+  async deleteAttachment(
+    @Param('taskId') taskId: string,
+    @Param('attachmentId') attachmentId: string,
+  ) {
+    return this.taskService.deleteAttachment(taskId, attachmentId);
   }
 }

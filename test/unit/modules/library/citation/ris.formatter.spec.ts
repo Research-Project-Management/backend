@@ -1,4 +1,4 @@
-import { RisFormatter } from '@/modules/library/citation/formatters/ris.formatter';
+import { RisFormatter } from '@/modules/library/cite/formatters/ris.formatter';
 
 describe('RisFormatter', () => {
   let formatter: RisFormatter;

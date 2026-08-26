@@ -20,12 +20,12 @@ import {
   AddWorkspaceMemberDto,
   UpdateWorkspaceMemberDto,
   JoinWorkspaceDto,
+  CreateWorkspaceInvitationDto,
 } from './dto/workspace.dto';
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
-import {
-  WorkspaceRoleGuard,
-  WorkspaceRoles,
-} from '@/modules/iam/authz';
+import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
+import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
+import { WorkspaceRoleGuard } from '@/modules/iam/authz/guards/workspace-role.guard';
+import { WorkspaceRoles } from '@/modules/iam/authz/decorators/workspace-roles.decorator';
 
 @ApiTags('Organization')
 @ApiBearerAuth('JWT-auth')
@@ -85,10 +85,20 @@ export class WorkspaceController {
   @Delete(':workspaceId')
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner')
-  @ApiOperation({ summary: 'Delete a workspace permanently' })
+  @ApiOperation({ summary: 'Delete (soft-delete) a workspace' })
   async deleteWorkspace(@Param('workspaceId') workspaceId: string) {
     return this.workspaceService.deleteWorkspace(workspaceId);
   }
+
+  @Post(':workspaceId/restore')
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner')
+  @ApiOperation({ summary: 'Restore a soft-deleted workspace' })
+  async restoreWorkspace(@Param('workspaceId') workspaceId: string) {
+    return this.workspaceService.restoreWorkspace(workspaceId);
+  }
+
+  // ── Member Management ──────────────────────────────────────────────────────
 
   @Get(':workspaceId/members')
   @UseGuards(WorkspaceRoleGuard)
@@ -143,7 +153,58 @@ export class WorkspaceController {
     return this.workspaceService.leaveWorkspace(workspaceId, userId);
   }
 
-  @Get([':workspaceId/search', '/api/search/workspaces/:workspaceId'])
+  // ── Invitations Management ─────────────────────────────────────────────────
+
+  @Post(':workspaceId/invitations')
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin')
+  @ApiOperation({ summary: 'Create and send a workspace invitation' })
+  async createInvitation(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') invitedById: string,
+    @Body() dto: CreateWorkspaceInvitationDto,
+  ) {
+    return this.workspaceService.createInvitation(
+      workspaceId,
+      invitedById,
+      dto,
+    );
+  }
+
+  @Get(':workspaceId/invitations')
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin')
+  @ApiOperation({ summary: 'List pending invitations for a workspace' })
+  async listPendingInvitations(@Param('workspaceId') workspaceId: string) {
+    return this.workspaceService.listPendingInvitations(workspaceId);
+  }
+
+  @Post('invitations/:token/accept')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Accept a workspace invitation by token' })
+  async acceptInvitation(
+    @Param('token') token: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.workspaceService.acceptInvitation(userId, token);
+  }
+
+  @Delete(':workspaceId/invitations/:invitationId')
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin')
+  @ApiOperation({ summary: 'Revoke a pending workspace invitation' })
+  async revokeInvitation(
+    @Param('workspaceId') workspaceId: string,
+    @Param('invitationId') invitationId: string,
+  ) {
+    return this.workspaceService.revokeInvitation(workspaceId, invitationId);
+  }
+
+  // ── Global Search ──────────────────────────────────────────────────────────
+
+  @Get([':workspaceId/search', 'search/:workspaceId'])
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'Global search across workspace entities' })
   async searchWorkspace(
     @Param('workspaceId') workspaceId: string,
@@ -153,7 +214,9 @@ export class WorkspaceController {
     return this.workspaceService.search(workspaceId, query || '', userId);
   }
 
-  @Get('/api/search')
+  @Get('search')
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'Global search via workspace query param' })
   async searchGlobal(
     @Query('workspaceId') workspaceId: string,

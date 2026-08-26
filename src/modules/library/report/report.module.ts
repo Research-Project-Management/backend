@@ -1,12 +1,13 @@
 import { Module } from '@nestjs/common';
-import { CatalogModule } from '../catalog/catalog.module';
-import { LibraryReportController } from './report.controller';
-import { LibraryReportService } from './report.service';
+import { ReportController } from './report.controller';
+import { ReportService } from './report.service';
+import { ItemsModule } from '../items/items.module';
+import { CiteModule } from '../cite/cite.module';
 
 @Module({
-  imports: [CatalogModule],
-  controllers: [LibraryReportController],
-  providers: [LibraryReportService],
-  exports: [LibraryReportService],
+  imports: [ItemsModule, CiteModule],
+  controllers: [ReportController],
+  providers: [ReportService],
+  exports: [ReportService],
 })
-export class LibraryReportModule {}
+export class ReportModule {}

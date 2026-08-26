@@ -1,0 +1,98 @@
+{
+  "description": "Citation Golden Corpus for Style Formatting, Disambiguation & Locales",
+  "version": "1.0.0",
+  "styles": [
+    {
+      "styleId": "apa-7th",
+      "name": "American Psychological Association 7th edition",
+      "testCases": [
+        {
+          "input": {
+            "itemType": "journalArticle",
+            "title": "Attention is all you need",
+            "creators": [
+              { "firstName": "Ashish", "lastName": "Vaswani" },
+              { "firstName": "Noam", "lastName": "Shazeer" },
+              { "firstName": "Niki", "lastName": "Parmar" },
+              { "firstName": "Jakob", "lastName": "Uszkoreit" },
+              { "firstName": "Llion", "lastName": "Jones" },
+              { "firstName": "Aidan N.", "lastName": "Gomez" },
+              { "firstName": "Lukasz", "lastName": "Kaiser" },
+              { "firstName": "Illia", "lastName": "Polosukhin" }
+            ],
+            "publicationTitle": "Advances in Neural Information Processing Systems",
+            "volume": "30",
+            "year": 2017,
+            "doi": "10.48550/arXiv.1706.03762"
+          },
+          "expectedInText": "(Vaswani et al., 2017)",
+          "expectedBibliography": "Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., Kaiser, L., & Polosukhin, I. (2017). Attention is all you need. Advances in Neural Information Processing Systems, 30. https://doi.org/10.48550/arXiv.1706.03762"
+        },
+        {
+          "input": {
+            "itemType": "book",
+            "title": "Deep Learning",
+            "creators": [
+              { "firstName": "Ian", "lastName": "Goodfellow" },
+              { "firstName": "Yoshua", "lastName": "Bengio" },
+              { "firstName": "Aaron", "lastName": "Courville" }
+            ],
+            "publisher": "MIT Press",
+            "year": 2016,
+            "city": "Cambridge, MA"
+          },
+          "expectedInText": "(Goodfellow et al., 2016)",
+          "expectedBibliography": "Goodfellow, I., Bengio, Y., & Courville, A. (2016). Deep Learning. MIT Press."
+        }
+      ]
+    },
+    {
+      "styleId": "ieee",
+      "name": "IEEE Standard",
+      "testCases": [
+        {
+          "input": {
+            "itemType": "journalArticle",
+            "title": "Deep Residual Learning for Image Recognition",
+            "creators": [
+              { "firstName": "Kaiming", "lastName": "He" },
+              { "firstName": "Xiangyu", "lastName": "Zhang" },
+              { "firstName": "Shaoqing", "lastName": "Ren" },
+              { "firstName": "Jian", "lastName": "Sun" }
+            ],
+            "publicationTitle": "IEEE Conference on Computer Vision and Pattern Recognition (CVPR)",
+            "pages": "770-778",
+            "year": 2016,
+            "doi": "10.1109/CVPR.2016.90"
+          },
+          "expectedInText": "[1]",
+          "expectedBibliography": "K. He, X. Zhang, S. Ren, and J. Sun, \"Deep Residual Learning for Image Recognition,\" IEEE Conference on Computer Vision and Pattern Recognition (CVPR), pp. 770-778, 2016, doi: 10.1109/CVPR.2016.90."
+        }
+      ]
+    },
+    {
+      "styleId": "nature",
+      "name": "Nature Publishing Group",
+      "testCases": [
+        {
+          "input": {
+            "itemType": "journalArticle",
+            "title": "Mastering the game of Go with deep neural networks and tree search",
+            "creators": [
+              { "firstName": "David", "lastName": "Silver" },
+              { "firstName": "Aja", "lastName": "Huang" },
+              { "firstName": "Demis", "lastName": "Hassabis" }
+            ],
+            "publicationTitle": "Nature",
+            "volume": "529",
+            "pages": "484-489",
+            "year": 2016,
+            "doi": "10.1038/nature16961"
+          },
+          "expectedInText": "1",
+          "expectedBibliography": "Silver, D., Huang, A. & Hassabis, D. Mastering the game of Go with deep neural networks and tree search. Nature 529, 484–489 (2016)."
+        }
+      ]
+    }
+  ]
+}

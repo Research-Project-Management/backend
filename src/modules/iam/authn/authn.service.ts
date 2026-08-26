@@ -3,14 +3,17 @@ import {
   UnauthorizedException,
   BadRequestException,
   Logger,
+  NotFoundException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
-import { User } from '@prisma/client';
+import { User, AuthProvider } from '@prisma/client';
 
 import { AuthnRepository } from './authn.repository';
+import { FederatedIdentityRepository } from '../user/federated-identity.repository';
+import { AuditService } from '../audit/audit.service';
 import { RedisCacheService } from '@/core/cache/redis-cache.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -19,10 +22,25 @@ import {
   TokenRefreshResponseDto,
   UserSummaryResponseDto,
 } from './dto/authn-response.dto';
+import { IAM_REDIS_KEYS } from '../constants/redis-keys.constant';
 
 export interface TokenPair {
   accessToken: string;
   refreshToken: string;
+}
+
+export interface SessionSummary {
+  id: string;
+  userId: string;
+  familyId: string | null;
+  parentId: string | null;
+  userAgent: string | null;
+  ipAddress: string | null;
+  deviceType: string | null;
+  lastUsedAt: Date | null;
+  expiresAt: Date;
+  createdAt: Date;
+  isRevoked: boolean;
 }
 
 export interface OAuthUserProfile {
@@ -30,31 +48,29 @@ export interface OAuthUserProfile {
   email?: string;
   name?: string;
   avatar?: string;
-  provider: 'google' | 'github';
+  provider: 'google' | 'github' | 'orcid';
 }
 
 /**
  * Enterprise Authentication & Identity Service.
  * Manages user credentials, JWT lifecycle, Redis-backed OAuth state validation,
- * cryptographic token hashing, and breach reuse detection.
+ * cryptographic token hashing, token family rotation, and breach reuse detection.
  */
 @Injectable()
 export class AuthnService {
   private readonly logger = new Logger(AuthnService.name);
 
-  // Redis Key Prefixes (following redis-core colon standard)
-  private static readonly OAUTH_STATE_PREFIX = 'flux:iam:oauth_state';
-  private static readonly OAUTH_TICKET_PREFIX = 'flux:iam:oauth_ticket';
-
   constructor(
     private readonly authnRepo: AuthnRepository,
+    private readonly federatedRepo: FederatedIdentityRepository,
+    private readonly auditService: AuditService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly redis: RedisCacheService,
   ) {}
 
   /**
-   * Cryptographically hashes a refresh token before persistence.
+   * Cryptographically hashes a refresh token before persistence (SHA-256).
    */
   private hashToken(rawToken: string): string {
     return crypto.createHash('sha256').update(rawToken).digest('hex');
@@ -69,13 +85,16 @@ export class AuthnService {
   formatUser(user: User | null | undefined): UserSummaryResponseDto | null {
     if (!user) return null;
     const { password, ...rest } = user;
-    return rest as UserSummaryResponseDto;
+    return rest;
   }
 
-  /**
-   * Generates a signed Access Token & Refresh Token pair.
-   */
-  private async generateTokens(user: {
+  private getRefreshTokenExpiresAt(): Date {
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 30);
+    return expiresAt;
+  }
+
+  private async signTokenPair(user: {
     id: string;
     email: string | null;
     name: string;
@@ -89,9 +108,9 @@ export class AuthnService {
 
     const accessTokenSecret = this.configService.get<string>('JWT_SECRET');
     const refreshTokenSecret =
-      this.configService.get<string>('JWT_REFRESH_SECRET');
+      this.configService.get<string>('JWT_REFRESH_SECRET') || accessTokenSecret;
 
-    if (!accessTokenSecret || !refreshTokenSecret) {
+    if (!accessTokenSecret) {
       throw new UnauthorizedException(
         'JWT secrets are not configured in environment',
       );
@@ -110,14 +129,50 @@ export class AuthnService {
       }),
     ]);
 
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 30);
+    return { accessToken, refreshToken };
+  }
 
-    await this.authnRepo.createRefreshToken({
+  /**
+   * Generates a signed Access Token & Refresh Token pair with token family lineage.
+   */
+  private async generateTokens(
+    user: { id: string; email: string | null; name: string },
+    options?: {
+      familyId?: string;
+      parentId?: string;
+      userAgent?: string;
+      ipAddress?: string;
+    },
+  ): Promise<TokenPair> {
+    const { accessToken, refreshToken } = await this.signTokenPair(user);
+    const expiresAt = this.getRefreshTokenExpiresAt();
+    const tokenHash = this.hashToken(refreshToken);
+    const familyId = options?.familyId || crypto.randomUUID();
+
+    const session = await this.authnRepo.createSession({
       userId: user.id,
-      token: this.hashToken(refreshToken),
+      tokenHash,
+      familyId,
+      parentId: options?.parentId,
       expiresAt,
+      userAgent: options?.userAgent,
+      ipAddress: options?.ipAddress,
     });
+
+    // Cache active session in Redis
+    const sessionCacheKey = IAM_REDIS_KEYS.session(session.id);
+    await this.redis.set(
+      sessionCacheKey,
+      {
+        userId: user.id,
+        familyId,
+        isValid: true,
+        expiresAt: expiresAt.toISOString(),
+        ipAddress: options?.ipAddress,
+        userAgent: options?.userAgent,
+      },
+      30 * 24 * 3600, // 30 days
+    );
 
     return { accessToken, refreshToken };
   }
@@ -126,14 +181,14 @@ export class AuthnService {
 
   async createOAuthState(): Promise<string> {
     const state = crypto.randomBytes(24).toString('hex');
-    const key = `${AuthnService.OAUTH_STATE_PREFIX}:${state}`;
+    const key = IAM_REDIS_KEYS.oauthState(state);
     await this.redis.set(key, { createdAt: Date.now() }, 300); // 5 minutes TTL
     return state;
   }
 
   async verifyOAuthState(state?: string): Promise<boolean> {
     if (!state) return false;
-    const key = `${AuthnService.OAUTH_STATE_PREFIX}:${state}`;
+    const key = IAM_REDIS_KEYS.oauthState(state);
     const record = await this.redis.get<{ createdAt: number }>(key);
     if (!record) return false;
     await this.redis.del(key);
@@ -142,7 +197,7 @@ export class AuthnService {
 
   async createOAuthExchangeTicket(data: AuthnResponseDto): Promise<string> {
     const ticket = crypto.randomBytes(32).toString('hex');
-    const key = `${AuthnService.OAUTH_TICKET_PREFIX}:${ticket}`;
+    const key = `flux:iam:oauth_ticket:${ticket}`;
     await this.redis.set(key, data, 60); // 60 seconds TTL
     return ticket;
   }
@@ -151,7 +206,7 @@ export class AuthnService {
     if (!ticket) {
       throw new UnauthorizedException('OAuth exchange ticket is required');
     }
-    const key = `${AuthnService.OAUTH_TICKET_PREFIX}:${ticket}`;
+    const key = `flux:iam:oauth_ticket:${ticket}`;
     const data = await this.redis.get<AuthnResponseDto>(key);
     if (!data) {
       throw new UnauthorizedException(
@@ -278,10 +333,10 @@ export class AuthnService {
       clientId +
       '&redirect_uri=' +
       encodeURIComponent(redirectUri) +
-      '&state=' +
-      encodeURIComponent(state) +
       '&scope=' +
-      encodeURIComponent('read:user user:email')
+      encodeURIComponent('user:email read:user') +
+      '&state=' +
+      encodeURIComponent(state)
     );
   }
 
@@ -311,6 +366,9 @@ export class AuthnService {
       const clientSecret = this.configService.get<string>(
         'GITHUB_CLIENT_SECRET',
       );
+      const apiUrl =
+        this.configService.get<string>('API_URL') || 'http://localhost:3000';
+      const redirectUri = `${apiUrl}/auth/github/callback`;
 
       const tokenRes = await fetch(
         'https://github.com/login/oauth/access_token',
@@ -324,6 +382,7 @@ export class AuthnService {
             client_id: clientId,
             client_secret: clientSecret,
             code,
+            redirect_uri: redirectUri,
           }),
         },
       );
@@ -338,14 +397,14 @@ export class AuthnService {
       const userRes = await fetch('https://api.github.com/user', {
         headers: {
           Authorization: `Bearer ${tokenData.access_token}`,
-          'User-Agent': 'RPM-App',
+          'User-Agent': 'Flux-App',
         },
       });
       const githubUser = (await userRes.json()) as {
         id: number;
-        email?: string;
+        login: string;
         name?: string;
-        login?: string;
+        email?: string;
         avatar_url?: string;
       };
 
@@ -354,7 +413,7 @@ export class AuthnService {
         const emailsRes = await fetch('https://api.github.com/user/emails', {
           headers: {
             Authorization: `Bearer ${tokenData.access_token}`,
-            'User-Agent': 'RPM-App',
+            'User-Agent': 'Flux-App',
           },
         });
         const emails = (await emailsRes.json()) as Array<{
@@ -388,30 +447,65 @@ export class AuthnService {
   }
 
   async handleOAuth(profile: OAuthUserProfile): Promise<AuthnResponseDto> {
-    const providerField: 'googleId' | 'githubId' =
-      profile.provider === 'google' ? 'googleId' : 'githubId';
+    const providerEnum = profile.provider as AuthProvider;
 
-    let user = await this.authnRepo.findUserByOAuth(
-      providerField,
+    // 1. Check if federated identity exists
+    const federatedRecord = await this.federatedRepo.findByProviderSubject(
+      providerEnum,
       profile.id,
-      profile.email,
     );
 
-    if (!user) {
-      user = await this.authnRepo.createUser({
-        email: profile.email?.toLowerCase() || null,
-        name: profile.name || 'User',
-        avatar: profile.avatar || null,
-        [providerField]: profile.id,
-        isVerified: true,
+    let user: User;
+
+    if (federatedRecord) {
+      user = federatedRecord.user;
+    } else {
+      // 2. Check if user with matching email already exists
+      const existingUser = profile.email
+        ? await this.authnRepo.findUserByEmail(profile.email)
+        : null;
+
+      if (existingUser) {
+        user = existingUser;
+      } else {
+        // Create new user profile
+        user = await this.authnRepo.createUser({
+          email: profile.email?.toLowerCase() || null,
+          name: profile.name || 'User',
+          avatar: profile.avatar || null,
+          isVerified: true,
+          status: 'active',
+        });
+      }
+
+      // Link federated identity
+      await this.federatedRepo.linkIdentity({
+        userId: user.id,
+        provider: providerEnum,
+        providerSubjectId: profile.id,
+        email: profile.email?.toLowerCase(),
+        profileData: { name: profile.name, avatar: profile.avatar },
       });
-    } else if (!user[providerField]) {
-      user = await this.authnRepo.updateUser(user.id, {
-        [providerField]: profile.id,
+
+      await this.auditService.log({
+        actorId: user.id,
+        eventType: 'oauth_account_linked',
+        targetType: 'user',
+        targetId: user.id,
+        metadata: { provider: profile.provider },
       });
     }
 
     const tokens = await this.generateTokens(user);
+
+    await this.auditService.log({
+      actorId: user.id,
+      eventType: 'login_success',
+      targetType: 'user',
+      targetId: user.id,
+      metadata: { method: `oauth_${profile.provider}` },
+    });
+
     return {
       user: this.formatUser(user),
       ...tokens,
@@ -434,9 +528,19 @@ export class AuthnService {
       name: dto.name || 'User',
       avatar: dto.avatar || null,
       isVerified: true,
+      status: 'active',
     });
 
     const tokens = await this.generateTokens(user);
+
+    await this.auditService.log({
+      actorId: user.id,
+      eventType: 'login_success',
+      targetType: 'user',
+      targetId: user.id,
+      metadata: { method: 'local_registration' },
+    });
+
     return {
       user: this.formatUser(user),
       ...tokens,
@@ -447,20 +551,43 @@ export class AuthnService {
     const user = await this.authnRepo.findUserByEmail(dto.email);
 
     if (!user || !user.password) {
+      await this.auditService.log({
+        eventType: 'login_failed',
+        targetType: 'user',
+        metadata: { email: dto.email, reason: 'user_not_found_or_no_password' },
+      });
       throw new UnauthorizedException('Invalid email or password');
     }
 
     const isMatch = await bcrypt.compare(dto.password, user.password);
     if (!isMatch) {
+      await this.auditService.log({
+        actorId: user.id,
+        eventType: 'login_failed',
+        targetType: 'user',
+        targetId: user.id,
+        metadata: { email: dto.email, reason: 'password_mismatch' },
+      });
       throw new UnauthorizedException('Invalid email or password');
     }
 
     const tokens = await this.generateTokens(user);
+
+    await this.auditService.log({
+      actorId: user.id,
+      eventType: 'login_success',
+      targetType: 'user',
+      targetId: user.id,
+      metadata: { method: 'password' },
+    });
+
     return {
       user: this.formatUser(user),
       ...tokens,
     };
   }
+
+  // ─── Token Rotation with Family Breach Detection ───────────────────────────
 
   async refresh(refreshToken: string): Promise<TokenRefreshResponseDto> {
     if (!refreshToken) {
@@ -470,10 +597,43 @@ export class AuthnService {
     const tokenHash = this.hashToken(refreshToken);
     const tokenRecord = await this.authnRepo.findRefreshToken(tokenHash);
 
-    if (tokenRecord && tokenRecord.revokedAt) {
-      await this.authnRepo.revokeAllUserTokens(tokenRecord.userId);
+    // BREACH DETECTION: If token was already revoked, check grace period first before triggering full breach
+    if (tokenRecord && (tokenRecord.isRevoked || tokenRecord.revokedAt)) {
+      const GRACE_PERIOD_MS = 15_000;
+      const revokedTime = tokenRecord.revokedAt
+        ? new Date(tokenRecord.revokedAt).getTime()
+        : 0;
+      const isWithinGrace =
+        revokedTime > 0 && Date.now() - revokedTime < GRACE_PERIOD_MS;
+
+      if (isWithinGrace) {
+        this.logger.warn(
+          `Token refresh race condition detected within grace window (familyId: ${tokenRecord.familyId}). Request safely rejected without revoking session family.`,
+        );
+        throw new UnauthorizedException(
+          'Session is currently refreshing. Please retry.',
+        );
+      }
+
+      if (tokenRecord.familyId) {
+        await this.authnRepo.revokeFamily(tokenRecord.familyId);
+      } else {
+        await this.authnRepo.revokeAllUserTokens(tokenRecord.userId);
+      }
+
+      await this.auditService.log({
+        actorId: tokenRecord.userId,
+        eventType: 'token_breach_detected',
+        targetType: 'session',
+        targetId: tokenRecord.id,
+        metadata: {
+          familyId: tokenRecord.familyId,
+          reason: 'revoked_token_replay',
+        },
+      });
+
       throw new UnauthorizedException(
-        'Compromised session detected. All sessions terminated. Please log in again.',
+        'Compromised session detected. All sessions in this token family have been terminated. Please log in again.',
       );
     }
 
@@ -481,8 +641,29 @@ export class AuthnService {
       throw new UnauthorizedException('Refresh token is invalid or expired');
     }
 
-    await this.authnRepo.revokeRefreshToken(tokenHash);
-    const newTokens = await this.generateTokens(tokenRecord.user);
+    const familyId = tokenRecord.familyId || crypto.randomUUID();
+    const newTokens = await this.signTokenPair(tokenRecord.user);
+    const newTokenHash = this.hashToken(newTokens.refreshToken);
+
+    try {
+      await this.authnRepo.rotateToken({
+        oldTokenId: tokenRecord.id,
+        newTokenHash,
+        familyId,
+        userId: tokenRecord.userId,
+        expiresAt: this.getRefreshTokenExpiresAt(),
+      });
+    } catch {
+      throw new UnauthorizedException('Refresh token is invalid or expired');
+    }
+
+    await this.auditService.log({
+      actorId: tokenRecord.userId,
+      eventType: 'token_refreshed',
+      targetType: 'session',
+      targetId: tokenRecord.id,
+      metadata: { familyId },
+    });
 
     return {
       accessToken: newTokens.accessToken,
@@ -494,86 +675,118 @@ export class AuthnService {
   async logout(refreshToken?: string): Promise<{ message: string }> {
     if (refreshToken) {
       const tokenHash = this.hashToken(refreshToken);
-      await this.authnRepo.revokeRefreshToken(tokenHash);
+      const tokenRecord = await this.authnRepo.findRefreshToken(tokenHash);
+      if (tokenRecord) {
+        await this.authnRepo.revokeRefreshToken(tokenHash);
+        await this.redis.del(IAM_REDIS_KEYS.session(tokenRecord.id));
+
+        await this.auditService.log({
+          actorId: tokenRecord.userId,
+          eventType: 'logout',
+          targetType: 'session',
+          targetId: tokenRecord.id,
+        });
+      }
     }
     return { message: 'Logged out successfully' };
   }
 
-  // ─── Password Reset Flow ──────────────────────────────────────────────────
+  // ─── Password Reset Lifecycle ──────────────────────────────────────────────
 
-  private static readonly RESET_TOKEN_PREFIX = 'flux:iam:pwd_reset';
-  private static readonly RESET_TOKEN_TTL_S = 60 * 60; // 1 hour
-
-  /**
-   * Generate a cryptographically secure reset token, store its hash in Redis,
-   * and return the raw token so the caller can include it in an email link.
-   * The actual email dispatch is the responsibility of a Notification/Mailer
-   * service (not yet wired) — the token is logged at DEBUG level for dev testing.
-   */
-  async forgotPassword(email: string): Promise<{ message: string; _devToken?: string }> {
-    // Always return the same generic message to prevent user enumeration.
-    const genericResponse = {
-      message: 'If this email is registered, a reset link will be sent.',
-    };
-
+  async forgotPassword(email: string): Promise<{ message: string }> {
     const user = await this.authnRepo.findUserByEmail(email);
-    if (!user || !user.email) return genericResponse;
+    if (!user) {
+      return {
+        message:
+          'If that email is registered, a password reset link has been sent.',
+      };
+    }
 
-    // Generate a 32-byte random token (URL-safe base64)
-    const rawToken = crypto.randomBytes(32).toString('base64url');
-    const tokenHash = this.hashToken(rawToken);
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const resetKey = `flux:iam:pw_reset:${resetToken}`;
+    await this.redis.set(resetKey, { userId: user.id }, 900); // 15 min TTL
 
-    const redisKey = `${AuthnService.RESET_TOKEN_PREFIX}:${tokenHash}`;
-    await this.redis.set(redisKey, { userId: user.id, email: user.email }, AuthnService.RESET_TOKEN_TTL_S);
-
-    this.logger.debug(`[dev] Password reset token for ${email}: ${rawToken}`);
-
-    // TODO: dispatch email via MailerService when available
-    // await this.mailerService.sendPasswordReset(user.email, rawToken);
+    await this.auditService.log({
+      actorId: user.id,
+      eventType: 'password_reset_requested',
+      targetType: 'user',
+      targetId: user.id,
+    });
 
     return {
-      ...genericResponse,
-      // Only exposed in non-production for testing — strip in prod via response interceptor or remove when mailer is wired
-      ...(process.env.NODE_ENV !== 'production' && { _devToken: rawToken }),
+      message:
+        'If that email is registered, a password reset link has been sent.',
     };
   }
 
-  /**
-   * Validate the reset token from Redis, hash the new password, update the user,
-   * and revoke the token so it cannot be reused.
-   */
-  async resetPassword(token: string, newPassword: string): Promise<{ message: string }> {
-    if (!token || !newPassword) {
-      throw new BadRequestException('Token and new password are required');
-    }
-    if (newPassword.length < 8) {
-      throw new BadRequestException('Password must be at least 8 characters');
-    }
+  async resetPassword(
+    token: string,
+    newPass: string,
+  ): Promise<{ message: string }> {
+    const resetKey = `flux:iam:pw_reset:${token}`;
+    const record = await this.redis.get<{ userId: string }>(resetKey);
 
-    const tokenHash = this.hashToken(token);
-    const redisKey = `${AuthnService.RESET_TOKEN_PREFIX}:${tokenHash}`;
-    const stored = await this.redis.get<{ userId: string; email: string }>(redisKey);
-
-    if (!stored) {
-      throw new BadRequestException('Reset token is invalid or has expired');
+    if (!record?.userId) {
+      throw new BadRequestException('Invalid or expired reset token');
     }
 
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-    await this.authnRepo.updateUserPassword(stored.userId, hashedPassword);
+    const hashedPassword = await bcrypt.hash(newPass, 10);
+    await this.authnRepo.updateUserPassword(record.userId, hashedPassword);
+    await this.authnRepo.revokeAllUserTokens(record.userId);
+    await this.redis.del(resetKey);
 
-    // Revoke the token immediately — single-use only
-    await this.redis.del(redisKey);
+    await this.auditService.log({
+      actorId: record.userId,
+      eventType: 'password_reset_completed',
+      targetType: 'user',
+      targetId: record.userId,
+    });
 
-    // Revoke all active refresh tokens for extra security
-    await this.authnRepo.revokeAllUserRefreshTokens(stored.userId);
+    return { message: 'Password updated successfully' };
+  }
 
-    this.logger.log(`Password reset completed for user ${stored.userId}`);
-    return { message: 'Password has been reset successfully.' };
+  // ─── Active Session Management (User Story 3) ──────────────────────────────
+
+  private formatSession(session: any): SessionSummary {
+    const { token: _token, tokenHash: _tokenHash, ...safeSession } = session;
+    return safeSession as SessionSummary;
+  }
+
+  async getActiveSessions(userId: string): Promise<SessionSummary[]> {
+    const sessions = await this.authnRepo.findActiveSessionsByUser(userId);
+    return sessions.map((session) => this.formatSession(session));
+  }
+
+  async revokeSession(userId: string, sessionId: string): Promise<void> {
+    const revokedCount = await this.authnRepo.revokeUserSession(
+      userId,
+      sessionId,
+    );
+    if (revokedCount === 0) {
+      throw new NotFoundException('Session not found');
+    }
+
+    await this.redis.del(IAM_REDIS_KEYS.session(sessionId));
+
+    await this.auditService.log({
+      actorId: userId,
+      eventType: 'token_revoked',
+      targetType: 'session',
+      targetId: sessionId,
+    });
+  }
+
+  async revokeAllSessions(userId: string): Promise<{ revokedCount: number }> {
+    const count = await this.authnRepo.revokeAllUserSessions(userId);
+
+    await this.auditService.log({
+      actorId: userId,
+      eventType: 'token_revoked',
+      targetType: 'user',
+      targetId: userId,
+      metadata: { count, scope: 'all_sessions' },
+    });
+
+    return { revokedCount: count };
   }
 }
-
-// Backward compatibility aliases
-export const AuthService = AuthnService;
-export type AuthService = AuthnService;
-export const AuthenticationService = AuthnService;
-export type AuthenticationService = AuthnService;

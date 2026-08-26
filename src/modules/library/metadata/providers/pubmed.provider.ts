@@ -1,12 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { getErrorMessage, tryCatch } from '../../../../core/utils/error.util';
-import { UnifiedAcademicMetadata } from '../metadata.types';
+import { getErrorMessage, tryCatch } from '@/core/utils/error.util';
+
+import { UnifiedAcademicMetadata } from '../types/metadata.types';
 import {
   normalizePmid,
   normalizePmcid,
   normalizeDoi,
-} from '../canonical-identifiers.util';
-import { validateAcademicMetadata } from '../metadata.validator';
+  validateAcademicMetadata,
+} from '../utils/metadata.util';
+
 import { createHash } from 'crypto';
 
 @Injectable()

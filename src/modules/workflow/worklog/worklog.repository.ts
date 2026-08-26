@@ -1,25 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
-
-export interface WorklogRecord {
-  id: string;
-  hours: number;
-  description: string;
-  date: Date;
-  userId: string;
-  projectId: string;
-  workspaceId: string;
-  taskId?: string | null;
-  taskTitle?: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-  user?: {
-    id: string;
-    name: string;
-    avatar: string | null;
-    email: string | null;
-  };
-}
+import { Prisma, Worklog } from '@prisma/client';
+import {
+  IWorklogRepository,
+  USER_MINIMAL_SELECT,
+} from '../types/workflow-repository.interface';
 
 export interface WorklogQueryOptions {
   userId?: string;
@@ -30,166 +15,131 @@ export interface WorklogQueryOptions {
 }
 
 @Injectable()
-export class WorklogRepository {
+export class WorklogRepository implements IWorklogRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async findProjectWorklogs(
     projectId: string,
     options: WorklogQueryOptions,
   ): Promise<{ items: any[]; total: number }> {
-    // If prisma.worklog model is available in schema
-    if ((this.prisma as any).worklog) {
-      const where: any = { projectId };
-      if (options.userId) where.userId = options.userId;
-      if (options.startDate || options.endDate) {
-        where.date = {};
-        if (options.startDate) where.date.gte = options.startDate;
-        if (options.endDate) where.date.lte = options.endDate;
-      }
-
-      const [items, total] = await Promise.all([
-        (this.prisma as any).worklog.findMany({
-          where,
-          orderBy: { date: 'desc' },
-          take: options.limit,
-          skip: options.offset,
-          include: {
-            user: {
-              select: { id: true, name: true, avatar: true, email: true },
-            },
-          },
-        }),
-        (this.prisma as any).worklog.count({ where }),
-      ]);
-
-      return { items, total };
+    const where: Prisma.WorklogWhereInput = { projectId };
+    if (options.userId) where.userId = options.userId;
+    if (options.startDate || options.endDate) {
+      where.date = {};
+      if (options.startDate) where.date.gte = options.startDate;
+      if (options.endDate) where.date.lte = options.endDate;
     }
 
-    // Fallback: Query via ActivityEvent with entityType 'task' or project tasks
-    const _project = await this.prisma.project.findUnique({
-      where: { id: projectId },
-      include: {
-        members: {
-          include: {
-            user: {
-              select: { id: true, name: true, avatar: true, email: true },
-            },
-          },
+    const [items, total] = await Promise.all([
+      this.prisma.worklog.findMany({
+        where,
+        orderBy: { date: 'desc' },
+        take: options.limit,
+        skip: options.offset,
+        include: {
+          user: { select: USER_MINIMAL_SELECT },
+          task: { select: { id: true, title: true, identifier: true } },
         },
-      },
-    });
+      }),
+      this.prisma.worklog.count({ where }),
+    ]);
 
-    return { items: [], total: 0 };
+    return { items, total };
   }
 
   async findWorkspaceWorklogs(
     workspaceId: string,
     options: WorklogQueryOptions,
   ): Promise<{ items: any[]; total: number }> {
-    if ((this.prisma as any).worklog) {
-      const where: any = { workspaceId };
-      if (options.userId) where.userId = options.userId;
-      if (options.startDate || options.endDate) {
-        where.date = {};
-        if (options.startDate) where.date.gte = options.startDate;
-        if (options.endDate) where.date.lte = options.endDate;
-      }
-
-      const [items, total] = await Promise.all([
-        (this.prisma as any).worklog.findMany({
-          where,
-          orderBy: { date: 'desc' },
-          take: options.limit,
-          skip: options.offset,
-          include: {
-            user: {
-              select: { id: true, name: true, avatar: true, email: true },
-            },
-            project: { select: { id: true, name: true } },
-          },
-        }),
-        (this.prisma as any).worklog.count({ where }),
-      ]);
-
-      return { items, total };
+    const where: Prisma.WorklogWhereInput = {
+      project: { workspaceId, deletedAt: null },
+    };
+    if (options.userId) where.userId = options.userId;
+    if (options.startDate || options.endDate) {
+      where.date = {};
+      if (options.startDate) where.date.gte = options.startDate;
+      if (options.endDate) where.date.lte = options.endDate;
     }
 
-    return { items: [], total: 0 };
+    const [items, total] = await Promise.all([
+      this.prisma.worklog.findMany({
+        where,
+        orderBy: { date: 'desc' },
+        take: options.limit,
+        skip: options.offset,
+        include: {
+          user: { select: USER_MINIMAL_SELECT },
+          project: { select: { id: true, name: true, identifier: true } },
+          task: { select: { id: true, title: true, identifier: true } },
+        },
+      }),
+      this.prisma.worklog.count({ where }),
+    ]);
+
+    return { items, total };
   }
 
-  async createWorklog(data: {
-    hours: number;
-    description?: string;
-    date?: Date;
-    userId: string;
-    projectId: string;
-    workspaceId: string;
-    taskId?: string;
-    taskTitle?: string;
-  }) {
-    if ((this.prisma as any).worklog) {
-      return (this.prisma as any).worklog.create({
-        data: {
-          hours: data.hours,
-          description: data.description || '',
-          date: data.date || new Date(),
-          userId: data.userId,
-          projectId: data.projectId,
-          workspaceId: data.workspaceId,
-          taskId: data.taskId,
-        },
-        include: {
-          user: { select: { id: true, name: true, avatar: true, email: true } },
-        },
-      });
-    }
+  async findTaskWorklogs(taskId: string): Promise<Worklog[]> {
+    return this.prisma.worklog.findMany({
+      where: { taskId },
+      include: {
+        user: { select: USER_MINIMAL_SELECT },
+      },
+      orderBy: { date: 'desc' },
+    });
+  }
 
-    const user = await this.prisma.user.findUnique({
-      where: { id: data.userId },
-      select: { id: true, name: true, avatar: true, email: true },
+  async createWorklog(
+    data: Prisma.WorklogCreateInput | Prisma.WorklogUncheckedCreateInput,
+  ): Promise<Worklog> {
+    const worklog = await this.prisma.worklog.create({
+      data: data as Prisma.WorklogCreateInput,
+      include: {
+        user: { select: USER_MINIMAL_SELECT },
+      },
     });
 
-    return {
-      id: `wl-${Date.now()}`,
-      hours: data.hours,
-      description: data.description || '',
-      date: data.date || new Date(),
-      userId: data.userId,
-      projectId: data.projectId,
-      workspaceId: data.workspaceId,
-      taskId: data.taskId,
-      taskTitle: data.taskTitle,
-      user,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-  }
-
-  async deleteWorklog(id: string) {
-    if ((this.prisma as any).worklog) {
-      return await (this.prisma as any).worklog.delete({
-        where: { id },
+    if (worklog.taskId) {
+      await this.prisma.task.update({
+        where: { id: worklog.taskId },
+        data: { timeSpent: { increment: worklog.hours } },
       });
     }
-    return { id, deleted: true };
+
+    return worklog;
   }
 
-  async updateWorklog(id: string, data: Record<string, any>) {
-    if ((this.prisma as any).worklog) {
-      return (this.prisma as any).worklog.update({
-        where: { id },
-        data,
-        include: {
-          user: { select: { id: true, name: true, avatar: true, email: true } },
-        },
+  async deleteWorklog(id: string): Promise<Worklog> {
+    const worklog = await this.prisma.worklog.delete({
+      where: { id },
+    });
+
+    if (worklog.taskId) {
+      await this.prisma.task.update({
+        where: { id: worklog.taskId },
+        data: { timeSpent: { decrement: worklog.hours } },
       });
     }
-    return { id, ...data, updatedAt: new Date() };
+
+    return worklog;
+  }
+
+  async updateWorklog(
+    id: string,
+    data: Prisma.WorklogUpdateInput,
+  ): Promise<Worklog> {
+    return this.prisma.worklog.update({
+      where: { id },
+      data,
+      include: {
+        user: { select: USER_MINIMAL_SELECT },
+      },
+    });
   }
 
   async resolveWorkspaceId(projectId: string): Promise<string | null> {
-    const project = await this.prisma.project.findUnique({
-      where: { id: projectId },
+    const project = await this.prisma.project.findFirst({
+      where: { id: projectId, deletedAt: null },
       select: { workspaceId: true },
     });
     return project?.workspaceId ?? null;

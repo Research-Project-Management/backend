@@ -1,4 +1,4 @@
-﻿import {
+import {
   Controller,
   Get,
   Post,
@@ -11,11 +11,11 @@
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { QualityService } from './quality.service';
 import { MergeCatalogItemsDto } from './dto/quality.dto';
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
-import {
-  WorkspaceRoleGuard,
-  WorkspaceRoles,
-} from '@/modules/iam/authz';
+
+import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
+import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
+import { WorkspaceRoleGuard } from '@/modules/iam/authz/guards/workspace-role.guard';
+import { WorkspaceRoles } from '@/modules/iam/authz/decorators/workspace-roles.decorator';
 
 @ApiTags('Library - Quality & Duplicates')
 @ApiBearerAuth('JWT-auth')

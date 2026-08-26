@@ -1,14 +1,40 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { HistoryRepository } from './history.repository';
 import { CreateVersionDto } from './dto/history.dto';
 import { VersionEventType, Prisma } from '@prisma/client';
 import { tryCatchSync } from '@/core/utils/error.util';
+import { RedisCacheService } from '@/core/cache/redis-cache.service';
+import { DOCUMENT_REDIS_KEYS } from '../constants/redis-keys.constant';
 
 @Injectable()
 export class HistoryService {
-  constructor(private readonly historyRepo: HistoryRepository) {}
+  constructor(
+    private readonly historyRepo: HistoryRepository,
+    @Optional() private readonly cache?: RedisCacheService,
+  ) {}
+
+  private async invalidateVersionCache(pageId: string) {
+    if (!this.cache) return;
+    await Promise.all([
+      this.cache.del(DOCUMENT_REDIS_KEYS.pageVersions(pageId)),
+      this.cache.del(DOCUMENT_REDIS_KEYS.page(pageId)),
+    ]);
+  }
 
   async getVersions(pageId: string) {
+    const cacheKey = DOCUMENT_REDIS_KEYS.pageVersions(pageId);
+
+    if (this.cache) {
+      return this.cache.wrap(
+        cacheKey,
+        async () => {
+          const versions = await this.historyRepo.findPageVersions(pageId);
+          return { versions };
+        },
+        3600,
+      );
+    }
+
     const versions = await this.historyRepo.findPageVersions(pageId);
     return { versions };
   }
@@ -21,7 +47,7 @@ export class HistoryService {
     }
 
     const version = await this.historyRepo.createVersion({
-      pageId,
+      page: { connect: { id: pageId } },
       projectPageId: dto.projectPageId || null,
       title: dto.title || page.title,
       content:
@@ -35,6 +61,8 @@ export class HistoryService {
       eventType: dto.eventType || VersionEventType.manual_save,
       fileName: dto.fileName || '',
     });
+
+    await this.invalidateVersionCache(pageId);
 
     return { version };
   }
@@ -64,6 +92,8 @@ export class HistoryService {
       title: version.title || undefined,
     });
 
+    await this.invalidateVersionCache(pageId);
+
     return {
       message: 'Version restored successfully',
       page,
@@ -71,7 +101,14 @@ export class HistoryService {
   }
 
   async deleteVersion(versionId: string) {
+    const version = await this.historyRepo.findVersionById(versionId);
+    if (!version) {
+      throw new NotFoundException('Version not found');
+    }
+
     await this.historyRepo.deleteVersion(versionId);
+    await this.invalidateVersionCache(version.pageId);
+
     return { message: 'Version deleted successfully' };
   }
 

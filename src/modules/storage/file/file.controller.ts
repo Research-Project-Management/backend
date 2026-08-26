@@ -29,21 +29,22 @@ import {
   BatchFileIdsDto,
   BatchStarDto,
 } from './dto/file.dto';
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
-import {
-  WorkspaceRoleGuard,
-  WorkspaceRoles,
-  ProjectRoleGuard,
-  ProjectRoles,
-  CurrentWorkspace,
-} from '@/modules/iam/authz';
+import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
+import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
+import { Public } from '@/modules/iam/authn/decorators/public.decorator';
+import { WorkspaceRoleGuard } from '@/modules/iam/authz/guards/workspace-role.guard';
+
+import { WorkspaceRoles } from '@/modules/iam/authz/decorators/workspace-roles.decorator';
+import { ProjectRoleGuard } from '@/modules/iam/authz/guards/project-role.guard';
+import { ProjectRoles } from '@/modules/iam/authz/decorators/project-roles.decorator';
+import { CurrentWorkspace } from '@/modules/iam/authz/decorators/current-workspace.decorator';
 
 @ApiTags('Storage & Assets')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/files')
 @UseGuards(JwtAuthGuard)
 export class FileController {
-  constructor(private readonly fileService: FileService) { }
+  constructor(private readonly fileService: FileService) {}
 
   @Post('presign')
   @HttpCode(HttpStatus.OK)
@@ -66,14 +67,12 @@ export class FileController {
   }
 
   /**
-   * Serve / Stream R2 File by storage key
+   * Serve / Stream R2 File by storage key (Public for browser media & PDF viewers)
    */
+  @Public()
   @Get('r2/*')
   @ApiOperation({ summary: 'Stream R2 stored file by storage key' })
-  async getR2File(
-    @Req() req: FastifyRequest,
-    @Res() res: FastifyReply,
-  ) {
+  async getR2File(@Req() req: FastifyRequest, @Res() res: FastifyReply) {
     const rawUrl = req.raw?.url || req.url || '';
     const prefix = '/api/files/r2/';
     const idx = rawUrl.indexOf(prefix);
@@ -94,7 +93,9 @@ export class FileController {
     } catch {
       try {
         output = await this.fileService.getR2Stream(rawKey);
-      } catch { }
+      } catch {
+        // Fallback failed, handled by 404 check below
+      }
     }
 
     if (!output?.Body) {
@@ -171,7 +172,9 @@ export class FileController {
   @Get('workspace/:workspaceId/all')
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
-  @ApiOperation({ summary: 'List all workspace files with optional parent filter' })
+  @ApiOperation({
+    summary: 'List all workspace files with optional parent filter',
+  })
   async getWorkspaceAll(
     @Param('workspaceId') workspaceId: string,
     @Query('parentId') parentId?: string,
@@ -422,7 +425,7 @@ export class FileController {
     return this.fileService.getFile(fileId, userId);
   }
 
-  @Put(':fileId')
+  @Put([':fileId', ':fileId/metadata'])
   @ApiOperation({ summary: 'Update file metadata' })
   async updateFile(
     @Param('fileId') fileId: string,
@@ -441,7 +444,6 @@ export class FileController {
     return this.fileService.deleteFile(fileId, userId);
   }
   @ApiOperation({ summary: 'Toggle star on file (alias)' })
-
   @Put(':fileId/star')
   async toggleStar(
     @Param('fileId') fileId: string,

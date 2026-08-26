@@ -44,3 +44,5 @@ export class SearchCatalogQueryDto {
   @IsOptional()
   skip?: number = 0;
 }
+
+export const SearchItemsQueryDto = SearchCatalogQueryDto;

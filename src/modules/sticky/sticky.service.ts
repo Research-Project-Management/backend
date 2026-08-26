@@ -2,46 +2,108 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  Optional,
+  Logger,
 } from '@nestjs/common';
-import { StickyRepository, StickyWithUser } from './sticky.repository';
+import { StickyRepository } from './sticky.repository';
+import { StickyWithUser } from './types/sticky-repository.interface';
 import { CreateStickyDto, UpdateStickyDto } from './dto/sticky.dto';
 import { StickyScope } from '@prisma/client';
+import { RedisCacheService } from '@/core/cache/redis-cache.service';
+import { STICKY_REDIS_KEYS } from './constants/redis-keys.constant';
 
 @Injectable()
 export class StickyService {
-  constructor(private readonly stickyRepo: StickyRepository) {}
+  private readonly logger = new Logger(StickyService.name);
 
-  private formatSticky(s: StickyWithUser): StickyWithUser & {
-    position: { x: number; y: number };
-  };
-  private formatSticky(s: null | undefined): null;
-  private formatSticky(s: StickyWithUser | null | undefined):
-    | (StickyWithUser & {
-        position: { x: number; y: number };
-      })
-    | null;
-  private formatSticky(s: StickyWithUser | null | undefined) {
-    if (!s) return null;
+  constructor(
+    private readonly stickyRepo: StickyRepository,
+    @Optional() private readonly cache?: RedisCacheService,
+  ) {}
+
+  private async invalidateStickyCache(
+    userId: string,
+    workspaceId?: string | null,
+    projectId?: string | null,
+  ) {
+    if (!this.cache) return;
+    const promises: Promise<any>[] = [];
+    if (workspaceId) {
+      promises.push(
+        this.cache.del(
+          STICKY_REDIS_KEYS.workspaceStickies(workspaceId, userId),
+        ),
+      );
+    }
+    if (projectId) {
+      promises.push(
+        this.cache.del(STICKY_REDIS_KEYS.projectStickies(projectId, userId)),
+      );
+    }
+    await Promise.all(promises).catch((err) => {
+      this.logger.warn(`Failed to invalidate sticky cache: ${err}`);
+    });
+  }
+
+  private formatSticky<T extends { positionX: number; positionY: number }>(
+    stickyRecord: T | null | undefined,
+  ): (T & { position: { x: number; y: number } }) | null {
+    if (!stickyRecord) return null;
     return {
-      ...s,
-      position: { x: s.positionX, y: s.positionY },
+      ...stickyRecord,
+      position: { x: stickyRecord.positionX, y: stickyRecord.positionY },
     };
   }
 
   async getWorkspaceStickies(workspaceId: string, userId: string) {
-    const stickies = await this.stickyRepo.findWorkspaceStickies(
-      workspaceId,
+    const workspace = await this.stickyRepo.resolveWorkspace(workspaceId);
+    const resolvedWorkspaceId = workspace?.id || workspaceId;
+    const cacheKey = STICKY_REDIS_KEYS.workspaceStickies(
+      resolvedWorkspaceId,
       userId,
     );
-    return { stickies: stickies.map((s) => this.formatSticky(s)) };
+
+    if (this.cache) {
+      const cached = await this.cache.get<any>(cacheKey);
+      if (cached) return cached;
+    }
+
+    const stickies = await this.stickyRepo.findWorkspaceStickies(
+      resolvedWorkspaceId,
+      userId,
+    );
+    const result = {
+      stickies: stickies.map((sticky) => this.formatSticky(sticky)),
+    };
+
+    if (this.cache) {
+      await this.cache.set(cacheKey, result, 1800);
+    }
+
+    return result;
   }
 
   async getProjectStickies(projectId: string, userId: string) {
+    const cacheKey = STICKY_REDIS_KEYS.projectStickies(projectId, userId);
+
+    if (this.cache) {
+      const cached = await this.cache.get<any>(cacheKey);
+      if (cached) return cached;
+    }
+
     const stickies = await this.stickyRepo.findProjectStickies(
       projectId,
       userId,
     );
-    return { stickies: stickies.map((s) => this.formatSticky(s)) };
+    const result = {
+      stickies: stickies.map((sticky) => this.formatSticky(sticky)),
+    };
+
+    if (this.cache) {
+      await this.cache.set(cacheKey, result, 1800);
+    }
+
+    return result;
   }
 
   async createWorkspaceSticky(
@@ -49,8 +111,11 @@ export class StickyService {
     userId: string,
     dto: CreateStickyDto,
   ) {
+    const workspace = await this.stickyRepo.resolveWorkspace(workspaceId);
+    const resolvedWorkspaceId = workspace?.id || workspaceId;
+
     const count = await this.stickyRepo.countWorkspaceStickies(
-      workspaceId,
+      resolvedWorkspaceId,
       userId,
     );
 
@@ -62,9 +127,11 @@ export class StickyService {
       positionX: dto.position?.x ?? 0,
       positionY: dto.position?.y ?? 0,
       order: count,
-      workspaceId,
+      workspaceId: resolvedWorkspaceId,
       userId,
     });
+
+    await this.invalidateStickyCache(userId, resolvedWorkspaceId);
 
     return { sticky: this.formatSticky(sticky) };
   }
@@ -75,9 +142,10 @@ export class StickyService {
     dto: CreateStickyDto,
   ) {
     let workspaceId = '';
-    const wsId = await this.stickyRepo.findProjectWorkspaceId(projectId);
-    if (wsId) {
-      workspaceId = wsId;
+    const resolvedWorkspaceId =
+      await this.stickyRepo.findProjectWorkspaceId(projectId);
+    if (resolvedWorkspaceId) {
+      workspaceId = resolvedWorkspaceId;
     }
 
     const count = await this.stickyRepo.countProjectStickies(projectId, userId);
@@ -95,15 +163,17 @@ export class StickyService {
       userId,
     });
 
+    await this.invalidateStickyCache(userId, workspaceId, projectId);
+
     return { sticky: this.formatSticky(sticky) };
   }
 
   async updateSticky(stickyId: string, userId: string, dto: UpdateStickyDto) {
-    const existing = await this.stickyRepo.findStickyById(stickyId);
-    if (!existing) {
+    const existingSticky = await this.stickyRepo.findStickyById(stickyId);
+    if (!existingSticky) {
       throw new NotFoundException('Sticky note not found');
     }
-    if (existing.userId !== userId) {
+    if (existingSticky.userId !== userId) {
       throw new ForbiddenException('You can only update your own sticky notes');
     }
 
@@ -117,27 +187,49 @@ export class StickyService {
       ...(dto.projectId !== undefined && { projectId: dto.projectId }),
     });
 
+    await this.invalidateStickyCache(
+      userId,
+      existingSticky.workspaceId,
+      existingSticky.projectId,
+    );
+
     return { sticky: this.formatSticky(sticky) };
   }
 
   async deleteSticky(stickyId: string, userId: string) {
-    const existing = await this.stickyRepo.findStickyById(stickyId);
-    if (!existing) {
+    const existingSticky = await this.stickyRepo.findStickyById(stickyId);
+    if (!existingSticky) {
       throw new NotFoundException('Sticky note not found');
     }
-    if (existing.userId !== userId) {
+    if (existingSticky.userId !== userId) {
       throw new ForbiddenException('You can only delete your own sticky notes');
     }
 
     await this.stickyRepo.deleteSticky(stickyId);
+    await this.invalidateStickyCache(
+      userId,
+      existingSticky.workspaceId,
+      existingSticky.projectId,
+    );
+
     return { message: 'Sticky deleted successfully', success: true };
   }
 
-  async reorderStickies(stickyIds: string[]) {
+  async reorderStickies(stickyIds: string[], userId?: string) {
     if (!stickyIds || stickyIds.length <= 1) {
       return { success: true };
     }
-    await this.stickyRepo.reorderStickies(stickyIds);
+    const stickies = await this.stickyRepo.reorderStickies(stickyIds);
+
+    if (userId && stickies.length > 0) {
+      const firstSticky = stickies[0];
+      await this.invalidateStickyCache(
+        userId,
+        firstSticky.workspaceId,
+        firstSticky.projectId,
+      );
+    }
+
     return { success: true };
   }
 }

@@ -14,6 +14,11 @@ import { GlobalExceptionFilter } from './core/filters/global-exception.filter';
 import { AppLogger } from './core/logger/app-logger.service';
 import { LoggingInterceptor } from './core/logger/logging.interceptor';
 
+import { Reflector } from '@nestjs/core';
+import { TransformInterceptor } from './core/interceptors/transform.interceptor';
+import { IdempotencyInterceptor } from './core/idempotency/idempotency.interceptor';
+import { IdempotencyService } from './core/idempotency/idempotency.service';
+
 async function bootstrap() {
   const logger = AppLogger.getInstance('Bootstrap');
 
@@ -63,7 +68,19 @@ async function bootstrap() {
   });
 
   // Global Interceptors, Pipes & Filters
-  app.useGlobalInterceptors(new LoggingInterceptor());
+  const reflector = app.get(Reflector);
+  let idempotencyService: IdempotencyService | undefined;
+  try {
+    idempotencyService = app.get(IdempotencyService, { strict: false });
+  } catch {
+    idempotencyService = undefined;
+  }
+
+  app.useGlobalInterceptors(
+    new LoggingInterceptor(),
+    new IdempotencyInterceptor(idempotencyService),
+    new TransformInterceptor(reflector),
+  );
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -102,8 +119,15 @@ async function bootstrap() {
       'X-Requested-With',
       'Range',
       'Origin',
+      'Idempotency-Key',
+      'X-Idempotency-Key',
     ],
-    exposedHeaders: ['Content-Range', 'X-Total-Count'],
+    exposedHeaders: [
+      'Content-Range',
+      'X-Total-Count',
+      'Idempotent-Replay',
+      'X-Idempotent-Key',
+    ],
     credentials: true,
   });
 

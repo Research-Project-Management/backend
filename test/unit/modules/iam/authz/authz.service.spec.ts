@@ -1,32 +1,46 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuthzService } from '@/modules/iam/authz/authz.service';
 import { PrismaService } from '@/core/database/prisma.service';
+import { RedisCacheService } from '@/core/cache/redis-cache.service';
 import { Permission } from '@/modules/iam/authz/enums/permissions.enum';
 import { WorkspaceRole } from '@/modules/iam/authz/enums/workspace-role.enum';
 import { ProjectRole } from '@/modules/iam/authz/enums/project-role.enum';
 
 describe('AuthzService', () => {
   let service: AuthzService;
-  let prismaService: any;
+  let prisma: any;
+  let redis: jest.Mocked<RedisCacheService>;
 
   beforeEach(async () => {
-    prismaService = {
+    prisma = {
       workspaceMember: {
-        findFirst: jest.fn(),
+        findUnique: jest.fn(),
       },
       projectMember: {
-        findFirst: jest.fn(),
+        findUnique: jest.fn(),
       },
     };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthzService,
-        { provide: PrismaService, useValue: prismaService },
+        {
+          provide: PrismaService,
+          useValue: prisma,
+        },
+        {
+          provide: RedisCacheService,
+          useValue: {
+            get: jest.fn(),
+            set: jest.fn(),
+            del: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
     service = module.get<AuthzService>(AuthzService);
+    redis = module.get(RedisCacheService);
   });
 
   it('should be defined', () => {
@@ -121,21 +135,68 @@ describe('AuthzService', () => {
     });
   });
 
-  describe('getWorkspaceMemberRole & getProjectMemberRole', () => {
-    it('should retrieve workspace member role', async () => {
-      prismaService.workspaceMember.findFirst.mockResolvedValue({
-        role: 'ADMIN',
-      });
+  describe('getWorkspaceMemberRole & getProjectMemberRole with Redis caching', () => {
+    it('should retrieve workspace member role from cache if present', async () => {
+      redis.get.mockResolvedValue('admin');
       const role = await service.getWorkspaceMemberRole('ws-1', 'user-1');
-      expect(role).toBe('ADMIN');
+      expect(role).toBe('admin');
+      expect(prisma.workspaceMember.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('should fetch from DB and populate cache if not cached', async () => {
+      redis.get.mockResolvedValue(null);
+      prisma.workspaceMember.findUnique.mockResolvedValue({
+        role: 'admin',
+      });
+
+      const role = await service.getWorkspaceMemberRole('ws-1', 'user-1');
+      expect(role).toBe('admin');
+      expect(prisma.workspaceMember.findUnique).toHaveBeenCalledWith({
+        where: {
+          workspaceId_userId: {
+            workspaceId: 'ws-1',
+            userId: 'user-1',
+          },
+        },
+        select: { role: true },
+      });
+      expect(redis.set).toHaveBeenCalledWith(
+        'flux:iam:ws_role:ws-1:user-1',
+        'admin',
+        600,
+      );
     });
 
     it('should retrieve project member role', async () => {
-      prismaService.projectMember.findFirst.mockResolvedValue({
+      redis.get.mockResolvedValue(null);
+      prisma.projectMember.findUnique.mockResolvedValue({
         role: 'contributor',
       });
+
       const role = await service.getProjectMemberRole('p-1', 'user-1');
       expect(role).toBe('contributor');
+      expect(prisma.projectMember.findUnique).toHaveBeenCalledWith({
+        where: {
+          projectId_userId: {
+            projectId: 'p-1',
+            userId: 'user-1',
+          },
+        },
+        select: { role: true },
+      });
+      expect(redis.set).toHaveBeenCalledWith(
+        'flux:iam:proj_role:p-1:user-1',
+        'contributor',
+        600,
+      );
+    });
+
+    it('should invalidate role caches on demand', async () => {
+      await service.invalidateWorkspaceRoleCache('ws-1', 'user-1');
+      expect(redis.del).toHaveBeenCalledWith('flux:iam:ws_role:ws-1:user-1');
+
+      await service.invalidateProjectRoleCache('p-1', 'user-1');
+      expect(redis.del).toHaveBeenCalledWith('flux:iam:proj_role:p-1:user-1');
     });
   });
 });

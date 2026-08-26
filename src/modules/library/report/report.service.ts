@@ -1,23 +1,22 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { CatalogRepository } from '../catalog/catalog.repository';
-import { CatalogExtraStore } from '../catalog/catalog-extra.store';
-import { LibraryItemRecord } from '../catalog/items/item.types';
-import { toLibraryItemView } from '../catalog/items/item.mapper';
-import { PdfAnnotation } from '../attachments/annotations/annotations.types';
+import { ItemsRepository } from '../items/items.repository';
+import { ItemRecord } from '../items/types/items.types';
+import { toItemView } from '../items/items.mapper';
+import { PdfAnnotation } from '../annotations/types/annotations.types';
 
-export interface LibraryReportRow {
+export interface ReportRow {
   label: string;
   value: string;
   present: boolean;
 }
 
-export interface LibraryReportNote {
+export interface ReportNote {
   title?: string;
   content: string;
   createdAt?: string;
 }
 
-export interface LibraryReportAttachment {
+export interface ReportAttachment {
   id: string;
   filename: string;
   url: string;
@@ -27,42 +26,46 @@ export interface LibraryReportAttachment {
   uploadedAt: string;
 }
 
-export interface LibraryItemReport {
-  item: ReturnType<typeof toLibraryItemView>;
+export interface ItemReport {
+  item: ReturnType<typeof toItemView>;
   title: string;
-  metadataRows: LibraryReportRow[];
+  metadataRows: ReportRow[];
   metadataCompleteness: {
     present: string[];
     missing: string[];
   };
   abstractNote: string;
   tags: string[];
-  notes: LibraryReportNote[];
-  attachments: LibraryReportAttachment[];
+  notes: ReportNote[];
+  attachments: ReportAttachment[];
   annotations: PdfAnnotation[];
   collections: { id: string; name: string }[];
   relatedCount: number;
   generatedAt: string;
 }
 
-export interface LibraryCollectionReport {
+export interface CollectionReport {
   collection: { id: string; name: string; description?: string };
   totalItems: number;
-  items: LibraryItemReport[];
+  items: ItemReport[];
   generatedAt: string;
 }
 
+// Backward-compatible aliases
+export type LibraryReportRow = ReportRow;
+export type LibraryReportNote = ReportNote;
+export type LibraryReportAttachment = ReportAttachment;
+export type LibraryItemReport = ItemReport;
+export type LibraryCollectionReport = CollectionReport;
+
 @Injectable()
-export class LibraryReportService {
-  constructor(
-    private readonly catalogRepo: CatalogRepository,
-    private readonly extraStore: CatalogExtraStore,
-  ) {}
+export class ReportService {
+  constructor(private readonly catalogRepo: ItemsRepository) {}
 
   async getItemReport(
     workspaceId: string,
     itemId: string,
-  ): Promise<LibraryItemReport> {
+  ): Promise<ItemReport> {
     const targetWsId = await this.catalogRepo.resolveWorkspaceId(workspaceId);
     const item = await this.catalogRepo.findItemByIdInWorkspace(
       targetWsId,
@@ -74,11 +77,11 @@ export class LibraryReportService {
     }
 
     const [annotations, relations] = await Promise.all([
-      this.extraStore.getAnnotations(item.id),
-      this.extraStore.getRelations(item.id),
+      this.catalogRepo.getAnnotations(item.id),
+      this.catalogRepo.getRelations(item.id),
     ]);
 
-    const view = toLibraryItemView(item);
+    const view = toItemView(item);
     const metadataRows = this.buildMetadataRows(item);
 
     return {
@@ -86,7 +89,9 @@ export class LibraryReportService {
       title: item.title,
       metadataRows,
       metadataCompleteness: {
-        present: metadataRows.filter((row) => row.present).map((row) => row.label),
+        present: metadataRows
+          .filter((row) => row.present)
+          .map((row) => row.label),
         missing: metadataRows
           .filter((row) => !row.present)
           .map((row) => row.label),
@@ -94,15 +99,18 @@ export class LibraryReportService {
       abstractNote: item.abstract?.trim() ?? '',
       tags: item.labels ?? [],
       notes: this.normalizeNotes(item.notes),
-      attachments: (item.attachments ?? []).map((attachment) => ({
+      attachments: (item.attachments ?? []).map((attachment: any) => ({
         id: attachment.id,
         filename: attachment.filename,
         url: attachment.url,
         mimeType: attachment.mimeType,
         size: attachment.size,
         attachmentType: attachment.attachmentType,
-        uploadedAt: attachment.uploadedAt.toISOString(),
+        uploadedAt: attachment.uploadedAt
+          ? new Date(attachment.uploadedAt).toISOString()
+          : new Date().toISOString(),
       })),
+
       annotations,
       collections: item.collection
         ? [{ id: item.collection.id, name: item.collection.name }]
@@ -115,7 +123,7 @@ export class LibraryReportService {
   async getCollectionReport(
     workspaceId: string,
     collectionId: string,
-  ): Promise<LibraryCollectionReport> {
+  ): Promise<CollectionReport> {
     const targetWsId = await this.catalogRepo.resolveWorkspaceId(workspaceId);
     const collection = await this.catalogRepo.findCollectionById(collectionId);
     if (!collection || collection.workspaceId !== targetWsId) {
@@ -128,46 +136,51 @@ export class LibraryReportService {
       deletedAt: null,
     });
 
-    const itemReports: LibraryItemReport[] = await Promise.all(
-      items.map(async (item) => {
-        const [annotations, relations] = await Promise.all([
-          this.extraStore.getAnnotations(item.id),
-          this.extraStore.getRelations(item.id),
-        ]);
-        const view = toLibraryItemView(item);
-        const metadataRows = this.buildMetadataRows(item);
+    const itemIds = items.map((item) => item.id);
+    const [annotationsMap, relationsMap] = await Promise.all([
+      this.catalogRepo.getBulkAnnotations(itemIds),
+      this.catalogRepo.getBulkRelations(itemIds),
+    ]);
 
-        return {
-          item: view,
-          title: item.title,
-          metadataRows,
-          metadataCompleteness: {
-            present: metadataRows
-              .filter((row) => row.present)
-              .map((row) => row.label),
-            missing: metadataRows
-              .filter((row) => !row.present)
-              .map((row) => row.label),
-          },
-          abstractNote: item.abstract?.trim() ?? '',
-          tags: item.labels ?? [],
-          notes: this.normalizeNotes(item.notes),
-          attachments: (item.attachments ?? []).map((attachment) => ({
-            id: attachment.id,
-            filename: attachment.filename,
-            url: attachment.url,
-            mimeType: attachment.mimeType,
-            size: attachment.size,
-            attachmentType: attachment.attachmentType,
-            uploadedAt: attachment.uploadedAt.toISOString(),
-          })),
-          annotations,
-          collections: [{ id: collection.id, name: collection.name }],
-          relatedCount: relations.length,
-          generatedAt: new Date().toISOString(),
-        };
-      }),
-    );
+    const itemReports: ItemReport[] = items.map((item) => {
+      const annotations = annotationsMap.get(item.id) || [];
+      const relations = relationsMap.get(item.id) || [];
+      const view = toItemView(item);
+      const metadataRows = this.buildMetadataRows(item);
+
+      return {
+        item: view,
+        title: item.title,
+        metadataRows,
+        metadataCompleteness: {
+          present: metadataRows
+            .filter((row) => row.present)
+            .map((row) => row.label),
+          missing: metadataRows
+            .filter((row) => !row.present)
+            .map((row) => row.label),
+        },
+        abstractNote: item.abstract?.trim() ?? '',
+        tags: item.labels ?? [],
+        notes: this.normalizeNotes(item.notes),
+        attachments: (item.attachments ?? []).map((attachment: any) => ({
+          id: attachment.id,
+          filename: attachment.filename,
+          url: attachment.url,
+          mimeType: attachment.mimeType,
+          size: attachment.size,
+          attachmentType: attachment.attachmentType,
+          uploadedAt: attachment.uploadedAt
+            ? new Date(attachment.uploadedAt).toISOString()
+            : new Date().toISOString(),
+        })),
+
+        annotations,
+        collections: [{ id: collection.id, name: collection.name }],
+        relatedCount: relations.length,
+        generatedAt: new Date().toISOString(),
+      };
+    });
 
     return {
       collection: {
@@ -181,7 +194,7 @@ export class LibraryReportService {
     };
   }
 
-  renderCollectionHtml(report: LibraryCollectionReport): string {
+  renderCollectionHtml(report: CollectionReport): string {
     const toc = report.items
       .map(
         (item, index) =>
@@ -280,13 +293,14 @@ export class LibraryReportService {
 </html>`;
   }
 
-  renderHtml(report: LibraryItemReport): string {
+  renderHtml(report: ItemReport): string {
     const rows = report.metadataRows
       .filter((row) => row.present)
       .map(
-        (row) => `<tr><th>${this.escapeHtml(row.label)}</th><td>${this.linkifyValue(
-          row.value,
-        )}</td></tr>`,
+        (row) =>
+          `<tr><th>${this.escapeHtml(row.label)}</th><td>${this.linkifyValue(
+            row.value,
+          )}</td></tr>`,
       )
       .join('\n');
 
@@ -362,7 +376,7 @@ export class LibraryReportService {
 </html>`;
   }
 
-  private buildMetadataRows(item: LibraryItemRecord): LibraryReportRow[] {
+  private buildMetadataRows(item: ItemRecord): ReportRow[] {
     const authors = item.authors?.join('; ') ?? '';
     const editors = item.editors?.join('; ') ?? '';
     const extra = this.readReportExtra(item.extra);
@@ -375,7 +389,10 @@ export class LibraryReportService {
       this.row('Publication', item.publicationTitle || item.journal),
       this.row('Publisher', item.publisher),
       this.row('Place', item.place),
-      this.row('Date', item.publicationDate || (item.year ? String(item.year) : '')),
+      this.row(
+        'Date',
+        item.publicationDate || (item.year ? String(item.year) : ''),
+      ),
       this.row('Volume', item.volume),
       this.row('Issue', item.issue),
       this.row('Section', item.section),
@@ -407,12 +424,12 @@ export class LibraryReportService {
     ];
   }
 
-  private row(label: string, value?: string | null): LibraryReportRow {
+  private row(label: string, value?: string | null): ReportRow {
     const normalized = typeof value === 'string' ? value.trim() : '';
     return { label, value: normalized, present: normalized.length > 0 };
   }
 
-  private normalizeNotes(notes: unknown): LibraryReportNote[] {
+  private normalizeNotes(notes: unknown): ReportNote[] {
     if (!Array.isArray(notes)) return [];
     return notes
       .map((note) => {
@@ -421,23 +438,31 @@ export class LibraryReportService {
         }
         if (!note || typeof note !== 'object') return null;
 
-        const record = note as Record<string, unknown>;
-        const content = String(
-          record.content ?? record.text ?? record.note ?? '',
+        const noteObj = note as Record<string, unknown>;
+        const rawContent =
+          noteObj.content ?? noteObj.text ?? noteObj.note ?? '';
+        const content = (
+          typeof rawContent === 'string'
+            ? rawContent
+            : typeof rawContent === 'number' || typeof rawContent === 'boolean'
+              ? String(rawContent)
+              : JSON.stringify(rawContent)
         ).trim();
         if (!content) return null;
 
         return {
           title:
-            typeof record.title === 'string' && record.title.trim()
-              ? record.title.trim()
+            typeof noteObj.title === 'string' && noteObj.title.trim()
+              ? noteObj.title.trim()
               : undefined,
           content,
           createdAt:
-            typeof record.createdAt === 'string' ? record.createdAt : undefined,
+            typeof noteObj.createdAt === 'string'
+              ? noteObj.createdAt
+              : undefined,
         };
       })
-      .filter((note): note is LibraryReportNote => Boolean(note?.content));
+      .filter((note): note is ReportNote => Boolean(note?.content));
   }
 
   private readReportExtra(extra: string | null): string {
@@ -448,7 +473,11 @@ export class LibraryReportService {
         return extra.trim();
       }
 
-      const { annotations: _annotations, relations: _relations, ...rest } = parsed;
+      const {
+        annotations: _annotations,
+        relations: _relations,
+        ...rest
+      } = parsed;
       return Object.keys(rest).length > 0 ? JSON.stringify(rest) : '';
     } catch {
       return extra.trim();
@@ -472,3 +501,5 @@ export class LibraryReportService {
       .replace(/'/g, '&#39;');
   }
 }
+
+export { ReportService as LibraryReportService };

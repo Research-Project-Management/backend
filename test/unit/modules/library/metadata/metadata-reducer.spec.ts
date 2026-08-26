@@ -1,9 +1,9 @@
-import { AcademicMetadataReducer } from '@/modules/library/metadata/metadata-reducer';
-import { IngestionSourceType } from '@/modules/library/ingestion/dto/ingestion.dto';
+import { AcademicMetadataReducer } from '@/modules/library/metadata/utils/metadata.util';
+import { TranslationSourceType as IngestionSourceType } from '@/modules/library/translation/dto/translation.dto';
 
 describe('AcademicMetadataReducer', () => {
   describe('cleanFilenameForTitleSearch', () => {
-    it('cleans Zotero Better BibTeX filenames', () => {
+    it('cleans Reference Manager Better BibTeX filenames', () => {
       const filename =
         'Bao2024Deepfmcrispr_deepfm_crispr_prediction_accuracy.pdf';
       const clean =

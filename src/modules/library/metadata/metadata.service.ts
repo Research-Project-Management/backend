@@ -3,16 +3,19 @@ import {
   AcademicQueryType,
   ProviderCircuitBreaker,
   QueryClassifierUtil,
-} from './metadata.util';
-import { SemanticScholarProvider } from './providers/semantic-scholar.provider';
+} from './utils/metadata.util';
+import { SemanticScholarProvider } from './providers/semantic.provider';
+
 import { ArxivProvider } from './providers/arxiv.provider';
 import { PubmedProvider } from './providers/pubmed.provider';
 import { OpenlibraryProvider } from './providers/openlibrary.provider';
 import { OpenAlexProvider } from './providers/openalex.provider';
 import { UnpaywallProvider } from './providers/unpaywall.provider';
-import { DoiResolver } from '../citation/resolvers/doi.resolver';
-import { BibtexFormatter } from '../citation/formatters/bibtex.formatter';
+import { DoiResolver } from '../cite/resolvers/doi.resolver';
+import { BibtexFormatter } from '../cite/formatters/bibtex.formatter';
+
 import {
+  ItemMetadata,
   UnifiedAcademicMetadata,
   ProvenanceMetadata,
   CREATOR_TYPE_LABELS,
@@ -24,14 +27,16 @@ import {
   SUPPORTED_LIBRARY_ITEM_TYPES,
   SYSTEM_LIBRARY_ITEM_TYPES,
   SupportedLibraryItemType,
-  ZOTERO_SCHEMA_VERSION,
+  REFERENCE_MANAGER_SCHEMA_VERSION,
   extractYearFromDate,
   normalizeCreators,
   normalizeLibraryItemType,
   normalizeTags,
-} from './metadata.types';
+} from './types/metadata.types';
+
 import { NormalizeMetadataDto } from './dto/metadata.dto';
-import { RedisCacheService } from '../../../core/cache/redis-cache.service';
+
+import { RedisCacheService } from '@/core/cache/redis-cache.service';
 import { createHash } from 'crypto';
 
 export interface ResolveResult {
@@ -62,6 +67,9 @@ export class MetadataService {
     cooldownMs: 30_000,
   });
 
+  private readonly CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+  private readonly REDIS_KEY_PREFIX = 'metadata:resolved:';
+
   constructor(
     private readonly s2Provider: SemanticScholarProvider,
     private readonly arxivProvider: ArxivProvider,
@@ -76,15 +84,15 @@ export class MetadataService {
 
   getItemTypes() {
     return {
-      version: ZOTERO_SCHEMA_VERSION,
-      selectable: SELECTABLE_LIBRARY_ITEM_TYPES.map((itemType) =>
-        this.toItemType(itemType),
+      version: REFERENCE_MANAGER_SCHEMA_VERSION,
+      selectable: SELECTABLE_LIBRARY_ITEM_TYPES.map((itemType: string) =>
+        this.getItemType(itemType),
       ),
-      system: SYSTEM_LIBRARY_ITEM_TYPES.map((itemType) =>
-        this.toItemType(itemType),
+      system: SYSTEM_LIBRARY_ITEM_TYPES.map((itemType: string) =>
+        this.getItemType(itemType),
       ),
-      supported: SUPPORTED_LIBRARY_ITEM_TYPES.map((itemType) =>
-        this.toItemType(itemType),
+      supported: SUPPORTED_LIBRARY_ITEM_TYPES.map((itemType: string) =>
+        this.getItemType(itemType),
       ),
     };
   }
@@ -92,7 +100,7 @@ export class MetadataService {
   getItemType(itemType: string) {
     const normalized = normalizeLibraryItemType(itemType);
     return {
-      version: ZOTERO_SCHEMA_VERSION,
+      version: REFERENCE_MANAGER_SCHEMA_VERSION,
       itemType: normalized,
       localized: ITEM_TYPE_LABELS[normalized],
       selectable: SELECTABLE_LIBRARY_ITEM_TYPES.includes(normalized as any),
@@ -103,12 +111,10 @@ export class MetadataService {
 
   getItemTypeFields(itemType: string) {
     const normalized = normalizeLibraryItemType(itemType);
-    const fieldKeys =
-      ITEM_TYPE_FIELD_KEYS[normalized] ??
-      ITEM_TYPE_FIELD_KEYS.document ??
-      ['title', 'abstractNote'];
+    const fieldKeys = ITEM_TYPE_FIELD_KEYS[normalized] ??
+      ITEM_TYPE_FIELD_KEYS.document ?? ['title', 'abstractNote'];
 
-    return fieldKeys.map((key) => ({
+    return fieldKeys.map((key: string) => ({
       key,
       label: FIELD_LABELS[key] ?? key,
       required: key === 'title',
@@ -122,9 +128,10 @@ export class MetadataService {
       { creatorType: 'contributor' },
     ];
 
-    return creators.map((creator) => ({
+    return creators.map((creator: any) => ({
       creatorType: creator.creatorType,
-      localized: CREATOR_TYPE_LABELS[creator.creatorType] ?? creator.creatorType,
+      localized:
+        CREATOR_TYPE_LABELS[creator.creatorType] ?? creator.creatorType,
       primary: Boolean(creator.primary),
     }));
   }
@@ -135,7 +142,7 @@ export class MetadataService {
       itemType,
       itemTypeLabel: ITEM_TYPE_LABELS[itemType],
       creators: normalizeCreators(dto.creators),
-      tags: normalizeTags(dto.tags ?? []),
+      tags: normalizeTags(dto.tags as any),
       year: extractYearFromDate(dto.date),
     };
   }
@@ -194,7 +201,7 @@ export class MetadataService {
         // 2. Enrich with S2 for tldr, citationCount — non-blocking merge
         if (meta) {
           const s2Meta = await this.circuitBreaker
-            .execute('SemanticScholar', () =>
+            .execute<ItemMetadata | null>('SemanticScholar', () =>
               this.s2Provider.fetchById(classified.clean),
             )
             .catch(() => null);
@@ -209,16 +216,18 @@ export class MetadataService {
           }
         } else {
           // 3. Fallback to Semantic Scholar
-          meta = await this.circuitBreaker.execute('SemanticScholar', () =>
-            this.s2Provider.fetchById(classified.clean),
+          meta = await this.circuitBreaker.execute<ItemMetadata | null>(
+            'SemanticScholar',
+            () => this.s2Provider.fetchById(classified.clean),
           );
           if (meta) {
             provider = 'SemanticScholar';
             confidenceScore = 0.92;
           } else {
             // 4. Fallback to CrossRef search
-            const crMeta = await this.circuitBreaker.execute('CrossRef', () =>
-              this.doiResolver.searchByTitle(classified.clean),
+            const crMeta = await this.circuitBreaker.execute<any>(
+              'CrossRef',
+              () => this.doiResolver.searchByTitle(classified.clean),
             );
             if (crMeta) {
               provider = 'CrossRef';
@@ -232,7 +241,7 @@ export class MetadataService {
 
       case 'DOI': {
         // 1. CrossRef is the canonical DOI registry — always query first.
-        const crMeta = await this.circuitBreaker.execute('CrossRef', () =>
+        const crMeta = await this.circuitBreaker.execute<any>('CrossRef', () =>
           this.doiResolver.resolve(classified.clean),
         );
         if (crMeta) {
@@ -241,8 +250,9 @@ export class MetadataService {
           meta = this.convertCrMeta(crMeta);
         } else {
           // 2. OpenAlex re-serves CrossRef data — use as fallback
-          meta = await this.circuitBreaker.execute('OpenAlex', () =>
-            this.openAlexProvider.fetchByDoi(classified.clean),
+          meta = await this.circuitBreaker.execute<ItemMetadata | null>(
+            'OpenAlex',
+            () => this.openAlexProvider.fetchByDoi(classified.clean),
           );
           if (meta) {
             provider = 'OpenAlex';
@@ -253,7 +263,7 @@ export class MetadataService {
         // 3. Enrich with S2 for tldr, citationCount — non-blocking, merge if available
         if (meta) {
           const s2Meta = await this.circuitBreaker
-            .execute('SemanticScholar', () =>
+            .execute<ItemMetadata | null>('SemanticScholar', () =>
               this.s2Provider.fetchById(classified.clean),
             )
             .catch(() => null);
@@ -267,8 +277,9 @@ export class MetadataService {
 
         // 4. Check Open Access PDF via Unpaywall if not yet present
         if (meta && !meta.openAccessPdfUrl && meta.doi) {
-          const oaResult = await this.circuitBreaker.execute('Unpaywall', () =>
-            this.unpaywallProvider.resolveOaPdf(meta!.doi!),
+          const oaResult = await this.circuitBreaker.execute<any>(
+            'Unpaywall',
+            () => this.unpaywallProvider.resolveOaPdf(meta!.doi!),
           );
           if (oaResult?.pdfUrl) {
             meta.openAccessPdfUrl = oaResult.pdfUrl;
@@ -347,7 +358,7 @@ export class MetadataService {
       case 'TITLE':
       default: {
         // 1. Semantic Scholar — best fuzzy title search
-        const s2Meta = await this.circuitBreaker.execute(
+        const s2Meta = await this.circuitBreaker.execute<ItemMetadata | null>(
           'SemanticScholar',
           () => this.s2Provider.searchByTitle(classified.clean),
         );
@@ -369,8 +380,9 @@ export class MetadataService {
 
         if (!meta) {
           // 2. CrossRef bibliographic search
-          const crMeta = await this.circuitBreaker.execute('CrossRef', () =>
-            this.doiResolver.searchByTitle(classified.clean),
+          const crMeta = await this.circuitBreaker.execute<any>(
+            'CrossRef',
+            () => this.doiResolver.searchByTitle(classified.clean),
           );
           if (crMeta) {
             const sim = this.titleSimilarity(classified.clean, crMeta.title);
@@ -388,8 +400,9 @@ export class MetadataService {
 
         if (!meta) {
           // 3. OpenAlex as additional fallback
-          const oaMeta = await this.circuitBreaker.execute('OpenAlex', () =>
-            this.openAlexProvider.searchByTitle(classified.clean),
+          const oaMeta = await this.circuitBreaker.execute<ItemMetadata | null>(
+            'OpenAlex',
+            () => this.openAlexProvider.searchByTitle(classified.clean),
           );
           if (oaMeta) {
             const sim = this.titleSimilarity(
@@ -406,9 +419,11 @@ export class MetadataService {
 
         if (!meta && /^\d{4}\.\d{4,5}/i.test(classified.clean)) {
           // 4. arXiv direct fallback for arXiv-like strings misclassified as TITLE
-          meta = await this.circuitBreaker.execute('arXiv', () =>
-            this.arxivProvider.fetchById(classified.clean),
+          meta = await this.circuitBreaker.execute<ItemMetadata | null>(
+            'arXiv',
+            () => this.arxivProvider.fetchById(classified.clean),
           );
+
           if (meta) {
             provider = 'arXiv';
             confidenceScore = 0.9;
@@ -463,7 +478,7 @@ export class MetadataService {
   }
 
   private toItemType(itemType: SupportedLibraryItemType) {
-    const system = SYSTEM_LIBRARY_ITEM_TYPES.includes(itemType as any);
+    const system = SYSTEM_LIBRARY_ITEM_TYPES.includes(itemType);
     return {
       itemType,
       localized: ITEM_TYPE_LABELS[itemType],

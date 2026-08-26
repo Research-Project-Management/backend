@@ -107,7 +107,7 @@ export class WorkspaceRoleGuard implements CanActivate {
     const memberLevel = WorkspaceRoleHierarchy[memberRole] || 0;
 
     const isAllowed = requiredRoles.some((role) => {
-      const normalized = (role as string).toUpperCase() as WorkspaceRole;
+      const normalized = role.toUpperCase() as WorkspaceRole;
       const requiredLevel = WorkspaceRoleHierarchy[normalized] || 0;
       return memberLevel >= requiredLevel;
     });

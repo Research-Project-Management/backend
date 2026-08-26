@@ -1,18 +1,20 @@
-﻿import { Test, TestingModule } from '@nestjs/testing';
+import { Test, TestingModule } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { AuthnService } from '@/modules/iam/authn/authn.service';
 import { AuthnRepository } from '@/modules/iam/authn/authn.repository';
+import { FederatedIdentityRepository } from '@/modules/iam/user/federated-identity.repository';
+import { AuditService } from '@/modules/iam/audit/audit.service';
 import { RedisCacheService } from '@/core/cache/redis-cache.service';
 import * as bcrypt from 'bcrypt';
 
 jest.mock('bcrypt');
 
-describe('AuthnService', () => {
+describe('AuthService (Compatibility)', () => {
   let service: AuthnService;
-  let authRepo: AuthnRepository;
-  let redis: RedisCacheService;
+  let authRepo: jest.Mocked<AuthnRepository>;
+  let redis: jest.Mocked<RedisCacheService>;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -26,10 +28,30 @@ describe('AuthnService', () => {
             findUserByOAuth: jest.fn(),
             createUser: jest.fn(),
             updateUser: jest.fn(),
+            createSession: jest.fn().mockResolvedValue({ id: 's-1' }),
             createRefreshToken: jest.fn(),
             findRefreshToken: jest.fn(),
             revokeRefreshToken: jest.fn(),
             revokeAllUserTokens: jest.fn(),
+            revokeFamily: jest.fn(),
+            revokeAllUserSessions: jest.fn(),
+            findActiveSessionsByUser: jest.fn().mockResolvedValue([]),
+          },
+        },
+        {
+          provide: FederatedIdentityRepository,
+          useValue: {
+            findByProviderSubject: jest.fn(),
+            findByUserId: jest.fn(),
+            linkIdentity: jest.fn(),
+            unlinkIdentity: jest.fn(),
+          },
+        },
+        {
+          provide: AuditService,
+          useValue: {
+            log: jest.fn().mockResolvedValue(undefined),
+            getRecentAuditLogs: jest.fn().mockResolvedValue([]),
           },
         },
         {
@@ -60,8 +82,8 @@ describe('AuthnService', () => {
     }).compile();
 
     service = module.get<AuthnService>(AuthnService);
-    authRepo = module.get<AuthnRepository>(AuthnRepository);
-    redis = module.get<RedisCacheService>(RedisCacheService);
+    authRepo = module.get(AuthnRepository);
+    redis = module.get(RedisCacheService);
   });
 
   it('should be defined', () => {
@@ -69,10 +91,10 @@ describe('AuthnService', () => {
   });
 
   it('should throw BadRequestException if email already registered', async () => {
-    (authRepo.findUserByEmail as jest.Mock).mockResolvedValue({
+    authRepo.findUserByEmail.mockResolvedValue({
       id: '1',
       email: 'test@example.com',
-    });
+    } as any);
 
     await expect(
       service.registerUser({
@@ -83,16 +105,17 @@ describe('AuthnService', () => {
   });
 
   it('should register a new user successfully', async () => {
-    (authRepo.findUserByEmail as jest.Mock).mockResolvedValue(null);
+    authRepo.findUserByEmail.mockResolvedValue(null);
     (bcrypt.hash as jest.Mock).mockResolvedValue('hashed-password');
-    (authRepo.createUser as jest.Mock).mockResolvedValue({
+    authRepo.createUser.mockResolvedValue({
       id: 'user-1',
       email: 'new@example.com',
       name: 'New User',
       password: 'hashed-password',
       avatar: null,
       isVerified: true,
-    });
+      status: 'active',
+    } as any);
 
     const result = await service.registerUser({
       email: 'new@example.com',
@@ -107,11 +130,11 @@ describe('AuthnService', () => {
   });
 
   it('should throw UnauthorizedException on invalid login password', async () => {
-    (authRepo.findUserByEmail as jest.Mock).mockResolvedValue({
+    authRepo.findUserByEmail.mockResolvedValue({
       id: 'user-1',
       email: 'user@example.com',
       password: 'hashed-password',
-    });
+    } as any);
     (bcrypt.compare as jest.Mock).mockResolvedValue(false);
 
     await expect(
@@ -124,10 +147,9 @@ describe('AuthnService', () => {
     expect(typeof state).toBe('string');
     expect(redis.set).toHaveBeenCalled();
 
-    (redis.get as jest.Mock).mockResolvedValue({ createdAt: Date.now() });
+    redis.get.mockResolvedValue({ createdAt: Date.now() });
     const isValid = await service.verifyOAuthState(state);
     expect(isValid).toBe(true);
     expect(redis.del).toHaveBeenCalled();
   });
 });
-

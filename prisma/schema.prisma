@@ -8,6 +8,48 @@ datasource db {
 
 // ── Enums ───────────────────────────────────────────────────────────────────
 
+enum UserStatus {
+  active
+  suspended
+  pending_verification
+  deactivated
+}
+
+enum AuthProvider {
+  google
+  github
+  orcid
+  saml
+  local
+}
+
+enum InvitationStatus {
+  pending
+  accepted
+  declined
+  revoked
+  expired
+}
+
+enum SecurityEventType {
+  login_success
+  login_failed
+  logout
+  token_refreshed
+  token_revoked
+  token_breach_detected
+  password_reset_requested
+  password_reset_completed
+  oauth_account_linked
+  oauth_account_unlinked
+  member_invited
+  member_joined
+  member_role_updated
+  member_removed
+  mfa_enabled
+  mfa_disabled
+}
+
 enum WorkspaceMemberRole {
   owner
   admin
@@ -41,6 +83,53 @@ enum AttachmentType {
   code
   figure
   other
+}
+
+enum AnnotationType {
+  highlight
+  underline
+  note
+  rect
+  image
+}
+
+enum RelationType {
+  cites
+  cited_by
+  replicates
+  extends
+  is_preprint_of
+  is_published_version_of
+  is_translation_of
+  supplements
+}
+
+enum IngestionStatus {
+  RECEIVED
+  DETECTED
+  EXTRACTED
+  RESOLVED
+  NORMALIZED
+  MERGED
+  NEEDS_REVIEW
+  COMMITTED
+  ENRICHING
+  READY
+  FAILED_RETRYABLE
+  FAILED_FINAL
+}
+
+enum ReadStatus {
+  unread
+  reading
+  completed
+}
+
+enum OutboxStatus {
+  PENDING
+  PROCESSING
+  PUBLISHED
+  FAILED
 }
 
 enum PageStatus {
@@ -131,196 +220,319 @@ enum EntityType {
   task
   paper
   page
+  cycle
+  file
+  sticky
+  comment
+  collection
+  worklog
 }
 
 // ── 1. Identity Context ─────────────────────────────────────────────────────
 
 model User {
-  id           String    @id @default(uuid())
-  email        String?   @unique
+  id           String      @id @default(uuid())
+  email        String?     @unique
   password     String?
-  name         String    @default("User")
+  name         String      @default("User")
   avatar       String?
-  isVerified   Boolean   @default(false)
-  googleId     String?   @unique
-  githubId     String?   @unique
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  isVerified   Boolean     @default(false) @map("is_verified")
+  status       UserStatus  @default(active)
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+  deletedAt    DateTime?   @map("deleted_at")
 
-  // Relations
-  refreshTokens       RefreshToken[]
-  workspaceMembers    WorkspaceMember[]
-  createdWorkspaces   Workspace[]       @relation("WorkspaceCreator")
-  projectMembers      ProjectMember[]
-  createdProjects     Project[]         @relation("ProjectCreator")
-  authoredFiles       File[]            @relation("FileAuthor")
-  sharedFiles         FileShare[]
-  createdLabels       Label[]
-  uploadedCatalogItems CatalogItem[]     @relation("CatalogItemUploader")
-  createdCollections  Collection[]
-  authoredPages       Page[]            @relation("PageAuthor")
-  authoredTasks       Task[]            @relation("TaskAuthor")
-  assignedTasks       Task[]            @relation("TaskAssignee")
-  authoredCycles      Cycle[]
-  stickies            Sticky[]
-  pageComments        PageComment[]
-  taskComments        TaskComment[]
-  aiChats             AiChat[]
-  activityEvents      ActivityEvent[]
+  // Backward compatibility OAuth fields
+  googleId     String?     @unique @map("google_id")
+  githubId     String?     @unique @map("github_id")
 
+  // IAM Relations
+  federatedIdentities  FederatedIdentity[]
+  refreshTokens        RefreshToken[]
+  workspaceMembers     WorkspaceMember[]
+  projectMembers       ProjectMember[]
+  sentInvitations      WorkspaceInvitation[] @relation("InvitationSender")
+  securityAuditLogs    SecurityAuditLog[]    @relation("AuditActor")
+
+  // Domain Relations
+  createdWorkspaces    Workspace[]           @relation("WorkspaceCreator")
+  createdProjects      Project[]             @relation("ProjectCreator")
+  ledProjects          Project[]             @relation("ProjectLead")
+  authoredFiles        File[]                @relation("FileAuthor")
+  sharedFiles          FileShare[]
+  createdLabels        Label[]
+  uploadedCatalogItems CatalogItem[]         @relation("CatalogItemUploader")
+  createdCollections   Collection[]
+  authoredPages        Page[]                @relation("PageAuthor")
+  authoredTasks        Task[]                @relation("TaskAuthor")
+  assignedTasks        Task[]                @relation("TaskAssignee")
+  authoredCycles       Cycle[]
+  stickies             Sticky[]
+  pageComments         PageComment[]
+  taskComments         TaskComment[]
+  aiChats              AiChat[]
+  activityEvents       ActivityEvent[]
+  authoredNotes        Note[]
+  authoredAnnotations  Annotation[]
+  userItemStates       UserItemState[]
+  savedSearches        SavedSearch[]
+  worklogs             Worklog[]             @relation("UserWorklogs")
+
+  @@index([email])
+  @@index([status, deletedAt])
   @@index([googleId])
   @@index([githubId])
   @@map("users")
 }
 
+model FederatedIdentity {
+  id                String       @id @default(uuid())
+  userId            String       @map("user_id")
+  user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider          AuthProvider
+  providerSubjectId String       @map("provider_subject_id")
+  email             String?
+  profileData       Json?        @map("profile_data")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
+
+  @@unique([provider, providerSubjectId])
+  @@unique([userId, provider])
+  @@index([userId])
+  @@index([email])
+  @@map("federated_identities")
+}
+
 model RefreshToken {
-  id          String    @id @default(uuid())
-  userId      String
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  token       String    @unique
-  expiresAt   DateTime
-  revokedAt   DateTime?
-  userAgent   String?
-  ipAddress   String?
-  createdAt   DateTime  @default(now())
+  id          String         @id @default(uuid())
+  userId      String         @map("user_id")
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token       String         @unique
+  tokenHash   String         @default("") @unique @map("token_hash")
+  familyId    String         @default(uuid()) @map("family_id")
+  parentId    String?        @map("parent_id")
+  parent      RefreshToken?  @relation("TokenLineage", fields: [parentId], references: [id], onDelete: SetNull)
+  children    RefreshToken[] @relation("TokenLineage")
+  isRevoked   Boolean        @default(false) @map("is_revoked")
+  revokedAt   DateTime?      @map("revoked_at")
+  expiresAt   DateTime       @map("expires_at")
+  userAgent   String?        @map("user_agent")
+  ipAddress   String?        @map("ip_address")
+  deviceType  String?        @map("device_type")
+  lastUsedAt  DateTime       @default(now()) @map("last_used_at")
+  createdAt   DateTime       @default(now()) @map("created_at")
 
   @@index([userId])
+  @@index([userId, isRevoked, expiresAt])
+  @@index([userId, revokedAt, expiresAt])
+  @@index([familyId])
+  @@index([tokenHash])
   @@map("refresh_tokens")
+}
+
+model WorkspaceInvitation {
+  id          String              @id @default(uuid())
+  workspaceId String              @map("workspace_id")
+  workspace   Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  email       String
+  role        WorkspaceMemberRole @default(member)
+  token       String              @unique
+  status      InvitationStatus    @default(pending)
+  invitedById String              @map("invited_by_id")
+  invitedBy   User                @relation("InvitationSender", fields: [invitedById], references: [id], onDelete: Cascade)
+  expiresAt   DateTime            @map("expires_at")
+  acceptedAt  DateTime?           @map("accepted_at")
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+
+  @@index([workspaceId, status])
+  @@index([email, status])
+  @@index([token])
+  @@map("workspace_invitations")
+}
+
+model SecurityAuditLog {
+  id         String            @id @default(uuid())
+  actorId    String?           @map("actor_id")
+  actor      User?             @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  eventType  SecurityEventType @map("event_type")
+  targetType String?           @map("target_type")
+  targetId   String?           @map("target_id")
+  ipAddress  String?           @map("ip_address")
+  userAgent  String?           @map("user_agent")
+  metadata   Json?             @default("{}")
+  createdAt  DateTime          @default(now()) @map("created_at")
+
+  @@index([actorId, createdAt])
+  @@index([eventType, createdAt])
+  @@index([targetType, targetId])
+  @@map("security_audit_logs")
 }
 
 // ── 2. Organization Context ─────────────────────────────────────────────────
 
 model Workspace {
-  id          String    @id @default(uuid())
-  name        String
-  url         String    @unique
-  avatar      String?   @default("")
-  companySize String?   @default("")
-  inviteCode  String?   @unique
-  settings    Json?     @default("{}")
-  createdById String?
-  createdBy   User?     @relation("WorkspaceCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id           String      @id @default(uuid())
+  name         String
+  url          String      @unique
+  slug         String?     @unique @map("slug")
+  avatar       String?     @default("")
+  companySize  String?     @default("") @map("company_size")
+  plan         String      @default("free")
+  inviteCode   String?     @unique @map("invite_code")
+  settings     Json?       @default("{}")
+  createdById  String?     @map("created_by_id")
+  createdBy    User?       @relation("WorkspaceCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+  deletedAt    DateTime?   @map("deleted_at")
 
   // Relations
-  members     WorkspaceMember[]
-  projects    Project[]
-  files       File[]
-  labels      Label[]
+  members      WorkspaceMember[]
+  invitations  WorkspaceInvitation[]
+  projects     Project[]
+  files        File[]
+  labels       Label[]
   catalogItems CatalogItem[]
-  collections Collection[]
-  pages       Page[]
-  stickies    Sticky[]
+  catalogTags  CatalogTag[]
+  collections  Collection[]
+  pages        Page[]
+  stickies     Sticky[]
   activityEvents ActivityEvent[]
+  notes        Note[]
+  itemRelations ItemRelation[]
+  ingestionRuns IngestionRun[]
+  libraryChanges LibraryChange[]
+  tombstones   Tombstone[]
+  syncSequence SyncSequence?
+  savedSearches SavedSearch[]
+  duplicateClusters DuplicateCluster[]
 
   @@index([createdById])
+  @@index([url])
+  @@index([slug])
+  @@index([inviteCode])
+  @@index([deletedAt])
   @@map("workspaces")
 }
 
 model WorkspaceMember {
-  id          String      @id @default(uuid())
-  workspaceId String
-  workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  userId      String
-  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role        WorkspaceMemberRole  @default(member)
-  joinedAt    DateTime    @default(now())
+  id          String              @id @default(uuid())
+  workspaceId String              @map("workspace_id")
+  workspace   Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId      String              @map("user_id")
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        WorkspaceMemberRole @default(member)
+  joinedAt    DateTime            @default(now()) @map("joined_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
 
   @@unique([workspaceId, userId])
   @@index([userId])
+  @@index([workspaceId, role])
   @@map("workspace_members")
 }
 
 model Project {
   id           String          @id @default(uuid())
   name         String
+  identifier   String?         @map("identifier")
   avatar       String?         @default("")
+  coverImage   String?         @default("") @map("cover_image")
   description  String?         @default("")
-  isActive     Boolean         @default(true)
+  isActive     Boolean         @default(true) @map("is_active")
   modules      String[]        @default(["overview", "tasks", "cycles", "pages", "storage", "stickies", "collection"])
-  taskColumns  Json?           @default("[{\"id\":\"backlog\",\"title\":\"Backlog\",\"isDefault\":true,\"accentColor\":\"#6366F1\"},{\"id\":\"todo\",\"title\":\"To Do\",\"isDefault\":true,\"accentColor\":\"#0EA5E9\"},{\"id\":\"doing\",\"title\":\"Doing\",\"isDefault\":true,\"accentColor\":\"#F59E0B\"},{\"id\":\"review\",\"title\":\"Review\",\"isDefault\":true,\"accentColor\":\"#eab308\"},{\"id\":\"done\",\"title\":\"Done\",\"isDefault\":true,\"accentColor\":\"#22c55e\"}]")
-  taskSequence Int             @default(0)
+  taskColumns  Json?           @default("[{\"id\":\"backlog\",\"title\":\"Backlog\",\"isDefault\":true,\"accentColor\":\"#6366F1\"},{\"id\":\"todo\",\"title\":\"To Do\",\"isDefault\":true,\"accentColor\":\"#0EA5E9\"},{\"id\":\"doing\",\"title\":\"Doing\",\"isDefault\":true,\"accentColor\":\"#F59E0B\"},{\"id\":\"review\",\"title\":\"Review\",\"isDefault\":true,\"accentColor\":\"#eab308\"},{\"id\":\"done\",\"title\":\"Done\",\"isDefault\":true,\"accentColor\":\"#22c55e\"}]") @map("task_columns")
+  taskSequence Int             @default(0) @map("task_sequence")
   settings     Json?           @default("{}")
-  workspaceId  String
+  workspaceId  String          @map("workspace_id")
   workspace    Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdById  String
+  createdById  String          @map("created_by_id")
   createdBy    User            @relation("ProjectCreator", fields: [createdById], references: [id], onDelete: Cascade)
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
+  leadId       String?         @map("lead_id")
+  lead         User?           @relation("ProjectLead", fields: [leadId], references: [id], onDelete: SetNull)
+  createdAt    DateTime        @default(now()) @map("created_at")
+  updatedAt    DateTime        @updatedAt @map("updated_at")
+  deletedAt    DateTime?       @map("deleted_at")
 
   // Relations
-  members      ProjectMember[]
-  pages        Page[]
-  tasks        Task[]
-  cycles       Cycle[]
-  stickies     Sticky[]
+  members        ProjectMember[]
+  pages          Page[]
+  tasks          Task[]
+  cycles         Cycle[]
+  stickies       Sticky[]
   activityEvents ActivityEvent[]
+  worklogs       Worklog[]
 
-  @@index([workspaceId])
+  @@unique([workspaceId, identifier])
+  @@index([workspaceId, isActive, deletedAt])
   @@index([createdById])
-  @@index([isActive])
+  @@index([leadId])
+  @@index([deletedAt])
   @@map("projects")
 }
 
 model ProjectMember {
-  id        String      @id @default(uuid())
-  projectId String
-  project   Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  userId    String
-  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role      ProjectMemberRole  @default(viewer)
-  joinedAt  DateTime    @default(now())
+  id        String            @id @default(uuid())
+  projectId String            @map("project_id")
+  project   Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId    String            @map("user_id")
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      ProjectMemberRole @default(viewer)
+  joinedAt  DateTime          @default(now()) @map("joined_at")
+  updatedAt DateTime          @updatedAt @map("updated_at")
 
   @@unique([projectId, userId])
   @@index([userId])
+  @@index([projectId, role])
   @@map("project_members")
 }
 
 // ── 3. Shared & Storage Context ─────────────────────────────────────────────
 
 model File {
-  id             String       @id @default(uuid())
-  filename       String
-  isFolder       Boolean      @default(false)
-  parentId       String?
-  parent         File?        @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
-  children       File[]       @relation("FolderHierarchy")
-  authorId       String
-  author         User         @relation("FileAuthor", fields: [authorId], references: [id], onDelete: Cascade)
-  workspaceId    String?
-  workspace      Workspace?   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  linkedToType   String?
-  linkedToId     String?
-  starred        Boolean      @default(false)
-  trashedAt      DateTime?
-  metaData       Json?
-  size           Int?         @default(0)
-  mimeType       String?      @default("application/octet-stream")
-  url            String?
-  thumbnail      String?
-  uploadedAt     DateTime     @default(now())
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  id           String      @id @default(uuid())
+  filename     String
+  isFolder     Boolean     @default(false) @map("is_folder")
+  parentId     String?     @map("parent_id")
+  parent       File?       @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children     File[]      @relation("FolderHierarchy")
+  authorId     String      @map("author_id")
+  author       User        @relation("FileAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  workspaceId  String?     @map("workspace_id")
+  workspace    Workspace?  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  linkedToType String?     @map("linked_to_type")
+  linkedToId   String?     @map("linked_to_id")
+  starred      Boolean     @default(false)
+  trashedAt    DateTime?   @map("trashed_at")
+  metaData     Json?       @map("meta_data")
+  size         Int?        @default(0)
+  mimeType     String?     @default("application/octet-stream") @map("mime_type")
+  url          String?
+  thumbnail    String?
+  uploadedAt   DateTime    @default(now()) @map("uploaded_at")
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
 
   // Relations
-  sharedWith     FileShare[]
-  attachments    CatalogAttachment[]
+  sharedWith   FileShare[]
+  attachments  CatalogAttachment[]
 
   @@index([workspaceId, parentId, trashedAt])
+  @@index([workspaceId, isFolder, trashedAt])
   @@index([linkedToId, linkedToType])
-  @@index([authorId])
+  @@index([authorId, trashedAt])
+  @@index([trashedAt])
   @@map("files")
 }
 
 model FileShare {
-  id          String          @id @default(uuid())
-  fileId      String
-  file        File            @relation(fields: [fileId], references: [id], onDelete: Cascade)
-  userId      String
-  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  permission  FilePermission  @default(view)
-  createdAt   DateTime        @default(now())
+  id         String         @id @default(uuid())
+  fileId     String         @map("file_id")
+  file       File           @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  userId     String         @map("user_id")
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission FilePermission @default(view)
+  createdAt  DateTime       @default(now()) @map("created_at")
 
   @@unique([fileId, userId])
   @@index([userId])
@@ -328,16 +540,16 @@ model FileShare {
 }
 
 model Label {
-  id          String      @id @default(uuid())
+  id          String    @id @default(uuid())
   name        String
-  color       String      @default("#3b82f6")
-  type        LabelType   @default(sticky)
-  workspaceId String
-  workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdById String
-  createdBy   User        @relation(fields: [createdById], references: [id], onDelete: Cascade)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  color       String    @default("#3b82f6")
+  type        LabelType @default(sticky)
+  workspaceId String    @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdById String    @map("created_by_id")
+  createdBy   User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
 
   @@index([workspaceId, name, type])
   @@map("labels")
@@ -353,22 +565,22 @@ model CatalogItem {
   doi              String?           @default("")
   abstract         String?           @default("")
   keywords         String[]          @default([])
-  itemType         String?           @default("journalArticle")
+  itemType         String?           @default("journalArticle") @map("item_type")
   editors          String[]          @default([])
   journal          String?           @default("")
-  publicationTitle String?           @default("")
-  publicationDate  String?           @default("")
+  publicationTitle String?           @default("") @map("publication_title")
+  publicationDate  String?           @default("") @map("publication_date")
   publisher        String?           @default("")
   place            String?           @default("")
   volume           String?           @default("")
   issue            String?           @default("")
   section          String?           @default("")
-  partNumber       String?           @default("")
-  partTitle        String?           @default("")
+  partNumber       String?           @default("") @map("part_number")
+  partTitle        String?           @default("") @map("part_title")
   pages            String?           @default("")
   series           String?           @default("")
-  seriesTitle      String?           @default("")
-  seriesText       String?           @default("")
+  seriesTitle      String?           @default("") @map("series_title")
+  seriesText       String?           @default("") @map("series_text")
   issn             String?           @default("")
   isbn             String?           @default("")
   pmid             String?           @default("")
@@ -376,42 +588,55 @@ model CatalogItem {
   url              String?           @default("")
   type             String?           @default("")
   language         String?           @default("")
-  journalAbbr      String?           @default("")
-  shortTitle       String?           @default("")
+  journalAbbr      String?           @default("") @map("journal_abbr")
+  shortTitle       String?           @default("") @map("short_title")
   rights           String?           @default("")
   license          String?           @default("")
-  citationKey      String?           @default("")
-  libraryCatalog   String?           @default("")
+  citationKey      String?           @default("") @map("citation_key")
+  libraryCatalog   String?           @default("") @map("library_catalog")
   archive          String?           @default("")
-  archiveLocation  String?           @default("")
-  callNumber       String?           @default("")
-  accessedAt       DateTime?
+  archiveLocation  String?           @default("") @map("archive_location")
+  callNumber       String?           @default("") @map("call_number")
+  accessedAt       DateTime?         @map("accessed_at")
   extra            String?           @default("")
   notes            Json?             @default("[]")
-  primaryFile      Json?             // { fileId, filename, url, size, mimeType }
-  fileUrl          String
+  primaryFile      Json?             @map("primary_file")
+  fileUrl          String            @map("file_url")
   filename         String
-  mimeType         String?           @default("application/pdf")
+  mimeType         String?           @default("application/pdf") @map("mime_type")
   size             Int?              @default(0)
   labels           String[]          @default([])
-  ragDocId         String?
-  ragIndexedAt     DateTime?
-  ragLastAttemptAt DateTime?
-  ragAttempts      Int               @default(0)
-  ragError         String?           @default("")
-  ragStatus        RagStatus?
-  workspaceId      String
+  ragDocId         String?           @map("rag_doc_id")
+  ragIndexedAt     DateTime?         @map("rag_indexed_at")
+  ragLastAttemptAt DateTime?         @map("rag_last_attempt_at")
+  ragAttempts      Int               @default(0) @map("rag_attempts")
+  ragError         String?           @default("") @map("rag_error")
+  ragStatus        RagStatus?        @map("rag_status")
+  workspaceId      String            @map("workspace_id")
   workspace        Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  uploadedById     String
+  uploadedById     String            @map("uploaded_by_id")
   uploadedBy       User              @relation("CatalogItemUploader", fields: [uploadedById], references: [id], onDelete: Cascade)
-  collectionId     String?
+  collectionId     String?           @map("collection_id")
   collection       Collection?       @relation(fields: [collectionId], references: [id], onDelete: SetNull)
-  deletedAt        DateTime?
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  deletedAt        DateTime?         @map("deleted_at")
+  version          Int               @default(1)
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
 
   // Relations
   attachments      CatalogAttachment[]
+  contributors     CatalogContributor[]
+  identifiers      CatalogIdentifier[]
+  collectionItems  CollectionItem[]
+  itemTags         CatalogItemTag[]
+  sourceRecords    MetadataSourceRecord[]
+  assertions       MetadataAssertion[]
+  revisions        CatalogItemRevision[]
+  notesList        Note[]
+  outgoingRel      ItemRelation[]    @relation("SourceCatalogItem")
+  incomingRel      ItemRelation[]    @relation("TargetCatalogItem")
+  userStates       UserItemState[]
+  ingestionRuns    IngestionRun[]
 
   @@index([workspaceId, collectionId, deletedAt, createdAt])
   @@index([workspaceId, deletedAt])
@@ -421,22 +646,407 @@ model CatalogItem {
   @@map("papers")
 }
 
+model CatalogContributor {
+  id            String      @id @default(uuid())
+  catalogItemId String      @map("catalog_item_id")
+  catalogItem   CatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+  creatorType   String      @default("author") @map("creator_type")
+  firstName     String?     @default("") @map("first_name")
+  lastName      String?     @default("") @map("last_name")
+  fullName      String      @map("full_name")
+  orderIndex    Int         @default(0) @map("order_index")
+  createdAt     DateTime    @default(now()) @map("created_at")
+
+  @@index([catalogItemId, orderIndex])
+  @@index([fullName])
+  @@map("catalog_contributors")
+}
+
+model CatalogIdentifier {
+  id            String      @id @default(uuid())
+  catalogItemId String      @map("catalog_item_id")
+  catalogItem   CatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+  type          String
+  value         String
+  canonicalUri  String?     @map("canonical_uri")
+  createdAt     DateTime    @default(now()) @map("created_at")
+
+  @@index([catalogItemId, type])
+  @@index([type, value])
+  @@index([canonicalUri])
+  @@map("catalog_identifiers")
+}
+
+model CollectionItem {
+  id            String      @id @default(uuid())
+  collectionId  String      @map("collection_id")
+  collection    Collection  @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  catalogItemId String      @map("catalog_item_id")
+  catalogItem   CatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+  sortOrder     Int         @default(0) @map("sort_order")
+  addedAt       DateTime    @default(now()) @map("added_at")
+
+  @@unique([collectionId, catalogItemId])
+  @@index([collectionId])
+  @@index([catalogItemId])
+  @@map("collection_items")
+}
+
+model CatalogTag {
+  id          String           @id @default(uuid())
+  name        String
+  color       String           @default("#3b82f6")
+  type        String           @default("manual")
+  workspaceId String           @map("workspace_id")
+  workspace   Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt   DateTime         @default(now()) @map("created_at")
+  itemTags    CatalogItemTag[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId, name])
+  @@map("catalog_tags")
+}
+
+model CatalogItemTag {
+  id            String      @id @default(uuid())
+  tagId         String      @map("tag_id")
+  tag           CatalogTag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  catalogItemId String      @map("catalog_item_id")
+  catalogItem   CatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+  addedAt       DateTime    @default(now()) @map("added_at")
+
+  @@unique([tagId, catalogItemId])
+  @@index([tagId])
+  @@index([catalogItemId])
+  @@map("catalog_item_tags")
+}
+
+model MetadataSourceRecord {
+  id              String      @id @default(uuid())
+  catalogItemId   String      @map("catalog_item_id")
+  catalogItem     CatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+  sourceProvider  String      @map("source_provider")
+  rawPayload      Json?       @map("raw_payload")
+  snapshotHash    String?     @map("snapshot_hash")
+  confidenceScore Float       @default(1.0) @map("confidence_score")
+  fetchedAt       DateTime    @default(now()) @map("fetched_at")
+
+  @@index([catalogItemId, sourceProvider])
+  @@index([snapshotHash])
+  @@map("metadata_source_records")
+}
+
+model MetadataAssertion {
+  id              String      @id @default(uuid())
+  catalogItemId   String      @map("catalog_item_id")
+  catalogItem     CatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+  field           String
+  value           String
+  sourceProvider  String      @map("source_provider")
+  confidenceScore Float       @default(1.0) @map("confidence_score")
+  isUserOverride  Boolean     @default(false) @map("is_user_override")
+  createdAt       DateTime    @default(now()) @map("created_at")
+
+  @@index([catalogItemId, field])
+  @@index([isUserOverride])
+  @@map("metadata_assertions")
+}
+
+model CatalogItemRevision {
+  id              String      @id @default(uuid())
+  catalogItemId   String      @map("catalog_item_id")
+  catalogItem     CatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+  version         Int
+  changesSnapshot Json        @map("changes_snapshot")
+  changedById     String?     @map("changed_by_id")
+  createdAt       DateTime    @default(now()) @map("created_at")
+
+  @@index([catalogItemId, version])
+  @@map("catalog_item_revisions")
+}
+
 model CatalogAttachment {
-  id             String          @id @default(uuid())
-  catalogItemId  String          @map("paperId")
-  catalogItem    CatalogItem     @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
-  fileId         String?
-  file           File?           @relation(fields: [fileId], references: [id], onDelete: SetNull)
+  id             String               @id @default(uuid())
+  catalogItemId  String               @map("paperId")
+  catalogItem    CatalogItem          @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+  fileId         String?              @map("file_id")
+  file           File?                @relation(fields: [fileId], references: [id], onDelete: SetNull)
   filename       String
   url            String
-  size           Int             @default(0)
-  mimeType       String          @default("application/octet-stream")
-  attachmentType AttachmentType  @default(supplementary)
-  uploadedAt     DateTime        @default(now())
+  fileHash       String?              @map("file_hash")
+  size           Int                  @default(0)
+  mimeType       String               @default("application/octet-stream") @map("mime_type")
+  attachmentType AttachmentType       @default(supplementary) @map("attachment_type")
+  uploadedAt     DateTime             @default(now()) @map("uploaded_at")
+
+  // Relations
+  revisions      AttachmentRevision[]
+  annotations    Annotation[]
+  fullTextIndexes FullTextIndex[]
 
   @@index([catalogItemId])
   @@index([fileId])
   @@map("paper_attachments")
+}
+
+model AttachmentRevision {
+  id             String            @id @default(uuid())
+  attachmentId   String            @map("attachment_id")
+  attachment     CatalogAttachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+  revisionNumber Int               @default(1) @map("revision_number")
+  fileHash       String            @map("file_hash")
+  sizeBytes      Int               @default(0) @map("size_bytes")
+  url            String
+  comment        String?           @default("")
+  createdAt      DateTime          @default(now()) @map("created_at")
+
+  @@unique([attachmentId, revisionNumber])
+  @@index([attachmentId, revisionNumber])
+  @@map("attachment_revisions")
+}
+
+model Annotation {
+  id           String            @id @default(uuid())
+  attachmentId String            @map("attachment_id")
+  attachment   CatalogAttachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+  type         AnnotationType    @default(highlight)
+  pageIndex    Int               @map("page_index")
+  color        String            @default("#ffeb3b")
+  quoteText    String?           @map("quote_text")
+  comment      String?           @default("")
+  rectCoords   Json?             @map("rect_coords") // [x1, y1, x2, y2]
+  authorId     String            @map("author_id")
+  author       User              @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  version      Int               @default(1)
+  deletedAt    DateTime?         @map("deleted_at")
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
+
+  @@index([attachmentId, pageIndex])
+  @@index([attachmentId, deletedAt])
+  @@map("annotations")
+}
+
+model Note {
+  id          String       @id @default(uuid())
+  workspaceId String       @map("workspace_id")
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  itemId      String?      @map("item_id") // Nullable: standalone note if null
+  item        CatalogItem? @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  title       String       @default("Untitled Note")
+  contentJson Json?        @map("content_json") // TipTap / ProseMirror Document JSON
+  contentMd   String       @default("") @map("content_md")
+  tags        String[]     @default([])
+  version     Int          @default(1)
+  createdById String       @map("created_by_id")
+  createdBy   User         @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  deletedAt   DateTime?    @map("deleted_at")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  @@index([workspaceId, itemId, createdAt])
+  @@index([workspaceId, deletedAt])
+  @@map("notes")
+}
+
+model ItemRelation {
+  id           String       @id @default(uuid())
+  workspaceId  String       @map("workspace_id")
+  workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sourceItemId String       @map("source_item_id")
+  sourceItem   CatalogItem  @relation("SourceCatalogItem", fields: [sourceItemId], references: [id], onDelete: Cascade)
+  targetItemId String       @map("target_item_id")
+  targetItem   CatalogItem  @relation("TargetCatalogItem", fields: [targetItemId], references: [id], onDelete: Cascade)
+  relationType RelationType @default(cites) @map("relation_type")
+  description  String?      @default("")
+  createdAt    DateTime     @default(now()) @map("created_at")
+
+  @@unique([sourceItemId, targetItemId, relationType])
+  @@index([workspaceId, sourceItemId])
+  @@index([targetItemId])
+  @@map("item_relations")
+}
+
+model IngestionRun {
+  id              String           @id @default(uuid())
+  workspaceId     String           @map("workspace_id")
+  workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  itemId          String?          @map("item_id")
+  item            CatalogItem?     @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  status          IngestionStatus  @default(RECEIVED)
+  idempotencyKey  String?          @unique @map("idempotency_key")
+  inputParams     Json             @map("input_params") // { rawInput, inputType, options }
+  inputHash       String           @map("input_hash")
+  pipelineVersion String           @default("1.0.0") @map("pipeline_version")
+  attempts        Int              @default(0)
+  maxRetries      Int              @default(3) @map("max_retries")
+  lastError       String?          @map("last_error")
+  executionLog    Json?            @map("execution_log") // Structured log trail
+  startedAt       DateTime         @default(now()) @map("started_at")
+  completedAt     DateTime?        @map("completed_at")
+
+  // Relations
+  stages          IngestionStage[]
+
+  @@index([workspaceId, status])
+  @@index([inputHash])
+  @@map("ingestion_runs")
+}
+
+model IngestionStage {
+  id             String          @id @default(uuid())
+  ingestionRunId String          @map("ingestion_run_id")
+  ingestionRun   IngestionRun    @relation(fields: [ingestionRunId], references: [id], onDelete: Cascade)
+  stageName      String          @map("stage_name") // RESOLVE_PID, FETCH_EXTERNAL, RECONCILE...
+  durationMs     Int             @default(0) @map("duration_ms")
+  success        Boolean         @default(true)
+  errorMessage   String?         @map("error_message")
+  outputSnapshot Json?           @map("output_snapshot")
+  executedAt     DateTime        @default(now()) @map("executed_at")
+
+  @@index([ingestionRunId, stageName])
+  @@map("ingestion_stages")
+}
+
+model SyncSequence {
+  id              String    @id @default(uuid())
+  workspaceId     String    @unique @map("workspace_id")
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  currentSequence BigInt    @default(0) @map("current_sequence")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@map("sync_sequences")
+}
+
+model LibraryChange {
+  seq         BigInt    @id @default(autoincrement())
+  workspaceId String    @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  entityType  String    @map("entity_type") // item, collection, tag, attachment, note, annotation
+  entityId    String    @map("entity_id")
+  action      String    // create, update, delete
+  version     Int       @default(1)
+  data        Json?
+  timestamp   DateTime  @default(now())
+
+  @@unique([workspaceId, seq])
+  @@index([workspaceId, seq])
+  @@index([workspaceId, entityType, entityId])
+  @@map("library_changes")
+}
+
+model Tombstone {
+  id          String    @id @default(uuid())
+  workspaceId String    @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  entityType  String    @map("entity_type")
+  entityId    String    @map("entity_id")
+  seq         BigInt?   @map("seq")
+  deletedAt   DateTime  @default(now()) @map("deleted_at")
+  deletedById String?   @map("deleted_by_id")
+
+  @@unique([workspaceId, entityType, entityId])
+  @@index([workspaceId, deletedAt])
+  @@index([workspaceId, seq])
+  @@map("tombstones")
+}
+
+model UserItemState {
+  id           String      @id @default(uuid())
+  userId       String      @map("user_id")
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  itemId       String      @map("item_id")
+  item         CatalogItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  readStatus   ReadStatus  @default(unread) @map("read_status")
+  isFavorite   Boolean     @default(false) @map("is_favorite")
+  rating       Int?        @default(0) // 1..5 stars
+  lastReadAt   DateTime?   @map("last_read_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+
+  @@unique([userId, itemId])
+  @@index([userId, readStatus])
+  @@index([itemId])
+  @@map("user_item_states")
+}
+
+model OutboxEvent {
+  id          String       @id @default(uuid())
+  workspaceId String?      @map("workspace_id")
+  aggregateId String       @map("aggregate_id")
+  eventType   String       @map("event_type") // library.item.created, metadata.reconciled...
+  payload     Json
+  status      OutboxStatus @default(PENDING)
+  retryCount  Int          @default(0) @map("retry_count")
+  error       String?
+  scheduledAt DateTime?    @default(now()) @map("scheduled_at")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  processedAt DateTime?    @map("processed_at")
+
+  @@index([status, createdAt])
+  @@index([workspaceId, status])
+  @@map("outbox_events")
+}
+
+model IdempotencyRecord {
+  id             String    @id @default(uuid())
+  idempotencyKey String    @map("idempotency_key")
+  workspaceId    String    @map("workspace_id")
+  requestHash    String    @map("request_hash")
+  status         String    @default("in_progress") // in_progress, succeeded, failed
+  statusCode     Int?      @map("status_code")
+  responseBody   Json?     @map("response_body")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  expiresAt      DateTime  @map("expires_at")
+
+  @@unique([workspaceId, idempotencyKey])
+  @@index([idempotencyKey, workspaceId])
+  @@index([expiresAt])
+  @@map("idempotency_records")
+}
+
+model SavedSearch {
+  id          String    @id @default(uuid())
+  workspaceId String    @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId      String    @map("user_id")
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  query       Json      // Filter criteria (q, itemType, tags, collections, year range, etc.)
+  color       String?   @default("#3370ff")
+  icon        String?   @default("search")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@index([workspaceId, userId])
+  @@map("saved_searches")
+}
+
+model FullTextIndex {
+  id             String            @id @default(uuid())
+  attachmentId   String            @map("attachment_id")
+  attachment     CatalogAttachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+  pageIndex      Int               @map("page_index")
+  textContent    String            @map("text_content") @db.Text
+  charOffset     Int               @default(0) @map("char_offset")
+  indexedAt      DateTime          @default(now()) @map("indexed_at")
+
+  @@index([attachmentId, pageIndex])
+  @@map("full_text_indexes")
+}
+
+model DuplicateCluster {
+  id          String    @id @default(uuid())
+  workspaceId String    @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  itemIds     String[]  @map("item_ids")
+  confidence  Float     @default(1.0)
+  matchReason String    @map("match_reason") // DOI_EXACT, TITLE_FUZZY, CITATION_KEY
+  status      String    @default("pending") // pending, resolved, dismissed
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@index([workspaceId, status])
+  @@map("duplicate_clusters")
 }
 
 model Collection {
@@ -445,18 +1055,21 @@ model Collection {
   description String?     @default("")
   color       String?     @default("#3370ff")
   icon        String?     @default("")
-  parentId    String?
+  parentId    String?     @map("parent_id")
   parent      Collection? @relation("CollectionHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
   children    Collection[]@relation("CollectionHierarchy")
-  workspaceId String
+  workspaceId String      @map("workspace_id")
   workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdById String
+  createdById String      @map("created_by_id")
   createdBy   User        @relation(fields: [createdById], references: [id], onDelete: Cascade)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  deletedAt   DateTime?   @map("deleted_at")
+  version     Int         @default(1)
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
 
   // Relations
-  catalogItems CatalogItem[]
+  catalogItems    CatalogItem[]
+  collectionItems CollectionItem[]
 
   @@index([workspaceId, parentId, createdAt])
   @@map("collections")
@@ -467,52 +1080,60 @@ model Collection {
 model Page {
   id             String          @id @default(uuid())
   title          String
+  slug           String?         @map("slug")
+  icon           String?         @map("icon")
+  coverImage     String?         @map("cover_image")
   content        Json?           // Editor JSON block content or LaTeX source
   status         PageStatus      @default(draft)
+  rank           Float           @default(0)
+  isLocked       Boolean         @default(false) @map("is_locked")
+  isPublished    Boolean         @default(false) @map("is_published")
   views          Int             @default(0)
-  lastAccessedAt DateTime        @default(now())
-  workspaceId    String
+  lastAccessedAt DateTime        @default(now()) @map("last_accessed_at")
+  workspaceId    String          @map("workspace_id")
   workspace      Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  projectId      String
+  projectId      String          @map("project_id")
   project        Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  authorId       String
+  authorId       String          @map("author_id")
   author         User            @relation("PageAuthor", fields: [authorId], references: [id], onDelete: Cascade)
-  parentPageId   String?
+  parentPageId   String?         @map("parent_page_id")
   parentPage     Page?           @relation("PageHierarchy", fields: [parentPageId], references: [id], onDelete: Cascade)
   childPages     Page[]          @relation("PageHierarchy")
-  mainFileId     String?
+  mainFileId     String?         @map("main_file_id")
   mainFile       Page?           @relation("PageMainFile", fields: [mainFileId], references: [id], onDelete: SetNull)
   mainFileOf     Page[]          @relation("PageMainFile")
-  pdfThumbnail   String?
-  deletedAt      DateTime?
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  pdfThumbnail   String?         @map("pdf_thumbnail")
+  deletedAt      DateTime?       @map("deleted_at")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
 
   // Relations
   versions       PageVersion[]
   comments       PageComment[]
 
-  @@index([workspaceId, projectId, status])
+  @@index([projectId, parentPageId, rank])
+  @@index([projectId, status, deletedAt])
   @@index([workspaceId, projectId, deletedAt])
-  @@index([parentPageId])
+  @@index([parentPageId, deletedAt])
   @@index([authorId])
+  @@index([deletedAt])
   @@map("pages")
 }
 
 model PageVersion {
   id            String            @id @default(uuid())
-  pageId        String
+  pageId        String            @map("page_id")
   page          Page              @relation(fields: [pageId], references: [id], onDelete: Cascade)
-  projectPageId String?
+  projectPageId String?           @map("project_page_id")
   content       String?           @default("")
   title         String?           @default("")
   label         String?           @default("")
-  savedById     String?
-  eventType     VersionEventType  @default(manual_save)
-  fileName      String?           @default("")
-  createdAt     DateTime          @default(now())
+  savedById     String?           @map("saved_by_id")
+  eventType     VersionEventType  @default(manual_save) @map("event_type")
+  fileName      String?           @default("") @map("file_name")
+  createdAt     DateTime          @default(now()) @map("created_at")
 
-  @@index([pageId])
+  @@index([pageId, createdAt])
   @@index([projectPageId])
   @@map("page_versions")
 }
@@ -520,45 +1141,51 @@ model PageVersion {
 // ── 6. Planning Context (Tasks & Cycles) ────────────────────────────────────
 
 model Task {
-  id           String          @id @default(uuid())
-  title        String
-  content      String?         @default("")
-  description  String?         @default("")
-  columnId     String
-  startDate    DateTime?
-  dueDate      DateTime?
-  recurrence   TaskRecurrence  @default(none)
-  reminder     TaskReminder    @default(d1)
-  labels       String[]        @default([])
-  rank         Float           @default(0)
-  priority     TaskPriority    @default(none)
-  estimate     Float?
-  identifier   String?
-  checklists   Json?           @default("[]")
-  attachments  Json?           @default("[]")
-  completed    Boolean         @default(false)
-  projectId    String
-  project      Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  authorId     String
-  author       User            @relation("TaskAuthor", fields: [authorId], references: [id], onDelete: Cascade)
-  assigneeId   String?
-  assignee     User?           @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
-  cycleId      String?
-  cycle        Cycle?          @relation(fields: [cycleId], references: [id], onDelete: SetNull)
-  parentTaskId String?
-  parentTask   Task?           @relation("TaskSubtasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
-  subtasks     Task[]          @relation("TaskSubtasks")
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
+  id             String          @id @default(uuid())
+  title          String
+  content        String?         @default("")
+  description    String?         @default("")
+  columnId       String          @map("column_id")
+  startDate      DateTime?       @map("start_date")
+  dueDate        DateTime?       @map("due_date")
+  recurrence     TaskRecurrence  @default(none)
+  reminder       TaskReminder    @default(d1)
+  labels         String[]        @default([])
+  rank           Float           @default(0)
+  priority       TaskPriority    @default(none)
+  estimate       Float?
+  identifier     String?         @map("identifier")
+  sequenceNumber Int?            @map("sequence_number")
+  timeSpent      Float?          @default(0) @map("time_spent")
+  checklists     Json?           @default("[]")
+  attachments    Json?           @default("[]")
+  completed      Boolean         @default(false)
+  archivedAt     DateTime?       @map("archived_at")
+  projectId      String          @map("project_id")
+  project        Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  authorId       String          @map("author_id")
+  author         User            @relation("TaskAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  assigneeId     String?         @map("assignee_id")
+  assignee       User?           @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  cycleId        String?         @map("cycle_id")
+  cycle          Cycle?          @relation(fields: [cycleId], references: [id], onDelete: SetNull)
+  parentTaskId   String?         @map("parent_task_id")
+  parentTask     Task?           @relation("TaskSubtasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
+  subtasks       Task[]          @relation("TaskSubtasks")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+  deletedAt      DateTime?       @map("deleted_at")
 
   // Relations
-  comments     TaskComment[]
+  comments       TaskComment[]
+  worklogs       Worklog[]
 
   @@index([projectId, columnId, rank])
-  @@index([projectId, completed])
+  @@index([projectId, completed, deletedAt])
   @@index([projectId, assigneeId, dueDate])
   @@index([projectId, identifier])
-  @@index([cycleId])
+  @@index([cycleId, deletedAt])
+  @@index([deletedAt])
   @@map("tasks")
 }
 
@@ -566,66 +1193,89 @@ model Cycle {
   id                String       @id @default(uuid())
   name              String
   description       String?      @default("")
-  startDate         DateTime?
-  endDate           DateTime?
+  startDate         DateTime?    @map("start_date")
+  endDate           DateTime?    @map("end_date")
   status            CycleStatus  @default(planned)
   phase             CyclePhase   @default(custom)
   milestones        Json?        @default("[]")
   deliverables      Json?        @default("[]")
   labels            String[]     @default([])
   order             Int          @default(0)
-  startedAt         DateTime?
-  endedAt           DateTime?
-  statsAtCompletion Json?        @default("{\"totalTasks\":0,\"completedTasks\":0,\"completionPercentage\":0}")
-  projectId         String
+  startedAt         DateTime?    @map("started_at")
+  endedAt           DateTime?    @map("ended_at")
+  statsAtCompletion Json?        @default("{\"totalTasks\":0,\"completedTasks\":0,\"completionPercentage\":0}") @map("stats_at_completion")
+  projectId         String       @map("project_id")
   project           Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  authorId          String
+  authorId          String       @map("author_id")
   author            User         @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
+  deletedAt         DateTime?    @map("deleted_at")
 
   // Relations
   tasks             Task[]
 
-  @@index([projectId, status])
+  @@index([projectId, status, deletedAt])
+  @@index([projectId, order])
+  @@index([deletedAt])
   @@map("cycles")
+}
+
+model Worklog {
+  id          String   @id @default(uuid())
+  hours       Float
+  description String   @default("")
+  date        DateTime @default(now())
+  taskId      String?  @map("task_id")
+  task        Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  projectId   String   @map("project_id")
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId      String   @map("user_id")
+  user        User     @relation("UserWorklogs", fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([projectId, date])
+  @@index([userId, date])
+  @@index([taskId])
+  @@map("worklogs")
 }
 
 // ── 7. Collaboration Context (Comments & Stickies) ──────────────────────────
 
 model PageComment {
   id            String         @id @default(uuid())
-  pageId        String
+  pageId        String         @map("page_id")
   page          Page           @relation(fields: [pageId], references: [id], onDelete: Cascade)
-  projectPageId String?
-  authorId      String
+  projectPageId String?        @map("project_page_id")
+  authorId      String         @map("author_id")
   author        User           @relation(fields: [authorId], references: [id], onDelete: Cascade)
   content       String
-  isEdited      Boolean        @default(false)
+  isEdited      Boolean        @default(false) @map("is_edited")
   line          Int?
-  lineEnd       Int?
+  lineEnd       Int?           @map("line_end")
   status        CommentStatus  @default(open)
   replies       Json?          @default("[]")
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
 
-  @@index([pageId])
+  @@index([pageId, status])
   @@index([authorId])
   @@map("page_comments")
 }
 
 model TaskComment {
   id        String    @id @default(uuid())
-  taskId    String
+  taskId    String    @map("task_id")
   task      Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  authorId  String
+  authorId  String    @map("author_id")
   author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
   content   String
-  isEdited  Boolean   @default(false)
+  isEdited  Boolean   @default(false) @map("is_edited")
   reactions Json?     @default("[]")
   replies   Json?     @default("[]")
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
 
   @@index([taskId])
   @@index([authorId])
@@ -633,25 +1283,26 @@ model TaskComment {
 }
 
 model Sticky {
-  id          String       @id @default(uuid())
-  title       String?      @default("")
+  id          String      @id @default(uuid())
+  title       String?     @default("")
   content     String
-  color       String       @default("yellow-1")
-  scope       StickyScope  @default(workspace)
-  positionX   Float        @default(0)
-  positionY   Float        @default(0)
-  order       Int          @default(0)
-  workspaceId String
-  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  userId      String
-  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  projectId   String?
-  project     Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  color       String      @default("yellow-1")
+  scope       StickyScope @default(workspace)
+  positionX   Float       @default(0) @map("position_x")
+  positionY   Float       @default(0) @map("position_y")
+  order       Int         @default(0)
+  workspaceId String      @map("workspace_id")
+  workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId      String      @map("user_id")
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId   String?     @map("project_id")
+  project     Project?    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
 
-  @@index([workspaceId, createdAt])
-  @@index([projectId, userId])
+  @@index([workspaceId, userId, scope, order])
+  @@index([projectId, userId, scope, order])
+  @@index([userId])
   @@map("stickies")
 }
 
@@ -659,39 +1310,41 @@ model Sticky {
 
 model AiChat {
   id            String       @id @default(uuid())
-  workspaceSlug String
-  userId        String
+  workspaceSlug String       @map("workspace_slug")
+  userId        String       @map("user_id")
   user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  projectId     String?
-  pageId        String?
+  projectId     String?      @map("project_id")
+  pageId        String?      @map("page_id")
   title         String       @default("New Chat")
   summary       String?      @default("")
-  keyFacts      String[]     @default([])
-  openQuestions String[]     @default([])
-  documentIds   String[]     @default([])
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
+  keyFacts      String[]     @default([]) @map("key_facts")
+  openQuestions String[]     @default([]) @map("open_questions")
+  documentIds   String[]     @default([]) @map("document_ids")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
 
   // Relations
   messages      AiMessage[]
 
   @@index([workspaceSlug, userId, updatedAt])
+  @@index([projectId, userId, updatedAt])
   @@index([pageId, userId])
+  @@index([userId])
   @@map("ai_chats")
 }
 
 model AiMessage {
   id               String       @id @default(uuid())
-  chatId           String
+  chatId           String       @map("chat_id")
   chat             AiChat       @relation(fields: [chatId], references: [id], onDelete: Cascade)
   role             MessageRole
   content          String       @default("")
   sources          Json?        @default("[]")
   widgets          Json?        @default("[]")
-  selectionContext Json?
-  createdAt        DateTime     @default(now())
+  selectionContext Json?        @map("selection_context")
+  createdAt        DateTime     @default(now()) @map("created_at")
 
-  @@index([chatId])
+  @@index([chatId, createdAt])
   @@map("ai_messages")
 }
 
@@ -699,26 +1352,26 @@ model AiMessage {
 
 model ActivityEvent {
   id            String      @id @default(uuid())
-  entityType    EntityType
-  entityId      String
+  entityType    EntityType  @map("entity_type")
+  entityId      String      @map("entity_id")
   verb          String      // "created" | "updated" | "deleted" | "assigned" | etc.
   field         String?     // specific field changed (e.g. "state", "priority", "assigneeId")
-  oldValue      String?     // textual / serialized representation of old value
-  newValue      String?     // textual / serialized representation of new value
-  oldIdentifier String?     // old UUID if relation changed
-  newIdentifier String?     // new UUID if relation changed
-  actorId       String
+  oldValue      String?     @map("old_value")
+  newValue      String?     @map("new_value")
+  oldIdentifier String?     @map("old_identifier")
+  newIdentifier String?     @map("new_identifier")
+  actorId       String      @map("actor_id")
   actor         User        @relation(fields: [actorId], references: [id], onDelete: Cascade)
-  workspaceId   String
+  workspaceId   String      @map("workspace_id")
   workspace     Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  projectId     String?
+  projectId     String?     @map("project_id")
   project       Project?    @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  createdAt     DateTime    @default(now())
+  createdAt     DateTime    @default(now()) @map("created_at")
 
   @@index([workspaceId, createdAt])
   @@index([workspaceId, entityType, createdAt])
   @@index([projectId, createdAt])
-  @@index([entityType, entityId])
+  @@index([entityType, entityId, createdAt])
   @@index([actorId, createdAt])
   @@map("activity_events")
 }

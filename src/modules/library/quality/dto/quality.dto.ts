@@ -1,5 +1,5 @@
-import { IsString, IsArray, IsNotEmpty, IsOptional } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsString, IsArray, IsOptional } from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class MergeCatalogItemsDto {
   @ApiPropertyOptional({
@@ -38,6 +38,8 @@ export class MergeCatalogItemsDto {
 // Backward compatibility alias
 export const MergePapersDto = MergeCatalogItemsDto;
 export type MergePapersDto = MergeCatalogItemsDto;
+export const MergeItemsDto = MergeCatalogItemsDto;
+export type MergeItemsDto = MergeCatalogItemsDto;
 
 export interface DuplicateGroupItem {
   id: string;

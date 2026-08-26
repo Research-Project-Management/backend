@@ -1,23 +1,21 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
-import { Prisma } from '@prisma/client';
-
-const USER_SELECT = {
-  id: true,
-  name: true,
-  email: true,
-  avatar: true,
-} as const;
+import { Prisma, Cycle } from '@prisma/client';
+import {
+  ICycleRepository,
+  USER_MINIMAL_SELECT,
+} from '../types/workflow-repository.interface';
 
 @Injectable()
-export class CycleRepository {
+export class CycleRepository implements ICycleRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findProjectCycles(projectId: string) {
+  async findProjectCycles(projectId: string): Promise<Cycle[]> {
     return this.prisma.cycle.findMany({
-      where: { projectId },
+      where: { projectId, deletedAt: null },
       include: {
         tasks: {
+          where: { deletedAt: null },
           select: {
             id: true,
             title: true,
@@ -31,13 +29,14 @@ export class CycleRepository {
     });
   }
 
-  async findCycleById(cycleId: string) {
-    return this.prisma.cycle.findUnique({
-      where: { id: cycleId },
+  async findCycleById(cycleId: string): Promise<Cycle | null> {
+    return this.prisma.cycle.findFirst({
+      where: { id: cycleId, deletedAt: null },
       include: {
         tasks: {
+          where: { deletedAt: null },
           include: {
-            assignee: { select: USER_SELECT },
+            assignee: { select: USER_MINIMAL_SELECT },
           },
         },
       },
@@ -46,7 +45,7 @@ export class CycleRepository {
 
   async createCycle(
     data: Prisma.CycleCreateInput | Prisma.CycleUncheckedCreateInput,
-  ) {
+  ): Promise<Cycle> {
     return this.prisma.cycle.create({
       data: data as Prisma.CycleCreateInput,
       include: {
@@ -58,7 +57,7 @@ export class CycleRepository {
   async updateCycle(
     cycleId: string,
     data: Prisma.CycleUpdateInput | Prisma.CycleUncheckedUpdateInput,
-  ) {
+  ): Promise<Cycle> {
     return this.prisma.cycle.update({
       where: { id: cycleId },
       data: data,
@@ -68,7 +67,21 @@ export class CycleRepository {
     });
   }
 
-  async deleteCycle(cycleId: string) {
+  async softDeleteCycle(cycleId: string): Promise<Cycle> {
+    return this.prisma.cycle.update({
+      where: { id: cycleId },
+      data: { deletedAt: new Date() },
+    });
+  }
+
+  async restoreCycle(cycleId: string): Promise<Cycle> {
+    return this.prisma.cycle.update({
+      where: { id: cycleId },
+      data: { deletedAt: null },
+    });
+  }
+
+  async deleteCycle(cycleId: string): Promise<Cycle> {
     return this.prisma.cycle.delete({
       where: { id: cycleId },
     });
@@ -76,7 +89,7 @@ export class CycleRepository {
 
   async findCycleTasks(cycleId: string) {
     return this.prisma.task.findMany({
-      where: { cycleId },
+      where: { cycleId, deletedAt: null },
       select: {
         id: true,
         title: true,
@@ -94,6 +107,7 @@ export class CycleRepository {
       where: {
         cycleId: fromCycleId,
         columnId: { not: 'done' },
+        deletedAt: null,
       },
       data: {
         cycleId: targetCycleId,

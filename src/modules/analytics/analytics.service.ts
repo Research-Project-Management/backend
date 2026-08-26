@@ -44,7 +44,7 @@ export class AnalyticsService {
   async getProjectAnalytics(
     projectId: string,
   ): Promise<ProjectTaskDistributionDto> {
-    const cacheKey = `analytics:project:${projectId}:insights`;
+    const cacheKey = `flux:analytics:proj:${projectId}:insights`;
 
     return this.cache.wrap(
       cacheKey,
@@ -97,13 +97,15 @@ export class AnalyticsService {
   async getCycleAnalytics(cycleId: string): Promise<CycleAnalyticsDto> {
     const tasks = await this.analyticsRepo.findCycleTasks(cycleId);
     const totalTasks = tasks.length;
-    const completedTasks = tasks.filter((t) => t.completed).length;
+    const completedTasks = tasks.filter(
+      (taskItem) => taskItem.completed,
+    ).length;
     const inProgressTasks = tasks.filter(
-      (t) =>
-        t.columnId === 'doing' ||
-        t.columnId === 'in_progress' ||
-        t.columnId === 'review' ||
-        t.columnId === 'in_review',
+      (taskItem) =>
+        taskItem.columnId === 'doing' ||
+        taskItem.columnId === 'in_progress' ||
+        taskItem.columnId === 'review' ||
+        taskItem.columnId === 'in_review',
     ).length;
     const pendingTasks = totalTasks - completedTasks - inProgressTasks;
     const completionRate =
@@ -125,7 +127,7 @@ export class AnalyticsService {
   async getWorkspaceOverview(
     workspaceId: string,
   ): Promise<{ stats: WorkspaceStatsResponse }> {
-    const cacheKey = `analytics:workspace:${workspaceId}:overview`;
+    const cacheKey = `flux:analytics:ws:${workspaceId}:overview`;
 
     return this.cache.wrap(
       cacheKey,
@@ -150,33 +152,39 @@ export class AnalyticsService {
       this.activityService.getRecentItems(workspaceId, userId, 10),
     ]);
 
-    const assigned = tasks.filter((t) => t.assigneeId === userId);
-    const created = tasks.filter((t) => t.authorId === userId);
+    const assigned = tasks.filter((taskItem) => taskItem.assigneeId === userId);
+    const created = tasks.filter((taskItem) => taskItem.authorId === userId);
     const subscribed = tasks.filter(
-      (t) =>
-        t.assigneeId !== userId &&
-        t.authorId !== userId &&
-        (t.comments?.length || 0) > 0,
+      (taskItem) =>
+        taskItem.assigneeId !== userId &&
+        taskItem.authorId !== userId &&
+        (taskItem.comments?.length || 0) > 0,
     );
 
     const formattedActivities = (activityFeed.items as ActivityFeedItem[]).map(
-      (evt) => {
-        const isYou = evt.actorId === userId;
+      (activityEvent) => {
+        const isYou = activityEvent.actorId === userId;
         return {
-          id: evt.id,
-          type: `${evt.entityType}_${evt.verb}`,
-          actorName: isYou ? 'You' : evt.actor?.name || 'A member',
-          actionVerb: evt.verb,
-          targetIdentifier: evt.field || null,
-          targetTitle: evt.newValue || evt.entityId,
-          content: `${isYou ? 'You' : evt.actor?.name || 'Member'} ${evt.verb} ${evt.entityType}`,
-          time: evt.createdAt.toISOString(),
-          itemId: evt.entityId,
-          user: evt.actor
-            ? { name: evt.actor.name || '', avatar: evt.actor.avatar || null }
+          id: activityEvent.id,
+          type: `${activityEvent.entityType}_${activityEvent.verb}`,
+          actorName: isYou ? 'You' : activityEvent.actor?.name || 'A member',
+          actionVerb: activityEvent.verb,
+          targetIdentifier: activityEvent.field || null,
+          targetTitle: activityEvent.newValue || activityEvent.entityId,
+          content: `${isYou ? 'You' : activityEvent.actor?.name || 'Member'} ${activityEvent.verb} ${activityEvent.entityType}`,
+          time: activityEvent.createdAt.toISOString(),
+          itemId: activityEvent.entityId,
+          user: activityEvent.actor
+            ? {
+                name: activityEvent.actor.name || '',
+                avatar: activityEvent.actor.avatar || null,
+              }
             : undefined,
-          project: evt.projectId
-            ? { id: evt.projectId, name: evt.project?.name || '' }
+          project: activityEvent.projectId
+            ? {
+                id: activityEvent.projectId,
+                name: activityEvent.project?.name || '',
+              }
             : undefined,
         };
       },

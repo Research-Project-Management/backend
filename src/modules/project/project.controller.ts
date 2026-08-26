@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -20,13 +21,12 @@ import {
   AddColumnDto,
   UpdateColumnDto,
 } from './dto/project.dto';
-import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authn';
-import {
-  WorkspaceRoleGuard,
-  WorkspaceRoles,
-  ProjectRoleGuard,
-  ProjectRoles,
-} from '@/modules/iam/authz';
+import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
+import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
+import { WorkspaceRoleGuard } from '@/modules/iam/authz/guards/workspace-role.guard';
+import { WorkspaceRoles } from '@/modules/iam/authz/decorators/workspace-roles.decorator';
+import { ProjectRoleGuard } from '@/modules/iam/authz/guards/project-role.guard';
+import { ProjectRoles } from '@/modules/iam/authz/decorators/project-roles.decorator';
 
 @ApiTags('Organization')
 @ApiBearerAuth('JWT-auth')
@@ -106,9 +106,17 @@ export class ProjectController {
   @Delete('project/:projectId')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
-  @ApiOperation({ summary: 'Delete a project permanently' })
+  @ApiOperation({ summary: 'Soft-delete a project' })
   async deleteProject(@Param('projectId') projectId: string) {
     return this.projectService.deleteProject(projectId);
+  }
+
+  @Post('project/:projectId/restore')
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin')
+  @ApiOperation({ summary: 'Restore a soft-deleted project' })
+  async restoreProject(@Param('projectId') projectId: string) {
+    return this.projectService.restoreProject(projectId);
   }
 
   @Get('project/:projectId/members')
@@ -145,12 +153,23 @@ export class ProjectController {
   @Delete('project/:projectId/members/:userId')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
-  @ApiOperation({ summary: 'Remove a member from the project' })
+  @ApiOperation({
+    summary: 'Remove a member from the project (single-admin protected)',
+  })
   async removeProjectMember(
     @Param('projectId') projectId: string,
     @Param('userId') userId: string,
   ) {
     return this.projectService.removeProjectMember(projectId, userId);
+  }
+
+  @Post('project/:projectId/leave')
+  @ApiOperation({ summary: 'Leave project (single-admin protected)' })
+  async leaveProject(
+    @Param('projectId') projectId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.projectService.leaveProject(projectId, userId);
   }
 
   @Get('project/:projectId/columns')
@@ -187,11 +206,20 @@ export class ProjectController {
   @Delete('project/:projectId/columns/:columnId')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
-  @ApiOperation({ summary: 'Delete a project board column' })
+  @ApiOperation({
+    summary: 'Delete a project board column with automatic task migration',
+  })
   async deleteColumn(
     @Param('projectId') projectId: string,
     @Param('columnId') columnId: string,
+    @Query('fallbackColumnId') fallbackColumnId?: string,
+    @CurrentUser('id') userId?: string,
   ) {
-    return this.projectService.deleteColumn(projectId, columnId);
+    return this.projectService.deleteColumn(
+      projectId,
+      columnId,
+      fallbackColumnId,
+      userId,
+    );
   }
 }

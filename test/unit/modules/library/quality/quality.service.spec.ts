@@ -1,4 +1,5 @@
 import { QualityService } from '@/modules/library/quality/quality.service';
+
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 
 describe('QualityService', () => {
@@ -11,9 +12,11 @@ describe('QualityService', () => {
       resolveWorkspaceId: jest.fn().mockResolvedValue('ws-1'),
       findItems: jest.fn(),
       findItemById: jest.fn(),
+      executeMergeItemsTransaction: jest.fn().mockResolvedValue(undefined),
       executeMergePapersTransaction: jest.fn().mockResolvedValue(undefined),
       findDoiDuplicates: jest.fn().mockResolvedValue([]),
       findIntegrityStats: jest.fn().mockResolvedValue({
+        totalItems: 0,
         totalPapers: 0,
         missingDoiCount: 0,
         missingYearCount: 0,
@@ -151,13 +154,14 @@ describe('QualityService', () => {
 
       expect(result.mergedCount).toBe(1);
       expect(result.softDeletedPaperIds).toContain('p-src');
-      expect(mockPaperRepo.executeMergePapersTransaction).toHaveBeenCalled();
+      expect(mockPaperRepo.executeMergeItemsTransaction).toHaveBeenCalled();
     });
   });
 
   describe('Library Health & Integrity Diagnostics', () => {
     it('should accurately categorize missing metadata issues and compute health stats', async () => {
       mockPaperRepo.findIntegrityStats.mockResolvedValueOnce({
+        totalItems: 2,
         totalPapers: 2,
         missingDoiCount: 1,
         missingYearCount: 1,
