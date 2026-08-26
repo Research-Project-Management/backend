@@ -142,3 +142,44 @@ export class BatchStarDto {
   starred!: boolean;
 }
 
+export class QueryFilesDto {
+  @IsString()
+  @IsOptional()
+  search?: string;
+
+  @IsString()
+  @IsOptional()
+  parentId?: string;
+
+  @IsString()
+  @IsOptional()
+  sortBy?:
+    | 'date-desc'
+    | 'date-asc'
+    | 'name-asc'
+    | 'name-desc'
+    | 'size-desc'
+    | 'size-asc';
+
+  @IsString()
+  @IsOptional()
+  types?: string; // Comma-separated (e.g. "document,image,video,audio,spreadsheet,archive,folder")
+
+  @IsString()
+  @IsOptional()
+  type?: string;
+
+  @IsString()
+  @IsOptional()
+  projectIds?: string; // Comma-separated project IDs or "workspace-only"
+
+  @IsString()
+  @IsOptional()
+  projectId?: string;
+
+  @IsOptional()
+  limit?: number | string;
+
+  @IsOptional()
+  page?: number | string;
+}

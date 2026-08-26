@@ -28,6 +28,7 @@ import {
   ShareFileDto,
   BatchFileIdsDto,
   BatchStarDto,
+  QueryFilesDto,
 } from './dto/file.dto';
 import { JwtAuthGuard, CurrentUser } from '@/modules/iam/authentication';
 import {
@@ -195,8 +196,11 @@ export class FileController {
   @Get('workspace/:workspaceId/home')
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
-  async getWorkspaceHome(@Param('workspaceId') workspaceId: string) {
-    return this.fileService.getHomeFiles(workspaceId);
+  async getWorkspaceHome(
+    @Param('workspaceId') workspaceId: string,
+    @Query() query?: QueryFilesDto,
+  ) {
+    return this.fileService.getHomeFiles(workspaceId, query);
   }
 
   @Get('workspace/:workspaceId/all')
@@ -204,9 +208,9 @@ export class FileController {
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async getWorkspaceAll(
     @Param('workspaceId') workspaceId: string,
-    @Query('parentId') parentId?: string,
+    @Query() query?: QueryFilesDto,
   ) {
-    return this.fileService.getFiles({ workspaceId, parentId });
+    return this.fileService.getFiles({ workspaceId }, query);
   }
 
   @Get('workspace/:workspaceId/my-files')
@@ -215,15 +219,19 @@ export class FileController {
   async getWorkspaceMyFiles(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
+    @Query() query?: QueryFilesDto,
   ) {
-    return this.fileService.getMyFiles(userId, workspaceId);
+    return this.fileService.getMyFiles(userId, workspaceId, undefined, query);
   }
 
   @Get('workspace/:workspaceId/starred')
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
-  async getWorkspaceStarred(@Param('workspaceId') workspaceId: string) {
-    return this.fileService.getStarredFiles(workspaceId);
+  async getWorkspaceStarred(
+    @Param('workspaceId') workspaceId: string,
+    @Query() query?: QueryFilesDto,
+  ) {
+    return this.fileService.getStarredFiles(workspaceId, undefined, query);
   }
 
   @Get('workspace/:workspaceId/shared')
@@ -232,15 +240,19 @@ export class FileController {
   async getWorkspaceShared(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
+    @Query() query?: QueryFilesDto,
   ) {
-    return this.fileService.getSharedFiles(userId, workspaceId);
+    return this.fileService.getSharedFiles(userId, workspaceId, undefined, query);
   }
 
   @Get('workspace/:workspaceId/trash')
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
-  async getWorkspaceTrash(@Param('workspaceId') workspaceId: string) {
-    return this.fileService.getTrashedFiles(workspaceId);
+  async getWorkspaceTrash(
+    @Param('workspaceId') workspaceId: string,
+    @Query() query?: QueryFilesDto,
+  ) {
+    return this.fileService.getTrashedFiles(workspaceId, undefined, query);
   }
 
   @Get('folder/:folderId/path')
@@ -253,9 +265,9 @@ export class FileController {
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async getWorkspaceFiles(
     @Param('workspaceId') workspaceId: string,
-    @Query('parentId') parentId?: string,
+    @Query() query?: QueryFilesDto,
   ) {
-    return this.fileService.getFiles({ workspaceId, parentId });
+    return this.fileService.getFiles({ workspaceId }, query);
   }
 
   // ── Project Scoped ──────────────────────────────────────────────────────────
@@ -290,15 +302,19 @@ export class FileController {
   async getProjectMyFiles(
     @Param('projectId') projectId: string,
     @CurrentUser('id') userId: string,
+    @Query() query?: QueryFilesDto,
   ) {
-    return this.fileService.getMyFiles(userId, undefined, projectId);
+    return this.fileService.getMyFiles(userId, undefined, projectId, query);
   }
 
   @Get('project/:projectId/starred')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
-  async getProjectStarred(@Param('projectId') projectId: string) {
-    return this.fileService.getStarredFiles(undefined, projectId);
+  async getProjectStarred(
+    @Param('projectId') projectId: string,
+    @Query() query?: QueryFilesDto,
+  ) {
+    return this.fileService.getStarredFiles(undefined, projectId, query);
   }
 
   @Get('project/:projectId/shared')
@@ -307,15 +323,19 @@ export class FileController {
   async getProjectShared(
     @Param('projectId') projectId: string,
     @CurrentUser('id') userId: string,
+    @Query() query?: QueryFilesDto,
   ) {
-    return this.fileService.getSharedFiles(userId, undefined, projectId);
+    return this.fileService.getSharedFiles(userId, undefined, projectId, query);
   }
 
   @Get('project/:projectId/trash')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
-  async getProjectTrash(@Param('projectId') projectId: string) {
-    return this.fileService.getTrashedFiles(undefined, projectId);
+  async getProjectTrash(
+    @Param('projectId') projectId: string,
+    @Query() query?: QueryFilesDto,
+  ) {
+    return this.fileService.getTrashedFiles(undefined, projectId, query);
   }
 
   @Get('project/:projectId')
@@ -323,9 +343,9 @@ export class FileController {
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   async getProjectFiles(
     @Param('projectId') projectId: string,
-    @Query('parentId') parentId?: string,
+    @Query() query?: QueryFilesDto,
   ) {
-    return this.fileService.getFiles({ projectId, parentId });
+    return this.fileService.getFiles({ projectId }, query);
   }
 
   // ── Page Scoped ────────────────────────────────────────────────────────────

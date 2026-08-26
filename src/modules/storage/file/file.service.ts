@@ -11,6 +11,7 @@ import {
   CreateFolderDto,
   UpdateFileDto,
   ShareFileDto,
+  QueryFilesDto,
 } from './dto/file.dto';
 
 export type FormattedFile<
@@ -339,12 +340,238 @@ export class FileService {
 
   // ── Scoped Queries ──────────────────────────────────────────────────────────
 
-  async getFiles(scope: {
-    workspaceId?: string;
-    projectId?: string;
-    pageId?: string;
-    parentId?: string;
-  }) {
+  private buildTypeFilterConditions(typesStr?: string, singleType?: string): Prisma.FileWhereInput[] {
+    const rawTypes = [
+      ...(typesStr ? typesStr.split(',').map((t) => t.trim()) : []),
+      ...(singleType && singleType !== 'all' ? [singleType.trim()] : []),
+    ];
+    const uniqueTypes = Array.from(new Set(rawTypes)).filter((t) => t && t !== 'all');
+
+    if (uniqueTypes.length === 0) return [];
+
+    const conditions: Prisma.FileWhereInput[] = [];
+
+    for (const type of uniqueTypes) {
+      switch (type) {
+        case 'folder':
+          conditions.push({ isFolder: true });
+          break;
+        case 'image':
+          conditions.push({
+            isFolder: false,
+            OR: [
+              { mimeType: { startsWith: 'image/' } },
+              { filename: { endsWith: '.png', mode: 'insensitive' } },
+              { filename: { endsWith: '.jpg', mode: 'insensitive' } },
+              { filename: { endsWith: '.jpeg', mode: 'insensitive' } },
+              { filename: { endsWith: '.webp', mode: 'insensitive' } },
+              { filename: { endsWith: '.svg', mode: 'insensitive' } },
+              { filename: { endsWith: '.gif', mode: 'insensitive' } },
+            ],
+          });
+          break;
+        case 'video':
+          conditions.push({
+            isFolder: false,
+            OR: [
+              { mimeType: { startsWith: 'video/' } },
+              { filename: { endsWith: '.mp4', mode: 'insensitive' } },
+              { filename: { endsWith: '.webm', mode: 'insensitive' } },
+              { filename: { endsWith: '.mov', mode: 'insensitive' } },
+              { filename: { endsWith: '.mkv', mode: 'insensitive' } },
+            ],
+          });
+          break;
+        case 'audio':
+          conditions.push({
+            isFolder: false,
+            OR: [
+              { mimeType: { startsWith: 'audio/' } },
+              { filename: { endsWith: '.mp3', mode: 'insensitive' } },
+              { filename: { endsWith: '.wav', mode: 'insensitive' } },
+              { filename: { endsWith: '.ogg', mode: 'insensitive' } },
+              { filename: { endsWith: '.m4a', mode: 'insensitive' } },
+            ],
+          });
+          break;
+        case 'document':
+          conditions.push({
+            isFolder: false,
+            OR: [
+              {
+                mimeType: {
+                  in: [
+                    'application/pdf',
+                    'application/msword',
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                    'text/plain',
+                    'text/markdown',
+                    'application/rtf',
+                  ],
+                },
+              },
+              { filename: { endsWith: '.pdf', mode: 'insensitive' } },
+              { filename: { endsWith: '.doc', mode: 'insensitive' } },
+              { filename: { endsWith: '.docx', mode: 'insensitive' } },
+              { filename: { endsWith: '.txt', mode: 'insensitive' } },
+              { filename: { endsWith: '.md', mode: 'insensitive' } },
+              { filename: { endsWith: '.rtf', mode: 'insensitive' } },
+            ],
+          });
+          break;
+        case 'spreadsheet':
+          conditions.push({
+            isFolder: false,
+            OR: [
+              {
+                mimeType: {
+                  in: [
+                    'application/vnd.ms-excel',
+                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    'text/csv',
+                    'text/tab-separated-values',
+                  ],
+                },
+              },
+              { filename: { endsWith: '.xls', mode: 'insensitive' } },
+              { filename: { endsWith: '.xlsx', mode: 'insensitive' } },
+              { filename: { endsWith: '.csv', mode: 'insensitive' } },
+              { filename: { endsWith: '.tsv', mode: 'insensitive' } },
+            ],
+          });
+          break;
+        case 'archive':
+          conditions.push({
+            isFolder: false,
+            OR: [
+              {
+                mimeType: {
+                  in: [
+                    'application/zip',
+                    'application/x-rar-compressed',
+                    'application/x-7z-compressed',
+                    'application/x-tar',
+                    'application/gzip',
+                  ],
+                },
+              },
+              { filename: { endsWith: '.zip', mode: 'insensitive' } },
+              { filename: { endsWith: '.rar', mode: 'insensitive' } },
+              { filename: { endsWith: '.7z', mode: 'insensitive' } },
+              { filename: { endsWith: '.tar', mode: 'insensitive' } },
+              { filename: { endsWith: '.gz', mode: 'insensitive' } },
+            ],
+          });
+          break;
+      }
+    }
+
+    return conditions;
+  }
+
+  private buildProjectFilterConditions(
+    projectIdsStr?: string,
+    singleProjectId?: string,
+  ): Prisma.FileWhereInput[] {
+    const rawProjects = [
+      ...(projectIdsStr ? projectIdsStr.split(',').map((p) => p.trim()) : []),
+      ...(singleProjectId && singleProjectId !== 'all'
+        ? [singleProjectId.trim()]
+        : []),
+    ];
+    const uniqueProjects = Array.from(new Set(rawProjects)).filter(
+      (p) => p && p !== 'all',
+    );
+
+    if (uniqueProjects.length === 0) return [];
+
+    const conditions: Prisma.FileWhereInput[] = [];
+
+    const hasWorkspaceOnly = uniqueProjects.includes('workspace-only');
+    const validProjectIds = uniqueProjects.filter((id) => id !== 'workspace-only');
+
+    if (hasWorkspaceOnly) {
+      conditions.push({
+        OR: [
+          { linkedToType: 'Workspace' },
+          { linkedToId: null, linkedToType: null },
+        ],
+      });
+    }
+
+    if (validProjectIds.length > 0) {
+      conditions.push({
+        linkedToId: { in: validProjectIds },
+        linkedToType: 'Project',
+      });
+    }
+
+    return conditions;
+  }
+
+  private buildOrderBy(sortBy?: string): Prisma.FileOrderByWithRelationInput[] {
+    switch (sortBy) {
+      case 'name-asc':
+        return [{ isFolder: 'desc' }, { filename: 'asc' }];
+      case 'name-desc':
+        return [{ isFolder: 'desc' }, { filename: 'desc' }];
+      case 'date-asc':
+        return [{ isFolder: 'desc' }, { updatedAt: 'asc' }];
+      case 'size-desc':
+        return [{ isFolder: 'desc' }, { size: 'desc' }];
+      case 'size-asc':
+        return [{ isFolder: 'desc' }, { size: 'asc' }];
+      case 'date-desc':
+      default:
+        return [{ isFolder: 'desc' }, { updatedAt: 'desc' }];
+    }
+  }
+
+  private applyCommonQueryFilters(
+    where: Prisma.FileWhereInput,
+    query?: QueryFilesDto,
+  ) {
+    if (!query) return;
+
+    // 1. Search Query
+    if (query.search && query.search.trim()) {
+      where.filename = {
+        contains: query.search.trim(),
+        mode: 'insensitive',
+      };
+    }
+
+    // 2. Types Filter
+    const typeConditions = this.buildTypeFilterConditions(query.types, query.type);
+    if (typeConditions.length > 0) {
+      where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+        { OR: typeConditions },
+      ];
+    }
+
+    // 3. Projects Filter
+    const projectConditions = this.buildProjectFilterConditions(
+      query.projectIds,
+      query.projectId,
+    );
+    if (projectConditions.length > 0) {
+      where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+        { OR: projectConditions },
+      ];
+    }
+  }
+
+  async getFiles(
+    scope: {
+      workspaceId?: string;
+      projectId?: string;
+      pageId?: string;
+      parentId?: string;
+    },
+    query?: QueryFilesDto,
+  ) {
     const workspaceId = await this.resolveWorkspaceId(scope);
     const where: Prisma.FileWhereInput = {
       trashedAt: null,
@@ -360,66 +587,97 @@ export class FileService {
       where.workspaceId = workspaceId;
     }
 
-    if (scope.parentId !== undefined) {
+    const parentIdParam = query?.parentId !== undefined ? query.parentId : scope.parentId;
+    if (parentIdParam !== undefined) {
       where.parentId =
-        scope.parentId === 'null' || scope.parentId === 'undefined' || scope.parentId === ''
+        parentIdParam === 'null' || parentIdParam === 'undefined' || parentIdParam === ''
           ? null
-          : scope.parentId;
+          : parentIdParam;
     }
 
-    const files = await this.fileRepo.findFiles(
-      where,
-      [{ isFolder: 'desc' }, { filename: 'asc' }],
-    );
+    this.applyCommonQueryFilters(where, query);
+
+    const orderBy = this.buildOrderBy(query?.sortBy);
+    const take = query?.limit ? Number(query.limit) : undefined;
+    const skip =
+      query?.page && query?.limit
+        ? (Number(query.page) - 1) * Number(query.limit)
+        : undefined;
+
+    const files = await this.fileRepo.findFiles(where, orderBy, take);
 
     return { files: files.map((f) => this.formatFile(f)) };
   }
 
-  async getHomeFiles(workspaceParam: string) {
-    const workspaceId = (await this.resolveWorkspaceId({ workspaceId: workspaceParam })) || workspaceParam;
-    const files = await this.fileRepo.findFiles(
-      {
-        workspaceId,
-        trashedAt: null,
-        parentId: null,
-      },
-      [{ isFolder: 'desc' }, { createdAt: 'desc' }],
-      50,
-    );
+  async getHomeFiles(workspaceParam: string, query?: QueryFilesDto) {
+    const workspaceId =
+      (await this.resolveWorkspaceId({ workspaceId: workspaceParam })) ||
+      workspaceParam;
+    const where: Prisma.FileWhereInput = {
+      workspaceId,
+      trashedAt: null,
+      parentId: null,
+    };
+
+    this.applyCommonQueryFilters(where, query);
+
+    const orderBy = this.buildOrderBy(query?.sortBy || 'date-desc');
+    const limit = query?.limit ? Number(query.limit) : 50;
+
+    const files = await this.fileRepo.findFiles(where, orderBy, limit);
 
     return { files: files.map((f) => this.formatFile(f)) };
   }
 
-  async getMyFiles(userId: string, workspaceParam?: string, projectId?: string) {
+  async getMyFiles(
+    userId: string,
+    workspaceParam?: string,
+    projectId?: string,
+    query?: QueryFilesDto,
+  ) {
     const workspaceId = workspaceParam
-      ? (await this.resolveWorkspaceId({ workspaceId: workspaceParam })) || workspaceParam
+      ? (await this.resolveWorkspaceId({ workspaceId: workspaceParam })) ||
+        workspaceParam
       : undefined;
-    const files = await this.fileRepo.findFiles(
-      {
-        authorId: userId,
-        trashedAt: null,
-        ...(workspaceId && { workspaceId }),
-        ...(projectId && { linkedToId: projectId, linkedToType: 'Project' }),
-      },
-      [{ createdAt: 'desc' }],
-    );
+    const where: Prisma.FileWhereInput = {
+      authorId: userId,
+      trashedAt: null,
+      ...(workspaceId && { workspaceId }),
+      ...(projectId && { linkedToId: projectId, linkedToType: 'Project' }),
+    };
+
+    this.applyCommonQueryFilters(where, query);
+
+    const orderBy = this.buildOrderBy(query?.sortBy || 'date-desc');
+    const take = query?.limit ? Number(query.limit) : undefined;
+
+    const files = await this.fileRepo.findFiles(where, orderBy, take);
 
     return { files: files.map((f) => this.formatFile(f)) };
   }
 
-  async getStarredFiles(workspaceParam?: string, projectId?: string) {
+  async getStarredFiles(
+    workspaceParam?: string,
+    projectId?: string,
+    query?: QueryFilesDto,
+  ) {
     const workspaceId = workspaceParam
-      ? (await this.resolveWorkspaceId({ workspaceId: workspaceParam })) || workspaceParam
+      ? (await this.resolveWorkspaceId({ workspaceId: workspaceParam })) ||
+        workspaceParam
       : undefined;
-    const files = await this.fileRepo.findFiles(
-      {
-        starred: true,
-        trashedAt: null,
-        ...(workspaceId && { workspaceId }),
-        ...(projectId && { linkedToId: projectId, linkedToType: 'Project' }),
-      },
-      [{ updatedAt: 'desc' }],
-    );
+    const where: Prisma.FileWhereInput = {
+      starred: true,
+      trashedAt: null,
+      ...(workspaceId && { workspaceId }),
+      ...(projectId && { linkedToId: projectId, linkedToType: 'Project' }),
+    };
+
+    this.applyCommonQueryFilters(where, query);
+
+    const orderBy = this.buildOrderBy(query?.sortBy || 'date-desc');
+    const take = query?.limit ? Number(query.limit) : undefined;
+
+    const files = await this.fileRepo.findFiles(where, orderBy, take);
 
     return { files: files.map((f) => this.formatFile(f)) };
   }
@@ -428,13 +686,15 @@ export class FileService {
     userId: string,
     workspaceParam?: string,
     projectId?: string,
+    query?: QueryFilesDto,
   ) {
     const workspaceId = workspaceParam
-      ? (await this.resolveWorkspaceId({ workspaceId: workspaceParam })) || workspaceParam
+      ? (await this.resolveWorkspaceId({ workspaceId: workspaceParam })) ||
+        workspaceParam
       : undefined;
     const shares = await this.fileRepo.findFileShares(userId);
 
-    const files = shares
+    let files = shares
       .map((s) => s.file)
       .filter((f) => {
         if (!f || f.trashedAt) return false;
@@ -447,21 +707,52 @@ export class FileService {
         return true;
       });
 
+    if (query?.search && query.search.trim()) {
+      const q = query.search.trim().toLowerCase();
+      files = files.filter((f) => f.filename?.toLowerCase().includes(q));
+    }
+
+    if (query?.types || (query?.type && query.type !== 'all')) {
+      const allowedTypes = [
+        ...(query?.types ? query.types.split(',').map((t) => t.trim()) : []),
+        ...(query?.type && query.type !== 'all' ? [query.type.trim()] : []),
+      ];
+      files = files.filter((f) => {
+        if (allowedTypes.includes('folder') && f.isFolder) return true;
+        if (allowedTypes.includes('image') && f.mimeType?.startsWith('image/'))
+          return true;
+        if (allowedTypes.includes('video') && f.mimeType?.startsWith('video/'))
+          return true;
+        if (allowedTypes.includes('audio') && f.mimeType?.startsWith('audio/'))
+          return true;
+        return true;
+      });
+    }
+
     return { files: files.map((f) => this.formatFile(f)) };
   }
 
-  async getTrashedFiles(workspaceParam?: string, projectId?: string) {
+  async getTrashedFiles(
+    workspaceParam?: string,
+    projectId?: string,
+    query?: QueryFilesDto,
+  ) {
     const workspaceId = workspaceParam
-      ? (await this.resolveWorkspaceId({ workspaceId: workspaceParam })) || workspaceParam
+      ? (await this.resolveWorkspaceId({ workspaceId: workspaceParam })) ||
+        workspaceParam
       : undefined;
-    const files = await this.fileRepo.findFiles(
-      {
-        trashedAt: { not: null },
-        ...(workspaceId && { workspaceId }),
-        ...(projectId && { linkedToId: projectId, linkedToType: 'Project' }),
-      },
-      [{ trashedAt: 'desc' }],
-    );
+    const where: Prisma.FileWhereInput = {
+      trashedAt: { not: null },
+      ...(workspaceId && { workspaceId }),
+      ...(projectId && { linkedToId: projectId, linkedToType: 'Project' }),
+    };
+
+    this.applyCommonQueryFilters(where, query);
+
+    const orderBy = this.buildOrderBy(query?.sortBy || 'date-desc');
+    const take = query?.limit ? Number(query.limit) : undefined;
+
+    const files = await this.fileRepo.findFiles(where, orderBy, take);
 
     return { files: files.map((f) => this.formatFile(f)) };
   }
