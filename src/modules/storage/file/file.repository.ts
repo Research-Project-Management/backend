@@ -87,6 +87,7 @@ export class FileRepository {
     where: Prisma.FileWhereInput,
     orderBy?: Prisma.FileOrderByWithRelationInput[],
     take?: number,
+    skip?: number,
   ): Promise<FileWithAuthor[]> {
     return this.prisma.file.findMany({
       where,
@@ -95,7 +96,30 @@ export class FileRepository {
       },
       orderBy,
       take,
+      skip,
     });
+  }
+
+  async findFilesWithCount(
+    where: Prisma.FileWhereInput,
+    orderBy?: Prisma.FileOrderByWithRelationInput[],
+    take?: number,
+    skip?: number,
+  ): Promise<{ files: FileWithAuthor[]; total: number }> {
+    const [files, total] = await Promise.all([
+      this.prisma.file.findMany({
+        where,
+        include: {
+          author: { select: USER_SELECT },
+        },
+        orderBy,
+        take,
+        skip,
+      }),
+      this.prisma.file.count({ where }),
+    ]);
+
+    return { files, total };
   }
 
   async findFileShares(userId: string) {

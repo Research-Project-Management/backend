@@ -563,6 +563,17 @@ export class FileService {
     }
   }
 
+  private parsePagination(query?: QueryFilesDto, defaultLimit = 40) {
+    const page = query?.page
+      ? Math.max(1, parseInt(String(query.page), 10) || 1)
+      : 1;
+    const limit = query?.limit
+      ? Math.min(100, Math.max(1, parseInt(String(query.limit), 10) || defaultLimit))
+      : defaultLimit;
+    const skip = (page - 1) * limit;
+    return { page, limit, skip };
+  }
+
   async getFiles(
     scope: {
       workspaceId?: string;
@@ -598,15 +609,22 @@ export class FileService {
     this.applyCommonQueryFilters(where, query);
 
     const orderBy = this.buildOrderBy(query?.sortBy);
-    const take = query?.limit ? Number(query.limit) : undefined;
-    const skip =
-      query?.page && query?.limit
-        ? (Number(query.page) - 1) * Number(query.limit)
-        : undefined;
+    const { page, limit, skip } = this.parsePagination(query, 40);
 
-    const files = await this.fileRepo.findFiles(where, orderBy, take);
+    const { files, total } = await this.fileRepo.findFilesWithCount(
+      where,
+      orderBy,
+      limit,
+      skip,
+    );
 
-    return { files: files.map((f) => this.formatFile(f)) };
+    return {
+      files: files.map((f) => this.formatFile(f)),
+      total,
+      page,
+      limit,
+      hasMore: skip + files.length < total,
+    };
   }
 
   async getHomeFiles(workspaceParam: string, query?: QueryFilesDto) {
@@ -622,11 +640,22 @@ export class FileService {
     this.applyCommonQueryFilters(where, query);
 
     const orderBy = this.buildOrderBy(query?.sortBy || 'date-desc');
-    const limit = query?.limit ? Number(query.limit) : 50;
+    const { page, limit, skip } = this.parsePagination(query, 40);
 
-    const files = await this.fileRepo.findFiles(where, orderBy, limit);
+    const { files, total } = await this.fileRepo.findFilesWithCount(
+      where,
+      orderBy,
+      limit,
+      skip,
+    );
 
-    return { files: files.map((f) => this.formatFile(f)) };
+    return {
+      files: files.map((f) => this.formatFile(f)),
+      total,
+      page,
+      limit,
+      hasMore: skip + files.length < total,
+    };
   }
 
   async getMyFiles(
@@ -649,11 +678,22 @@ export class FileService {
     this.applyCommonQueryFilters(where, query);
 
     const orderBy = this.buildOrderBy(query?.sortBy || 'date-desc');
-    const take = query?.limit ? Number(query.limit) : undefined;
+    const { page, limit, skip } = this.parsePagination(query, 40);
 
-    const files = await this.fileRepo.findFiles(where, orderBy, take);
+    const { files, total } = await this.fileRepo.findFilesWithCount(
+      where,
+      orderBy,
+      limit,
+      skip,
+    );
 
-    return { files: files.map((f) => this.formatFile(f)) };
+    return {
+      files: files.map((f) => this.formatFile(f)),
+      total,
+      page,
+      limit,
+      hasMore: skip + files.length < total,
+    };
   }
 
   async getStarredFiles(
@@ -675,11 +715,22 @@ export class FileService {
     this.applyCommonQueryFilters(where, query);
 
     const orderBy = this.buildOrderBy(query?.sortBy || 'date-desc');
-    const take = query?.limit ? Number(query.limit) : undefined;
+    const { page, limit, skip } = this.parsePagination(query, 40);
 
-    const files = await this.fileRepo.findFiles(where, orderBy, take);
+    const { files, total } = await this.fileRepo.findFilesWithCount(
+      where,
+      orderBy,
+      limit,
+      skip,
+    );
 
-    return { files: files.map((f) => this.formatFile(f)) };
+    return {
+      files: files.map((f) => this.formatFile(f)),
+      total,
+      page,
+      limit,
+      hasMore: skip + files.length < total,
+    };
   }
 
   async getSharedFiles(
@@ -729,7 +780,17 @@ export class FileService {
       });
     }
 
-    return { files: files.map((f) => this.formatFile(f)) };
+    const { page, limit, skip } = this.parsePagination(query, 40);
+    const total = files.length;
+    const paginatedFiles = files.slice(skip, skip + limit);
+
+    return {
+      files: paginatedFiles.map((f) => this.formatFile(f)),
+      total,
+      page,
+      limit,
+      hasMore: skip + paginatedFiles.length < total,
+    };
   }
 
   async getTrashedFiles(
@@ -750,10 +811,21 @@ export class FileService {
     this.applyCommonQueryFilters(where, query);
 
     const orderBy = this.buildOrderBy(query?.sortBy || 'date-desc');
-    const take = query?.limit ? Number(query.limit) : undefined;
+    const { page, limit, skip } = this.parsePagination(query, 40);
 
-    const files = await this.fileRepo.findFiles(where, orderBy, take);
+    const { files, total } = await this.fileRepo.findFilesWithCount(
+      where,
+      orderBy,
+      limit,
+      skip,
+    );
 
-    return { files: files.map((f) => this.formatFile(f)) };
+    return {
+      files: files.map((f) => this.formatFile(f)),
+      total,
+      page,
+      limit,
+      hasMore: skip + files.length < total,
+    };
   }
 }
