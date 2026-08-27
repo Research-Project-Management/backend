@@ -1,8 +1,8 @@
-import { validateExternalUrl } from '@/modules/library/translation/utils/translation.util';
+import { validateExternalUrl } from '@/modules/library/legacy/translation/utils/translation.util';
 import {
   validatePdfBuffer,
   FileSecurityValidator,
-} from '@/modules/library/attachments/utils/attachments.util';
+} from '@/modules/library/legacy/attachments/utils/attachments.util';
 
 describe('SSRF Guard & File Security (Ingestion & Attachments)', () => {
   let fileSecurity: FileSecurityValidator;

@@ -277,6 +277,8 @@ model User {
   userItemStates       UserItemState[]
   savedSearches        SavedSearch[]
   worklogs             Worklog[]             @relation("UserWorklogs")
+  zoteroConnections    ZoteroConnection[]
+  capturePreviews      CapturePreview[]
 
   @@index([email])
   @@index([status, deletedAt])
@@ -407,6 +409,12 @@ model Workspace {
   syncSequence SyncSequence?
   savedSearches SavedSearch[]
   duplicateClusters DuplicateCluster[]
+  zoteroConnections ZoteroConnection[]
+  zoteroBindings    ZoteroBinding[]
+  zoteroItemBindings ZoteroItemBinding[]
+  zoteroSyncRuns    ZoteroSyncRun[]
+  zoteroSyncFailures ZoteroSyncFailure[]
+  capturePreviews   CapturePreview[]
 
   @@index([createdById])
   @@index([url])
@@ -919,7 +927,8 @@ model SyncSequence {
 }
 
 model LibraryChange {
-  seq         BigInt    @id @default(autoincrement())
+  id          String    @id @default(uuid())
+  seq         BigInt    @map("seq")
   workspaceId String    @map("workspace_id")
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   entityType  String    @map("entity_type") // item, collection, tag, attachment, note, annotation
@@ -970,18 +979,25 @@ model UserItemState {
 }
 
 model OutboxEvent {
-  id          String       @id @default(uuid())
-  workspaceId String?      @map("workspace_id")
-  aggregateId String       @map("aggregate_id")
-  eventType   String       @map("event_type") // library.item.created, metadata.reconciled...
-  payload     Json
-  status      OutboxStatus @default(PENDING)
-  retryCount  Int          @default(0) @map("retry_count")
-  error       String?
-  scheduledAt DateTime?    @default(now()) @map("scheduled_at")
-  createdAt   DateTime     @default(now()) @map("created_at")
-  processedAt DateTime?    @map("processed_at")
+  id             String       @id @default(uuid())
+  workspaceId    String?      @map("workspace_id")
+  aggregateId    String       @map("aggregate_id")
+  eventType      String       @map("event_type") // library.item.created, metadata.reconciled...
+  payload        Json
+  status         OutboxStatus @default(PENDING)
+  retryCount     Int          @default(0) @map("retry_count")
+  error          String?
+  scheduledAt    DateTime?    @default(now()) @map("scheduled_at")
+  claimedAt      DateTime?    @map("claimed_at")
+  leaseExpiresAt DateTime?    @map("lease_expires_at")
+  claimedBy      String?      @map("claimed_by")
+  dedupeKey      String?      @unique @map("dedupe_key")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at")
+  processedAt    DateTime?    @map("processed_at")
 
+  @@index([status, scheduledAt])
+  @@index([status, leaseExpiresAt])
   @@index([status, createdAt])
   @@index([workspaceId, status])
   @@map("outbox_events")
@@ -1181,6 +1197,8 @@ model Task {
   worklogs       Worklog[]
 
   @@index([projectId, columnId, rank])
+  @@index([projectId, columnId, deletedAt, rank])
+  @@index([projectId, parentTaskId, rank])
   @@index([projectId, completed, deletedAt])
   @@index([projectId, assigneeId, dueDate])
   @@index([projectId, identifier])
@@ -1237,6 +1255,7 @@ model Worklog {
 
   @@index([projectId, date])
   @@index([userId, date])
+  @@index([projectId, userId, date])
   @@index([taskId])
   @@map("worklogs")
 }
@@ -1375,3 +1394,156 @@ model ActivityEvent {
   @@index([actorId, createdAt])
   @@map("activity_events")
 }
+
+// ── 10. Library Integrations (Zotero & External Providers) ─────────────────
+
+model ZoteroConnection {
+  id              String          @id @default(uuid())
+  workspaceId     String          @map("workspace_id")
+  workspace       Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId          String          @map("user_id")
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider        String          @default("zotero")
+  accountName     String?         @map("account_name")
+  accountType     String?         @default("user") @map("account_type") // user, group
+  zoteroUserId    String?         @map("zotero_user_id")
+  encryptedApiKey String          @map("encrypted_api_key")
+  keyIv           String          @map("key_iv")
+  keyTag          String          @map("key_tag")
+  scopes          Json?           @default("{}")
+  status          String          @default("active") // active, revoked, error
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  bindings        ZoteroBinding[]
+
+  @@unique([workspaceId, zoteroUserId])
+  @@index([workspaceId, status])
+  @@map("zotero_connections")
+}
+
+model ZoteroBinding {
+  id                 String              @id @default(uuid())
+  connectionId       String              @map("connection_id")
+  connection         ZoteroConnection    @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  workspaceId        String              @map("workspace_id")
+  workspace          Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  remoteLibraryType  String              @default("user") @map("remote_library_type") // user, group
+  remoteLibraryId    String              @map("remote_library_id")
+  lastSyncVersion    BigInt              @default(0) @map("last_sync_version")
+  lastSyncAt         DateTime?           @map("last_sync_at")
+  syncStatus         String              @default("idle") @map("sync_status") // idle, syncing, error
+  syncDirection      String              @default("read_only") @map("sync_direction") // read_only, two_way
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+
+  itemBindings       ZoteroItemBinding[]
+  syncRuns           ZoteroSyncRun[]
+  syncFailures       ZoteroSyncFailure[]
+
+  @@unique([workspaceId, remoteLibraryType, remoteLibraryId])
+  @@index([connectionId])
+  @@map("zotero_bindings")
+}
+
+model ZoteroItemBinding {
+  id             String        @id @default(uuid())
+  bindingId      String        @map("binding_id")
+  binding        ZoteroBinding @relation(fields: [bindingId], references: [id], onDelete: Cascade)
+  workspaceId    String        @map("workspace_id")
+  workspace      Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  entityType     String        @map("entity_type") // item, collection, tag, attachment, note, annotation
+  entityId       String        @map("entity_id")
+  remoteKey      String        @map("remote_key")
+  remoteVersion  BigInt        @default(0) @map("remote_version")
+  baseSnapshot   Json?         @map("base_snapshot")
+  rawPayload     Json?         @map("raw_payload")
+  syncState      String        @default("synced") @map("sync_state") // synced, pending_push, conflict, error
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  @@unique([bindingId, remoteKey])
+  @@unique([bindingId, entityType, entityId])
+  @@index([workspaceId, entityType, entityId])
+  @@map("zotero_item_bindings")
+}
+
+model ZoteroSyncRun {
+  id             String              @id @default(uuid())
+  bindingId      String              @map("binding_id")
+  binding        ZoteroBinding       @relation(fields: [bindingId], references: [id], onDelete: Cascade)
+  workspaceId    String              @map("workspace_id")
+  workspace      Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  direction      String              @default("pull") // pull, push, reconcile
+  versionBefore  BigInt              @default(0) @map("version_before")
+  versionAfter   BigInt              @default(0) @map("version_after")
+  itemsCreated   Int                 @default(0) @map("items_created")
+  itemsUpdated   Int                 @default(0) @map("items_updated")
+  itemsDeleted   Int                 @default(0) @map("items_deleted")
+  status         String              @default("pending") // pending, running, completed, failed
+  errorMessage   String?             @map("error_message")
+  startedAt      DateTime            @default(now()) @map("started_at")
+  completedAt    DateTime?           @map("completed_at")
+
+  failures       ZoteroSyncFailure[]
+
+  @@index([bindingId, startedAt])
+  @@map("zotero_sync_runs")
+}
+
+model ZoteroSyncFailure {
+  id             String           @id @default(uuid())
+  syncRunId      String?          @map("sync_run_id")
+  syncRun        ZoteroSyncRun?   @relation(fields: [syncRunId], references: [id], onDelete: SetNull)
+  bindingId      String           @map("binding_id")
+  binding        ZoteroBinding    @relation(fields: [bindingId], references: [id], onDelete: Cascade)
+  workspaceId    String           @map("workspace_id")
+  workspace      Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  operation      String           // fetch_items, map_item, persist_item, push_item
+  remoteKey      String?          @map("remote_key")
+  entityId       String?          @map("entity_id")
+  errorMessage   String           @map("error_message")
+  errorDetails   Json?            @map("error_details")
+  attempts       Int              @default(1)
+  status         String           @default("retryable") // retryable, dead_letter, resolved
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  @@index([bindingId, status])
+  @@map("zotero_sync_failures")
+}
+
+model IntegrationPolicy {
+  id         String   @id @default(uuid())
+  provider   String   @unique // e.g. "zotero"
+  isPaused   Boolean  @default(false) @map("is_paused")
+  reason     String?
+  changedBy  String?  @map("changed_by")
+  changedAt  DateTime @default(now()) @map("changed_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@map("integration_policies")
+}
+
+model CapturePreview {
+  id                String    @id @default(uuid())
+  workspaceId       String    @map("workspace_id")
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId            String    @map("user_id")
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceUrl         String    @map("source_url")
+  canonicalMetadata Json      @map("canonical_metadata")
+  metadataDigest    String    @map("metadata_digest")
+  tokenHash         String    @unique @map("token_hash")
+  expiresAt         DateTime  @map("expires_at")
+  consumedAt        DateTime? @map("consumed_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@index([workspaceId, expiresAt])
+  @@index([tokenHash])
+  @@map("capture_previews")
+}
+
+

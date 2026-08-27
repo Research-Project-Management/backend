@@ -38,10 +38,26 @@ export class AppendMessagesDto {
   @IsArray()
   @IsOptional()
   documentIds?: string[];
+
+  @IsString()
+  @IsOptional()
+  projectId?: string;
+
+  @IsString()
+  @IsOptional()
+  workspaceId?: string;
 }
 
 export class RenameThreadDto {
   @IsString()
   @IsNotEmpty({ message: 'Title is required' })
   title!: string;
+
+  @IsString()
+  @IsOptional()
+  projectId?: string;
+
+  @IsString()
+  @IsOptional()
+  workspaceId?: string;
 }

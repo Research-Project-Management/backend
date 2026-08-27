@@ -2,73 +2,142 @@ import {
   Controller,
   Get,
   Post,
-  Put,
+  Patch,
   Delete,
-  Body,
   Param,
   Query,
+  Body,
+  Headers,
   UseGuards,
+  NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { NotesService } from './notes.service';
-import { CreateNoteDto, UpdateNoteDto } from './dto/notes.dto';
-import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
-import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
-import { WorkspaceRoleGuard } from '@/modules/iam/authz/guards/workspace-role.guard';
-import { WorkspaceRoles } from '@/modules/iam/authz/decorators/workspace-roles.decorator';
+import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
+import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
+import { CurrentUser } from '../../../modules/iam/authn/decorators/current-user.decorator';
 
-@ApiTags('Library - Notes')
-@ApiBearerAuth()
+export class CreateNoteDto {
+  itemId?: string | null;
+  title?: string;
+  contentJson?: any;
+  contentMd?: string;
+  tags?: string[];
+}
+
+export class UpdateNoteDto {
+  title?: string;
+  contentJson?: any;
+  contentMd?: string;
+  tags?: string[];
+  expectedVersion?: number;
+}
+
+@Controller('api/v1/workspaces/:workspaceId/library/notes')
 @UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
-@Controller('workspace/:workspaceId/library/notes')
 export class NotesController {
   constructor(private readonly notesService: NotesService) {}
 
   @Get()
-  @WorkspaceRoles('admin', 'member', 'viewer')
-  @ApiOperation({ summary: 'Get all standalone or catalog notes in workspace' })
-  async getNotes(
+  async listNotes(
     @Param('workspaceId') workspaceId: string,
     @Query('itemId') itemId?: string,
   ) {
-    const notes = await this.notesService.getNotes(workspaceId, itemId);
-    return { data: notes, total: notes.length };
+    const notes = await this.notesService.listNotes(workspaceId, itemId);
+    return {
+      success: true,
+      data: notes,
+    };
+  }
+
+  @Get(':id')
+  async getNote(
+    @Param('workspaceId') workspaceId: string,
+    @Param('id') id: string,
+  ) {
+    const note = await this.notesService.getNote(workspaceId, id);
+    if (!note) {
+      throw new NotFoundException(
+        `Note ${id} not found in workspace ${workspaceId}`,
+      );
+    }
+
+    return {
+      success: true,
+      data: note,
+    };
   }
 
   @Post()
-  @WorkspaceRoles('admin', 'member')
-  @ApiOperation({
-    summary: 'Create a new standalone note or child note on catalog item',
-  })
   async createNote(
     @Param('workspaceId') workspaceId: string,
-    @CurrentUser('id') userId: string,
-    @Body() dto: CreateNoteDto,
+    @CurrentUser('id') currentUserId: string,
+    @Body() body: CreateNoteDto,
   ) {
-    const note = await this.notesService.createNote(workspaceId, dto, userId);
-    return { data: note };
+    const note = await this.notesService.createNote(workspaceId, {
+      ...body,
+      createdById: currentUserId || 'system',
+    });
+
+    return {
+      success: true,
+      data: note,
+    };
   }
 
-  @Put(':noteId')
-  @WorkspaceRoles('admin', 'member')
-  @ApiOperation({ summary: 'Update note content or tags' })
+  @Patch(':id')
   async updateNote(
     @Param('workspaceId') workspaceId: string,
-    @Param('noteId') noteId: string,
-    @Body() dto: UpdateNoteDto,
+    @Param('id') id: string,
+    @Headers('if-match') ifMatch: string | undefined,
+    @Body() body: UpdateNoteDto,
   ) {
-    const note = await this.notesService.updateNote(workspaceId, noteId, dto);
-    return { data: note };
+    const expectedVersion =
+      body.expectedVersion ??
+      (ifMatch ? parseInt(ifMatch.replace(/["']/g, ''), 10) : undefined);
+    if (!expectedVersion || isNaN(expectedVersion)) {
+      throw new BadRequestException(
+        'Optimistic locking requirement: expectedVersion or If-Match header is required',
+      );
+    }
+
+    const { expectedVersion: _, ...updateData } = body;
+    const updated = await this.notesService.updateNote(
+      workspaceId,
+      id,
+      expectedVersion,
+      updateData,
+    );
+
+    return {
+      success: true,
+      data: updated,
+    };
   }
 
-  @Delete(':noteId')
-  @WorkspaceRoles('admin', 'member')
-  @ApiOperation({ summary: 'Delete a note' })
+  @Delete(':id')
   async deleteNote(
     @Param('workspaceId') workspaceId: string,
-    @Param('noteId') noteId: string,
+    @Param('id') id: string,
+    @Headers('if-match') ifMatch?: string,
   ) {
-    await this.notesService.deleteNote(workspaceId, noteId);
-    return { deleted: true };
+    const expectedVersion = ifMatch
+      ? parseInt(ifMatch.replace(/["']/g, ''), 10)
+      : undefined;
+    const deleted = await this.notesService.deleteNote(
+      workspaceId,
+      id,
+      expectedVersion,
+    );
+    if (!deleted) {
+      throw new NotFoundException(
+        `Note ${id} not found in workspace ${workspaceId}`,
+      );
+    }
+
+    return {
+      success: true,
+      data: { deleted },
+    };
   }
 }

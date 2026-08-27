@@ -1,8 +1,7 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
-import { CitationService } from '../../../../src/contexts/library/citation/citation.service';
+import { CitationService } from '../../../../src/modules/library/citation/citation.service';
 
 const goldenCorpus = require('../../../fixtures/library/citation-golden-corpus.json');
-
 
 describe('CSL Style Registry & Golden Citation Corpus (Integration)', () => {
   let citationService: CitationService;

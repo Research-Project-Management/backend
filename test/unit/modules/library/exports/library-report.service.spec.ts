@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ReportService as LibraryReportService } from '@/modules/library/report/report.service';
-import { ItemsRepository as CatalogRepository } from '@/modules/library/items/items.repository';
+import { ReportService as LibraryReportService } from '@/modules/library/legacy/report/report.service';
+import { ItemsRepository as CatalogRepository } from '@/modules/library/legacy/items/items.repository';
 import { NotFoundException } from '@nestjs/common';
 
 describe('LibraryReportService', () => {

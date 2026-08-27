@@ -1,0 +1,106 @@
+{
+  "nonConflictingThreeWay": {
+    "base": {
+      "key": "ITEM_BASE_001",
+      "version": 10,
+      "title": "Quantum Error Mitigation in Noisy Processors",
+      "abstract": "Original abstract about error mitigation techniques.",
+      "year": 2023,
+      "doi": "10.1103/PhysRevLett.123.456",
+      "itemType": "journalArticle",
+      "publicationTitle": "Physical Review Letters",
+      "tags": ["Quantum", "Physics"]
+    },
+    "local": {
+      "key": "ITEM_BASE_001",
+      "version": 11,
+      "title": "Quantum Error Mitigation in Superconducting Processors (Flux Edit)",
+      "abstract": "Original abstract about error mitigation techniques.",
+      "year": 2023,
+      "doi": "10.1103/PhysRevLett.123.456",
+      "itemType": "journalArticle",
+      "publicationTitle": "Physical Review Letters",
+      "tags": ["Quantum", "Physics", "Superconducting"]
+    },
+    "remote": {
+      "key": "ITEM_BASE_001",
+      "version": 12,
+      "title": "Quantum Error Mitigation in Noisy Processors",
+      "abstract": "Expanded abstract updated remotely by peer reviewer in Zotero.",
+      "year": 2023,
+      "doi": "10.1103/PhysRevLett.123.456",
+      "itemType": "journalArticle",
+      "publicationTitle": "Physical Review Letters",
+      "tags": ["Quantum", "Physics", "NISQ"]
+    },
+    "expectedAutoMerged": {
+      "title": "Quantum Error Mitigation in Superconducting Processors (Flux Edit)",
+      "abstract": "Expanded abstract updated remotely by peer reviewer in Zotero.",
+      "year": 2023,
+      "doi": "10.1103/PhysRevLett.123.456",
+      "itemType": "journalArticle",
+      "publicationTitle": "Physical Review Letters",
+      "tags": ["Physics", "Quantum", "NISQ", "Superconducting"]
+    }
+  },
+  "conflictingFieldEdit": {
+    "base": {
+      "key": "ITEM_BASE_002",
+      "version": 20,
+      "title": "Deep Residual Learning for Image Recognition",
+      "abstract": "Presents residual neural networks.",
+      "year": 2015
+    },
+    "local": {
+      "key": "ITEM_BASE_002",
+      "version": 21,
+      "title": "Deep Residual Learning (Flux Local Title)",
+      "abstract": "Presents residual neural networks with 152 layers.",
+      "year": 2016
+    },
+    "remote": {
+      "key": "ITEM_BASE_002",
+      "version": 22,
+      "title": "Deep ResNet Architectures (Zotero Remote Title)",
+      "abstract": "Presents residual neural networks with 152 layers.",
+      "year": 2015
+    },
+    "expectedConflict": {
+      "hasConflict": true,
+      "conflicts": [
+        {
+          "field": "title",
+          "baseValue": "Deep Residual Learning for Image Recognition",
+          "localValue": "Deep Residual Learning (Flux Local Title)",
+          "remoteValue": "Deep ResNet Architectures (Zotero Remote Title)"
+        },
+        {
+          "field": "year",
+          "baseValue": 2015,
+          "localValue": 2016,
+          "remoteValue": 2015
+        }
+      ]
+    }
+  },
+  "deleteVsEditConflict": {
+    "base": {
+      "key": "ITEM_BASE_003",
+      "version": 30,
+      "title": "Semi-Supervised Knowledge Distillation"
+    },
+    "local": {
+      "key": "ITEM_BASE_003",
+      "isDeleted": true
+    },
+    "remote": {
+      "key": "ITEM_BASE_003",
+      "version": 32,
+      "title": "Semi-Supervised Knowledge Distillation in Transformer Vision",
+      "isDeleted": false
+    },
+    "expectedConflict": {
+      "conflictType": "local_delete_vs_remote_edit"
+    }
+  }
+}

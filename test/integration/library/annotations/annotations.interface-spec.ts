@@ -1,5 +1,5 @@
 import { LibraryTestHarness } from '../library-test-harness';
-import { VersionMismatchException } from '../../../../src/contexts/library/common/library-mutation.dto';
+import { VersionMismatchException } from '../../../../src/modules/library/common/library-mutation.dto';
 
 describe('Annotations Interface & Invariants (Integration)', () => {
   let harness: LibraryTestHarness;

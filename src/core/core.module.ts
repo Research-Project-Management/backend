@@ -5,7 +5,6 @@ import { LoggerModule } from './logger/logger.module';
 import { GlobalExceptionFilter } from './filters/global-exception.filter';
 import { TransformInterceptor } from './interceptors/transform.interceptor';
 import { ObservabilityModule } from './observability/observability.module';
-import { OutboxModule } from './outbox/outbox.module';
 import { IdempotencyModule } from './idempotency/idempotency.module';
 import { SandboxModule } from './sandbox/sandbox.module';
 
@@ -16,7 +15,6 @@ import { SandboxModule } from './sandbox/sandbox.module';
     CacheModule,
     LoggerModule,
     ObservabilityModule,
-    OutboxModule,
     IdempotencyModule,
     SandboxModule,
   ],
@@ -26,7 +24,6 @@ import { SandboxModule } from './sandbox/sandbox.module';
     CacheModule,
     LoggerModule,
     ObservabilityModule,
-    OutboxModule,
     IdempotencyModule,
     SandboxModule,
     GlobalExceptionFilter,

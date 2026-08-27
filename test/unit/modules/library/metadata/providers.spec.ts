@@ -7,14 +7,14 @@ import {
   normalizeIssn,
   formatCanonicalId,
   validateAcademicMetadata,
-} from '@/modules/library/metadata/utils/metadata.util';
-import { OpenAlexProvider } from '@/modules/library/metadata/providers/openalex.provider';
-import { ArxivProvider } from '@/modules/library/metadata/providers/arxiv.provider';
-import { PubmedProvider } from '@/modules/library/metadata/providers/pubmed.provider';
-import { OpenlibraryProvider } from '@/modules/library/metadata/providers/openlibrary.provider';
-import { SemanticScholarProvider } from '@/modules/library/metadata/providers/semantic.provider';
-import { UnpaywallProvider } from '@/modules/library/metadata/providers/unpaywall.provider';
-import { DoiResolver } from '@/modules/library/cite/resolvers/doi.resolver';
+} from '@/modules/library/legacy/metadata/utils/metadata.util';
+import { OpenAlexProvider } from '@/modules/library/legacy/metadata/providers/openalex.provider';
+import { ArxivProvider } from '@/modules/library/legacy/metadata/providers/arxiv.provider';
+import { PubmedProvider } from '@/modules/library/legacy/metadata/providers/pubmed.provider';
+import { OpenlibraryProvider } from '@/modules/library/legacy/metadata/providers/openlibrary.provider';
+import { SemanticScholarProvider } from '@/modules/library/legacy/metadata/providers/semantic.provider';
+import { UnpaywallProvider } from '@/modules/library/legacy/metadata/providers/unpaywall.provider';
+import { DoiResolver } from '@/modules/library/legacy/cite/resolvers/doi.resolver';
 
 describe('Canonical Identifier Utilities', () => {
   describe('normalizeDoi', () => {

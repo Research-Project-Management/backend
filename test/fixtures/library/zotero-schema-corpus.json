@@ -1,0 +1,211 @@
+{
+  "version": 1,
+  "description": "Comprehensive Zotero API v3 schema fixture corpus with canonical mapping and unknown field preservation",
+  "items": [
+    {
+      "key": "ZOTERO_ITEM_001",
+      "version": 42,
+      "library": {
+        "type": "user",
+        "id": 123456
+      },
+      "data": {
+        "key": "ZOTERO_ITEM_001",
+        "version": 42,
+        "itemType": "journalArticle",
+        "title": "Attention Is All You Need",
+        "creators": [
+          {
+            "creatorType": "author",
+            "firstName": "Ashish",
+            "lastName": "Vaswani"
+          },
+          {
+            "creatorType": "author",
+            "firstName": "Noam",
+            "lastName": "Shazeer"
+          },
+          {
+            "creatorType": "editor",
+            "firstName": "Yoshua",
+            "lastName": "Bengio"
+          }
+        ],
+        "abstractNote": "The dominant sequence transduction models are based on complex recurrent or convolutional neural networks.",
+        "publicationTitle": "Advances in Neural Information Processing Systems",
+        "volume": "30",
+        "issue": "1",
+        "pages": "5998-6008",
+        "date": "2017",
+        "DOI": "10.48550/arXiv.1706.03762",
+        "ISSN": "1049-5258",
+        "url": "https://arxiv.org/abs/1706.03762",
+        "extra": "Citation Key: vaswani2017attention\ntex.publisher: Curran Associates, Inc.",
+        "tags": [
+          { "tag": "deep-learning", "type": 0 },
+          { "tag": "transformers", "type": 0 },
+          { "tag": "auto-extracted", "type": 1 }
+        ],
+        "collections": ["ZOTERO_COL_001", "ZOTERO_COL_002"],
+        "relations": {
+          "owl:sameAs": "http://example.com/item/42"
+        },
+        "dateAdded": "2024-01-10T12:00:00Z",
+        "dateModified": "2024-02-15T16:30:00Z",
+        "customZoteroFieldX": "proprietary_plugin_data_value_alpha",
+        "customScore": 99.5
+      }
+    },
+    {
+      "key": "ZOTERO_ITEM_002",
+      "version": 15,
+      "library": {
+        "type": "user",
+        "id": 123456
+      },
+      "data": {
+        "key": "ZOTERO_ITEM_002",
+        "version": 15,
+        "itemType": "book",
+        "title": "Deep Learning",
+        "creators": [
+          {
+            "creatorType": "author",
+            "firstName": "Ian",
+            "lastName": "Goodfellow"
+          },
+          {
+            "creatorType": "author",
+            "firstName": "Yoshua",
+            "lastName": "Bengio"
+          },
+          {
+            "creatorType": "author",
+            "name": "Aaron Courville"
+          }
+        ],
+        "publisher": "MIT Press",
+        "place": "Cambridge, MA",
+        "date": "2016",
+        "ISBN": "978-0262035613",
+        "numPages": "800",
+        "tags": [
+          { "tag": "textbook", "type": 0 }
+        ],
+        "collections": ["ZOTERO_COL_001"],
+        "dateAdded": "2024-01-11T10:00:00Z",
+        "dateModified": "2024-01-11T10:00:00Z"
+      }
+    },
+    {
+      "key": "ZOTERO_ITEM_003",
+      "version": 20,
+      "library": {
+        "type": "user",
+        "id": 123456
+      },
+      "data": {
+        "key": "ZOTERO_ITEM_003",
+        "version": 20,
+        "itemType": "conferencePaper",
+        "title": "BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding",
+        "creators": [
+          {
+            "creatorType": "author",
+            "firstName": "Jacob",
+            "lastName": "Devlin"
+          }
+        ],
+        "proceedingsTitle": "Proceedings of NAACL-HLT 2019",
+        "conferenceName": "NAACL-HLT",
+        "date": "2019",
+        "DOI": "10.18653/v1/N19-1423",
+        "tags": [],
+        "collections": [],
+        "dateAdded": "2024-01-12T08:00:00Z",
+        "dateModified": "2024-01-12T08:00:00Z"
+      }
+    }
+  ],
+  "attachments": [
+    {
+      "key": "ZOTERO_ATT_001",
+      "version": 10,
+      "data": {
+        "key": "ZOTERO_ATT_001",
+        "version": 10,
+        "itemType": "attachment",
+        "parentItem": "ZOTERO_ITEM_001",
+        "linkMode": "imported_file",
+        "title": "Vaswani et al. - 2017 - Attention Is All You Need.pdf",
+        "filename": "Vaswani et al. - 2017 - Attention Is All You Need.pdf",
+        "contentType": "application/pdf",
+        "md5": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mtime": 1700000000000,
+        "dateAdded": "2024-01-10T12:05:00Z",
+        "dateModified": "2024-01-10T12:05:00Z"
+      }
+    }
+  ],
+  "notes": [
+    {
+      "key": "ZOTERO_NOTE_001",
+      "version": 5,
+      "data": {
+        "key": "ZOTERO_NOTE_001",
+        "version": 5,
+        "itemType": "note",
+        "parentItem": "ZOTERO_ITEM_001",
+        "note": "<p><strong>Key Insight:</strong> Multi-head attention allows the model to jointly attend to information from different representation subspaces.</p>",
+        "tags": [{ "tag": "summary", "type": 0 }],
+        "dateAdded": "2024-01-15T09:00:00Z",
+        "dateModified": "2024-01-15T09:00:00Z"
+      }
+    }
+  ],
+  "annotations": [
+    {
+      "key": "ZOTERO_ANN_001",
+      "version": 8,
+      "data": {
+        "key": "ZOTERO_ANN_001",
+        "version": 8,
+        "itemType": "annotation",
+        "parentItem": "ZOTERO_ATT_001",
+        "annotationType": "highlight",
+        "annotationText": "Multi-head attention allows the model to jointly attend to information from different representation subspaces",
+        "annotationComment": "Crucial definition for Chapter 3",
+        "annotationColor": "#ffd400",
+        "annotationPageLabel": "4",
+        "annotationPosition": {
+          "pageIndex": 3,
+          "rects": [[100, 200, 450, 230]]
+        },
+        "dateAdded": "2024-01-16T14:00:00Z",
+        "dateModified": "2024-01-16T14:00:00Z"
+      }
+    }
+  ],
+  "collections": [
+    {
+      "key": "ZOTERO_COL_001",
+      "version": 10,
+      "data": {
+        "key": "ZOTERO_COL_001",
+        "version": 10,
+        "name": "Machine Learning",
+        "parentCollection": false
+      }
+    },
+    {
+      "key": "ZOTERO_COL_002",
+      "version": 12,
+      "data": {
+        "key": "ZOTERO_COL_002",
+        "version": 12,
+        "name": "Transformers & LLMs",
+        "parentCollection": "ZOTERO_COL_001"
+      }
+    }
+  ]
+}

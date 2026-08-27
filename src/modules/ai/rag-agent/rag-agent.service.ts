@@ -2,7 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { FastifyReply } from 'fastify';
 import { EngineService } from '../engine/engine.service';
 import { RagAgentQueryDto } from './dto/rag-agent.dto';
-import { ItemsRepository } from '@/modules/library/items/items.repository';
+import { ItemsRepository } from '@/modules/library/legacy/items/items.repository';
 
 @Injectable()
 export class RagAgentService {

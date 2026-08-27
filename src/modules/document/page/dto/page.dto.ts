@@ -64,6 +64,14 @@ export class CreatePageDto {
 export class UpdatePageDto {
   @IsString()
   @IsOptional()
+  projectId?: string;
+
+  @IsString()
+  @IsOptional()
+  workspaceId?: string;
+
+  @IsString()
+  @IsOptional()
   title?: string;
 
   @IsString()

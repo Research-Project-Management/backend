@@ -2,106 +2,145 @@ import {
   Controller,
   Get,
   Post,
-  Put,
+  Patch,
   Delete,
-  Body,
   Param,
+  Query,
+  Body,
+  Headers,
   UseGuards,
-  HttpCode,
-  HttpStatus,
+  NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { AnnotationsService } from './annotations.service';
-import {
-  CreateAnnotationDto,
-  UpdateAnnotationDto,
-} from './dto/annotations.dto';
-import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
-import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
-import { WorkspaceRoleGuard } from '@/modules/iam/authz/guards/workspace-role.guard';
-import { WorkspaceRoles } from '@/modules/iam/authz/decorators/workspace-roles.decorator';
+import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
+import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
+import { CurrentUser } from '../../../modules/iam/authn/decorators/current-user.decorator';
+import { AnnotationType } from '@prisma/client';
 
-@ApiTags('Library - Annotations')
-@ApiBearerAuth()
+export class CreateAnnotationDto {
+  type?: AnnotationType;
+  pageIndex!: number;
+  color?: string;
+  quoteText?: string;
+  comment?: string;
+  rectCoords?: any;
+}
+
+export class UpdateAnnotationDto {
+  color?: string;
+  quoteText?: string;
+  comment?: string;
+  rectCoords?: any;
+  expectedVersion?: number;
+}
+
+@Controller(
+  'api/v1/workspaces/:workspaceId/library/attachments/:attachmentId/annotations',
+)
 @UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
-@Controller('workspace/:workspaceId/library/items/:itemId/annotations')
 export class AnnotationsController {
   constructor(private readonly annotationsService: AnnotationsService) {}
 
   @Get()
-  @WorkspaceRoles('admin', 'member', 'viewer')
-  @ApiOperation({ summary: 'Get all PDF annotations for a catalog item' })
-  async getAnnotations(
+  async listAnnotations(
     @Param('workspaceId') workspaceId: string,
-    @Param('itemId') itemId: string,
+    @Param('attachmentId') attachmentId: string,
+    @Query('pageIndex') pageIndex?: string,
   ) {
-    return this.annotationsService.getAnnotations(workspaceId, itemId);
+    const parsedPage =
+      pageIndex !== undefined ? parseInt(pageIndex, 10) : undefined;
+    const annotations =
+      await this.annotationsService.getAnnotationsByAttachment(
+        workspaceId,
+        attachmentId,
+        parsedPage,
+      );
+
+    return {
+      success: true,
+      data: annotations,
+    };
   }
 
   @Post()
-  @WorkspaceRoles('admin', 'member')
-  @ApiOperation({ summary: 'Add a new PDF annotation (highlight/note/rect)' })
   async createAnnotation(
     @Param('workspaceId') workspaceId: string,
-    @Param('itemId') itemId: string,
-    @CurrentUser('id') userId: string,
-    @Body() dto: CreateAnnotationDto,
+    @Param('attachmentId') attachmentId: string,
+    @CurrentUser('id') currentUserId: string,
+    @Body() body: CreateAnnotationDto,
   ) {
-    return this.annotationsService.createAnnotation(
+    const annotation = await this.annotationsService.createAnnotation(
       workspaceId,
-      itemId,
-      userId,
-      dto,
+      {
+        attachmentId,
+        type: body.type,
+        pageIndex: body.pageIndex,
+        color: body.color,
+        quoteText: body.quoteText,
+        comment: body.comment,
+        rectCoords: body.rectCoords,
+        authorId: currentUserId || 'system',
+      },
     );
+
+    return {
+      success: true,
+      data: annotation,
+    };
   }
 
-  @Put(':annotationId')
-  @WorkspaceRoles('admin', 'member')
-  @ApiOperation({ summary: 'Update an annotation comment or color' })
+  @Patch(':id')
   async updateAnnotation(
     @Param('workspaceId') workspaceId: string,
-    @Param('itemId') itemId: string,
-    @Param('annotationId') annotationId: string,
-    @Body() dto: UpdateAnnotationDto,
+    @Param('id') id: string,
+    @Headers('if-match') ifMatch: string | undefined,
+    @Body() body: UpdateAnnotationDto,
   ) {
-    return this.annotationsService.updateAnnotation(
+    const expectedVersion =
+      body.expectedVersion ??
+      (ifMatch ? parseInt(ifMatch.replace(/["']/g, ''), 10) : undefined);
+    if (!expectedVersion || isNaN(expectedVersion)) {
+      throw new BadRequestException(
+        'Optimistic locking requirement: expectedVersion or If-Match header is required',
+      );
+    }
+
+    const { expectedVersion: _, ...updateData } = body;
+    const updated = await this.annotationsService.updateAnnotation(
       workspaceId,
-      itemId,
-      annotationId,
-      dto,
+      id,
+      expectedVersion,
+      updateData,
     );
+
+    return {
+      success: true,
+      data: updated,
+    };
   }
 
-  @Delete(':annotationId')
-  @WorkspaceRoles('admin', 'member')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Delete a PDF annotation' })
+  @Delete(':id')
   async deleteAnnotation(
     @Param('workspaceId') workspaceId: string,
-    @Param('itemId') itemId: string,
-    @Param('annotationId') annotationId: string,
+    @Param('id') id: string,
+    @Headers('if-match') ifMatch?: string,
   ) {
-    return this.annotationsService.deleteAnnotation(
+    const expectedVersion = ifMatch
+      ? parseInt(ifMatch.replace(/["']/g, ''), 10)
+      : undefined;
+    const deleted = await this.annotationsService.deleteAnnotation(
       workspaceId,
-      itemId,
-      annotationId,
+      id,
+      expectedVersion,
     );
-  }
+    if (!deleted) {
+      throw new NotFoundException(`Annotation ${id} not found`);
+    }
 
-  @Post('extract-notes')
-  @WorkspaceRoles('admin', 'member')
-  @ApiOperation({
-    summary: 'Extract and compile literature notes from annotations',
-  })
-  async extractNotes(
-    @Param('workspaceId') workspaceId: string,
-    @Param('itemId') itemId: string,
-    @CurrentUser('id') userId: string,
-  ) {
-    return this.annotationsService.extractLiteratureNotes(
-      workspaceId,
-      itemId,
-      userId,
-    );
+    return {
+      success: true,
+      data: { deleted },
+    };
   }
 }

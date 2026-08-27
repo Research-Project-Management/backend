@@ -1,7 +1,7 @@
 import {
   wrapResponse,
   createPaginationMeta,
-} from '@/modules/library/sync/utils/sync.util';
+} from '@/modules/library/legacy/sync/utils/sync.util';
 
 describe('API Envelope & Pagination Utilities (Sync & Subsystem)', () => {
   describe('wrapResponse', () => {

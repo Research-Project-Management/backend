@@ -1,4 +1,4 @@
-import { BibtexParser } from '@/modules/library/cite/parsers/bibtex.parser';
+import { BibtexParser } from '@/modules/library/legacy/cite/parsers/bibtex.parser';
 
 describe('BibtexParser', () => {
   let parser: BibtexParser;

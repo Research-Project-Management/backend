@@ -1,5 +1,5 @@
-import { FileSecurityValidator } from '@/modules/library/attachments/utils/attachments.util';
-import { UrlSecurityValidator } from '@/modules/library/translation/utils/translation.util';
+import { FileSecurityValidator } from '@/modules/library/legacy/attachments/utils/attachments.util';
+import { UrlSecurityValidator } from '@/modules/library/legacy/translation/utils/translation.util';
 
 describe('Phase 10: Security & Production Hardening', () => {
   describe('FileSecurityValidator (MIME & Magic Bytes Safety)', () => {

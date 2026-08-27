@@ -1,4 +1,4 @@
-import { QualityService } from '@/modules/library/quality/quality.service';
+import { QualityService } from '@/modules/library/legacy/quality/quality.service';
 
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 

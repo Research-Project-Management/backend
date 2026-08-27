@@ -14,6 +14,9 @@ describe('Library (e2e)', () => {
   let moduleFixture: TestingModule;
 
   beforeAll(async () => {
+    process.env.ZOTERO_ENCRYPTION_KEY =
+      'flux-research-zotero-secret-key-32-chars-long!';
+
     moduleFixture = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();

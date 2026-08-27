@@ -1,6 +1,6 @@
-import { ContextService as ResearchContextService } from '@/modules/library/context/context.service';
+import { ContextService as ResearchContextService } from '@/modules/library/legacy/context/context.service';
 
-import { CslFormatter } from '@/modules/library/cite/formatters/csl.formatter';
+import { CslFormatter } from '@/modules/library/legacy/cite/formatters/csl.formatter';
 
 describe('ResearchContextService', () => {
   let service: ResearchContextService;

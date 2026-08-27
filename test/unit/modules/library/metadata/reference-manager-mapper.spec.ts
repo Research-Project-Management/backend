@@ -1,5 +1,5 @@
-import { MapperService as ReferenceManagerMapperService } from '@/modules/library/cite/mapper.service';
-import { UnifiedAcademicMetadata } from '@/modules/library/metadata/types/metadata.types';
+import { MapperService as ReferenceManagerMapperService } from '@/modules/library/legacy/cite/mapper.service';
+import { UnifiedAcademicMetadata } from '@/modules/library/legacy/metadata/types/metadata.types';
 
 describe('ReferenceManagerMapperService (Reference Manager Schema & CSL JSON)', () => {
   let mapper: ReferenceManagerMapperService;

@@ -1,8 +1,8 @@
-import { CitationProjectionService } from '@/modules/library/cite/cite.service';
-import { CslFormatter } from '@/modules/library/cite/formatters/csl.formatter';
-import { BibtexFormatter } from '@/modules/library/cite/formatters/bibtex.formatter';
-import { RisFormatter } from '@/modules/library/cite/formatters/ris.formatter';
-import { MapperService as ReferenceManagerMapperService } from '@/modules/library/cite/mapper.service';
+import { CitationProjectionService } from '@/modules/library/legacy/cite/cite.service';
+import { CslFormatter } from '@/modules/library/legacy/cite/formatters/csl.formatter';
+import { BibtexFormatter } from '@/modules/library/legacy/cite/formatters/bibtex.formatter';
+import { RisFormatter } from '@/modules/library/legacy/cite/formatters/ris.formatter';
+import { MapperService as ReferenceManagerMapperService } from '@/modules/library/legacy/cite/mapper.service';
 
 describe('CitationProjectionService (Standard Multi-Format Export & Caching)', () => {
   let service: CitationProjectionService;

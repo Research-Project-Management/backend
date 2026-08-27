@@ -1,13 +1,13 @@
-import { ItemsController as CatalogController } from '@/modules/library/items/items.controller';
-import { CollectionsController } from '@/modules/library/collections/collections.controller';
-import { TranslationController as IngestionController } from '@/modules/library/translation/translation.controller';
-import { CiteController as CitationController } from '@/modules/library/cite/cite.controller';
+import { ItemsController as CatalogController } from '@/modules/library/legacy/items/items.controller';
+import { CollectionsController } from '@/modules/library/legacy/collections/collections.controller';
+import { TranslationController as IngestionController } from '@/modules/library/legacy/translation/translation.controller';
+import { CiteController as CitationController } from '@/modules/library/legacy/cite/cite.controller';
 
-import { AttachmentsController } from '@/modules/library/attachments/attachments.controller';
-import { RelationsController as RelationGraphController } from '@/modules/library/relations/relations.controller';
-import { QualityController } from '@/modules/library/quality/quality.controller';
-import { ContextController as ResearchContextController } from '@/modules/library/context/context.controller';
-import { TranslationSourceType as IngestionSourceType } from '@/modules/library/translation/dto/translation.dto';
+import { AttachmentsController } from '@/modules/library/legacy/attachments/attachments.controller';
+import { RelationsController as RelationGraphController } from '@/modules/library/legacy/relations/relations.controller';
+import { QualityController } from '@/modules/library/legacy/quality/quality.controller';
+import { ContextController as ResearchContextController } from '@/modules/library/legacy/context/context.controller';
+import { TranslationSourceType as IngestionSourceType } from '@/modules/library/legacy/translation/dto/translation.dto';
 
 describe('Library Subsystem: Complete Controllers & Endpoints Verification', () => {
   let catalogController: CatalogController;

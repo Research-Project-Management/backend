@@ -1,6 +1,6 @@
 import { LibraryTestHarness } from '../library-test-harness';
-import { ChangeLogRepository } from '../../../../src/contexts/library/sync-core/change-log.repository';
-import { IdempotencyRepository } from '../../../../src/contexts/library/sync-core/idempotency.repository';
+import { ChangeLogRepository } from '../../../../src/modules/library/sync-core/change-log.repository';
+import { IdempotencyRepository } from '../../../../src/modules/library/sync-core/idempotency.repository';
 
 jest.setTimeout(60000);
 
@@ -15,14 +15,13 @@ describe('Sync Recovery & Replay Invariants (Integration)', () => {
     idempotencyRepo = harness.moduleRef.get(IdempotencyRepository);
   });
 
-
   afterAll(async () => {
     await harness.close();
   });
 
   describe('1. Cursor-Based Delta Pull Invariant', () => {
     it('returns sequential delta entries strictly greater than sinceSeq cursor', async () => {
-      const tenant = harness.createWorkspaceFixture();
+      const tenant = await harness.seedWorkspaceFixture();
 
       const c1 = await changeLogRepo.appendChange(tenant.workspaceId, {
         entityType: 'CatalogItem',
@@ -62,7 +61,7 @@ describe('Sync Recovery & Replay Invariants (Integration)', () => {
 
   describe('2. Idempotent Replay Invariant', () => {
     it('replaying pull with identical sinceSeq yields consistent, immutable change logs', async () => {
-      const tenant = harness.createWorkspaceFixture();
+      const tenant = await harness.seedWorkspaceFixture();
 
       const c1 = await changeLogRepo.appendChange(tenant.workspaceId, {
         entityType: 'CatalogItemTag',
@@ -88,7 +87,7 @@ describe('Sync Recovery & Replay Invariants (Integration)', () => {
     });
 
     it('replays cached response when identical idempotencyKey and requestHash are provided', async () => {
-      const tenant = harness.createWorkspaceFixture();
+      const tenant = await harness.seedWorkspaceFixture();
       const key = `idempotency-test-${Date.now()}`;
       const hash = 'req-hash-abc-123';
 
@@ -121,13 +120,37 @@ describe('Sync Recovery & Replay Invariants (Integration)', () => {
     });
   });
 
-  describe('3. Expired Cursor & Full Resync Signal', () => {
-    it('signals full resync required when requested cursor is older than retention window', () => {
-      const minRetainedSeq = 100;
-      const requestedSeq = 50;
+  describe('3. Restart & Cold Recovery Invariant', () => {
+    it('recovers state accurately after a fresh repository instance is initialized against the database', async () => {
+      const tenant = await harness.seedWorkspaceFixture();
 
-      const requiresFullResync = requestedSeq < minRetainedSeq;
-      expect(requiresFullResync).toBe(true);
+      // Write 3 changes with initial repo
+      await changeLogRepo.appendChange(tenant.workspaceId, {
+        entityType: 'CatalogItem',
+        entityId: 'item-cold-1',
+        action: 'create',
+        version: 1,
+      });
+      await changeLogRepo.appendChange(tenant.workspaceId, {
+        entityType: 'CatalogItem',
+        entityId: 'item-cold-2',
+        action: 'create',
+        version: 1,
+      });
+
+      // Simulate cold restart: new repository instance with zero in-memory state
+      const freshRepo = new ChangeLogRepository(harness.prisma);
+      const latestSeq = await freshRepo.getLatestSequence(tenant.workspaceId);
+      expect(Number(latestSeq)).toBe(2);
+
+      const allChanges = await freshRepo.getChangesSince(
+        tenant.workspaceId,
+        0,
+        10,
+      );
+      expect(allChanges).toHaveLength(2);
+      expect(allChanges[0].entityId).toBe('item-cold-1');
+      expect(allChanges[1].entityId).toBe('item-cold-2');
     });
   });
 });

@@ -1,13 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { TranslationService as IngestionService } from '@/modules/library/translation/translation.service';
-import { ItemsRepository as CatalogRepository } from '@/modules/library/items/items.repository';
-import { BibtexFormatter } from '@/modules/library/cite/formatters/bibtex.formatter';
-import { BibtexParser } from '@/modules/library/cite/parsers/bibtex.parser';
-import { RisFormatter } from '@/modules/library/cite/formatters/ris.formatter';
-import { DoiResolver } from '@/modules/library/cite/resolvers/doi.resolver';
-import { MetadataService } from '@/modules/library/metadata/metadata.service';
-import { ExtractorService as PdfDoiExtractor } from '@/modules/library/attachments/extractor.service';
-import { TranslationSourceType as IngestionSourceType } from '@/modules/library/translation/dto/translation.dto';
+import { TranslationService as IngestionService } from '@/modules/library/legacy/translation/translation.service';
+import { ItemsRepository as CatalogRepository } from '@/modules/library/legacy/items/items.repository';
+import { BibtexFormatter } from '@/modules/library/legacy/cite/formatters/bibtex.formatter';
+import { BibtexParser } from '@/modules/library/legacy/cite/parsers/bibtex.parser';
+import { RisFormatter } from '@/modules/library/legacy/cite/formatters/ris.formatter';
+import { DoiResolver } from '@/modules/library/legacy/cite/resolvers/doi.resolver';
+import { MetadataService } from '@/modules/library/legacy/metadata/metadata.service';
+import { ExtractorService as PdfDoiExtractor } from '@/modules/library/legacy/attachments/extractor.service';
+import { TranslationSourceType as IngestionSourceType } from '@/modules/library/legacy/translation/dto/translation.dto';
 
 describe('IngestionService', () => {
   let service: IngestionService;

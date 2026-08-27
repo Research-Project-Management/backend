@@ -22,6 +22,14 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
   constructor(private readonly configService: ConfigService) {}
 
   onModuleInit() {
+    if (
+      process.env.NODE_ENV === 'test' ||
+      process.env.DISABLE_REDIS === 'true'
+    ) {
+      this.isConnected = false;
+      return;
+    }
+
     const redisUrl =
       this.configService.get<string>('REDIS_URL') ||
       process.env.REDIS_URL ||
@@ -72,8 +80,14 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
       try {
         await this.redisClient.quit();
       } catch {
-        // ignore on shutdown
+        try {
+          this.redisClient.disconnect();
+        } catch {
+          // ignore
+        }
       }
+      this.redisClient = null;
+      this.isConnected = false;
     }
   }
 

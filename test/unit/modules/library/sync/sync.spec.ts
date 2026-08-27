@@ -1,4 +1,4 @@
-import { SyncService } from '@/modules/library/sync/sync.service';
+import { SyncService } from '@/modules/library/legacy/sync/sync.service';
 
 describe('Phase 9: Sync, Versioning & Offline-Ready Subsystem', () => {
   let syncService: SyncService;

@@ -1,126 +1,166 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { createHash, randomUUID } from 'crypto';
-import { ExtractorService } from './extractor.service';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../../../core/database/prisma.service';
+import { createHash } from 'crypto';
+import { LibraryTransactionService } from '../sync-core/library-transaction.service';
 
-import { ItemsRepository } from '../items/items.repository';
+export interface CreateAttachmentInput {
+  catalogItemId: string;
+  filename: string;
+  url: string;
+  mimeType?: string;
+  size?: number;
+  fileHash?: string;
+  fileId?: string;
+}
+
+export interface ReplaceAttachmentFileInput {
+  url: string;
+  fileHash: string;
+  sizeBytes: number;
+  comment?: string;
+}
 
 @Injectable()
 export class AttachmentsService {
+  private readonly logger = new Logger(AttachmentsService.name);
+
   constructor(
-    private readonly pdfExtractorService: ExtractorService,
-    private readonly itemsRepo: ItemsRepository,
+    private readonly prisma: PrismaService,
+    private readonly libraryTx: LibraryTransactionService,
   ) {}
 
   /**
-   * Extract metadata identifiers from a PDF file URL
+   * Computes SHA-256 hex digest of a file buffer.
    */
-  async extractFromPdf(fileUrl: string) {
-    return this.pdfExtractorService.extractMetadataFromUrl(fileUrl);
+  calculateChecksum(buffer: Buffer): string {
+    return createHash('sha256').update(buffer).digest('hex');
   }
 
   /**
-   * Calculates SHA-256 fingerprint of a file content or buffer
+   * Creates a new attachment with an initial Revision (revision 1).
    */
-  calculateFileHash(content: Buffer | string): string {
-    return createHash('sha256').update(content).digest('hex');
-  }
-
-  async getItemAttachments(workspaceId: string, itemId: string) {
-    const item = await this.getItemInWorkspace(workspaceId, itemId);
-    return {
-      itemId: item.id,
-      attachments: item.attachments ?? [],
-      total: item.attachments?.length ?? 0,
-    };
-  }
-
-  async getItemAttachment(
-    workspaceId: string,
-    itemId: string,
-    attachmentId: string,
-  ) {
-    const item = await this.getItemInWorkspace(workspaceId, itemId);
-    const attachment = item.attachments?.find(
-      (candidate: any) => candidate.id === attachmentId,
-    );
-
-    if (!attachment) {
-      throw new NotFoundException('Attachment not found for this catalog item');
+  async createAttachment(input: CreateAttachmentInput) {
+    const item = await this.prisma.catalogItem.findUnique({
+      where: { id: input.catalogItemId },
+    });
+    if (!item) {
+      throw new NotFoundException(
+        `CatalogItem ${input.catalogItemId} not found`,
+      );
     }
 
-    return { attachment };
+    return this.libraryTx.executeInTransaction(async (tx, helpers) => {
+      const attachment = await tx.catalogAttachment.create({
+        data: {
+          catalogItemId: input.catalogItemId,
+          filename: input.filename,
+          url: input.url,
+          mimeType: input.mimeType ?? 'application/pdf',
+          size: input.size ?? 0,
+          fileHash: input.fileHash ?? '',
+          fileId: input.fileId ?? null,
+          revisions: {
+            create: {
+              revisionNumber: 1,
+              url: input.url,
+              fileHash: input.fileHash ?? '',
+              sizeBytes: input.size ?? 0,
+              comment: 'Initial file upload',
+            },
+          },
+        },
+        include: {
+          revisions: {
+            orderBy: { revisionNumber: 'desc' },
+          },
+        },
+      });
+
+      await helpers.appendChange(item.workspaceId, {
+        entityType: 'Attachment',
+        entityId: attachment.id,
+        action: 'create',
+        version: 1,
+        data: attachment,
+      });
+
+      await helpers.publishOutbox(
+        item.workspaceId,
+        attachment.id,
+        'library.attachment.created',
+        attachment,
+      );
+
+      return attachment;
+    });
   }
 
-  async addAttachment(
-    workspaceId: string,
-    itemId: string,
-    data: {
-      filename: string;
-      mimeType: string;
-      size: number;
-      url: string;
-      content?: Buffer | string;
-      storageKey?: string;
-    },
-  ) {
-    const item = await this.getItemInWorkspace(workspaceId, itemId);
-    const hash = data.content
-      ? this.calculateFileHash(data.content)
-      : undefined;
-    const now = new Date().toISOString();
-
-    const attachmentId = randomUUID();
-    const newAttachment = {
-      id: attachmentId,
-      filename: data.filename,
-      mimeType: data.mimeType,
-      size: data.size,
-      url: data.url,
-      storageKey:
-        data.storageKey || `attachments/${attachmentId}/${data.filename}`,
-      fileHash: hash,
-      version: 1,
-      createdAt: now,
-      updatedAt: now,
-      revisions: [
-        {
-          id: randomUUID(),
-          revisionNumber: 1,
-          fileHash: hash,
-          size: data.size,
-          url: data.url,
-          createdAt: now,
-        },
-      ],
-    };
-
-    await this.itemsRepo.updateItem(item.id, {
-      attachments: {
-        create: {
-          id: attachmentId,
-          filename: data.filename,
-          mimeType: data.mimeType,
-          size: data.size,
-          url: data.url,
-          attachmentType: 'pdf' as any,
-        },
+  /**
+   * Replaces an attachment's current file by creating an immutable sequential revision.
+   */
+  async addRevision(attachmentId: string, input: ReplaceAttachmentFileInput) {
+    const attachment = await this.prisma.catalogAttachment.findUnique({
+      where: { id: attachmentId },
+      include: {
+        catalogItem: true,
+        revisions: { orderBy: { revisionNumber: 'desc' }, take: 1 },
       },
     });
 
-    return { attachment: newAttachment };
-  }
-
-  private async getItemInWorkspace(workspaceId: string, itemId: string) {
-    const targetWsId = await this.itemsRepo.resolveWorkspaceId(workspaceId);
-    const item = await this.itemsRepo.findItemByIdInWorkspace(
-      targetWsId,
-      itemId,
-    );
-
-    if (!item || item.deletedAt) {
-      throw new NotFoundException('Catalog item not found in this workspace');
+    if (!attachment) {
+      throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
-    return item;
+    const nextRevisionNumber =
+      (attachment.revisions[0]?.revisionNumber ?? 0) + 1;
+
+    return this.libraryTx.executeInTransaction(async (tx, helpers) => {
+      const updatedAttachment = await tx.catalogAttachment.update({
+        where: { id: attachmentId },
+        data: {
+          url: input.url,
+          fileHash: input.fileHash,
+          size: input.sizeBytes,
+        },
+      });
+
+      const revision = await tx.attachmentRevision.create({
+        data: {
+          attachmentId,
+          revisionNumber: nextRevisionNumber,
+          url: input.url,
+          fileHash: input.fileHash,
+          sizeBytes: input.sizeBytes,
+          comment: input.comment ?? `Revision ${nextRevisionNumber}`,
+        },
+      });
+
+      await helpers.appendChange(attachment.catalogItem.workspaceId, {
+        entityType: 'Attachment',
+        entityId: attachmentId,
+        action: 'update',
+        version: nextRevisionNumber,
+        data: { attachment: updatedAttachment, revision },
+      });
+
+      await helpers.publishOutbox(
+        attachment.catalogItem.workspaceId,
+        attachmentId,
+        'library.attachment.revision_added',
+        { attachmentId, revisionNumber: nextRevisionNumber },
+      );
+
+      return updatedAttachment;
+    });
+  }
+
+  /**
+   * Retrieves revision history for an attachment.
+   */
+  async getRevisions(attachmentId: string) {
+    return this.prisma.attachmentRevision.findMany({
+      where: { attachmentId },
+      orderBy: { revisionNumber: 'desc' },
+    });
   }
 }

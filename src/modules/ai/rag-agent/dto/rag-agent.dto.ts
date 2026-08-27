@@ -36,6 +36,14 @@ export class RagAgentQueryDto {
 
   @IsString()
   @IsOptional()
+  project_id?: string;
+
+  @IsString()
+  @IsOptional()
+  projectId?: string;
+
+  @IsString()
+  @IsOptional()
   chat_id?: string;
 
   @IsString()

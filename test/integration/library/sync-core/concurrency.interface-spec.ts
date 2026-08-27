@@ -1,5 +1,5 @@
 import { LibraryTestHarness } from '../library-test-harness';
-import { ChangeLogRepository } from '../../../../src/contexts/library/sync-core/change-log.repository';
+import { ChangeLogRepository } from '../../../../src/modules/library/sync-core/change-log.repository';
 
 jest.setTimeout(60000);
 
@@ -12,14 +12,13 @@ describe('Sync Sequence Concurrency & Isolation Invariants (Integration)', () =>
     changeLogRepo = harness.moduleRef.get(ChangeLogRepository);
   });
 
-
   afterAll(async () => {
     await harness.close();
   });
 
   describe('1. Monotonic Per-Workspace Sequence Allocation', () => {
     it('allocates strictly ascending sequence numbers without collisions', async () => {
-      const tenant = harness.createWorkspaceFixture();
+      const tenant = await harness.seedWorkspaceFixture();
 
       const seq1 = await changeLogRepo.allocateNextSequence(tenant.workspaceId);
       const seq2 = await changeLogRepo.allocateNextSequence(tenant.workspaceId);
@@ -32,8 +31,8 @@ describe('Sync Sequence Concurrency & Isolation Invariants (Integration)', () =>
 
   describe('2. Multi-Tenant Sequence Independence', () => {
     it('maintains completely isolated sequence streams across distinct workspaces', async () => {
-      const tenantA = harness.createWorkspaceFixture();
-      const tenantB = harness.createWorkspaceFixture();
+      const tenantA = await harness.seedWorkspaceFixture();
+      const tenantB = await harness.seedWorkspaceFixture();
 
       const seqA1 = await changeLogRepo.allocateNextSequence(
         tenantA.workspaceId,
@@ -57,6 +56,40 @@ describe('Sync Sequence Concurrency & Isolation Invariants (Integration)', () =>
 
       expect(Number(seqB1)).toBe(1);
       expect(Number(seqB2)).toBe(2);
+    });
+  });
+
+  describe('3. Two Concurrent Application Instances', () => {
+    it('allocates unique, collision-free monotonic sequences when two concurrent application instances write in parallel', async () => {
+      const tenant = await harness.seedWorkspaceFixture();
+
+      // Simulate two separate application instances connected to the same DB
+      const instanceA = new ChangeLogRepository(harness.prisma);
+      const instanceB = new ChangeLogRepository(harness.prisma);
+
+      const allocationsCount = 25;
+      const promisesA = Array.from({ length: allocationsCount }, () =>
+        instanceA.allocateNextSequence(tenant.workspaceId),
+      );
+      const promisesB = Array.from({ length: allocationsCount }, () =>
+        instanceB.allocateNextSequence(tenant.workspaceId),
+      );
+
+      const allAllocated = await Promise.all([...promisesA, ...promisesB]);
+      const numbers = allAllocated
+        .map((seq) => Number(seq))
+        .sort((a, b) => a - b);
+
+      // Verify exactly 50 numbers allocated
+      expect(numbers).toHaveLength(50);
+
+      // Verify set contains no duplicates
+      const uniqueSet = new Set(numbers);
+      expect(uniqueSet.size).toBe(50);
+
+      // Verify sequence is strictly 1 to 50
+      expect(numbers[0]).toBe(1);
+      expect(numbers[49]).toBe(50);
     });
   });
 });

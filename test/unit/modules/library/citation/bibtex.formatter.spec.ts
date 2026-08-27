@@ -1,4 +1,4 @@
-import { BibtexFormatter } from '@/modules/library/cite/formatters/bibtex.formatter';
+import { BibtexFormatter } from '@/modules/library/legacy/cite/formatters/bibtex.formatter';
 
 describe('BibtexFormatter', () => {
   let formatter: BibtexFormatter;

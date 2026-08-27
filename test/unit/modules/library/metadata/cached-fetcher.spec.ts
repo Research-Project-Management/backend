@@ -1,13 +1,13 @@
-import { MetadataService } from '@/modules/library/metadata/metadata.service';
-import { SemanticScholarProvider } from '@/modules/library/metadata/providers/semantic.provider';
-import { ArxivProvider } from '@/modules/library/metadata/providers/arxiv.provider';
-import { PubmedProvider } from '@/modules/library/metadata/providers/pubmed.provider';
-import { OpenlibraryProvider } from '@/modules/library/metadata/providers/openlibrary.provider';
-import { OpenAlexProvider } from '@/modules/library/metadata/providers/openalex.provider';
-import { UnpaywallProvider } from '@/modules/library/metadata/providers/unpaywall.provider';
+import { MetadataService } from '@/modules/library/legacy/metadata/metadata.service';
+import { SemanticScholarProvider } from '@/modules/library/legacy/metadata/providers/semantic.provider';
+import { ArxivProvider } from '@/modules/library/legacy/metadata/providers/arxiv.provider';
+import { PubmedProvider } from '@/modules/library/legacy/metadata/providers/pubmed.provider';
+import { OpenlibraryProvider } from '@/modules/library/legacy/metadata/providers/openlibrary.provider';
+import { OpenAlexProvider } from '@/modules/library/legacy/metadata/providers/openalex.provider';
+import { UnpaywallProvider } from '@/modules/library/legacy/metadata/providers/unpaywall.provider';
 
-import { DoiResolver } from '@/modules/library/cite/resolvers/doi.resolver';
-import { BibtexFormatter } from '@/modules/library/cite/formatters/bibtex.formatter';
+import { DoiResolver } from '@/modules/library/legacy/cite/resolvers/doi.resolver';
+import { BibtexFormatter } from '@/modules/library/legacy/cite/formatters/bibtex.formatter';
 import { RedisCacheService } from '@/core/cache/redis-cache.service';
 
 describe('MetadataService (Redis Cache-Aside Layer)', () => {

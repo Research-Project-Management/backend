@@ -47,6 +47,14 @@ export class CreateProjectDto {
 export class UpdateProjectDto {
   @IsString()
   @IsOptional()
+  projectId?: string;
+
+  @IsString()
+  @IsOptional()
+  workspaceId?: string;
+
+  @IsString()
+  @IsOptional()
   name?: string;
 
   @IsString()

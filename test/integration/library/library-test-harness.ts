@@ -7,8 +7,8 @@ import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from '../../../src/app.module';
 import { PrismaService } from '../../../src/core/database/prisma.service';
 import { RedisCacheService } from '../../../src/core/cache/redis-cache.service';
-import { LibraryFeatureFlagsService } from '../../../src/contexts/library/common/library-feature-flags';
-import { VersionMismatchException } from '../../../src/contexts/library/common/library-mutation.dto';
+import { LibraryFeatureFlagsService } from '../../../src/modules/library/common/library-feature-flags';
+import { VersionMismatchException } from '../../../src/modules/library/common/library-mutation.dto';
 
 export interface TestWorkspaceFixture {
   workspaceId: string;
@@ -17,6 +17,9 @@ export interface TestWorkspaceFixture {
 }
 
 export class LibraryTestHarness {
+  private readonly createdWorkspaces = new Set<string>();
+  private readonly createdUsers = new Set<string>();
+
   constructor(
     public readonly app: NestFastifyApplication,
     public readonly moduleRef: TestingModule,
@@ -28,6 +31,15 @@ export class LibraryTestHarness {
    * Initializes the NestJS application with Fastify and Global Validation Pipes.
    */
   static async create(): Promise<LibraryTestHarness> {
+    if (!process.env.ZOTERO_ENCRYPTION_KEY && !process.env.ENCRYPTION_SECRET) {
+      process.env.ZOTERO_ENCRYPTION_KEY =
+        'flux-research-zotero-secret-key-32-chars-long!';
+    }
+    if (!process.env.URL_CAPTURE_SECRET) {
+      process.env.URL_CAPTURE_SECRET =
+        'test_secret_key_minimum_32_bytes_entropy_abcdef1234567890';
+    }
+
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
@@ -48,7 +60,64 @@ export class LibraryTestHarness {
   }
 
   /**
-   * Creates an isolated workspace fixture for multi-tenant boundary testing.
+   * Creates and persists an isolated workspace fixture with real User & Workspace database rows.
+   */
+  async seedWorkspaceFixture(customId?: string): Promise<TestWorkspaceFixture> {
+    const uniqueSuffix =
+      Math.random().toString(36).substring(2, 9) + Date.now().toString(36);
+    const workspaceId = customId || `ws-${uniqueSuffix}`;
+    const ownerUserId = `user-${uniqueSuffix}`;
+    const workspaceSlug = `slug-${uniqueSuffix}`;
+
+    await this.prisma.user.upsert({
+      where: { id: ownerUserId },
+      create: {
+        id: ownerUserId,
+        email: `${ownerUserId}@test.local`,
+        name: `Test User ${uniqueSuffix}`,
+      },
+      update: {},
+    });
+
+    await this.prisma.workspace.upsert({
+      where: { id: workspaceId },
+      create: {
+        id: workspaceId,
+        name: `Test Workspace ${uniqueSuffix}`,
+        url: `https://${workspaceId}.test.local`,
+        slug: workspaceSlug,
+        createdById: ownerUserId,
+      },
+      update: {},
+    });
+
+    await this.prisma.workspaceMember.upsert({
+      where: {
+        workspaceId_userId: {
+          workspaceId,
+          userId: ownerUserId,
+        },
+      },
+      create: {
+        workspaceId,
+        userId: ownerUserId,
+        role: 'owner',
+      },
+      update: {},
+    });
+
+    this.createdWorkspaces.add(workspaceId);
+    this.createdUsers.add(ownerUserId);
+
+    return {
+      workspaceId,
+      workspaceSlug,
+      ownerUserId,
+    };
+  }
+
+  /**
+   * Legacy helper returning fixture metadata.
    */
   createWorkspaceFixture(customId?: string): TestWorkspaceFixture {
     const uniqueSuffix = Math.random().toString(36).substring(2, 9);
@@ -144,12 +213,18 @@ export class LibraryTestHarness {
    */
   async close(): Promise<void> {
     try {
+      for (const wsId of this.createdWorkspaces) {
+        await this.prisma.workspace.deleteMany({ where: { id: wsId } });
+      }
+      for (const userId of this.createdUsers) {
+        await this.prisma.user.deleteMany({ where: { id: userId } });
+      }
       const redis = this.moduleRef.get(RedisCacheService, { strict: false });
       if (redis) {
         await redis.onModuleDestroy();
       }
-      await this.prisma.onModuleDestroy();
       await this.app.close();
+      await this.prisma.onModuleDestroy();
     } catch {
       // ignore
     }

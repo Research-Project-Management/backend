@@ -8,8 +8,8 @@ import {
   normalizeIsbn,
   normalizeIssn,
   formatCanonicalId,
-} from '@/modules/library/metadata/utils/metadata.util';
-import { extractFamilyName } from '@/modules/library/cite/utils/cite.util';
+} from '@/modules/library/legacy/metadata/utils/metadata.util';
+import { extractFamilyName } from '@/modules/library/legacy/cite/utils/cite.util';
 
 
 type CanonicalIdentifierType = 'doi' | 'arxiv' | 'pmid' | 'pmcid' | 'isbn' | 'issn';

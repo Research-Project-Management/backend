@@ -12,7 +12,7 @@ import { parseTaskColumns, TaskColumn } from './types/project.types';
 import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
 import { RedisCacheService } from '@/core/cache/redis-cache.service';
 import { PROJECT_REDIS_KEYS } from './constants/redis-keys.constant';
-import { WORKFLOW_REDIS_KEYS } from '@/modules/workflow/constants/redis-keys.constant';
+import { WORK_ITEM_REDIS_KEYS } from '@/modules/work-item/constants/redis-keys.constant';
 import {
   CreateProjectDto,
   UpdateProjectDto,
@@ -522,7 +522,7 @@ export class ProjectService {
     await this.invalidateProjectCache(projectId, project.workspaceId);
     if (this.cache) {
       await Promise.all([
-        this.cache.del(WORKFLOW_REDIS_KEYS.projectTasks(projectId)),
+        this.cache.del(WORK_ITEM_REDIS_KEYS.projectTasks(projectId)),
         this.cache.del(`flux:proj:overview:${projectId}`),
       ]);
     }

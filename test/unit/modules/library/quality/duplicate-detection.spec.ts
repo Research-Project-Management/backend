@@ -1,6 +1,6 @@
-import { QualityService } from '@/modules/library/quality/quality.service';
-import { normalizeQualityTitle } from '@/modules/library/quality/utils/quality.util';
-import { extractFamilyName } from '@/modules/library/cite/utils/cite.util';
+import { QualityService } from '@/modules/library/legacy/quality/quality.service';
+import { normalizeQualityTitle } from '@/modules/library/legacy/quality/utils/quality.util';
+import { extractFamilyName } from '@/modules/library/legacy/cite/utils/cite.util';
 
 describe('QualityService — Duplicate Detection Logic', () => {
   let service: QualityService;

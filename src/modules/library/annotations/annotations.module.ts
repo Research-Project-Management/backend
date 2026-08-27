@@ -1,12 +1,14 @@
 import { Module } from '@nestjs/common';
 import { AnnotationsController } from './annotations.controller';
 import { AnnotationsService } from './annotations.service';
-import { ItemsModule } from '../items/items.module';
+import { AnnotationsRepository } from './annotations.repository';
+import { CoreModule } from '../../../core/core.module';
+import { SyncCoreContextModule } from '../sync-core/sync-core.module';
 
 @Module({
-  imports: [ItemsModule],
+  imports: [CoreModule, SyncCoreContextModule],
   controllers: [AnnotationsController],
-  providers: [AnnotationsService],
-  exports: [AnnotationsService],
+  providers: [AnnotationsRepository, AnnotationsService],
+  exports: [AnnotationsRepository, AnnotationsService],
 })
-export class AnnotationsModule {}
+export class AnnotationsContextModule {}

@@ -1,6 +1,6 @@
-import { JobsService as IngestionJobService } from '@/modules/library/translation/jobs.service';
-import { TranslationSourceType as IngestionSourceType } from '@/modules/library/translation/dto/translation.dto';
-import { IngestionState } from '@/modules/library/translation/jobs.state';
+import { JobsService as IngestionJobService } from '@/modules/library/legacy/translation/jobs.service';
+import { TranslationSourceType as IngestionSourceType } from '@/modules/library/legacy/translation/dto/translation.dto';
+import { IngestionState } from '@/modules/library/legacy/translation/jobs.state';
 
 describe('IngestionJobService (Durable Queue Engine & Retry Policy)', () => {
   let service: IngestionJobService;

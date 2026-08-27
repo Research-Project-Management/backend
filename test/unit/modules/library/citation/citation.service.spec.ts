@@ -1,12 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { CiteService as CitationService } from '@/modules/library/cite/cite.service';
-import { BibtexFormatter } from '@/modules/library/cite/formatters/bibtex.formatter';
-import { DoiResolver } from '@/modules/library/cite/resolvers/doi.resolver';
-import { ItemsRepository as CatalogRepository } from '@/modules/library/items/items.repository';
-import { BibtexParser } from '@/modules/library/cite/parsers/bibtex.parser';
-import { CslFormatter } from '@/modules/library/cite/formatters/csl.formatter';
-import { RisFormatter } from '@/modules/library/cite/formatters/ris.formatter';
-import { MapperService as ReferenceManagerMapperService } from '@/modules/library/cite/mapper.service';
+import { CiteService as CitationService } from '@/modules/library/legacy/cite/cite.service';
+import { BibtexFormatter } from '@/modules/library/legacy/cite/formatters/bibtex.formatter';
+import { DoiResolver } from '@/modules/library/legacy/cite/resolvers/doi.resolver';
+import { ItemsRepository as CatalogRepository } from '@/modules/library/legacy/items/items.repository';
+import { BibtexParser } from '@/modules/library/legacy/cite/parsers/bibtex.parser';
+import { CslFormatter } from '@/modules/library/legacy/cite/formatters/csl.formatter';
+import { RisFormatter } from '@/modules/library/legacy/cite/formatters/ris.formatter';
+import { MapperService as ReferenceManagerMapperService } from '@/modules/library/legacy/cite/mapper.service';
 
 describe('CitationService & Formatters', () => {
   let service: CitationService;

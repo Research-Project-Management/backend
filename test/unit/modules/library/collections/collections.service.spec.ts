@@ -1,9 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { CollectionsService } from '@/modules/library/collections/collections.service';
-import { CollectionsRepository } from '@/modules/library/collections/collections.repository';
+import { CollectionsService } from '@/modules/library/legacy/collections/collections.service';
+import { CollectionsRepository } from '@/modules/library/legacy/collections/collections.repository';
 import { BadRequestException } from '@nestjs/common';
 
-import { BibtexFormatter } from '@/modules/library/cite/formatters/bibtex.formatter';
+import { BibtexFormatter } from '@/modules/library/legacy/cite/formatters/bibtex.formatter';
 
 describe('CollectionsService', () => {
   let service: CollectionsService;

@@ -2,7 +2,7 @@ import {
   IngestionState,
   IngestionStateMachine,
   ALLOWED_STATE_TRANSITIONS,
-} from '@/modules/library/translation/jobs.state';
+} from '@/modules/library/legacy/translation/jobs.state';
 
 describe('IngestionStateMachine (12-State Formal Model)', () => {
   let sm: IngestionStateMachine;

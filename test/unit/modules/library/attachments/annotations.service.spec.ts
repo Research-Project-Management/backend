@@ -1,4 +1,4 @@
-import { AnnotationsService } from '@/modules/library/annotations/annotations.service';
+import { AnnotationsService } from '@/modules/library/legacy/annotations/annotations.service';
 
 describe('AnnotationsService', () => {
   let service: AnnotationsService;

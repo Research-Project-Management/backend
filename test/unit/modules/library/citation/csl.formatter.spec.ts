@@ -1,4 +1,4 @@
-import { CslFormatter } from '@/modules/library/cite/formatters/csl.formatter';
+import { CslFormatter } from '@/modules/library/legacy/cite/formatters/csl.formatter';
 
 describe('CslFormatter', () => {
   let formatter: CslFormatter;

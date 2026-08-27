@@ -19,7 +19,19 @@ export class CompileLatexDto {
 
   @IsString()
   @IsOptional()
+  projectId?: string;
+
+  @IsString()
+  @IsOptional()
+  workspaceId?: string;
+
+  @IsString()
+  @IsOptional()
   page_id?: string;
+
+  @IsString()
+  @IsOptional()
+  pageId?: string;
 
   @IsString()
   @IsOptional()
@@ -51,4 +63,12 @@ export class SyncIncrementalDto {
   @IsBoolean()
   @IsOptional()
   forceAll?: boolean;
+
+  @IsString()
+  @IsOptional()
+  projectId?: string;
+
+  @IsString()
+  @IsOptional()
+  workspaceId?: string;
 }

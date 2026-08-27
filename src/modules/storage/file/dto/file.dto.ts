@@ -92,6 +92,14 @@ export class CreateFolderDto {
 export class UpdateFileDto {
   @IsString()
   @IsOptional()
+  projectId?: string;
+
+  @IsString()
+  @IsOptional()
+  workspaceId?: string;
+
+  @IsString()
+  @IsOptional()
   filename?: string;
 
   @IsBoolean()
@@ -110,6 +118,14 @@ export class UpdateFileDto {
 export class RenameFileDto {
   @IsString()
   @IsOptional()
+  projectId?: string;
+
+  @IsString()
+  @IsOptional()
+  workspaceId?: string;
+
+  @IsString()
+  @IsOptional()
   filename?: string;
 
   @IsString()
@@ -118,6 +134,14 @@ export class RenameFileDto {
 }
 
 export class MoveFileDto {
+  @IsString()
+  @IsOptional()
+  projectId?: string;
+
+  @IsString()
+  @IsOptional()
+  workspaceId?: string;
+
   @IsString()
   @IsOptional()
   parentId?: string;

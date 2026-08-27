@@ -1,10 +1,16 @@
 import { LibraryTestHarness } from '../library-test-harness';
+import { DiscoveryRepository } from '../../../../src/modules/library/discovery/discovery.repository';
+import { FullTextIndexer } from '../../../../src/modules/library/discovery/full-text-indexer';
 
 describe('Discovery & Search Invariants (Integration)', () => {
   let harness: LibraryTestHarness;
+  let discoveryRepo: DiscoveryRepository;
+  let fullTextIndexer: FullTextIndexer;
 
   beforeAll(async () => {
     harness = await LibraryTestHarness.create();
+    discoveryRepo = harness.moduleRef.get(DiscoveryRepository);
+    fullTextIndexer = harness.moduleRef.get(FullTextIndexer);
   });
 
   afterAll(async () => {
@@ -63,59 +69,115 @@ describe('Discovery & Search Invariants (Integration)', () => {
     });
   });
 
-  describe('2. Saved Search Invariant', () => {
-    it('persists and retrieves saved search query definitions strictly scoped to workspace tenant', () => {
-      const tenantA = harness.createWorkspaceFixture('ws-saved-search-a');
-      const tenantB = harness.createWorkspaceFixture('ws-saved-search-b');
+  describe('2. Saved Search DB Invariant', () => {
+    it('persists, lists, and deletes saved search query definitions strictly in PostgreSQL', async () => {
+      const tenantA = await harness.seedWorkspaceFixture();
+      const tenantB = await harness.seedWorkspaceFixture();
 
-      const savedSearches = [
+      const searchA = await discoveryRepo.createSavedSearch(
+        tenantA.workspaceId,
+        tenantA.ownerUserId,
         {
-          id: 'saved-1',
-          workspaceId: tenantA.workspaceId,
           name: 'Recent AI Papers',
           query: { q: 'attention mechanism', yearGte: 2023 },
+          color: '#3370ff',
+          icon: 'search',
         },
+      );
+
+      const searchB = await discoveryRepo.createSavedSearch(
+        tenantB.workspaceId,
+        tenantB.ownerUserId,
         {
-          id: 'saved-2',
-          workspaceId: tenantB.workspaceId,
           name: 'Genomics 2024',
           query: { q: 'CRISPR', year: 2024 },
+          color: '#22c55e',
+          icon: 'dna',
         },
-      ];
-
-      const searchesForA = savedSearches.filter(
-        (s) => s.workspaceId === tenantA.workspaceId,
-      );
-      const searchesForB = savedSearches.filter(
-        (s) => s.workspaceId === tenantB.workspaceId,
       );
 
-      expect(searchesForA).toHaveLength(1);
-      expect(searchesForA[0].name).toBe('Recent AI Papers');
-      expect(searchesForB).toHaveLength(1);
-      expect(searchesForB[0].name).toBe('Genomics 2024');
+      const listA = await discoveryRepo.listSavedSearches(
+        tenantA.workspaceId,
+        tenantA.ownerUserId,
+      );
+      const listB = await discoveryRepo.listSavedSearches(
+        tenantB.workspaceId,
+        tenantB.ownerUserId,
+      );
+
+      expect(listA).toHaveLength(1);
+      expect(listA[0].id).toBe(searchA.id);
+      expect(listA[0].name).toBe('Recent AI Papers');
+
+      expect(listB).toHaveLength(1);
+      expect(listB[0].id).toBe(searchB.id);
+      expect(listB[0].name).toBe('Genomics 2024');
+
+      // Delete saved search
+      const deleted = await discoveryRepo.deleteSavedSearch(
+        tenantA.workspaceId,
+        tenantA.ownerUserId,
+        searchA.id,
+      );
+      expect(deleted).toBe(true);
+
+      const listAAfter = await discoveryRepo.listSavedSearches(
+        tenantA.workspaceId,
+        tenantA.ownerUserId,
+      );
+      expect(listAAfter).toHaveLength(0);
     });
   });
 
-  describe('3. PDF Page-Anchor & Character Offset Invariant', () => {
-    it('returns exact page number and highlighted text offsets for deep full-text matches', () => {
-      const fullTextIndex = [
-        {
-          attachmentId: 'att-pdf-1',
-          pageIndex: 4,
-          text: 'The transformer architecture relies entirely on self-attention mechanisms to compute representations.',
-          charOffsetStart: 120,
-          charOffsetEnd: 228,
+  describe('3. PDF Page-Anchor & Character Offset Invariant in PostgreSQL', () => {
+    it('indexes pages and returns exact page anchors and snippet offsets from PostgreSQL', async () => {
+      const tenant = await harness.seedWorkspaceFixture();
+
+      const item = await harness.prisma.catalogItem.create({
+        data: {
+          workspaceId: tenant.workspaceId,
+          uploadedById: tenant.ownerUserId,
+          title: 'Deep Attention Models',
+          filename: 'deep-attention.pdf',
+          fileUrl: 'https://example.com/deep-attention.pdf',
+          version: 1,
         },
-      ];
+      });
 
-      const queryTerm = 'self-attention';
-      const match = fullTextIndex.find((p) => p.text.includes(queryTerm));
+      const attachment = await harness.prisma.catalogAttachment.create({
+        data: {
+          catalogItemId: item.id,
+          filename: 'deep-attention.pdf',
+          url: 'https://example.com/deep-attention.pdf',
+          attachmentType: 'primary_pdf',
+          size: 1024,
+        },
+      });
 
-      expect(match).toBeDefined();
-      expect(match?.pageIndex).toBe(4);
-      expect(match?.charOffsetStart).toBe(120);
-      expect(match?.text).toContain(queryTerm);
+      await fullTextIndexer.indexAttachmentPages(attachment.id, [
+        {
+          pageIndex: 1,
+          textContent: 'Introduction to neural networks and deep learning.',
+          charOffset: 0,
+        },
+        {
+          pageIndex: 4,
+          textContent:
+            'The transformer architecture relies entirely on self-attention mechanisms to compute representations.',
+          charOffset: 1200,
+        },
+      ]);
+
+      const matches = await fullTextIndexer.searchPageAnchors(
+        attachment.id,
+        'self-attention',
+      );
+
+      expect(matches).toHaveLength(1);
+      expect(matches[0].attachmentId).toBe(attachment.id);
+      expect(matches[0].pageIndex).toBe(4);
+      expect(matches[0].snippet).toContain('self-attention');
+      expect(matches[0].charOffsetStart).toBeGreaterThanOrEqual(1200);
     });
   });
 });

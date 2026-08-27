@@ -1,5 +1,5 @@
-import { JobsService as IngestionJobService } from '@/modules/library/translation/jobs.service';
-import { TranslationSourceType as IngestionSourceType } from '@/modules/library/translation/dto/translation.dto';
+import { JobsService as IngestionJobService } from '@/modules/library/legacy/translation/jobs.service';
+import { TranslationSourceType as IngestionSourceType } from '@/modules/library/legacy/translation/dto/translation.dto';
 
 describe('IngestionJobService (Async Batch Job Tracker)', () => {
   let jobService: IngestionJobService;

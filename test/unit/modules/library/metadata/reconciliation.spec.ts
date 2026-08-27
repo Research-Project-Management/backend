@@ -1,5 +1,5 @@
-import { ReconciliationService } from '@/modules/library/metadata/reconciliation.service';
-import { MetadataCandidate } from '@/modules/library/metadata/types/metadata.types';
+import { ReconciliationService } from '@/modules/library/legacy/metadata/reconciliation.service';
+import { MetadataCandidate } from '@/modules/library/legacy/metadata/types/metadata.types';
 
 describe('ReconciliationService (Provenance & Field-Level Assertions)', () => {
   let service: ReconciliationService;

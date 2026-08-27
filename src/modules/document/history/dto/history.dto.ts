@@ -25,4 +25,12 @@ export class CreateVersionDto {
   @IsString()
   @IsOptional()
   projectPageId?: string;
+
+  @IsString()
+  @IsOptional()
+  projectId?: string;
+
+  @IsString()
+  @IsOptional()
+  workspaceId?: string;
 }

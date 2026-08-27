@@ -8,13 +8,11 @@ import { WorkspaceModule } from './modules/workspace/workspace.module';
 import { ProjectModule } from './modules/project/project.module';
 import { ActivityModule } from './modules/activity/activity.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
-import { SharedModule } from './modules/shared/shared.module';
 import { StickyModule } from './modules/sticky/sticky.module';
 import { StorageModule } from './modules/storage/storage.module';
-import { LibraryModule } from './modules/library/library.module';
-import { LibraryContextModule } from './contexts/library/library.module';
+import { LibraryModule } from './modules/library/module';
 import { DocumentModule } from './modules/document/document.module';
-import { WorkflowModule } from './modules/workflow/workflow.module';
+import { WorkItemModule } from './modules/work-item/work-item.module';
 import { AiModule } from './modules/ai/ai.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -37,12 +35,10 @@ import { AppService } from './app.service';
     ProjectModule,
     ActivityModule,
     AnalyticsModule,
-    SharedModule,
     StickyModule,
-    WorkflowModule,
+    WorkItemModule,
     DocumentModule,
     LibraryModule,
-    LibraryContextModule,
     StorageModule,
     AiModule,
   ],

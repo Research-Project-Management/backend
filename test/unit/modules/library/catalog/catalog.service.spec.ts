@@ -1,9 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ItemsService as CatalogService } from '@/modules/library/items/items.service';
-import { ItemsRepository as CatalogRepository } from '@/modules/library/items/items.repository';
+import { ItemsService as CatalogService } from '@/modules/library/legacy/items/items.service';
+import { ItemsRepository as CatalogRepository } from '@/modules/library/legacy/items/items.repository';
 import { FileService } from '@/modules/storage/file/file.service';
-import { BibtexFormatter } from '@/modules/library/cite/formatters/bibtex.formatter';
-import { TranslationService as IngestionService } from '@/modules/library/translation/translation.service';
+import { BibtexFormatter } from '@/modules/library/legacy/cite/formatters/bibtex.formatter';
+import { TranslationService as IngestionService } from '@/modules/library/legacy/translation/translation.service';
 
 describe('CatalogService', () => {
   let service: CatalogService;

@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { CursorUtil } from '@/modules/library/items/dto/cursor-pagination.dto';
+import { CursorUtil } from '@/modules/library/legacy/items/dto/cursor-pagination.dto';
 
 describe('Library Cursor Pagination & Concurrency', () => {
   describe('Cursor Pagination Util', () => {

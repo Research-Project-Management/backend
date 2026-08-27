@@ -1,4 +1,4 @@
-import { SearchService as LibrarySearchService } from '@/modules/library/search/search.service';
+import { SearchService as LibrarySearchService } from '@/modules/library/legacy/search/search.service';
 
 describe('Phase 8: Search, Facets & Researcher UX Subsystem', () => {
   let searchService: LibrarySearchService;

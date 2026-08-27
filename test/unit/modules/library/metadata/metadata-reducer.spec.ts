@@ -1,5 +1,5 @@
-import { AcademicMetadataReducer } from '@/modules/library/metadata/utils/metadata.util';
-import { TranslationSourceType as IngestionSourceType } from '@/modules/library/translation/dto/translation.dto';
+import { AcademicMetadataReducer } from '@/modules/library/legacy/metadata/utils/metadata.util';
+import { TranslationSourceType as IngestionSourceType } from '@/modules/library/legacy/translation/dto/translation.dto';
 
 describe('AcademicMetadataReducer', () => {
   describe('cleanFilenameForTitleSearch', () => {

@@ -4,6 +4,11 @@ import { RedisCacheService } from '../cache/redis-cache.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EnqueueOutboxInput, OutboxDispatchResult } from './outbox.types';
 
+/**
+ * @deprecated Use `OutboxWorker` in `src/modules/library/sync-core/outbox.worker.ts` instead.
+ * `OutboxWorker` is the single authoritative distributed outbox processor with CAS lease claiming,
+ * heartbeat renewal, recovery, dead-lettering, and typed event handlers.
+ */
 @Injectable()
 export class OutboxService {
   private readonly logger = new Logger(OutboxService.name);

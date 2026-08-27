@@ -1,6 +1,6 @@
-import { RelationsService as RelationGraphService } from '@/modules/library/relations/relations.service';
+import { RelationsService as RelationGraphService } from '@/modules/library/legacy/relations/relations.service';
 
-import { ItemsRepository as CatalogRepository } from '@/modules/library/items/items.repository';
+import { ItemsRepository as CatalogRepository } from '@/modules/library/legacy/items/items.repository';
 import { BadRequestException } from '@nestjs/common';
 
 describe('Phase 8: Citation & Relation Graph Subsystem', () => {

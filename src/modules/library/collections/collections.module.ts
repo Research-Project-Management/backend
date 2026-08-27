@@ -1,12 +1,11 @@
 import { Module } from '@nestjs/common';
-import { CollectionsController } from './collections.controller';
-import { CollectionsService } from './collections.service';
 import { CollectionsRepository } from './collections.repository';
+import { CoreModule } from '../../../core/core.module';
+import { LibraryFeatureFlagsService } from '../common/library-feature-flags';
 
 @Module({
-  imports: [],
-  controllers: [CollectionsController],
-  providers: [CollectionsService, CollectionsRepository],
-  exports: [CollectionsService, CollectionsRepository],
+  imports: [CoreModule],
+  providers: [CollectionsRepository, LibraryFeatureFlagsService],
+  exports: [CollectionsRepository],
 })
-export class CollectionsModule {}
+export class CollectionsContextModule {}

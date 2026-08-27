@@ -1,200 +1,125 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { ItemsRepository } from '../items/items.repository';
+import { Injectable, Logger } from '@nestjs/common';
 import {
-  CreateAnnotationDto,
-  UpdateAnnotationDto,
-} from './dto/annotations.dto';
-import {
-  PdfAnnotation,
-  ExtractedLiteratureNote,
-} from './types/annotations.types';
-import { groupAnnotationsByPage } from './utils/annotations.util';
-
-import { randomUUID } from 'crypto';
+  AnnotationsRepository,
+  CreateAnnotationData,
+  UpdateAnnotationData,
+} from './annotations.repository';
+import { LibraryTransactionService } from '../sync-core/library-transaction.service';
 
 @Injectable()
 export class AnnotationsService {
-  constructor(private readonly itemsRepo: ItemsRepository) {}
+  private readonly logger = new Logger(AnnotationsService.name);
 
-  async getAnnotations(
+  constructor(
+    private readonly annotationsRepo: AnnotationsRepository,
+    private readonly libraryTx: LibraryTransactionService,
+  ) {}
+
+  async getAnnotationsByAttachment(
     workspaceId: string,
-    itemId: string,
-  ): Promise<{ annotations: PdfAnnotation[]; total: number }> {
-    const item = await this.resolveItem(workspaceId, itemId);
-    const annotations = await this.itemsRepo.getAnnotations(item.id);
-    return { annotations, total: annotations.length };
+    attachmentId: string,
+    pageIndex?: number,
+  ) {
+    return this.annotationsRepo.findByAttachment(
+      workspaceId,
+      attachmentId,
+      pageIndex,
+    );
   }
 
-  async createAnnotation(
-    workspaceId: string,
-    itemId: string,
-    userId: string,
-    dto: CreateAnnotationDto,
-  ): Promise<{ annotation: PdfAnnotation }> {
-    const item = await this.resolveItem(workspaceId, itemId);
-    const now = new Date().toISOString();
+  async getAnnotation(workspaceId: string, id: string) {
+    return this.annotationsRepo.findById(workspaceId, id);
+  }
 
-    const annotation: PdfAnnotation = {
-      id: randomUUID(),
-      itemId: item.id,
-      paperId: item.id,
-      attachmentId: dto.attachmentId,
-      type: dto.type,
-      pageNumber: dto.pageNumber,
-      color: dto.color,
-      quote: dto.quote || undefined,
-      comment: dto.comment || undefined,
-      rect: dto.rect || undefined,
-      authorId: userId,
-      createdAt: now,
-      updatedAt: now,
-    };
+  async createAnnotation(workspaceId: string, data: CreateAnnotationData) {
+    return this.libraryTx.executeInTransaction(async (tx, helpers) => {
+      const annotation = await this.annotationsRepo.create(
+        workspaceId,
+        data,
+        tx,
+      );
 
-    await this.itemsRepo.putAnnotation(item.id, annotation);
-    return { annotation };
+      await helpers.appendChange(workspaceId, {
+        entityType: 'Annotation',
+        entityId: annotation.id,
+        action: 'create',
+        version: annotation.version,
+        data: annotation,
+      });
+
+      await helpers.publishOutbox(
+        workspaceId,
+        annotation.id,
+        'library.annotation.created',
+        annotation,
+      );
+
+      return annotation;
+    });
   }
 
   async updateAnnotation(
     workspaceId: string,
-    itemId: string,
-    annotationId: string,
-    dto: UpdateAnnotationDto,
-  ): Promise<{ annotation: PdfAnnotation }> {
-    const item = await this.resolveItem(workspaceId, itemId);
+    id: string,
+    expectedVersion: number,
+    data: UpdateAnnotationData,
+  ) {
+    return this.libraryTx.executeInTransaction(async (tx, helpers) => {
+      const updated = await this.annotationsRepo.update(
+        workspaceId,
+        id,
+        expectedVersion,
+        data,
+        tx,
+      );
 
-    const updated = await this.itemsRepo.replaceAnnotation(
-      item.id,
-      annotationId,
-      {
-        ...(dto.comment !== undefined && { comment: dto.comment }),
-        ...(dto.color !== undefined && { color: dto.color }),
-        updatedAt: new Date().toISOString(),
-      },
-    );
+      await helpers.appendChange(workspaceId, {
+        entityType: 'Annotation',
+        entityId: updated.id,
+        action: 'update',
+        version: updated.version,
+        data: updated,
+      });
 
-    if (!updated) {
-      throw new NotFoundException('Annotation not found');
-    }
+      await helpers.publishOutbox(
+        workspaceId,
+        updated.id,
+        'library.annotation.updated',
+        updated,
+      );
 
-    return { annotation: updated };
+      return updated;
+    });
   }
 
   async deleteAnnotation(
     workspaceId: string,
-    itemId: string,
-    annotationId: string,
-  ): Promise<{ deleted: boolean; remainingCount: number }> {
-    const item = await this.resolveItem(workspaceId, itemId);
-
-    const remaining = await this.itemsRepo.removeAnnotation(
-      item.id,
-      annotationId,
-    );
-
-    if (remaining === -1) {
-      throw new NotFoundException('Annotation not found');
-    }
-
-    return { deleted: true, remainingCount: remaining };
-  }
-
-  async extractNotesFromAnnotations(
-    workspaceId: string,
-    itemId: string,
-    _userId: string,
-  ): Promise<{ literatureNote: ExtractedLiteratureNote }> {
-    const item = await this.resolveItem(workspaceId, itemId);
-
-    const annotations = await this.itemsRepo.getAnnotations(item.id);
-    if (annotations.length === 0) {
-      throw new NotFoundException(
-        'No annotations found on this catalog item to extract',
-      );
-    }
-
-    const pageMap = groupAnnotationsByPage(annotations);
-
-    const lines: string[] = [];
-    lines.push(`# 📖 Literature Notes: ${item.title}`);
-    lines.push(
-      `*Extracted on ${new Date().toLocaleDateString()} from ${annotations.length} annotations*\n`,
-    );
-
-    for (const [page, anns] of pageMap.entries()) {
-      lines.push(`### 📄 Page ${page}`);
-      for (const ann of anns) {
-        if (ann.quote) {
-          lines.push(`> "${ann.quote.trim()}" *(p. ${ann.pageNumber})*`);
-        }
-        if (ann.comment) {
-          lines.push(`**Note**: ${ann.comment.trim()}\n`);
-        } else {
-          lines.push('');
-        }
-      }
-    }
-
-    const markdownContent = lines.join('\n');
-    const noteTitle = `Annotations Summary (${new Date().toLocaleDateString()})`;
-
-    const existingNotes = this.parseStoredNotes(item.notes);
-    existingNotes.push({ title: noteTitle, content: markdownContent });
-
-    await this.itemsRepo.updateItem(item.id, { notes: existingNotes });
-
-    return {
-      literatureNote: {
-        title: noteTitle,
-        content: markdownContent,
-        annotationCount: annotations.length,
-        createdAt: new Date().toISOString(),
-      },
-    };
-  }
-
-  async extractLiteratureNotes(
-    workspaceId: string,
-    itemId: string,
-    userId: string = 'system',
+    id: string,
+    expectedVersion?: number,
   ) {
-    return this.extractNotesFromAnnotations(workspaceId, itemId, userId);
-  }
+    return this.libraryTx.executeInTransaction(async (tx, helpers) => {
+      const deleted = await this.annotationsRepo.softDelete(
+        workspaceId,
+        id,
+        expectedVersion,
+        tx,
+      );
 
-  private async resolveItem(workspaceId: string, itemId: string) {
-    const targetWsId = await this.itemsRepo.resolveWorkspaceId(workspaceId);
+      if (deleted) {
+        await helpers.recordTombstone(workspaceId, {
+          entityType: 'Annotation',
+          entityId: id,
+        });
 
-    const item = await this.itemsRepo.findItemByIdInWorkspace(
-      targetWsId,
-      itemId,
-    );
-    if (!item || item.deletedAt) {
-      throw new NotFoundException('Catalog item not found in this workspace');
-    }
-    return item;
-  }
-
-  private parseStoredNotes(
-    notes: unknown,
-  ): Array<{ title: string; content: string }> {
-    if (!Array.isArray(notes)) return [];
-
-    return notes.flatMap((note) => {
-      const record = this.toRecord(note);
-      if (!record) return [];
-
-      const title = record.title;
-      const content = record.content;
-
-      if (typeof title === 'string' && typeof content === 'string') {
-        return [{ title, content }];
+        await helpers.publishOutbox(
+          workspaceId,
+          id,
+          'library.annotation.deleted',
+          { id, deletedAt: new Date() },
+        );
       }
 
-      return [];
+      return deleted;
     });
-  }
-
-  private toRecord(value: unknown): Record<string, unknown> | null {
-    if (typeof value !== 'object' || value === null) return null;
-    return value as Record<string, unknown>;
   }
 }

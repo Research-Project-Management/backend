@@ -1,8 +1,8 @@
-import { NotesService } from '@/modules/library/notes/notes.service';
-import { AttachmentsService } from '@/modules/library/attachments/attachments.service';
-import { AnnotationsService } from '@/modules/library/annotations/annotations.service';
+import { NotesService } from '@/modules/library/legacy/notes/notes.service';
+import { AttachmentsService } from '@/modules/library/legacy/attachments/attachments.service';
+import { AnnotationsService } from '@/modules/library/legacy/annotations/annotations.service';
 
-import { ItemsRepository } from '@/modules/library/items/items.repository';
+import { ItemsRepository } from '@/modules/library/legacy/items/items.repository';
 
 describe('Phase 7: Attachments, Notes & Annotations Subsystem', () => {
   let notesService: NotesService;
