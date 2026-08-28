@@ -15,11 +15,11 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { CatalogService } from './items.service';
 import {
-  IngestPaperDto,
-  UploadPaperDto,
+  IngestCatalogItemDto,
+  UploadCatalogItemDto,
   AddAttachmentDto,
-  UpdatePaperDto,
-  ImportStoragePaperDto,
+  UpdateCatalogItemDto,
+  ImportStorageCatalogItemDto,
 } from './dto/items.dto';
 
 import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
@@ -48,7 +48,7 @@ export class ItemsController {
   async ingestPaper(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
-    @Body() dto: IngestPaperDto,
+    @Body() dto: IngestCatalogItemDto,
   ) {
     return this.catalogService.ingestPaper(workspaceId, userId, dto);
   }
@@ -103,7 +103,11 @@ export class ItemsController {
 
   @Get([
     'workspace/:workspaceId/library/collections/:collectionId/items',
+    'workspace/:workspaceId/library/collections/:collectionId/papers',
     'library/:workspaceId/collections/:collectionId/items',
+    'library/:workspaceId/collections/:collectionId/papers',
+    'library/collections/:workspaceId/:collectionId/items',
+    'library/collections/:workspaceId/:collectionId/papers',
   ])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
@@ -133,7 +137,7 @@ export class ItemsController {
   async uploadPaper(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
-    @Body() dto: UploadPaperDto,
+    @Body() dto: UploadCatalogItemDto,
   ) {
     return this.catalogService.uploadPaper(workspaceId, userId, dto);
   }
@@ -151,7 +155,7 @@ export class ItemsController {
     @Param('workspaceId') workspaceId: string,
     @Param('collectionId') collectionId: string,
     @CurrentUser('id') userId: string,
-    @Body() dto: UploadPaperDto,
+    @Body() dto: UploadCatalogItemDto,
   ) {
     dto.collectionId = collectionId;
     return this.catalogService.uploadPaper(workspaceId, userId, dto);
@@ -171,7 +175,7 @@ export class ItemsController {
   async importFromStorage(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
-    @Body() dto: ImportStoragePaperDto,
+    @Body() dto: ImportStorageCatalogItemDto,
   ) {
     return this.catalogService.importFromStorage(workspaceId, userId, dto);
   }
@@ -209,7 +213,7 @@ export class ItemsController {
   async updateItem(
     @Param('workspaceId') workspaceId: string,
     @Param('itemId') itemId: string,
-    @Body() dto: UpdatePaperDto,
+    @Body() dto: UpdateCatalogItemDto,
   ) {
     return this.catalogService.updateItemInWorkspace(workspaceId, itemId, dto);
   }

@@ -48,8 +48,21 @@ export function toItemView(item: ItemRecord): ItemView {
     })),
   ];
 
+  let extraFields: Record<string, any> = {};
+  if (item.extra && typeof item.extra === 'string') {
+    const trimmed = item.extra.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        extraFields = JSON.parse(trimmed);
+      } catch {
+        // Raw text format, keep as is
+      }
+    }
+  }
+
   return {
     ...item,
+    ...extraFields,
     creators,
     tags: item.labels ?? [],
     abstractNote: item.abstract ?? '',

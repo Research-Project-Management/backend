@@ -27,6 +27,17 @@ export class MetadataController {
   constructor(private readonly metadataService: MetadataService) {}
 
   @Get([
+    'workspace/:workspaceId/library/metadata/schema',
+    'library/metadata/schema',
+    'workspace/:workspaceId/library/schema',
+    'library/schema',
+  ])
+  @ApiOperation({ summary: 'Get full official Zotero metadata schema with all item types, fields and creator roles' })
+  getSchema() {
+    return this.metadataService.getItemTypes();
+  }
+
+  @Get([
     'workspace/:workspaceId/library/metadata/item-types',
     'library/metadata/item-types',
   ])

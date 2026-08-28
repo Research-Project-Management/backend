@@ -1,4 +1,11 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Optional,
+  Inject,
+  ConflictException,
+  BadRequestException,
+} from '@nestjs/common';
 import {
   AcademicQueryType,
   ProviderCircuitBreaker,
@@ -38,6 +45,13 @@ import { NormalizeMetadataDto } from './dto/metadata.dto';
 
 import { RedisCacheService } from '@/core/cache/redis-cache.service';
 import { createHash } from 'crypto';
+
+// ── Canonical metadata delegation ─────────────────────────────────────────────
+import {
+  CANONICAL_METADATA_SERVICE,
+  CanonicalMetadataResolver,
+  ResolvedMetadata,
+} from '../../ingestion/metadata/metadata.contracts';
 
 export interface ResolveResult {
   query: string;
@@ -80,6 +94,9 @@ export class MetadataService {
     private readonly doiResolver: DoiResolver,
     private readonly bibtexFormatter: BibtexFormatter,
     @Optional() private readonly redisCache?: RedisCacheService,
+    @Optional()
+    @Inject(CANONICAL_METADATA_SERVICE)
+    private readonly canonicalMetadata?: CanonicalMetadataResolver,
   ) {}
 
   getItemTypes() {
@@ -103,7 +120,7 @@ export class MetadataService {
       version: REFERENCE_MANAGER_SCHEMA_VERSION,
       itemType: normalized,
       localized: ITEM_TYPE_LABELS[normalized],
-      selectable: SELECTABLE_LIBRARY_ITEM_TYPES.includes(normalized as any),
+      selectable: SELECTABLE_LIBRARY_ITEM_TYPES.includes(normalized),
       fields: this.getItemTypeFields(normalized),
       creators: this.getItemTypeCreators(normalized),
     };
@@ -159,13 +176,56 @@ export class MetadataService {
     const queryHash = createHash('md5')
       .update(cleanQuery.toLowerCase())
       .digest('hex');
+
+    // ── Canonical delegation (feature flag: CANONICAL_METADATA_ENABLED) ─────
+    if (
+      process.env['CANONICAL_METADATA_ENABLED'] === 'true' &&
+      this.canonicalMetadata
+    ) {
+      try {
+        const canonical = await this.canonicalMetadata.resolve({
+          query: cleanQuery,
+        });
+        if (canonical) {
+          return this.toResolveResult(canonical);
+        }
+        return null;
+      } catch (err: any) {
+        // Never fallback for validation or security errors (e.g. SSRF / BadRequest)
+        if (
+          err instanceof ConflictException ||
+          err instanceof BadRequestException ||
+          err?.status === 409 ||
+          err?.status === 400
+        ) {
+          throw err;
+        }
+
+        // Fall back to legacy if canonical pipeline encounters internal unexpected error
+        this.logger.warn(
+          JSON.stringify({
+            event: 'library.metadata.legacy_fallback',
+            queryHash,
+            errorName: err instanceof Error ? err.name : 'UnknownError',
+          }),
+        );
+      }
+    }
+    // ── End canonical delegation ──────────────────────────────────────────────
+
     const cacheKey = `academic:resolve:${queryHash}`;
 
     // 1. Check Redis Cache
     if (this.redisCache && this.redisCache.isReady()) {
       const cached = await this.redisCache.get<ResolveResult>(cacheKey);
       if (cached) {
-        this.logger.log(`Cache HIT (Redis) for academic query: ${cleanQuery}`);
+        this.logger.log(
+          JSON.stringify({
+            event: 'library.metadata.legacy_cache',
+            outcome: 'hit',
+            queryHash,
+          }),
+        );
         return { ...cached, cached: true };
       }
     }
@@ -176,10 +236,35 @@ export class MetadataService {
     // 3. Populate Redis Cache with 7-day TTL (604,800s)
     if (result && this.redisCache && this.redisCache.isReady()) {
       await this.redisCache.set(cacheKey, result, 604800);
-      this.logger.log(`Cached academic query result for 7 days: ${cleanQuery}`);
+      this.logger.log(
+        JSON.stringify({
+          event: 'library.metadata.legacy_cache',
+          outcome: 'set',
+          queryHash,
+          ttlSeconds: 604800,
+        }),
+      );
     }
 
     return result;
+  }
+
+  /**
+   * Converts the canonical ResolvedMetadata shape into the legacy ResolveResult shape
+   * so the Legacy controller and any downstream callers see the same response contract.
+   */
+  private toResolveResult(canonical: ResolvedMetadata): ResolveResult {
+    const primaryProvider = canonical.metadata.provenance?.originProvider;
+    const provider: ResolveResult['provider'] =
+      (primaryProvider as ResolveResult['provider']) ?? 'Fallback';
+
+    return {
+      query: canonical.query,
+      queryType: canonical.queryType,
+      provider,
+      metadata: canonical.metadata as UnifiedAcademicMetadata,
+      cached: canonical.cached,
+    };
   }
 
   private async doResolve(cleanQuery: string): Promise<ResolveResult | null> {
@@ -373,7 +458,11 @@ export class MetadataService {
             confidenceScore = sim * 0.9;
           } else {
             this.logger.debug(
-              `S2 title match rejected (sim=${sim.toFixed(2)}): "${s2Meta.title}" vs "${classified.clean}"`,
+              JSON.stringify({
+                event: 'library.metadata.legacy_title_mismatch',
+                provider: 'SemanticScholar',
+                similarity: Number(sim.toFixed(2)),
+              }),
             );
           }
         }
@@ -392,7 +481,11 @@ export class MetadataService {
               meta = this.convertCrMeta(crMeta);
             } else {
               this.logger.debug(
-                `CrossRef title match rejected (sim=${sim.toFixed(2)}): "${crMeta.title}" vs "${classified.clean}"`,
+                JSON.stringify({
+                  event: 'library.metadata.legacy_title_mismatch',
+                  provider: 'CrossRef',
+                  similarity: Number(sim.toFixed(2)),
+                }),
               );
             }
           }

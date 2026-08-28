@@ -29,6 +29,18 @@ export class CreateProjectDto {
 
   @IsString()
   @IsOptional()
+  cover?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  isPrivate?: boolean;
+
+  @IsString()
+  @IsOptional()
+  timezone?: string;
+
+  @IsString()
+  @IsOptional()
   description?: string;
 
   @IsString()
@@ -72,6 +84,10 @@ export class UpdateProjectDto {
 
   @IsString()
   @IsOptional()
+  cover?: string;
+
+  @IsString()
+  @IsOptional()
   description?: string;
 
   @IsString()
@@ -85,6 +101,34 @@ export class UpdateProjectDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  isArchived?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  isFavorite?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  isPrivate?: boolean;
+
+  @IsString()
+  @IsOptional()
+  timezone?: string;
+
+  @IsArray()
+  @IsOptional()
+  subscriberIds?: string[];
+
+  @IsString()
+  @IsOptional()
+  role?: string;
+
+  @IsString()
+  @IsOptional()
+  newRole?: string;
 
   @IsOptional()
   settings?: any;
@@ -105,8 +149,12 @@ export class AddProjectMemberDto {
 
 export class UpdateProjectMemberDto {
   @IsEnum(ProjectMemberRole, { message: 'Invalid project member role' })
-  @IsNotEmpty({ message: 'Role is required' })
-  role!: ProjectMemberRole;
+  @IsOptional()
+  role?: ProjectMemberRole;
+
+  @IsString()
+  @IsOptional()
+  newRole?: string;
 
   @IsString()
   @IsOptional()

@@ -29,7 +29,7 @@ import { WorkspaceRoles } from '@/modules/iam/authz/decorators/workspace-roles.d
 
 @ApiTags('Organization')
 @ApiBearerAuth('JWT-auth')
-@Controller('api/workspace')
+@Controller(['api/workspace', 'api/workspaces'])
 @UseGuards(JwtAuthGuard)
 export class WorkspaceController {
   constructor(private readonly workspaceService: WorkspaceService) {}

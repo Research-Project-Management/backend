@@ -14,7 +14,6 @@ import { CitationContextModule } from './citation/citation.module';
 import { IngestionContextModule } from './ingestion/ingestion.module';
 import { CurationContextModule } from './curation/curation.module';
 import { ExportsContextModule } from './exports/exports.module';
-import { ZoteroModule } from './integrations/zotero/zotero.module';
 import { LegacyLibraryModule } from './legacy/module';
 
 /**
@@ -39,7 +38,6 @@ import { LegacyLibraryModule } from './legacy/module';
     IngestionContextModule,
     CurationContextModule,
     ExportsContextModule,
-    ZoteroModule,
 
     // Compatibility routes and providers
     LegacyLibraryModule,
@@ -60,7 +58,6 @@ import { LegacyLibraryModule } from './legacy/module';
     IngestionContextModule,
     CurationContextModule,
     ExportsContextModule,
-    ZoteroModule,
   ],
 })
 export class LibraryModule {}

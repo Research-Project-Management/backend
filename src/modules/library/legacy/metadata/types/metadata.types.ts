@@ -163,17 +163,15 @@ export function normalizeCreators(
   return [];
 }
 
+import {
+  ZOTERO_SCHEMA_ITEM_TYPES,
+  ALL_CREATOR_TYPES,
+  FIELD_DEFINITIONS,
+  normalizeCanonicalItemType,
+} from '../../../common/zotero-schema';
+
 export function normalizeItemType(type?: string | null): string {
-  if (!type || typeof type !== 'string') return 'journalArticle';
-  const clean = type.toLowerCase().trim();
-  if (clean.includes('book')) return 'book';
-  if (clean.includes('thesis') || clean.includes('dissertation'))
-    return 'thesis';
-  if (clean.includes('conference') || clean.includes('proceeding'))
-    return 'conferencePaper';
-  if (clean.includes('preprint') || clean.includes('arxiv')) return 'preprint';
-  if (clean.includes('report')) return 'report';
-  return 'journalArticle';
+  return normalizeCanonicalItemType(type);
 }
 export const normalizeLibraryItemType = normalizeItemType;
 
@@ -193,94 +191,35 @@ export function normalizeTags(
 
 export const REFERENCE_MANAGER_SCHEMA_VERSION = 1;
 
-export const SUPPORTED_LIBRARY_ITEM_TYPES = [
-  'journalArticle',
-  'book',
-  'bookSection',
-  'conferencePaper',
-  'thesis',
-  'report',
-  'preprint',
-  'webpage',
-  'document',
-] as const;
+export const SUPPORTED_LIBRARY_ITEM_TYPES = Object.keys(
+  ZOTERO_SCHEMA_ITEM_TYPES,
+) as Array<keyof typeof ZOTERO_SCHEMA_ITEM_TYPES>;
 
 export type SupportedLibraryItemType =
   (typeof SUPPORTED_LIBRARY_ITEM_TYPES)[number];
 export const SELECTABLE_LIBRARY_ITEM_TYPES = SUPPORTED_LIBRARY_ITEM_TYPES;
 export const SYSTEM_LIBRARY_ITEM_TYPES = SUPPORTED_LIBRARY_ITEM_TYPES;
 
-export const ITEM_TYPE_LABELS: Record<string, string> = {
-  journalArticle: 'Journal Article',
-  book: 'Book',
-  bookSection: 'Book Section',
-  conferencePaper: 'Conference Paper',
-  thesis: 'Thesis / Dissertation',
-  report: 'Report',
-  preprint: 'Preprint',
-  webpage: 'Web Page',
-  document: 'Document',
-};
+export const ITEM_TYPE_LABELS: Record<string, string> = Object.fromEntries(
+  Object.entries(ZOTERO_SCHEMA_ITEM_TYPES).map(([k, v]) => [k, v.label]),
+);
 
-export const CREATOR_TYPE_LABELS: Record<string, string> = {
-  author: 'Author',
-  editor: 'Editor',
-  contributor: 'Contributor',
-  translator: 'Translator',
-};
+export const CREATOR_TYPE_LABELS: Record<string, string> = ALL_CREATOR_TYPES;
 
-export const FIELD_LABELS: Record<string, string> = {
-  title: 'Title',
-  abstractNote: 'Abstract',
-  publicationTitle: 'Publication Title',
-  date: 'Date',
-  doi: 'DOI',
-  url: 'URL',
-  volume: 'Volume',
-  issue: 'Issue',
-  pages: 'Pages',
-  publisher: 'Publisher',
-  isbn: 'ISBN',
-  issn: 'ISSN',
-};
+export const FIELD_LABELS: Record<string, string> = Object.fromEntries(
+  Object.entries(FIELD_DEFINITIONS).map(([k, v]) => [k, v.label]),
+);
 
-export const ITEM_TYPE_FIELD_KEYS: Record<string, string[]> = {
-  journalArticle: [
-    'title',
-    'abstractNote',
-    'publicationTitle',
-    'volume',
-    'issue',
-    'pages',
-    'date',
-    'doi',
-    'issn',
-    'url',
-  ],
-  book: ['title', 'abstractNote', 'publisher', 'date', 'isbn', 'url'],
-  conferencePaper: [
-    'title',
-    'abstractNote',
-    'publicationTitle',
-    'publisher',
-    'date',
-    'doi',
-    'url',
-  ],
-  preprint: ['title', 'abstractNote', 'date', 'doi', 'url'],
-  thesis: ['title', 'abstractNote', 'publisher', 'date', 'url'],
-  report: ['title', 'abstractNote', 'publisher', 'date', 'url'],
-  webpage: ['title', 'abstractNote', 'url', 'accessDate'],
-  document: ['title', 'abstractNote', 'date', 'url'],
-};
+export const ITEM_TYPE_FIELD_KEYS: Record<string, string[]> = Object.fromEntries(
+  Object.entries(ZOTERO_SCHEMA_ITEM_TYPES).map(([k, v]) => [
+    k,
+    v.fields.map((f) => f.field),
+  ]),
+);
 
-export const ITEM_TYPE_CREATOR_KEYS: Record<string, string[]> = {
-  journalArticle: ['author'],
-  book: ['author', 'editor', 'translator'],
-  conferencePaper: ['author', 'editor'],
-  preprint: ['author'],
-  thesis: ['author'],
-  report: ['author'],
-  webpage: ['author'],
-  document: ['author'],
-};
+export const ITEM_TYPE_CREATOR_KEYS: Record<string, string[]> = Object.fromEntries(
+  Object.entries(ZOTERO_SCHEMA_ITEM_TYPES).map(([k, v]) => [
+    k,
+    v.creatorTypes.map((c) => c.creatorType),
+  ]),
+);

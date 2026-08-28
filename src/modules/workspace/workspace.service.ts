@@ -160,10 +160,13 @@ export class WorkspaceService {
   }
 
   async addMember(workspaceId: string, dto: AddWorkspaceMemberDto) {
-    let targetUserId = dto.userId;
+    let targetUserId = dto.userId || dto.email;
+    if (!targetUserId) {
+      throw new BadRequestException('User ID or Email is required');
+    }
 
-    if (dto.userId.includes('@')) {
-      const user = await this.workspaceRepo.findUserByEmail(dto.userId);
+    if (targetUserId.includes('@')) {
+      const user = await this.workspaceRepo.findUserByEmail(targetUserId);
       if (!user) {
         throw new NotFoundException('User with this email was not found');
       }

@@ -9,7 +9,6 @@ import {
 
 import { SemanticScholarProvider } from './providers/semantic.provider';
 import { ArxivProvider } from './providers/arxiv.provider';
-
 import { PubmedProvider } from './providers/pubmed.provider';
 import { OpenlibraryProvider } from './providers/openlibrary.provider';
 import { OpenAlexProvider } from './providers/openalex.provider';
@@ -17,10 +16,17 @@ import { UnpaywallProvider } from './providers/unpaywall.provider';
 
 import { CiteModule } from '../cite/cite.module';
 
-@Module({
-  imports: [CiteModule],
-  controllers: [MetadataController],
+// ── Canonical pipeline delegation ─────────────────────────────────────────────
+// Legacy imports canonical MetadataModule to access CANONICAL_METADATA_SERVICE.
+// No circular dependency: Legacy → Canonical, Canonical has 0 legacy imports.
+import { MetadataModule as CanonicalMetadataModule } from '../../ingestion/metadata/metadata.module';
 
+@Module({
+  imports: [
+    CiteModule,
+    CanonicalMetadataModule,
+  ],
+  controllers: [MetadataController],
   providers: [
     MetadataService,
     ReconciliationService,

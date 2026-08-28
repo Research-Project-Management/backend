@@ -40,4 +40,5 @@ Thumbs.db
 .agents/
 .claude/
 .windsurf/
+.cleanup_trash/
 skills-lock.json

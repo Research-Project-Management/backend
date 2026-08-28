@@ -12,6 +12,7 @@ describe('Gate H: URL Capture Security & Persistent CapturePreview Record', () =
   let mockPrisma: any;
   let mockLibraryTx: any;
   let mockCatalogService: any;
+  let mockMetadataService: any;
   let ingestionService: IngestionService;
 
   const workspaceId = 'ws-test-123';
@@ -41,6 +42,10 @@ describe('Gate H: URL Capture Security & Persistent CapturePreview Record', () =
       createItem: jest.fn(),
     };
 
+    mockMetadataService = {
+      resolve: jest.fn().mockResolvedValue(null),
+    };
+
     mockLibraryTx = {
       executeInTransaction: jest.fn(async (op) => {
         const helpers = {
@@ -57,6 +62,7 @@ describe('Gate H: URL Capture Security & Persistent CapturePreview Record', () =
       mockLibraryTx,
       mockCatalogService,
       connector,
+      mockMetadataService,
     );
   });
 

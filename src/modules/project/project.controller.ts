@@ -38,6 +38,8 @@ export class ProjectController {
   @Get([
     'workspace/:workspaceId/projects',
     'workspace/:workspaceId/project',
+    'workspaces/:workspaceId/projects',
+    'workspaces/:workspaceId/project',
     ':workspaceId/projects',
     ':workspaceId/project',
   ])
@@ -51,6 +53,8 @@ export class ProjectController {
   @Post([
     'workspace/:workspaceId/projects',
     'workspace/:workspaceId/project',
+    'workspaces/:workspaceId/projects',
+    'workspaces/:workspaceId/project',
     ':workspaceId/projects',
     ':workspaceId/project',
   ])
@@ -66,7 +70,7 @@ export class ProjectController {
     return this.projectService.createProject(workspaceId, userId, dto);
   }
 
-  @Get('project/:projectId')
+  @Get(['project/:projectId', 'projects/:projectId'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get a project by ID' })
@@ -92,7 +96,7 @@ export class ProjectController {
     return this.projectService.getProjectOverview(projectId, userId);
   }
 
-  @Put('project/:projectId')
+  @Put(['project/:projectId', 'projects/:projectId'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
   @ApiOperation({ summary: 'Update project settings' })
@@ -103,7 +107,7 @@ export class ProjectController {
     return this.projectService.updateProject(projectId, dto);
   }
 
-  @Delete('project/:projectId')
+  @Delete(['project/:projectId', 'projects/:projectId'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
   @ApiOperation({ summary: 'Soft-delete a project' })
@@ -111,7 +115,7 @@ export class ProjectController {
     return this.projectService.deleteProject(projectId);
   }
 
-  @Post('project/:projectId/restore')
+  @Post(['project/:projectId/restore', 'projects/:projectId/restore'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
   @ApiOperation({ summary: 'Restore a soft-deleted project' })
@@ -119,7 +123,7 @@ export class ProjectController {
     return this.projectService.restoreProject(projectId);
   }
 
-  @Get('project/:projectId/members')
+  @Get(['project/:projectId/members', 'projects/:projectId/members'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'List project members' })
@@ -127,7 +131,7 @@ export class ProjectController {
     return this.projectService.getProjectMembers(projectId);
   }
 
-  @Post('project/:projectId/members')
+  @Post(['project/:projectId/members', 'projects/:projectId/members'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
   @ApiOperation({ summary: 'Add a member to the project' })
@@ -138,7 +142,7 @@ export class ProjectController {
     return this.projectService.addProjectMember(projectId, dto);
   }
 
-  @Put('project/:projectId/members/:userId')
+  @Put(['project/:projectId/members/:userId', 'projects/:projectId/members/:userId'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
   @ApiOperation({ summary: 'Update project member role' })
@@ -150,7 +154,7 @@ export class ProjectController {
     return this.projectService.updateProjectMember(projectId, userId, dto);
   }
 
-  @Delete('project/:projectId/members/:userId')
+  @Delete(['project/:projectId/members/:userId', 'projects/:projectId/members/:userId'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
   @ApiOperation({
@@ -163,7 +167,7 @@ export class ProjectController {
     return this.projectService.removeProjectMember(projectId, userId);
   }
 
-  @Post('project/:projectId/leave')
+  @Post(['project/:projectId/leave', 'projects/:projectId/leave'])
   @ApiOperation({ summary: 'Leave project (single-admin protected)' })
   async leaveProject(
     @Param('projectId') projectId: string,
@@ -172,7 +176,7 @@ export class ProjectController {
     return this.projectService.leaveProject(projectId, userId);
   }
 
-  @Get('project/:projectId/columns')
+  @Get(['project/:projectId/columns', 'projects/:projectId/columns'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'List project columns (task board lanes)' })
@@ -180,7 +184,7 @@ export class ProjectController {
     return this.projectService.getColumns(projectId);
   }
 
-  @Post('project/:projectId/columns')
+  @Post(['project/:projectId/columns', 'projects/:projectId/columns'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
   @ApiOperation({ summary: 'Add a new column to the project board' })
@@ -191,7 +195,7 @@ export class ProjectController {
     return this.projectService.addColumn(projectId, dto);
   }
 
-  @Put('project/:projectId/columns/:columnId')
+  @Put(['project/:projectId/columns/:columnId', 'projects/:projectId/columns/:columnId'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
   @ApiOperation({ summary: 'Update a project board column' })
@@ -203,7 +207,7 @@ export class ProjectController {
     return this.projectService.updateColumn(projectId, columnId, dto);
   }
 
-  @Delete('project/:projectId/columns/:columnId')
+  @Delete(['project/:projectId/columns/:columnId', 'projects/:projectId/columns/:columnId'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
   @ApiOperation({

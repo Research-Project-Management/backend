@@ -72,7 +72,115 @@ export class IngestCatalogItemDto {
 
   @IsString()
   @IsOptional()
+  abstract?: string;
+
+  @IsString()
+  @IsOptional()
   abstractNote?: string;
+
+  @IsString()
+  @IsOptional()
+  journal?: string;
+
+  @IsString()
+  @IsOptional()
+  publicationTitle?: string;
+
+  @IsString()
+  @IsOptional()
+  publisher?: string;
+
+  @IsString()
+  @IsOptional()
+  place?: string;
+
+  @IsString()
+  @IsOptional()
+  volume?: string;
+
+  @IsString()
+  @IsOptional()
+  issue?: string;
+
+  @IsString()
+  @IsOptional()
+  section?: string;
+
+  @IsString()
+  @IsOptional()
+  partNumber?: string;
+
+  @IsString()
+  @IsOptional()
+  partTitle?: string;
+
+  @IsString()
+  @IsOptional()
+  pages?: string;
+
+  @IsString()
+  @IsOptional()
+  series?: string;
+
+  @IsString()
+  @IsOptional()
+  seriesTitle?: string;
+
+  @IsString()
+  @IsOptional()
+  seriesText?: string;
+
+  @IsString()
+  @IsOptional()
+  issn?: string;
+
+  @IsString()
+  @IsOptional()
+  isbn?: string;
+
+  @IsString()
+  @IsOptional()
+  pmid?: string;
+
+  @IsString()
+  @IsOptional()
+  pmcid?: string;
+
+  @IsString()
+  @IsOptional()
+  arxivId?: string;
+
+  @IsString()
+  @IsOptional()
+  arxiv?: string;
+
+  @IsString()
+  @IsOptional()
+  url?: string;
+
+  @IsString()
+  @IsOptional()
+  type?: string;
+
+  @IsString()
+  @IsOptional()
+  language?: string;
+
+  @IsString()
+  @IsOptional()
+  journalAbbr?: string;
+
+  @IsString()
+  @IsOptional()
+  shortTitle?: string;
+
+  @IsString()
+  @IsOptional()
+  rights?: string;
+
+  @IsString()
+  @IsOptional()
+  license?: string;
 
   @IsString()
   @IsOptional()
@@ -80,7 +188,25 @@ export class IngestCatalogItemDto {
 
   @IsString()
   @IsOptional()
+  publicationDate?: string;
+
+  @IsString()
+  @IsOptional()
   accessDate?: string;
+
+  @IsString()
+  @IsOptional()
+  extra?: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  editors?: string[];
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  keywords?: string[];
 }
 
 export class UploadCatalogItemDto {
@@ -89,12 +215,12 @@ export class UploadCatalogItemDto {
   title!: string;
 
   @IsString()
-  @IsNotEmpty({ message: 'Filename is required' })
-  filename!: string;
+  @IsOptional()
+  filename?: string;
 
   @IsString()
-  @IsNotEmpty({ message: 'File URL is required' })
-  fileUrl!: string;
+  @IsOptional()
+  fileUrl?: string;
 
   @IsString()
   @IsOptional()
@@ -192,6 +318,9 @@ export class UploadCatalogItemDto {
   @IsOptional()
   accessDate?: string;
 
+  @IsOptional()
+  accessedAt?: string | Date;
+
   @IsString()
   @IsOptional()
   language?: string;
@@ -210,7 +339,175 @@ export class UploadCatalogItemDto {
 
   @IsString()
   @IsOptional()
+  license?: string;
+
+  @IsString()
+  @IsOptional()
   citationKey?: string;
+
+  @IsString()
+  @IsOptional()
+  publicationTitle?: string;
+
+  @IsString()
+  @IsOptional()
+  publicationDate?: string;
+
+  @IsString()
+  @IsOptional()
+  place?: string;
+
+  @IsString()
+  @IsOptional()
+  section?: string;
+
+  @IsString()
+  @IsOptional()
+  partNumber?: string;
+
+  @IsString()
+  @IsOptional()
+  partTitle?: string;
+
+  @IsString()
+  @IsOptional()
+  series?: string;
+
+  @IsString()
+  @IsOptional()
+  seriesTitle?: string;
+
+  @IsString()
+  @IsOptional()
+  seriesText?: string;
+
+  @IsString()
+  @IsOptional()
+  pmid?: string;
+
+  @IsString()
+  @IsOptional()
+  pmcid?: string;
+
+  @IsString()
+  @IsOptional()
+  libraryCatalog?: string;
+
+  @IsString()
+  @IsOptional()
+  archive?: string;
+
+  @IsString()
+  @IsOptional()
+  archiveLocation?: string;
+
+  @IsString()
+  @IsOptional()
+  callNumber?: string;
+
+  @IsString()
+  @IsOptional()
+  extra?: string;
+
+  @IsString()
+  @IsOptional()
+  author?: string;
+
+  @IsString()
+  @IsOptional()
+  arxivId?: string;
+
+  @IsString()
+  @IsOptional()
+  arxiv?: string;
+
+  @IsString()
+  @IsOptional()
+  journalAbbreviation?: string;
+
+  @IsString()
+  @IsOptional()
+  seriesNumber?: string;
+
+  @IsOptional()
+  keywordsList?: string[];
+
+  @IsOptional()
+  crossrefEnriched?: boolean;
+
+  @IsOptional()
+  extraFields?: any;
+
+  @IsOptional()
+  provenance?: any;
+
+  @IsOptional()
+  subject?: string;
+
+  @IsOptional()
+  creator?: string;
+
+  @IsOptional()
+  producer?: string;
+
+  @IsOptional()
+  creationDate?: string;
+
+  @IsOptional()
+  modDate?: string;
+
+  @IsOptional()
+  pageCount?: number;
+
+  @IsOptional()
+  copyright?: string;
+
+  @IsOptional()
+  numPages?: string | number;
+
+  @IsOptional()
+  numberOfVolumes?: string | number;
+
+  @IsOptional()
+  edition?: string;
+
+  @IsOptional()
+  conferenceName?: string;
+
+  @IsOptional()
+  proceedingsTitle?: string;
+
+  @IsOptional()
+  bookTitle?: string;
+
+  @IsOptional()
+  university?: string;
+
+  @IsOptional()
+  institution?: string;
+
+  @IsOptional()
+  country?: string;
+
+  @IsOptional()
+  assignee?: string;
+
+  @IsOptional()
+  issuingAuthority?: string;
+
+  @IsOptional()
+  filingDate?: string;
+
+  @IsOptional()
+  websiteTitle?: string;
+
+  @IsOptional()
+  websiteType?: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  editors?: string[];
 
   @IsArray()
   @IsString({ each: true })
@@ -327,6 +624,10 @@ export class UpdateCatalogItemDto {
   @IsOptional()
   itemType?: string;
 
+  @IsString()
+  @IsOptional()
+  type?: string;
+
   @IsArray()
   @IsOptional()
   editors?: string[];
@@ -421,6 +722,106 @@ export class UpdateCatalogItemDto {
 
   @IsString()
   @IsOptional()
+  bookTitle?: string;
+
+  @IsString()
+  @IsOptional()
+  proceedingsTitle?: string;
+
+  @IsString()
+  @IsOptional()
+  conferenceName?: string;
+
+  @IsString()
+  @IsOptional()
+  websiteTitle?: string;
+
+  @IsString()
+  @IsOptional()
+  websiteType?: string;
+
+  @IsString()
+  @IsOptional()
+  university?: string;
+
+  @IsString()
+  @IsOptional()
+  institution?: string;
+
+  @IsString()
+  @IsOptional()
+  country?: string;
+
+  @IsString()
+  @IsOptional()
+  assignee?: string;
+
+  @IsString()
+  @IsOptional()
+  issuingAuthority?: string;
+
+  @IsString()
+  @IsOptional()
+  patentNumber?: string;
+
+  @IsString()
+  @IsOptional()
+  applicationNumber?: string;
+
+  @IsString()
+  @IsOptional()
+  reportNumber?: string;
+
+  @IsString()
+  @IsOptional()
+  reportType?: string;
+
+  @IsString()
+  @IsOptional()
+  thesisType?: string;
+
+  @IsString()
+  @IsOptional()
+  genre?: string;
+
+  @IsString()
+  @IsOptional()
+  edition?: string;
+
+  @IsString()
+  @IsOptional()
+  numPages?: string;
+
+  @IsString()
+  @IsOptional()
+  numberOfVolumes?: string;
+
+  @IsString()
+  @IsOptional()
+  seriesNumber?: string;
+
+  @IsString()
+  @IsOptional()
+  seriesText?: string;
+
+  @IsString()
+  @IsOptional()
+  filingDate?: string;
+
+  @IsString()
+  @IsOptional()
+  legalStatus?: string;
+
+  @IsString()
+  @IsOptional()
+  versionNumber?: string;
+
+  @IsString()
+  @IsOptional()
+  libraryCatalog?: string;
+
+  @IsString()
+  @IsOptional()
   archive?: string;
 
   @IsString()
@@ -461,17 +862,8 @@ export class MergeCatalogItemsDto {
 }
 
 // Aliases for seamless backward compatibility
-export const IngestPaperDto = IngestCatalogItemDto;
-export type IngestPaperDto = IngestCatalogItemDto;
-
-export const UploadPaperDto = UploadCatalogItemDto;
-export type UploadPaperDto = UploadCatalogItemDto;
-
-export const UpdatePaperDto = UpdateCatalogItemDto;
-export type UpdatePaperDto = UpdateCatalogItemDto;
-
-export const ImportStoragePaperDto = ImportStorageCatalogItemDto;
-export type ImportStoragePaperDto = ImportStorageCatalogItemDto;
-
-export const MergePapersDto = MergeCatalogItemsDto;
-export type MergePapersDto = MergeCatalogItemsDto;
+export class IngestPaperDto extends IngestCatalogItemDto {}
+export class UploadPaperDto extends UploadCatalogItemDto {}
+export class UpdatePaperDto extends UpdateCatalogItemDto {}
+export class ImportStoragePaperDto extends ImportStorageCatalogItemDto {}
+export class MergePapersDto extends MergeCatalogItemsDto {}

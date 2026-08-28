@@ -1,0 +1,112 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { createHash } from 'crypto';
+import {
+  MetadataProvider,
+  MetadataRequest,
+  ProviderCapability,
+  ProviderName,
+  ProviderResult,
+  QueryType,
+} from '../metadata.contracts';
+import { normalizeDoi } from '../metadata.identifiers';
+import { ProviderFetchError } from '../metadata.executor';
+
+@Injectable()
+export class UnpaywallProvider implements MetadataProvider {
+  readonly id: ProviderName = 'Unpaywall';
+  readonly capabilities: ProviderCapability = {
+    queryTypes: ['DOI'],
+    isAuthoritative: false,
+    timeoutMs: 8000,
+    maxConcurrency: 2,
+  };
+
+  private readonly logger = new Logger(UnpaywallProvider.name);
+  private readonly BASE_URL = 'https://api.unpaywall.org/v2';
+  private readonly EMAIL = 'admin@researchmanagement.local';
+
+  supports(queryType: QueryType): boolean {
+    return this.capabilities.queryTypes.includes(queryType);
+  }
+
+  async resolve(
+    request: MetadataRequest,
+    signal?: AbortSignal,
+  ): Promise<ProviderResult | null> {
+    const cleanDoi = normalizeDoi(request.query);
+    if (!cleanDoi) return null;
+
+    const url = `${this.BASE_URL}/${encodeURIComponent(cleanDoi)}?email=${encodeURIComponent(this.EMAIL)}`;
+
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent':
+          'FluxResearchPlatform/1.0 (academic-research-bot; mailto:admin@researchmanagement.local)',
+        Accept: 'application/json',
+      },
+      signal,
+    });
+
+    if (response.status === 404) return null;
+
+    if (!response.ok) {
+      const retryAfterHeader = response.headers.get('retry-after');
+      const retryAfterMs = retryAfterHeader
+        ? parseInt(retryAfterHeader, 10) * 1000
+        : undefined;
+      throw new ProviderFetchError(
+        `Unpaywall API HTTP ${response.status} for DOI: ${cleanDoi}`,
+        response.status,
+        retryAfterMs,
+      );
+    }
+
+    let json: any;
+    try {
+      json = await response.json();
+    } catch {
+      throw new ProviderFetchError(
+        `Failed to parse Unpaywall JSON for DOI: ${cleanDoi}`,
+        undefined,
+        undefined,
+        false,
+        true,
+      );
+    }
+
+    const isOa = Boolean(json?.is_oa);
+    const bestOaLocation = json?.best_oa_location;
+    const pdfUrl =
+      bestOaLocation?.url_for_pdf || bestOaLocation?.url || undefined;
+
+    if (!pdfUrl) return null;
+
+    const rawVersion = createHash('md5')
+      .update(JSON.stringify(json))
+      .digest('hex');
+
+    return {
+      provider: this.id,
+      metadata: {
+        doi: cleanDoi,
+        title: json.title,
+        journal: json.journal_name,
+        openAccessPdfUrl: pdfUrl,
+        provenance: {
+          originProvider: this.id,
+          resolvedAt: new Date().toISOString(),
+          canonicalId: `doi:${cleanDoi}`,
+          canonicalUrl: `https://doi.org/${cleanDoi}`,
+          confidenceScore: 0.99,
+          rawSnapshotHash: rawVersion,
+          isOpenAccess: isOa,
+          openAccessPdfUrl: pdfUrl,
+        },
+      },
+      confidence: 0.99,
+      identifier: cleanDoi,
+      fetchedAt: new Date().toISOString(),
+      rawVersion,
+    };
+  }
+}

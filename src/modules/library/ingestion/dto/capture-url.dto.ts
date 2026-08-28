@@ -43,10 +43,10 @@ export class CaptureUrlDto {
 }
 
 export class ConfirmCapturedUrlDto {
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
   @MaxLength(500)
-  title!: string;
+  title?: string;
 
   @IsOptional()
   @IsString()

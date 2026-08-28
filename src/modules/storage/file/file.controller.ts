@@ -225,6 +225,22 @@ export class FileController {
     return this.fileService.getFolderPath(folderId);
   }
 
+  @Get('workspace/:workspaceId/usage')
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'Get workspace storage usage' })
+  async getWorkspaceStorageUsage(@Param('workspaceId') workspaceId: string) {
+    return this.fileService.getStorageUsage(workspaceId);
+  }
+
+  @Get('workspace/:workspaceId/stats')
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'Get workspace storage stats (alias)' })
+  async getWorkspaceStorageStats(@Param('workspaceId') workspaceId: string) {
+    return this.fileService.getStorageUsage(workspaceId);
+  }
+
   @Get('workspace/:workspaceId')
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')

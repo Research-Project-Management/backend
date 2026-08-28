@@ -10,17 +10,47 @@ export interface CreateCatalogItemData {
   doi?: string;
   abstract?: string;
   itemType?: string;
+  editors?: string[];
   journal?: string;
+  publicationTitle?: string;
+  publicationDate?: string;
   publisher?: string;
+  place?: string;
   volume?: string;
   issue?: string;
+  section?: string;
+  partNumber?: string;
+  partTitle?: string;
   pages?: string;
+  series?: string;
+  seriesTitle?: string;
+  seriesText?: string;
+  issn?: string;
+  isbn?: string;
+  pmid?: string;
+  pmcid?: string;
   url?: string;
+  type?: string;
+  language?: string;
+  journalAbbr?: string;
+  shortTitle?: string;
+  rights?: string;
+  license?: string;
+  citationKey?: string;
+  libraryCatalog?: string;
+  archive?: string;
+  archiveLocation?: string;
+  callNumber?: string;
+  accessedAt?: Date | null;
+  extra?: string;
+  notes?: any;
+  labels?: string[];
+  keywords?: string[];
   fileUrl?: string;
   filename?: string;
   mimeType?: string;
   size?: number;
-  collectionId?: string;
+  collectionId?: string | null;
   uploadedById: string;
 }
 
@@ -31,12 +61,42 @@ export interface UpdateCatalogItemData {
   doi?: string;
   abstract?: string;
   itemType?: string;
+  editors?: string[];
   journal?: string;
+  publicationTitle?: string;
+  publicationDate?: string;
   publisher?: string;
+  place?: string;
   volume?: string;
   issue?: string;
+  section?: string;
+  partNumber?: string;
+  partTitle?: string;
   pages?: string;
+  series?: string;
+  seriesTitle?: string;
+  seriesText?: string;
+  issn?: string;
+  isbn?: string;
+  pmid?: string;
+  pmcid?: string;
   url?: string;
+  type?: string;
+  language?: string;
+  journalAbbr?: string;
+  shortTitle?: string;
+  rights?: string;
+  license?: string;
+  citationKey?: string;
+  libraryCatalog?: string;
+  archive?: string;
+  archiveLocation?: string;
+  callNumber?: string;
+  accessedAt?: Date | null;
+  extra?: string;
+  notes?: any;
+  labels?: string[];
+  keywords?: string[];
   collectionId?: string | null;
 }
 
@@ -82,21 +142,23 @@ export class CatalogRepository {
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    const limit = Math.min(options.limit ?? 50, 100);
-    const where: any = {
+    const limit = options.limit ?? 50;
+
+    const where: Prisma.CatalogItemWhereInput = {
       workspaceId,
       deletedAt: null,
     };
 
     if (options.collectionId) {
-      where.OR = [
-        { collectionId: options.collectionId },
-        { collectionItems: { some: { collectionId: options.collectionId } } },
-      ];
+      where.collectionItems = {
+        some: { collectionId: options.collectionId },
+      };
     }
 
     if (options.tagId) {
-      where.itemTags = { some: { tagId: options.tagId } };
+      where.itemTags = {
+        some: { tagId: options.tagId },
+      };
     }
 
     if (options.search) {
@@ -139,12 +201,42 @@ export class CatalogRepository {
         doi: data.doi ?? '',
         abstract: data.abstract ?? '',
         itemType: data.itemType ?? 'journalArticle',
+        editors: data.editors ?? [],
         journal: data.journal ?? '',
+        publicationTitle: data.publicationTitle ?? data.journal ?? '',
+        publicationDate: data.publicationDate ?? (data.year ? String(data.year) : ''),
         publisher: data.publisher ?? '',
+        place: data.place ?? '',
         volume: data.volume ?? '',
         issue: data.issue ?? '',
+        section: data.section ?? '',
+        partNumber: data.partNumber ?? '',
+        partTitle: data.partTitle ?? '',
         pages: data.pages ?? '',
+        series: data.series ?? '',
+        seriesTitle: data.seriesTitle ?? '',
+        seriesText: data.seriesText ?? '',
+        issn: data.issn ?? '',
+        isbn: data.isbn ?? '',
+        pmid: data.pmid ?? '',
+        pmcid: data.pmcid ?? '',
         url: data.url ?? '',
+        type: data.type ?? '',
+        language: data.language ?? '',
+        journalAbbr: data.journalAbbr ?? '',
+        shortTitle: data.shortTitle ?? '',
+        rights: data.rights ?? '',
+        license: data.license ?? '',
+        citationKey: data.citationKey ?? '',
+        libraryCatalog: data.libraryCatalog ?? '',
+        archive: data.archive ?? '',
+        archiveLocation: data.archiveLocation ?? '',
+        callNumber: data.callNumber ?? '',
+        accessedAt: data.accessedAt ?? null,
+        extra: data.extra ?? '',
+        notes: data.notes ?? [],
+        labels: data.labels ?? data.keywords ?? [],
+        keywords: data.keywords ?? data.labels ?? [],
         fileUrl: data.fileUrl ?? '',
         filename: data.filename ?? data.title,
         mimeType: data.mimeType ?? 'application/pdf',
@@ -210,12 +302,40 @@ export class CatalogRepository {
         doi: data.doi ?? existing.doi,
         abstract: data.abstract ?? existing.abstract,
         itemType: data.itemType ?? existing.itemType,
+        editors: data.editors ?? existing.editors,
         journal: data.journal ?? existing.journal,
+        publicationTitle: data.publicationTitle ?? existing.publicationTitle,
+        publicationDate: data.publicationDate ?? existing.publicationDate,
         publisher: data.publisher ?? existing.publisher,
+        place: data.place ?? existing.place,
         volume: data.volume ?? existing.volume,
         issue: data.issue ?? existing.issue,
+        section: data.section ?? existing.section,
+        partNumber: data.partNumber ?? existing.partNumber,
+        partTitle: data.partTitle ?? existing.partTitle,
         pages: data.pages ?? existing.pages,
+        series: data.series ?? existing.series,
+        seriesTitle: data.seriesTitle ?? existing.seriesTitle,
+        seriesText: data.seriesText ?? existing.seriesText,
+        issn: data.issn ?? existing.issn,
+        isbn: data.isbn ?? existing.isbn,
+        pmid: data.pmid ?? existing.pmid,
+        pmcid: data.pmcid ?? existing.pmcid,
         url: data.url ?? existing.url,
+        type: data.type ?? existing.type,
+        language: data.language ?? existing.language,
+        journalAbbr: data.journalAbbr ?? existing.journalAbbr,
+        shortTitle: data.shortTitle ?? existing.shortTitle,
+        rights: data.rights ?? existing.rights,
+        license: data.license ?? existing.license,
+        citationKey: data.citationKey ?? existing.citationKey,
+        libraryCatalog: data.libraryCatalog ?? existing.libraryCatalog,
+        archive: data.archive ?? existing.archive,
+        archiveLocation: data.archiveLocation ?? existing.archiveLocation,
+        callNumber: data.callNumber ?? existing.callNumber,
+        accessedAt: data.accessedAt !== undefined ? data.accessedAt : existing.accessedAt,
+        extra: data.extra ?? existing.extra,
+        notes: data.notes !== undefined ? data.notes : existing.notes,
         collectionId:
           data.collectionId !== undefined
             ? data.collectionId

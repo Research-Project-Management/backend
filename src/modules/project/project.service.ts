@@ -154,7 +154,7 @@ export class ProjectService {
       name: dto.name,
       identifier: identifier || null,
       avatar: dto.avatar || '',
-      coverImage: dto.coverImage || '',
+      coverImage: dto.coverImage || dto.cover || '',
       description: dto.description || '',
       modules: dto.modules || [
         'overview',
@@ -213,14 +213,22 @@ export class ProjectService {
       dto.identifier = identifier;
     }
 
+    const coverVal = dto.coverImage !== undefined ? dto.coverImage : dto.cover;
+    const activeVal =
+      dto.isActive !== undefined
+        ? dto.isActive
+        : dto.isArchived !== undefined
+          ? !dto.isArchived
+          : undefined;
+
     const project = await this.projectRepo.updateProject(projectId, {
       ...(dto.name !== undefined && { name: dto.name }),
       ...(dto.identifier !== undefined && { identifier: dto.identifier }),
       ...(dto.avatar !== undefined && { avatar: dto.avatar }),
-      ...(dto.coverImage !== undefined && { coverImage: dto.coverImage }),
+      ...(coverVal !== undefined && { coverImage: coverVal }),
       ...(dto.description !== undefined && { description: dto.description }),
       ...(dto.modules !== undefined && { modules: dto.modules }),
-      ...(dto.isActive !== undefined && { isActive: dto.isActive }),
+      ...(activeVal !== undefined && { isActive: activeVal }),
       ...(dto.settings !== undefined && { settings: dto.settings }),
       ...(dto.leadId !== undefined && {
         lead: dto.leadId
@@ -323,7 +331,8 @@ export class ProjectService {
     targetUserId: string,
     dto: UpdateProjectMemberDto,
   ) {
-    if (!VALID_PROJECT_ROLES.has(dto.role)) {
+    const role = dto.role;
+    if (!role || !VALID_PROJECT_ROLES.has(role)) {
       throw new BadRequestException(
         `Invalid project role "${dto.role}". Valid roles are: ${Object.values(ProjectMemberRole).join(', ')}`,
       );
@@ -340,7 +349,7 @@ export class ProjectService {
     // Single Admin Invariant check
     if (
       existing.role === ProjectMemberRole.admin &&
-      dto.role !== ProjectMemberRole.admin
+      role !== ProjectMemberRole.admin
     ) {
       const adminCount = await this.projectRepo.countAdmins(projectId);
       if (adminCount <= 1) {
@@ -353,7 +362,7 @@ export class ProjectService {
     const member = await this.projectRepo.updateProjectMemberRole(
       projectId,
       targetUserId,
-      dto.role,
+      role,
     );
 
     await this.invalidateProjectCache(projectId);

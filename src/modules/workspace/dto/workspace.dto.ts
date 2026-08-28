@@ -34,6 +34,14 @@ export class CreateWorkspaceDto {
 
   @IsString()
   @IsOptional()
+  size?: string;
+
+  @IsString()
+  @IsOptional()
+  timezone?: string;
+
+  @IsString()
+  @IsOptional()
   plan?: string;
 
   @IsObject()
@@ -64,6 +72,14 @@ export class UpdateWorkspaceDto {
 
   @IsString()
   @IsOptional()
+  size?: string;
+
+  @IsString()
+  @IsOptional()
+  timezone?: string;
+
+  @IsString()
+  @IsOptional()
   plan?: string;
 
   @IsObject()
@@ -73,8 +89,12 @@ export class UpdateWorkspaceDto {
 
 export class AddWorkspaceMemberDto {
   @IsString()
-  @IsNotEmpty({ message: 'User ID or Email is required' })
-  userId!: string;
+  @IsOptional()
+  userId?: string;
+
+  @IsString()
+  @IsOptional()
+  email?: string;
 
   @IsEnum(WorkspaceMemberRole, {
     message: 'Role must be one of: owner, admin, member, viewer',

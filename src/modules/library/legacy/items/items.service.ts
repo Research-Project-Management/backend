@@ -89,7 +89,11 @@ export class ItemsService {
     dto: UploadCatalogItemDto,
   ) {
     const targetWsId = await this.catalogRepo.resolveWorkspaceId(workspaceId);
-    const authors = dto.authors || [];
+    const authors = dto.authors?.length
+      ? dto.authors
+      : dto.author
+        ? [dto.author]
+        : [];
     const year = dto.year || (dto.date ? extractYearFromDate(dto.date) : null);
     const itemType = normalizeLibraryItemType(dto.itemType || dto.type);
 
@@ -110,20 +114,47 @@ export class ItemsService {
       size: dto.size || 0,
       mimeType: dto.mimeType || 'application/pdf',
       authors,
+      editors: dto.editors || [],
       year,
 
       doi: dto.doi?.trim() || null,
       abstract: dto.abstract || dto.abstractNote || null,
-      publicationTitle: dto.journal || dto.publisher || null,
+      journal: dto.journal || null,
+      publisher: dto.publisher || null,
+      publicationTitle: dto.publicationTitle || dto.journal || dto.publisher || null,
+      place: dto.place || null,
       volume: dto.volume || null,
       issue: dto.issue || null,
+      section: dto.section || null,
+      partNumber: dto.partNumber || null,
+      partTitle: dto.partTitle || null,
       pages: dto.pages || null,
+      series: dto.series || null,
+      seriesTitle: dto.seriesTitle || null,
+      seriesText: dto.seriesText || null,
       issn: dto.issn || null,
       isbn: dto.isbn || null,
+      pmid: dto.pmid || null,
+      pmcid: dto.pmcid || null,
       url: dto.url || null,
+      type: dto.type || null,
+      language: dto.language || null,
+      journalAbbr: dto.journalAbbr || null,
+      shortTitle: dto.shortTitle || null,
+      rights: dto.rights || null,
+      license: dto.license || null,
+      libraryCatalog: dto.libraryCatalog || null,
+      archive: dto.archive || null,
+      archiveLocation: dto.archiveLocation || null,
+      callNumber: dto.callNumber || null,
+      extra: dto.extra || null,
       itemType,
-      publicationDate: dto.date || null,
-      accessedAt: dto.accessDate ? new Date(dto.accessDate) : null,
+      publicationDate: dto.publicationDate || dto.date || null,
+      accessedAt: dto.accessDate
+        ? new Date(dto.accessDate)
+        : dto.accessedAt
+          ? new Date(dto.accessedAt)
+          : null,
       citationKey,
       labels: normalizeTags(dto.tags || dto.keywords || []),
       ...(dto.collectionId && {
@@ -196,6 +227,53 @@ export class ItemsService {
       ]
     >;
 
+    const PRISMA_VALID_COLUMNS = new Set([
+      'title',
+      'authors',
+      'year',
+      'doi',
+      'abstract',
+      'itemType',
+      'editors',
+      'journal',
+      'publicationTitle',
+      'publicationDate',
+      'publisher',
+      'place',
+      'volume',
+      'issue',
+      'section',
+      'partNumber',
+      'partTitle',
+      'pages',
+      'series',
+      'seriesTitle',
+      'seriesText',
+      'issn',
+      'isbn',
+      'pmid',
+      'pmcid',
+      'url',
+      'type',
+      'language',
+      'journalAbbr',
+      'shortTitle',
+      'rights',
+      'license',
+      'citationKey',
+      'libraryCatalog',
+      'archive',
+      'archiveLocation',
+      'callNumber',
+      'accessedAt',
+      'extra',
+      'notes',
+      'labels',
+      'keywords',
+    ]);
+
+    const customFields: Record<string, any> = {};
+
     for (const [key, value] of entries) {
       if (value === undefined) continue;
 
@@ -254,9 +332,45 @@ export class ItemsService {
         updateData.itemType = normalizeLibraryItemType(
           typeof value === 'string' ? value : '',
         );
-      } else {
+      } else if (key === 'bookTitle' || key === 'proceedingsTitle' || key === 'websiteTitle') {
+        if (!dto.publicationTitle) {
+          updateData.publicationTitle = String(value);
+        }
+        customFields[key] = value;
+      } else if (key === 'university' || key === 'institution') {
+        if (!dto.publisher) {
+          updateData.publisher = String(value);
+        }
+        customFields[key] = value;
+      } else if (key === 'thesisType' || key === 'reportType' || key === 'genre' || key === 'websiteType') {
+        if (!dto.type) {
+          updateData.type = String(value);
+        }
+        customFields[key] = value;
+      } else if (key === 'country') {
+        if (!dto.place) {
+          updateData.place = String(value);
+        }
+        customFields[key] = value;
+      } else if (PRISMA_VALID_COLUMNS.has(String(key))) {
         assignableUpdateData[String(key)] = value;
+      } else {
+        customFields[String(key)] = value;
       }
+    }
+
+    // Merge custom fields into extra if present
+    if (Object.keys(customFields).length > 0) {
+      let baseExtra: Record<string, any> = {};
+      const currentExtra = (typeof updateData.extra === 'string' ? updateData.extra : (dto.extra || ''));
+      if (currentExtra && currentExtra.trim().startsWith('{') && currentExtra.trim().endsWith('}')) {
+        try {
+          baseExtra = JSON.parse(currentExtra.trim());
+        } catch {
+          // keep as is
+        }
+      }
+      updateData.extra = JSON.stringify({ ...baseExtra, ...customFields });
     }
 
     const paper = await this.catalogRepo.updateItem(itemId, updateData);
