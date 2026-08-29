@@ -239,6 +239,9 @@ export interface CanonicalMetadataResolver {
   resolve(request: MetadataRequest): Promise<ResolvedMetadata | null>;
 }
 
+export type ICanonicalMetadataService = CanonicalMetadataResolver;
+export type CanonicalMetadataService = CanonicalMetadataResolver;
+
 // ── Metadata Provider Interface ───────────────────────────────────────────────
 
 export interface MetadataProvider {

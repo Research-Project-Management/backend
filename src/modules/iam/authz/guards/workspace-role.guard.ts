@@ -74,9 +74,12 @@ export class WorkspaceRoleGuard implements CanActivate {
       return true;
     }
 
-    // 2. Fetch workspace to support both UUID and URL slug
+    // 2. Fetch workspace to support UUID, slug, and URL
     const ws = await this.prisma.workspace.findFirst({
-      where: { OR: [{ id: workspaceId }, { url: workspaceId }] },
+      where: {
+        OR: [{ id: workspaceId }, { slug: workspaceId }, { url: workspaceId }],
+        deletedAt: null,
+      },
       select: { id: true },
     });
     const targetWsId = ws?.id || workspaceId;

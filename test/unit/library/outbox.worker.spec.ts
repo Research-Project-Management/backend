@@ -1,10 +1,10 @@
-import { OutboxWorker } from '../../../src/modules/library/sync-core/outbox.worker';
+import { OutboxWorker } from '../../../src/modules/library/sync/outbox.worker';
 import { OutboxStatus } from '@prisma/client';
-import { SyncMetricsService } from '../../../src/modules/library/sync-core/sync.metrics';
+import { SyncMetricsService } from '../../../src/modules/library/sync/sync.metrics';
 import {
   LIBRARY_EVENT_TYPES,
   LIBRARY_EVENT_CATALOG,
-} from '../../../src/modules/library/sync-core/library-event-catalog';
+} from '../../../src/modules/library/sync/library-event-catalog';
 
 describe('OutboxWorker (Atomic Lease, Heartbeat & Recovery)', () => {
   let worker: OutboxWorker;

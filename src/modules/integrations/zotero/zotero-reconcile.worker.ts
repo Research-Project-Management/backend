@@ -6,7 +6,7 @@ import {
   LIBRARY_SYNC_PORT,
   ILibrarySyncPort,
   SyncEntityType,
-} from '../../library/library-sync.port';
+} from '../../library/sync/library-sync.port';
 
 export interface ReconcileJobResult {
   deletedItems: number;

@@ -210,7 +210,7 @@ export class FileService {
   }): Promise<string | null> {
     if (scope.workspaceId) {
       const ws = await this.resolveWorkspace(scope.workspaceId);
-      return ws?.id || scope.workspaceId;
+      return ws?.id || null;
     }
     if (scope.projectId) {
       const project = await this.fileRepo.findProjectScope(scope.projectId);
@@ -309,10 +309,7 @@ export class FileService {
     const projectId = getFieldValue(fields.projectId);
     const pageId = getFieldValue(fields.pageId);
     const source = getFieldValue(fields.source) || getFieldValue(fields.module);
-    const skipFileRecord =
-      getFieldValue(fields.skipFileRecord) === 'true' ||
-      source === 'library' ||
-      source === 'paper';
+    const skipFileRecord = getFieldValue(fields.skipFileRecord) === 'true';
 
     return this.uploadR2Buffer(authorId, filename, buffer, mimeType, {
       workspaceId,
@@ -345,13 +342,8 @@ export class FileService {
     const key = `uploads/${Date.now()}-${cleanName}`;
     const uploadRes = await this.r2Service.uploadBuffer(key, buffer, mimeType);
 
-    // Pure binary upload transport: does not create unorganized database records
-    if (
-      !scope.createRecord ||
-      scope.skipFileRecord ||
-      scope.source === 'library' ||
-      scope.source === 'paper'
-    ) {
+    // Pure binary upload transport if explicitly requested
+    if (scope.skipFileRecord) {
       return {
         file: null,
         url: uploadRes.url,
@@ -359,15 +351,17 @@ export class FileService {
       };
     }
 
+    const resolvedWorkspaceId = await this.resolveWorkspaceId(scope);
+
     const linkedToType = scope.pageId
       ? 'Page'
       : scope.projectId
         ? 'Project'
-        : scope.workspaceId
+        : resolvedWorkspaceId
           ? 'Workspace'
           : null;
     const linkedToId =
-      scope.pageId || scope.projectId || scope.workspaceId || null;
+      scope.pageId || scope.projectId || resolvedWorkspaceId || null;
 
     let file = null;
     try {
@@ -380,26 +374,30 @@ export class FileService {
           url: uploadRes.url,
           thumbnail: null,
           parentId: null,
-          metaData: {},
+          metaData: scope.source ? { source: scope.source } : {},
           authorId: userId,
-          workspaceId: scope.workspaceId || null,
+          workspaceId: resolvedWorkspaceId,
           linkedToType,
           linkedToId,
         });
 
-        await this.invalidateStorageCache(scope.workspaceId, file.id);
+        if (resolvedWorkspaceId && file?.id) {
+          await this.invalidateStorageCache(resolvedWorkspaceId, file.id);
+        }
 
-        this.eventEmitter?.emit(
-          'file.created',
-          new DomainActivityEvent({
-            entityType: 'file' as unknown as EntityType,
-            entityId: file.id,
-            verb: 'uploaded',
-            actorId: userId,
-            workspaceId: scope.workspaceId || '',
-            projectId: scope.projectId || undefined,
-          }),
-        );
+        if (file) {
+          this.eventEmitter?.emit(
+            'file.created',
+            new DomainActivityEvent({
+              entityType: 'file' as unknown as EntityType,
+              entityId: file.id,
+              verb: 'uploaded',
+              actorId: userId,
+              workspaceId: resolvedWorkspaceId || '',
+              projectId: scope.projectId || undefined,
+            }),
+          );
+        }
       }
     } catch (dbErr) {
       this.logger.warn(
@@ -409,6 +407,7 @@ export class FileService {
 
     return {
       file: file ? this.formatFile(file) : null,
+      id: file?.id,
       url: uploadRes.url,
       path: uploadRes.path,
     };

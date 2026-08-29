@@ -68,7 +68,9 @@ describe('Canonical metadata pipeline wiring', () => {
   it('resolve returns null for empty query without throwing', async () => {
     for (const p of ALL_PROVIDERS) {
       const result = await p.resolve({ query: '' });
-      expect(result === null || result === undefined || typeof result === 'object').toBe(true);
+      expect(
+        result === null || result === undefined || typeof result === 'object',
+      ).toBe(true);
     }
   });
 });

@@ -2,13 +2,14 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { FastifyReply } from 'fastify';
 import { EngineService } from '../engine/engine.service';
 import { RagAgentQueryDto } from './dto/rag-agent.dto';
-import { ItemsRepository } from '@/modules/library/legacy/items/items.repository';
+
+import { CatalogRepository } from '../../library/catalog/catalog.repository';
 
 @Injectable()
 export class RagAgentService {
   constructor(
     private readonly engineService: EngineService,
-    private readonly itemsRepo: ItemsRepository,
+    private readonly catalogRepo: CatalogRepository,
   ) {}
 
   private normalizeMessages(dto: RagAgentQueryDto) {
@@ -95,7 +96,7 @@ export class RagAgentService {
     dto: RagAgentQueryDto,
     reply: FastifyReply,
   ): Promise<void> {
-    const paper = await this.itemsRepo.findItemById(paperId);
+    const paper = await this.catalogRepo.findItemById(paperId);
     if (!paper || paper.deletedAt) {
       throw new NotFoundException(`Paper with ID ${paperId} not found`);
     }
@@ -135,7 +136,7 @@ export class RagAgentService {
    * Paper-Scoped Synchronous RAG Chat
    */
   async syncPaperChat(userId: string, paperId: string, dto: RagAgentQueryDto) {
-    const paper = await this.itemsRepo.findItemById(paperId);
+    const paper = await this.catalogRepo.findItemById(paperId);
     if (!paper || paper.deletedAt) {
       throw new NotFoundException(`Paper with ID ${paperId} not found`);
     }

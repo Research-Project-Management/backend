@@ -3,13 +3,11 @@ import { CatalogController } from './catalog.controller';
 import { CatalogService } from './catalog.service';
 import { CatalogRepository } from './catalog.repository';
 import { CoreModule } from '../../../core/core.module';
-import { LibraryFeatureFlagsService } from '../common/library-feature-flags';
-import { SyncCoreContextModule } from '../sync-core/sync-core.module';
-
+import { SyncModule } from '../sync/sync.module';
 @Module({
-  imports: [CoreModule, SyncCoreContextModule],
+  imports: [CoreModule, SyncModule],
   controllers: [CatalogController],
-  providers: [CatalogRepository, CatalogService, LibraryFeatureFlagsService],
+  providers: [CatalogRepository, CatalogService],
   exports: [CatalogRepository, CatalogService],
 })
-export class CatalogContextModule {}
+export class CatalogModule {}

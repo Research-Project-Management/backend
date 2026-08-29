@@ -2,7 +2,7 @@ import { LibraryTestHarness } from '../library-test-harness';
 import {
   LIBRARY_SYNC_PORT,
   ILibrarySyncPort,
-} from '../../../../src/modules/library/library-sync.port';
+} from '../../../../src/modules/library/sync/library-sync.port';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 
 jest.setTimeout(60000);
@@ -290,7 +290,11 @@ describe('Library Sync Port (ILibrarySyncPort Integration & Invariants)', () => 
       });
       expect(revisions).toHaveLength(3);
       expect(revisions.map((r) => r.revisionNumber)).toEqual([1, 2, 3]);
-      expect(revisions.map((r) => r.fileHash)).toEqual(['hash_v1', 'hash_v2', 'hash_v3']);
+      expect(revisions.map((r) => r.fileHash)).toEqual([
+        'hash_v1',
+        'hash_v2',
+        'hash_v3',
+      ]);
     });
   });
 

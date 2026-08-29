@@ -4,7 +4,7 @@ import {
   CreateNoteData,
   UpdateNoteData,
 } from './notes.repository';
-import { LibraryTransactionService } from '../sync-core/library-transaction.service';
+import { LibraryTransactionService } from '../sync/library-transaction.service';
 
 @Injectable()
 export class NotesService {

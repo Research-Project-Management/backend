@@ -18,7 +18,9 @@ describe('MetadataCache', () => {
   describe('buildKey', () => {
     it('includes policy version, queryType, and a hash of canonicalId', () => {
       const key = cache.buildKey('DOI', 'doi:10.1234/foo');
-      expect(key).toMatch(new RegExp(`^metadata:v${METADATA_POLICY_VERSION}:DOI:[a-f0-9]{32}$`));
+      expect(key).toMatch(
+        new RegExp(`^metadata:v${METADATA_POLICY_VERSION}:DOI:[a-f0-9]{32}$`),
+      );
     });
 
     it('produces same key for same inputs (deterministic)', () => {
@@ -69,17 +71,29 @@ describe('MetadataCache', () => {
   describe('set', () => {
     it('stores value with 7-day TTL for DOI', async () => {
       await cache.set('key', { query: 'x' } as any, 'DOI');
-      expect(mockRedis.set).toHaveBeenCalledWith('key', expect.anything(), 7 * 86_400);
+      expect(mockRedis.set).toHaveBeenCalledWith(
+        'key',
+        expect.anything(),
+        7 * 86_400,
+      );
     });
 
     it('stores value with 14-day TTL for ISBN', async () => {
       await cache.set('key', { query: 'x' } as any, 'ISBN');
-      expect(mockRedis.set).toHaveBeenCalledWith('key', expect.anything(), 14 * 86_400);
+      expect(mockRedis.set).toHaveBeenCalledWith(
+        'key',
+        expect.anything(),
+        14 * 86_400,
+      );
     });
 
     it('stores value with 24-hour TTL for TITLE', async () => {
       await cache.set('key', { query: 'x' } as any, 'TITLE');
-      expect(mockRedis.set).toHaveBeenCalledWith('key', expect.anything(), 86_400);
+      expect(mockRedis.set).toHaveBeenCalledWith(
+        'key',
+        expect.anything(),
+        86_400,
+      );
     });
 
     it('no-ops when Redis unavailable', async () => {
@@ -93,12 +107,20 @@ describe('MetadataCache', () => {
     it('stores negative sentinel with 1-hour TTL for DOI', async () => {
       mockRedis.isReady.mockReturnValue(true);
       await cache.setNegative('key', 'DOI');
-      expect(mockRedis.set).toHaveBeenCalledWith('key', '__metadata_negative__', 3_600);
+      expect(mockRedis.set).toHaveBeenCalledWith(
+        'key',
+        '__metadata_negative__',
+        3_600,
+      );
     });
 
     it('stores negative sentinel with 15-min TTL for TITLE', async () => {
       await cache.setNegative('key', 'TITLE');
-      expect(mockRedis.set).toHaveBeenCalledWith('key', '__metadata_negative__', 900);
+      expect(mockRedis.set).toHaveBeenCalledWith(
+        'key',
+        '__metadata_negative__',
+        900,
+      );
     });
   });
 
@@ -109,7 +131,7 @@ describe('MetadataCache', () => {
     });
 
     it('returns false when no Redis injected', () => {
-      const noRedisCache = new MetadataCache(undefined as any);
+      const noRedisCache = new MetadataCache(undefined);
       expect(noRedisCache.available).toBe(false);
     });
   });

@@ -115,4 +115,12 @@ export class ConfirmCapturedUrlDto {
   @ValidateNested({ each: true })
   @Type(() => CreatorDto)
   creators?: CreatorDto[];
+
+  @IsOptional()
+  @IsString()
+  collectionId?: string;
+
+  @IsOptional()
+  @IsString()
+  idempotencyKey?: string;
 }

@@ -10,4 +10,4 @@ import { BibtexParser } from './formatters/bibtex.parser';
   providers: [CitationService, BibtexParser],
   exports: [CitationService, BibtexParser],
 })
-export class CitationContextModule {}
+export class CitationModule {}

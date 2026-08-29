@@ -62,14 +62,24 @@ describe('MetadataReconciliationService (Canonical)', () => {
       {
         id: 'crossref:1',
         sourceProvider: 'CrossRef',
-        metadata: { title: 'Good Title', doi: '10.1/x', authors: ['A'], year: 2022 },
+        metadata: {
+          title: 'Good Title',
+          doi: '10.1/x',
+          authors: ['A'],
+          year: 2022,
+        },
         confidenceScore: 0.99,
         fetchedAt: new Date().toISOString(),
       },
       {
         id: 's2:1',
         sourceProvider: 'SemanticScholar',
-        metadata: { title: 'Good Title', doi: '10.1/x', authors: [], year: null },
+        metadata: {
+          title: 'Good Title',
+          doi: '10.1/x',
+          authors: [],
+          year: null,
+        },
         confidenceScore: 0.88,
         fetchedAt: new Date().toISOString(),
       },
@@ -83,7 +93,11 @@ describe('MetadataReconciliationService (Canonical)', () => {
       {
         id: 'arxiv:1706.03762',
         sourceProvider: 'arXiv',
-        metadata: { title: 'Attention Is All You Need', authors: ['Vaswani'], year: 2017 },
+        metadata: {
+          title: 'Attention Is All You Need',
+          authors: ['Vaswani'],
+          year: 2017,
+        },
         confidenceScore: 0.95,
         fetchedAt: new Date().toISOString(),
       },

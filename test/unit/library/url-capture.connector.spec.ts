@@ -1,7 +1,7 @@
 import {
   UrlCaptureConnector,
   CapturedPaperMetadata,
-} from '../../../src/modules/library/ingestion/url-capture.connector';
+} from '../../../src/modules/library/ingestion/providers/url-capture.connector';
 
 describe('UrlCaptureConnector (SSRF & Security)', () => {
   let connector: UrlCaptureConnector;

@@ -4,7 +4,6 @@ import {
 } from '../library-test-harness';
 import { IngestionService } from '../../../../src/modules/library/ingestion/ingestion.service';
 import { CatalogService } from '../../../../src/modules/library/catalog/catalog.service';
-import { MetadataService as LegacyMetadataService } from '../../../../src/modules/library/legacy/metadata/metadata.service';
 import {
   CANONICAL_METADATA_SERVICE,
   CanonicalMetadataResolver,
@@ -17,7 +16,6 @@ describe('Integration: Canonical Metadata Cutover & Transaction Atomicity', () =
   let fixture: TestWorkspaceFixture;
   let ingestionService: IngestionService;
   let canonicalMetadataService: CanonicalMetadataResolver;
-  let legacyMetadataService: LegacyMetadataService;
 
   beforeAll(async () => {
     harness = await LibraryTestHarness.create();
@@ -27,7 +25,6 @@ describe('Integration: Canonical Metadata Cutover & Transaction Atomicity', () =
     canonicalMetadataService = harness.moduleRef.get<CanonicalMetadataResolver>(
       CANONICAL_METADATA_SERVICE,
     );
-    legacyMetadataService = harness.moduleRef.get(LegacyMetadataService);
   });
 
   afterAll(async () => {
@@ -83,7 +80,7 @@ describe('Integration: Canonical Metadata Cutover & Transaction Atomicity', () =
       const outbox = await harness.prisma.outboxEvent.findFirst({
         where: {
           aggregateId: item.id,
-          eventType: 'library.item.ingested_doi',
+          eventType: 'library.item.created',
         },
       });
       expect(outbox).not.toBeNull();
@@ -165,49 +162,10 @@ describe('Integration: Canonical Metadata Cutover & Transaction Atomicity', () =
       const outbox = await harness.prisma.outboxEvent.findFirst({
         where: {
           aggregateId: item.id,
-          eventType: 'library.item.ingested_bibtex',
+          eventType: 'library.item.created',
         },
       });
       expect(outbox).not.toBeNull();
-    });
-  });
-
-  describe('3. Feature Flag Delegation & Compatibility', () => {
-    it('Legacy MetadataService delegates to canonical when CANONICAL_METADATA_ENABLED=true', async () => {
-      process.env['CANONICAL_METADATA_ENABLED'] = 'true';
-
-      const mockResolved = {
-        query: '10.1038/flag-test',
-        queryType: 'DOI' as const,
-        canonicalId: 'doi:10.1038/flag-test',
-        metadata: {
-          title: 'Flag Delegated Paper',
-          authors: ['Delegated Author'],
-          year: 2024,
-          doi: '10.1038/flag-test',
-          provenance: {
-            originProvider: 'CrossRef',
-            resolvedAt: new Date().toISOString(),
-            canonicalId: 'doi:10.1038/flag-test',
-            confidenceScore: 0.99,
-            isOpenAccess: false,
-          },
-        },
-        provenance: {},
-        resolvedAt: new Date().toISOString(),
-        policyVersion: 1,
-      };
-
-      const spy = jest
-        .spyOn(canonicalMetadataService, 'resolve')
-        .mockResolvedValueOnce(mockResolved);
-
-      const result = await legacyMetadataService.resolve('10.1038/flag-test');
-      expect(spy).toHaveBeenCalledWith({ query: '10.1038/flag-test' });
-      expect(result?.metadata.title).toBe('Flag Delegated Paper');
-      expect(result?.provider).toBe('CrossRef');
-
-      delete process.env['CANONICAL_METADATA_ENABLED'];
     });
   });
 

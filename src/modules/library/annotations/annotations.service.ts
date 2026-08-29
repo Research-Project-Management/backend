@@ -4,7 +4,7 @@ import {
   CreateAnnotationData,
   UpdateAnnotationData,
 } from './annotations.repository';
-import { LibraryTransactionService } from '../sync-core/library-transaction.service';
+import { LibraryTransactionService } from '../sync/library-transaction.service';
 
 @Injectable()
 export class AnnotationsService {

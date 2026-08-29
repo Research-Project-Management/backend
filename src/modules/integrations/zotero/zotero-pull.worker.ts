@@ -7,7 +7,7 @@ import {
   LIBRARY_SYNC_PORT,
   ILibrarySyncPort,
   ExternalSyncOperation,
-} from '../../library/library-sync.port';
+} from '../../library/sync/library-sync.port';
 
 export interface PullJobResult {
   syncRunId: string;
@@ -391,6 +391,7 @@ export class ZoteroPullWorker {
             filename: `${mapped.remoteKey}.pdf`,
             fileUrl:
               mapped.url || `https://api.zotero.org/items/${mapped.remoteKey}`,
+            tags: mapped.tags.map((t) => t.name).filter(Boolean),
           },
         });
       }
@@ -450,6 +451,7 @@ export class ZoteroPullWorker {
             catalogItemId: parentBinding?.entityId,
             title: 'Zotero Note',
             contentMd: mapped.contentHtml,
+            tags: mapped.tags || [],
           },
         });
       }
@@ -539,12 +541,12 @@ export class ZoteroPullWorker {
                 entityId: opRes.result.id,
                 remoteKey,
                 remoteVersion: mapped.remoteVersion,
-                rawPayload: mapped.rawPayload as any,
+                rawPayload: mapped.rawPayload,
                 syncState: 'synced',
               },
               update: {
                 remoteVersion: mapped.remoteVersion,
-                rawPayload: mapped.rawPayload as any,
+                rawPayload: mapped.rawPayload,
                 syncState: 'synced',
               },
             });

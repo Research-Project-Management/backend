@@ -2,11 +2,11 @@ import { Module } from '@nestjs/common';
 import { TagsRepository } from './tags.repository';
 import { TagsService } from './tags.service';
 import { CoreModule } from '../../../core/core.module';
-import { SyncCoreContextModule } from '../sync-core/sync-core.module';
+import { SyncModule } from '../sync/sync.module';
 
 @Module({
-  imports: [CoreModule, SyncCoreContextModule],
+  imports: [CoreModule, SyncModule],
   providers: [TagsRepository, TagsService],
   exports: [TagsRepository, TagsService],
 })
-export class TagsContextModule {}
+export class TagsModule {}

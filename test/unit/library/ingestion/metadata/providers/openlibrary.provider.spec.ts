@@ -54,8 +54,8 @@ describe('OpenLibraryProvider (Standalone)', () => {
       headers: new Headers(),
     } as any);
 
-    await expect(
-      provider.resolve({ query: '9780316769174' }),
-    ).rejects.toThrow(ProviderFetchError);
+    await expect(provider.resolve({ query: '9780316769174' })).rejects.toThrow(
+      ProviderFetchError,
+    );
   });
 });

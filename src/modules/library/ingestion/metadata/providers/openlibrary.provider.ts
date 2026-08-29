@@ -106,7 +106,8 @@ export class OpenLibraryProvider implements MetadataProvider {
       .update(JSON.stringify(item))
       .digest('hex');
 
-    const canonicalUrl = item.url || `https://openlibrary.org/isbn/${cleanIsbn}`;
+    const canonicalUrl =
+      item.url || `https://openlibrary.org/isbn/${cleanIsbn}`;
 
     return {
       provider: this.id,

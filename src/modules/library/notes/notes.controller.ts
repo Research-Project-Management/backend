@@ -17,23 +17,12 @@ import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
 import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
 import { CurrentUser } from '../../../modules/iam/authn/decorators/current-user.decorator';
 
-export class CreateNoteDto {
-  itemId?: string | null;
-  title?: string;
-  contentJson?: any;
-  contentMd?: string;
-  tags?: string[];
-}
+import { CreateNoteDto, UpdateNoteDto } from './dto/note.dto';
 
-export class UpdateNoteDto {
-  title?: string;
-  contentJson?: any;
-  contentMd?: string;
-  tags?: string[];
-  expectedVersion?: number;
-}
-
-@Controller('api/v1/workspaces/:workspaceId/library/notes')
+@Controller([
+  'api/v1/workspaces/:workspaceId/library/notes',
+  'workspace/:workspaceId/library/notes',
+])
 @UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
 export class NotesController {
   constructor(private readonly notesService: NotesService) {}

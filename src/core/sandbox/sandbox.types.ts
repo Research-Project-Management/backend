@@ -20,4 +20,10 @@ export interface SandboxResult<TOutput = unknown> {
   memoryUsedMb?: number;
 }
 
+export interface SandboxRunnerPort {
+  run<TInput = unknown, TOutput = unknown>(
+    task: SandboxTask<TInput>,
+  ): Promise<SandboxResult<TOutput>>;
+}
+
 export const SANDBOX_RUNNER_TOKEN = Symbol('SANDBOX_RUNNER_PORT');

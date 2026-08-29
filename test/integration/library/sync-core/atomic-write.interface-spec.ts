@@ -1,5 +1,5 @@
 import { LibraryTestHarness } from '../library-test-harness';
-import { LibraryTransactionService } from '../../../../src/modules/library/sync-core/library-transaction.service';
+import { LibraryTransactionService } from '../../../../src/modules/library/sync/library-transaction.service';
 
 describe('Atomic Write & Outbox Invariants (Integration)', () => {
   let harness: LibraryTestHarness;

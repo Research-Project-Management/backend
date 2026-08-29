@@ -1,7 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { Prisma } from '@prisma/client';
-import { VersionMismatchException } from '../common/library-mutation.dto';
+import { VersionMismatchException } from '../catalog/errors/catalog.errors';
+import { normalizeTags } from '../tags/utils/tags.utils';
 
 export interface CreateNoteData {
   itemId?: string | null;
@@ -67,7 +68,7 @@ export class NotesRepository {
         title: data.title ?? 'Untitled Note',
         contentJson: data.contentJson ?? null,
         contentMd: data.contentMd ?? '',
-        tags: data.tags ?? [],
+        tags: data.tags ? normalizeTags(data.tags) : [],
         createdById: data.createdById,
         version: 1,
       },
@@ -111,7 +112,8 @@ export class NotesRepository {
             : existing.contentJson,
         contentMd:
           data.contentMd !== undefined ? data.contentMd : existing.contentMd,
-        tags: data.tags ?? existing.tags,
+        tags:
+          data.tags !== undefined ? normalizeTags(data.tags) : existing.tags,
         version: { increment: 1 },
       },
     });

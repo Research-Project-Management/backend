@@ -142,7 +142,10 @@ export class ProjectController {
     return this.projectService.addProjectMember(projectId, dto);
   }
 
-  @Put(['project/:projectId/members/:userId', 'projects/:projectId/members/:userId'])
+  @Put([
+    'project/:projectId/members/:userId',
+    'projects/:projectId/members/:userId',
+  ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
   @ApiOperation({ summary: 'Update project member role' })
@@ -154,7 +157,10 @@ export class ProjectController {
     return this.projectService.updateProjectMember(projectId, userId, dto);
   }
 
-  @Delete(['project/:projectId/members/:userId', 'projects/:projectId/members/:userId'])
+  @Delete([
+    'project/:projectId/members/:userId',
+    'projects/:projectId/members/:userId',
+  ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
   @ApiOperation({
@@ -195,7 +201,10 @@ export class ProjectController {
     return this.projectService.addColumn(projectId, dto);
   }
 
-  @Put(['project/:projectId/columns/:columnId', 'projects/:projectId/columns/:columnId'])
+  @Put([
+    'project/:projectId/columns/:columnId',
+    'projects/:projectId/columns/:columnId',
+  ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
   @ApiOperation({ summary: 'Update a project board column' })
@@ -207,7 +216,10 @@ export class ProjectController {
     return this.projectService.updateColumn(projectId, columnId, dto);
   }
 
-  @Delete(['project/:projectId/columns/:columnId', 'projects/:projectId/columns/:columnId'])
+  @Delete([
+    'project/:projectId/columns/:columnId',
+    'projects/:projectId/columns/:columnId',
+  ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
   @ApiOperation({

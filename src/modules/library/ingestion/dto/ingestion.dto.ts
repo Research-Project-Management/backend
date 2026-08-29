@@ -18,6 +18,10 @@ export class StartIngestionDto {
   @IsOptional()
   @IsArray()
   items?: Record<string, any>[];
+
+  @IsOptional()
+  @IsString()
+  idempotencyKey?: string;
 }
 
 export class IngestDoiDto {
@@ -47,29 +51,12 @@ export class IngestBibtexDto {
 }
 
 export class IngestPdfDto {
+  @IsString()
+  fileId!: string;
+
   @IsOptional()
   @IsString()
   filename?: string;
-
-  @IsOptional()
-  @IsString()
-  fileUrl?: string;
-
-  @IsOptional()
-  @IsString()
-  fileId?: string;
-
-  @IsOptional()
-  @IsString()
-  mimeType?: string;
-
-  @IsOptional()
-  @IsNumber()
-  size?: number;
-
-  @IsOptional()
-  @IsString()
-  fileHash?: string;
 
   @IsOptional()
   @IsString()
@@ -77,7 +64,7 @@ export class IngestPdfDto {
 
   @IsOptional()
   @IsObject()
-  extractedMeta?: Record<string, any>;
+  overrides?: Record<string, any>;
 
   @IsOptional()
   @IsString()
@@ -115,31 +102,11 @@ export class UnifiedIngestionDto {
 
   @IsOptional()
   @IsString()
-  filename?: string;
-
-  @IsOptional()
-  @IsString()
-  fileUrl?: string;
-
-  @IsOptional()
-  @IsString()
   fileId?: string;
 
   @IsOptional()
   @IsString()
-  mimeType?: string;
-
-  @IsOptional()
-  @IsNumber()
-  size?: number;
-
-  @IsOptional()
-  @IsString()
-  fileHash?: string;
-
-  @IsOptional()
-  @IsObject()
-  extractedMeta?: Record<string, any>;
+  filename?: string;
 
   @IsOptional()
   @IsString()

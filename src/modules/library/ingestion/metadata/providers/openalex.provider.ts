@@ -156,7 +156,8 @@ export class OpenAlexProvider implements MetadataProvider {
     }
 
     const doi = normalizeDoi(item.doi);
-    const year = typeof item.publication_year === 'number' ? item.publication_year : null;
+    const year =
+      typeof item.publication_year === 'number' ? item.publication_year : null;
     const journal =
       item.primary_location?.source?.display_name ||
       item.host_venue?.display_name ||
@@ -176,18 +177,27 @@ export class OpenAlexProvider implements MetadataProvider {
     }
 
     const openAccessPdfUrl =
-      item.open_access?.oa_url ||
-      item.primary_location?.pdf_url ||
-      undefined;
+      item.open_access?.oa_url || item.primary_location?.pdf_url || undefined;
 
     const rawVersion = createHash('md5')
       .update(JSON.stringify(item))
       .digest('hex');
 
     const canonicalUrl =
-      item.doi ||
-      item.primary_location?.landing_page_url ||
-      item.id;
+      item.doi || item.primary_location?.landing_page_url || item.id;
+
+    const biblio = item.biblio || {};
+    const pages = biblio.first_page
+      ? biblio.last_page && biblio.last_page !== biblio.first_page
+        ? `${biblio.first_page}-${biblio.last_page}`
+        : biblio.first_page
+      : undefined;
+    const publisher =
+      item.primary_location?.source?.host_organization_name || undefined;
+    const issn =
+      item.primary_location?.source?.issn_l ||
+      item.primary_location?.source?.issn?.[0] ||
+      undefined;
 
     return {
       provider: this.id,
@@ -197,6 +207,11 @@ export class OpenAlexProvider implements MetadataProvider {
         year,
         doi,
         journal,
+        volume: biblio.volume || undefined,
+        issue: biblio.issue || undefined,
+        pages,
+        publisher,
+        issn,
         abstract,
         citationCount: item.cited_by_count,
         itemType,
@@ -231,6 +246,9 @@ export class OpenAlexProvider implements MetadataProvider {
     }
 
     wordPositions.sort((a, b) => a.pos - b.pos);
-    return wordPositions.map((wp) => wp.word).join(' ').trim();
+    return wordPositions
+      .map((wp) => wp.word)
+      .join(' ')
+      .trim();
   }
 }

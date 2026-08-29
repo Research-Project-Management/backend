@@ -1,8 +1,8 @@
-﻿import { LibraryTestHarness } from '../library-test-harness';
+import { LibraryTestHarness } from '../library-test-harness';
 import {
   LIBRARY_SYNC_PORT,
   ILibrarySyncPort,
-} from '../../../../src/modules/library/library-sync.port';
+} from '../../../../src/modules/library/sync/library-sync.port';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 
 jest.setTimeout(60000);
@@ -270,8 +270,12 @@ describe('Concurrent Idempotency & Reliability Invariants (Integration)', () => 
 
       expect(result.results).toHaveLength(2);
 
-      const parentResult = result.results.find((r) => r.operationId === 'col:parent');
-      const childResult = result.results.find((r) => r.operationId === 'col:child');
+      const parentResult = result.results.find(
+        (r) => r.operationId === 'col:parent',
+      );
+      const childResult = result.results.find(
+        (r) => r.operationId === 'col:child',
+      );
 
       expect(parentResult?.result?.isNew).toBe(true);
       expect(childResult?.result?.isNew).toBe(true);
@@ -419,6 +423,109 @@ describe('Concurrent Idempotency & Reliability Invariants (Integration)', () => 
         where: { workspaceId: tenant.workspaceId, title },
       });
       expect(count).toBe(1);
+    });
+  });
+
+  // ── 9. Lost Lease Rollback — markSucceededInTx failure rolls back transaction ───
+  describe('9. Lost Lease Rollback — rolls back CatalogItem, ChangeLog, OutboxEvent', () => {
+    it('rolls back all canonical database writes if the idempotency lease was reclaimed', async () => {
+      const tenant = await harness.seedWorkspaceFixture();
+      const key = `lost-lease-${Date.now()}-${Math.random()}`;
+      const title = `Lost Lease Paper ${key}`;
+
+      // Simulate a concurrent worker stealing/reclaiming the key with a newer leaseToken (expiresAt)
+      await harness.prisma.idempotencyRecord.create({
+        data: {
+          workspaceId: tenant.workspaceId,
+          idempotencyKey: key,
+          requestHash: 'mock-request-hash',
+          status: 'in_progress',
+          expiresAt: new Date(Date.now() + 999999), // Stolen lease with different timestamp
+        },
+      });
+
+      // An operation using a stale leaseToken should fail markSucceededInTx and rollback
+      const { IdempotencyRepository } =
+        await import('../../../../src/modules/library/sync/idempotency.repository');
+      const idempotencyRepo = harness.moduleRef.get(IdempotencyRepository);
+
+      const { LibraryTransactionService } =
+        await import('../../../../src/modules/library/sync/library-transaction.service');
+      const txService = harness.moduleRef.get(LibraryTransactionService);
+
+      await expect(
+        txService.executeInTransaction(async (tx, helpers) => {
+          const item = await tx.catalogItem.create({
+            data: {
+              workspaceId: tenant.workspaceId,
+              title,
+              itemType: 'journalArticle',
+              filename: 'paper.pdf',
+              fileUrl: 'https://example.com/paper.pdf',
+              uploadedById: tenant.ownerUserId,
+            },
+          });
+
+          await helpers.appendChange(tenant.workspaceId, {
+            entityType: 'item',
+            entityId: item.id,
+            action: 'create',
+            version: 1,
+            data: { title },
+          });
+
+          await helpers.publishOutbox(
+            tenant.workspaceId,
+            item.id,
+            'library.item.created',
+            {
+              itemId: item.id,
+              workspaceId: tenant.workspaceId,
+              title,
+              source: 'doi',
+            },
+          );
+
+          const staleLeaseToken = new Date(Date.now() - 50000).toISOString();
+          const marked = await idempotencyRepo.markSucceededInTx(
+            tx,
+            tenant.workspaceId,
+            key,
+            200,
+            { id: item.id },
+            staleLeaseToken, // Stale! Does not match expiresAt in DB
+          );
+
+          if (!marked) {
+            throw new ConflictException(
+              'Idempotency lease expired or lost to concurrent worker',
+            );
+          }
+          return item;
+        }),
+      ).rejects.toThrow(ConflictException);
+
+      // Verify ZERO records persisted in CatalogItem, LibraryChange, and OutboxEvent
+      const dbItem = await harness.prisma.catalogItem.findFirst({
+        where: { workspaceId: tenant.workspaceId, title },
+      });
+      expect(dbItem).toBeNull();
+
+      const dbChange = await harness.prisma.libraryChange.findFirst({
+        where: {
+          workspaceId: tenant.workspaceId,
+          data: { path: ['title'], equals: title },
+        },
+      });
+      expect(dbChange).toBeNull();
+
+      const dbOutbox = await harness.prisma.outboxEvent.findFirst({
+        where: {
+          workspaceId: tenant.workspaceId,
+          payload: { path: ['title'], equals: title },
+        },
+      });
+      expect(dbOutbox).toBeNull();
     });
   });
 });

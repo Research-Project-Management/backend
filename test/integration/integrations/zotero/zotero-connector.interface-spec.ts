@@ -5,7 +5,7 @@ import { ZoteroMapper } from '../../../../src/modules/integrations/zotero/zotero
 import { ZoteroConnectionService } from '../../../../src/modules/integrations/zotero/zotero-connection.service';
 import { ZoteroPullWorker } from '../../../../src/modules/integrations/zotero/zotero-pull.worker';
 import { ZoteroReconcileWorker } from '../../../../src/modules/integrations/zotero/zotero-reconcile.worker';
-import { LIBRARY_SYNC_PORT } from '../../../../src/modules/library/library-sync.port';
+import { LIBRARY_SYNC_PORT } from '../../../../src/modules/library/sync/library-sync.port';
 
 const schemaCorpus = require('../../../fixtures/library/zotero-schema-corpus.json');
 
@@ -132,9 +132,7 @@ describe('Zotero Connector, Mapper & Sync Invariants (Integration)', () => {
     });
 
     it('maps attachment, note, and annotation with hierarchical link keys', () => {
-      const mappedAtt = mapper.mapZoteroAttachment(
-        schemaCorpus.attachments[0],
-      );
+      const mappedAtt = mapper.mapZoteroAttachment(schemaCorpus.attachments[0]);
       expect(mappedAtt.parentItemKey).toBe('ZOTERO_ITEM_001');
       expect(mappedAtt.filename).toContain('Attention Is All You Need.pdf');
 
@@ -142,9 +140,7 @@ describe('Zotero Connector, Mapper & Sync Invariants (Integration)', () => {
       expect(mappedNote.parentItemKey).toBe('ZOTERO_ITEM_001');
       expect(mappedNote.contentHtml).toContain('Key Insight');
 
-      const mappedAnn = mapper.mapZoteroAnnotation(
-        schemaCorpus.annotations[0],
-      );
+      const mappedAnn = mapper.mapZoteroAnnotation(schemaCorpus.annotations[0]);
       expect(mappedAnn.parentAttachmentKey).toBe('ZOTERO_ATT_001');
       expect(mappedAnn.pageIndex).toBe(3);
       expect(mappedAnn.quote).toContain('Multi-head attention');

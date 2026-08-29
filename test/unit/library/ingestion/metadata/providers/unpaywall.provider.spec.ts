@@ -40,7 +40,9 @@ describe('UnpaywallProvider (Standalone)', () => {
     const res = await provider.resolve({ query: '10.1234/test' });
     expect(res).not.toBeNull();
     expect(res?.provider).toBe('Unpaywall');
-    expect(res?.metadata.openAccessPdfUrl).toBe('https://oa.example.com/paper.pdf');
+    expect(res?.metadata.openAccessPdfUrl).toBe(
+      'https://oa.example.com/paper.pdf',
+    );
     expect(res?.confidence).toBeCloseTo(0.99);
   });
 
@@ -67,8 +69,8 @@ describe('UnpaywallProvider (Standalone)', () => {
       headers: new Headers(),
     } as any);
 
-    await expect(
-      provider.resolve({ query: '10.1234/test' }),
-    ).rejects.toThrow(ProviderFetchError);
+    await expect(provider.resolve({ query: '10.1234/test' })).rejects.toThrow(
+      ProviderFetchError,
+    );
   });
 });

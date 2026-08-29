@@ -1,7 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { SandboxRunnerPort } from '../../modules/library/legacy/translation/types/translation.types';
-
-import { SandboxResult, SandboxTask } from './sandbox.types';
+import { SandboxResult, SandboxTask, SandboxRunnerPort } from './sandbox.types';
 
 @Injectable()
 export class LocalSandboxRunnerService implements SandboxRunnerPort {

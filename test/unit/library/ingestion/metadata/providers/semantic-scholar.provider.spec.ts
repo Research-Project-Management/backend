@@ -47,7 +47,9 @@ describe('SemanticScholarProvider (Standalone)', () => {
     expect(res?.provider).toBe('SemanticScholar');
     expect(res?.metadata.title).toBe('Attention Is All You Need');
     expect(res?.metadata.tldr).toBe('We propose the Transformer model.');
-    expect(res?.metadata.openAccessPdfUrl).toBe('https://arxiv.org/pdf/1706.03762.pdf');
+    expect(res?.metadata.openAccessPdfUrl).toBe(
+      'https://arxiv.org/pdf/1706.03762.pdf',
+    );
     expect(res?.confidence).toBeCloseTo(0.9);
   });
 

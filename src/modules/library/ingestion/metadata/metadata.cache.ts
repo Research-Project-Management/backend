@@ -30,9 +30,7 @@ export class MetadataCache {
     TITLE: 900, // 15 minutes
   };
 
-  constructor(
-    @Optional() private readonly redis?: RedisCacheService,
-  ) {}
+  constructor(@Optional() private readonly redis?: RedisCacheService) {}
 
   buildKey(queryType: QueryType, canonicalId: string): string {
     const hash = createHash('md5')
@@ -85,7 +83,9 @@ export class MetadataCache {
       await this.redis.set(key, NEGATIVE_SENTINEL, ttl);
       this.logger.debug(`Negative cache SET (TTL=${ttl}s): ${key}`);
     } catch (err: any) {
-      this.logger.warn(`Negative cache SET failed for key "${key}": ${err.message}`);
+      this.logger.warn(
+        `Negative cache SET failed for key "${key}": ${err.message}`,
+      );
     }
   }
 

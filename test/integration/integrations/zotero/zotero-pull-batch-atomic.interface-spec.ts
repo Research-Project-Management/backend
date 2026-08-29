@@ -6,7 +6,7 @@ import { ZoteroPullWorker } from '../../../../src/modules/integrations/zotero/zo
 import {
   LIBRARY_SYNC_PORT,
   ILibrarySyncPort,
-} from '../../../../src/modules/library/library-sync.port';
+} from '../../../../src/modules/library/sync/library-sync.port';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 
 jest.setTimeout(60000);
@@ -28,7 +28,11 @@ class TestFailingZoteroConnector extends ZoteroConnector {
         {
           key: 'ATOMIC_COL_001',
           version: 10,
-          data: { key: 'ATOMIC_COL_001', version: 10, name: 'Atomic Collection 1' },
+          data: {
+            key: 'ATOMIC_COL_001',
+            version: 10,
+            name: 'Atomic Collection 1',
+          },
         },
       ],
       version: BigInt(10),
@@ -69,7 +73,13 @@ class TestFailingZoteroConnector extends ZoteroConnector {
               key: 'ATOMIC_ITEM_001',
               itemType: 'journalArticle',
               title: 'Atomic Item Page 0 - Paper 1',
-              creators: [{ firstName: 'Alan', lastName: 'Turing', creatorType: 'author' }],
+              creators: [
+                {
+                  firstName: 'Alan',
+                  lastName: 'Turing',
+                  creatorType: 'author',
+                },
+              ],
             },
           },
           {
@@ -98,7 +108,13 @@ class TestFailingZoteroConnector extends ZoteroConnector {
               key: 'ATOMIC_ITEM_002',
               itemType: 'journalArticle',
               title: 'Atomic Item Page 1 - Paper 2',
-              creators: [{ firstName: 'Claude', lastName: 'Shannon', creatorType: 'author' }],
+              creators: [
+                {
+                  firstName: 'Claude',
+                  lastName: 'Shannon',
+                  creatorType: 'author',
+                },
+              ],
             },
           },
         ],
@@ -157,7 +173,11 @@ describe('ZoteroPullWorker Atomic Batch & Cutover Invariants (Integration)', () 
 
     const spy = jest.spyOn(libraryPort, 'applyExternalSyncBatch');
 
-    const result = await pullWorker.executePull(tenant.workspaceId, binding.id, 2);
+    const result = await pullWorker.executePull(
+      tenant.workspaceId,
+      binding.id,
+      2,
+    );
 
     expect(spy).toHaveBeenCalled();
     expect(result.itemsCreated).toBe(2);
@@ -166,7 +186,10 @@ describe('ZoteroPullWorker Atomic Batch & Cutover Invariants (Integration)', () 
 
     // Verify parent item created
     const item1 = await harness.prisma.catalogItem.findFirst({
-      where: { workspaceId: tenant.workspaceId, title: 'Atomic Item Page 0 - Paper 1' },
+      where: {
+        workspaceId: tenant.workspaceId,
+        title: 'Atomic Item Page 0 - Paper 1',
+      },
       include: { attachments: { include: { revisions: true } } },
     });
     expect(item1).not.toBeNull();
@@ -277,7 +300,10 @@ describe('ZoteroPullWorker Atomic Batch & Cutover Invariants (Integration)', () 
 
     // Verify entity in DB
     const countBefore = await harness.prisma.catalogItem.count({
-      where: { workspaceId: tenant.workspaceId, title: 'Crash Recovery Test Paper' },
+      where: {
+        workspaceId: tenant.workspaceId,
+        title: 'Crash Recovery Test Paper',
+      },
     });
     expect(countBefore).toBe(1);
 
@@ -293,7 +319,10 @@ describe('ZoteroPullWorker Atomic Batch & Cutover Invariants (Integration)', () 
 
     // Assert zero duplicates created
     const countAfter = await harness.prisma.catalogItem.count({
-      where: { workspaceId: tenant.workspaceId, title: 'Crash Recovery Test Paper' },
+      where: {
+        workspaceId: tenant.workspaceId,
+        title: 'Crash Recovery Test Paper',
+      },
     });
     expect(countAfter).toBe(1);
   });

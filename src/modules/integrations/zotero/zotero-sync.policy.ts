@@ -129,7 +129,12 @@ export class ZoteroSyncPolicy implements OnModuleInit {
 
     // Network disconnection / timeouts
     const code = error.code || error.cause?.code;
-    const transientCodes = ['ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED', 'EAI_AGAIN'];
+    const transientCodes = [
+      'ETIMEDOUT',
+      'ECONNRESET',
+      'ECONNREFUSED',
+      'EAI_AGAIN',
+    ];
     if (transientCodes.includes(code)) return true;
 
     return false;

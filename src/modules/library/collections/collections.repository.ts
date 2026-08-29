@@ -1,8 +1,8 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { Prisma } from '@prisma/client';
-import { LibraryFeatureFlagsService } from '../common/library-feature-flags';
-import { VersionMismatchException } from '../common/library-mutation.dto';
+import { VersionMismatchException } from '../catalog/errors/catalog.errors';
+import { CollectionDeleteStrategy } from './types/collection.types';
 
 export interface CreateCollectionInput {
   name: string;
@@ -10,7 +10,7 @@ export interface CreateCollectionInput {
   color?: string;
   icon?: string;
   parentId?: string | null;
-  createdById: string;
+  createdById?: string;
 }
 
 export interface UpdateCollectionInput {
@@ -19,16 +19,14 @@ export interface UpdateCollectionInput {
   color?: string;
   icon?: string;
   parentId?: string | null;
+  version?: number;
 }
 
 @Injectable()
 export class CollectionsRepository {
   private readonly logger = new Logger(CollectionsRepository.name);
 
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly featureFlags: LibraryFeatureFlagsService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   private getClient(tx?: Prisma.TransactionClient) {
     return tx ?? this.prisma;
@@ -49,19 +47,34 @@ export class CollectionsRepository {
         children: {
           where: { deletedAt: null },
         },
+        _count: {
+          select: { collectionItems: true },
+        },
       },
     });
   }
 
   /**
-   * Retrieves the full collection hierarchy tree for a workspace.
+   * Retrieves all collections for a workspace.
    */
-  async findTree(workspaceId: string, tx?: Prisma.TransactionClient) {
+  async findAll(workspaceId: string, tx?: Prisma.TransactionClient) {
     const client = this.getClient(tx);
     return client.collection.findMany({
       where: { workspaceId, deletedAt: null },
+      include: {
+        _count: {
+          select: { collectionItems: true },
+        },
+      },
       orderBy: { createdAt: 'asc' },
     });
+  }
+
+  /**
+   * Alias for findTree / findAll.
+   */
+  async findTree(workspaceId: string, tx?: Prisma.TransactionClient) {
+    return this.findAll(workspaceId, tx);
   }
 
   /**
@@ -69,10 +82,25 @@ export class CollectionsRepository {
    */
   async create(
     workspaceId: string,
-    input: CreateCollectionInput,
+    userIdOrInput: string | CreateCollectionInput,
+    inputOrTx?: CreateCollectionInput | Prisma.TransactionClient,
     tx?: Prisma.TransactionClient,
   ) {
-    const client = this.getClient(tx);
+    let createdById = 'system';
+    let input: CreateCollectionInput;
+    let clientTx: Prisma.TransactionClient | undefined;
+
+    if (typeof userIdOrInput === 'string') {
+      createdById = userIdOrInput;
+      input = inputOrTx as CreateCollectionInput;
+      clientTx = tx;
+    } else {
+      input = userIdOrInput;
+      createdById = input.createdById || 'system';
+      clientTx = inputOrTx as Prisma.TransactionClient | undefined;
+    }
+
+    const client = this.getClient(clientTx);
     return client.collection.create({
       data: {
         workspaceId,
@@ -81,7 +109,7 @@ export class CollectionsRepository {
         color: input.color ?? '#3370ff',
         icon: input.icon ?? '',
         parentId: input.parentId ?? null,
-        createdById: input.createdById,
+        createdById,
         version: 1,
       },
     });
@@ -93,19 +121,33 @@ export class CollectionsRepository {
   async update(
     workspaceId: string,
     id: string,
-    expectedVersion: number,
-    input: UpdateCollectionInput,
+    inputOrVersion: UpdateCollectionInput | number,
+    inputOrTx?: UpdateCollectionInput | Prisma.TransactionClient,
     tx?: Prisma.TransactionClient,
   ) {
-    const client = this.getClient(tx);
-    const existing = await this.findById(workspaceId, id, tx);
+    let expectedVersion: number | undefined;
+    let input: UpdateCollectionInput;
+    let clientTx: Prisma.TransactionClient | undefined;
+
+    if (typeof inputOrVersion === 'number') {
+      expectedVersion = inputOrVersion;
+      input = inputOrTx as UpdateCollectionInput;
+      clientTx = tx;
+    } else {
+      input = inputOrVersion;
+      expectedVersion = input.version;
+      clientTx = inputOrTx as Prisma.TransactionClient | undefined;
+    }
+
+    const client = this.getClient(clientTx);
+    const existing = await this.findById(workspaceId, id, clientTx);
     if (!existing) {
       throw new NotFoundException(
         `Collection ${id} not found in workspace ${workspaceId}`,
       );
     }
 
-    if (existing.version !== expectedVersion) {
+    if (expectedVersion !== undefined && existing.version !== expectedVersion) {
       throw new VersionMismatchException({
         aggregateType: 'Collection',
         entityId: id,
@@ -117,26 +159,54 @@ export class CollectionsRepository {
     return client.collection.update({
       where: { id },
       data: {
-        name: input.name ?? existing.name,
-        description: input.description ?? existing.description,
-        color: input.color ?? existing.color,
-        icon: input.icon ?? existing.icon,
-        parentId:
-          input.parentId !== undefined ? input.parentId : existing.parentId,
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.description !== undefined
+          ? { description: input.description }
+          : {}),
+        ...(input.color !== undefined ? { color: input.color } : {}),
+        ...(input.icon !== undefined ? { icon: input.icon } : {}),
+        ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
         version: { increment: 1 },
       },
     });
   }
 
   /**
-   * Soft deletes a collection.
+   * Soft deletes a collection according to strategy.
    */
   async delete(
     workspaceId: string,
     id: string,
+    strategyOrTx?: CollectionDeleteStrategy | Prisma.TransactionClient,
     tx?: Prisma.TransactionClient,
   ): Promise<boolean> {
-    const client = this.getClient(tx);
+    const clientTx =
+      typeof strategyOrTx === 'string'
+        ? tx
+        : (strategyOrTx as Prisma.TransactionClient | undefined);
+    const strategy =
+      typeof strategyOrTx === 'string'
+        ? (strategyOrTx as CollectionDeleteStrategy)
+        : 'orphan';
+
+    const client = this.getClient(clientTx);
+
+    if (strategy === 'cascade') {
+      // Find all child collections and delete recursively
+      const children = await client.collection.findMany({
+        where: { workspaceId, parentId: id, deletedAt: null },
+      });
+      for (const child of children) {
+        await this.delete(workspaceId, child.id, 'cascade', clientTx);
+      }
+    } else {
+      // Orphan child collections by resetting parentId to null
+      await client.collection.updateMany({
+        where: { workspaceId, parentId: id, deletedAt: null },
+        data: { parentId: null },
+      });
+    }
+
     const result = await client.collection.updateMany({
       where: { id, workspaceId, deletedAt: null },
       data: { deletedAt: new Date() },
@@ -154,7 +224,6 @@ export class CollectionsRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
     const client = this.getClient(tx);
-    const isDualWrite = this.featureFlags.isDualWriteEnabled(workspaceId);
 
     // 1. Canonical write into collection_items (M:N)
     await client.collectionItem.upsert({
@@ -172,16 +241,20 @@ export class CollectionsRepository {
       update: {},
     });
 
-    // 2. Dual-write to legacy collectionId on papers table if enabled
-    if (isDualWrite) {
-      this.logger.debug(
-        `[DualWrite] Syncing legacy collectionId for paper ${itemId} -> ${collectionId}`,
-      );
-      await client.catalogItem.updateMany({
-        where: { id: itemId, workspaceId },
-        data: { collectionId },
-      });
-    }
+    // 2. Dual-write to collectionId on catalogItem
+    await client.catalogItem.updateMany({
+      where: { id: itemId, workspaceId },
+      data: { collectionId },
+    });
+  }
+
+  async addItem(
+    workspaceId: string,
+    collectionId: string,
+    itemId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    return this.addItemToCollection(workspaceId, collectionId, itemId, tx);
   }
 
   /**
@@ -194,7 +267,6 @@ export class CollectionsRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
     const client = this.getClient(tx);
-    const isDualWrite = this.featureFlags.isDualWriteEnabled(workspaceId);
 
     // 1. Canonical delete from collection_items
     await client.collectionItem.deleteMany({
@@ -204,17 +276,81 @@ export class CollectionsRepository {
       },
     });
 
-    // 2. If dual-write enabled and legacy column still pointed to this collection, nullify it
-    if (isDualWrite) {
+    // 2. If legacy column pointed to this collection, nullify it
+    await client.catalogItem.updateMany({
+      where: { id: itemId, workspaceId, collectionId },
+      data: { collectionId: null },
+    });
+  }
+
+  async removeItem(
+    workspaceId: string,
+    collectionId: string,
+    itemId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    return this.removeItemFromCollection(workspaceId, collectionId, itemId, tx);
+  }
+
+  /**
+   * Moves items to target collection.
+   */
+  async moveItems(
+    workspaceId: string,
+    targetCollectionId: string | null,
+    itemIds: string[],
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    const client = this.getClient(tx);
+
+    if (targetCollectionId === null) {
+      // Remove items from all collections (unfiled)
+      await client.collectionItem.deleteMany({
+        where: {
+          catalogItemId: { in: itemIds },
+        },
+      });
       await client.catalogItem.updateMany({
-        where: { id: itemId, workspaceId, collectionId },
+        where: { id: { in: itemIds }, workspaceId },
         data: { collectionId: null },
+      });
+    } else {
+      for (const itemId of itemIds) {
+        await this.addItemToCollection(
+          workspaceId,
+          targetCollectionId,
+          itemId,
+          tx,
+        );
+      }
+    }
+  }
+
+  /**
+   * Reorders collections hierarchy and indices.
+   */
+  async reorder(
+    workspaceId: string,
+    collections: Array<{
+      id: string;
+      parentId?: string | null;
+      orderIndex?: number;
+    }>,
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    const client = this.getClient(tx);
+    for (const c of collections) {
+      await client.collection.updateMany({
+        where: { id: c.id, workspaceId },
+        data: {
+          ...(c.parentId !== undefined ? { parentId: c.parentId } : {}),
+        },
       });
     }
   }
 
   /**
-   * Dual-read: Retrieves catalog item IDs belonging to a collection.
+   * Retrieves catalog item IDs belonging to a collection.
    */
   async findItemIdsByCollection(
     workspaceId: string,
@@ -222,25 +358,23 @@ export class CollectionsRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<string[]> {
     const client = this.getClient(tx);
-    const isReadNew = this.featureFlags.isReadNewEnabled(workspaceId);
 
-    if (isReadNew) {
-      // Canonical read through collection_items join
-      const items = await client.collectionItem.findMany({
-        where: {
-          collectionId,
-          catalogItem: {
-            workspaceId,
-            deletedAt: null,
-          },
+    const items = await client.collectionItem.findMany({
+      where: {
+        collectionId,
+        catalogItem: {
+          workspaceId,
+          deletedAt: null,
         },
-        select: { catalogItemId: true },
-        orderBy: { sortOrder: 'asc' },
-      });
+      },
+      select: { catalogItemId: true },
+      orderBy: { sortOrder: 'asc' },
+    });
+
+    if (items.length > 0) {
       return items.map((i) => i.catalogItemId);
     }
 
-    // Legacy fallback read
     const legacyItems = await client.catalogItem.findMany({
       where: {
         collectionId,

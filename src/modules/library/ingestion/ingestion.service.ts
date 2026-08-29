@@ -1,104 +1,110 @@
 import {
-  Inject,
   Injectable,
   Logger,
-  NotFoundException,
-  BadRequestException,
-  ConflictException,
+  Inject,
   Optional,
-  HttpStatus,
+  NotFoundException,
+  ConflictException,
 } from '@nestjs/common';
+
 import { PrismaService } from '../../../core/database/prisma.service';
-import { IngestionStatus } from '@prisma/client';
-import { LibraryTransactionService } from '../sync-core/library-transaction.service';
-import { CatalogService } from '../catalog/catalog.service';
-import { IdempotencyRepository } from '../sync-core/idempotency.repository';
-import { AttachmentsService } from '../attachments/attachments.service';
-import { ExtractorService } from '../attachments/extractor.service';
-import { BibtexParser } from '../citation/formatters/bibtex.parser';
-import { FullTextIndexer } from '../discovery/full-text-indexer';
-import {
-  StartIngestionDto,
-  IngestDoiDto,
-  IngestBibtexDto,
-} from './dto/ingestion.dto';
-import { createHash, randomUUID } from 'crypto';
-import {
-  UrlCaptureConnector,
-  CapturedPaperMetadata,
-} from './url-capture.connector';
-import { ConfirmCapturedUrlDto } from './dto/capture-url.dto';
-import { QueryClassifier } from './metadata/metadata.classifier';
-import { normalizeDoi } from './metadata/metadata.identifiers';
-import {
-  CANONICAL_METADATA_SERVICE,
-  CanonicalMetadataResolver,
-  ResolvedMetadata,
-} from './metadata/metadata.contracts';
 import {
   IngestionCommand,
   IngestionResult,
   IngestionRunSnapshot,
   IUnifiedIngestionService,
-} from './ingestion.contracts';
-import {
-  calculateIngestionRequestHash,
-  INGESTION_LIMITS,
-  validateUrlSecurity,
-} from './ingestion.policy';
+  UNIFIED_INGESTION_SERVICE,
+} from './types/ingestion.contracts';
 import {
   IngestionException,
   IngestionValidationException,
-  IngestionUnsupportedSourceException,
-  IngestionMetadataNotFoundException,
   IngestionIdempotencyConflictException,
-} from './ingestion.errors';
+  IngestionDuplicateConflictException,
+  IngestionRateLimitException,
+  IngestionStorageException,
+} from './errors/ingestion.errors';
+import {
+  calculateIngestionRequestHash,
+  INGESTION_LIMITS,
+} from './policies/ingestion.policy';
+import { normalizeTags } from './metadata/metadata.identifiers';
+import { IdempotencyRepository } from '../sync/idempotency.repository';
+import { LibraryTransactionService } from '../sync/library-transaction.service';
+import {
+  CANONICAL_METADATA_SERVICE,
+  ICanonicalMetadataService,
+} from './metadata/metadata.contracts';
+import { ExtractorService } from '../attachments/providers/extractor.provider';
+import { UrlCaptureConnector } from './providers/url-capture.connector';
+import { BibtexParser } from '../citation/formatters/bibtex.parser';
+
+import { STORAGE_PORT, IStoragePort } from '../../storage/storage.port';
+import { IngestionStatus } from '@prisma/client';
+import { CatalogService } from '../catalog/catalog.service';
+import {
+  LIBRARY_EVENT_TYPES,
+  buildItemCreatedOutboxPayload,
+} from '../sync/library-event-catalog';
+import * as crypto from 'crypto';
+import { randomUUID } from 'crypto';
+import { prepareDoiIngestion } from './sources/doi';
+import { prepareUrlIngestion } from './sources/url';
+import { prepareBibtexIngestion } from './sources/bibtex';
+import { preparePdfIngestion } from './sources/pdf';
+import { prepareZoteroIngestion } from './sources/zotero';
+import {
+  StartIngestionDto,
+  IngestDoiDto,
+  IngestBibtexDto,
+} from './dto/ingestion.dto';
+import { ConfirmCapturedUrlDto } from './dto/capture-url.dto';
 
 @Injectable()
 export class IngestionService implements IUnifiedIngestionService {
   private readonly logger = new Logger(IngestionService.name);
-
-  private readonly extractorService?: ExtractorService;
-  private readonly bibtexParser?: BibtexParser;
-
-  private getBibtexParser(): BibtexParser {
-    return this.bibtexParser || new BibtexParser();
-  }
-
-  private getExtractorService(): ExtractorService {
-    return this.extractorService || new ExtractorService();
-  }
+  private catalogService?: any;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly libraryTx: LibraryTransactionService,
-    private readonly catalogService: CatalogService,
-    private readonly urlCapture: UrlCaptureConnector,
+    private readonly idempotencyRepo: IdempotencyRepository,
+    private readonly extractorService: ExtractorService,
+    private readonly bibtexParser: BibtexParser,
+    @Inject(STORAGE_PORT) private readonly storagePort: IStoragePort,
+    @Optional() private readonly urlConnector?: UrlCaptureConnector,
     @Optional()
     @Inject(CANONICAL_METADATA_SERVICE)
-    private readonly metadataService?: CanonicalMetadataResolver,
-    @Optional()
-    private readonly idempotencyRepo?: IdempotencyRepository,
-    @Optional()
-    private readonly attachmentsService?: AttachmentsService,
-    @Optional()
-    extractorService?: ExtractorService,
-    @Optional()
-    bibtexParser?: BibtexParser,
-    @Optional()
-    private readonly fullTextIndexer?: FullTextIndexer,
+    private readonly metadataService?: ICanonicalMetadataService,
+    @Optional() private readonly catalogServiceParam?: CatalogService,
   ) {
-    this.extractorService = extractorService;
-    this.bibtexParser = bibtexParser;
+    if (catalogServiceParam) {
+      this.catalogService = catalogServiceParam;
+    } else if ((idempotencyRepo as any)?.createItem) {
+      this.catalogService = idempotencyRepo as any;
+    }
   }
 
-  /**
-   * Unified entry point coordinating all ingestion sources (DOI, URL, BibTeX, PDF, Zotero).
-   * Enforces idempotency, external resolution outside transactions, atomic commit, and observability.
-   */
+  private async resolveWorkspaceId(workspaceId: string): Promise<string> {
+    if (!workspaceId || !this.prisma?.workspace?.findFirst) return workspaceId;
+    const ws = await this.prisma.workspace.findFirst({
+      where: {
+        OR: [{ id: workspaceId }, { slug: workspaceId }, { url: workspaceId }],
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    return ws?.id || workspaceId;
+  }
+
   async ingest(command: IngestionCommand): Promise<IngestionResult> {
-    const startTime = Date.now();
+    command.workspaceId = await this.resolveWorkspaceId(command.workspaceId);
     const runId = randomUUID();
+    const startTime = Date.now();
+    const idempotencyKey = command.idempotencyKey?.trim();
+    const requestHash = calculateIngestionRequestHash(command);
+    const keyFingerprint = idempotencyKey
+      ? IdempotencyRepository.getFingerprint(idempotencyKey)
+      : undefined;
 
     this.logger.log(
       JSON.stringify({
@@ -106,13 +112,14 @@ export class IngestionService implements IUnifiedIngestionService {
         runId,
         workspaceId: command.workspaceId,
         source: command.source,
+        hasIdempotencyKey: Boolean(idempotencyKey),
+        idempotencyKeyFp: keyFingerprint,
       }),
     );
 
-    // 1. Idempotency Check & Claim
-    const idempotencyKey = command.idempotencyKey?.trim();
-    if (idempotencyKey && this.idempotencyRepo) {
-      const requestHash = calculateIngestionRequestHash(command);
+    // 1. Concurrent Atomic Idempotency Check
+    let leaseToken: string | undefined;
+    if (idempotencyKey) {
       const claimResult = await this.idempotencyRepo.claim(
         command.workspaceId,
         idempotencyKey,
@@ -120,63 +127,348 @@ export class IngestionService implements IUnifiedIngestionService {
         INGESTION_LIMITS.DEFAULT_IDEMPOTENCY_TTL_SECONDS,
       );
 
-      if (claimResult.status === 'cached') {
-        this.logger.log(
-          JSON.stringify({
-            event: 'library.ingestion.idempotency_cache_hit',
-            runId,
-            workspaceId: command.workspaceId,
-            idempotencyKey,
-          }),
+      if (claimResult.status === 'mismatch') {
+        throw new IngestionIdempotencyConflictException(
+          `Idempotency key has already been used with different request parameters`,
         );
-        return claimResult.record.responseBody as unknown as IngestionResult;
       }
 
       if (claimResult.status === 'in_progress') {
         throw new IngestionIdempotencyConflictException(
-          'An ingestion request with this idempotency key is currently in progress.',
+          `A concurrent ingestion request with this idempotency key is already processing`,
         );
       }
 
-      if (claimResult.status === 'mismatch') {
-        throw new IngestionIdempotencyConflictException(
-          'Idempotency key reused with mismatched request payload.',
-        );
+      if (claimResult.status === 'acquired') {
+        leaseToken = claimResult.leaseToken;
       }
+
+      if (claimResult.status === 'cached' && claimResult.record.responseBody) {
+        this.logger.log(
+          JSON.stringify({
+            event: 'library.ingestion.idempotency_cache_hit',
+            workspaceId: command.workspaceId,
+            idempotencyKeyFp: keyFingerprint,
+          }),
+        );
+        return claimResult.record.responseBody as unknown as IngestionResult;
+      }
+    }
+
+    // 2. Mandatory IngestionRun persistence (RECEIVED -> PROCESSING)
+    const safeInputParams = this.buildSafeInputParams(command);
+    try {
+      if (this.prisma.ingestionRun?.create) {
+        await this.prisma.ingestionRun.create({
+          data: {
+            id: runId,
+            workspaceId: command.workspaceId,
+            status: IngestionStatus.RECEIVED,
+            inputHash: requestHash,
+            inputParams: safeInputParams,
+          },
+        });
+        if (this.prisma.ingestionRun?.update) {
+          await this.prisma.ingestionRun.update({
+            where: { id: runId },
+            data: {
+              status: IngestionStatus.DETECTED,
+              attempts: { increment: 1 },
+            },
+          });
+        }
+      }
+    } catch (runErr: any) {
+      this.logger.error(
+        `Mandatory IngestionRun persistence failed: ${runErr.message}`,
+      );
+      if (idempotencyKey) {
+        await this.idempotencyRepo
+          .markFailed(command.workspaceId, idempotencyKey, leaseToken)
+          .catch(() => {});
+      }
+      throw runErr;
     }
 
     try {
       let result: IngestionResult;
 
       switch (command.source) {
-        case 'doi':
-          result = await this.handleDoi(command, runId);
+        case 'doi': {
+          const prep = await prepareDoiIngestion(
+            command.workspaceId,
+            command.doi,
+            this.prisma,
+            this.metadataService,
+          );
+
+          if (prep.deduplicated) {
+            result = {
+              runId,
+              status: 'completed',
+              itemId: prep.existingItem.id,
+              attachmentIds:
+                prep.existingItem.attachments?.map((a: any) => a.id) || [],
+              deduplicated: true,
+              item: prep.existingItem,
+            };
+            if (idempotencyKey) {
+              await this.idempotencyRepo.markSucceeded(
+                command.workspaceId,
+                idempotencyKey,
+                200,
+                result,
+                leaseToken,
+              );
+            }
+            await this.finalizeIngestionRun(
+              runId,
+              IngestionStatus.READY,
+              result.itemId,
+            );
+            return result;
+          }
+
+          result = await this.commitItemTransaction({
+            runId,
+            workspaceId: command.workspaceId,
+            userId: command.userId,
+            collectionId: command.collectionId,
+            source: 'doi',
+            itemData: prep.itemData!,
+            idempotencyKey,
+            leaseToken,
+          });
           break;
-        case 'url':
-          result = await this.handleUrl(command, runId);
+        }
+
+        case 'url': {
+          const prep = await prepareUrlIngestion(
+            command.workspaceId,
+            command.url,
+            command.previewToken,
+            command.overrides,
+            this.prisma,
+            this.urlConnector,
+          );
+
+          if (prep.deduplicated) {
+            result = {
+              runId,
+              status: 'completed',
+              itemId: prep.existingItem.id,
+              attachmentIds:
+                prep.existingItem.attachments?.map((a: any) => a.id) || [],
+              deduplicated: true,
+              item: prep.existingItem,
+            };
+            if (idempotencyKey) {
+              await this.idempotencyRepo.markSucceeded(
+                command.workspaceId,
+                idempotencyKey,
+                200,
+                result,
+                leaseToken,
+              );
+            }
+            await this.finalizeIngestionRun(
+              runId,
+              IngestionStatus.READY,
+              result.itemId,
+            );
+            return result;
+          }
+
+          result = await this.commitItemTransaction({
+            runId,
+            workspaceId: command.workspaceId,
+            userId: command.userId,
+            collectionId: command.collectionId,
+            source: 'url',
+            itemData: prep.itemData!,
+            previewToken: command.previewToken,
+            idempotencyKey,
+            leaseToken,
+          });
           break;
-        case 'bibtex':
-          result = await this.handleBibtex(command, runId);
+        }
+
+        case 'bibtex': {
+          const prep = await prepareBibtexIngestion(
+            command.workspaceId,
+            command.content,
+            this.prisma,
+            this.bibtexParser,
+          );
+
+          if (prep.deduplicated) {
+            result = {
+              runId,
+              status: 'completed',
+              itemId: prep.existingItem.id,
+              attachmentIds:
+                prep.existingItem.attachments?.map((a: any) => a.id) || [],
+              deduplicated: true,
+              item: prep.existingItem,
+            };
+            if (idempotencyKey) {
+              await this.idempotencyRepo.markSucceeded(
+                command.workspaceId,
+                idempotencyKey,
+                200,
+                result,
+                leaseToken,
+              );
+            }
+            await this.finalizeIngestionRun(
+              runId,
+              IngestionStatus.READY,
+              result.itemId,
+            );
+            return result;
+          }
+
+          result = await this.commitItemTransaction({
+            runId,
+            workspaceId: command.workspaceId,
+            userId: command.userId,
+            collectionId: command.collectionId,
+            source: 'bibtex',
+            itemData: prep.itemData!,
+            idempotencyKey,
+            leaseToken,
+          });
           break;
-        case 'pdf':
-          result = await this.handlePdf(command, runId);
+        }
+
+        case 'pdf': {
+          const prep = await preparePdfIngestion(
+            command.workspaceId,
+            {
+              fileId: command.fileId,
+              filename: command.filename,
+              collectionId: command.collectionId,
+              overrides: command.overrides,
+            },
+            this.prisma,
+            this.extractorService,
+            this.storagePort,
+          );
+
+          if (prep.deduplicated) {
+            result = {
+              runId,
+              status: 'completed',
+              itemId: prep.existingItem.id,
+              attachmentIds: prep.existingAttachmentId
+                ? [prep.existingAttachmentId]
+                : prep.existingItem.attachments?.map((a: any) => a.id) || [],
+              deduplicated: true,
+              item: prep.existingItem,
+            };
+            if (idempotencyKey) {
+              await this.idempotencyRepo.markSucceeded(
+                command.workspaceId,
+                idempotencyKey,
+                200,
+                result,
+                leaseToken,
+              );
+            }
+            await this.finalizeIngestionRun(
+              runId,
+              IngestionStatus.READY,
+              result.itemId,
+            );
+            return result;
+          }
+
+          result = await this.commitItemTransaction({
+            runId,
+            workspaceId: command.workspaceId,
+            userId: command.userId,
+            collectionId: command.collectionId,
+            source: 'pdf',
+            itemData: prep.itemData!,
+            attachmentData: {
+              filename: prep.filename,
+              fileUrl: prep.fileUrl,
+              fileId: prep.fileId,
+              mimeType: prep.mimeType,
+              sizeBytes: prep.sizeBytes,
+              fileHash: prep.fileHash,
+            },
+            idempotencyKey,
+            leaseToken,
+          });
           break;
-        case 'zotero':
-          result = await this.handleZotero(command, runId);
+        }
+
+        case 'zotero': {
+          const prep = await prepareZoteroIngestion(
+            command.workspaceId,
+            command.connectionId,
+            command.externalItemKey,
+            command.payload,
+            this.prisma,
+          );
+
+          if (prep.deduplicated) {
+            result = {
+              runId,
+              status: 'completed',
+              itemId: prep.existingItem.id,
+              attachmentIds:
+                prep.existingItem.attachments?.map((a: any) => a.id) || [],
+              deduplicated: true,
+              item: prep.existingItem,
+            };
+            if (idempotencyKey) {
+              await this.idempotencyRepo.markSucceeded(
+                command.workspaceId,
+                idempotencyKey,
+                200,
+                result,
+                leaseToken,
+              );
+            }
+            await this.finalizeIngestionRun(
+              runId,
+              IngestionStatus.READY,
+              result.itemId,
+            );
+            return result;
+          }
+
+          result = await this.commitItemTransaction({
+            runId,
+            workspaceId: command.workspaceId,
+            userId: command.userId,
+            collectionId: command.collectionId,
+            source: 'zotero',
+            itemData: prep.itemData!,
+            zoteroBinding: {
+              bindingId: prep.bindingId,
+              externalItemKey: command.externalItemKey,
+            },
+            idempotencyKey,
+            leaseToken,
+          });
           break;
+        }
+
         default:
-          throw new IngestionUnsupportedSourceException((command as any).source);
+          throw new IngestionValidationException(
+            `Unsupported ingestion source: ${(command as any).source}`,
+          );
       }
 
-      // Record successful result in Idempotency store
-      if (idempotencyKey && this.idempotencyRepo) {
-        await this.idempotencyRepo.markSucceeded(
-          command.workspaceId,
-          idempotencyKey,
-          200,
-          result,
-        );
-      }
+      // 3. Update IngestionRun to READY
+      await this.finalizeIngestionRun(
+        runId,
+        IngestionStatus.READY,
+        result.itemId,
+      );
 
       const durationMs = Date.now() - startTime;
       this.logger.log(
@@ -195,10 +487,37 @@ export class IngestionService implements IUnifiedIngestionService {
 
       return result;
     } catch (err: any) {
-      if (idempotencyKey && this.idempotencyRepo) {
+      if (idempotencyKey) {
         await this.idempotencyRepo.markFailed(
           command.workspaceId,
           idempotencyKey,
+          leaseToken,
+        );
+      }
+
+      const isRetryable =
+        err instanceof IngestionRateLimitException ||
+        err instanceof IngestionStorageException ||
+        err?.status === 503 ||
+        err?.status === 502 ||
+        err?.status === 504 ||
+        err?.code === 'ECONNRESET' ||
+        err?.code === 'ETIMEDOUT';
+
+      const finalStatus = isRetryable
+        ? IngestionStatus.FAILED_RETRYABLE
+        : IngestionStatus.FAILED_FINAL;
+
+      try {
+        await this.finalizeIngestionRun(
+          runId,
+          finalStatus,
+          undefined,
+          err.message,
+        );
+      } catch (finalizeErr: any) {
+        this.logger.error(
+          `Failed to finalize failed ingestion run ${runId}: ${finalizeErr.message}`,
         );
       }
 
@@ -210,1211 +529,765 @@ export class IngestionService implements IUnifiedIngestionService {
           source: command.source,
           errorName: err instanceof Error ? err.name : 'UnknownError',
           errorCategory: err?.category || 'execution_failed',
+          errorMessage: err.message,
         }),
       );
 
+      if (err instanceof IngestionException) {
+        throw err;
+      }
       throw err;
     }
   }
 
-  // ─── Source Handlers ────────────────────────────────────────────────────────
-
-  /**
-   * Handles DOI ingestion with external metadata resolution outside transaction.
-   */
-  private async handleDoi(
-    command: Extract<IngestionCommand, { source: 'doi' }>,
+  async getRunStatus(
+    workspaceId: string,
     runId: string,
-  ): Promise<IngestionResult> {
-    const rawDoi = command.doi?.trim();
-    if (!rawDoi) {
-      throw new IngestionValidationException('DOI is required');
-    }
-
-    const cleanDoi =
-      normalizeDoi(rawDoi) ||
-      rawDoi.replace(/^https?:\/\/doi\.org\//i, '');
-    if (!cleanDoi) {
-      throw new IngestionValidationException(`Invalid DOI format: ${rawDoi}`);
-    }
-
-    // 1. External Resolution outside transaction
-    if (!this.metadataService) {
-      throw new IngestionException(
-        'Metadata service is not available',
-        'provider_unavailable',
-        HttpStatus.SERVICE_UNAVAILABLE,
-      );
-    }
-    const resolved = await this.metadataService.resolve({ query: cleanDoi });
-    if (!resolved) {
-      throw new IngestionMetadataNotFoundException(cleanDoi);
-    }
-
-    const meta = resolved.metadata;
-    const title = (meta.title || `Publication (${cleanDoi})`).trim();
-    const authors =
-      meta.authors && meta.authors.length > 0 ? meta.authors : undefined;
-    const year = meta.year ?? undefined;
-    const journal = meta.journal || meta.publicationTitle;
-    const itemType = meta.itemType || 'journalArticle';
-    const userId = command.userId || 'system';
-
-    // 2. Atomic Transaction
-    return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      // Deduplicate check
-      const existing = tx.catalogItem?.findFirst
-        ? await tx.catalogItem.findFirst({
-            where: {
-              workspaceId: command.workspaceId,
-              doi: cleanDoi,
-              deletedAt: null,
-            },
-          })
-        : null;
-
-      if (existing) {
-        return {
-          runId,
-          status: 'completed',
-          itemId: existing.id,
-          attachmentIds: [],
-          deduplicated: true,
-          item: existing,
-        };
-      }
-
-      const item = await this.catalogService.createItem(
-        command.workspaceId,
-        {
-          itemType,
-          title,
-          authors,
-          year,
-          journal,
-          abstract: meta.abstract,
-          doi: cleanDoi,
-          url: meta.url || `https://doi.org/${cleanDoi}`,
-          uploadedById: userId,
-          collectionId: command.collectionId,
-        },
-        { tx, helpers },
-      );
-
-      // Persist tags if present
-      if (meta.tags && meta.tags.length > 0) {
-        await this.persistItemTags(
-          tx,
-          helpers,
-          command.workspaceId,
-          item.id,
-          meta.tags,
-        );
-      }
-
-      await helpers.publishOutbox(
-        command.workspaceId,
-        item.id,
-        'library.item.ingested_doi',
-        {
-          doi: cleanDoi,
-          itemId: item.id,
-          title,
-          itemType,
-          authors,
-          year,
-          canonicalId: resolved.canonicalId,
-        },
-      );
-
-      return {
-        runId,
-        status: 'completed',
-        itemId: item.id,
-        attachmentIds: [],
-        deduplicated: false,
-        item,
-      };
+  ): Promise<IngestionRunSnapshot> {
+    const run = await this.prisma.ingestionRun.findFirst({
+      where: { id: runId, workspaceId },
+      include: { stages: { orderBy: { executedAt: 'asc' } } },
     });
+
+    if (!run) {
+      throw new NotFoundException(
+        `IngestionRun ${runId} not found in workspace`,
+      );
+    }
+
+    const params = (run.inputParams as any) || {};
+    return {
+      id: run.id,
+      workspaceId: run.workspaceId,
+      sourceType: params.source || params.sourceType || 'UNKNOWN',
+      status: run.status,
+      totalItems: params.totalItems || 1,
+      processedItems: run.status === IngestionStatus.READY ? 1 : 0,
+      failedItems: run.status === IngestionStatus.FAILED_FINAL ? 1 : 0,
+      startedAt: run.startedAt,
+      completedAt: run.completedAt,
+    };
   }
 
-  /**
-   * Handles URL capture / confirm ingestion.
-   */
-  private async handleUrl(
-    command: Extract<IngestionCommand, { source: 'url' }>,
-    runId: string,
-  ): Promise<IngestionResult> {
-    const rawUrl = command.url?.trim();
-    if (!rawUrl) {
-      throw new IngestionValidationException('URL is required');
-    }
+  // ── Atomic Ingestion Transaction ──────────────────────────────────────────
 
-    validateUrlSecurity(rawUrl);
+  private async commitItemTransaction(options: {
+    runId: string;
+    workspaceId: string;
+    userId?: string;
+    collectionId?: string;
+    source: string;
+    itemData: any;
+    attachmentData?: {
+      filename: string;
+      fileUrl: string;
+      fileId?: string;
+      mimeType: string;
+      sizeBytes: number;
+      fileHash: string;
+    };
+    zoteroBinding?: {
+      bindingId: string;
+      externalItemKey: string;
+    };
+    previewToken?: string;
+    idempotencyKey?: string;
+    leaseToken?: string;
+  }): Promise<IngestionResult> {
+    const {
+      runId,
+      workspaceId,
+      userId,
+      collectionId,
+      source,
+      itemData,
+      attachmentData,
+      zoteroBinding,
+      previewToken,
+      idempotencyKey,
+      leaseToken,
+    } = options;
 
-    // If previewToken is provided, confirm captured preview directly
-    if (command.previewToken) {
-      const item = await this.confirmCapturedUrl(
-        command.workspaceId,
-        command.userId || 'system',
-        {
-          previewToken: command.previewToken,
-          url: rawUrl,
-          ...(command.overrides || {}),
-        },
-      );
+    try {
+      return await this.libraryTx.executeInTransaction(async (tx, helpers) => {
+        // 1. Consume CapturePreview immediately to ensure single-use atomic locking
+        if (options.previewToken && tx.capturePreview?.updateMany) {
+          const tokenHash =
+            this.urlConnector?.hashToken(options.previewToken) ||
+            options.previewToken;
+          let previewRecord: any = null;
+          if (tx.capturePreview?.findUnique) {
+            previewRecord = await tx.capturePreview.findUnique({
+              where: { tokenHash },
+            });
+          }
+          const whereClause = previewRecord?.id
+            ? { id: previewRecord.id, consumedAt: null }
+            : { tokenHash, consumedAt: null };
 
-      return {
-        runId,
-        status: 'completed',
-        itemId: item.id,
-        attachmentIds: [],
-        deduplicated: false,
-        item,
-      };
-    }
-
-    // Direct URL resolution outside transaction
-    const captured = await this.captureUrl(rawUrl, {
-      workspaceId: command.workspaceId,
-      userId: command.userId,
-    });
-
-    const overrides = command.overrides || {};
-    const title = (overrides.title || captured.title || 'Untitled Document').trim();
-    const abstract =
-      overrides.abstract !== undefined ? overrides.abstract : captured.abstract;
-    const doi =
-      overrides.doi !== undefined
-        ? overrides.doi
-        : captured.doi
-          ? normalizeDoi(captured.doi) || captured.doi
-          : undefined;
-    const year = overrides.year !== undefined ? overrides.year : captured.year;
-    const publicationTitle =
-      overrides.publicationTitle !== undefined
-        ? overrides.publicationTitle
-        : captured.publicationTitle;
-    const itemType = overrides.itemType || captured.itemType || 'webpage';
-
-    const creators =
-      overrides.creators && overrides.creators.length > 0
-        ? overrides.creators
-        : captured.creators || [];
-    const authors = creators
-      .map((c: any) => {
-        if (typeof c === 'string') return c;
-        if (c.lastName && c.firstName) return `${c.lastName}, ${c.firstName}`;
-        return c.lastName || c.firstName || '';
-      })
-      .filter(Boolean);
-
-    const userId = command.userId || 'system';
-
-    return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      // Deduplicate check by DOI or exact canonical URL
-      let existing = null;
-      if (doi && tx.catalogItem?.findFirst) {
-        existing = await tx.catalogItem.findFirst({
-          where: {
-            workspaceId: command.workspaceId,
-            doi,
-            deletedAt: null,
-          },
-        });
-      }
-      if (!existing && tx.catalogItem?.findFirst) {
-        existing = await tx.catalogItem.findFirst({
-          where: {
-            workspaceId: command.workspaceId,
-            url: rawUrl,
-            deletedAt: null,
-          },
-        });
-      }
-
-      if (existing) {
-        return {
-          runId,
-          status: 'completed',
-          itemId: existing.id,
-          attachmentIds: [],
-          deduplicated: true,
-          item: existing,
-        };
-      }
-
-      const item = await this.catalogService.createItem(
-        command.workspaceId,
-        {
-          itemType,
-          title,
-          abstract,
-          doi,
-          url: rawUrl,
-          year,
-          journal: publicationTitle,
-          authors: authors.length > 0 ? authors : undefined,
-          uploadedById: userId,
-          collectionId: command.collectionId,
-        },
-        { tx, helpers },
-      );
-
-      const tags = overrides.tags || (captured as any).tags || [];
-      if (tags.length > 0) {
-        await this.persistItemTags(
-          tx,
-          helpers,
-          command.workspaceId,
-          item.id,
-          tags,
-        );
-      }
-
-      await helpers.publishOutbox(
-        command.workspaceId,
-        item.id,
-        'library.item.ingested_url',
-        {
-          itemId: item.id,
-          url: rawUrl,
-          title,
-          itemType,
-        },
-      );
-
-      return {
-        runId,
-        status: 'completed',
-        itemId: item.id,
-        attachmentIds: [],
-        deduplicated: false,
-        item,
-      };
-    });
-  }
-
-  /**
-   * Handles BibTeX ingestion.
-   */
-  private async handleBibtex(
-    command: Extract<IngestionCommand, { source: 'bibtex' }>,
-    runId: string,
-  ): Promise<IngestionResult> {
-    const rawContent = command.content?.trim();
-    if (!rawContent) {
-      throw new IngestionValidationException('BibTeX content is required');
-    }
-
-    if (Buffer.byteLength(rawContent, 'utf8') > INGESTION_LIMITS.MAX_BIBTEX_SIZE_BYTES) {
-      throw new IngestionValidationException('BibTeX content exceeds maximum allowed size (10MB)');
-    }
-
-    // 1. Parse BibTeX outside transaction
-    const entries = this.getBibtexParser().parse(rawContent);
-    if (entries.length === 0) {
-      throw new IngestionValidationException('No valid BibTeX entries found in input');
-    }
-
-    const primaryEntry = entries[0];
-    let resolvedDoiMeta: ResolvedMetadata | null = null;
-
-    if (primaryEntry.doi && this.metadataService) {
-      const cleanDoi = normalizeDoi(primaryEntry.doi);
-      if (cleanDoi) {
-        try {
-          resolvedDoiMeta = await this.metadataService.resolve({ query: cleanDoi });
-        } catch {
-          // Fall back gracefully to BibTeX parsed fields
+          const updateRes = await tx.capturePreview.updateMany({
+            where: whereClause,
+            data: { consumedAt: new Date() },
+          });
+          if (
+            updateRes &&
+            typeof updateRes.count === 'number' &&
+            updateRes.count === 0
+          ) {
+            throw new ConflictException(
+              'Preview token has already been consumed',
+            );
+          }
         }
-      }
-    }
 
-    const title = (
-      resolvedDoiMeta?.metadata.title ||
-      primaryEntry.title ||
-      'Imported BibTeX Reference'
-    ).trim();
-
-    const authors =
-      resolvedDoiMeta?.metadata.authors && resolvedDoiMeta.metadata.authors.length > 0
-        ? resolvedDoiMeta.metadata.authors
-        : primaryEntry.authors && primaryEntry.authors.length > 0
-          ? primaryEntry.authors
-          : undefined;
-
-    const year = resolvedDoiMeta?.metadata.year ?? primaryEntry.year ?? undefined;
-    const journal =
-      resolvedDoiMeta?.metadata.journal ||
-      resolvedDoiMeta?.metadata.publicationTitle ||
-      primaryEntry.journal;
-    const doi = resolvedDoiMeta?.metadata.doi || primaryEntry.doi;
-    const itemType =
-      resolvedDoiMeta?.metadata.itemType ||
-      primaryEntry.itemType ||
-      'journalArticle';
-    const userId = command.userId || 'system';
-
-    // 2. Open Library Transaction
-    return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      // Deduplicate check by DOI or title+year
-      let existing = null;
-      if (doi && tx.catalogItem?.findFirst) {
-        existing = await tx.catalogItem.findFirst({
-          where: {
-            workspaceId: command.workspaceId,
-            doi,
-            deletedAt: null,
-          },
-        });
-      }
-      if (!existing && year && tx.catalogItem?.findFirst) {
-        existing = await tx.catalogItem.findFirst({
-          where: {
-            workspaceId: command.workspaceId,
-            title: { equals: title, mode: 'insensitive' },
-            year,
-            deletedAt: null,
-          },
-        });
-      }
-
-      if (existing) {
-        return {
-          runId,
-          status: 'completed',
-          itemId: existing.id,
-          attachmentIds: [],
-          deduplicated: true,
-          item: existing,
-        };
-      }
-
-      const item = await this.catalogService.createItem(
-        command.workspaceId,
-        {
-          itemType,
-          title,
-          authors,
-          year,
-          journal,
-          doi,
-          abstract: resolvedDoiMeta?.metadata.abstract || primaryEntry.abstract,
-          citationKey: primaryEntry.citationKey,
-          volume: primaryEntry.volume,
-          issue: primaryEntry.issue,
-          pages: primaryEntry.pages,
-          publisher: primaryEntry.publisher,
-          uploadedById: userId,
-          collectionId: command.collectionId,
-        },
-        { tx, helpers },
-      );
-
-      await helpers.publishOutbox(
-        command.workspaceId,
-        item.id,
-        'library.item.ingested_bibtex',
-        { itemId: item.id, title, citationKey: primaryEntry.citationKey },
-      );
-
-      return {
-        runId,
-        status: 'completed',
-        itemId: item.id,
-        attachmentIds: [],
-        deduplicated: false,
-        item,
-      };
-    });
-  }
-
-  /**
-   * Handles PDF upload / ingestion.
-   * Performs file validation, checksum calculation, text/metadata extraction outside transaction,
-   * atomic item + attachment creation in transaction, and triggers async page indexing post-commit.
-   */
-  private async handlePdf(
-    command: Extract<IngestionCommand, { source: 'pdf' }>,
-    runId: string,
-  ): Promise<IngestionResult> {
-    const filename = (command.filename || 'document.pdf').trim();
-    const mimeType = command.mimeType || 'application/pdf';
-    const size = command.size || command.buffer?.length || 0;
-    const fileUrl = command.fileUrl || '';
-    const userId = command.userId || 'system';
-
-    if (size > INGESTION_LIMITS.MAX_PDF_SIZE_BYTES) {
-      throw new IngestionValidationException(
-        `PDF file size (${size} bytes) exceeds maximum limit of 50MB`,
-      );
-    }
-
-    // 1. Calculate or use SHA-256 Checksum
-    let fileHash = command.fileHash;
-    if (!fileHash && command.buffer && this.attachmentsService) {
-      fileHash = this.attachmentsService.calculateChecksum(command.buffer);
-    }
-    if (!fileHash && command.buffer) {
-      fileHash = createHash('sha256').update(command.buffer).digest('hex');
-    }
-    if (!fileHash) {
-      fileHash = createHash('sha256')
-        .update(`${filename}-${size}-${fileUrl}`)
-        .digest('hex');
-    }
-
-    // 2. Extract PDF Metadata outside transaction
-    let extracted: any = command.extractedMeta || {};
-    if (command.buffer && Object.keys(extracted).length === 0) {
-      try {
-        const bufMeta = this.getExtractorService().extractMetadataFromBuffer(command.buffer);
-        extracted = { ...bufMeta };
-      } catch (err: any) {
-        this.logger.warn(`PDF buffer extraction error: ${err.message}`);
-      }
-    }
-
-    // If DOI or arXiv extracted, attempt canonical metadata enrichment outside transaction
-    let resolvedMeta: ResolvedMetadata | null = null;
-    const potentialDoi = extracted.doi ? normalizeDoi(extracted.doi) : null;
-    if (potentialDoi && this.metadataService) {
-      try {
-        resolvedMeta = await this.metadataService.resolve({ query: potentialDoi });
-      } catch {
-        // Fall back to extracted fields
-      }
-    }
-
-    const title = (
-      resolvedMeta?.metadata.title ||
-      extracted.title ||
-      filename.replace(/\.pdf$/i, '') ||
-      'Uploaded Document'
-    ).trim();
-
-    const authors =
-      resolvedMeta?.metadata.authors && resolvedMeta.metadata.authors.length > 0
-        ? resolvedMeta.metadata.authors
-        : extracted.authors && extracted.authors.length > 0
-          ? extracted.authors
-          : undefined;
-
-    const year = resolvedMeta?.metadata.year ?? extracted.year ?? undefined;
-    const doi = resolvedMeta?.metadata.doi || potentialDoi || undefined;
-    const abstract = resolvedMeta?.metadata.abstract || extracted.abstract || undefined;
-    const journal =
-      resolvedMeta?.metadata.journal ||
-      resolvedMeta?.metadata.publicationTitle ||
-      extracted.journal ||
-      undefined;
-    const itemType = resolvedMeta?.metadata.itemType || 'journalArticle';
-
-    // 3. Open Library Transaction for Atomic Finalization
-    const result = await this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      // Check attachment deduplication by fileHash within workspace
-      const existingAttachment = tx.catalogAttachment?.findFirst
-        ? await tx.catalogAttachment.findFirst({
-            where: {
-              fileHash,
-              catalogItem: {
-                workspaceId: command.workspaceId,
-                deletedAt: null,
-              },
-            },
-            include: { catalogItem: true },
-          })
-        : null;
-
-      if (existingAttachment) {
-        this.logger.log(
-          JSON.stringify({
-            event: 'library.attachment.deduplicated',
-            fileHash,
-            attachmentId: existingAttachment.id,
-            catalogItemId: existingAttachment.catalogItemId,
-          }),
-        );
-
-        return {
-          runId,
-          status: 'completed' as const,
-          itemId: existingAttachment.catalogItemId,
-          attachmentIds: [existingAttachment.id],
-          deduplicated: true,
-          item: existingAttachment.catalogItem,
-        };
-      }
-
-      // Check if item with same DOI already exists
-      let targetItemId: string;
-      let isItemDeduplicated = false;
-      let targetItem: any = null;
-
-      if (doi && tx.catalogItem?.findFirst) {
-        const existingItem = await tx.catalogItem.findFirst({
-          where: {
-            workspaceId: command.workspaceId,
-            doi,
-            deletedAt: null,
-          },
-        });
-        if (existingItem) {
-          targetItemId = existingItem.id;
-          targetItem = existingItem;
-          isItemDeduplicated = true;
+        // Resolve a valid user ID for uploader relation
+        let effectiveUserId = userId;
+        if (!effectiveUserId) {
+          const member = await tx.workspaceMember?.findFirst?.({
+            where: { workspaceId },
+          });
+          effectiveUserId = member?.userId;
         }
-      }
-
-      if (!targetItem) {
-        // Create new CatalogItem atomically
-        targetItem = await this.catalogService.createItem(
-          command.workspaceId,
-          {
-            itemType,
-            title,
-            authors,
-            year,
-            journal,
-            doi,
-            abstract,
-            fileUrl: fileUrl || `/files/${filename}`,
-            filename,
-            size,
-            mimeType,
-            uploadedById: userId,
-            collectionId: command.collectionId,
-          },
-          { tx, helpers },
-        );
-        targetItemId = targetItem.id;
-      } else {
-        targetItemId = targetItem.id;
-      }
-
-      // Create CatalogAttachment + Revision 1 atomically
-      const attachment = await tx.catalogAttachment.create({
-        data: {
-          catalogItemId: targetItemId,
-          filename,
-          url: fileUrl || `/files/${filename}`,
-          mimeType,
-          size,
-          fileHash,
-          fileId: command.fileId || null,
-          attachmentType: 'primary_pdf',
-          revisions: {
-            create: {
-              revisionNumber: 1,
-              url: fileUrl || `/files/${filename}`,
-              fileHash,
-              sizeBytes: size,
-              comment: 'Initial PDF attachment',
-            },
-          },
-        },
-      });
-
-      await helpers.appendChange(command.workspaceId, {
-        entityType: 'Attachment',
-        entityId: attachment.id,
-        action: 'create',
-        version: 1,
-        data: attachment,
-      });
-
-      await helpers.publishOutbox(
-        command.workspaceId,
-        attachment.id,
-        'library.attachment.created',
-        {
-          attachmentId: attachment.id,
-          catalogItemId: targetItemId,
-          fileHash,
-          filename,
-        },
-      );
-
-      // If keywords / tags extracted, persist tags
-      const tags = resolvedMeta?.metadata.tags || extracted.keywords || [];
-      if (tags.length > 0) {
-        await this.persistItemTags(
-          tx,
-          helpers,
-          command.workspaceId,
-          targetItemId,
-          tags,
-        );
-      }
-
-      return {
-        runId,
-        status: 'completed' as const,
-        itemId: targetItemId,
-        attachmentIds: [attachment.id],
-        deduplicated: isItemDeduplicated,
-        item: targetItem,
-      };
-    });
-
-    // 4. Post-Commit Asynchronous PDF Indexing
-    if (command.buffer && result.attachmentIds.length > 0) {
-      void this.indexPdfPagesAsync(result.attachmentIds[0], command.buffer);
-    }
-
-    return result;
-  }
-
-  /**
-   * Handles Zotero source via unified ingestion boundary.
-   */
-  private async handleZotero(
-    command: Extract<IngestionCommand, { source: 'zotero' }>,
-    runId: string,
-  ): Promise<IngestionResult> {
-    const payload = (command.payload as any) || {};
-    const title = (payload.title || `Zotero Item (${command.externalItemKey})`).trim();
-    const authors = payload.authors || [];
-    const year = payload.year ? parseInt(String(payload.year), 10) : undefined;
-    const doi = payload.doi ? normalizeDoi(payload.doi) || payload.doi : undefined;
-    const userId = command.userId || 'system';
-
-    return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      // Check existing Zotero item binding
-      const existingBinding = await tx.zoteroItemBinding.findFirst({
-        where: {
-          workspaceId: command.workspaceId,
-          entityType: 'item',
-          remoteKey: command.externalItemKey,
-        },
-      });
-
-      if (existingBinding) {
-        const existingItem = await tx.catalogItem.findUnique({
-          where: { id: existingBinding.entityId },
-        });
-        if (existingItem && !existingItem.deletedAt) {
-          return {
-            runId,
-            status: 'completed',
-            itemId: existingItem.id,
-            attachmentIds: [],
-            deduplicated: true,
-            item: existingItem,
-          };
+        if (!effectiveUserId) {
+          const user = await tx.user?.findFirst?.();
+          effectiveUserId = user?.id || 'system-ingestion';
         }
-      }
 
-      const item = await this.catalogService.createItem(
-        command.workspaceId,
-        {
-          itemType: payload.itemType || 'journalArticle',
-          title,
-          authors: authors.length > 0 ? authors : undefined,
-          year,
-          doi,
-          abstract: payload.abstractNote || payload.abstract,
-          journal: payload.publicationTitle || payload.journal,
-          uploadedById: userId,
-          collectionId: command.collectionId,
-        },
-        { tx, helpers },
-      );
+        let rawCreators = itemData.creators || [];
+        if (
+          (!rawCreators || rawCreators.length === 0) &&
+          Array.isArray(itemData.authors) &&
+          itemData.authors.length > 0
+        ) {
+          rawCreators = itemData.authors.map((authStr: string) => {
+            const trimmed = String(authStr || '').trim();
+            if (trimmed.includes(',')) {
+              const [last, ...firstParts] = trimmed.split(',');
+              const firstName = firstParts.join(',').trim();
+              const lastName = last.trim();
+              return {
+                creatorType: 'author',
+                firstName,
+                lastName,
+                fullName:
+                  [firstName, lastName].filter(Boolean).join(' ').trim() ||
+                  trimmed,
+              };
+            }
+            const parts = trimmed.split(/\s+/);
+            if (parts.length > 1) {
+              const lastName = parts.pop() || '';
+              const firstName = parts.join(' ');
+              return {
+                creatorType: 'author',
+                firstName,
+                lastName,
+                fullName: trimmed,
+              };
+            }
+            return {
+              creatorType: 'author',
+              firstName: '',
+              lastName: trimmed,
+              fullName: trimmed,
+            };
+          });
+        }
 
-      // Link to ZoteroBinding if connectionId is available
-      if (command.connectionId) {
-        const binding = await tx.zoteroBinding.findFirst({
-          where: {
-            connectionId: command.connectionId,
-            workspaceId: command.workspaceId,
-          },
-        });
-        if (binding) {
-          await tx.zoteroItemBinding.upsert({
-            where: {
-              bindingId_remoteKey: {
-                bindingId: binding.id,
-                remoteKey: command.externalItemKey,
-              },
+        const cleanCreators = rawCreators.map((c: any, index: number) => ({
+          creatorType: c.creatorType || 'author',
+          firstName: c.firstName || '',
+          lastName: c.lastName || '',
+          fullName:
+            typeof c === 'string'
+              ? c
+              : c.fullName ||
+                [c.firstName, c.lastName].filter(Boolean).join(' ').trim(),
+          orderIndex: index,
+        }));
+
+        const cleanAuthors: string[] =
+          itemData.authors && itemData.authors.length > 0
+            ? itemData.authors
+            : cleanCreators.map((c: any) => c.fullName).filter(Boolean);
+
+        let finalExtra = itemData.extra || '';
+        if (itemData.arxivId && !finalExtra.includes(itemData.arxivId)) {
+          finalExtra = finalExtra
+            ? `${finalExtra}\narXiv: ${itemData.arxivId}`
+            : `arXiv: ${itemData.arxivId}`;
+        }
+
+        // Create CatalogItem (delegate to CatalogService if provided, else direct transactional Prisma)
+        let catalogItem: any;
+        const itemCreateData = {
+          workspaceId,
+          collectionId: collectionId || null,
+          title: itemData.title,
+          abstract: itemData.abstract || '',
+          doi: itemData.doi || null,
+          citationKey: itemData.citationKey || null,
+          year: itemData.year || null,
+          publicationDate: itemData.publicationDate || null,
+          publicationTitle:
+            itemData.publicationTitle || itemData.journal || null,
+          journal: itemData.journal || itemData.publicationTitle || null,
+          publisher: itemData.publisher || null,
+          place: itemData.place || null,
+          volume: itemData.volume || null,
+          issue: itemData.issue || null,
+          section: itemData.section || null,
+          partNumber: itemData.partNumber || null,
+          partTitle: itemData.partTitle || null,
+          pages: itemData.pages || null,
+          series: itemData.series || null,
+          seriesTitle: itemData.seriesTitle || null,
+          seriesText: itemData.seriesText || null,
+          issn: itemData.issn || null,
+          isbn: itemData.isbn || null,
+          pmid: itemData.pmid || null,
+          pmcid: itemData.pmcid || null,
+          journalAbbr: itemData.journalAbbr || null,
+          shortTitle: itemData.shortTitle || null,
+          rights: itemData.rights || itemData.license || null,
+          license: itemData.license || itemData.rights || null,
+          archive: itemData.archive || null,
+          archiveLocation: itemData.archiveLocation || null,
+          libraryCatalog: itemData.libraryCatalog || null,
+          callNumber: itemData.callNumber || null,
+          extra: finalExtra || null,
+          labels: normalizeTags([
+            ...(Array.isArray(itemData.tags) ? itemData.tags : []),
+            ...(Array.isArray(itemData.labels) ? itemData.labels : []),
+            ...(Array.isArray(itemData.keywords) ? itemData.keywords : []),
+          ]),
+          keywords: normalizeTags([
+            ...(Array.isArray(itemData.keywords) ? itemData.keywords : []),
+            ...(Array.isArray(itemData.tags) ? itemData.tags : []),
+            ...(Array.isArray(itemData.labels) ? itemData.labels : []),
+          ]),
+          url: itemData.url || null,
+          itemType: itemData.itemType || 'journalArticle',
+          authors: cleanAuthors,
+          filename: attachmentData?.filename || itemData.filename || 'document',
+          fileUrl: attachmentData?.fileUrl || itemData.fileUrl || '',
+          size: attachmentData?.sizeBytes || itemData.size || 0,
+          mimeType:
+            attachmentData?.mimeType || itemData.mimeType || 'application/pdf',
+          uploadedById: effectiveUserId,
+          contributors:
+            cleanCreators.length > 0
+              ? {
+                  create: cleanCreators,
+                }
+              : undefined,
+        };
+
+        if (this.catalogService?.createItem) {
+          catalogItem = await this.catalogService.createItem(
+            workspaceId,
+            itemCreateData,
+            { tx, helpers, source: (source as any) || 'manual' },
+          );
+        } else {
+          catalogItem = await tx.catalogItem.create({
+            data: itemCreateData,
+            include: {
+              contributors: true,
+              attachments: true,
             },
-            create: {
-              bindingId: binding.id,
-              workspaceId: command.workspaceId,
+          });
+          if (helpers?.appendChange) {
+            await helpers.appendChange(workspaceId, {
               entityType: 'item',
-              entityId: item.id,
-              remoteKey: command.externalItemKey,
-              remoteVersion: BigInt(payload.version ? Number(payload.version) : 1),
-              syncState: 'synced',
+              entityId: catalogItem.id,
+              action: 'create',
+              version: 1,
+              data: {
+                title: catalogItem.title,
+                doi: catalogItem.doi,
+                source,
+              },
+            });
+          }
+          if (helpers?.publishOutbox) {
+            const outboxPayload = buildItemCreatedOutboxPayload({
+              itemId: catalogItem.id,
+              workspaceId,
+              title: catalogItem.title,
+              doi: catalogItem.doi,
+              source: (source as any) || 'manual',
+            });
+            await helpers.publishOutbox(
+              workspaceId,
+              catalogItem.id,
+              LIBRARY_EVENT_TYPES.ITEM_CREATED,
+              outboxPayload,
+            );
+          }
+        }
+
+        // 2. Register Database Deduplication Claims within transaction
+        if (itemData.doi && tx.libraryDedupClaim?.create) {
+          await tx.libraryDedupClaim.create({
+            data: {
+              workspaceId,
+              claimType: 'doi',
+              claimValue: itemData.doi.toLowerCase().trim(),
+              catalogItemId: catalogItem.id,
             },
-            update: {
-              entityId: item.id,
-              remoteVersion: BigInt(payload.version ? Number(payload.version) : 1),
+          });
+        }
+
+        const attachmentIds: string[] = [];
+
+        // Create Attachment + Revision if PDF
+        if (attachmentData && tx.catalogAttachment?.create) {
+          const attachment = await tx.catalogAttachment.create({
+            data: {
+              catalogItemId: catalogItem.id,
+              filename: attachmentData.filename,
+              url: attachmentData.fileUrl,
+              fileHash: attachmentData.fileHash,
+              fileId: attachmentData.fileId || null,
+              size: attachmentData.sizeBytes,
+              mimeType: attachmentData.mimeType,
+              attachmentType: 'primary_pdf',
+            },
+          });
+
+          attachmentIds.push(attachment.id);
+
+          if (attachmentData.fileHash && tx.libraryDedupClaim?.create) {
+            await tx.libraryDedupClaim.create({
+              data: {
+                workspaceId,
+                claimType: 'pdf_sha256',
+                claimValue: attachmentData.fileHash.toLowerCase().trim(),
+                catalogItemId: catalogItem.id,
+              },
+            });
+          }
+
+          if (tx.attachmentRevision?.create) {
+            await tx.attachmentRevision.create({
+              data: {
+                attachmentId: attachment.id,
+                revisionNumber: 1,
+                fileHash: attachmentData.fileHash,
+                sizeBytes: attachmentData.sizeBytes,
+                url: attachmentData.fileUrl,
+                comment: 'Initial ingestion revision',
+              },
+            });
+          }
+
+          if (helpers?.publishOutbox) {
+            await helpers.publishOutbox(
+              workspaceId,
+              attachment.id,
+              'library.attachment.extraction_requested',
+              {
+                attachmentId: attachment.id,
+                catalogItemId: catalogItem.id,
+                workspaceId,
+                fileId: attachmentData.fileId || null,
+                filename: attachmentData.filename,
+              },
+            );
+          }
+        }
+
+        // Bind Zotero remote item if applicable
+        if (zoteroBinding && tx.zoteroItemBinding?.create) {
+          await tx.zoteroItemBinding.create({
+            data: {
+              workspaceId,
+              bindingId: zoteroBinding.bindingId,
+              remoteKey: zoteroBinding.externalItemKey,
+              entityType: 'item',
+              entityId: catalogItem.id,
               syncState: 'synced',
             },
           });
         }
-      }
 
-      await helpers.publishOutbox(
-        command.workspaceId,
-        item.id,
-        'library.zotero.item_synced',
-        {
-          itemId: item.id,
-          externalItemKey: command.externalItemKey,
-          connectionId: command.connectionId,
-        },
-      );
+        const finalResult: IngestionResult = {
+          runId,
+          status: 'completed',
+          itemId: catalogItem.id,
+          attachmentIds,
+          deduplicated: false,
+          item: catalogItem,
+        };
 
-      return {
-        runId,
-        status: 'completed',
-        itemId: item.id,
-        attachmentIds: [],
-        deduplicated: false,
-        item,
-      };
-    });
-  }
-
-  // ─── Helpers ────────────────────────────────────────────────────────────────
-
-  private async persistItemTags(
-    tx: import('@prisma/client').Prisma.TransactionClient,
-    helpers: import('../sync-core/library-transaction.service').TransactionHelpers,
-    workspaceId: string,
-    itemId: string,
-    tags: string[],
-  ): Promise<void> {
-    const cleanTags = Array.from(
-      new Set(
-        tags
-          .map((t) => (typeof t === 'string' ? t.trim() : ''))
-          .filter((t) => t.length > 0),
-      ),
-    ).slice(0, 30);
-
-    for (const tagName of cleanTags) {
-      const tag = await tx.catalogTag.upsert({
-        where: {
-          workspaceId_name: {
+        // Mark Idempotency succeeded in the SAME database transaction
+        if (idempotencyKey) {
+          const marked = await this.idempotencyRepo.markSucceededInTx(
+            tx,
             workspaceId,
-            name: tagName,
-          },
-        },
-        create: {
-          workspaceId,
-          name: tagName,
-          color: '#3b82f6',
-          type: 'manual',
-        },
-        update: {},
+            idempotencyKey,
+            200,
+            finalResult,
+            leaseToken,
+          );
+          if (!marked) {
+            throw new ConflictException(
+              'Idempotency lease expired or lost to concurrent worker',
+            );
+          }
+        }
+
+        return finalResult;
       });
+    } catch (txErr: any) {
+      const isPrismaP2002 = txErr?.code === 'P2002';
+      const modelName = String(txErr?.meta?.modelName || '').toLowerCase();
+      const targetStr = (
+        Array.isArray(txErr?.meta?.target)
+          ? txErr.meta.target.join('_')
+          : String(
+              txErr?.meta?.target ||
+                txErr?.meta?.constraint ||
+                txErr?.message ||
+                '',
+            )
+      ).toLowerCase();
 
-      await tx.catalogItemTag.upsert({
-        where: {
-          tagId_catalogItemId: {
-            tagId: tag.id,
-            catalogItemId: itemId,
-          },
-        },
-        create: {
-          tagId: tag.id,
-          catalogItemId: itemId,
-        },
-        update: {},
-      });
+      const targetArray = Array.isArray(txErr?.meta?.target)
+        ? txErr.meta.target.map((t: string) => String(t).toLowerCase())
+        : [];
 
-      await helpers.appendChange(workspaceId, {
-        entityType: 'CatalogItemTag',
-        entityId: `${tag.id}:${itemId}`,
-        action: 'create',
-        version: 1,
-        data: { tagId: tag.id, catalogItemId: itemId },
-      });
-    }
-  }
+      const isDedupConstraint =
+        modelName.includes('librarydedupclaim') ||
+        targetStr.includes('librarydedupclaim') ||
+        targetStr.includes('library_dedup_claims') ||
+        targetStr.includes('papers_workspace_id_doi_key') ||
+        targetStr.includes('claim_type') ||
+        targetStr.includes('claim_value') ||
+        targetStr.includes('claimtype') ||
+        targetStr.includes('claimvalue') ||
+        (targetArray.includes('claim_value') &&
+          targetArray.includes('claim_type')) ||
+        (targetArray.includes('claimvalue') &&
+          targetArray.includes('claimtype')) ||
+        (targetArray.includes('doi') &&
+          (targetArray.includes('workspace_id') ||
+            targetArray.includes('workspaceid')));
 
-  /**
-   * Asynchronously extracts text pages from PDF buffer and indexes them for Discovery search.
-   */
-  private async indexPdfPagesAsync(attachmentId: string, buffer: Buffer): Promise<void> {
-    if (!this.extractorService || !this.fullTextIndexer) return;
-    try {
-      this.logger.log(
-        JSON.stringify({
-          event: 'library.extraction.started',
-          attachmentId,
-        }),
-      );
+      const isDedupCollision = isPrismaP2002 && isDedupConstraint;
 
-      const text = await this.extractorService.extractFromBuffer(buffer);
-      if (text) {
-        await this.fullTextIndexer.indexAttachmentPages(attachmentId, [
-          {
-            pageIndex: 1,
-            textContent: text,
-            charOffset: 0,
-          },
-        ]);
-
+      if (isDedupCollision) {
         this.logger.log(
           JSON.stringify({
-            event: 'library.extraction.completed',
-            attachmentId,
+            event: 'library.ingestion.concurrent_dedup_contention_resolved',
+            workspaceId,
+            source,
           }),
         );
-      }
-    } catch (err: any) {
-      this.logger.warn(
-        JSON.stringify({
-          event: 'library.extraction.failed',
-          attachmentId,
-          errorMessage: err.message,
-        }),
-      );
-    }
-  }
+        let existingItem: any = null;
+        const maxRetries = 10;
 
-  // ─── Legacy & Specialized Public Methods ────────────────────────────────────
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+          if (itemData.doi) {
+            if (this.prisma.libraryDedupClaim?.findUnique) {
+              const claim = await this.prisma.libraryDedupClaim.findUnique({
+                where: {
+                  workspaceId_claimType_claimValue: {
+                    workspaceId,
+                    claimType: 'doi',
+                    claimValue: itemData.doi.toLowerCase().trim(),
+                  },
+                },
+                include: {
+                  catalogItem: {
+                    include: { attachments: true, contributors: true },
+                  },
+                },
+              });
+              existingItem = claim?.catalogItem;
+            }
+            if (!existingItem && this.prisma.catalogItem?.findFirst) {
+              existingItem = await this.prisma.catalogItem.findFirst({
+                where: {
+                  workspaceId,
+                  doi: itemData.doi.toLowerCase().trim(),
+                },
+                include: { attachments: true, contributors: true },
+              });
+            }
+          }
+          if (!existingItem && attachmentData?.fileHash) {
+            if (this.prisma.libraryDedupClaim?.findUnique) {
+              const claim = await this.prisma.libraryDedupClaim.findUnique({
+                where: {
+                  workspaceId_claimType_claimValue: {
+                    workspaceId,
+                    claimType: 'pdf_sha256',
+                    claimValue: attachmentData.fileHash.toLowerCase().trim(),
+                  },
+                },
+                include: {
+                  catalogItem: {
+                    include: { attachments: true, contributors: true },
+                  },
+                },
+              });
+              existingItem = claim?.catalogItem;
+            }
+            if (!existingItem && this.prisma.catalogAttachment?.findFirst) {
+              const existingAttachment =
+                await this.prisma.catalogAttachment.findFirst({
+                  where: {
+                    fileHash: attachmentData.fileHash.toLowerCase().trim(),
+                    catalogItem: { workspaceId },
+                  },
+                  include: {
+                    catalogItem: {
+                      include: { attachments: true, contributors: true },
+                    },
+                  },
+                });
+              existingItem = existingAttachment?.catalogItem;
+            }
+          }
 
-  /**
-   * Captures and previews academic metadata from any public URL with SSRF filtering and signed preview token.
-   */
-  async captureUrl(
-    targetUrl: string,
-    context?: { workspaceId?: string; userId?: string },
-  ): Promise<CapturedPaperMetadata> {
-    const canonicalUrl = targetUrl.trim();
-    validateUrlSecurity(canonicalUrl);
+          if (existingItem) {
+            break;
+          }
 
-    const classified = QueryClassifier.classify(canonicalUrl);
-    let meta: CapturedPaperMetadata | null = null;
-
-    if (
-      this.metadataService &&
-      (classified.type === 'DOI' ||
-        classified.type === 'ARXIV' ||
-        classified.type === 'PMID' ||
-        classified.type === 'ISBN')
-    ) {
-      try {
-        const resolved = await this.metadataService.resolve({
-          query: canonicalUrl,
-        });
-        if (resolved) {
-          meta = this.mapResolvedToCaptured(resolved, canonicalUrl, context);
+          if (attempt < maxRetries) {
+            await new Promise((res) => setTimeout(res, 25 * attempt));
+          }
         }
-      } catch (err: any) {
-        this.logger.warn(
-          JSON.stringify({
-            event: 'library.metadata.capture_fallback',
-            queryType: classified.type,
-            errorName: err instanceof Error ? err.name : 'UnknownError',
-          }),
-        );
+
+        if (existingItem) {
+          // Soft-delete recovery policy: restore item if previously soft-deleted
+          if (
+            existingItem.deletedAt !== null &&
+            this.prisma.catalogItem?.update
+          ) {
+            await this.prisma.catalogItem.update({
+              where: { id: existingItem.id },
+              data: { deletedAt: null },
+            });
+            existingItem.deletedAt = null;
+          }
+
+          const dedupResult: IngestionResult = {
+            runId,
+            status: 'completed',
+            itemId: existingItem.id,
+            attachmentIds:
+              existingItem.attachments?.map((a: any) => a.id) || [],
+            deduplicated: true,
+            item: existingItem,
+          };
+          if (idempotencyKey) {
+            await this.idempotencyRepo.markSucceeded(
+              workspaceId,
+              idempotencyKey,
+              200,
+              dedupResult,
+              leaseToken,
+            );
+          }
+          return dedupResult;
+        }
       }
+
+      this.logger.error(
+        `Transaction commit failed for ingestion: ${txErr.message}`,
+      );
+      throw txErr;
     }
-
-    if (!meta) {
-      meta = await this.urlCapture.captureFromUrl(canonicalUrl, context);
-    }
-
-    if (context?.workspaceId && context?.userId && meta.previewToken) {
-      const tokenHash = this.urlCapture.hashToken(meta.previewToken);
-      const metadataDigest = this.urlCapture.calculateMetadataDigest(meta);
-
-      const parts = meta.previewToken.split('.');
-      const expiresAt =
-        parts.length === 5
-          ? parseInt(parts[3], 10)
-          : Date.now() + 15 * 60 * 1000;
-
-      const sanitizedCanonical = { ...meta };
-      delete (sanitizedCanonical as any).previewToken;
-
-      await this.prisma.capturePreview.create({
-        data: {
-          workspaceId: context.workspaceId,
-          userId: context.userId,
-          sourceUrl: meta.url,
-          canonicalMetadata: sanitizedCanonical as any,
-          metadataDigest,
-          tokenHash,
-          expiresAt: new Date(expiresAt),
-        },
-      });
-    }
-
-    return meta;
   }
 
-  private mapResolvedToCaptured(
-    resolved: ResolvedMetadata,
-    originalUrl: string,
-    context?: { workspaceId?: string; userId?: string },
-  ): CapturedPaperMetadata {
-    const m = resolved.metadata;
-    const creators = (m.authors || []).map((name) => {
-      if (name.includes(',')) {
-        const parts = name.split(',');
-        return { lastName: parts[0].trim(), firstName: parts[1]?.trim() };
-      }
-      const parts = name.split(' ');
-      const lastName = parts.pop() || name;
-      const firstName = parts.join(' ');
-      return { lastName, firstName: firstName || undefined };
-    });
-
-    const rawItemType = m.itemType || 'journalArticle';
-    const validTypes: CapturedPaperMetadata['itemType'][] = [
-      'journalArticle',
-      'preprint',
-      'webpage',
-      'book',
-      'conferencePaper',
-    ];
-    const itemType = validTypes.includes(rawItemType as any)
-      ? (rawItemType as CapturedPaperMetadata['itemType'])
-      : 'journalArticle';
-
-    const captured: CapturedPaperMetadata = {
-      title: m.title || 'Untitled Document',
-      abstract: m.abstract,
-      creators: creators.length > 0 ? creators : undefined,
-      year: m.year ?? undefined,
-      doi: m.doi,
-      url: m.url || originalUrl,
-      publicationTitle: m.journal || m.publicationTitle,
-      itemType,
-      rawMetadata: {
-        canonicalId: resolved.canonicalId,
-        provenance: resolved.provenance,
-      },
+  private buildSafeInputParams(command: IngestionCommand): Record<string, any> {
+    const safe: Record<string, any> = {
+      source: command.source,
+      workspaceId: command.workspaceId,
     };
 
-    return this.urlCapture.attachPreviewToken(captured, context);
-  }
-
-  /**
-   * Confirms and persists captured URL metadata into a CatalogItem within a single atomic transaction.
-   */
-  async confirmCapturedUrl(
-    workspaceId: string,
-    userId: string,
-    dto: ConfirmCapturedUrlDto,
-  ) {
-    if (!dto.previewToken) {
-      throw new BadRequestException('previewToken is strictly required');
+    switch (command.source) {
+      case 'doi':
+        safe.doi = command.doi;
+        break;
+      case 'url': {
+        try {
+          const parsed = new URL(command.url);
+          safe.origin = parsed.origin;
+          safe.hostname = parsed.hostname;
+          safe.urlHash = crypto
+            .createHash('sha256')
+            .update(command.url)
+            .digest('hex');
+        } catch {
+          safe.hostname = 'invalid-url';
+        }
+        break;
+      }
+      case 'bibtex':
+        safe.contentLength = (command.content || '').length;
+        break;
+      case 'pdf':
+        safe.fileId = command.fileId;
+        if (command.filename) safe.filename = command.filename;
+        break;
+      case 'zotero':
+        safe.connectionId = command.connectionId;
+        safe.externalItemKey = command.externalItemKey;
+        break;
     }
 
-    const tokenHash = this.urlCapture.hashToken(dto.previewToken);
-
-    return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const preview = await tx.capturePreview.findUnique({
-        where: { tokenHash },
-      });
-
-      if (!preview) {
-        throw new BadRequestException('Invalid or unrecognised preview token');
-      }
-
-      if (preview.workspaceId !== workspaceId) {
-        throw new BadRequestException('Preview token does not belong to this workspace');
-      }
-      if (preview.userId !== userId) {
-        throw new BadRequestException('Preview token does not belong to this user');
-      }
-
-      if (preview.expiresAt.getTime() < Date.now()) {
-        throw new BadRequestException('Preview token has expired');
-      }
-
-      if (preview.consumedAt !== null) {
-        throw new ConflictException('Preview token has already been consumed');
-      }
-
-      const canonicalMeta = preview.canonicalMetadata as any;
-      const verification = this.urlCapture.verifyPreviewToken(
-        canonicalMeta,
-        dto.previewToken,
-        { workspaceId, userId },
-      );
-
-      if (!verification.valid) {
-        throw new BadRequestException(
-          `Preview token validation failed: ${verification.reason || 'invalid_token'}`,
-        );
-      }
-
-      const updateResult = await tx.capturePreview.updateMany({
-        where: { id: preview.id, consumedAt: null },
-        data: { consumedAt: new Date() },
-      });
-
-      if (updateResult.count === 0) {
-        throw new ConflictException('Preview token has already been consumed');
-      }
-
-      const title = dto.title?.trim() || canonicalMeta.title;
-      const abstract =
-        dto.abstract !== undefined ? dto.abstract : canonicalMeta.abstract;
-      const doi = dto.doi !== undefined ? dto.doi : canonicalMeta.doi;
-      const year = dto.year !== undefined ? dto.year : canonicalMeta.year;
-      const publicationTitle =
-        dto.publicationTitle !== undefined
-          ? dto.publicationTitle
-          : canonicalMeta.publicationTitle;
-
-      const rawItemType =
-        dto.itemType || canonicalMeta.itemType || 'journalArticle';
-      const validItemTypes = [
-        'journalArticle',
-        'book',
-        'bookSection',
-        'conferencePaper',
-        'preprint',
-        'report',
-        'thesis',
-        'webpage',
-        'manuscript',
-        'dataset',
-        'document',
-      ];
-      const itemType = validItemTypes.includes(rawItemType)
-        ? rawItemType
-        : 'journalArticle';
-
-      const creators =
-        dto.creators && dto.creators.length > 0
-          ? dto.creators
-          : canonicalMeta.creators || [];
-      const authors = creators
-        .map((c: any) => {
-          if (typeof c === 'string') return c;
-          if (c.lastName && c.firstName) return `${c.lastName}, ${c.firstName}`;
-          return c.lastName || c.firstName || '';
-        })
-        .filter(Boolean);
-
-      const item = await this.catalogService.createItem(
-        workspaceId,
-        {
-          itemType,
-          title,
-          abstract,
-          doi,
-          url: dto.url || canonicalMeta.url,
-          year,
-          journal: publicationTitle,
-          authors: authors.length > 0 ? authors : undefined,
-          uploadedById: userId || 'system',
-        },
-        { tx, helpers },
-      );
-
-      const rawTags: string[] =
-        dto.tags && dto.tags.length > 0 ? dto.tags : canonicalMeta.tags || [];
-      if (rawTags.length > 0) {
-        await this.persistItemTags(tx, helpers, workspaceId, item.id, rawTags);
-      }
-
-      await helpers.publishOutbox(
-        workspaceId,
-        item.id,
-        'library.item.ingested_url',
-        {
-          itemId: item.id,
-          url: dto.url || canonicalMeta.url,
-          title,
-          itemType,
-          previewId: preview.id,
-        },
-      );
-
-      return item;
-    });
+    return safe;
   }
 
-  async cleanupExpiredPreviews(olderThanDays = 7): Promise<number> {
-    const cutoff = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000);
-    const result = await this.prisma.capturePreview.deleteMany({
-      where: {
-        OR: [{ consumedAt: { lte: cutoff } }, { expiresAt: { lte: cutoff } }],
-      },
-    });
-    return result.count;
+  private async finalizeIngestionRun(
+    runId: string,
+    status: IngestionStatus,
+    itemId?: string,
+    lastError?: string,
+  ): Promise<void> {
+    const isTerminal =
+      status === IngestionStatus.READY ||
+      status === IngestionStatus.FAILED_RETRYABLE ||
+      status === IngestionStatus.FAILED_FINAL;
+
+    try {
+      if (this.prisma.ingestionRun?.update) {
+        await this.prisma.ingestionRun.update({
+          where: { id: runId },
+          data: {
+            status,
+            itemId: itemId || null,
+            lastError: lastError || null,
+            ...(isTerminal ? { completedAt: new Date() } : {}),
+          },
+        });
+      }
+    } catch (dbErr: any) {
+      this.logger.error(
+        JSON.stringify({
+          event: 'library.ingestion.run_terminal_update_failed',
+          runId,
+          status,
+          error: dbErr?.message,
+        }),
+      );
+      throw new IngestionStorageException(
+        `Failed to persist terminal ingestion run state for runId ${runId}: ${dbErr?.message}`,
+        { cause: dbErr },
+      );
+    }
   }
+
+  // ── Backward-Compatible Legacy Wrappers ───────────────────────────────────
 
   async startRun(
     workspaceId: string,
     userId: string,
     dto: StartIngestionDto,
   ): Promise<IngestionRunSnapshot> {
-    const inputHash = createHash('sha256')
-      .update(dto.rawInput || JSON.stringify(dto.items || []))
-      .digest('hex');
-
-    const run = await this.prisma.ingestionRun.create({
-      data: {
-        workspaceId,
-        inputParams: {
-          sourceType: dto.sourceType,
-          rawInput: dto.rawInput,
-          totalItems: dto.items?.length || 1,
-        },
-        inputHash,
-        status: IngestionStatus.RECEIVED,
-      },
+    const result = await this.ingest({
+      source: (dto.sourceType as any) || 'doi',
+      workspaceId,
+      userId,
+      doi: dto.rawInput || '',
+      url: dto.rawInput || '',
+      content: dto.rawInput || '',
+      idempotencyKey: dto.idempotencyKey,
     });
 
-    await this.prisma.ingestionStage.create({
-      data: {
-        ingestionRunId: run.id,
-        stageName: 'INPUT_RECEIVED',
-        durationMs: 0,
-        success: true,
-      },
-    });
-
-    const params = (run.inputParams as any) || {};
-
-    return {
-      id: run.id,
-      workspaceId: run.workspaceId,
-      sourceType: params.sourceType || dto.sourceType,
-      status: run.status,
-      totalItems: params.totalItems || 1,
-      processedItems: 0,
-      failedItems: 0,
-      startedAt: run.startedAt,
-      completedAt: run.completedAt,
-    };
+    return this.getRunStatus(workspaceId, result.runId);
   }
 
-  async getRunStatus(runId: string): Promise<IngestionRunSnapshot> {
-    const run = await this.prisma.ingestionRun.findUnique({
-      where: { id: runId },
-      include: { stages: { orderBy: { executedAt: 'asc' } } },
+  async captureUrl(
+    url: string,
+    contextOrWorkspaceId: string | { workspaceId: string; userId?: string },
+  ) {
+    const wsId =
+      typeof contextOrWorkspaceId === 'string'
+        ? contextOrWorkspaceId
+        : contextOrWorkspaceId?.workspaceId;
+    const userId =
+      typeof contextOrWorkspaceId === 'object'
+        ? contextOrWorkspaceId?.userId
+        : undefined;
+
+    if (!this.urlConnector) {
+      throw new IngestionValidationException(
+        'UrlCaptureConnector is not configured',
+      );
+    }
+    const captured = await this.urlConnector.captureFromUrl(url, {
+      workspaceId: wsId,
+      userId,
     });
 
-    if (!run) {
-      throw new NotFoundException(`IngestionRun ${runId} not found`);
+    if (this.prisma.capturePreview?.create && captured.previewToken) {
+      const sanitizedMeta = { ...captured };
+      delete (sanitizedMeta as any).previewToken;
+      const tokenHash = this.urlConnector.hashToken(captured.previewToken);
+      const metadataDigest =
+        this.urlConnector.calculateMetadataDigest(captured);
+      await this.prisma.capturePreview.create({
+        data: {
+          workspaceId: wsId || 'unassigned',
+          userId: userId || 'system',
+          sourceUrl: url,
+          canonicalMetadata: sanitizedMeta as any,
+          metadataDigest,
+          tokenHash,
+          expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+        },
+      });
     }
 
-    const params = (run.inputParams as any) || {};
-    return {
-      id: run.id,
-      workspaceId: run.workspaceId,
-      sourceType: params.sourceType || 'UNKNOWN',
-      status: run.status,
-      totalItems: params.totalItems || 1,
-      processedItems: 0,
-      failedItems: 0,
-      startedAt: run.startedAt,
-      completedAt: run.completedAt,
-    };
+    return captured;
+  }
+
+  async cleanupExpiredPreviews(retentionDays: number = 7): Promise<number> {
+    if ((this.prisma as any)?.capturePreview?.deleteMany) {
+      const threshold = new Date(Date.now() - retentionDays * 86400 * 1000);
+      const res = await (this.prisma as any).capturePreview.deleteMany({
+        where: {
+          OR: [
+            { consumedAt: { lte: threshold } },
+            { expiresAt: { lte: threshold } },
+          ],
+        },
+      });
+      return res?.count || 0;
+    }
+    return 0;
+  }
+
+  async confirmCapturedUrl(
+    workspaceId: string,
+    userId: string,
+    dto: ConfirmCapturedUrlDto,
+  ) {
+    const result = await this.ingest({
+      source: 'url',
+      workspaceId,
+      userId,
+      url: dto.url || '',
+      previewToken: dto.previewToken,
+      collectionId: dto.collectionId,
+      overrides: {
+        title: dto.title,
+        abstract: dto.abstract,
+        doi: dto.doi,
+        year: dto.year,
+        publicationTitle: dto.publicationTitle,
+        itemType: dto.itemType,
+        creators: dto.creators,
+        tags: dto.tags,
+        url: dto.url,
+      },
+    });
+    return result.item;
   }
 
   async ingestDoi(workspaceId: string, userId: string, dto: IngestDoiDto) {

@@ -13,6 +13,9 @@ export const CurrentUser = createParamDecorator(
     const request = ctx.switchToHttp().getRequest();
     const user = request.user;
     if (!user) return null;
+    if (data === 'id') {
+      return user.id || user.sub || null;
+    }
     return data ? user[data] : user;
   },
 );

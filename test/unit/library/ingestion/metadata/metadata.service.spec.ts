@@ -1,8 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConflictException } from '@nestjs/common';
-import {
-  MetadataService,
-} from '@/modules/library/ingestion/metadata/metadata.service';
+import { MetadataService } from '@/modules/library/ingestion/metadata/metadata.service';
 import {
   CANONICAL_METADATA_PROVIDERS,
   MetadataProvider,
@@ -10,7 +8,10 @@ import {
 } from '@/modules/library/ingestion/metadata/metadata.contracts';
 import { MetadataCache } from '@/modules/library/ingestion/metadata/metadata.cache';
 import { MetadataReconciliationService } from '@/modules/library/ingestion/metadata/metadata.reconciler';
-import { ProviderExecutor, ProviderFetchError } from '@/modules/library/ingestion/metadata/metadata.executor';
+import {
+  ProviderExecutor,
+  ProviderFetchError,
+} from '@/modules/library/ingestion/metadata/metadata.executor';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -55,10 +56,10 @@ function makeResult(
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
 const mockCache = {
-  get: jest.fn() as jest.Mock,
-  set: jest.fn() as jest.Mock,
-  setNegative: jest.fn() as jest.Mock,
-  buildKey: jest.fn().mockReturnValue('test-cache-key') as jest.Mock,
+  get: jest.fn(),
+  set: jest.fn(),
+  setNegative: jest.fn(),
+  buildKey: jest.fn().mockReturnValue('test-cache-key'),
   available: true,
 };
 
@@ -104,9 +105,21 @@ describe('MetadataService (canonical orchestrator)', () => {
     mockCache.setNegative.mockResolvedValue(undefined);
     mockCache.buildKey.mockReturnValue('test-cache-key');
 
-    crossref = makeProvider('CrossRef', ['DOI', 'TITLE'], makeResult('CrossRef', 'Test Paper'));
-    s2 = makeProvider('SemanticScholar', ['DOI', 'ARXIV', 'PMID', 'TITLE'], makeResult('SemanticScholar', 'Test Paper', 0.88));
-    openAlex = makeProvider('OpenAlex', ['DOI', 'TITLE'], makeResult('OpenAlex', 'Test Paper', 0.85));
+    crossref = makeProvider(
+      'CrossRef',
+      ['DOI', 'TITLE'],
+      makeResult('CrossRef', 'Test Paper'),
+    );
+    s2 = makeProvider(
+      'SemanticScholar',
+      ['DOI', 'ARXIV', 'PMID', 'TITLE'],
+      makeResult('SemanticScholar', 'Test Paper', 0.88),
+    );
+    openAlex = makeProvider(
+      'OpenAlex',
+      ['DOI', 'TITLE'],
+      makeResult('OpenAlex', 'Test Paper', 0.85),
+    );
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -135,7 +148,11 @@ describe('MetadataService (canonical orchestrator)', () => {
 
   // ── Cache hit ──────────────────────────────────────────────────────────────
   it('returns cached result without calling any provider', async () => {
-    const cached = { query: '10.1234/test', queryType: 'DOI', cached: true } as any;
+    const cached = {
+      query: '10.1234/test',
+      queryType: 'DOI',
+      cached: true,
+    } as any;
     mockCache.get.mockResolvedValue(cached);
 
     const result = await service.resolve({ query: '10.1234/test' });
@@ -276,14 +293,21 @@ describe('MetadataService (canonical orchestrator)', () => {
 
   // ── arXiv URL ─────────────────────────────────────────────────────────────
   it('re-resolves arXiv embedded in arxiv.org URL', async () => {
-    const arxiv = makeProvider('arXiv', ['ARXIV'], makeResult('arXiv', 'Attention Is All You Need'));
+    const arxiv = makeProvider(
+      'arXiv',
+      ['ARXIV'],
+      makeResult('arXiv', 'Attention Is All You Need'),
+    );
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MetadataService,
         ProviderExecutor,
         { provide: MetadataCache, useValue: mockCache },
         { provide: MetadataReconciliationService, useValue: mockReconciler },
-        { provide: CANONICAL_METADATA_PROVIDERS, useValue: [arxiv, s2, openAlex] },
+        {
+          provide: CANONICAL_METADATA_PROVIDERS,
+          useValue: [arxiv, s2, openAlex],
+        },
       ],
     }).compile();
 

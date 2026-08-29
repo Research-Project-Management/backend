@@ -1,12 +1,41 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
+import { AttachmentsController } from './attachments.controller';
 import { AttachmentsService } from './attachments.service';
-import { ExtractorService } from './extractor.service';
+import { ExtractorService } from './providers/extractor.provider';
+import {
+  AttachmentExtractionHandler,
+  EXTRACTION_EVENT_TYPES,
+} from './handlers/attachment-extraction.handler';
 import { CoreModule } from '../../../core/core.module';
-import { SyncCoreContextModule } from '../sync-core/sync-core.module';
+import { SyncModule } from '../sync/sync.module';
+import { SearchModule } from '../search/search.module';
+import { OutboxWorker } from '../sync/outbox.worker';
+import { StorageModule } from '../../storage/storage.module';
 
 @Module({
-  imports: [CoreModule, SyncCoreContextModule],
-  providers: [AttachmentsService, ExtractorService],
-  exports: [AttachmentsService, ExtractorService],
+  imports: [CoreModule, SyncModule, SearchModule, StorageModule],
+  controllers: [AttachmentsController],
+  providers: [
+    AttachmentsService,
+    ExtractorService,
+    AttachmentExtractionHandler,
+  ],
+  exports: [AttachmentsService, ExtractorService, AttachmentExtractionHandler],
 })
-export class AttachmentsContextModule {}
+export class AttachmentsModule implements OnModuleInit {
+  constructor(
+    private readonly outboxWorker: OutboxWorker,
+    private readonly extractionHandler: AttachmentExtractionHandler,
+  ) {}
+
+  onModuleInit() {
+    if (
+      !this.outboxWorker.hasHandler(EXTRACTION_EVENT_TYPES.EXTRACTION_REQUESTED)
+    ) {
+      this.outboxWorker.registerHandler(
+        EXTRACTION_EVENT_TYPES.EXTRACTION_REQUESTED,
+        this.extractionHandler,
+      );
+    }
+  }
+}

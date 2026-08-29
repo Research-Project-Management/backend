@@ -48,7 +48,9 @@ describe('ArxivProvider (Standalone)', () => {
     expect(res?.metadata.authors).toEqual(['Ashish Vaswani', 'Noam Shazeer']);
     expect(res?.metadata.year).toBe(2017);
     expect(res?.metadata.doi).toBe('10.5555/3295222');
-    expect(res?.metadata.openAccessPdfUrl).toBe('https://arxiv.org/pdf/1706.03762.pdf');
+    expect(res?.metadata.openAccessPdfUrl).toBe(
+      'https://arxiv.org/pdf/1706.03762.pdf',
+    );
   });
 
   it('returns null on 404', async () => {
@@ -68,8 +70,8 @@ describe('ArxivProvider (Standalone)', () => {
       headers: new Headers(),
     } as any);
 
-    await expect(
-      provider.resolve({ query: '1706.03762' }),
-    ).rejects.toThrow(ProviderFetchError);
+    await expect(provider.resolve({ query: '1706.03762' })).rejects.toThrow(
+      ProviderFetchError,
+    );
   });
 });

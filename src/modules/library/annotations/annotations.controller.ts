@@ -16,24 +16,7 @@ import { AnnotationsService } from './annotations.service';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
 import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
 import { CurrentUser } from '../../../modules/iam/authn/decorators/current-user.decorator';
-import { AnnotationType } from '@prisma/client';
-
-export class CreateAnnotationDto {
-  type?: AnnotationType;
-  pageIndex!: number;
-  color?: string;
-  quoteText?: string;
-  comment?: string;
-  rectCoords?: any;
-}
-
-export class UpdateAnnotationDto {
-  color?: string;
-  quoteText?: string;
-  comment?: string;
-  rectCoords?: any;
-  expectedVersion?: number;
-}
+import { CreateAnnotationDto, UpdateAnnotationDto } from './dto/annotation.dto';
 
 @Controller(
   'api/v1/workspaces/:workspaceId/library/attachments/:attachmentId/annotations',

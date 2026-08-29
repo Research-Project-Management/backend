@@ -7,8 +7,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from '../../../src/app.module';
 import { PrismaService } from '../../../src/core/database/prisma.service';
 import { RedisCacheService } from '../../../src/core/cache/redis-cache.service';
-import { LibraryFeatureFlagsService } from '../../../src/modules/library/common/library-feature-flags';
-import { VersionMismatchException } from '../../../src/modules/library/common/library-mutation.dto';
+import { VersionMismatchException } from '../../../src/modules/library/catalog/errors/catalog.errors';
 
 export interface TestWorkspaceFixture {
   workspaceId: string;
@@ -24,7 +23,7 @@ export class LibraryTestHarness {
     public readonly app: NestFastifyApplication,
     public readonly moduleRef: TestingModule,
     public readonly prisma: PrismaService,
-    public readonly featureFlags: LibraryFeatureFlagsService,
+    public readonly featureFlags: any = {},
   ) {}
 
   /**
@@ -54,9 +53,8 @@ export class LibraryTestHarness {
     await app.getHttpAdapter().getInstance().ready();
 
     const prisma = moduleRef.get(PrismaService);
-    const featureFlags = moduleRef.get(LibraryFeatureFlagsService);
 
-    return new LibraryTestHarness(app, moduleRef, prisma, featureFlags);
+    return new LibraryTestHarness(app, moduleRef, prisma, {});
   }
 
   /**

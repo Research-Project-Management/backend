@@ -280,11 +280,15 @@ describe('Zotero Product Wiring & Release Verification (Steps 1-12)', () => {
         where: {
           workspaceId,
           aggregateId: confirmed.id,
-          eventType: 'library.item.ingested_url',
+          eventType: 'library.item.created',
         },
       });
       expect(outbox).toBeDefined();
-      expect((outbox?.payload as any)?.title).toBe('Attention Is All You Need');
+      const payload = outbox?.payload as any;
+      expect(payload?.itemId).toBe(confirmed.id);
+      expect(payload?.workspaceId).toBe(workspaceId);
+      expect(payload?.title).toBe('Attention Is All You Need');
+      expect(payload?.source).toBe('url');
     });
   });
 });

@@ -5,7 +5,7 @@ import { ZoteroConnectionService } from '../../../../src/modules/integrations/zo
 import { ZoteroMapper } from '../../../../src/modules/integrations/zotero/zotero.mapper';
 import { ZoteroConflictService } from '../../../../src/modules/integrations/zotero/zotero-conflict.service';
 import { ZoteroSyncPolicy } from '../../../../src/modules/integrations/zotero/zotero-sync.policy';
-import { LIBRARY_SYNC_PORT } from '../../../../src/modules/library/library-sync.port';
+import { LIBRARY_SYNC_PORT } from '../../../../src/modules/library/sync/library-sync.port';
 
 jest.setTimeout(60000);
 

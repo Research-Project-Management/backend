@@ -4,7 +4,10 @@ import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-
 import { CurationService } from './curation.service';
 import { MergeDuplicatesDto } from './dto/curation.dto';
 
-@Controller('api/v1/workspaces/:workspaceId/library/curation')
+@Controller([
+  'api/v1/workspaces/:workspaceId/library/curation',
+  'api/library/quality/:workspaceId',
+])
 @UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
 export class CurationController {
   constructor(private readonly curationService: CurationService) {}
@@ -30,7 +33,7 @@ export class CurationController {
     };
   }
 
-  @Get('quality-audit')
+  @Get(['quality-audit', 'integrity'])
   async getQualityAudit(@Param('workspaceId') workspaceId: string) {
     const report = await this.curationService.getQualityAudit(workspaceId);
     return {

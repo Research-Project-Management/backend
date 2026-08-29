@@ -43,7 +43,9 @@ describe('SSRF Prevention — MetadataRoutingPolicy.validateUrl', () => {
 
   blocked.forEach((url) => {
     it(`blocks: ${url}`, () => {
-      expect(() => MetadataRoutingPolicy.validateUrl(url)).toThrow(ConflictException);
+      expect(() => MetadataRoutingPolicy.validateUrl(url)).toThrow(
+        ConflictException,
+      );
     });
   });
 

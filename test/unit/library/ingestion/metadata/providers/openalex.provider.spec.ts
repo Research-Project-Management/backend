@@ -28,7 +28,9 @@ describe('OpenAlexProvider (Standalone)', () => {
       publication_year: 2017,
       doi: 'https://doi.org/10.5555/3295222',
       primary_location: {
-        source: { display_name: 'Advances in Neural Information Processing Systems' },
+        source: {
+          display_name: 'Advances in Neural Information Processing Systems',
+        },
         pdf_url: 'https://arxiv.org/pdf/1706.03762.pdf',
       },
       abstract_inverted_index: {
@@ -37,7 +39,10 @@ describe('OpenAlexProvider (Standalone)', () => {
         is: [2],
         great: [3],
       },
-      open_access: { is_oa: true, oa_url: 'https://arxiv.org/pdf/1706.03762.pdf' },
+      open_access: {
+        is_oa: true,
+        oa_url: 'https://arxiv.org/pdf/1706.03762.pdf',
+      },
       cited_by_count: 95000,
     };
 
@@ -52,7 +57,9 @@ describe('OpenAlexProvider (Standalone)', () => {
     expect(res?.provider).toBe('OpenAlex');
     expect(res?.metadata.title).toBe('Attention Is All You Need');
     expect(res?.metadata.abstract).toBe('The Transformer is great');
-    expect(res?.metadata.openAccessPdfUrl).toBe('https://arxiv.org/pdf/1706.03762.pdf');
+    expect(res?.metadata.openAccessPdfUrl).toBe(
+      'https://arxiv.org/pdf/1706.03762.pdf',
+    );
     expect(res?.confidence).toBeCloseTo(0.9);
   });
 

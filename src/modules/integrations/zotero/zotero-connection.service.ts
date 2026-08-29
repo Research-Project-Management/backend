@@ -17,7 +17,7 @@ import {
 import {
   LIBRARY_SYNC_PORT,
   ILibrarySyncPort,
-} from '../../library/library-sync.port';
+} from '../../library/sync/library-sync.port';
 
 @Injectable()
 export class ZoteroConnectionService {

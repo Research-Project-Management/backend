@@ -17,7 +17,9 @@ describe('Canonical metadata.classifier re-export', () => {
     });
 
     it('classifies doi.org URL', () => {
-      const r = QueryClassifier.classify('https://doi.org/10.1038/s41586-020-2649-2');
+      const r = QueryClassifier.classify(
+        'https://doi.org/10.1038/s41586-020-2649-2',
+      );
       expect(r.type).toBe('DOI');
       expect(r.clean).toBe('10.1038/s41586-020-2649-2');
     });
@@ -49,7 +51,9 @@ describe('Canonical metadata.classifier re-export', () => {
     });
 
     it('classifies arXiv pdf URL', () => {
-      const r = QueryClassifier.classify('https://arxiv.org/pdf/1706.03762.pdf');
+      const r = QueryClassifier.classify(
+        'https://arxiv.org/pdf/1706.03762.pdf',
+      );
       expect(r.type).toBe('ARXIV');
       expect(r.clean).toBe('1706.03762');
     });
@@ -63,7 +67,9 @@ describe('Canonical metadata.classifier re-export', () => {
     });
 
     it('classifies PubMed URL', () => {
-      const r = QueryClassifier.classify('https://pubmed.ncbi.nlm.nih.gov/12345678/');
+      const r = QueryClassifier.classify(
+        'https://pubmed.ncbi.nlm.nih.gov/12345678/',
+      );
       expect(r.type).toBe('PMID');
       expect(r.clean).toBe('12345678');
     });
@@ -84,7 +90,9 @@ describe('Canonical metadata.classifier re-export', () => {
 
   describe('URL classification', () => {
     it('classifies generic https URL', () => {
-      const r = QueryClassifier.classify('https://nature.com/articles/some-paper');
+      const r = QueryClassifier.classify(
+        'https://nature.com/articles/some-paper',
+      );
       expect(r.type).toBe('URL');
     });
   });

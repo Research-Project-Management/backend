@@ -4,7 +4,11 @@ import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-
 import { ExportsService } from './exports.service';
 import { ExportLibraryDto } from './dto/export.dto';
 
-@Controller('api/v1/workspaces/:workspaceId/library/exports')
+@Controller([
+  'api/v1/workspaces/:workspaceId/library/exports',
+  'api/library/collections/:workspaceId/:collectionId/export-bundle',
+  'api/library/exports',
+])
 @UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
 export class ExportsController {
   constructor(private readonly exportsService: ExportsService) {}

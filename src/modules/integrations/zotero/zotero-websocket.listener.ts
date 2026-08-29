@@ -12,7 +12,7 @@ import { ZoteroConnectionService } from './zotero-connection.service';
 import {
   ILibrarySyncPort,
   LIBRARY_SYNC_PORT,
-} from '../../library/library-sync.port';
+} from '../../library/sync/library-sync.port';
 
 export interface ZoteroStreamSubscription {
   workspaceId: string;
@@ -204,7 +204,9 @@ export class ZoteroWebSocketListener implements OnModuleInit, OnModuleDestroy {
           },
         });
         if (res.id.startsWith('deduped-')) {
-          this.logger.debug(`Duplicate stream event ignored for key ${dedupeKey}`);
+          this.logger.debug(
+            `Duplicate stream event ignored for key ${dedupeKey}`,
+          );
           return { enqueued: false, duplicate: true, topic };
         }
       } catch (err: any) {
@@ -243,9 +245,7 @@ export class ZoteroWebSocketListener implements OnModuleInit, OnModuleDestroy {
           const str = data.toString('utf-8');
           await this.handleIncomingMessage(str);
         } catch (err: any) {
-          this.logger.error(
-            `Error processing stream message: ${err.message}`,
-          );
+          this.logger.error(`Error processing stream message: ${err.message}`);
         }
       });
 
@@ -277,7 +277,10 @@ export class ZoteroWebSocketListener implements OnModuleInit, OnModuleDestroy {
     this.reconnectAttempt++;
     const baseDelay = 1000;
     const maxDelay = 60000;
-    const factor = Math.min(Math.pow(2, this.reconnectAttempt) * baseDelay, maxDelay);
+    const factor = Math.min(
+      Math.pow(2, this.reconnectAttempt) * baseDelay,
+      maxDelay,
+    );
     const delay = Math.floor(Math.random() * factor);
 
     this.logger.log(

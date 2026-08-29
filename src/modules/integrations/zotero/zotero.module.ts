@@ -1,11 +1,8 @@
 import { Module, OnModuleInit, Inject } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from '../../../core/database/prisma.module';
-import { LibraryModule } from '../../library/module';
-import {
-  LIBRARY_SYNC_PORT,
-  ILibrarySyncPort,
-} from '../../library/library-sync.port';
+import { LibraryModule } from '../../library/library.module';
+import { LIBRARY_SYNC_PORT, ILibrarySyncPort } from '../../library/sync/library-sync.port';
 import { ZoteroConnectionService } from './zotero-connection.service';
 import { ZoteroConnector } from './zotero.connector';
 import { ZoteroMapper } from './zotero.mapper';

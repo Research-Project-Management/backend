@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { Prisma, AnnotationType } from '@prisma/client';
-import { VersionMismatchException } from '../common/library-mutation.dto';
+import { VersionMismatchException } from '../catalog/errors/catalog.errors';
 
 export interface CreateAnnotationData {
   attachmentId: string;

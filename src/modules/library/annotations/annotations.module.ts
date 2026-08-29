@@ -3,12 +3,12 @@ import { AnnotationsController } from './annotations.controller';
 import { AnnotationsService } from './annotations.service';
 import { AnnotationsRepository } from './annotations.repository';
 import { CoreModule } from '../../../core/core.module';
-import { SyncCoreContextModule } from '../sync-core/sync-core.module';
+import { SyncModule } from '../sync/sync.module';
 
 @Module({
-  imports: [CoreModule, SyncCoreContextModule],
+  imports: [CoreModule, SyncModule],
   controllers: [AnnotationsController],
   providers: [AnnotationsRepository, AnnotationsService],
   exports: [AnnotationsRepository, AnnotationsService],
 })
-export class AnnotationsContextModule {}
+export class AnnotationsModule {}

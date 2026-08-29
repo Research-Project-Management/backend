@@ -1,7 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { createHash } from 'crypto';
-import { LibraryTransactionService } from '../sync-core/library-transaction.service';
+import { LibraryTransactionService } from '../sync/library-transaction.service';
 
 export interface CreateAttachmentInput {
   catalogItemId: string;
@@ -163,4 +163,89 @@ export class AttachmentsService {
       orderBy: { revisionNumber: 'desc' },
     });
   }
+
+  /**
+   * Retrieves all attachments for a catalog item in a workspace.
+   */
+  async getItemAttachments(workspaceId: string, itemId: string) {
+    const item = await this.prisma.catalogItem.findFirst({
+      where: { id: itemId, workspaceId, deletedAt: null },
+    });
+    if (!item) {
+      throw new NotFoundException(`CatalogItem ${itemId} not found`);
+    }
+
+    const attachments = await this.prisma.catalogAttachment.findMany({
+      where: { catalogItemId: itemId },
+      include: {
+        revisions: { orderBy: { revisionNumber: 'desc' } },
+      },
+    });
+
+    return { attachments, total: attachments.length };
+  }
+
+  /**
+   * Retrieves a specific attachment for a catalog item in a workspace.
+   */
+  async getItemAttachment(
+    workspaceId: string,
+    itemId: string,
+    attachmentId: string,
+  ) {
+    const attachment = await this.prisma.catalogAttachment.findFirst({
+      where: {
+        id: attachmentId,
+        catalogItemId: itemId,
+        catalogItem: { workspaceId, deletedAt: null },
+      },
+      include: {
+        revisions: { orderBy: { revisionNumber: 'desc' } },
+      },
+    });
+
+    if (!attachment) {
+      throw new NotFoundException(`Attachment ${attachmentId} not found`);
+    }
+
+    return { attachment };
+  }
+
+  /**
+   * Deletes an attachment and records a tombstone.
+   */
+  async deleteAttachment(workspaceId: string, attachmentId: string) {
+    const attachment = await this.prisma.catalogAttachment.findFirst({
+      where: {
+        id: attachmentId,
+        catalogItem: { workspaceId },
+      },
+    });
+
+    if (!attachment) {
+      throw new NotFoundException(`Attachment ${attachmentId} not found`);
+    }
+
+    return this.libraryTx.executeInTransaction(async (tx, helpers) => {
+      await tx.catalogAttachment.delete({ where: { id: attachmentId } });
+
+      await helpers.appendChange(workspaceId, {
+        entityType: 'Attachment',
+        entityId: attachmentId,
+        action: 'delete',
+        version: 1,
+        data: { id: attachmentId },
+      });
+
+      await helpers.publishOutbox(
+        workspaceId,
+        attachmentId,
+        'library.attachment.deleted',
+        { attachmentId },
+      );
+
+      return { success: true };
+    });
+  }
 }
+

@@ -1,6 +1,5 @@
 import { RagAgentService } from '@/modules/ai/rag-agent/rag-agent.service';
 import { EngineService } from '@/modules/ai/engine/engine.service';
-import { ItemsRepository } from '@/modules/library/legacy/items/items.repository';
 
 describe('RagAgentService (Paper-Scoped AI Copilot)', () => {
   let service: RagAgentService;
@@ -18,6 +17,7 @@ describe('RagAgentService (Paper-Scoped AI Copilot)', () => {
 
     mockPaperRepo = {
       findItemById: jest.fn(),
+      findById: jest.fn(),
     };
 
     service = new RagAgentService(mockEngine, mockPaperRepo);

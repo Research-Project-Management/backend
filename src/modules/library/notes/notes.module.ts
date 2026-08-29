@@ -3,12 +3,12 @@ import { NotesController } from './notes.controller';
 import { NotesService } from './notes.service';
 import { NotesRepository } from './notes.repository';
 import { CoreModule } from '../../../core/core.module';
-import { SyncCoreContextModule } from '../sync-core/sync-core.module';
+import { SyncModule } from '../sync/sync.module';
 
 @Module({
-  imports: [CoreModule, SyncCoreContextModule],
+  imports: [CoreModule, SyncModule],
   controllers: [NotesController],
   providers: [NotesRepository, NotesService],
   exports: [NotesRepository, NotesService],
 })
-export class NotesContextModule {}
+export class NotesModule {}

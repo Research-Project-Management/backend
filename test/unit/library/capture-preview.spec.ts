@@ -1,8 +1,11 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
-import { UrlCaptureConnector } from '../../../src/modules/library/ingestion/url-capture.connector';
+import { UrlCaptureConnector } from '../../../src/modules/library/ingestion/providers/url-capture.connector';
 import { IngestionService } from '../../../src/modules/library/ingestion/ingestion.service';
 import { CatalogService } from '../../../src/modules/library/catalog/catalog.service';
-import { LibraryTransactionService } from '../../../src/modules/library/sync-core/library-transaction.service';
+import { LibraryTransactionService } from '../../../src/modules/library/sync/library-transaction.service';
+import { IdempotencyRepository } from '../../../src/modules/library/sync/idempotency.repository';
+import { ExtractorService } from '../../../src/modules/library/attachments/providers/extractor.provider';
+import { BibtexParser } from '../../../src/modules/library/citation/formatters/bibtex.parser';
 import { createHash } from 'crypto';
 
 describe('Gate H: URL Capture Security & Persistent CapturePreview Record', () => {
@@ -57,12 +60,25 @@ describe('Gate H: URL Capture Security & Persistent CapturePreview Record', () =
       }),
     };
 
+    const mockStoragePort = {
+      readOwnedFile: jest.fn().mockResolvedValue({
+        fileId: 'file-1',
+        filename: 'document.pdf',
+        mimeType: 'application/pdf',
+        buffer: Buffer.from('%PDF-1.4 Mock'),
+      }),
+    };
+
     ingestionService = new IngestionService(
       mockPrisma,
       mockLibraryTx,
-      mockCatalogService,
+      new IdempotencyRepository(mockPrisma),
+      new ExtractorService(),
+      new BibtexParser(),
+      mockStoragePort,
       connector,
       mockMetadataService,
+      mockCatalogService,
     );
   });
 

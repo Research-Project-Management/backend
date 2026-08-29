@@ -15,7 +15,7 @@ import { ResolveZoteroConflictDto } from './dto/resolve-zotero-conflict.dto';
 import {
   LIBRARY_SYNC_PORT,
   ILibrarySyncPort,
-} from '../../library/library-sync.port';
+} from '../../library/sync/library-sync.port';
 
 export interface PushItemResult {
   success: boolean;
@@ -370,7 +370,8 @@ export class ZoteroPushWorker {
 
     const remotePayload = remoteRaw.data || remoteRaw;
     const remoteVersion = BigInt(remoteRaw.version || pullRes.version);
-    const basePayload = itemBinding.baseSnapshot || itemBinding.rawPayload || {};
+    const basePayload =
+      itemBinding.baseSnapshot || itemBinding.rawPayload || {};
 
     // 2. Perform 3-way merge
     const mergeResult = this.conflictService.mergeItemThreeWay(

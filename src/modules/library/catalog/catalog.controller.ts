@@ -16,134 +16,15 @@ import { CatalogService } from './catalog.service';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
 import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
 import { CurrentUser } from '../../../modules/iam/authn/decorators/current-user.decorator';
-import { CursorPaginationQueryDto } from '../common/library-contracts';
+import { CursorPaginationQueryDto } from './dto/pagination.dto';
+import { CreateCatalogItemDto, UpdateCatalogItemDto } from './dto/item.dto';
 
-export class CreateCatalogItemDto {
-  title!: string;
-  author?: string;
-  authors?: string[];
-  creators?: any[];
-  year?: number | null;
-  doi?: string;
-  abstract?: string;
-  abstractNote?: string;
-  itemType?: string;
-  editors?: string[];
-  journal?: string;
-  publicationTitle?: string;
-  publicationDate?: string;
-  date?: string;
-  publisher?: string;
-  place?: string;
-  volume?: string;
-  issue?: string;
-  section?: string;
-  partNumber?: string;
-  partTitle?: string;
-  pages?: string;
-  series?: string;
-  seriesTitle?: string;
-  seriesText?: string;
-  seriesNumber?: string;
-  issn?: string;
-  isbn?: string;
-  pmid?: string;
-  pmcid?: string;
-  arxivId?: string;
-  arxiv?: string;
-  url?: string;
-  type?: string;
-  language?: string;
-  journalAbbr?: string;
-  journalAbbreviation?: string;
-  shortTitle?: string;
-  rights?: string;
-  license?: string;
-  citationKey?: string;
-  libraryCatalog?: string;
-  archive?: string;
-  archiveLocation?: string;
-  callNumber?: string;
-  accessedAt?: Date | null;
-  accessDate?: string;
-  extra?: string;
-  notes?: any;
-  labels?: string[];
-  keywords?: string[];
-  keywordsList?: string[];
-  tags?: string[];
-  fileUrl?: string;
-  filename?: string;
-  mimeType?: string;
-  size?: number;
-  collectionId?: string | null;
-  crossrefEnriched?: boolean;
-  extraFields?: any;
-  provenance?: any;
-}
-
-export class UpdateCatalogItemDto {
-  title?: string;
-  author?: string;
-  authors?: string[];
-  creators?: any[];
-  year?: number | null;
-  doi?: string;
-  abstract?: string;
-  abstractNote?: string;
-  itemType?: string;
-  editors?: string[];
-  journal?: string;
-  publicationTitle?: string;
-  publicationDate?: string;
-  date?: string;
-  publisher?: string;
-  place?: string;
-  volume?: string;
-  issue?: string;
-  section?: string;
-  partNumber?: string;
-  partTitle?: string;
-  pages?: string;
-  series?: string;
-  seriesTitle?: string;
-  seriesText?: string;
-  seriesNumber?: string;
-  issn?: string;
-  isbn?: string;
-  pmid?: string;
-  pmcid?: string;
-  arxivId?: string;
-  arxiv?: string;
-  url?: string;
-  type?: string;
-  language?: string;
-  journalAbbr?: string;
-  journalAbbreviation?: string;
-  shortTitle?: string;
-  rights?: string;
-  license?: string;
-  citationKey?: string;
-  libraryCatalog?: string;
-  archive?: string;
-  archiveLocation?: string;
-  callNumber?: string;
-  accessedAt?: Date | null;
-  accessDate?: string;
-  extra?: string;
-  notes?: any;
-  labels?: string[];
-  keywords?: string[];
-  keywordsList?: string[];
-  tags?: string[];
-  collectionId?: string | null;
-  crossrefEnriched?: boolean;
-  extraFields?: any;
-  provenance?: any;
-  expectedVersion?: number;
-}
-
-@Controller('api/v1/workspaces/:workspaceId/library/items')
+@Controller([
+  'api/v1/workspaces/:workspaceId/library/items',
+  'api/workspace/:workspaceId/library/items',
+  'api/library/papers/:workspaceId',
+  'api/library/:workspaceId/items',
+])
 @UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
 export class CatalogController {
   constructor(private readonly catalogService: CatalogService) {}
@@ -151,14 +32,18 @@ export class CatalogController {
   @Get()
   async listItems(
     @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') currentUserId: string,
     @Query()
     query: CursorPaginationQueryDto & {
+      view?: 'all' | 'recent' | 'unfiled' | 'trash';
       collectionId?: string;
       tagId?: string;
       search?: string;
     },
   ) {
     const result = await this.catalogService.listItems(workspaceId, {
+      view: query.view,
+      userId: currentUserId,
       collectionId: query.collectionId,
       tagId: query.tagId,
       search: query.search,
@@ -177,8 +62,13 @@ export class CatalogController {
   async getItem(
     @Param('workspaceId') workspaceId: string,
     @Param('id') id: string,
+    @CurrentUser('id') currentUserId: string,
   ) {
-    const item = await this.catalogService.getItem(workspaceId, id);
+    const item = await this.catalogService.getItem(
+      workspaceId,
+      id,
+      currentUserId,
+    );
     if (!item) {
       throw new NotFoundException(
         `CatalogItem ${id} not found in workspace ${workspaceId}`,
@@ -258,4 +148,68 @@ export class CatalogController {
       data: { deleted },
     };
   }
+
+  @Post(':id/restore')
+  async restoreItem(
+    @Param('workspaceId') workspaceId: string,
+    @Param('id') id: string,
+    @Headers('if-match') ifMatch?: string,
+  ) {
+    const expectedVersion = ifMatch
+      ? parseInt(ifMatch.replace(/["']/g, ''), 10)
+      : undefined;
+    const restored = await this.catalogService.restoreItem(
+      workspaceId,
+      id,
+      expectedVersion,
+    );
+
+    return {
+      success: true,
+      data: restored,
+    };
+  }
+
+  @Delete(':id/purge')
+  async purgeItem(
+    @Param('workspaceId') workspaceId: string,
+    @Param('id') id: string,
+  ) {
+    const purged = await this.catalogService.purgeItem(workspaceId, id);
+
+    return {
+      success: true,
+      data: { purged },
+    };
+  }
+
+  @Get([':id/relations', 'api/library/relations/:workspaceId/:id'])
+  async getRelatedItems(
+    @Param('workspaceId') workspaceId: string,
+    @Param('id') id: string,
+  ) {
+    return this.catalogService.getRelatedItems(workspaceId, id);
+  }
+
+  @Post([':id/relations', 'api/library/relations/:workspaceId/:id/link'])
+  async linkItems(
+    @Param('workspaceId') workspaceId: string,
+    @Param('id') id: string,
+    @Body() body: { targetItemId: string; relationType?: string; note?: string },
+  ) {
+    return this.catalogService.linkItems(workspaceId, id, body);
+  }
+
+  @Delete([
+    ':id/relations/:targetId',
+    'api/library/relations/:workspaceId/:id/link/:targetId',
+  ])
+  async unlinkItems(
+    @Param('workspaceId') workspaceId: string,
+    @Param('id') id: string,
+    @Param('targetId') targetId: string,
+  ) {
+    return this.catalogService.unlinkItems(workspaceId, id, targetId);
+  }
 }
+

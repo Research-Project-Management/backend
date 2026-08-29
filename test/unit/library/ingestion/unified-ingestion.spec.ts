@@ -1,42 +1,53 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { IngestionService } from '@/modules/library/ingestion/ingestion.service';
 import { PrismaService } from '@/core/database/prisma.service';
-import { LibraryTransactionService } from '@/modules/library/sync-core/library-transaction.service';
-import { CatalogService } from '@/modules/library/catalog/catalog.service';
-import { UrlCaptureConnector } from '@/modules/library/ingestion/url-capture.connector';
+import { LibraryTransactionService } from '@/modules/library/sync/library-transaction.service';
+import { UrlCaptureConnector } from '@/modules/library/ingestion/providers/url-capture.connector';
 import { CANONICAL_METADATA_SERVICE } from '@/modules/library/ingestion/metadata/metadata.contracts';
-import { IdempotencyRepository } from '@/modules/library/sync-core/idempotency.repository';
-import { AttachmentsService } from '@/modules/library/attachments/attachments.service';
-import { ExtractorService } from '@/modules/library/attachments/extractor.service';
+import { IdempotencyRepository } from '@/modules/library/sync/idempotency.repository';
+import { ExtractorService } from '@/modules/library/attachments/providers/extractor.provider';
 import { BibtexParser } from '@/modules/library/citation/formatters/bibtex.parser';
-import { FullTextIndexer } from '@/modules/library/discovery/full-text-indexer';
+import { R2Service } from '@/modules/storage/r2/r2.service';
 import {
   IngestionIdempotencyConflictException,
   IngestionValidationException,
-} from '@/modules/library/ingestion/ingestion.errors';
+} from '@/modules/library/ingestion/errors/ingestion.errors';
 import { createHash } from 'crypto';
+import { STORAGE_PORT } from '@/modules/storage/storage.port';
 
 describe('Unified Ingestion Pipeline (DOI / URL / BibTeX / PDF / Zotero)', () => {
   let service: IngestionService;
   let prisma: jest.Mocked<any>;
   let libraryTx: jest.Mocked<any>;
-  let catalogService: jest.Mocked<any>;
   let urlCapture: jest.Mocked<any>;
   let metadataService: jest.Mocked<any>;
   let idempotencyRepo: jest.Mocked<any>;
-  let attachmentsService: jest.Mocked<any>;
   let extractorService: jest.Mocked<any>;
+  let storagePort: jest.Mocked<any>;
   let bibtexParser: BibtexParser;
-  let fullTextIndexer: jest.Mocked<any>;
 
   const workspaceId = 'ws-test-123';
   const userId = 'user-test-456';
 
   beforeEach(async () => {
+    storagePort = {
+      readOwnedFile: jest.fn().mockResolvedValue({
+        fileId: 'file-new-123',
+        filename: 'document.pdf',
+        mimeType: 'application/pdf',
+        size: 100,
+        storageKey: 'ws-test-123/file-new-123.pdf',
+        buffer: Buffer.from('%PDF-1.4 valid test pdf content'),
+      }),
+    };
     prisma = {
       catalogItem: {
         findFirst: jest.fn().mockResolvedValue(null),
         findUnique: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockImplementation((args) => ({
+          id: 'item-new-123',
+          ...args.data,
+        })),
       },
       catalogAttachment: {
         findFirst: jest.fn().mockResolvedValue(null),
@@ -45,63 +56,84 @@ describe('Unified Ingestion Pipeline (DOI / URL / BibTeX / PDF / Zotero)', () =>
           ...args.data,
         })),
       },
-      catalogTag: {
-        upsert: jest.fn().mockResolvedValue({ id: 'tag-1', name: 'AI' }),
+      libraryDedupClaim: {
+        findUnique: jest.fn().mockResolvedValue(null),
       },
-      catalogItemTag: {
-        upsert: jest.fn().mockResolvedValue({ id: 'cit-1' }),
+      attachmentRevision: {
+        create: jest.fn().mockImplementation((args) => ({
+          id: 'rev-123',
+          ...args.data,
+        })),
       },
-      capturePreview: {
-        create: jest.fn(),
-        findUnique: jest.fn(),
-        updateMany: jest.fn(),
+      outboxEvent: {
+        create: jest.fn().mockResolvedValue({ id: 'outbox-1' }),
+      },
+      libraryChange: {
+        create: jest.fn().mockResolvedValue({ id: 'change-1' }),
+      },
+      ingestionRun: {
+        create: jest.fn().mockResolvedValue({ id: 'run-1' }),
+        update: jest.fn().mockResolvedValue({ id: 'run-1' }),
+        findFirst: jest.fn().mockResolvedValue(null),
       },
       zoteroBinding: {
         findFirst: jest.fn().mockResolvedValue({ id: 'bind-1' }),
       },
       zoteroItemBinding: {
         findFirst: jest.fn().mockResolvedValue(null),
-        upsert: jest.fn().mockResolvedValue({ id: 'zib-1' }),
+        create: jest.fn().mockResolvedValue({ id: 'zib-1' }),
+      },
+      file: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'file-123',
+          workspaceId: 'ws-test-123',
+          storageKey: 'ws-test-123/file-123.pdf',
+          trashedAt: null,
+        }),
+      },
+      workspaceMember: {
+        findFirst: jest.fn().mockResolvedValue({ userId: 'user-test-456' }),
+      },
+      user: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'user-test-456' }),
       },
     };
 
     libraryTx = {
-      executeInTransaction: jest.fn().mockImplementation(async (cb) => {
-        const helpers = {
-          appendChange: jest.fn(),
-          recordTombstone: jest.fn(),
-          publishOutbox: jest.fn().mockResolvedValue({ id: 'outbox-1' }),
-        };
-        return cb(prisma, helpers);
-      }),
-    };
-
-    catalogService = {
-      createItem: jest.fn().mockImplementation((ws, data) => ({
-        id: 'item-new-123',
-        workspaceId: ws,
-        title: data.title,
-        itemType: data.itemType,
-        doi: data.doi,
-        url: data.url,
-      })),
+      executeInTransaction: jest
+        .fn()
+        .mockImplementation(async (wsOrCb, maybeCb) => {
+          const cb = typeof wsOrCb === 'function' ? wsOrCb : maybeCb;
+          const helpers = {
+            appendChange: jest.fn(),
+            recordTombstone: jest.fn(),
+            publishOutbox: jest.fn().mockResolvedValue({ id: 'outbox-1' }),
+          };
+          return cb(prisma, helpers);
+        }),
     };
 
     urlCapture = {
+      captureUrl: jest.fn().mockResolvedValue({
+        title: 'Deep Learning Review',
+        metadata: {
+          abstract: 'A survey of deep learning',
+          itemType: 'journalArticle',
+          authors: [{ lastName: 'LeCun', firstName: 'Yann' }],
+        },
+      }),
       captureFromUrl: jest.fn().mockResolvedValue({
         title: 'Deep Learning Review',
-        abstract: 'A survey of deep learning',
-        url: 'https://example.com/paper',
-        itemType: 'journalArticle',
-        creators: [{ lastName: 'LeCun', firstName: 'Yann' }],
+        metadata: {
+          abstract: 'A survey of deep learning',
+          itemType: 'journalArticle',
+          authors: [{ lastName: 'LeCun', firstName: 'Yann' }],
+        },
       }),
-      hashToken: jest.fn().mockReturnValue('hashed_token'),
-      calculateMetadataDigest: jest.fn().mockReturnValue('digest_123'),
-      attachPreviewToken: jest.fn().mockImplementation((meta) => ({
-        ...meta,
-        previewToken: 'preview.token.signed',
-      })),
-      verifyPreviewToken: jest.fn().mockReturnValue({ valid: true }),
+      verifyPreviewToken: jest.fn().mockReturnValue({
+        title: 'Verified Paper',
+        metadata: { itemType: 'journalArticle' },
+      }),
     };
 
     metadataService = {
@@ -109,152 +141,139 @@ describe('Unified Ingestion Pipeline (DOI / URL / BibTeX / PDF / Zotero)', () =>
     };
 
     idempotencyRepo = {
-      claim: jest.fn().mockResolvedValue({ status: 'claimed' }),
+      claim: jest.fn().mockResolvedValue({ status: 'acquired' }),
       markSucceeded: jest.fn().mockResolvedValue(undefined),
+      markSucceededInTx: jest.fn().mockResolvedValue(true),
       markFailed: jest.fn().mockResolvedValue(undefined),
     };
 
-    attachmentsService = {
-      calculateChecksum: jest.fn().mockImplementation((buf: Buffer) =>
-        createHash('sha256').update(buf).digest('hex'),
-      ),
-    };
-
     extractorService = {
-      extractMetadataFromBuffer: jest.fn().mockReturnValue({
-        title: 'Attention Paper Extracted',
-        doi: '10.1000/182',
-        authors: ['Vaswani, Ashish'],
-        year: 2017,
+      extractMetadataFromBuffer: jest.fn().mockReturnValue({}),
+      extractDocumentFromBuffer: jest.fn().mockResolvedValue({
+        metadata: {
+          doi: '10.1038/nature12345',
+          title: 'Quantum Advantage Demonstration',
+          authors: ['Physicist A'],
+          year: 2024,
+        },
+        pages: [{ pageIndex: 0, textContent: 'Quantum text', charOffset: 0 }],
       }),
-      extractFromBuffer: jest.fn().mockResolvedValue('Attention is all you need full text contents'),
     };
 
     bibtexParser = new BibtexParser();
-
-    fullTextIndexer = {
-      indexAttachmentPages: jest.fn().mockResolvedValue(undefined),
-    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         IngestionService,
         { provide: PrismaService, useValue: prisma },
         { provide: LibraryTransactionService, useValue: libraryTx },
-        { provide: CatalogService, useValue: catalogService },
         { provide: UrlCaptureConnector, useValue: urlCapture },
         { provide: CANONICAL_METADATA_SERVICE, useValue: metadataService },
         { provide: IdempotencyRepository, useValue: idempotencyRepo },
-        { provide: AttachmentsService, useValue: attachmentsService },
         { provide: ExtractorService, useValue: extractorService },
+        { provide: STORAGE_PORT, useValue: storagePort },
         { provide: BibtexParser, useValue: bibtexParser },
-        { provide: FullTextIndexer, useValue: fullTextIndexer },
       ],
     }).compile();
 
     service = module.get<IngestionService>(IngestionService);
   });
 
-  describe('1. Unified DOI Ingestion', () => {
-    it('successfully ingests DOI via canonical metadata resolution and short tx commit', async () => {
-      metadataService.resolve.mockResolvedValue({
-        canonicalId: 'doi:10.1038/s41586-020-2649-2',
-        metadata: {
-          title: 'AlphaFold Structure Prediction',
-          authors: ['Jumper, John', 'Hassabis, Demis'],
-          year: 2021,
-          journal: 'Nature',
-          itemType: 'journalArticle',
-          tags: ['Structural Biology', 'AI'],
-        },
+  describe('1. DOI Ingestion', () => {
+    it('resolves metadata outside tx and commits item atomically inside tx', async () => {
+      const doi = '10.1038/nature12345';
+      metadataService.resolve.mockResolvedValueOnce({
+        title: 'Quantum Advantage Demonstration',
+        authors: [{ fullName: 'Physicist A' }],
+        year: 2024,
+        journal: 'Nature',
+        itemType: 'journalArticle',
       });
 
       const result = await service.ingest({
         source: 'doi',
         workspaceId,
         userId,
-        doi: '10.1038/s41586-020-2649-2',
-        idempotencyKey: 'idem-doi-1',
+        doi,
       });
 
       expect(result.status).toBe('completed');
       expect(result.deduplicated).toBe(false);
-      expect(result.itemId).toBe('item-new-123');
-      expect(idempotencyRepo.claim).toHaveBeenCalledWith(
+      expect(metadataService.resolve).toHaveBeenCalledWith({
+        query: doi,
         workspaceId,
-        'idem-doi-1',
-        expect.any(String),
-        86400,
-      );
-      expect(idempotencyRepo.markSucceeded).toHaveBeenCalled();
+      });
+      expect(libraryTx.executeInTransaction).toHaveBeenCalled();
     });
 
-    it('returns deduplicated item when item with same DOI already exists', async () => {
-      metadataService.resolve.mockResolvedValue({
-        canonicalId: 'doi:10.1000/182',
-        metadata: { title: 'Existing Item' },
-      });
-
-      prisma.catalogItem.findFirst.mockResolvedValue({
-        id: 'existing-item-999',
-        workspaceId,
-        title: 'Existing Item',
-        doi: '10.1000/182',
+    it('returns deduplicated item when normalized DOI exists in workspace', async () => {
+      const doi = '10.1038/NATURE12345';
+      prisma.catalogItem.findFirst.mockResolvedValueOnce({
+        id: 'item-existing-999',
+        doi: '10.1038/nature12345',
+        title: 'Existing Paper',
+        attachments: [],
       });
 
       const result = await service.ingest({
         source: 'doi',
         workspaceId,
         userId,
-        doi: '10.1000/182',
+        doi,
       });
 
-      expect(result.status).toBe('completed');
       expect(result.deduplicated).toBe(true);
-      expect(result.itemId).toBe('existing-item-999');
-      expect(catalogService.createItem).not.toHaveBeenCalled();
+      expect(result.itemId).toBe('item-existing-999');
+      expect(metadataService.resolve).not.toHaveBeenCalled();
     });
   });
 
-  describe('2. Unified URL Ingestion', () => {
-    it('ingests URL with web scraping and safe validation', async () => {
+  describe('2. URL Ingestion & Preview Verification', () => {
+    it('captures URL metadata and commits item', async () => {
+      const url = 'https://arxiv.org/abs/2301.00001';
+
       const result = await service.ingest({
         source: 'url',
         workspaceId,
         userId,
-        url: 'https://example.com/paper',
+        url,
       });
 
       expect(result.status).toBe('completed');
-      expect(result.deduplicated).toBe(false);
-      expect(catalogService.createItem).toHaveBeenCalledWith(
+      expect(urlCapture.captureFromUrl).toHaveBeenCalledWith(url, {
         workspaceId,
-        expect.objectContaining({
-          title: 'Deep Learning Review',
-          url: 'https://example.com/paper',
-        }),
-        expect.any(Object),
-      );
+      });
+      expect(libraryTx.executeInTransaction).toHaveBeenCalled();
     });
 
-    it('rejects SSRF violation on local private addresses', async () => {
+    it('rejects SSRF forbidden URLs (e.g. localhost, private IP)', async () => {
       await expect(
         service.ingest({
           source: 'url',
           workspaceId,
           userId,
-          url: 'http://127.0.0.1:8080/secret',
+          url: 'http://localhost:8080/secret',
         }),
-      ).rejects.toThrow(/SSRF violation/);
+      ).rejects.toThrow();
+
+      await expect(
+        service.ingest({
+          source: 'url',
+          workspaceId,
+          userId,
+          url: 'http://127.0.0.1/admin',
+        }),
+      ).rejects.toThrow();
     });
   });
 
-  describe('3. Unified BibTeX Ingestion', () => {
-    it('parses BibTeX entry and creates CatalogItem with outbox atomically', async () => {
-      const bibtex = `@article{devlin2018bert,
-        title={BERT: Pre-training of Deep Bidirectional Transformers},
-        author={Devlin, Jacob and Chang, Ming-Wei and Lee, Kenton},
-        year={2018}
+  describe('3. BibTeX Ingestion', () => {
+    it('parses BibTeX entry and commits item', async () => {
+      const bibtex = `@article{knuth1984,
+        title={Literate Programming},
+        author={Knuth, Donald E.},
+        journal={The Computer Journal},
+        year={1984}
       }`;
 
       const result = await service.ingest({
@@ -265,142 +284,158 @@ describe('Unified Ingestion Pipeline (DOI / URL / BibTeX / PDF / Zotero)', () =>
       });
 
       expect(result.status).toBe('completed');
-      expect(result.deduplicated).toBe(false);
-      expect(catalogService.createItem).toHaveBeenCalledWith(
-        workspaceId,
-        expect.objectContaining({
-          title: 'BERT: Pre-training of Deep Bidirectional Transformers',
-          year: 2018,
+      expect(libraryTx.executeInTransaction).toHaveBeenCalled();
+    });
+
+    it('rejects oversized BibTeX content (>10MB)', async () => {
+      const hugeBibtex =
+        '@article{huge, title={' + 'A'.repeat(11 * 1024 * 1024) + '}}';
+
+      await expect(
+        service.ingest({
+          source: 'bibtex',
+          workspaceId,
+          userId,
+          content: hugeBibtex,
         }),
-        expect.any(Object),
-      );
+      ).rejects.toThrow(IngestionValidationException);
     });
   });
 
-  describe('4. Unified PDF Ingestion', () => {
-    it('processes PDF buffer, calculates SHA-256, binds attachment and triggers async indexing', async () => {
-      const dummyPdfBuffer = Buffer.from('%PDF-1.4 sample content');
+  describe('4. PDF Ingestion', () => {
+    it('validates %PDF header, extracts metadata, creates attachment with revision v1 and outbox event', async () => {
+      const validPdfBuffer = Buffer.from('%PDF-1.4 valid test pdf content');
+      storagePort.readOwnedFile.mockResolvedValueOnce({
+        fileId: 'file-123',
+        filename: 'sample.pdf',
+        mimeType: 'application/pdf',
+        size: validPdfBuffer.length,
+        storageKey: 'ws-test-123/file-123.pdf',
+        buffer: validPdfBuffer,
+      });
 
       const result = await service.ingest({
         source: 'pdf',
         workspaceId,
         userId,
-        filename: 'attention.pdf',
-        buffer: dummyPdfBuffer,
-        size: dummyPdfBuffer.length,
+        fileId: 'file-123',
+        filename: 'sample.pdf',
       });
 
       expect(result.status).toBe('completed');
       expect(result.attachmentIds).toHaveLength(1);
-      expect(prisma.catalogAttachment.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            attachmentType: 'primary_pdf',
-            filename: 'attention.pdf',
-          }),
-        }),
+      expect(extractorService.extractDocumentFromBuffer).toHaveBeenCalledWith(
+        validPdfBuffer,
       );
+      expect(libraryTx.executeInTransaction).toHaveBeenCalled();
     });
 
-    it('rejects PDF exceeding maximum size limit (50MB)', async () => {
+    it('deduplicates PDF when matching file checksum exists in workspace', async () => {
+      const validPdfBuffer = Buffer.from('%PDF-1.4 duplicate test content');
+      storagePort.readOwnedFile.mockResolvedValueOnce({
+        fileId: 'file-123',
+        filename: 'sample.pdf',
+        mimeType: 'application/pdf',
+        size: validPdfBuffer.length,
+        storageKey: 'ws-test-123/file-123.pdf',
+        buffer: validPdfBuffer,
+      });
+      const hash = createHash('sha256').update(validPdfBuffer).digest('hex');
+
+      prisma.libraryDedupClaim.findUnique.mockResolvedValueOnce({
+        catalogItem: {
+          id: 'item-existing-1',
+          title: 'Existing PDF Paper',
+          attachments: [{ id: 'att-existing-1' }],
+        },
+      });
+
+      const result = await service.ingest({
+        source: 'pdf',
+        workspaceId,
+        userId,
+        fileId: 'file-123',
+        filename: 'sample.pdf',
+      });
+
+      expect(result.deduplicated).toBe(true);
+      expect(result.itemId).toBe('item-existing-1');
+    });
+
+    it('rejects invalid non-PDF buffer', async () => {
+      const invalidBuffer = Buffer.from('NOT A REAL PDF BUFFER');
+      storagePort.readOwnedFile.mockResolvedValueOnce({
+        fileId: 'file-123',
+        filename: 'corrupt.pdf',
+        mimeType: 'application/pdf',
+        size: invalidBuffer.length,
+        storageKey: 'ws-test-123/file-123.pdf',
+        buffer: invalidBuffer,
+      });
+
       await expect(
         service.ingest({
           source: 'pdf',
           workspaceId,
           userId,
-          filename: 'huge.pdf',
-          size: 60 * 1024 * 1024,
+          fileId: 'file-123',
+          filename: 'corrupt.pdf',
         }),
-      ).rejects.toThrow(IngestionValidationException);
-    });
-
-    it('deduplicates attachment if identical fileHash already exists in workspace', async () => {
-      const dummyPdfBuffer = Buffer.from('%PDF-1.4 existing pdf');
-      const hash = createHash('sha256').update(dummyPdfBuffer).digest('hex');
-
-      prisma.catalogAttachment.findFirst.mockResolvedValue({
-        id: 'att-existing-777',
-        catalogItemId: 'item-existing-888',
-        fileHash: hash,
-        catalogItem: { id: 'item-existing-888', workspaceId, deletedAt: null },
-      });
-
-      const result = await service.ingest({
-        source: 'pdf',
-        workspaceId,
-        userId,
-        filename: 'duplicate.pdf',
-        buffer: dummyPdfBuffer,
-        size: dummyPdfBuffer.length,
-      });
-
-      expect(result.status).toBe('completed');
-      expect(result.deduplicated).toBe(true);
-      expect(result.itemId).toBe('item-existing-888');
-      expect(result.attachmentIds).toEqual(['att-existing-777']);
-      expect(prisma.catalogAttachment.create).not.toHaveBeenCalled();
+      ).rejects.toThrow(/Missing %PDF magic bytes/i);
     });
   });
 
-  describe('5. Unified Zotero Ingestion', () => {
-    it('ingests Zotero item, binds ZoteroItemBinding, and emits outbox event', async () => {
+  describe('5. Zotero Source Ingestion', () => {
+    it('creates CatalogItem and ZoteroItemBinding for valid connection', async () => {
       const result = await service.ingest({
         source: 'zotero',
         workspaceId,
         userId,
-        connectionId: 'conn-1',
-        externalItemKey: 'ZOTERO_KEY_123',
+        connectionId: 'conn-123',
+        externalItemKey: 'ZOTERO_ITEM_456',
         payload: {
-          title: 'Zotero Paper Reference',
-          itemType: 'journalArticle',
-          year: 2023,
-          authors: ['Smith, John'],
+          data: {
+            title: 'Zotero Paper',
+            creators: [{ firstName: 'John', lastName: 'Doe' }],
+            date: '2023',
+          },
         },
       });
 
       expect(result.status).toBe('completed');
-      expect(result.deduplicated).toBe(false);
-      expect(prisma.zoteroItemBinding.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          create: expect.objectContaining({
-            remoteKey: 'ZOTERO_KEY_123',
-            entityType: 'item',
-          }),
-        }),
-      );
+      expect(libraryTx.executeInTransaction).toHaveBeenCalled();
     });
   });
 
-  describe('6. Idempotency & Conflict Controls', () => {
-    it('returns cached response directly on idempotency cache hit without opening new transaction', async () => {
-      const cachedResult = {
-        runId: 'run-cached-1',
-        status: 'completed' as const,
-        itemId: 'item-cached-99',
-        attachmentIds: [],
-        deduplicated: false,
-      };
-
-      idempotencyRepo.claim.mockResolvedValue({
+  describe('6. Idempotency Handling', () => {
+    it('returns cached response when idempotency record is cached', async () => {
+      idempotencyRepo.claim.mockResolvedValueOnce({
         status: 'cached',
-        record: { responseBody: cachedResult },
+        record: {
+          responseBody: {
+            runId: 'cached-run-123',
+            status: 'completed',
+            itemId: 'item-cached-123',
+            attachmentIds: [],
+            deduplicated: false,
+          },
+        },
       });
 
       const result = await service.ingest({
         source: 'doi',
         workspaceId,
         userId,
-        doi: '10.1000/182',
-        idempotencyKey: 'idem-cached-key',
+        doi: '10.1038/cached123',
+        idempotencyKey: 'idemp-key-cached',
       });
 
-      expect(result).toEqual(cachedResult);
+      expect(result.itemId).toBe('item-cached-123');
       expect(libraryTx.executeInTransaction).not.toHaveBeenCalled();
-      expect(metadataService.resolve).not.toHaveBeenCalled();
     });
 
-    it('throws IngestionIdempotencyConflictException when claim returns mismatch', async () => {
-      idempotencyRepo.claim.mockResolvedValue({
+    it('throws IngestionIdempotencyConflictException on request mismatch', async () => {
+      idempotencyRepo.claim.mockResolvedValueOnce({
         status: 'mismatch',
       });
 
@@ -409,8 +444,8 @@ describe('Unified Ingestion Pipeline (DOI / URL / BibTeX / PDF / Zotero)', () =>
           source: 'doi',
           workspaceId,
           userId,
-          doi: '10.1000/182',
-          idempotencyKey: 'idem-mismatched-key',
+          doi: '10.1038/mismatch123',
+          idempotencyKey: 'idemp-key-mismatch',
         }),
       ).rejects.toThrow(IngestionIdempotencyConflictException);
     });

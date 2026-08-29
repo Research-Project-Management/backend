@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { TagsRepository } from './tags.repository';
-import { LibraryTransactionService } from '../sync-core/library-transaction.service';
+import { LibraryTransactionService } from '../sync/library-transaction.service';
 
 @Injectable()
 export class TagsService {

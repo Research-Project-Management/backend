@@ -93,7 +93,9 @@ export class ArxivProvider implements MetadataProvider {
 
     // Authors
     const authors: string[] = [];
-    const authorMatches = entry.matchAll(/<author>\s*<name>([\s\S]*?)<\/name>/gi);
+    const authorMatches = entry.matchAll(
+      /<author>\s*<name>([\s\S]*?)<\/name>/gi,
+    );
     for (const match of authorMatches) {
       if (match[1]) {
         authors.push(match[1].trim());
@@ -125,7 +127,9 @@ export class ArxivProvider implements MetadataProvider {
 
     // Journal ref
     let journal: string | undefined;
-    const journalMatch = entry.match(/<arxiv:journal_ref[^>]*>([\s\S]*?)<\/arxiv:journal_ref>/i);
+    const journalMatch = entry.match(
+      /<arxiv:journal_ref[^>]*>([\s\S]*?)<\/arxiv:journal_ref>/i,
+    );
     if (journalMatch) {
       journal = journalMatch[1].replace(/\s+/g, ' ').trim();
     }
@@ -134,9 +138,7 @@ export class ArxivProvider implements MetadataProvider {
     const pdfUrl = `https://arxiv.org/pdf/${cleanId}.pdf`;
     const canonicalUrl = `https://arxiv.org/abs/${cleanId}`;
 
-    const rawVersion = createHash('md5')
-      .update(xml)
-      .digest('hex');
+    const rawVersion = createHash('md5').update(xml).digest('hex');
 
     return {
       provider: this.id,

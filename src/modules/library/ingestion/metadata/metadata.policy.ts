@@ -89,9 +89,7 @@ export class MetadataRoutingPolicy {
       );
     }
 
-    const hostname = parsed.hostname
-      .toLowerCase()
-      .replace(/^\[|\]$/g, '');
+    const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
 
     for (const pattern of SSRF_BLOCKED_PATTERNS) {
       if (pattern.test(hostname)) {

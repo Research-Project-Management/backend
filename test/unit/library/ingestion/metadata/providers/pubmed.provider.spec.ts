@@ -61,8 +61,8 @@ describe('PubMedProvider (Standalone)', () => {
       headers: new Headers(),
     } as any);
 
-    await expect(
-      provider.resolve({ query: '12345678' }),
-    ).rejects.toThrow(ProviderFetchError);
+    await expect(provider.resolve({ query: '12345678' })).rejects.toThrow(
+      ProviderFetchError,
+    );
   });
 });
