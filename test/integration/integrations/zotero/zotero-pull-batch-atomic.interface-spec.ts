@@ -4,9 +4,9 @@ import { ZoteroMapper } from '../../../../src/modules/integrations/zotero/zotero
 import { ZoteroConnectionService } from '../../../../src/modules/integrations/zotero/zotero-connection.service';
 import { ZoteroPullWorker } from '../../../../src/modules/integrations/zotero/zotero-pull.worker';
 import {
-  LIBRARY_SYNC_PORT,
-  ILibrarySyncPort,
-} from '../../../../src/modules/library/sync/library-sync.port';
+  SYNC_PORT,
+  SyncPort,
+} from '../../../../src/modules/library/sync/ports/sync.port';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 
 jest.setTimeout(60000);
@@ -130,7 +130,7 @@ describe('ZoteroPullWorker Atomic Batch & Cutover Invariants (Integration)', () 
   let fakeConnector: TestFailingZoteroConnector;
   let mapper: ZoteroMapper;
   let connectionService: ZoteroConnectionService;
-  let libraryPort: ILibrarySyncPort;
+  let libraryPort: SyncPort;
   let pullWorker: ZoteroPullWorker;
 
   beforeAll(async () => {
@@ -138,7 +138,7 @@ describe('ZoteroPullWorker Atomic Batch & Cutover Invariants (Integration)', () 
     fakeConnector = new TestFailingZoteroConnector();
     mapper = new ZoteroMapper();
     connectionService = harness.moduleRef.get(ZoteroConnectionService);
-    libraryPort = harness.moduleRef.get(LIBRARY_SYNC_PORT);
+    libraryPort = harness.moduleRef.get(SYNC_PORT);
 
     pullWorker = new ZoteroPullWorker(
       harness.prisma,

@@ -21,7 +21,7 @@ RUN pnpm prune --prod
 FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-ENV PORT=2915
+ENV PORT=3000
 
 # Security: run as non-root user
 RUN addgroup --system --gid 1001 nodejs && \
@@ -35,6 +35,6 @@ COPY --from=builder /app/dist ./dist
 # Give ownership to nestjs user
 USER nestjs
 
-EXPOSE 2915
+EXPOSE 3000
 
 CMD ["node", "dist/main.js"]

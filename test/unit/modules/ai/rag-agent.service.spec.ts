@@ -1,10 +1,11 @@
 import { RagAgentService } from '@/modules/ai/rag-agent/rag-agent.service';
 import { EngineService } from '@/modules/ai/engine/engine.service';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 
-describe('RagAgentService (Paper-Scoped AI Copilot)', () => {
+describe('RagAgentService (Paper-Scoped AI Copilot & Tenant Isolation)', () => {
   let service: RagAgentService;
   let mockEngine: jest.Mocked<EngineService>;
-  let mockPaperRepo: any;
+  let mockCatalogService: any;
 
   beforeEach(() => {
     mockEngine = {
@@ -15,15 +16,14 @@ describe('RagAgentService (Paper-Scoped AI Copilot)', () => {
       }),
     } as any;
 
-    mockPaperRepo = {
-      findItemById: jest.fn(),
-      findById: jest.fn(),
+    mockCatalogService = {
+      getItem: jest.fn(),
     };
 
-    service = new RagAgentService(mockEngine, mockPaperRepo);
+    service = new RagAgentService(mockEngine, mockCatalogService);
   });
 
-  it('should enrich chat payload with paper metadata and execute streamChat', async () => {
+  it('should enrich chat payload with paper metadata and execute streamChat within authorized workspace', async () => {
     const mockPaper = {
       id: 'paper-vaswani',
       workspaceId: 'ws-ai-lab',
@@ -36,17 +36,21 @@ describe('RagAgentService (Paper-Scoped AI Copilot)', () => {
       deletedAt: null,
     };
 
-    mockPaperRepo.findItemById.mockResolvedValueOnce(mockPaper);
+    mockCatalogService.getItem.mockResolvedValueOnce(mockPaper);
 
     const mockReply = {} as any;
     const dto = {
       query: 'What is Multi-Head Attention?',
-      workspace_id: 'ws-ai-lab',
+      workspaceId: 'ws-ai-lab',
     };
 
     await service.streamPaperChat('user-1', 'paper-vaswani', dto, mockReply);
 
-    expect(mockPaperRepo.findItemById).toHaveBeenCalledWith('paper-vaswani');
+    expect(mockCatalogService.getItem).toHaveBeenCalledWith(
+      'ws-ai-lab',
+      'paper-vaswani',
+      'user-1',
+    );
     expect(mockEngine.streamChat).toHaveBeenCalledWith(
       expect.objectContaining({
         document_ids: ['rag-doc-999'],
@@ -67,7 +71,41 @@ describe('RagAgentService (Paper-Scoped AI Copilot)', () => {
     );
   });
 
-  it('should execute synchronous paper-scoped RAG query', async () => {
+  it('should reject request when workspaceId is missing', async () => {
+    const dto = {
+      query: 'What is attention?',
+    };
+
+    await expect(
+      service.streamPaperChat('user-1', 'paper-1', dto, {} as any),
+    ).rejects.toThrow(BadRequestException);
+
+    await expect(
+      service.syncPaperChat('user-1', 'paper-1', dto),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('should throw NotFoundException when paper is not found in the workspace (no leakage)', async () => {
+    mockCatalogService.getItem.mockResolvedValueOnce(null);
+
+    const dto = {
+      query: 'Explain architecture',
+      workspaceId: 'ws-tenant-a',
+    };
+
+    await expect(
+      service.syncPaperChat('user-1', 'paper-other-tenant', dto),
+    ).rejects.toThrow(NotFoundException);
+
+    expect(mockCatalogService.getItem).toHaveBeenCalledWith(
+      'ws-tenant-a',
+      'paper-other-tenant',
+      'user-1',
+    );
+    expect(mockEngine.syncChat).not.toHaveBeenCalled();
+  });
+
+  it('should execute synchronous paper-scoped RAG query with valid workspaceId', async () => {
     const mockPaper = {
       id: 'paper-resnet',
       workspaceId: 'ws-ai-lab',
@@ -78,16 +116,22 @@ describe('RagAgentService (Paper-Scoped AI Copilot)', () => {
       deletedAt: null,
     };
 
-    mockPaperRepo.findItemById.mockResolvedValueOnce(mockPaper);
+    mockCatalogService.getItem.mockResolvedValueOnce(mockPaper);
 
     const dto = {
       query: 'Explain residual connection benefit',
+      workspaceId: 'ws-ai-lab',
     };
 
     const res = await service.syncPaperChat('user-1', 'paper-resnet', dto);
 
     expect(res).toBeDefined();
     expect(res.answer).toContain('scaled dot-product');
+    expect(mockCatalogService.getItem).toHaveBeenCalledWith(
+      'ws-ai-lab',
+      'paper-resnet',
+      'user-1',
+    );
     expect(mockEngine.syncChat).toHaveBeenCalled();
   });
 });

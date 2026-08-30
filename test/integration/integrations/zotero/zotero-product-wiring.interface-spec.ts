@@ -2,7 +2,7 @@ import { LibraryTestHarness } from '../../library/library-test-harness';
 import { ZoteroSyncPolicy } from '../../../../src/modules/integrations/zotero/zotero-sync.policy';
 import { ZoteroConnectionService } from '../../../../src/modules/integrations/zotero/zotero-connection.service';
 import { ZoteroFileConnector } from '../../../../src/modules/integrations/zotero/zotero-file.connector';
-import { UrlCaptureConnector } from '../../../../src/modules/library/ingestion/url-capture.connector';
+import { UrlCaptureProvider } from '../../../../src/modules/library/ingestion/providers/url-capture.provider';
 import { IngestionService } from '../../../../src/modules/library/ingestion/ingestion.service';
 import { CatalogService } from '../../../../src/modules/library/catalog/catalog.service';
 
@@ -13,7 +13,7 @@ describe('Zotero Product Wiring & Release Verification (Steps 1-12)', () => {
   let syncPolicy: ZoteroSyncPolicy;
   let connectionService: ZoteroConnectionService;
   let fileConnector: ZoteroFileConnector;
-  let urlCaptureConnector: UrlCaptureConnector;
+  let urlCaptureConnector: UrlCaptureProvider;
   let ingestionService: IngestionService;
   let catalogService: CatalogService;
   let workspaceId: string;
@@ -31,7 +31,7 @@ describe('Zotero Product Wiring & Release Verification (Steps 1-12)', () => {
     });
     connectionService = harness.moduleRef.get(ZoteroConnectionService);
     fileConnector = new ZoteroFileConnector(syncPolicy);
-    urlCaptureConnector = new UrlCaptureConnector();
+    urlCaptureConnector = new UrlCaptureProvider();
     catalogService = harness.moduleRef.get(CatalogService);
 
     ingestionService = harness.moduleRef.get(IngestionService);
@@ -262,14 +262,15 @@ describe('Zotero Product Wiring & Release Verification (Steps 1-12)', () => {
         },
       });
 
-      const confirmed = await ingestionService.confirmCapturedUrl(
+      const confirmedRes = await ingestionService.confirmCapturedUrl(
         workspaceId,
         userId,
         {
-          ...meta,
+          title: 'Attention Is All You Need',
           previewToken: withToken.previewToken!,
         },
       );
+      const confirmed = confirmedRes as any;
 
       expect(confirmed.id).toBeDefined();
       expect(confirmed.title).toBe('Attention Is All You Need');

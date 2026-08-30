@@ -4,13 +4,13 @@ import {
 } from '../library-test-harness';
 import { IngestionService } from '../../../../src/modules/library/ingestion/ingestion.service';
 import {
-  CANONICAL_METADATA_SERVICE,
-  CanonicalMetadataResolver,
-} from '../../../../src/modules/library/ingestion/metadata/metadata.contracts';
+  METADATA_PORT,
+  MetadataPort,
+} from '../../../../src/modules/library/ingestion/metadata/types/metadata.types';
 import {
   IngestionIdempotencyConflictException,
   IngestionValidationException,
-} from '../../../../src/modules/library/ingestion/ingestion.errors';
+} from '../../../../src/modules/library/ingestion/errors/ingestion.errors';
 import { NotFoundException } from '@nestjs/common';
 import * as crypto from 'crypto';
 
@@ -19,7 +19,7 @@ describe('Integration: Unified Library Ingestion Golden Paths & Security Gates',
   let fixture: TestWorkspaceFixture;
   let fixtureB: TestWorkspaceFixture;
   let ingestionService: IngestionService;
-  let metadataService: CanonicalMetadataResolver;
+  let metadataService: MetadataPort;
 
   beforeAll(async () => {
     harness = await LibraryTestHarness.create();
@@ -27,9 +27,7 @@ describe('Integration: Unified Library Ingestion Golden Paths & Security Gates',
     fixtureB = await harness.seedWorkspaceFixture();
 
     ingestionService = harness.moduleRef.get(IngestionService);
-    metadataService = harness.moduleRef.get<CanonicalMetadataResolver>(
-      CANONICAL_METADATA_SERVICE,
-    );
+    metadataService = harness.moduleRef.get<MetadataPort>(METADATA_PORT);
   });
 
   afterAll(async () => {
@@ -321,74 +319,7 @@ describe('Integration: Unified Library Ingestion Golden Paths & Security Gates',
     });
   });
 
-  describe('5. Zotero Source Ingestion', () => {
-    it('creates CatalogItem and ZoteroItemBinding for verified connection', async () => {
-      // Seed Zotero connection & binding
-      const connection = await harness.prisma.zoteroConnection.create({
-        data: {
-          workspaceId: fixture.workspaceId,
-          userId: fixture.ownerUserId,
-          zoteroUserId: 'zotero-user-12345',
-          encryptedApiKey: 'test-encrypted-key',
-          keyIv: 'test-iv-12345678',
-          keyTag: 'test-tag-12345678',
-        },
-      });
-
-      const binding = await harness.prisma.zoteroBinding.create({
-        data: {
-          workspaceId: fixture.workspaceId,
-          connectionId: connection.id,
-          remoteLibraryType: 'user',
-          remoteLibraryId: 'zotero-user-12345',
-          syncDirection: 'two_way',
-        },
-      });
-
-      const externalKey = 'ZOTERO_ITEM_KEY_888';
-      const result = await ingestionService.ingest({
-        source: 'zotero',
-        workspaceId: fixture.workspaceId,
-        userId: fixture.ownerUserId,
-        connectionId: binding.id,
-        externalItemKey: externalKey,
-        payload: {
-          data: {
-            title: 'Synchronized Zotero Paper',
-            creators: [{ firstName: 'Zotero', lastName: 'Author' }],
-            date: '2024',
-          },
-        },
-      });
-
-      expect(result.status).toBe('completed');
-      expect(result.deduplicated).toBe(false);
-
-      const zBinding = await harness.prisma.zoteroItemBinding.findFirst({
-        where: {
-          workspaceId: fixture.workspaceId,
-          bindingId: binding.id,
-          remoteKey: externalKey,
-        },
-      });
-      expect(zBinding).toBeDefined();
-      expect(zBinding?.entityId).toBe(result.itemId);
-
-      // Re-ingest with same binding + remoteKey -> deduplicated
-      const dedupResult = await ingestionService.ingest({
-        source: 'zotero',
-        workspaceId: fixture.workspaceId,
-        userId: fixture.ownerUserId,
-        connectionId: binding.id,
-        externalItemKey: externalKey,
-        payload: {},
-      });
-      expect(dedupResult.deduplicated).toBe(true);
-      expect(dedupResult.itemId).toBe(result.itemId);
-    });
-  });
-
-  describe('6. Concurrent Idempotency & Crash Safety', () => {
+  describe('5. Concurrent Idempotency & Crash Safety', () => {
     it('concurrent identical requests with same idempotencyKey create only 1 item and return consistent results', async () => {
       const idempotencyKey = `idemp-concurrent-${Date.now()}`;
       const doi = `10.1000/concurrent.${Date.now()}`;

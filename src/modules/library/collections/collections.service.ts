@@ -8,7 +8,10 @@ import { CollectionsRepository } from './collections.repository';
 import { CreateCollectionDto } from './dto/create-collection.dto';
 import { UpdateCollectionDto } from './dto/update-collection.dto';
 import { AssignItemsToCollectionDto } from './dto/assign-items.dto';
-import { CollectionDeleteStrategy, CollectionTreeNode } from './types/collection.types';
+import {
+  CollectionDeleteStrategy,
+  CollectionTreeNode,
+} from './types/collection.types';
 import { PrismaService } from '../../../core/database/prisma.service';
 
 @Injectable()
@@ -28,7 +31,9 @@ export class CollectionsService {
     };
   }
 
-  async getCollectionTree(workspaceId: string): Promise<{ tree: CollectionTreeNode[] }> {
+  async getCollectionTree(
+    workspaceId: string,
+  ): Promise<{ tree: CollectionTreeNode[] }> {
     const collections = await this.collectionsRepo.findAll(workspaceId);
 
     const map = new Map<string, CollectionTreeNode>();
@@ -58,7 +63,10 @@ export class CollectionsService {
   }
 
   async getCollectionById(workspaceId: string, collectionId: string) {
-    const collection = await this.collectionsRepo.findById(workspaceId, collectionId);
+    const collection = await this.collectionsRepo.findById(
+      workspaceId,
+      collectionId,
+    );
     if (!collection) {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
     }
@@ -71,9 +79,14 @@ export class CollectionsService {
     dto: CreateCollectionDto,
   ) {
     if (dto.parentId) {
-      const parent = await this.collectionsRepo.findById(workspaceId, dto.parentId);
+      const parent = await this.collectionsRepo.findById(
+        workspaceId,
+        dto.parentId,
+      );
       if (!parent) {
-        throw new BadRequestException(`Parent collection not found: ${dto.parentId}`);
+        throw new BadRequestException(
+          `Parent collection not found: ${dto.parentId}`,
+        );
       }
     }
 
@@ -93,7 +106,10 @@ export class CollectionsService {
     collectionId: string,
     dto: UpdateCollectionDto,
   ) {
-    const existing = await this.collectionsRepo.findById(workspaceId, collectionId);
+    const existing = await this.collectionsRepo.findById(
+      workspaceId,
+      collectionId,
+    );
     if (!existing) {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
     }
@@ -102,13 +118,22 @@ export class CollectionsService {
       if (dto.parentId === collectionId) {
         throw new BadRequestException('A collection cannot be its own parent');
       }
-      const parent = await this.collectionsRepo.findById(workspaceId, dto.parentId);
+      const parent = await this.collectionsRepo.findById(
+        workspaceId,
+        dto.parentId,
+      );
       if (!parent) {
-        throw new BadRequestException(`Parent collection not found: ${dto.parentId}`);
+        throw new BadRequestException(
+          `Parent collection not found: ${dto.parentId}`,
+        );
       }
     }
 
-    const collection = await this.collectionsRepo.update(workspaceId, collectionId, dto);
+    const collection = await this.collectionsRepo.update(
+      workspaceId,
+      collectionId,
+      dto,
+    );
     return { collection };
   }
 
@@ -117,7 +142,10 @@ export class CollectionsService {
     collectionId: string,
     strategy: CollectionDeleteStrategy = 'orphan',
   ) {
-    const existing = await this.collectionsRepo.findById(workspaceId, collectionId);
+    const existing = await this.collectionsRepo.findById(
+      workspaceId,
+      collectionId,
+    );
     if (!existing) {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
     }
@@ -132,7 +160,10 @@ export class CollectionsService {
     itemIds: string[],
   ) {
     if (collectionId !== 'unfiled') {
-      const collection = await this.collectionsRepo.findById(workspaceId, collectionId);
+      const collection = await this.collectionsRepo.findById(
+        workspaceId,
+        collectionId,
+      );
       if (!collection) {
         throw new NotFoundException(`Collection not found: ${collectionId}`);
       }
@@ -150,7 +181,11 @@ export class CollectionsService {
 
   async reorderCollections(
     workspaceId: string,
-    collections: Array<{ id: string; parentId?: string | null; orderIndex?: number }>,
+    collections: Array<{
+      id: string;
+      parentId?: string | null;
+      orderIndex?: number;
+    }>,
   ) {
     await this.collectionsRepo.reorder(workspaceId, collections);
     const updated = await this.collectionsRepo.findAll(workspaceId);
@@ -162,7 +197,10 @@ export class CollectionsService {
     collectionId: string,
     dto: AssignItemsToCollectionDto,
   ) {
-    const collection = await this.collectionsRepo.findById(workspaceId, collectionId);
+    const collection = await this.collectionsRepo.findById(
+      workspaceId,
+      collectionId,
+    );
     if (!collection) {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
     }
@@ -180,7 +218,10 @@ export class CollectionsService {
     collectionId: string,
     itemId: string,
   ) {
-    const collection = await this.collectionsRepo.findById(workspaceId, collectionId);
+    const collection = await this.collectionsRepo.findById(
+      workspaceId,
+      collectionId,
+    );
     if (!collection) {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
     }

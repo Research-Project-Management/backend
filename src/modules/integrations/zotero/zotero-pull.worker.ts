@@ -4,10 +4,10 @@ import { ZoteroConnectionService } from './zotero-connection.service';
 import { ZoteroConnector } from './zotero.connector';
 import { ZoteroMapper } from './zotero.mapper';
 import {
-  LIBRARY_SYNC_PORT,
-  ILibrarySyncPort,
+  SYNC_PORT,
+  SyncPort,
   ExternalSyncOperation,
-} from '../../library/sync/library-sync.port';
+} from '../../library/sync/ports/sync.port';
 
 export interface PullJobResult {
   syncRunId: string;
@@ -26,8 +26,8 @@ export class ZoteroPullWorker {
     private readonly connectionService: ZoteroConnectionService,
     private readonly connector: ZoteroConnector,
     private readonly mapper: ZoteroMapper,
-    @Inject(LIBRARY_SYNC_PORT)
-    private readonly libraryBridge: ILibrarySyncPort,
+    @Inject(SYNC_PORT)
+    private readonly libraryBridge: SyncPort,
   ) {}
 
   /**

@@ -65,6 +65,32 @@ export class WorkspaceRoleGuard implements CanActivate {
       }
     }
 
+    // Resolve workspace from attachment if attachmentId is present
+    if (
+      !workspaceId &&
+      request.params?.attachmentId &&
+      this.prisma?.catalogAttachment
+    ) {
+      const attachment = await this.prisma.catalogAttachment.findUnique({
+        where: { id: request.params.attachmentId },
+        select: { catalogItem: { select: { workspaceId: true } } },
+      });
+      if (attachment?.catalogItem?.workspaceId) {
+        workspaceId = attachment.catalogItem.workspaceId;
+      }
+    }
+
+    // Resolve workspace from file if fileId is present
+    if (!workspaceId && request.params?.fileId && this.prisma?.file) {
+      const file = await this.prisma.file.findUnique({
+        where: { id: request.params.fileId },
+        select: { workspaceId: true },
+      });
+      if (file?.workspaceId) {
+        workspaceId = file.workspaceId;
+      }
+    }
+
     if (!workspaceId) {
       if (requiredRoles && requiredRoles.length > 0) {
         throw new ForbiddenException(

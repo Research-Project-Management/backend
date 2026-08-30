@@ -73,8 +73,8 @@ export class IngestPdfDto {
 
 export class UnifiedIngestionDto {
   @IsString()
-  @IsIn(['doi', 'url', 'bibtex', 'pdf', 'zotero'])
-  source!: 'doi' | 'url' | 'bibtex' | 'pdf' | 'zotero';
+  @IsIn(['doi', 'url', 'bibtex', 'pdf'])
+  source!: 'doi' | 'url' | 'bibtex' | 'pdf';
 
   @IsOptional()
   @IsString()
@@ -107,17 +107,6 @@ export class UnifiedIngestionDto {
   @IsOptional()
   @IsString()
   filename?: string;
-
-  @IsOptional()
-  @IsString()
-  connectionId?: string;
-
-  @IsOptional()
-  @IsString()
-  externalItemKey?: string;
-
-  @IsOptional()
-  payload?: unknown;
 
   @IsOptional()
   @IsString()

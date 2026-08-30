@@ -2,8 +2,8 @@ import {
   ProviderExecutor,
   ProviderFetchError,
   Semaphore,
-} from '@/modules/library/ingestion/metadata/metadata.executor';
-import { MetadataProvider } from '@/modules/library/ingestion/metadata/metadata.contracts';
+} from '@/modules/library/ingestion/metadata/services/provider.executor';
+import { MetadataProvider } from '@/modules/library/ingestion/metadata/types/metadata.types';
 
 describe('Semaphore', () => {
   it('enforces maximum concurrent executions', async () => {

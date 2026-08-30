@@ -8,6 +8,6 @@ import { CoreModule } from '../../../core/core.module';
   imports: [CoreModule],
   controllers: [CollectionsController],
   providers: [CollectionsRepository, CollectionsService],
-  exports: [CollectionsRepository, CollectionsService],
+  exports: [CollectionsService],
 })
 export class CollectionsModule {}

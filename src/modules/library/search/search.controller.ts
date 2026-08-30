@@ -17,6 +17,8 @@ import { CurrentUser } from '../../../modules/iam/authn/decorators/current-user.
 
 @Controller([
   'api/v1/workspaces/:workspaceId/library/search',
+  'api/v1/workspaces/:workspaceId/library/discovery/search',
+  'api/v1/workspaces/:workspaceId/library/discovery',
   'api/workspace/:workspaceId/library/search',
   'api/library/search/:workspaceId',
   'api/library/papers/:workspaceId/search',
@@ -43,11 +45,7 @@ export class SearchController {
   ) {
     const parsedPage =
       pageIndex !== undefined ? parseInt(pageIndex, 10) : undefined;
-    return this.searchService.searchPageAnchors(
-      attachmentId,
-      term,
-      parsedPage,
-    );
+    return this.searchService.searchPageAnchors(attachmentId, term, parsedPage);
   }
 
   @Get('saved')

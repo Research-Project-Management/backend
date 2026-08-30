@@ -14,13 +14,7 @@ import { WorkspaceRoleGuard } from '../../iam/authz/guards/workspace-role.guard'
 import { WorkspaceRoles } from '../../iam/authz/decorators/workspace-roles.decorator';
 import { WorkspaceRole } from '../../iam/authz/enums/workspace-role.enum';
 import { CurrentUser } from '../../iam/authn/decorators/current-user.decorator';
-import { ZoteroConnectionService } from './zotero-connection.service';
-import { ZoteroConnector } from './zotero.connector';
-import { ZoteroPullWorker } from './zotero-pull.worker';
-import { ZoteroReconcileWorker } from './zotero-reconcile.worker';
-import { ZoteroPushWorker } from './zotero-push.worker';
-import { ZoteroSyncPolicy } from './zotero-sync.policy';
-import { ZoteroFileConnector } from './zotero-file.connector';
+import { ZoteroService } from './zotero.service';
 import { SetKillSwitchDto } from './dto/set-kill-switch.dto';
 import {
   CreateZoteroConnectionDto,
@@ -32,15 +26,7 @@ import { ResolveZoteroConflictDto } from './dto/resolve-zotero-conflict.dto';
 @Controller('api/v1/workspaces/:workspaceId/library/integrations/zotero')
 @UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
 export class ZoteroController {
-  constructor(
-    private readonly connectionService: ZoteroConnectionService,
-    private readonly connector: ZoteroConnector,
-    private readonly pullWorker: ZoteroPullWorker,
-    private readonly reconcileWorker: ZoteroReconcileWorker,
-    private readonly pushWorker: ZoteroPushWorker,
-    private readonly syncPolicy: ZoteroSyncPolicy,
-    private readonly fileConnector: ZoteroFileConnector,
-  ) {}
+  constructor(private readonly zoteroService: ZoteroService) {}
 
   @Post('connections')
   @WorkspaceRoles(WorkspaceRole.ADMIN, WorkspaceRole.OWNER)
@@ -49,34 +35,17 @@ export class ZoteroController {
     @CurrentUser('id') userId: string,
     @Body() body: CreateZoteroConnectionDto,
   ) {
-    // Validate API key with Zotero
-    const validation = await this.connector.validateApiKey(body.apiKey);
-    if (!validation.valid) {
-      return {
-        error: {
-          code: 'ZOTERO_INVALID_API_KEY',
-          message: 'The provided Zotero API key is invalid or unauthorized',
-        },
-      };
-    }
-
-    const connection = await this.connectionService.createConnection(
+    const connection = await this.zoteroService.createConnection(
       workspaceId,
       userId,
-      {
-        ...body,
-        zoteroUserId: validation.userId || body.zoteroUserId,
-        accountName:
-          body.accountName || validation.username || 'Zotero Account',
-      },
+      body,
     );
-
     return { data: connection };
   }
 
   @Get('connections')
   async listConnections(@Param('workspaceId') workspaceId: string) {
-    const data = await this.connectionService.listConnections(workspaceId);
+    const data = await this.zoteroService.listConnections(workspaceId);
     return { data };
   }
 
@@ -85,9 +54,9 @@ export class ZoteroController {
     @Param('workspaceId') workspaceId: string,
     @Param('connectionId') connectionId: string,
   ) {
-    const data = await this.connectionService.getConnection(
-      connectionId,
+    const data = await this.zoteroService.getConnection(
       workspaceId,
+      connectionId,
     );
     return { data };
   }
@@ -98,8 +67,11 @@ export class ZoteroController {
     @Param('workspaceId') workspaceId: string,
     @Param('connectionId') connectionId: string,
   ) {
-    await this.connectionService.revokeConnection(connectionId, workspaceId);
-    return { data: { success: true } };
+    const res = await this.zoteroService.revokeConnection(
+      workspaceId,
+      connectionId,
+    );
+    return { data: res };
   }
 
   @Get('connections/:connectionId/libraries')
@@ -107,20 +79,10 @@ export class ZoteroController {
     @Param('workspaceId') workspaceId: string,
     @Param('connectionId') connectionId: string,
   ) {
-    const connection = await this.connectionService.getConnection(
-      connectionId,
+    const libraries = await this.zoteroService.listRemoteLibraries(
       workspaceId,
-    );
-    const apiKey = await this.connectionService.getDecryptedApiKey(
       connectionId,
-      workspaceId,
     );
-
-    const libraries = await this.connector.listLibraries(
-      apiKey,
-      connection.zoteroUserId || '0',
-    );
-
     return { data: libraries };
   }
 
@@ -130,10 +92,7 @@ export class ZoteroController {
     @Param('workspaceId') workspaceId: string,
     @Body() body: CreateZoteroBindingDto,
   ) {
-    const binding = await this.connectionService.createBinding(
-      workspaceId,
-      body,
-    );
+    const binding = await this.zoteroService.createBinding(workspaceId, body);
     return {
       data: {
         ...binding,
@@ -147,7 +106,7 @@ export class ZoteroController {
     @Param('workspaceId') workspaceId: string,
     @Query('connectionId') connectionId?: string,
   ) {
-    const bindings = await this.connectionService.listBindings(
+    const bindings = await this.zoteroService.listBindings(
       workspaceId,
       connectionId,
     );
@@ -167,7 +126,7 @@ export class ZoteroController {
     @CurrentUser('id') userId: string,
     @Body() body: UpdateZoteroSyncDirectionDto,
   ) {
-    const updated = await this.connectionService.updateBindingSyncDirection(
+    const updated = await this.zoteroService.updateBindingSyncDirection(
       workspaceId,
       bindingId,
       body.syncDirection,
@@ -187,7 +146,7 @@ export class ZoteroController {
     @Param('workspaceId') workspaceId: string,
     @Param('bindingId') bindingId: string,
   ) {
-    const result = await this.pullWorker.executePull(workspaceId, bindingId);
+    const result = await this.zoteroService.executePull(workspaceId, bindingId);
     return {
       data: {
         ...result,
@@ -202,7 +161,7 @@ export class ZoteroController {
     @Param('workspaceId') workspaceId: string,
     @Param('bindingId') bindingId: string,
   ) {
-    const result = await this.reconcileWorker.executeReconciliation(
+    const result = await this.zoteroService.executeReconciliation(
       workspaceId,
       bindingId,
     );
@@ -221,7 +180,7 @@ export class ZoteroController {
     @Param('bindingId') bindingId: string,
     @Param('itemId') itemId: string,
   ) {
-    const result = await this.pushWorker.pushItem(
+    const result = await this.zoteroService.executePush(
       workspaceId,
       bindingId,
       itemId,
@@ -236,7 +195,7 @@ export class ZoteroController {
 
   @Get('conflicts')
   async listWorkspaceConflicts(@Param('workspaceId') workspaceId: string) {
-    const data = await this.connectionService.listConflicts(workspaceId);
+    const data = await this.zoteroService.listConflicts(workspaceId);
     return { data };
   }
 
@@ -245,10 +204,7 @@ export class ZoteroController {
     @Param('workspaceId') workspaceId: string,
     @Param('bindingId') bindingId: string,
   ) {
-    const data = await this.connectionService.listConflicts(
-      workspaceId,
-      bindingId,
-    );
+    const data = await this.zoteroService.listConflicts(workspaceId, bindingId);
     return { data };
   }
 
@@ -257,7 +213,7 @@ export class ZoteroController {
     @Param('workspaceId') workspaceId: string,
     @Param('bindingId') bindingId: string,
   ) {
-    const data = await this.connectionService.listPendingPushes(
+    const data = await this.zoteroService.listPendingPushes(
       workspaceId,
       bindingId,
     );
@@ -272,7 +228,7 @@ export class ZoteroController {
     @Param('itemId') itemId: string,
     @Body() body: ResolveZoteroConflictDto,
   ) {
-    const result = await this.pushWorker.resolveConflict(
+    const result = await this.zoteroService.resolveConflict(
       workspaceId,
       bindingId,
       itemId,
@@ -288,7 +244,7 @@ export class ZoteroController {
 
   @Get('kill-switch')
   async getKillSwitchStatus(@Param('workspaceId') workspaceId: string) {
-    const status = await this.syncPolicy.getFreshKillSwitchStatus(workspaceId);
+    const status = await this.zoteroService.getKillSwitchStatus(workspaceId);
     return { data: status };
   }
 
@@ -299,22 +255,11 @@ export class ZoteroController {
     @CurrentUser('id') userId: string,
     @Body() body: SetKillSwitchDto,
   ) {
-    if (body.workspaceId && body.workspaceId !== workspaceId) {
-      // Global operator switch
-      await this.syncPolicy.setGlobalPushKillSwitch(
-        body.disabled,
-        body.reason,
-        userId,
-      );
-    } else {
-      await this.syncPolicy.setWorkspacePushKillSwitch(
-        workspaceId,
-        body.disabled,
-        body.reason,
-        userId,
-      );
-    }
-    const status = await this.syncPolicy.getFreshKillSwitchStatus(workspaceId);
+    const status = await this.zoteroService.setKillSwitch(
+      workspaceId,
+      body,
+      userId,
+    );
     return { data: status };
   }
 
@@ -323,34 +268,10 @@ export class ZoteroController {
     @Param('workspaceId') workspaceId: string,
     @Param('bindingId') bindingId: string,
   ) {
-    const binding = await this.connectionService
-      .getConnection(bindingId, workspaceId)
-      .catch(async () => {
-        const bindings = await this.connectionService.listBindings(workspaceId);
-        return bindings.find((b) => b.id === bindingId);
-      });
-
-    if (!binding) {
-      return {
-        data: {
-          total: 0,
-          used: 0,
-          available: 0,
-          isExceeded: false,
-          isUnavailable: true,
-        },
-      };
-    }
-
-    const connectionId = (binding as any).connectionId || (binding as any).id;
-    const apiKey = await this.connectionService.getDecryptedApiKey(
-      connectionId,
+    const quota = await this.zoteroService.getStorageQuota(
       workspaceId,
+      bindingId,
     );
-    const userId =
-      (binding as any).zoteroUserId || (binding as any).remoteLibraryId || '0';
-
-    const quota = await this.fileConnector.getStorageQuota(apiKey, userId);
     return { data: quota };
   }
 }

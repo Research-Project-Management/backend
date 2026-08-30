@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
-  CANONICAL_METADATA_PROVIDERS,
-  CanonicalMetadataResolver,
+  METADATA_PROVIDERS,
+  MetadataPort,
   FieldProvenance,
   ItemMetadata,
   MetadataCandidate,
@@ -11,33 +11,33 @@ import {
   ProviderName,
   ProviderResult,
   ResolvedMetadata,
-} from './metadata.contracts';
-import { QueryClassifier } from './metadata.classifier';
+} from './types/metadata.types';
+import { QueryClassifier } from './classifiers/query.classifier';
 import {
   formatCanonicalId,
   normalizeArxivId,
   normalizeDoi,
   normalizePmid,
-} from './metadata.identifiers';
+} from './utils/metadata.utils';
 import {
   MetadataRoutingPolicy,
   METADATA_POLICY_VERSION,
-} from './metadata.policy';
-import { MetadataCache } from './metadata.cache';
-import { MetadataReconciliationService } from './metadata.reconciler';
-import { ProviderExecutor } from './metadata.executor';
-import { validateMetadata } from './metadata.validator';
+} from './policies/metadata.policy';
+import { MetadataCache } from './cache/metadata.cache';
+import { ReconciliationService } from './services/reconciliation.service';
+import { ProviderExecutor } from './services/provider.executor';
+import { validateMetadata } from './validators/metadata.validator';
 
 @Injectable()
-export class MetadataService implements CanonicalMetadataResolver {
+export class MetadataService implements MetadataPort {
   private readonly logger = new Logger(MetadataService.name);
   private readonly providerMap = new Map<ProviderName, MetadataProvider>();
 
   constructor(
-    @Inject(CANONICAL_METADATA_PROVIDERS)
+    @Inject(METADATA_PROVIDERS)
     private readonly providers: MetadataProvider[],
     private readonly cache: MetadataCache,
-    private readonly reconciler: MetadataReconciliationService,
+    private readonly reconciler: ReconciliationService,
     private readonly executor: ProviderExecutor,
   ) {
     for (const provider of providers) {

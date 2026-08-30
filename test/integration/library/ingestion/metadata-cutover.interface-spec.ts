@@ -5,9 +5,9 @@ import {
 import { IngestionService } from '../../../../src/modules/library/ingestion/ingestion.service';
 import { CatalogService } from '../../../../src/modules/library/catalog/catalog.service';
 import {
-  CANONICAL_METADATA_SERVICE,
-  CanonicalMetadataResolver,
-} from '../../../../src/modules/library/ingestion/metadata/metadata.contracts';
+  METADATA_PORT,
+  MetadataPort,
+} from '../../../../src/modules/library/ingestion/metadata/types/metadata.types';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -15,16 +15,15 @@ describe('Integration: Canonical Metadata Cutover & Transaction Atomicity', () =
   let harness: LibraryTestHarness;
   let fixture: TestWorkspaceFixture;
   let ingestionService: IngestionService;
-  let canonicalMetadataService: CanonicalMetadataResolver;
+  let canonicalMetadataService: MetadataPort;
 
   beforeAll(async () => {
     harness = await LibraryTestHarness.create();
     fixture = await harness.seedWorkspaceFixture();
 
     ingestionService = harness.moduleRef.get(IngestionService);
-    canonicalMetadataService = harness.moduleRef.get<CanonicalMetadataResolver>(
-      CANONICAL_METADATA_SERVICE,
-    );
+    canonicalMetadataService =
+      harness.moduleRef.get<MetadataPort>(METADATA_PORT);
   });
 
   afterAll(async () => {
@@ -57,11 +56,12 @@ describe('Integration: Canonical Metadata Cutover & Transaction Atomicity', () =
         .spyOn(canonicalMetadataService, 'resolve')
         .mockResolvedValueOnce(mockResolved);
 
-      const item = await ingestionService.ingestDoi(
+      const itemRes = await ingestionService.ingestDoi(
         fixture.workspaceId,
         fixture.ownerUserId,
         { doi },
       );
+      const item = itemRes as any;
 
       expect(item).toBeDefined();
       expect(item.id).toBeDefined();
@@ -144,11 +144,12 @@ describe('Integration: Canonical Metadata Cutover & Transaction Atomicity', () =
         year={2024}
       }`;
 
-      const item = await ingestionService.ingestBibtex(
+      const itemRes = await ingestionService.ingestBibtex(
         fixture.workspaceId,
         fixture.ownerUserId,
         { bibtex },
       );
+      const item = itemRes as any;
 
       expect(item).toBeDefined();
       expect(item.title).toBe('Nature Breakthrough 2024');

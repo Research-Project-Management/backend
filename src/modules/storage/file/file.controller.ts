@@ -102,9 +102,23 @@ export class FileController {
       return res.status(404).send({ message: 'File not found in storage' });
     }
 
-    if (output.ContentType) {
-      res.header('Content-Type', output.ContentType);
+    let contentType = output.ContentType || 'application/octet-stream';
+    if (contentType === 'application/octet-stream') {
+      const lower = key.toLowerCase();
+      if (lower.endsWith('.pdf')) contentType = 'application/pdf';
+      else if (lower.endsWith('.png')) contentType = 'image/png';
+      else if (lower.endsWith('.jpg') || lower.endsWith('.jpeg'))
+        contentType = 'image/jpeg';
+      else if (lower.endsWith('.svg')) contentType = 'image/svg+xml';
+      else if (lower.endsWith('.webp')) contentType = 'image/webp';
+      else if (lower.endsWith('.gif')) contentType = 'image/gif';
+      else if (lower.endsWith('.mp4')) contentType = 'video/mp4';
+      else if (lower.endsWith('.mp3')) contentType = 'audio/mpeg';
+      else if (lower.endsWith('.json')) contentType = 'application/json';
+      else if (lower.endsWith('.txt')) contentType = 'text/plain';
     }
+
+    res.header('Content-Type', contentType);
     if (output.ContentLength) {
       res.header('Content-Length', output.ContentLength);
     }

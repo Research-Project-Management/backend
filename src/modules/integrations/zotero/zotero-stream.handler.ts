@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { IntegrationOutboxEvent } from '../../library/sync/library-sync.port';
+import { IntegrationOutboxEvent } from '../../library/sync/ports/sync.port';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { ZoteroPullWorker } from './zotero-pull.worker';
 import { ZoteroReconcileWorker } from './zotero-reconcile.worker';

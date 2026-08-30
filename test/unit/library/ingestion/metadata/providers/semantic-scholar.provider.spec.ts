@@ -1,5 +1,5 @@
 import { SemanticScholarProvider } from '@/modules/library/ingestion/metadata/providers/semantic-scholar.provider';
-import { ProviderFetchError } from '@/modules/library/ingestion/metadata/metadata.executor';
+import { ProviderFetchError } from '@/modules/library/ingestion/metadata/services/provider.executor';
 
 describe('SemanticScholarProvider (Standalone)', () => {
   let provider: SemanticScholarProvider;

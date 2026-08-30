@@ -9,10 +9,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { ZoteroConnectionService } from './zotero-connection.service';
-import {
-  ILibrarySyncPort,
-  LIBRARY_SYNC_PORT,
-} from '../../library/sync/library-sync.port';
+import { SyncPort, SYNC_PORT } from '../../library/sync/ports/sync.port';
 
 export interface ZoteroStreamSubscription {
   workspaceId: string;
@@ -46,8 +43,8 @@ export class ZoteroWebSocketListener implements OnModuleInit, OnModuleDestroy {
     @Optional() private readonly prisma?: PrismaService,
     @Optional() private readonly configService?: ConfigService,
     @Optional()
-    @Inject(LIBRARY_SYNC_PORT)
-    private readonly libraryBridge?: ILibrarySyncPort,
+    @Inject(SYNC_PORT)
+    private readonly libraryBridge?: SyncPort,
   ) {}
 
   async onModuleInit() {
@@ -68,7 +65,7 @@ export class ZoteroWebSocketListener implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async onModuleDestroy() {
+  onModuleDestroy(): void {
     this.isDestroyed = true;
     this.cleanupHeartbeat();
     if (this.reconnectTimer) {
@@ -227,7 +224,15 @@ export class ZoteroWebSocketListener implements OnModuleInit, OnModuleDestroy {
     if (this.isDestroyed) return;
 
     try {
-      const WebSocketClass = (global as any).WebSocket || require('ws');
+      const WebSocketClass =
+        (globalThis as unknown as { WebSocket?: any }).WebSocket ??
+        (global as unknown as { WebSocket?: any }).WebSocket;
+      if (!WebSocketClass) {
+        this.logger.warn(
+          'WebSocket client is not available in current environment',
+        );
+        return;
+      }
       this.ws = new WebSocketClass(this.endpoint);
 
       this.ws.on('open', () => {

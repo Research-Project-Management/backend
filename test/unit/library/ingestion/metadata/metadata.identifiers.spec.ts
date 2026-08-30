@@ -6,7 +6,7 @@ import {
   normalizeIsbn,
   normalizeIssn,
   formatCanonicalId,
-} from '@/modules/library/ingestion/metadata/metadata.identifiers';
+} from '@/modules/library/ingestion/metadata/utils/metadata.utils';
 
 describe('metadata.identifiers re-exports', () => {
   describe('normalizeDoi', () => {

@@ -1,7 +1,4 @@
-export type CollectionDeleteStrategy =
-  | 'cascade'
-  | 'move-to-parent'
-  | 'orphan';
+export type CollectionDeleteStrategy = 'cascade' | 'move-to-parent' | 'orphan';
 
 export interface CollectionTreeNode {
   id: string;

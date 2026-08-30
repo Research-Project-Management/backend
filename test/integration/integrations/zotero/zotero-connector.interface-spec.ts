@@ -5,7 +5,7 @@ import { ZoteroMapper } from '../../../../src/modules/integrations/zotero/zotero
 import { ZoteroConnectionService } from '../../../../src/modules/integrations/zotero/zotero-connection.service';
 import { ZoteroPullWorker } from '../../../../src/modules/integrations/zotero/zotero-pull.worker';
 import { ZoteroReconcileWorker } from '../../../../src/modules/integrations/zotero/zotero-reconcile.worker';
-import { LIBRARY_SYNC_PORT } from '../../../../src/modules/library/sync/library-sync.port';
+import { SYNC_PORT } from '../../../../src/modules/library/sync/ports/sync.port';
 
 const schemaCorpus = require('../../../fixtures/library/zotero-schema-corpus.json');
 
@@ -84,7 +84,7 @@ describe('Zotero Connector, Mapper & Sync Invariants (Integration)', () => {
     fakeConnector = new FakeZoteroConnector();
     mapper = new ZoteroMapper();
     connectionService = harness.moduleRef.get(ZoteroConnectionService);
-    const libraryBridge = harness.moduleRef.get(LIBRARY_SYNC_PORT);
+    const libraryBridge = harness.moduleRef.get(SYNC_PORT);
 
     pullWorker = new ZoteroPullWorker(
       harness.prisma,

@@ -1,5 +1,5 @@
 import { ZoteroStreamOutboxHandler } from '../../../../src/modules/integrations/zotero/zotero-stream.handler';
-import { IntegrationOutboxEvent } from '../../../../src/modules/library/sync/library-sync.port';
+import { IntegrationOutboxEvent } from '../../../../src/modules/library/sync/ports/sync.port';
 
 describe('ZoteroStreamOutboxHandler', () => {
   let handler: ZoteroStreamOutboxHandler;

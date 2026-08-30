@@ -1,12 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { TagsRepository } from './tags.repository';
-import { LibraryTransactionService } from '../sync/library-transaction.service';
+import { TransactionService } from '../sync/services/transaction.service';
 
 @Injectable()
 export class TagsService {
   constructor(
     private readonly tagsRepo: TagsRepository,
-    private readonly libraryTx: LibraryTransactionService,
+    private readonly libraryTx: TransactionService,
   ) {}
 
   async getTags(workspaceId: string) {

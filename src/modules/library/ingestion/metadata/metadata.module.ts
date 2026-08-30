@@ -1,13 +1,13 @@
 import { Module } from '@nestjs/common';
 import { CoreModule } from '@/core/core.module';
 import {
-  CANONICAL_METADATA_PROVIDERS,
-  CANONICAL_METADATA_SERVICE,
+  METADATA_PROVIDERS,
+  METADATA_PORT,
   MetadataProvider,
-} from './metadata.contracts';
-import { MetadataCache } from './metadata.cache';
-import { MetadataReconciliationService } from './metadata.reconciler';
-import { ProviderExecutor } from './metadata.executor';
+} from './types/metadata.types';
+import { MetadataCache } from './cache/metadata.cache';
+import { ReconciliationService } from './services/reconciliation.service';
+import { ProviderExecutor } from './services/provider.executor';
 import { MetadataService } from './metadata.service';
 
 import { CrossRefProvider } from './providers/crossref.provider';
@@ -22,7 +22,7 @@ import { UnpaywallProvider } from './providers/unpaywall.provider';
   imports: [CoreModule],
   providers: [
     MetadataCache,
-    MetadataReconciliationService,
+    ReconciliationService,
     ProviderExecutor,
     CrossRefProvider,
     ArxivProvider,
@@ -32,7 +32,7 @@ import { UnpaywallProvider } from './providers/unpaywall.provider';
     OpenAlexProvider,
     UnpaywallProvider,
     {
-      provide: CANONICAL_METADATA_PROVIDERS,
+      provide: METADATA_PROVIDERS,
       useFactory: (
         crossref: CrossRefProvider,
         arxiv: ArxivProvider,
@@ -62,12 +62,12 @@ import { UnpaywallProvider } from './providers/unpaywall.provider';
     },
     MetadataService,
     {
-      provide: CANONICAL_METADATA_SERVICE,
+      provide: METADATA_PORT,
       useExisting: MetadataService,
     },
   ],
   // Keep implementation details private. Callers cross the canonical seam via
-  // CANONICAL_METADATA_SERVICE only.
-  exports: [CANONICAL_METADATA_SERVICE],
+  // METADATA_PORT only.
+  exports: [METADATA_PORT],
 })
 export class MetadataModule {}

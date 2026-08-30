@@ -29,7 +29,6 @@ describe('Library Critical Path Release Hardening (14-Step Invariant Suite)', ()
     ingestionService = harness.moduleRef.get(IngestionService);
     catalogService = harness.moduleRef.get(CatalogService);
     citationService = harness.moduleRef.get(CitationService);
-    relationsService = harness.moduleRef.get(RelationsService);
     storagePort = harness.moduleRef.get<IStoragePort>(STORAGE_PORT);
     r2Service = harness.moduleRef.get(R2Service);
   }, 60000);
@@ -156,7 +155,7 @@ describe('Library Critical Path Release Hardening (14-Step Invariant Suite)', ()
     expect(bibtexCitation.bibliography).toContain('Preskill');
 
     // STEP 11: Directed relation link (Item A -> Item B)
-    const linkResult = await relationsService.linkItems(wsId, itemAId, {
+    const linkResult = await catalogService.linkItems(wsId, itemAId, {
       targetItemId: itemBId,
       relationType: 'cites',
       note: 'Foundational quantum reference',
@@ -165,24 +164,21 @@ describe('Library Critical Path Release Hardening (14-Step Invariant Suite)', ()
     expect(linkResult.link.targetItemId).toBe(itemBId);
 
     // STEP 12: Asymmetry verification (Item A links B, but B does NOT link A)
-    const relsFromA = await relationsService.getRelatedItems(wsId, itemAId);
+    const relsFromA = await catalogService.getRelatedItems(wsId, itemAId);
     expect(relsFromA.total).toBe(1);
-    expect(relsFromA.relatedItems[0].id).toBe(itemBId);
+    expect(relsFromA.relatedItems[0].targetItemId).toBe(itemBId);
 
-    const relsFromB = await relationsService.getRelatedItems(wsId, itemBId);
+    const relsFromB = await catalogService.getRelatedItems(wsId, itemBId);
     expect(relsFromB.total).toBe(0);
 
     // STEP 13: Directed unlink
-    const unlinkResult = await relationsService.unlinkItems(
+    const unlinkResult = await catalogService.unlinkItems(
       wsId,
       itemAId,
       itemBId,
     );
     expect(unlinkResult.success).toBe(true);
-    const relsAfterUnlink = await relationsService.getRelatedItems(
-      wsId,
-      itemAId,
-    );
+    const relsAfterUnlink = await catalogService.getRelatedItems(wsId, itemAId);
     expect(relsAfterUnlink.total).toBe(0);
 
     // STEP 14: Workspace isolation (Workspace B cannot access Workspace A item)

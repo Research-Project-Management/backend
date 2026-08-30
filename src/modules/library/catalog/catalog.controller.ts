@@ -18,6 +18,7 @@ import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-
 import { CurrentUser } from '../../../modules/iam/authn/decorators/current-user.decorator';
 import { CursorPaginationQueryDto } from './dto/pagination.dto';
 import { CreateCatalogItemDto, UpdateCatalogItemDto } from './dto/item.dto';
+import { MergeDuplicatesDto } from './dto/curation.dto';
 
 @Controller([
   'api/v1/workspaces/:workspaceId/library/items',
@@ -58,6 +59,36 @@ export class CatalogController {
     };
   }
 
+  @Get('duplicates')
+  async getDuplicates(@Param('workspaceId') workspaceId: string) {
+    const clusters = await this.catalogService.detectDuplicates(workspaceId);
+    return {
+      success: true,
+      data: clusters,
+    };
+  }
+
+  @Post('merge')
+  async mergeDuplicates(
+    @Param('workspaceId') workspaceId: string,
+    @Body() dto: MergeDuplicatesDto,
+  ) {
+    const merged = await this.catalogService.mergeDuplicates(workspaceId, dto);
+    return {
+      success: true,
+      data: merged,
+    };
+  }
+
+  @Get(['quality-audit', 'integrity'])
+  async getQualityAudit(@Param('workspaceId') workspaceId: string) {
+    const report = await this.catalogService.getQualityAudit(workspaceId);
+    return {
+      success: true,
+      data: report,
+    };
+  }
+
   @Get(':id')
   async getItem(
     @Param('workspaceId') workspaceId: string,
@@ -78,6 +109,31 @@ export class CatalogController {
     return {
       success: true,
       data: item,
+    };
+  }
+
+  @Get([':id/bundle', 'papers/:id/bundle'])
+  async getItemBundle(
+    @Param('workspaceId') workspaceId: string,
+    @Param('id') id: string,
+    @CurrentUser('id') currentUserId: string,
+  ) {
+    const item = await this.catalogService.getItem(
+      workspaceId,
+      id,
+      currentUserId,
+    );
+    if (!item) {
+      throw new NotFoundException(
+        `CatalogItem ${id} not found in workspace ${workspaceId}`,
+      );
+    }
+
+    return {
+      success: true,
+      data: item,
+      paper: item,
+      ...item,
     };
   }
 
@@ -195,7 +251,8 @@ export class CatalogController {
   async linkItems(
     @Param('workspaceId') workspaceId: string,
     @Param('id') id: string,
-    @Body() body: { targetItemId: string; relationType?: string; note?: string },
+    @Body()
+    body: { targetItemId: string; relationType?: string; note?: string },
   ) {
     return this.catalogService.linkItems(workspaceId, id, body);
   }
@@ -211,5 +268,27 @@ export class CatalogController {
   ) {
     return this.catalogService.unlinkItems(workspaceId, id, targetId);
   }
-}
 
+  @Post([
+    ':id/extract-notes',
+    'papers/:id/extract-notes',
+    'api/v1/workspaces/:workspaceId/library/papers/:id/extract-notes',
+  ])
+  async extractNotes(
+    @Param('workspaceId') workspaceId: string,
+    @Param('id') id: string,
+    @CurrentUser('id') currentUserId: string,
+  ) {
+    const result = await this.catalogService.extractNotesFromAnnotations(
+      workspaceId,
+      id,
+      currentUserId,
+    );
+    return {
+      success: true,
+      data: result,
+      totalExtracted: result.totalExtracted,
+      literatureNote: result.literatureNote,
+    };
+  }
+}

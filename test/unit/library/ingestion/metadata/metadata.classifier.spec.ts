@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Tests for metadata.classifier.ts re-export.
  * Ensures the canonical import path resolves correctly and the classifier
  * works identically to the legacy import path (parity check via re-export).
@@ -6,7 +6,7 @@
 import {
   QueryClassifier,
   QueryClassifierUtil,
-} from '@/modules/library/ingestion/metadata/metadata.classifier';
+} from '@/modules/library/ingestion/metadata/classifiers/query.classifier';
 
 describe('Canonical metadata.classifier re-export', () => {
   describe('DOI classification', () => {

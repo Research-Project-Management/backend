@@ -1,6 +1,6 @@
 import { LibraryTestHarness } from '../library-test-harness';
-import { DiscoveryRepository } from '../../../../src/modules/library/discovery/discovery.repository';
-import { FullTextIndexer } from '../../../../src/modules/library/discovery/full-text-indexer';
+import { SearchRepository as DiscoveryRepository } from '../../../../src/modules/library/search/search.repository';
+import { FullTextIndexer } from '../../../../src/modules/library/search/providers/full-text-indexer.provider';
 
 describe('Discovery & Search Invariants (Integration)', () => {
   let harness: LibraryTestHarness;

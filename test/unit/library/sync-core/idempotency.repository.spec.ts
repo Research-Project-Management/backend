@@ -1,7 +1,7 @@
 import {
   IdempotencyRepository,
   isIdempotencyUniqueViolation,
-} from '../../../../src/modules/library/sync/idempotency.repository';
+} from '../../../../src/modules/library/sync/repositories/idempotency.repository';
 import { PrismaService } from '../../../../src/core/database/prisma.service';
 import { Prisma } from '@prisma/client';
 

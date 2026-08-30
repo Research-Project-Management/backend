@@ -1,17 +1,14 @@
 import { Module, OnModuleInit } from '@nestjs/common';
 import { SyncController } from './sync.controller';
-import { ChangeLogRepository } from './change-log.repository';
-import { IdempotencyRepository } from './idempotency.repository';
-import { LibraryTransactionService } from './library-transaction.service';
-import { OutboxWorker } from './outbox.worker';
-import { SyncMetricsService } from './sync.metrics';
-import {
-  LibraryDomainEventDispatcher,
-  LIBRARY_EVENT_TYPES,
-} from './library-event-catalog';
+import { ChangeLogRepository } from './repositories/change-log.repository';
+import { IdempotencyRepository } from './repositories/idempotency.repository';
+import { TransactionService } from './services/transaction.service';
+import { OutboxWorker } from './workers/outbox.worker';
+import { SyncMetricsService } from './metrics/sync.metrics';
+import { EventDispatcher, SYNC_EVENT_TYPES } from './events/library.events';
 import { CoreModule } from '../../../core/core.module';
-import { LIBRARY_SYNC_PORT, LIBRARY_PORT } from './library-sync.port';
-import { LibrarySyncBridgeService } from './library-sync-bridge.service';
+import { SYNC_PORT } from './ports/sync.port';
+import { SyncService } from './sync.service';
 
 @Module({
   imports: [CoreModule],
@@ -19,34 +16,26 @@ import { LibrarySyncBridgeService } from './library-sync-bridge.service';
   providers: [
     ChangeLogRepository,
     IdempotencyRepository,
-    LibraryTransactionService,
+    TransactionService,
     OutboxWorker,
     SyncMetricsService,
-    LibraryDomainEventDispatcher,
-    LibrarySyncBridgeService,
+    EventDispatcher,
+    SyncService,
     {
-      provide: LIBRARY_PORT,
-      useExisting: LibrarySyncBridgeService,
+      provide: SYNC_PORT,
+      useExisting: SyncService,
     },
   ],
-  exports: [
-    LIBRARY_PORT,
-    LIBRARY_SYNC_PORT,
-    LibrarySyncBridgeService,
-    LibraryTransactionService,
-    ChangeLogRepository,
-    IdempotencyRepository,
-    OutboxWorker,
-  ],
+  exports: [SYNC_PORT, SyncService, TransactionService],
 })
 export class SyncModule implements OnModuleInit {
   constructor(
     private readonly outboxWorker: OutboxWorker,
-    private readonly dispatcher: LibraryDomainEventDispatcher,
+    private readonly dispatcher: EventDispatcher,
   ) {}
 
   onModuleInit() {
-    for (const evtType of Object.values(LIBRARY_EVENT_TYPES)) {
+    for (const evtType of Object.values(SYNC_EVENT_TYPES)) {
       if (!this.outboxWorker.hasHandler(evtType)) {
         this.outboxWorker.registerHandler(evtType, this.dispatcher);
       }

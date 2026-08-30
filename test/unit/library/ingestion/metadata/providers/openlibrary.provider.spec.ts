@@ -1,5 +1,5 @@
 import { OpenLibraryProvider } from '@/modules/library/ingestion/metadata/providers/openlibrary.provider';
-import { ProviderFetchError } from '@/modules/library/ingestion/metadata/metadata.executor';
+import { ProviderFetchError } from '@/modules/library/ingestion/metadata/services/provider.executor';
 
 describe('OpenLibraryProvider (Standalone)', () => {
   let provider: OpenLibraryProvider;

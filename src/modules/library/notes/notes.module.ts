@@ -9,6 +9,6 @@ import { SyncModule } from '../sync/sync.module';
   imports: [CoreModule, SyncModule],
   controllers: [NotesController],
   providers: [NotesRepository, NotesService],
-  exports: [NotesRepository, NotesService],
+  exports: [NotesService],
 })
 export class NotesModule {}

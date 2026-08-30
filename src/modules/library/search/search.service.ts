@@ -1,9 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { SearchRepository, SearchOptions } from './search.repository';
 import {
-  SearchRepository,
-  SearchOptions,
-} from './search.repository';
-import { FullTextIndexer, PageAnchorMatch } from './providers/full-text-indexer.provider';
+  FullTextIndexer,
+  PageAnchorMatch,
+  PageTextExtraction,
+} from './providers/full-text-indexer.provider';
 import { SearchCatalogQueryDto, SavedSearchDto } from './dto/search.dto';
 
 @Injectable()
@@ -63,6 +64,13 @@ export class SearchService {
       term,
       pageIndex,
     );
+  }
+
+  async indexAttachmentPages(
+    attachmentId: string,
+    pages: PageTextExtraction[],
+  ): Promise<void> {
+    await this.fullTextIndexer.indexAttachmentPages(attachmentId, pages);
   }
 
   /**

@@ -43,10 +43,10 @@ services:
     container_name: research_backend
     restart: unless-stopped
     ports:
-      - "${PORT:-2915}:2915"
+      - "${PORT:-3000}:3000"
     environment:
       NODE_ENV: production
-      PORT: 2915
+      PORT: 3000
       DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgrespassword}@postgres:5432/${DB_NAME:-research_management}?schema=public
       REDIS_HOST: redis
       REDIS_PORT: 6379

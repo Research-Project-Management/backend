@@ -9,16 +9,15 @@ import {
   HttpCode,
   HttpStatus,
   Inject,
+  Query,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
 import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
 import { CurrentUser } from '../../../modules/iam/authn/decorators/current-user.decorator';
 import { CurrentWorkspace } from '../../../modules/iam/authz/decorators/current-workspace.decorator';
-import {
-  IUnifiedIngestionService,
-  UNIFIED_INGESTION_SERVICE,
-} from './types/ingestion.contracts';
+import { IngestionPort, INGESTION_PORT } from './types/ingestion.types';
 import { IngestionService } from './ingestion.service';
+import { IngestionSubmissionDto } from './dto/ingestion-submission.dto';
 import {
   StartIngestionDto,
   IngestDoiDto,
@@ -36,14 +35,126 @@ import { CaptureUrlDto, ConfirmCapturedUrlDto } from './dto/capture-url.dto';
 @UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
 export class IngestionController {
   constructor(
-    @Inject(UNIFIED_INGESTION_SERVICE)
-    private readonly unifiedService: IUnifiedIngestionService,
+    @Inject(INGESTION_PORT)
+    private readonly unifiedService: IngestionPort,
     private readonly ingestionService: IngestionService,
   ) {}
 
   /**
-   * Unified Ingestion Endpoint (Supports DOI, URL, BibTeX, PDF, Zotero)
+   * Primary Fast-Path Submission Endpoint (202 Accepted)
    */
+  @Post('submit')
+  @HttpCode(HttpStatus.ACCEPTED)
+  async submit(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentWorkspace() currentWorkspaceId: string,
+    @CurrentUser('id') userId: string,
+    @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
+    @Body() dto: IngestionSubmissionDto,
+  ) {
+    const targetWsId = currentWorkspaceId || workspaceId;
+    const effectiveIdempotencyKey = idempotencyKeyHeader || dto.idempotencyKey;
+
+    let payload: any;
+    switch (dto.kind) {
+      case 'IDENTIFIER':
+        payload = {
+          kind: 'IDENTIFIER',
+          identifierType: dto.identifierType || 'DOI',
+          value: dto.value || '',
+        };
+        break;
+      case 'RECORD':
+        payload = {
+          kind: 'RECORD',
+          format: dto.format || 'BIBTEX',
+          content: dto.content || '',
+        };
+        break;
+      case 'URL':
+        payload = {
+          kind: 'URL',
+          url: dto.url || '',
+          previewToken: dto.previewToken,
+        };
+        break;
+      case 'FILE':
+        payload = {
+          kind: 'FILE',
+          fileId: dto.fileId || '',
+          filename: dto.filename,
+        };
+        break;
+      case 'CONNECTOR':
+        payload = {
+          kind: 'CONNECTOR',
+          connectionId: dto.connectionId || '',
+          externalObjectId: dto.externalObjectId || '',
+          externalVersion: dto.externalVersion || '',
+        };
+        break;
+      default:
+        payload = {
+          kind: 'IDENTIFIER',
+          identifierType: 'DOI',
+          value: '',
+        };
+    }
+
+    const result = await this.ingestionService.submit({
+      workspaceId: targetWsId,
+      userId,
+      idempotencyKey: effectiveIdempotencyKey,
+      payload,
+      collectionIds: dto.collectionIds,
+      tagIds: dto.tagIds,
+      overrides: dto.overrides,
+      contractVersion: dto.contractVersion,
+    });
+
+    return {
+      success: true,
+      data: result,
+    };
+  }
+
+  /**
+   * Ingestion Run Status Endpoint
+   */
+  @Get('status/:runId')
+  async getStatus(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentWorkspace() currentWorkspaceId: string,
+    @Param('runId') runId: string,
+  ) {
+    const targetWsId = currentWorkspaceId || workspaceId;
+    const status = await this.ingestionService.getRunStatus(targetWsId, runId);
+    return {
+      success: true,
+      data: status,
+    };
+  }
+
+  /**
+   * Ingestion Run Retry Endpoint
+   */
+  @Post('retry/:runId')
+  @HttpCode(HttpStatus.ACCEPTED)
+  async retry(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentWorkspace() currentWorkspaceId: string,
+    @Param('runId') runId: string,
+  ) {
+    const targetWsId = currentWorkspaceId || workspaceId;
+    const result = await this.ingestionService.retryRun(targetWsId, runId);
+    return {
+      success: true,
+      data: result,
+    };
+  }
+
+  // ── Backward Compatibility Endpoints ─────────────────────────────────────
+
   @Post(['', 'unified'])
   @HttpCode(HttpStatus.OK)
   async ingestUnified(
@@ -102,19 +213,6 @@ export class IngestionController {
           filename: dto.filename,
           collectionId: dto.collectionId,
           overrides: dto.overrides,
-          idempotencyKey: effectiveIdempotencyKey,
-        };
-        break;
-
-      case 'zotero':
-        command = {
-          source: 'zotero',
-          workspaceId: targetWsId,
-          userId,
-          connectionId: dto.connectionId || '',
-          externalItemKey: dto.externalItemKey || '',
-          payload: dto.payload,
-          collectionId: dto.collectionId,
           idempotencyKey: effectiveIdempotencyKey,
         };
         break;
@@ -186,18 +284,6 @@ export class IngestionController {
     return {
       success: true,
       data: run,
-    };
-  }
-
-  @Get('status/:runId')
-  async getStatus(
-    @Param('workspaceId') workspaceId: string,
-    @Param('runId') runId: string,
-  ) {
-    const status = await this.unifiedService.getRunStatus(workspaceId, runId);
-    return {
-      success: true,
-      data: status,
     };
   }
 

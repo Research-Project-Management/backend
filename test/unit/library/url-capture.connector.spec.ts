@@ -1,15 +1,15 @@
 import {
-  UrlCaptureConnector,
+  UrlCaptureProvider,
   CapturedPaperMetadata,
-} from '../../../src/modules/library/ingestion/providers/url-capture.connector';
+} from '../../../src/modules/library/ingestion/providers/url-capture.provider';
 
-describe('UrlCaptureConnector (SSRF & Security)', () => {
-  let connector: UrlCaptureConnector;
+describe('UrlCaptureProvider (SSRF & Security)', () => {
+  let connector: UrlCaptureProvider;
 
   beforeEach(() => {
     process.env.URL_CAPTURE_SECRET =
       'deterministic_test_url_capture_secret_key_min_32_bytes_1234567890';
-    connector = new UrlCaptureConnector();
+    connector = new UrlCaptureProvider();
   });
 
   it('rejects loopback and private IPv4 addresses', () => {

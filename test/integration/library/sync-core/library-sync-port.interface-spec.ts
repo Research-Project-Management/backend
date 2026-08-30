@@ -1,15 +1,15 @@
 import { LibraryTestHarness } from '../library-test-harness';
 import {
-  LIBRARY_SYNC_PORT,
-  ILibrarySyncPort,
-} from '../../../../src/modules/library/sync/library-sync.port';
+  SYNC_PORT,
+  SyncPort,
+} from '../../../../src/modules/library/sync/ports/sync.port';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 
 jest.setTimeout(60000);
 
-describe('Library Sync Port (ILibrarySyncPort Integration & Invariants)', () => {
+describe('Library Sync Port (SyncPort Integration & Invariants)', () => {
   let harness: LibraryTestHarness;
-  let port: ILibrarySyncPort;
+  let port: SyncPort;
   let workspaceIdA: string;
   let userIdA: string;
   let workspaceIdB: string;
@@ -17,7 +17,7 @@ describe('Library Sync Port (ILibrarySyncPort Integration & Invariants)', () => 
 
   beforeAll(async () => {
     harness = await LibraryTestHarness.create();
-    port = harness.moduleRef.get(LIBRARY_SYNC_PORT);
+    port = harness.moduleRef.get(SYNC_PORT);
 
     const tenantA = await harness.seedWorkspaceFixture();
     workspaceIdA = tenantA.workspaceId;

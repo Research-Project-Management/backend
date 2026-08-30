@@ -2,29 +2,26 @@ import {
   LibraryTestHarness,
   TestWorkspaceFixture,
 } from './library-test-harness';
-import { CurationService } from '../../../src/modules/library/curation/curation.service';
 import { CatalogService } from '../../../src/modules/library/catalog/catalog.service';
 import { CatalogRepository } from '../../../src/modules/library/catalog/catalog.repository';
-import { StateService } from '../../../src/modules/library/state/state.service';
-import { StateReadStatus, ItemReadStatus } from '../../../src/modules/library/state/dto/state.dto';
+import { ReadingService } from '../../../src/modules/library/reading/reading.service';
+import { ReadingStatus } from '../../../src/modules/library/reading/types/reading.types';
 import { BadRequestException } from '@nestjs/common';
 import * as crypto from 'crypto';
 
 describe('Duplicate Merge, Item States & Server-Owned Smart Views', () => {
   let harness: LibraryTestHarness;
   let workspace: TestWorkspaceFixture;
-  let curationService: CurationService;
   let catalogService: CatalogService;
   let catalogRepo: CatalogRepository;
-  let stateService: StateService;
+  let readingService: ReadingService;
 
   beforeAll(async () => {
     harness = await LibraryTestHarness.create();
     workspace = await harness.seedWorkspaceFixture();
-    curationService = harness.moduleRef.get(CurationService);
     catalogService = harness.moduleRef.get(CatalogService);
     catalogRepo = harness.moduleRef.get(CatalogRepository);
-    stateService = harness.moduleRef.get(StateService);
+    readingService = harness.moduleRef.get(ReadingService);
   }, 60000);
 
   afterAll(async () => {
@@ -54,7 +51,7 @@ describe('Duplicate Merge, Item States & Server-Owned Smart Views', () => {
       uploadedById: workspace.ownerUserId,
     });
 
-    const clusters = await curationService.detectDuplicates(wsId);
+    const clusters = await catalogService.detectDuplicates(wsId);
     const match = clusters.find(
       (c) =>
         c.items.some((i) => i.id === item1.id) &&
@@ -83,7 +80,7 @@ describe('Duplicate Merge, Item States & Server-Owned Smart Views', () => {
       uploadedById: workspace.ownerUserId,
     });
 
-    const clusters = await curationService.detectDuplicates(wsId);
+    const clusters = await catalogService.detectDuplicates(wsId);
     const match = clusters.find(
       (c) =>
         c.items.some((i) => i.id === item1.id) &&
@@ -155,7 +152,7 @@ describe('Duplicate Merge, Item States & Server-Owned Smart Views', () => {
     });
 
     // Perform atomic merge
-    const mergeResult = await curationService.mergeDuplicates(wsId, {
+    const mergeResult = await catalogService.mergeDuplicates(wsId, {
       primaryItemId: primary.id,
       duplicateItemIds: [duplicate.id],
     });
@@ -223,7 +220,7 @@ describe('Duplicate Merge, Item States & Server-Owned Smart Views', () => {
     });
 
     // Execute merge
-    await curationService.mergeDuplicates(wsId, {
+    await catalogService.mergeDuplicates(wsId, {
       primaryItemId: primary.id,
       duplicateItemIds: [duplicate.id],
     });
@@ -290,7 +287,7 @@ describe('Duplicate Merge, Item States & Server-Owned Smart Views', () => {
     });
 
     // Merge
-    await curationService.mergeDuplicates(wsId, {
+    await catalogService.mergeDuplicates(wsId, {
       primaryItemId: primary.id,
       duplicateItemIds: [duplicate.id],
     });
@@ -379,7 +376,7 @@ describe('Duplicate Merge, Item States & Server-Owned Smart Views', () => {
     });
 
     // Merge
-    await curationService.mergeDuplicates(wsId, {
+    await catalogService.mergeDuplicates(wsId, {
       primaryItemId: primary.id,
       duplicateItemIds: [duplicate.id],
     });
@@ -423,7 +420,7 @@ describe('Duplicate Merge, Item States & Server-Owned Smart Views', () => {
 
     // Attempt to update forbidden field 'workspaceId' or 'version'
     await expect(
-      curationService.mergeDuplicates(wsId, {
+      catalogService.mergeDuplicates(wsId, {
         primaryItemId: primary.id,
         duplicateItemIds: [duplicate.id],
         fieldSelections: {
@@ -433,7 +430,7 @@ describe('Duplicate Merge, Item States & Server-Owned Smart Views', () => {
     ).rejects.toThrow(BadRequestException);
 
     // Valid allowlisted field update succeeds
-    const res = await curationService.mergeDuplicates(wsId, {
+    const res = await catalogService.mergeDuplicates(wsId, {
       primaryItemId: primary.id,
       duplicateItemIds: [duplicate.id],
       fieldSelections: {
@@ -460,7 +457,7 @@ describe('Duplicate Merge, Item States & Server-Owned Smart Views', () => {
       uploadedById: userId,
     });
 
-    await curationService.mergeDuplicates(wsId, {
+    await catalogService.mergeDuplicates(wsId, {
       primaryItemId: primary.id,
       duplicateItemIds: [duplicate.id],
     });
@@ -521,7 +518,7 @@ describe('Duplicate Merge, Item States & Server-Owned Smart Views', () => {
       uploadedById: userId,
     });
 
-    await curationService.mergeDuplicates(wsId, {
+    await catalogService.mergeDuplicates(wsId, {
       primaryItemId: primary.id,
       duplicateItemIds: [duplicate.id],
     });
@@ -544,7 +541,7 @@ describe('Duplicate Merge, Item States & Server-Owned Smart Views', () => {
     });
 
     // Initial state is default
-    const initial = await stateService.getState(wsId, userId, item.id);
+    const initial = await readingService.getState(wsId, item.id, userId);
     expect(initial).toEqual({
       readStatus: 'unread',
       rating: 0,
@@ -552,8 +549,8 @@ describe('Duplicate Merge, Item States & Server-Owned Smart Views', () => {
     });
 
     // Update state via PATCH
-    const updated = await stateService.updateState(wsId, userId, item.id, {
-      readStatus: ItemReadStatus.READING,
+    const updated = await readingService.updateState(wsId, item.id, userId, {
+      readStatus: ReadingStatus.READING,
       rating: 4,
     });
 
@@ -561,7 +558,7 @@ describe('Duplicate Merge, Item States & Server-Owned Smart Views', () => {
     expect(updated.rating).toBe(4);
 
     // Verify GET reflects patched values
-    const fetched = await stateService.getState(wsId, userId, item.id);
+    const fetched = await readingService.getState(wsId, item.id, userId);
     expect(fetched.readStatus).toBe('reading');
     expect(fetched.rating).toBe(4);
   });
@@ -576,7 +573,7 @@ describe('Duplicate Merge, Item States & Server-Owned Smart Views', () => {
     });
 
     const before = new Date();
-    const res1 = await stateService.markAsRead(wsId, userId, item.id);
+    const res1 = await readingService.markAsRead(wsId, item.id, userId);
     const after = new Date();
 
     expect(res1.readStatus).toBe('reading');
@@ -592,12 +589,12 @@ describe('Duplicate Merge, Item States & Server-Owned Smart Views', () => {
     expect(dbItem?.accessedAt).toBeNull();
 
     // Mark as completed
-    await stateService.updateState(wsId, userId, item.id, {
-      readStatus: ItemReadStatus.COMPLETED,
+    await readingService.updateState(wsId, item.id, userId, {
+      readStatus: ReadingStatus.COMPLETED,
     });
 
     // Calling markAsRead again should NOT downgrade completed to reading
-    const res2 = await stateService.markAsRead(wsId, userId, item.id);
+    const res2 = await readingService.markAsRead(wsId, item.id, userId);
     expect(res2.readStatus).toBe('completed');
   });
 
@@ -631,7 +628,7 @@ describe('Duplicate Merge, Item States & Server-Owned Smart Views', () => {
     });
 
     // Read second item now
-    await stateService.markAsRead(wsId, userId, readSecond.id);
+    await readingService.markAsRead(wsId, readSecond.id, userId);
 
     const list = await catalogService.listItems(wsId, {
       view: 'recent',

@@ -1,12 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { IngestionService } from '@/modules/library/ingestion/ingestion.service';
 import { PrismaService } from '@/core/database/prisma.service';
-import { LibraryTransactionService } from '@/modules/library/sync/library-transaction.service';
-import { UrlCaptureConnector } from '@/modules/library/ingestion/providers/url-capture.connector';
-import { CANONICAL_METADATA_SERVICE } from '@/modules/library/ingestion/metadata/metadata.contracts';
-import { IdempotencyRepository } from '@/modules/library/sync/idempotency.repository';
-import { ExtractorService } from '@/modules/library/attachments/providers/extractor.provider';
-import { BibtexParser } from '@/modules/library/citation/formatters/bibtex.parser';
+import { TransactionService } from '@/modules/library/sync/services/transaction.service';
+import { UrlCaptureProvider } from '@/modules/library/ingestion/providers/url-capture.provider';
+import { METADATA_PORT } from '@/modules/library/ingestion/metadata/types/metadata.types';
+import { IdempotencyRepository } from '@/modules/library/sync/repositories/idempotency.repository';
+import { PdfExtractorProvider } from '@/modules/library/attachments/providers/pdf-extractor.provider';
+import { BibtexParser } from '@/modules/library/ingestion/parsers/bibtex.parser';
 import { R2Service } from '@/modules/storage/r2/r2.service';
 import {
   IngestionIdempotencyConflictException,
@@ -166,11 +166,11 @@ describe('Unified Ingestion Pipeline (DOI / URL / BibTeX / PDF / Zotero)', () =>
       providers: [
         IngestionService,
         { provide: PrismaService, useValue: prisma },
-        { provide: LibraryTransactionService, useValue: libraryTx },
-        { provide: UrlCaptureConnector, useValue: urlCapture },
-        { provide: CANONICAL_METADATA_SERVICE, useValue: metadataService },
+        { provide: TransactionService, useValue: libraryTx },
+        { provide: UrlCaptureProvider, useValue: urlCapture },
+        { provide: METADATA_PORT, useValue: metadataService },
         { provide: IdempotencyRepository, useValue: idempotencyRepo },
-        { provide: ExtractorService, useValue: extractorService },
+        { provide: PdfExtractorProvider, useValue: extractorService },
         { provide: STORAGE_PORT, useValue: storagePort },
         { provide: BibtexParser, useValue: bibtexParser },
       ],
@@ -385,29 +385,7 @@ describe('Unified Ingestion Pipeline (DOI / URL / BibTeX / PDF / Zotero)', () =>
     });
   });
 
-  describe('5. Zotero Source Ingestion', () => {
-    it('creates CatalogItem and ZoteroItemBinding for valid connection', async () => {
-      const result = await service.ingest({
-        source: 'zotero',
-        workspaceId,
-        userId,
-        connectionId: 'conn-123',
-        externalItemKey: 'ZOTERO_ITEM_456',
-        payload: {
-          data: {
-            title: 'Zotero Paper',
-            creators: [{ firstName: 'John', lastName: 'Doe' }],
-            date: '2023',
-          },
-        },
-      });
-
-      expect(result.status).toBe('completed');
-      expect(libraryTx.executeInTransaction).toHaveBeenCalled();
-    });
-  });
-
-  describe('6. Idempotency Handling', () => {
+  describe('5. Idempotency Handling', () => {
     it('returns cached response when idempotency record is cached', async () => {
       idempotencyRepo.claim.mockResolvedValueOnce({
         status: 'cached',

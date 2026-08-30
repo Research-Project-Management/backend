@@ -58,17 +58,23 @@ export class PageController {
     return this.pageService.getProjectPageTree(projectId);
   }
 
-  @Post('project/:projectId/pages')
+  @Post(['project/:projectId/pages', 'workspace/:workspaceId/pages', 'pages'])
   @HttpCode(HttpStatus.CREATED)
-  @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('admin', 'contributor')
-  @ApiOperation({ summary: 'Create a new page in a project' })
+  @ApiOperation({ summary: 'Create a new page in a project or workspace' })
   async createPage(
-    @Param('projectId') projectId: string,
     @CurrentUser('id') userId: string,
     @Body() dto: CreatePageDto,
+    @Param('projectId') projectId?: string,
+    @Param('workspaceId') workspaceId?: string,
   ) {
-    return this.pageService.createPage('', projectId, userId, dto);
+    const effectiveProjectId = projectId || dto.projectId || '';
+    const effectiveWorkspaceId = workspaceId || dto.workspaceId || '';
+    return this.pageService.createPage(
+      effectiveWorkspaceId,
+      effectiveProjectId,
+      userId,
+      dto,
+    );
   }
 
   @Get(['project/:projectId/pages/:pageId', 'pages/:pageId'])

@@ -1,5 +1,5 @@
 import { LibraryTestHarness } from '../library-test-harness';
-import { ChangeLogRepository } from '../../../../src/modules/library/sync/change-log.repository';
+import { ChangeLogRepository } from '../../../../src/modules/library/sync/repositories/change-log.repository';
 
 jest.setTimeout(60000);
 

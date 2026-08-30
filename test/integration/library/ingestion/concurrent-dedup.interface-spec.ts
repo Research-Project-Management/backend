@@ -4,9 +4,9 @@ import {
 } from '../library-test-harness';
 import { IngestionService } from '../../../../src/modules/library/ingestion/ingestion.service';
 import {
-  CANONICAL_METADATA_SERVICE,
-  CanonicalMetadataResolver,
-} from '../../../../src/modules/library/ingestion/metadata/metadata.contracts';
+  METADATA_PORT,
+  MetadataPort,
+} from '../../../../src/modules/library/ingestion/metadata/types/metadata.types';
 import { R2Service } from '../../../../src/modules/storage/r2/r2.service';
 
 describe('Integration: Database-Backed Deduplication & Concurrency Race Resistance', () => {
@@ -14,7 +14,7 @@ describe('Integration: Database-Backed Deduplication & Concurrency Race Resistan
   let fixtureA: TestWorkspaceFixture;
   let fixtureB: TestWorkspaceFixture;
   let ingestionService: IngestionService;
-  let metadataService: CanonicalMetadataResolver;
+  let metadataService: MetadataPort;
 
   beforeAll(async () => {
     harness = await LibraryTestHarness.create();
@@ -22,9 +22,7 @@ describe('Integration: Database-Backed Deduplication & Concurrency Race Resistan
     fixtureB = await harness.seedWorkspaceFixture();
 
     ingestionService = harness.moduleRef.get(IngestionService);
-    metadataService = harness.moduleRef.get<CanonicalMetadataResolver>(
-      CANONICAL_METADATA_SERVICE,
-    );
+    metadataService = harness.moduleRef.get<MetadataPort>(METADATA_PORT);
   });
 
   afterAll(async () => {

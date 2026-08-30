@@ -180,14 +180,8 @@ export class CollectionsRepository {
     strategyOrTx?: CollectionDeleteStrategy | Prisma.TransactionClient,
     tx?: Prisma.TransactionClient,
   ): Promise<boolean> {
-    const clientTx =
-      typeof strategyOrTx === 'string'
-        ? tx
-        : (strategyOrTx as Prisma.TransactionClient | undefined);
-    const strategy =
-      typeof strategyOrTx === 'string'
-        ? (strategyOrTx as CollectionDeleteStrategy)
-        : 'orphan';
+    const clientTx = typeof strategyOrTx === 'string' ? tx : strategyOrTx;
+    const strategy = typeof strategyOrTx === 'string' ? strategyOrTx : 'orphan';
 
     const client = this.getClient(clientTx);
 

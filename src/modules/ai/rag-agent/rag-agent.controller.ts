@@ -60,7 +60,13 @@ export class RagAgentController {
     return this.ragAgentService.syncRagChat(userId, dto);
   }
 
-  @Post('paper/:paperId/chat')
+  @Post([
+    'paper/:paperId/chat',
+    'rag/papers/:paperId/stream',
+    'papers/:paperId/stream',
+    'papers/:paperId/chat',
+  ])
+  @BypassEnvelope()
   @ApiOperation({ summary: 'Stream paper-scoped RAG chat responses via SSE' })
   async paperChatStream(
     @CurrentUser('id') userId: string,

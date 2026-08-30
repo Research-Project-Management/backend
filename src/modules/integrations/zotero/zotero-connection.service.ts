@@ -14,10 +14,7 @@ import {
   CreateZoteroBindingDto,
   ZoteroConnectionView,
 } from './dto/zotero-connection.dto';
-import {
-  LIBRARY_SYNC_PORT,
-  ILibrarySyncPort,
-} from '../../library/sync/library-sync.port';
+import { SYNC_PORT, SyncPort } from '../../library/sync/ports/sync.port';
 
 @Injectable()
 export class ZoteroConnectionService {
@@ -28,8 +25,8 @@ export class ZoteroConnectionService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     @Optional()
-    @Inject(LIBRARY_SYNC_PORT)
-    private readonly libraryBridge?: ILibrarySyncPort,
+    @Inject(SYNC_PORT)
+    private readonly libraryBridge?: SyncPort,
   ) {
     const rawSecret =
       this.configService.get<string>('ZOTERO_ENCRYPTION_KEY') ||

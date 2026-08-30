@@ -12,10 +12,7 @@ import { ZoteroMapper } from './zotero.mapper';
 import { ZoteroConflictService } from './zotero-conflict.service';
 import { ZoteroSyncPolicy } from './zotero-sync.policy';
 import { ResolveZoteroConflictDto } from './dto/resolve-zotero-conflict.dto';
-import {
-  LIBRARY_SYNC_PORT,
-  ILibrarySyncPort,
-} from '../../library/sync/library-sync.port';
+import { SYNC_PORT, SyncPort } from '../../library/sync/ports/sync.port';
 
 export interface PushItemResult {
   success: boolean;
@@ -37,8 +34,8 @@ export class ZoteroPushWorker {
     private readonly mapper: ZoteroMapper,
     private readonly conflictService: ZoteroConflictService,
     private readonly syncPolicy: ZoteroSyncPolicy,
-    @Inject(LIBRARY_SYNC_PORT)
-    private readonly libraryBridge: ILibrarySyncPort,
+    @Inject(SYNC_PORT)
+    private readonly libraryBridge: SyncPort,
   ) {}
 
   /**

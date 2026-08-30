@@ -29,4 +29,3 @@ export class AttachmentStorageException extends HttpException {
     super(message, HttpStatus.INTERNAL_SERVER_ERROR);
   }
 }
-

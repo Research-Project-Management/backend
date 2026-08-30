@@ -4,12 +4,7 @@ export interface SchemaFieldDefinition {
   placeholder?: string;
   type: 'text' | 'textarea' | 'date' | 'number' | 'url';
   category?:
-    | 'core'
-    | 'venue'
-    | 'publication'
-    | 'identifiers'
-    | 'archive'
-    | 'extra';
+    'core' | 'venue' | 'publication' | 'identifiers' | 'archive' | 'extra';
 }
 
 export interface SchemaCreatorTypeDefinition {

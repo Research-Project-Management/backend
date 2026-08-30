@@ -15,6 +15,19 @@ export interface TestWorkspaceFixture {
   ownerUserId: string;
 }
 
+class InMemoryFeatureFlags {
+  private overrides = new Map<string, { readNew?: boolean }>();
+  setWorkspaceOverride(workspaceId: string, opts: { readNew?: boolean }) {
+    this.overrides.set(workspaceId, opts);
+  }
+  isReadNewEnabled(workspaceId: string) {
+    return this.overrides.get(workspaceId)?.readNew ?? true;
+  }
+  clearWorkspaceOverride(workspaceId: string) {
+    this.overrides.delete(workspaceId);
+  }
+}
+
 export class LibraryTestHarness {
   private readonly createdWorkspaces = new Set<string>();
   private readonly createdUsers = new Set<string>();
@@ -23,7 +36,7 @@ export class LibraryTestHarness {
     public readonly app: NestFastifyApplication,
     public readonly moduleRef: TestingModule,
     public readonly prisma: PrismaService,
-    public readonly featureFlags: any = {},
+    public readonly featureFlags: InMemoryFeatureFlags = new InMemoryFeatureFlags(),
   ) {}
 
   /**
@@ -54,7 +67,12 @@ export class LibraryTestHarness {
 
     const prisma = moduleRef.get(PrismaService);
 
-    return new LibraryTestHarness(app, moduleRef, prisma, {});
+    return new LibraryTestHarness(
+      app,
+      moduleRef,
+      prisma,
+      new InMemoryFeatureFlags(),
+    );
   }
 
   /**

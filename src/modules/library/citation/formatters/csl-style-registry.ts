@@ -248,6 +248,146 @@ export class CslStyleRegistry {
         return { styleId: 'ris', inText: item.title, bibliography: ris };
       },
     });
+
+    // Alias: apa -> apa-7th
+    const apaStyle = this.styles.get('apa-7th');
+    if (apaStyle) {
+      this.styles.set('apa', { ...apaStyle, id: 'apa' });
+    }
+
+    // 6. Harvard
+    this.styles.set('harvard', {
+      id: 'harvard',
+      name: 'Harvard Reference Format 1 (author-date)',
+      category: 'author-date',
+      format: (item: CitationItemInput) => {
+        const authors = this.parseAuthors(item);
+        const year =
+          item.year || (item.date ? new Date(item.date).getFullYear() : 'n.d.');
+        const inText =
+          authors.length > 2
+            ? `(${authors[0].lastName} et al. ${year})`
+            : authors.length === 2
+              ? `(${authors[0].lastName} and ${authors[1].lastName} ${year})`
+              : `(${authors[0].lastName || 'Anon.'} ${year})`;
+
+        const authorList = authors.map((a) => {
+          const init = a.firstName ? `, ${a.firstName[0]}.` : '';
+          return `${a.lastName}${init}`;
+        });
+        const authorStr =
+          authorList.length > 1
+            ? `${authorList.slice(0, -1).join(', ')} and ${authorList[authorList.length - 1]}`
+            : authorList[0] || 'Anon.';
+
+        const title = item.title;
+        const pubTitle =
+          item.publicationTitle || item.journal || item.publisher || '';
+        const vol = item.volume ? `, ${item.volume}` : '';
+        const pages = item.pages ? `, pp.${item.pages}` : '';
+
+        const bibliography =
+          `${authorStr} (${year}) '${title}', ${pubTitle}${vol}${pages}.`.trim();
+        return { styleId: 'harvard', inText, bibliography };
+      },
+    });
+
+    // 7. Chicago (Author-Date)
+    const chicagoFormatter = (item: CitationItemInput) => {
+      const authors = this.parseAuthors(item);
+      const year =
+        item.year || (item.date ? new Date(item.date).getFullYear() : 'n.d.');
+      const inText =
+        authors.length > 3
+          ? `(${authors[0].lastName} et al. ${year})`
+          : authors.length === 2
+            ? `(${authors[0].lastName} and ${authors[1].lastName} ${year})`
+            : `(${authors[0].lastName || 'Anonymous'} ${year})`;
+
+      const authorStr = authors
+        .map((a) => `${a.lastName}, ${a.firstName || ''}`.trim())
+        .join(', and ');
+      const title = `"${item.title}."`;
+      const pubTitle =
+        item.publicationTitle || item.journal || item.publisher || '';
+      const doi = item.doi ? ` https://doi.org/${item.doi}` : '';
+      const bibliography =
+        `${authorStr}. ${year}. ${title} ${pubTitle}.${doi}`.trim();
+      return {
+        styleId: 'chicago-author-date' as CitationStyleId,
+        inText,
+        bibliography,
+      };
+    };
+    this.styles.set('chicago-author-date', {
+      id: 'chicago-author-date',
+      name: 'Chicago Manual of Style 17th edition (author-date)',
+      category: 'author-date',
+      format: chicagoFormatter,
+    });
+    this.styles.set('chicago', {
+      id: 'chicago',
+      name: 'Chicago Manual of Style (alias)',
+      category: 'author-date',
+      format: (item) => ({ ...chicagoFormatter(item), styleId: 'chicago' }),
+    });
+
+    // 8. MLA
+    const mlaFormatter = (item: CitationItemInput) => {
+      const authors = this.parseAuthors(item);
+      const inText =
+        authors.length > 2
+          ? `(${authors[0].lastName} et al.)`
+          : authors.length === 2
+            ? `(${authors[0].lastName} and ${authors[1].lastName})`
+            : `(${authors[0].lastName || 'Anonymous'})`;
+
+      const authorStr = authors
+        .map((a) => `${a.lastName}, ${a.firstName || ''}`.trim())
+        .join(', and ');
+      const title = `"${item.title}."`;
+      const pubTitle = item.publicationTitle || item.journal || '';
+      const year =
+        item.year || (item.date ? new Date(item.date).getFullYear() : '');
+      const bibliography =
+        `${authorStr}. ${title} ${pubTitle}, ${year}.`.trim();
+      return { styleId: 'mla-9th' as CitationStyleId, inText, bibliography };
+    };
+    this.styles.set('mla-9th', {
+      id: 'mla-9th',
+      name: 'Modern Language Association 9th edition',
+      category: 'author-date',
+      format: mlaFormatter,
+    });
+    this.styles.set('mla', {
+      id: 'mla',
+      name: 'Modern Language Association (alias)',
+      category: 'author-date',
+      format: (item) => ({ ...mlaFormatter(item), styleId: 'mla' }),
+    });
+
+    // 9. Vancouver
+    this.styles.set('vancouver', {
+      id: 'vancouver',
+      name: 'Vancouver Style',
+      category: 'numeric',
+      format: (item: CitationItemInput, index: number = 1) => {
+        const authors = this.parseAuthors(item);
+        const inText = `(${index})`;
+        const authorStr = authors
+          .slice(0, 6)
+          .map((a) => `${a.lastName} ${a.firstName?.[0] || ''}`.trim())
+          .join(', ');
+        const etAl = authors.length > 6 ? ', et al.' : '';
+        const title = item.title;
+        const pubTitle = item.publicationTitle || item.journal || '';
+        const year =
+          item.year || (item.date ? new Date(item.date).getFullYear() : '');
+        const bibliography =
+          `${authorStr}${etAl}. ${title}. ${pubTitle}. ${year}.`.trim();
+        return { styleId: 'vancouver', inText, bibliography };
+      },
+    });
   }
 
   getStyle(styleId: CitationStyleId): CitationStyleDefinition | undefined {

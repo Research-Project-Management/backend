@@ -4,7 +4,7 @@ import {
   CreateAnnotationData,
   UpdateAnnotationData,
 } from './annotations.repository';
-import { LibraryTransactionService } from '../sync/library-transaction.service';
+import { TransactionService } from '../sync/services/transaction.service';
 
 @Injectable()
 export class AnnotationsService {
@@ -12,7 +12,7 @@ export class AnnotationsService {
 
   constructor(
     private readonly annotationsRepo: AnnotationsRepository,
-    private readonly libraryTx: LibraryTransactionService,
+    private readonly libraryTx: TransactionService,
   ) {}
 
   async getAnnotationsByAttachment(

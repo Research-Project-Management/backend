@@ -1,8 +1,8 @@
-﻿import { ConflictException } from '@nestjs/common';
+import { ConflictException } from '@nestjs/common';
 import {
   MetadataRoutingPolicy,
   METADATA_POLICY_VERSION,
-} from '@/modules/library/ingestion/metadata/metadata.policy';
+} from '@/modules/library/ingestion/metadata/policies/metadata.policy';
 
 describe('MetadataRoutingPolicy', () => {
   describe('getTiers — routing matrix', () => {

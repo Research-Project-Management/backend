@@ -9,6 +9,6 @@ import { CoreModule } from '../../../core/core.module';
   imports: [CoreModule],
   controllers: [SearchController],
   providers: [SearchRepository, SearchService, FullTextIndexer],
-  exports: [SearchRepository, SearchService, FullTextIndexer],
+  exports: [SearchService],
 })
 export class SearchModule {}

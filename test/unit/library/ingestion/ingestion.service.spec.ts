@@ -1,12 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { IngestionService } from '@/modules/library/ingestion/ingestion.service';
 import { PrismaService } from '@/core/database/prisma.service';
-import { LibraryTransactionService } from '@/modules/library/sync/library-transaction.service';
-import { IdempotencyRepository } from '@/modules/library/sync/idempotency.repository';
-import { ExtractorService } from '@/modules/library/attachments/providers/extractor.provider';
-import { BibtexParser } from '@/modules/library/citation/formatters/bibtex.parser';
-import { UrlCaptureConnector } from '@/modules/library/ingestion/providers/url-capture.connector';
-import { CANONICAL_METADATA_SERVICE } from '@/modules/library/ingestion/metadata/metadata.contracts';
+import { TransactionService } from '@/modules/library/sync/services/transaction.service';
+import { IdempotencyRepository } from '@/modules/library/sync/repositories/idempotency.repository';
+import { PdfExtractorProvider } from '@/modules/library/attachments/providers/pdf-extractor.provider';
+import { BibtexParser } from '@/modules/library/ingestion/parsers/bibtex.parser';
+import { UrlCaptureProvider } from '@/modules/library/ingestion/providers/url-capture.provider';
+import { METADATA_PORT } from '@/modules/library/ingestion/metadata/types/metadata.types';
 import { STORAGE_PORT } from '@/modules/storage/storage.port';
 
 describe('IngestionService (Canonical)', () => {
@@ -124,13 +124,13 @@ describe('IngestionService (Canonical)', () => {
       providers: [
         IngestionService,
         { provide: PrismaService, useValue: prisma },
-        { provide: LibraryTransactionService, useValue: libraryTx },
+        { provide: TransactionService, useValue: libraryTx },
         { provide: IdempotencyRepository, useValue: idempotencyRepo },
-        { provide: ExtractorService, useValue: extractorService },
+        { provide: PdfExtractorProvider, useValue: extractorService },
         { provide: STORAGE_PORT, useValue: storagePort },
         { provide: BibtexParser, useValue: new BibtexParser() },
-        { provide: UrlCaptureConnector, useValue: urlCapture },
-        { provide: CANONICAL_METADATA_SERVICE, useValue: metadataService },
+        { provide: UrlCaptureProvider, useValue: urlCapture },
+        { provide: METADATA_PORT, useValue: metadataService },
       ],
     }).compile();
 

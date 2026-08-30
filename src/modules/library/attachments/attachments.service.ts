@@ -1,7 +1,12 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { createHash } from 'crypto';
-import { LibraryTransactionService } from '../sync/library-transaction.service';
+import { TransactionService } from '../sync/services/transaction.service';
 
 export interface CreateAttachmentInput {
   catalogItemId: string;
@@ -26,7 +31,7 @@ export class AttachmentsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly libraryTx: LibraryTransactionService,
+    private readonly libraryTx: TransactionService,
   ) {}
 
   /**
@@ -214,38 +219,50 @@ export class AttachmentsService {
   /**
    * Deletes an attachment and records a tombstone.
    */
-  async deleteAttachment(workspaceId: string, attachmentId: string) {
+  async deleteAttachment(workspaceId?: string, attachmentId?: string) {
+    const targetId = attachmentId || workspaceId;
+    if (!targetId) {
+      throw new BadRequestException('Attachment ID is required');
+    }
+
     const attachment = await this.prisma.catalogAttachment.findFirst({
       where: {
-        id: attachmentId,
-        catalogItem: { workspaceId },
+        id: targetId,
+        ...(workspaceId && attachmentId
+          ? { catalogItem: { workspaceId } }
+          : {}),
       },
+      include: { catalogItem: true },
     });
 
     if (!attachment) {
-      throw new NotFoundException(`Attachment ${attachmentId} not found`);
+      throw new NotFoundException(`Attachment ${targetId} not found`);
     }
 
-    return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      await tx.catalogAttachment.delete({ where: { id: attachmentId } });
+    const effectiveWsId =
+      workspaceId && attachmentId
+        ? workspaceId
+        : attachment.catalogItem.workspaceId;
 
-      await helpers.appendChange(workspaceId, {
+    return this.libraryTx.executeInTransaction(async (tx, helpers) => {
+      await tx.catalogAttachment.delete({ where: { id: attachment.id } });
+
+      await helpers.appendChange(effectiveWsId, {
         entityType: 'Attachment',
-        entityId: attachmentId,
+        entityId: attachment.id,
         action: 'delete',
         version: 1,
-        data: { id: attachmentId },
+        data: { id: attachment.id },
       });
 
       await helpers.publishOutbox(
-        workspaceId,
-        attachmentId,
+        effectiveWsId,
+        attachment.id,
         'library.attachment.deleted',
-        { attachmentId },
+        { attachmentId: attachment.id },
       );
 
       return { success: true };
     });
   }
 }
-

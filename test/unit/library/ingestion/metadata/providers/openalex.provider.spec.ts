@@ -1,5 +1,5 @@
 import { OpenAlexProvider } from '@/modules/library/ingestion/metadata/providers/openalex.provider';
-import { ProviderFetchError } from '@/modules/library/ingestion/metadata/metadata.executor';
+import { ProviderFetchError } from '@/modules/library/ingestion/metadata/services/provider.executor';
 
 describe('OpenAlexProvider (Standalone)', () => {
   let provider: OpenAlexProvider;

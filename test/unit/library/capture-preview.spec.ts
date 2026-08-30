@@ -1,17 +1,17 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
-import { UrlCaptureConnector } from '../../../src/modules/library/ingestion/providers/url-capture.connector';
+import { UrlCaptureProvider } from '../../../src/modules/library/ingestion/providers/url-capture.provider';
 import { IngestionService } from '../../../src/modules/library/ingestion/ingestion.service';
 import { CatalogService } from '../../../src/modules/library/catalog/catalog.service';
-import { LibraryTransactionService } from '../../../src/modules/library/sync/library-transaction.service';
-import { IdempotencyRepository } from '../../../src/modules/library/sync/idempotency.repository';
-import { ExtractorService } from '../../../src/modules/library/attachments/providers/extractor.provider';
-import { BibtexParser } from '../../../src/modules/library/citation/formatters/bibtex.parser';
+import { TransactionService } from '../../../src/modules/library/sync/services/transaction.service';
+import { IdempotencyRepository } from '../../../src/modules/library/sync/repositories/idempotency.repository';
+import { PdfExtractorProvider } from '../../../src/modules/library/attachments/providers/pdf-extractor.provider';
+import { BibtexParser } from '../../../src/modules/library/ingestion/parsers/bibtex.parser';
 import { createHash } from 'crypto';
 
 describe('Gate H: URL Capture Security & Persistent CapturePreview Record', () => {
   const testSecret =
     'test_secret_key_minimum_32_bytes_entropy_abcdef1234567890';
-  let connector: UrlCaptureConnector;
+  let connector: UrlCaptureProvider;
   let mockPrisma: any;
   let mockLibraryTx: any;
   let mockCatalogService: any;
@@ -30,7 +30,7 @@ describe('Gate H: URL Capture Security & Persistent CapturePreview Record', () =
       }),
     } as any;
 
-    connector = new UrlCaptureConnector(mockConfigService);
+    connector = new UrlCaptureProvider(mockConfigService);
 
     mockPrisma = {
       capturePreview: {
@@ -73,7 +73,7 @@ describe('Gate H: URL Capture Security & Persistent CapturePreview Record', () =
       mockPrisma,
       mockLibraryTx,
       new IdempotencyRepository(mockPrisma),
-      new ExtractorService(),
+      new PdfExtractorProvider(),
       new BibtexParser(),
       mockStoragePort,
       connector,
@@ -86,7 +86,7 @@ describe('Gate H: URL Capture Security & Persistent CapturePreview Record', () =
     it('1. Rejects initialization if URL_CAPTURE_SECRET is missing or < 32 characters', () => {
       delete process.env.URL_CAPTURE_SECRET;
       const badConfig = { get: jest.fn().mockReturnValue('too-short') } as any;
-      expect(() => new UrlCaptureConnector(badConfig)).toThrow(
+      expect(() => new UrlCaptureProvider(badConfig)).toThrow(
         /URL_CAPTURE_SECRET is missing or less than 32 characters/,
       );
     });
@@ -271,7 +271,7 @@ describe('Gate H: URL Capture Security & Persistent CapturePreview Record', () =
         },
       );
 
-      expect(result.id).toBe('item-1');
+      expect((result as any).id).toBe('item-1');
       expect(mockPrisma.capturePreview.updateMany).toHaveBeenCalledWith({
         where: { id: 'preview-1', consumedAt: null },
         data: { consumedAt: expect.any(Date) },

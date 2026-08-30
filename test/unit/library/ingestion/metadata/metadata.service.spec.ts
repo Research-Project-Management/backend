@@ -2,16 +2,16 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConflictException } from '@nestjs/common';
 import { MetadataService } from '@/modules/library/ingestion/metadata/metadata.service';
 import {
-  CANONICAL_METADATA_PROVIDERS,
+  METADATA_PROVIDERS,
   MetadataProvider,
   ProviderResult,
-} from '@/modules/library/ingestion/metadata/metadata.contracts';
-import { MetadataCache } from '@/modules/library/ingestion/metadata/metadata.cache';
-import { MetadataReconciliationService } from '@/modules/library/ingestion/metadata/metadata.reconciler';
+} from '@/modules/library/ingestion/metadata/types/metadata.types';
+import { MetadataCache } from '@/modules/library/ingestion/metadata/cache/metadata.cache';
+import { ReconciliationService } from '@/modules/library/ingestion/metadata/services/reconciliation.service';
 import {
   ProviderExecutor,
   ProviderFetchError,
-} from '@/modules/library/ingestion/metadata/metadata.executor';
+} from '@/modules/library/ingestion/metadata/services/provider.executor';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -126,9 +126,9 @@ describe('MetadataService (canonical orchestrator)', () => {
         MetadataService,
         ProviderExecutor,
         { provide: MetadataCache, useValue: mockCache },
-        { provide: MetadataReconciliationService, useValue: mockReconciler },
+        { provide: ReconciliationService, useValue: mockReconciler },
         {
-          provide: CANONICAL_METADATA_PROVIDERS,
+          provide: METADATA_PROVIDERS,
           useValue: [crossref, s2, openAlex],
         },
       ],
@@ -258,8 +258,8 @@ describe('MetadataService (canonical orchestrator)', () => {
         MetadataService,
         ProviderExecutor,
         { provide: MetadataCache, useValue: mockCache },
-        { provide: MetadataReconciliationService, useValue: mockReconciler },
-        { provide: CANONICAL_METADATA_PROVIDERS, useValue: [] },
+        { provide: ReconciliationService, useValue: mockReconciler },
+        { provide: METADATA_PROVIDERS, useValue: [] },
       ],
     }).compile();
 
@@ -303,9 +303,9 @@ describe('MetadataService (canonical orchestrator)', () => {
         MetadataService,
         ProviderExecutor,
         { provide: MetadataCache, useValue: mockCache },
-        { provide: MetadataReconciliationService, useValue: mockReconciler },
+        { provide: ReconciliationService, useValue: mockReconciler },
         {
-          provide: CANONICAL_METADATA_PROVIDERS,
+          provide: METADATA_PROVIDERS,
           useValue: [arxiv, s2, openAlex],
         },
       ],

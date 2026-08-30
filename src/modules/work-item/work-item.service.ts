@@ -47,6 +47,17 @@ export class WorkItemService {
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
+  private isDoneColumn(col?: string | null): boolean {
+    if (!col) return false;
+    const lower = col.toLowerCase();
+    return (
+      lower === 'done' ||
+      lower === 'completed' ||
+      lower.includes('done') ||
+      lower.includes('complete')
+    );
+  }
+
   private async invalidateTaskCache(
     projectId: string,
     taskId?: string,
@@ -232,7 +243,7 @@ export class WorkItemService {
       ...(dto.description !== undefined && { content: dto.description }),
       ...(dto.columnId !== undefined && {
         columnId: dto.columnId,
-        completed: dto.columnId === 'done',
+        completed: this.isDoneColumn(dto.columnId),
       }),
       ...(dto.completed !== undefined && { completed: dto.completed }),
       ...(dto.rank !== undefined && { rank: dto.rank }),
@@ -388,7 +399,7 @@ export class WorkItemService {
       id: taskItem.id,
       rank: index,
       columnId: targetColumn,
-      completed: targetColumn === 'done',
+      completed: this.isDoneColumn(targetColumn),
     }));
 
     await this.workItemRepo.updateTasksRank(updates);
@@ -407,7 +418,7 @@ export class WorkItemService {
 
     if (payload.columnId !== undefined) {
       data.columnId = payload.columnId;
-      data.completed = payload.columnId === 'done';
+      data.completed = this.isDoneColumn(payload.columnId);
     }
     if (payload.assigneeId !== undefined) {
       data.assigneeId = payload.assigneeId;

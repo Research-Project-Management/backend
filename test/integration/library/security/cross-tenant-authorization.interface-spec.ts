@@ -138,4 +138,62 @@ describe('Cross-Tenant Isolation & WorkspaceRoleGuard Authorization (Security E2
 
     expect(memberReadRes.status).toBe(200);
   });
+
+  it('strictly scopes CatalogItem lookups to workspaceId: cannot access or leak items from another tenant', async () => {
+    const tenantA = await harness.seedWorkspaceFixture();
+    const tenantB = await harness.seedWorkspaceFixture();
+
+    const userAToken = makeAuthHeader(
+      tenantA.ownerUserId,
+      `${tenantA.ownerUserId}@test.local`,
+    );
+
+    // Create item in Workspace B
+    const itemB = await harness.prisma.catalogItem.create({
+      data: {
+        workspaceId: tenantB.workspaceId,
+        title: 'Secret Paper in Tenant B',
+        uploadedById: tenantB.ownerUserId,
+        filename: 'secret.pdf',
+        fileUrl: 'https://test.local/secret.pdf',
+      },
+    });
+
+    // User A queries itemB using Workspace A scope -> 404 Not Found (does not leak existence)
+    const crossTenantGet = await request(harness.app.getHttpServer())
+      .get(
+        `/api/v1/workspaces/${tenantA.workspaceId}/library/items/${itemB.id}`,
+      )
+      .set('Authorization', userAToken);
+
+    expect(crossTenantGet.status).toBe(404);
+  });
+
+  it('CatalogRepository.findById strictly enforces workspaceId and returns null across tenants', async () => {
+    const tenantA = await harness.seedWorkspaceFixture();
+    const tenantB = await harness.seedWorkspaceFixture();
+
+    const itemB = await harness.prisma.catalogItem.create({
+      data: {
+        workspaceId: tenantB.workspaceId,
+        title: 'Confidential Research B',
+        uploadedById: tenantB.ownerUserId,
+        filename: 'confidential.pdf',
+        fileUrl: 'https://test.local/confidential.pdf',
+      },
+    });
+
+    const { CatalogRepository } =
+      await import('../../../../src/modules/library/catalog/catalog.repository');
+    const catalogRepo = harness.moduleRef.get(CatalogRepository);
+
+    // Query with tenant A workspace -> null
+    const foundInA = await catalogRepo.findById(tenantA.workspaceId, itemB.id);
+    expect(foundInA).toBeNull();
+
+    // Query with tenant B workspace -> found
+    const foundInB = await catalogRepo.findById(tenantB.workspaceId, itemB.id);
+    expect(foundInB).not.toBeNull();
+    expect(foundInB?.id).toBe(itemB.id);
+  });
 });

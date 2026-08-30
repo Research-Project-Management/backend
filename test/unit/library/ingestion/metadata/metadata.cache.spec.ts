@@ -1,5 +1,5 @@
-﻿import { MetadataCache } from '@/modules/library/ingestion/metadata/metadata.cache';
-import { METADATA_POLICY_VERSION } from '@/modules/library/ingestion/metadata/metadata.policy';
+import { MetadataCache } from '@/modules/library/ingestion/metadata/cache/metadata.cache';
+import { METADATA_POLICY_VERSION } from '@/modules/library/ingestion/metadata/policies/metadata.policy';
 
 const mockRedis = {
   isReady: jest.fn(() => true),

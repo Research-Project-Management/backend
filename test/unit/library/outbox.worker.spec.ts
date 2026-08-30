@@ -1,10 +1,10 @@
-import { OutboxWorker } from '../../../src/modules/library/sync/outbox.worker';
+import { OutboxWorker } from '../../../src/modules/library/sync/workers/outbox.worker';
 import { OutboxStatus } from '@prisma/client';
-import { SyncMetricsService } from '../../../src/modules/library/sync/sync.metrics';
+import { SyncMetricsService } from '../../../src/modules/library/sync/metrics/sync.metrics';
 import {
-  LIBRARY_EVENT_TYPES,
+  SYNC_EVENT_TYPES,
   LIBRARY_EVENT_CATALOG,
-} from '../../../src/modules/library/sync/library-event-catalog';
+} from '../../../src/modules/library/sync/events/library.events';
 
 describe('OutboxWorker (Atomic Lease, Heartbeat & Recovery)', () => {
   let worker: OutboxWorker;
@@ -266,7 +266,7 @@ describe('OutboxWorker (Atomic Lease, Heartbeat & Recovery)', () => {
   });
 
   it('asserts 100% of defined library event types are documented in event catalog', () => {
-    for (const [key, eventType] of Object.entries(LIBRARY_EVENT_TYPES)) {
+    for (const [key, eventType] of Object.entries(SYNC_EVENT_TYPES)) {
       expect(LIBRARY_EVENT_CATALOG[eventType as string]).toBeDefined();
       expect(LIBRARY_EVENT_CATALOG[eventType as string].producer).toBeTruthy();
       expect(LIBRARY_EVENT_CATALOG[eventType as string].consumer).toBeTruthy();

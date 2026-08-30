@@ -7,9 +7,9 @@ import {
   ProviderName,
   ProviderResult,
   QueryType,
-} from '../metadata.contracts';
-import { normalizeDoi } from '../metadata.identifiers';
-import { ProviderFetchError } from '../metadata.executor';
+} from '../types/metadata.types';
+import { normalizeDoi } from '../utils/metadata.utils';
+import { ProviderFetchError } from '../services/provider.executor';
 
 @Injectable()
 export class OpenAlexProvider implements MetadataProvider {

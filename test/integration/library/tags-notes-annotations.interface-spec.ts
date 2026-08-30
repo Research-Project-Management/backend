@@ -7,9 +7,11 @@ import { CatalogService } from '../../../src/modules/library/catalog/catalog.ser
 import { CatalogRepository } from '../../../src/modules/library/catalog/catalog.repository';
 import { NotesService } from '../../../src/modules/library/notes/notes.service';
 import { AnnotationsService } from '../../../src/modules/library/annotations/annotations.service';
-import { LibrarySyncBridgeService } from '../../../src/modules/library/sync/library-sync-bridge.service';
+import { SyncService } from '../../../src/modules/library/sync/sync.service';
 import { R2Service } from '../../../src/modules/storage/r2/r2.service';
 import * as crypto from 'crypto';
+
+const toItemView = (item: any) => ({ ...item, tags: item?.labels ?? [] });
 
 describe('Library Feature Closure: Paper Tags, Notes & Annotation Comments', () => {
   let harness: LibraryTestHarness;
@@ -20,7 +22,7 @@ describe('Library Feature Closure: Paper Tags, Notes & Annotation Comments', () 
   let catalogRepo: CatalogRepository;
   let notesService: NotesService;
   let annotationsService: AnnotationsService;
-  let syncBridge: LibrarySyncBridgeService;
+  let syncBridge: SyncService;
   let r2Service: R2Service;
 
   beforeAll(async () => {
@@ -32,7 +34,7 @@ describe('Library Feature Closure: Paper Tags, Notes & Annotation Comments', () 
     catalogRepo = harness.moduleRef.get(CatalogRepository);
     notesService = harness.moduleRef.get(NotesService);
     annotationsService = harness.moduleRef.get(AnnotationsService);
-    syncBridge = harness.moduleRef.get(LibrarySyncBridgeService);
+    syncBridge = harness.moduleRef.get(SyncService);
     r2Service = harness.moduleRef.get(R2Service);
   }, 60000);
 

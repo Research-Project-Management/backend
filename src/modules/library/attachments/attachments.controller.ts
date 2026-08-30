@@ -24,6 +24,7 @@ import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-
   'api/workspace/:workspaceId/library/items/:itemId/attachments',
   'api/library/:workspaceId/items/:itemId/attachments',
   'api/library/papers/:workspaceId/:itemId/attachments',
+  'api/library/attachments',
 ])
 @UseGuards(JwtAuthGuard)
 export class AttachmentsController {

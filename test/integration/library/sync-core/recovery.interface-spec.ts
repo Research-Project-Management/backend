@@ -1,6 +1,6 @@
 import { LibraryTestHarness } from '../library-test-harness';
-import { ChangeLogRepository } from '../../../../src/modules/library/sync/change-log.repository';
-import { IdempotencyRepository } from '../../../../src/modules/library/sync/idempotency.repository';
+import { ChangeLogRepository } from '../../../../src/modules/library/sync/repositories/change-log.repository';
+import { IdempotencyRepository } from '../../../../src/modules/library/sync/repositories/idempotency.repository';
 
 jest.setTimeout(60000);
 

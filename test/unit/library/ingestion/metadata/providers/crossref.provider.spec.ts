@@ -1,5 +1,5 @@
 import { CrossRefProvider } from '@/modules/library/ingestion/metadata/providers/crossref.provider';
-import { ProviderFetchError } from '@/modules/library/ingestion/metadata/metadata.executor';
+import { ProviderFetchError } from '@/modules/library/ingestion/metadata/services/provider.executor';
 
 describe('CrossRefProvider (Standalone)', () => {
   let provider: CrossRefProvider;

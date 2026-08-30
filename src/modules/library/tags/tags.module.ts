@@ -7,6 +7,6 @@ import { SyncModule } from '../sync/sync.module';
 @Module({
   imports: [CoreModule, SyncModule],
   providers: [TagsRepository, TagsService],
-  exports: [TagsRepository, TagsService],
+  exports: [TagsService],
 })
 export class TagsModule {}

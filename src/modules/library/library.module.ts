@@ -7,17 +7,16 @@ import { TagsModule } from './tags/tags.module';
 import { AttachmentsModule } from './attachments/attachments.module';
 import { AnnotationsModule } from './annotations/annotations.module';
 import { NotesModule } from './notes/notes.module';
-import { StateModule } from './state/state.module';
+import { ReadingModule } from './reading/reading.module';
 import { SyncModule } from './sync/sync.module';
 import { SearchModule } from './search/search.module';
 import { CitationModule } from './citation/citation.module';
 import { IngestionModule } from './ingestion/ingestion.module';
-import { CurationModule } from './curation/curation.module';
 import { ExportsModule } from './exports/exports.module';
 
 /**
  * Pure Composition Root for the Library Module.
- * Wires canonical business feature modules.
+ * Wires canonical 12 business feature modules.
  */
 @Module({
   imports: [
@@ -30,12 +29,11 @@ import { ExportsModule } from './exports/exports.module';
     AttachmentsModule,
     AnnotationsModule,
     NotesModule,
-    StateModule,
+    ReadingModule,
     SyncModule,
     SearchModule,
     CitationModule,
     IngestionModule,
-    CurationModule,
     ExportsModule,
   ],
   exports: [
@@ -45,12 +43,11 @@ import { ExportsModule } from './exports/exports.module';
     AttachmentsModule,
     AnnotationsModule,
     NotesModule,
-    StateModule,
+    ReadingModule,
     SyncModule,
     SearchModule,
     CitationModule,
     IngestionModule,
-    CurationModule,
     ExportsModule,
   ],
 })

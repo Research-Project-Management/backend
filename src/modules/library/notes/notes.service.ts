@@ -4,7 +4,7 @@ import {
   CreateNoteData,
   UpdateNoteData,
 } from './notes.repository';
-import { LibraryTransactionService } from '../sync/library-transaction.service';
+import { TransactionService } from '../sync/services/transaction.service';
 
 @Injectable()
 export class NotesService {
@@ -12,7 +12,7 @@ export class NotesService {
 
   constructor(
     private readonly notesRepo: NotesRepository,
-    private readonly libraryTx: LibraryTransactionService,
+    private readonly libraryTx: TransactionService,
   ) {}
 
   async listNotes(workspaceId: string, itemId?: string) {

@@ -1,10 +1,10 @@
-import { MetadataReconciliationService } from '@/modules/library/ingestion/metadata/metadata.reconciler';
+import { ReconciliationService } from '@/modules/library/ingestion/metadata/services/reconciliation.service';
 
-describe('MetadataReconciliationService (Canonical)', () => {
-  let reconciler: MetadataReconciliationService;
+describe('ReconciliationService (Canonical)', () => {
+  let reconciler: ReconciliationService;
 
   beforeEach(() => {
-    reconciler = new MetadataReconciliationService();
+    reconciler = new ReconciliationService();
   });
 
   it('is instantiable without dependencies', () => {

@@ -12,9 +12,6 @@
     "dist",
     "**/*spec.ts",
     "prisma",
-    "prisma.config.ts",
-    "src/modules/library/discovery/**/*",
-    "src/modules/library/exports/**/*",
-    "src/modules/library/ingestion/metadata/**/*"
+    "prisma.config.ts"
   ]
 }

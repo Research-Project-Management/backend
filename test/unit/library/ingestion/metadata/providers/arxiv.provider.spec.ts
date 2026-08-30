@@ -1,5 +1,5 @@
 import { ArxivProvider } from '@/modules/library/ingestion/metadata/providers/arxiv.provider';
-import { ProviderFetchError } from '@/modules/library/ingestion/metadata/metadata.executor';
+import { ProviderFetchError } from '@/modules/library/ingestion/metadata/services/provider.executor';
 
 describe('ArxivProvider (Standalone)', () => {
   let provider: ArxivProvider;

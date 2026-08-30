@@ -4,7 +4,7 @@
  * - Providers implement the MetadataProvider interface correctly
  * - The multi-provider token produces the correct provider array
  */
-import { MetadataProvider } from '@/modules/library/ingestion/metadata/metadata.contracts';
+import { MetadataProvider } from '@/modules/library/ingestion/metadata/types/metadata.types';
 import { ArxivProvider } from '@/modules/library/ingestion/metadata/providers/arxiv.provider';
 import { CrossRefProvider } from '@/modules/library/ingestion/metadata/providers/crossref.provider';
 import { PubMedProvider } from '@/modules/library/ingestion/metadata/providers/pubmed.provider';

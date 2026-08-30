@@ -1,5 +1,5 @@
-﻿import { ConflictException } from '@nestjs/common';
-import { MetadataRoutingPolicy } from '@/modules/library/ingestion/metadata/metadata.policy';
+import { ConflictException } from '@nestjs/common';
+import { MetadataRoutingPolicy } from '@/modules/library/ingestion/metadata/policies/metadata.policy';
 
 describe('SSRF Prevention — MetadataRoutingPolicy.validateUrl', () => {
   const blocked = [

@@ -205,5 +205,3 @@ export function extractFamilyName(authorName?: string | null): string {
   const parts = trimmed.split(/\s+/);
   return parts[parts.length - 1] || '';
 }
-
-

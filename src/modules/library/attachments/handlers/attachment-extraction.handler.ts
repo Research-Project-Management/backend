@@ -1,10 +1,10 @@
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '../../../../core/database/prisma.service';
-import { ExtractorService } from '../providers/extractor.provider';
-import { FullTextIndexer } from '../../search/providers/full-text-indexer.provider';
+import { PdfExtractorProvider } from '../providers/pdf-extractor.provider';
+import { SearchService } from '../../search/search.service';
 import { STORAGE_PORT, IStoragePort } from '../../../storage/storage.port';
 import { OutboxEvent } from '@prisma/client';
-import { OutboxDispatchHandler } from '../../sync/outbox.worker';
+import { OutboxDispatchHandler } from '../../sync/workers/outbox.worker';
 import { AttachmentStorageException } from '../errors/attachments.errors';
 
 export const EXTRACTION_EVENT_TYPES = {
@@ -22,8 +22,8 @@ export class AttachmentExtractionHandler implements OutboxDispatchHandler {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly extractorService: ExtractorService,
-    private readonly fullTextIndexer: FullTextIndexer,
+    private readonly extractorService: PdfExtractorProvider,
+    private readonly searchService: SearchService,
     @Inject(STORAGE_PORT) private readonly storagePort: IStoragePort,
     @Optional()
     @Inject(ATTACHMENT_EXTRACTION_STALE_THRESHOLD)
@@ -158,10 +158,7 @@ export class AttachmentExtractionHandler implements OutboxDispatchHandler {
 
       // 4. Atomically index pages idempotently
       if (doc.pages.length > 0) {
-        await this.fullTextIndexer.indexAttachmentPages(
-          attachment.id,
-          doc.pages,
-        );
+        await this.searchService.indexAttachmentPages(attachment.id, doc.pages);
       }
 
       // 5. Update status to READY on completion

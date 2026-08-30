@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 import { LibraryTestHarness } from '../library-test-harness';
 import { CitationService } from '../../../../src/modules/library/citation/citation.service';
-import { DiscoveryRepository } from '../../../../src/modules/library/discovery/discovery.repository';
+import { SearchRepository as DiscoveryRepository } from '../../../../src/modules/library/search/search.repository';
 
 const roundtripCorpus = require('../../../fixtures/library/reference-roundtrip-corpus.json');
 

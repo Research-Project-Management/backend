@@ -1,5 +1,5 @@
 import { UnpaywallProvider } from '@/modules/library/ingestion/metadata/providers/unpaywall.provider';
-import { ProviderFetchError } from '@/modules/library/ingestion/metadata/metadata.executor';
+import { ProviderFetchError } from '@/modules/library/ingestion/metadata/services/provider.executor';
 
 describe('UnpaywallProvider (Standalone)', () => {
   let provider: UnpaywallProvider;

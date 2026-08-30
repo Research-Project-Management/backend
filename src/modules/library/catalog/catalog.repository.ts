@@ -137,27 +137,6 @@ export class CatalogRepository {
     });
   }
 
-  async findItemById(
-    id: string,
-    tx?: Prisma.TransactionClient,
-  ) {
-    const client = this.getClient(tx);
-    return client.catalogItem.findUnique({
-      where: { id },
-      include: {
-        collectionItems: {
-          include: { collection: true },
-        },
-        itemTags: {
-          include: { tag: true },
-        },
-        attachments: {
-          include: { revisions: true },
-        },
-      },
-    });
-  }
-
   async findMany(
     workspaceId: string,
     options: {
@@ -766,7 +745,9 @@ export class CatalogRepository {
       let extraObj: Record<string, any> = {};
       try {
         if (source.extra) extraObj = JSON.parse(source.extra);
-      } catch {}
+      } catch (_err) {
+        // ignore malformed JSON extra
+      }
       const existing = Array.isArray(extraObj.relations)
         ? extraObj.relations
         : [];
@@ -814,8 +795,9 @@ export class CatalogRepository {
             data: { extra: JSON.stringify(extraObj) },
           });
         }
-      } catch {}
+      } catch (_err) {
+        // ignore malformed JSON extra
+      }
     }
   }
 }
-

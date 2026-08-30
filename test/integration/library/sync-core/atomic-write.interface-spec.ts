@@ -1,13 +1,13 @@
 import { LibraryTestHarness } from '../library-test-harness';
-import { LibraryTransactionService } from '../../../../src/modules/library/sync/library-transaction.service';
+import { TransactionService } from '../../../../src/modules/library/sync/services/transaction.service';
 
 describe('Atomic Write & Outbox Invariants (Integration)', () => {
   let harness: LibraryTestHarness;
-  let txService: LibraryTransactionService;
+  let txService: TransactionService;
 
   beforeAll(async () => {
     harness = await LibraryTestHarness.create();
-    txService = harness.moduleRef.get(LibraryTransactionService);
+    txService = harness.moduleRef.get(TransactionService);
   });
 
   afterAll(async () => {

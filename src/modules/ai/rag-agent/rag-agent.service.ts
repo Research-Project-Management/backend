@@ -1,15 +1,19 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { FastifyReply } from 'fastify';
 import { EngineService } from '../engine/engine.service';
 import { RagAgentQueryDto } from './dto/rag-agent.dto';
 
-import { CatalogRepository } from '../../library/catalog/catalog.repository';
+import { CatalogService } from '../../library/catalog/catalog.service';
 
 @Injectable()
 export class RagAgentService {
   constructor(
     private readonly engineService: EngineService,
-    private readonly catalogRepo: CatalogRepository,
+    private readonly catalogService: CatalogService,
   ) {}
 
   private normalizeMessages(dto: RagAgentQueryDto) {
@@ -19,16 +23,14 @@ export class RagAgentService {
         content: m.content || '',
       }));
     }
-    if (dto.query && dto.query.trim()) {
-      return [{ role: 'user' as const, content: dto.query.trim() }];
+    if (dto.query) {
+      return [{ role: 'user' as const, content: dto.query }];
     }
-    return [];
+    return [{ role: 'user' as const, content: '' }];
   }
 
-  private extractDocIds(dto: RagAgentQueryDto): string[] | null {
-    const list =
-      dto.document_ids || dto.documentIds || dto.selected_files || [];
-    return list.length > 0 ? list : null;
+  private extractDocIds(dto: RagAgentQueryDto): string[] {
+    return dto.document_ids || dto.documentIds || dto.selected_files || [];
   }
 
   async streamRagChat(
@@ -38,8 +40,9 @@ export class RagAgentService {
   ): Promise<void> {
     const messages = this.normalizeMessages(dto);
     const documentIds = this.extractDocIds(dto);
-    const workspaceId = dto.workspace_id || dto.workspaceId || null;
-    const chatId = dto.chat_id || dto.chatId || null;
+    const workspaceId =
+      dto.workspace_id || dto.workspaceId || dto.project_id || dto.projectId;
+    const chatId = dto.chat_id || dto.chatId;
 
     const payload = {
       messages,
@@ -47,7 +50,7 @@ export class RagAgentService {
       workspace_id: workspaceId,
       chat_id: chatId,
       document_ids: documentIds,
-      intent_hint: dto.intent_hint || 'paper_rag_qa',
+      intent_hint: dto.intent_hint,
     };
 
     return this.engineService.streamChat(payload, reply);
@@ -56,8 +59,9 @@ export class RagAgentService {
   async syncRagChat(userId: string, dto: RagAgentQueryDto) {
     const messages = this.normalizeMessages(dto);
     const documentIds = this.extractDocIds(dto);
-    const workspaceId = dto.workspace_id || dto.workspaceId || null;
-    const chatId = dto.chat_id || dto.chatId || null;
+    const workspaceId =
+      dto.workspace_id || dto.workspaceId || dto.project_id || dto.projectId;
+    const chatId = dto.chat_id || dto.chatId;
 
     const payload = {
       messages,
@@ -65,14 +69,14 @@ export class RagAgentService {
       workspace_id: workspaceId,
       chat_id: chatId,
       document_ids: documentIds,
-      intent_hint: dto.intent_hint || 'paper_rag_qa',
+      intent_hint: dto.intent_hint,
     };
 
     return this.engineService.syncChat(payload);
   }
 
-  async uploadDocument(rawBuffer: Buffer, contentType: string) {
-    return this.engineService.uploadDocument(rawBuffer, contentType);
+  async uploadDocument(fileBuffer: Buffer, contentType: string) {
+    return this.engineService.uploadDocument(fileBuffer, contentType);
   }
 
   async getDocumentsBulk(ids: string[]) {
@@ -88,7 +92,7 @@ export class RagAgentService {
   }
 
   /**
-   * Paper-Scoped Streaming RAG Chat: Contextualizes conversation with the specific paper
+   * Paper-Scoped Streaming RAG Chat: Contextualizes conversation with the specific paper within authorized workspace.
    */
   async streamPaperChat(
     userId: string,
@@ -96,7 +100,18 @@ export class RagAgentService {
     dto: RagAgentQueryDto,
     reply: FastifyReply,
   ): Promise<void> {
-    const paper = await this.catalogRepo.findItemById(paperId);
+    const workspaceId = dto.workspaceId || dto.workspace_id;
+    if (!workspaceId) {
+      throw new BadRequestException(
+        'workspaceId is required for paper-scoped chat',
+      );
+    }
+
+    const paper = await this.catalogService.getItem(
+      workspaceId,
+      paperId,
+      userId,
+    );
     if (!paper || paper.deletedAt) {
       throw new NotFoundException(`Paper with ID ${paperId} not found`);
     }
@@ -105,8 +120,6 @@ export class RagAgentService {
     const documentIds = paper.ragDocId
       ? [paper.ragDocId]
       : this.extractDocIds(dto);
-    const workspaceId =
-      dto.workspace_id || dto.workspaceId || paper.workspaceId;
     const chatId = dto.chat_id || dto.chatId || `paper-${paperId}`;
 
     // Prepend system context with paper groundings
@@ -133,10 +146,21 @@ export class RagAgentService {
   }
 
   /**
-   * Paper-Scoped Synchronous RAG Chat
+   * Paper-Scoped Synchronous RAG Chat within authorized workspace.
    */
   async syncPaperChat(userId: string, paperId: string, dto: RagAgentQueryDto) {
-    const paper = await this.catalogRepo.findItemById(paperId);
+    const workspaceId = dto.workspaceId || dto.workspace_id;
+    if (!workspaceId) {
+      throw new BadRequestException(
+        'workspaceId is required for paper-scoped chat',
+      );
+    }
+
+    const paper = await this.catalogService.getItem(
+      workspaceId,
+      paperId,
+      userId,
+    );
     if (!paper || paper.deletedAt) {
       throw new NotFoundException(`Paper with ID ${paperId} not found`);
     }
@@ -145,8 +169,6 @@ export class RagAgentService {
     const documentIds = paper.ragDocId
       ? [paper.ragDocId]
       : this.extractDocIds(dto);
-    const workspaceId =
-      dto.workspace_id || dto.workspaceId || paper.workspaceId;
     const chatId = dto.chat_id || dto.chatId || `paper-${paperId}`;
 
     const authorsStr = Array.isArray(paper.authors)

@@ -1,19 +1,19 @@
 import { LibraryTestHarness } from '../library-test-harness';
 import {
-  LIBRARY_SYNC_PORT,
-  ILibrarySyncPort,
-} from '../../../../src/modules/library/sync/library-sync.port';
+  SYNC_PORT,
+  SyncPort,
+} from '../../../../src/modules/library/sync/ports/sync.port';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 
 jest.setTimeout(60000);
 
 describe('Concurrent Idempotency & Reliability Invariants (Integration)', () => {
   let harness: LibraryTestHarness;
-  let port: ILibrarySyncPort;
+  let port: SyncPort;
 
   beforeAll(async () => {
     harness = await LibraryTestHarness.create();
-    port = harness.moduleRef.get(LIBRARY_SYNC_PORT);
+    port = harness.moduleRef.get(SYNC_PORT);
   });
 
   afterAll(async () => {
@@ -397,7 +397,7 @@ describe('Concurrent Idempotency & Reliability Invariants (Integration)', () => 
       });
 
       expect(firstResult.results[0].result?.isNew).toBe(true);
-      const createdId = firstResult.results[0].result?.id!;
+      const createdId = firstResult.results[0].result!.id;
 
       // Retry with existingId set (simulates Zotero worker retry after bindings recorded)
       const retryResult = await port.applyExternalSyncBatch({
@@ -446,12 +446,12 @@ describe('Concurrent Idempotency & Reliability Invariants (Integration)', () => 
 
       // An operation using a stale leaseToken should fail markSucceededInTx and rollback
       const { IdempotencyRepository } =
-        await import('../../../../src/modules/library/sync/idempotency.repository');
+        await import('../../../../src/modules/library/sync/repositories/idempotency.repository');
       const idempotencyRepo = harness.moduleRef.get(IdempotencyRepository);
 
-      const { LibraryTransactionService } =
-        await import('../../../../src/modules/library/sync/library-transaction.service');
-      const txService = harness.moduleRef.get(LibraryTransactionService);
+      const { TransactionService } =
+        await import('../../../../src/modules/library/sync/services/transaction.service');
+      const txService = harness.moduleRef.get(TransactionService);
 
       await expect(
         txService.executeInTransaction(async (tx, helpers) => {

@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { IngestionCommand } from '../types/ingestion.contracts';
+import { IngestionCommand } from '../types/ingestion.types';
 import { isIP } from 'net';
 
 export const INGESTION_LIMITS = {
@@ -125,12 +125,6 @@ export function calculateIngestionRequestHash(
       if (command.overrides) {
         normalized.overrides = command.overrides;
       }
-      break;
-
-    case 'zotero':
-      normalized.connectionId = command.connectionId;
-      normalized.externalItemKey = command.externalItemKey;
-      normalized.collectionId = command.collectionId;
       break;
   }
 

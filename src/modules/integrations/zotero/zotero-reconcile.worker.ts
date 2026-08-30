@@ -3,10 +3,10 @@ import { PrismaService } from '../../../core/database/prisma.service';
 import { ZoteroConnectionService } from './zotero-connection.service';
 import { ZoteroConnector } from './zotero.connector';
 import {
-  LIBRARY_SYNC_PORT,
-  ILibrarySyncPort,
+  SYNC_PORT,
+  SyncPort,
   SyncEntityType,
-} from '../../library/sync/library-sync.port';
+} from '../../library/sync/ports/sync.port';
 
 export interface ReconcileJobResult {
   deletedItems: number;
@@ -22,8 +22,8 @@ export class ZoteroReconcileWorker {
     private readonly prisma: PrismaService,
     private readonly connectionService: ZoteroConnectionService,
     private readonly connector: ZoteroConnector,
-    @Inject(LIBRARY_SYNC_PORT)
-    private readonly libraryBridge: ILibrarySyncPort,
+    @Inject(SYNC_PORT)
+    private readonly libraryBridge: SyncPort,
   ) {}
 
   /**

@@ -8,8 +8,7 @@ import {
   UseGuards,
   BadRequestException,
 } from '@nestjs/common';
-import { ChangeLogRepository } from './change-log.repository';
-import { LibraryTransactionService } from './library-transaction.service';
+import { SyncService } from './sync.service';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
 import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
 
@@ -20,10 +19,7 @@ import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-
 ])
 @UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
 export class SyncController {
-  constructor(
-    private readonly changeLogRepo: ChangeLogRepository,
-    private readonly txService: LibraryTransactionService,
-  ) {}
+  constructor(private readonly syncService: SyncService) {}
 
   @Get('pull')
   async pullDelta(
@@ -34,37 +30,15 @@ export class SyncController {
     const parsedSeq = sinceSeq !== undefined ? BigInt(sinceSeq) : BigInt(0);
     const parsedLimit = limit !== undefined ? parseInt(limit, 10) : 100;
 
-    const changes = await this.changeLogRepo.getChangesSince(
+    const data = await this.syncService.pullDelta(
       workspaceId,
       parsedSeq,
       parsedLimit,
     );
-    const tombstones = await this.changeLogRepo.getTombstonesSince(
-      workspaceId,
-      parsedSeq,
-      parsedLimit,
-    );
-    const latestSeq = await this.changeLogRepo.getLatestSequence(workspaceId);
-
-    // Format BigInt values as strings for JSON serialization
-    const serializedChanges = changes.map((c) => ({
-      ...c,
-      seq: c.seq.toString(),
-    }));
-
-    const serializedTombstones = tombstones.map((t) => ({
-      ...t,
-      seq: t.seq?.toString() ?? null,
-    }));
 
     return {
       success: true,
-      data: {
-        changes: serializedChanges,
-        tombstones: serializedTombstones,
-        latestSeq: latestSeq.toString(),
-        hasMore: changes.length === parsedLimit,
-      },
+      data,
     };
   }
 
@@ -88,37 +62,9 @@ export class SyncController {
       );
     }
 
-    const applied = await this.txService.executeInTransaction(
-      async (_tx, helpers) => {
-        const results = [];
-        for (const mutation of body.mutations) {
-          if (mutation.action === 'delete') {
-            const tombstone = await helpers.recordTombstone(workspaceId, {
-              entityType: mutation.entityType,
-              entityId: mutation.entityId,
-            });
-            results.push({
-              entityId: mutation.entityId,
-              action: 'delete',
-              seq: tombstone.seq?.toString(),
-            });
-          } else {
-            const change = await helpers.appendChange(workspaceId, {
-              entityType: mutation.entityType,
-              entityId: mutation.entityId,
-              action: mutation.action,
-              version: mutation.version,
-              data: mutation.data,
-            });
-            results.push({
-              entityId: mutation.entityId,
-              action: mutation.action,
-              seq: change.seq.toString(),
-            });
-          }
-        }
-        return results;
-      },
+    const applied = await this.syncService.pushMutations(
+      workspaceId,
+      body.mutations,
     );
 
     return {
@@ -129,7 +75,7 @@ export class SyncController {
 
   @Post('resync')
   async initiateFullResync(@Param('workspaceId') workspaceId: string) {
-    const latestSeq = await this.changeLogRepo.getLatestSequence(workspaceId);
+    const latestSeq = await this.syncService.getLatestSequence(workspaceId);
     return {
       success: true,
       data: {

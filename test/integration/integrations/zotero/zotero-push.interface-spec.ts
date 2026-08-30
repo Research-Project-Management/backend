@@ -5,7 +5,7 @@ import { ZoteroConnectionService } from '../../../../src/modules/integrations/zo
 import { ZoteroMapper } from '../../../../src/modules/integrations/zotero/zotero.mapper';
 import { ZoteroConflictService } from '../../../../src/modules/integrations/zotero/zotero-conflict.service';
 import { ZoteroSyncPolicy } from '../../../../src/modules/integrations/zotero/zotero-sync.policy';
-import { LIBRARY_SYNC_PORT } from '../../../../src/modules/library/sync/library-sync.port';
+import { SYNC_PORT } from '../../../../src/modules/library/sync/ports/sync.port';
 
 jest.setTimeout(60000);
 
@@ -102,7 +102,7 @@ describe('Zotero Two-Way Push & Three-Way Conflict Resolution (Integration T079/
     syncPolicy = harness.moduleRef.get(ZoteroSyncPolicy);
     conflictService = harness.moduleRef.get(ZoteroConflictService);
     const mapper = harness.moduleRef.get(ZoteroMapper);
-    const libraryBridge = harness.moduleRef.get(LIBRARY_SYNC_PORT);
+    const libraryBridge = harness.moduleRef.get(SYNC_PORT);
 
     pushWorker = new ZoteroPushWorker(
       harness.prisma,

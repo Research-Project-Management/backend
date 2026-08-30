@@ -7,13 +7,13 @@ import {
   ProviderName,
   ProviderResult,
   QueryType,
-} from '../metadata.contracts';
+} from '../types/metadata.types';
 import {
   normalizeArxivId,
   normalizeDoi,
   normalizePmid,
-} from '../metadata.identifiers';
-import { ProviderFetchError } from '../metadata.executor';
+} from '../utils/metadata.utils';
+import { ProviderFetchError } from '../services/provider.executor';
 
 @Injectable()
 export class SemanticScholarProvider implements MetadataProvider {

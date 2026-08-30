@@ -1,9 +1,14 @@
 export type CitationStyleId =
+  | 'apa'
   | 'apa-7th'
   | 'ieee'
   | 'nature'
   | 'harvard'
+  | 'chicago'
   | 'chicago-author-date'
+  | 'mla'
+  | 'mla-9th'
+  | 'vancouver'
   | 'bibtex'
   | 'ris';
 
