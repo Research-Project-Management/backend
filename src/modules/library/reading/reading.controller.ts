@@ -28,15 +28,11 @@ export class ReadingController {
     @Param('itemId') itemId: string,
     @CurrentUser('id') userId: string,
   ) {
-    const data = await this.readingService.getState(
+    return this.readingService.getState(
       workspaceId,
       itemId,
       userId,
     );
-    return {
-      success: true,
-      data,
-    };
   }
 
   @Patch()
@@ -46,16 +42,12 @@ export class ReadingController {
     @CurrentUser('id') userId: string,
     @Body() dto: UpdateReadingDto,
   ) {
-    const data = await this.readingService.updateState(
+    return this.readingService.updateState(
       workspaceId,
       itemId,
       userId,
       dto,
     );
-    return {
-      success: true,
-      data,
-    };
   }
 
   @Post('read')
@@ -64,15 +56,11 @@ export class ReadingController {
     @Param('itemId') itemId: string,
     @CurrentUser('id') userId: string,
   ) {
-    const data = await this.readingService.markAsRead(
+    return this.readingService.markAsRead(
       workspaceId,
       itemId,
       userId,
     );
-    return {
-      success: true,
-      data,
-    };
   }
 
   @Post('batch')
@@ -81,14 +69,10 @@ export class ReadingController {
     @CurrentUser('id') userId: string,
     @Body() body: { itemIds: string[] },
   ) {
-    const data = await this.readingService.getBatchStates(
+    return this.readingService.getBatchStates(
       workspaceId,
       body.itemIds || [],
       userId,
     );
-    return {
-      success: true,
-      data,
-    };
   }
 }

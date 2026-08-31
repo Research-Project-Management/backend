@@ -32,11 +32,7 @@ export class NotesController {
     @Param('workspaceId') workspaceId: string,
     @Query('itemId') itemId?: string,
   ) {
-    const notes = await this.notesService.listNotes(workspaceId, itemId);
-    return {
-      success: true,
-      data: notes,
-    };
+    return this.notesService.listNotes(workspaceId, itemId);
   }
 
   @Get(':id')
@@ -51,10 +47,7 @@ export class NotesController {
       );
     }
 
-    return {
-      success: true,
-      data: note,
-    };
+    return note;
   }
 
   @Post()
@@ -63,15 +56,10 @@ export class NotesController {
     @CurrentUser('id') currentUserId: string,
     @Body() body: CreateNoteDto,
   ) {
-    const note = await this.notesService.createNote(workspaceId, {
+    return this.notesService.createNote(workspaceId, {
       ...body,
       createdById: currentUserId || 'system',
     });
-
-    return {
-      success: true,
-      data: note,
-    };
   }
 
   @Patch(':id')
@@ -91,17 +79,12 @@ export class NotesController {
     }
 
     const { expectedVersion: _, ...updateData } = body;
-    const updated = await this.notesService.updateNote(
+    return this.notesService.updateNote(
       workspaceId,
       id,
       expectedVersion,
       updateData,
     );
-
-    return {
-      success: true,
-      data: updated,
-    };
   }
 
   @Delete(':id')
@@ -124,9 +107,6 @@ export class NotesController {
       );
     }
 
-    return {
-      success: true,
-      data: { deleted },
-    };
+    return { deleted, id };
   }
 }

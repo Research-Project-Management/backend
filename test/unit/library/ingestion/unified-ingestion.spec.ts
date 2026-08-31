@@ -14,6 +14,7 @@ import {
 } from '@/modules/library/ingestion/errors/ingestion.errors';
 import { createHash } from 'crypto';
 import { STORAGE_PORT } from '@/modules/storage/storage.port';
+import { CatalogService } from '@/modules/library/catalog/catalog.service';
 
 describe('Unified Ingestion Pipeline (DOI / URL / BibTeX / PDF / Zotero)', () => {
   let service: IngestionService;
@@ -58,6 +59,8 @@ describe('Unified Ingestion Pipeline (DOI / URL / BibTeX / PDF / Zotero)', () =>
       },
       libraryDedupClaim: {
         findUnique: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 'claim-1' }),
+        upsert: jest.fn().mockResolvedValue({ id: 'claim-1' }),
       },
       attachmentRevision: {
         create: jest.fn().mockImplementation((args) => ({
@@ -160,6 +163,16 @@ describe('Unified Ingestion Pipeline (DOI / URL / BibTeX / PDF / Zotero)', () =>
       }),
     };
 
+    const mockCatalogService = {
+      createItem: jest.fn().mockImplementation((ws, data) =>
+        Promise.resolve({
+          id: 'item-new-123',
+          workspaceId: ws,
+          ...data,
+        }),
+      ),
+    };
+
     bibtexParser = new BibtexParser();
 
     const module: TestingModule = await Test.createTestingModule({
@@ -173,6 +186,7 @@ describe('Unified Ingestion Pipeline (DOI / URL / BibTeX / PDF / Zotero)', () =>
         { provide: PdfExtractorProvider, useValue: extractorService },
         { provide: STORAGE_PORT, useValue: storagePort },
         { provide: BibtexParser, useValue: bibtexParser },
+        { provide: CatalogService, useValue: mockCatalogService },
       ],
     }).compile();
 

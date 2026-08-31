@@ -425,6 +425,7 @@ model Workspace {
   capturePreviews    CapturePreview[]
   libraryDedupClaims LibraryDedupClaim[]
   ingestionReviewCases IngestionReviewCase[]
+  mergeLineages      CatalogMergeLineage[]
 
   @@index([createdById])
   @@index([url])
@@ -619,8 +620,8 @@ model CatalogItem {
   extra            String?     @default("")
   notes            Json?       @default("[]")
   primaryFile      Json?       @map("primary_file")
-  fileUrl          String      @map("file_url")
-  filename         String
+  fileUrl          String?     @default("") @map("file_url")
+  filename         String?     @default("")
   mimeType         String?     @default("application/pdf") @map("mime_type")
   size             Int?        @default(0)
   labels           String[]    @default([])
@@ -656,6 +657,7 @@ model CatalogItem {
   userStates      UserItemState[]
   ingestionRuns   IngestionRun[]
   dedupClaims     LibraryDedupClaim[]
+  mergeLineages   CatalogMergeLineage[]  @relation("TargetItemLineage")
 
   @@index([workspaceId, collectionId, deletedAt, createdAt])
   @@index([workspaceId, deletedAt])
@@ -782,6 +784,23 @@ model CatalogItemRevision {
 
   @@index([catalogItemId, version])
   @@map("catalog_item_revisions")
+}
+
+model CatalogMergeLineage {
+  id           String      @id @default(uuid())
+  workspaceId  String      @map("workspace_id")
+  workspace    Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sourceItemId String      @map("source_item_id")
+  targetItemId String      @map("target_item_id")
+  targetItem   CatalogItem @relation("TargetItemLineage", fields: [targetItemId], references: [id], onDelete: Cascade)
+  mergeReason  String?     @default("manual") @map("merge_reason")
+  mergedFields Json?       @map("merged_fields")
+  mergedById   String?     @map("merged_by_id")
+  mergedAt     DateTime    @default(now()) @map("merged_at")
+
+  @@index([workspaceId, sourceItemId])
+  @@index([targetItemId])
+  @@map("catalog_merge_lineage")
 }
 
 model CatalogAttachment {

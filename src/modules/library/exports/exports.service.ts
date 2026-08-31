@@ -1,6 +1,7 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, Optional } from '@nestjs/common';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { CitationService } from '../citation/citation.service';
+import { CatalogRepository } from '../catalog/catalog.repository';
 import { ExportLibraryDto, ExportFormatType } from './dto/export.dto';
 
 export interface ExportResult {
@@ -18,6 +19,7 @@ export class ExportsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly citationService: CitationService,
+    @Optional() private readonly catalogRepo?: CatalogRepository,
   ) {}
 
   async exportLibrary(

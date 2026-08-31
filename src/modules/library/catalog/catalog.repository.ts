@@ -7,6 +7,8 @@ import { PrismaService } from '../../../core/database/prisma.service';
 import { Prisma } from '@prisma/client';
 import { VersionMismatchException } from './errors/catalog.errors';
 import { normalizeTags } from '../tags/utils/tags.utils';
+import { parseCreatorString } from './migrations/backfill-creators';
+import { CatalogItemSummary } from './types/item.types';
 
 export interface CreateCatalogItemData {
   title: string;
@@ -124,6 +126,75 @@ export class CatalogRepository {
     return client.catalogItem.findFirst({
       where: { id, workspaceId, deletedAt: null },
       include: {
+        contributors: {
+          orderBy: { orderIndex: 'asc' },
+        },
+        identifiers: true,
+        collectionItems: {
+          include: { collection: true },
+        },
+        itemTags: {
+          include: { tag: true },
+        },
+        notesList: {
+          where: { deletedAt: null },
+        },
+        attachments: {
+          include: { revisions: true },
+        },
+        mergeLineages: true,
+      },
+    });
+  }
+
+  async findByIds(
+    workspaceId: string,
+    ids: string[],
+    tx?: Prisma.TransactionClient,
+  ) {
+    if (!ids || ids.length === 0) return [];
+    const client = this.getClient(tx);
+    return client.catalogItem.findMany({
+      where: {
+        id: { in: ids },
+        workspaceId,
+        deletedAt: null,
+      },
+      include: {
+        contributors: {
+          orderBy: { orderIndex: 'asc' },
+        },
+        identifiers: true,
+        collectionItems: {
+          include: { collection: true },
+        },
+        itemTags: {
+          include: { tag: true },
+        },
+        attachments: {
+          include: { revisions: true },
+        },
+      },
+    });
+  }
+
+  async findByDoi(
+    workspaceId: string,
+    doi: string,
+    tx?: Prisma.TransactionClient,
+  ) {
+    const client = this.getClient(tx);
+    return client.catalogItem.findFirst({
+      where: {
+        workspaceId,
+        doi,
+        deletedAt: null,
+      },
+      include: {
+        contributors: {
+          orderBy: { orderIndex: 'asc' },
+        },
+        identifiers: true,
         collectionItems: {
           include: { collection: true },
         },
@@ -155,11 +226,18 @@ export class CatalogRepository {
     const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
 
     const itemInclude = {
+      contributors: {
+        orderBy: { orderIndex: 'asc' as const },
+      },
+      identifiers: true,
       collectionItems: {
         include: { collection: true },
       },
       itemTags: {
         include: { tag: true },
+      },
+      notesList: {
+        where: { deletedAt: null },
       },
       attachments: true,
       userStates: options.userId
@@ -380,75 +458,105 @@ export class CatalogRepository {
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    return client.catalogItem.create({
-      data: {
-        workspaceId,
-        title: data.title,
-        authors: data.authors ?? [],
-        year: data.year ?? null,
-        doi: data.doi ?? '',
-        abstract: data.abstract ?? '',
-        itemType: data.itemType ?? 'journalArticle',
-        editors: data.editors ?? [],
-        journal: data.journal ?? '',
-        publicationTitle: data.publicationTitle ?? data.journal ?? '',
-        publicationDate:
-          data.publicationDate ?? (data.year ? String(data.year) : ''),
-        publisher: data.publisher ?? '',
-        place: data.place ?? '',
-        volume: data.volume ?? '',
-        issue: data.issue ?? '',
-        section: data.section ?? '',
-        partNumber: data.partNumber ?? '',
-        partTitle: data.partTitle ?? '',
-        pages: data.pages ?? '',
-        series: data.series ?? '',
-        seriesTitle: data.seriesTitle ?? '',
-        seriesText: data.seriesText ?? '',
-        issn: data.issn ?? '',
-        isbn: data.isbn ?? '',
-        pmid: data.pmid ?? '',
-        pmcid: data.pmcid ?? '',
-        url: data.url ?? '',
-        type: data.type ?? '',
-        language: data.language ?? '',
-        journalAbbr: data.journalAbbr ?? '',
-        shortTitle: data.shortTitle ?? '',
-        rights: data.rights ?? '',
-        license: data.license ?? '',
-        citationKey: data.citationKey ?? '',
-        libraryCatalog: data.libraryCatalog ?? '',
-        archive: data.archive ?? '',
-        archiveLocation: data.archiveLocation ?? '',
-        callNumber: data.callNumber ?? '',
-        accessedAt: data.accessedAt ?? null,
-        extra: data.extra ?? '',
-        notes: data.notes ?? [],
-        labels: normalizeTags(data.labels ?? data.keywords ?? []),
-        keywords: normalizeTags(data.keywords ?? data.labels ?? []),
-        fileUrl: data.fileUrl ?? '',
-        filename: data.filename ?? data.title,
-        mimeType: data.mimeType ?? 'application/pdf',
-        size: data.size ?? 0,
-        collectionId: data.collectionId ?? null,
-        uploadedById: data.uploadedById,
-        version: 1,
-        ...(data.collectionId
+    const createData: Prisma.CatalogItemUncheckedCreateInput = {
+      workspaceId,
+      title: data.title,
+      authors: data.authors ?? [],
+      year: data.year ?? null,
+      doi: data.doi ?? '',
+      abstract: data.abstract ?? '',
+      itemType: data.itemType ?? 'journalArticle',
+      editors: data.editors ?? [],
+      journal: data.journal ?? '',
+      publicationTitle: data.publicationTitle ?? data.journal ?? '',
+      publicationDate:
+        data.publicationDate ?? (data.year ? String(data.year) : ''),
+      publisher: data.publisher ?? '',
+      place: data.place ?? '',
+      volume: data.volume ?? '',
+      issue: data.issue ?? '',
+      section: data.section ?? '',
+      partNumber: data.partNumber ?? '',
+      partTitle: data.partTitle ?? '',
+      pages: data.pages ?? '',
+      series: data.series ?? '',
+      seriesTitle: data.seriesTitle ?? '',
+      seriesText: data.seriesText ?? '',
+      issn: data.issn ?? '',
+      isbn: data.isbn ?? '',
+      pmid: data.pmid ?? '',
+      pmcid: data.pmcid ?? '',
+      url: data.url ?? '',
+      type: data.type ?? '',
+      language: data.language ?? '',
+      journalAbbr: data.journalAbbr ?? '',
+      shortTitle: data.shortTitle ?? '',
+      rights: data.rights ?? '',
+      license: data.license ?? '',
+      citationKey: data.citationKey ?? '',
+      libraryCatalog: data.libraryCatalog ?? '',
+      archive: data.archive ?? '',
+      archiveLocation: data.archiveLocation ?? '',
+      callNumber: data.callNumber ?? '',
+      accessedAt: data.accessedAt ?? null,
+      extra: data.extra ?? '',
+      notes: data.notes ?? [],
+      labels: normalizeTags(data.labels ?? data.keywords ?? []),
+      keywords: normalizeTags(data.keywords ?? data.labels ?? []),
+      fileUrl: data.fileUrl ?? '',
+      filename: data.filename ?? data.title,
+      mimeType: data.mimeType ?? 'application/pdf',
+      size: data.size ?? 0,
+      collectionId: data.collectionId ?? null,
+      uploadedById: data.uploadedById || 'system',
+      version: 1,
+      ...(data.collectionId
+        ? {
+            collectionItems: {
+              create: {
+                collectionId: data.collectionId,
+                sortOrder: 0,
+              },
+            },
+          }
+        : {}),
+      ...(data.contributors
+        ? {
+            contributors: data.contributors,
+          }
+        : data.authors && data.authors.length > 0
           ? {
-              collectionItems: {
-                create: {
-                  collectionId: data.collectionId,
-                  sortOrder: 0,
-                },
+              contributors: {
+                create: data.authors.map((authorName: string, index: number) => {
+                  const parsed = parseCreatorString(authorName, index);
+                  return {
+                    creatorType: parsed.creatorType,
+                    firstName: parsed.firstName,
+                    lastName: parsed.lastName,
+                    fullName: parsed.fullName,
+                    orderIndex: parsed.orderIndex,
+                  };
+                }),
               },
             }
           : {}),
-        ...(data.contributors
-          ? {
-              contributors: data.contributors,
-            }
-          : {}),
-      },
+      ...(data.doi && data.doi.trim() !== ''
+        ? {
+            identifiers: {
+              create: [
+                {
+                  type: 'doi',
+                  value: data.doi.trim(),
+                  canonicalUri: `https://doi.org/${data.doi.trim()}`,
+                },
+              ],
+            },
+          }
+        : {}),
+    };
+
+    return client.catalogItem.create({
+      data: createData,
       include: {
         collectionItems: {
           include: { collection: true },
@@ -456,7 +564,10 @@ export class CatalogRepository {
         itemTags: {
           include: { tag: true },
         },
-        contributors: true,
+        contributors: {
+          orderBy: { orderIndex: 'asc' },
+        },
+        identifiers: true,
         attachments: true,
       },
     });
@@ -799,5 +910,34 @@ export class CatalogRepository {
         // ignore malformed JSON extra
       }
     }
+  }
+
+  toDomainSummary(item: any): CatalogItemSummary {
+    const authors: string[] =
+      Array.isArray(item.contributors) && item.contributors.length > 0
+        ? item.contributors
+            .map((c: any) =>
+              c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+            )
+            .filter(Boolean)
+        : Array.isArray(item.authors)
+          ? item.authors
+          : [];
+
+    const doiIdent = Array.isArray(item.identifiers)
+      ? item.identifiers.find((i: any) => i.type === 'doi')?.value
+      : null;
+
+    return {
+      id: item.id,
+      workspaceId: item.workspaceId,
+      title: item.title,
+      itemType: item.itemType,
+      year: item.year,
+      doi: doiIdent || item.doi || null,
+      primaryAuthors: authors,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+    };
   }
 }

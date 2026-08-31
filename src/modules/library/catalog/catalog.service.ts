@@ -998,4 +998,104 @@ export class CatalogService {
       literatureNote: note,
     };
   }
+
+  // ── Port Implementations (IItemExistencePort & ICatalogReadPort) ───────────
+
+  async exists(workspaceId: string, itemId: string): Promise<boolean> {
+    const count = await this.prisma.catalogItem.count({
+      where: { id: itemId, workspaceId, deletedAt: null },
+    });
+    return count > 0;
+  }
+
+  async assertExists(workspaceId: string, itemId: string): Promise<void> {
+    const isPresent = await this.exists(workspaceId, itemId);
+    if (!isPresent) {
+      throw new NotFoundException(
+        `Item ${itemId} not found in workspace ${workspaceId}`,
+      );
+    }
+  }
+
+  async existMany(
+    workspaceId: string,
+    itemIds: string[],
+  ): Promise<Map<string, boolean>> {
+    if (itemIds.length === 0) return new Map();
+    const found = await this.prisma.catalogItem.findMany({
+      where: { id: { in: itemIds }, workspaceId, deletedAt: null },
+      select: { id: true },
+    });
+    const foundSet = new Set(found.map((it: { id: string }) => it.id));
+    const result = new Map<string, boolean>();
+    for (const id of itemIds) {
+      result.set(id, foundSet.has(id));
+    }
+    return result;
+  }
+
+  async findSummaryById(
+    workspaceId: string,
+    itemId: string,
+  ) {
+    const item = await this.prisma.catalogItem.findFirst({
+      where: { id: itemId, workspaceId, deletedAt: null },
+      select: {
+        id: true,
+        workspaceId: true,
+        title: true,
+        itemType: true,
+        year: true,
+        doi: true,
+        authors: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+    if (!item) return null;
+    return {
+      id: item.id,
+      workspaceId: item.workspaceId,
+      title: item.title,
+      itemType: item.itemType || undefined,
+      year: item.year,
+      doi: item.doi || null,
+      primaryAuthors: Array.isArray(item.authors) ? item.authors : [],
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+    };
+  }
+
+  async findSummariesByIds(
+    workspaceId: string,
+    itemIds: string[],
+  ) {
+    if (itemIds.length === 0) return [];
+    const items = await this.prisma.catalogItem.findMany({
+      where: { id: { in: itemIds }, workspaceId, deletedAt: null },
+      select: {
+        id: true,
+        workspaceId: true,
+        title: true,
+        itemType: true,
+        year: true,
+        doi: true,
+        authors: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+    return items.map((item: any) => ({
+      id: item.id,
+      workspaceId: item.workspaceId,
+      title: item.title,
+      itemType: item.itemType || undefined,
+      year: item.year,
+      doi: item.doi || null,
+      primaryAuthors: Array.isArray(item.authors) ? item.authors : [],
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+    }));
+  }
 }
+

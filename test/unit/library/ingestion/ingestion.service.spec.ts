@@ -9,6 +9,8 @@ import { UrlCaptureProvider } from '@/modules/library/ingestion/providers/url-ca
 import { METADATA_PORT } from '@/modules/library/ingestion/metadata/types/metadata.types';
 import { STORAGE_PORT } from '@/modules/storage/storage.port';
 
+import { CatalogService } from '@/modules/library/catalog/catalog.service';
+
 describe('IngestionService (Canonical)', () => {
   let service: IngestionService;
   let prisma: jest.Mocked<any>;
@@ -18,8 +20,17 @@ describe('IngestionService (Canonical)', () => {
   let idempotencyRepo: jest.Mocked<any>;
   let extractorService: jest.Mocked<any>;
   let storagePort: jest.Mocked<any>;
+  let catalogService: jest.Mocked<any>;
 
   beforeEach(async () => {
+    catalogService = {
+      createItem: jest.fn().mockResolvedValue({
+        id: 'item-123',
+        title: 'Attention Is All You Need',
+        authors: ['Vaswani, Ashish', 'Shazeer, Noam'],
+        year: 2017,
+      }),
+    };
     prisma = {
       catalogItem: {
         findFirst: jest.fn().mockResolvedValue(null),
@@ -56,6 +67,11 @@ describe('IngestionService (Canonical)', () => {
       },
       catalogTag: { upsert: jest.fn().mockResolvedValue({ id: 'tag-1' }) },
       catalogItemTag: { upsert: jest.fn().mockResolvedValue({ id: 'cit-1' }) },
+      libraryDedupClaim: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 'claim-1' }),
+        upsert: jest.fn().mockResolvedValue({ id: 'claim-1' }),
+      },
     };
 
     libraryTx = {
@@ -131,6 +147,7 @@ describe('IngestionService (Canonical)', () => {
         { provide: BibtexParser, useValue: new BibtexParser() },
         { provide: UrlCaptureProvider, useValue: urlCapture },
         { provide: METADATA_PORT, useValue: metadataService },
+        { provide: CatalogService, useValue: catalogService },
       ],
     }).compile();
 

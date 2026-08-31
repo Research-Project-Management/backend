@@ -91,7 +91,7 @@ export class SemanticScholarProvider implements MetadataProvider {
       );
     }
 
-    let item: any;
+    let item: unknown;
     try {
       item = await response.json();
     } catch {
@@ -104,9 +104,10 @@ export class SemanticScholarProvider implements MetadataProvider {
       );
     }
 
-    if (!item || item.error || !item.title) return null;
+    const payload = item as Record<string, unknown> | null;
+    if (!payload || payload.error || typeof payload.title !== 'string') return null;
 
-    return this.transformPayload(item, rawQuery, 0.9);
+    return this.transformPayload(payload, rawQuery, 0.9);
   }
 
   private async searchByTitle(
@@ -141,7 +142,7 @@ export class SemanticScholarProvider implements MetadataProvider {
       );
     }
 
-    let json: any;
+    let json: unknown;
     try {
       json = await response.json();
     } catch {
@@ -154,58 +155,88 @@ export class SemanticScholarProvider implements MetadataProvider {
       );
     }
 
-    const item = json?.data?.[0];
-    if (!item || !item.title) return null;
+    const payload = json as { data?: Array<Record<string, unknown>> } | null;
+    const item = payload?.data?.[0];
+    if (!item || typeof item.title !== 'string') return null;
 
     return this.transformPayload(item, cleanTitle, 0.8);
   }
 
   private transformPayload(
-    item: any,
+    item: Record<string, unknown>,
     rawQuery: string,
     baseConfidence: number,
   ): ProviderResult {
-    const title = item.title?.trim() || 'Untitled Paper';
+    const rawTitle = typeof item.title === 'string' ? item.title.trim() : 'Untitled Paper';
+    const title = rawTitle || 'Untitled Paper';
 
-    const authors: string[] = Array.isArray(item.authors)
-      ? item.authors.map((a: any) => a.name).filter(Boolean)
-      : [];
+    const authors: string[] = [];
+    if (Array.isArray(item.authors)) {
+      for (const a of item.authors) {
+        if (a && typeof a === 'object' && typeof (a as { name?: string }).name === 'string') {
+          authors.push((a as { name: string }).name.trim());
+        }
+      }
+    }
 
-    const externalIds = item.externalIds || {};
-    const doi = normalizeDoi(externalIds.DOI);
-    const arxivId = normalizeArxivId(externalIds.ArXiv);
-    const pmid = normalizePmid(externalIds.PubMed);
+    const externalIds = (item.externalIds || {}) as Record<string, string | undefined>;
+    const doi = normalizeDoi(typeof externalIds.DOI === 'string' ? externalIds.DOI : undefined);
+    const arxivId = normalizeArxivId(typeof externalIds.ArXiv === 'string' ? externalIds.ArXiv : undefined);
+    const pmid = normalizePmid(typeof externalIds.PubMed === 'string' ? externalIds.PubMed : undefined);
 
     const year = typeof item.year === 'number' ? item.year : null;
+    const journalObj = item.journal as { name?: string } | undefined;
+    const pubVenueObj = item.publicationVenue as { name?: string } | undefined;
+    const venueStr = typeof item.venue === 'string' ? item.venue : undefined;
+
     const journal =
-      item.journal?.name ||
-      item.publicationVenue?.name ||
-      item.venue ||
+      journalObj?.name ||
+      pubVenueObj?.name ||
+      venueStr ||
       undefined;
 
     let itemType = 'journalArticle';
     if (Array.isArray(item.publicationTypes)) {
-      if (item.publicationTypes.includes('JournalArticle')) {
+      const pubTypes = item.publicationTypes as string[];
+      if (pubTypes.includes('JournalArticle')) {
         itemType = 'journalArticle';
-      } else if (item.publicationTypes.includes('Conference')) {
+      } else if (pubTypes.includes('Conference')) {
         itemType = 'conferencePaper';
-      } else if (item.publicationTypes.includes('Book')) {
+      } else if (pubTypes.includes('Book')) {
         itemType = 'book';
-      } else if (item.publicationTypes.includes('Preprint') || arxivId) {
+      } else if (pubTypes.includes('Preprint') || arxivId) {
         itemType = 'preprint';
       }
     }
 
-    const openAccessPdfUrl = item.openAccessPdf?.url || undefined;
+    const openAccessPdf = item.openAccessPdf as { url?: string } | undefined;
+    const openAccessPdfUrl = openAccessPdf?.url || undefined;
     const rawVersion = createHash('md5')
       .update(JSON.stringify(item))
       .digest('hex');
 
+    const paperIdStr = typeof item.paperId === 'string' ? item.paperId : '';
+    const itemUrl = typeof item.url === 'string' ? item.url : undefined;
     const canonicalUrl =
-      item.url ||
+      itemUrl ||
       (doi
         ? `https://doi.org/${doi}`
-        : `https://www.semanticscholar.org/paper/${item.paperId || ''}`);
+        : `https://www.semanticscholar.org/paper/${paperIdStr}`);
+
+    const abstractStr =
+      typeof item.abstract === 'string' ? item.abstract.trim() : undefined;
+    const tldrObj = item.tldr as { text?: string } | undefined;
+    const tldrStr =
+      typeof tldrObj?.text === 'string' ? tldrObj.text.trim() : undefined;
+
+    const citationCount =
+      typeof item.citationCount === 'number' ? item.citationCount : undefined;
+    const referenceCount =
+      typeof item.referenceCount === 'number' ? item.referenceCount : undefined;
+    const influentialCitationCount =
+      typeof item.influentialCitationCount === 'number'
+        ? item.influentialCitationCount
+        : undefined;
 
     return {
       provider: this.id,
@@ -217,11 +248,11 @@ export class SemanticScholarProvider implements MetadataProvider {
         arxivId,
         pmid,
         journal,
-        abstract: item.abstract?.trim() || undefined,
-        tldr: item.tldr?.text?.trim() || undefined,
-        citationCount: item.citationCount,
-        referenceCount: item.referenceCount,
-        influentialCitationCount: item.influentialCitationCount,
+        abstract: abstractStr || undefined,
+        tldr: tldrStr || undefined,
+        citationCount,
+        referenceCount,
+        influentialCitationCount,
         itemType,
         url: canonicalUrl,
         openAccessPdfUrl,
@@ -232,7 +263,7 @@ export class SemanticScholarProvider implements MetadataProvider {
             ? `doi:${doi}`
             : arxivId
               ? `arxiv:${arxivId}`
-              : `s2:${item.paperId || title}`,
+              : `s2:${paperIdStr || title}`,
           canonicalUrl,
           confidenceScore: baseConfidence,
           rawSnapshotHash: rawVersion,

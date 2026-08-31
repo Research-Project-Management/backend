@@ -94,15 +94,20 @@ export function formatCanonicalId(
   scheme: IdentifierScheme,
   value?: string | number | null,
 ): string | undefined {
-  const normalized = {
-    doi: normalizeDoi(typeof value === 'number' ? String(value) : value),
-    arxiv: normalizeArxivId(typeof value === 'number' ? String(value) : value),
+  if (!value) return undefined;
+  const strVal = typeof value === 'number' ? String(value) : value;
+  const normalizers: Record<IdentifierScheme, string | undefined> = {
+    doi: normalizeDoi(strVal),
+    arxiv: normalizeArxivId(strVal),
     pmid: normalizePmid(value),
-    pmcid: normalizePmcid(typeof value === 'number' ? String(value) : value),
-    isbn: normalizeIsbn(typeof value === 'number' ? String(value) : value),
-    issn: normalizeIssn(typeof value === 'number' ? String(value) : value),
-  }[scheme];
+    pmcid: normalizePmcid(strVal),
+    isbn: normalizeIsbn(strVal),
+    issn: normalizeIssn(strVal),
+    uri: strVal?.trim() || undefined,
+    custom: strVal?.trim() || undefined,
+  };
 
+  const normalized = normalizers[scheme];
   return normalized ? `${scheme}:${normalized}` : undefined;
 }
 

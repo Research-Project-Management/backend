@@ -70,7 +70,7 @@ export class OpenAlexProvider implements MetadataProvider {
       );
     }
 
-    let item: any;
+    let item: unknown;
     try {
       item = await response.json();
     } catch {
@@ -83,8 +83,9 @@ export class OpenAlexProvider implements MetadataProvider {
       );
     }
 
-    if (!item || !item.title) return null;
-    return this.transformPayload(item, doi, 0.9);
+    const payload = item as Record<string, unknown> | null;
+    if (!payload || typeof payload.title !== 'string') return null;
+    return this.transformPayload(payload, doi, 0.9);
   }
 
   private async searchByTitle(
@@ -119,7 +120,7 @@ export class OpenAlexProvider implements MetadataProvider {
       );
     }
 
-    let json: any;
+    let json: unknown;
     try {
       json = await response.json();
     } catch {
@@ -132,72 +133,99 @@ export class OpenAlexProvider implements MetadataProvider {
       );
     }
 
-    const item = json?.results?.[0];
-    if (!item || !item.title) return null;
+    const payload = json as { results?: Array<Record<string, unknown>> } | null;
+    const item = payload?.results?.[0];
+    if (!item || typeof item.title !== 'string') return null;
 
-    const doi = normalizeDoi(item.doi) || cleanTitle;
+    const itemDoi = typeof item.doi === 'string' ? item.doi : '';
+    const doi = normalizeDoi(itemDoi) || cleanTitle;
     return this.transformPayload(item, doi, 0.75);
   }
 
   private transformPayload(
-    item: any,
+    item: Record<string, unknown>,
     identifier: string,
     confidence: number,
   ): ProviderResult {
-    const title = item.title?.trim() || 'Untitled Paper';
+    const rawTitle = typeof item.title === 'string' ? item.title.trim() : 'Untitled Paper';
+    const title = rawTitle || 'Untitled Paper';
 
     const authors: string[] = [];
     if (Array.isArray(item.authorships)) {
       for (const auth of item.authorships) {
-        if (auth.author?.display_name) {
-          authors.push(auth.author.display_name.trim());
+        if (auth && typeof auth === 'object') {
+          const authObj = auth as { author?: { display_name?: string } };
+          if (typeof authObj.author?.display_name === 'string') {
+            authors.push(authObj.author.display_name.trim());
+          }
         }
       }
     }
 
-    const doi = normalizeDoi(item.doi);
+    const itemDoi = typeof item.doi === 'string' ? item.doi : '';
+    const doi = normalizeDoi(itemDoi);
     const year =
       typeof item.publication_year === 'number' ? item.publication_year : null;
+
+    const primLoc = item.primary_location as
+      | { source?: { display_name?: string; host_organization_name?: string; issn_l?: string; issn?: string[] }; pdf_url?: string; landing_page_url?: string }
+      | undefined;
+    const hostVenue = item.host_venue as { display_name?: string } | undefined;
+
     const journal =
-      item.primary_location?.source?.display_name ||
-      item.host_venue?.display_name ||
+      primLoc?.source?.display_name ||
+      hostVenue?.display_name ||
       undefined;
 
     let itemType = 'journalArticle';
-    if (item.type === 'book' || item.type === 'monograph') itemType = 'book';
-    else if (item.type === 'book-chapter') itemType = 'bookSection';
-    else if (item.type === 'proceedings-article') itemType = 'conferencePaper';
-    else if (item.type === 'preprint') itemType = 'preprint';
-    else if (item.type === 'dataset') itemType = 'dataset';
+    const typeStr = typeof item.type === 'string' ? item.type : '';
+    if (typeStr === 'book' || typeStr === 'monograph') itemType = 'book';
+    else if (typeStr === 'book-chapter') itemType = 'bookSection';
+    else if (typeStr === 'proceedings-article') itemType = 'conferencePaper';
+    else if (typeStr === 'preprint') itemType = 'preprint';
+    else if (typeStr === 'dataset') itemType = 'dataset';
 
     // Decode inverted index abstract
     let abstract: string | undefined;
-    if (item.abstract_inverted_index) {
-      abstract = this.decodeInvertedIndex(item.abstract_inverted_index);
+    if (item.abstract_inverted_index && typeof item.abstract_inverted_index === 'object') {
+      abstract = this.decodeInvertedIndex(item.abstract_inverted_index as Record<string, number[]>);
     }
 
+    const openAccess = item.open_access as { oa_url?: string; is_oa?: boolean } | undefined;
     const openAccessPdfUrl =
-      item.open_access?.oa_url || item.primary_location?.pdf_url || undefined;
+      openAccess?.oa_url || primLoc?.pdf_url || undefined;
 
     const rawVersion = createHash('md5')
       .update(JSON.stringify(item))
       .digest('hex');
 
     const canonicalUrl =
-      item.doi || item.primary_location?.landing_page_url || item.id;
+      (doi ? `https://doi.org/${doi}` : undefined) ||
+      primLoc?.landing_page_url ||
+      (typeof item.id === 'string' ? item.id : undefined);
 
-    const biblio = item.biblio || {};
+    const biblio = (item.biblio || {}) as {
+      volume?: string;
+      issue?: string;
+      first_page?: string;
+      last_page?: string;
+    };
     const pages = biblio.first_page
       ? biblio.last_page && biblio.last_page !== biblio.first_page
         ? `${biblio.first_page}-${biblio.last_page}`
         : biblio.first_page
       : undefined;
     const publisher =
-      item.primary_location?.source?.host_organization_name || undefined;
+      primLoc?.source?.host_organization_name || undefined;
     const issn =
-      item.primary_location?.source?.issn_l ||
-      item.primary_location?.source?.issn?.[0] ||
+      primLoc?.source?.issn_l ||
+      primLoc?.source?.issn?.[0] ||
       undefined;
+
+    const citationCount =
+      typeof item.cited_by_count === 'number' ? item.cited_by_count : undefined;
+
+    const itemIdStr = typeof item.id === 'string' ? item.id : title;
 
     return {
       provider: this.id,
@@ -205,7 +233,7 @@ export class OpenAlexProvider implements MetadataProvider {
         title,
         authors,
         year,
-        doi,
+        doi: doi || undefined,
         journal,
         volume: biblio.volume || undefined,
         issue: biblio.issue || undefined,
@@ -213,18 +241,18 @@ export class OpenAlexProvider implements MetadataProvider {
         publisher,
         issn,
         abstract,
-        citationCount: item.cited_by_count,
+        citationCount,
         itemType,
         url: canonicalUrl,
         openAccessPdfUrl,
         provenance: {
           originProvider: this.id,
           resolvedAt: new Date().toISOString(),
-          canonicalId: doi ? `doi:${doi}` : `openalex:${item.id || title}`,
+          canonicalId: doi ? `doi:${doi}` : `openalex:${itemIdStr}`,
           canonicalUrl,
           confidenceScore: confidence,
           rawSnapshotHash: rawVersion,
-          isOpenAccess: Boolean(item.open_access?.is_oa),
+          isOpenAccess: Boolean(openAccess?.is_oa),
           openAccessPdfUrl,
         },
       },

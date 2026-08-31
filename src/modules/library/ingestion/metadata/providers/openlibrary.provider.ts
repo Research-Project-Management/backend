@@ -61,7 +61,7 @@ export class OpenLibraryProvider implements MetadataProvider {
       );
     }
 
-    let json: any;
+    let json: unknown;
     try {
       json = await response.json();
     } catch {
@@ -74,40 +74,58 @@ export class OpenLibraryProvider implements MetadataProvider {
       );
     }
 
-    const item = json?.[bibKey];
+    const payload = json as Record<string, Record<string, unknown>> | null;
+    const item = payload?.[bibKey];
     if (!item) return null;
 
     return this.transformPayload(item, cleanIsbn);
   }
 
-  private transformPayload(item: any, cleanIsbn: string): ProviderResult {
-    const title = item.title || 'Untitled Book';
+  private transformPayload(
+    item: Record<string, unknown>,
+    cleanIsbn: string,
+  ): ProviderResult {
+    const rawTitle = typeof item.title === 'string' ? item.title.trim() : 'Untitled Book';
+    const title = rawTitle || 'Untitled Book';
 
-    const authors: string[] = Array.isArray(item.authors)
-      ? item.authors.map((a: any) => a.name).filter(Boolean)
-      : [];
+    const authors: string[] = [];
+    if (Array.isArray(item.authors)) {
+      for (const a of item.authors) {
+        if (
+          a &&
+          typeof a === 'object' &&
+          typeof (a as { name?: string }).name === 'string'
+        ) {
+          authors.push((a as { name: string }).name.trim());
+        }
+      }
+    }
 
     let year: number | null = null;
-    if (item.publish_date) {
+    if (typeof item.publish_date === 'string') {
       const match = item.publish_date.match(/(\d{4})/);
       if (match) year = Number(match[1]);
     }
 
-    const publisher =
-      Array.isArray(item.publishers) && item.publishers[0]?.name
-        ? item.publishers[0].name
-        : undefined;
+    let publisher: string | undefined;
+    if (Array.isArray(item.publishers) && item.publishers[0]) {
+      const firstPub = item.publishers[0] as { name?: string };
+      if (typeof firstPub.name === 'string') {
+        publisher = firstPub.name;
+      }
+    }
 
-    const pages = item.number_of_pages
-      ? String(item.number_of_pages)
-      : undefined;
+    const pages =
+      typeof item.number_of_pages === 'number' || typeof item.number_of_pages === 'string'
+        ? String(item.number_of_pages)
+        : undefined;
 
     const rawVersion = createHash('md5')
       .update(JSON.stringify(item))
       .digest('hex');
 
-    const canonicalUrl =
-      item.url || `https://openlibrary.org/isbn/${cleanIsbn}`;
+    const rawUrl = typeof item.url === 'string' ? item.url : undefined;
+    const canonicalUrl = rawUrl || `https://openlibrary.org/isbn/${cleanIsbn}`;
 
     return {
       provider: this.id,

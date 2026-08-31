@@ -18,10 +18,6 @@ export class ExportsController {
     @Param('workspaceId') workspaceId: string,
     @Body() dto: ExportLibraryDto,
   ) {
-    const result = await this.exportsService.exportLibrary(workspaceId, dto);
-    return {
-      success: true,
-      data: result,
-    };
+    return this.exportsService.exportLibrary(workspaceId, dto);
   }
 }

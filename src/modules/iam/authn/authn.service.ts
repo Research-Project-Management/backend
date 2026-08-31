@@ -120,7 +120,7 @@ export class AuthnService {
       this.jwtService.signAsync(payload, {
         secret: accessTokenSecret,
         expiresIn: (this.configService.get<string>('JWT_EXPIRES_IN') ||
-          '1h') as any,
+          '7d') as any,
       }),
       this.jwtService.signAsync(payload, {
         secret: refreshTokenSecret,

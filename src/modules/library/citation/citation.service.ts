@@ -13,6 +13,8 @@ import {
   FormattedCitationResult,
 } from './types/citation.types';
 
+import { CatalogRepository } from '../catalog/catalog.repository';
+
 export interface ReferenceData {
   doi?: string;
   title: string;
@@ -37,7 +39,10 @@ export class CitationService {
   private readonly logger = new Logger(CitationService.name);
   private readonly registry = new CslStyleRegistry();
 
-  constructor(@Optional() private readonly prisma?: PrismaService) {}
+  constructor(
+    @Optional() private readonly prisma?: PrismaService,
+    @Optional() private readonly catalogRepo?: CatalogRepository,
+  ) {}
 
   /**
    * Returns list of supported CSL styles.
@@ -184,22 +189,20 @@ export class CitationService {
     styleId: CitationStyleId = 'apa-7th',
     index: number = 1,
   ) {
-    if (!this.prisma) {
-      throw new BadRequestException('Prisma service not available');
-    }
-
-    const item = await this.prisma.catalogItem.findFirst({
-      where: {
-        id: paperId,
-        workspaceId,
-        deletedAt: null,
-      },
-      include: {
-        contributors: {
-          orderBy: { orderIndex: 'asc' },
-        },
-      },
-    });
+    const item = this.catalogRepo
+      ? await this.catalogRepo.findById(workspaceId, paperId)
+      : await this.prisma?.catalogItem.findFirst({
+          where: {
+            id: paperId,
+            workspaceId,
+            deletedAt: null,
+          },
+          include: {
+            contributors: {
+              orderBy: { orderIndex: 'asc' },
+            },
+          },
+        });
 
     if (!item) {
       throw new NotFoundException('Paper not found in workspace');
@@ -210,7 +213,7 @@ export class CitationService {
       title: item.title,
       itemType: item.itemType || 'journalArticle',
       authors: item.authors || [],
-      creators: item.contributors?.map((c) => ({
+      creators: item.contributors?.map((c: any) => ({
         firstName: c.firstName || '',
         lastName: c.lastName || '',
         name: c.fullName,
@@ -238,22 +241,20 @@ export class CitationService {
     paperIds: string[],
     styleId: CitationStyleId = 'apa-7th',
   ) {
-    if (!this.prisma) {
-      throw new BadRequestException('Prisma service not available');
-    }
-
-    const items = await this.prisma.catalogItem.findMany({
-      where: {
-        id: { in: paperIds },
-        workspaceId,
-        deletedAt: null,
-      },
-      include: {
-        contributors: {
-          orderBy: { orderIndex: 'asc' },
-        },
-      },
-    });
+    const items = this.catalogRepo
+      ? await this.catalogRepo.findByIds(workspaceId, paperIds)
+      : (await this.prisma?.catalogItem.findMany({
+          where: {
+            id: { in: paperIds },
+            workspaceId,
+            deletedAt: null,
+          },
+          include: {
+            contributors: {
+              orderBy: { orderIndex: 'asc' },
+            },
+          },
+        })) || [];
 
     const citationMap = new Map<string, FormattedCitationResult>();
     items.forEach((item, index) => {

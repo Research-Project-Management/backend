@@ -22,6 +22,8 @@ import { MergeDuplicatesDto } from './dto/curation.dto';
 
 @Controller([
   'api/v1/workspaces/:workspaceId/library/items',
+  'api/v1/workspaces/:workspaceId/library/catalog/items',
+  'api/v1/workspaces/:workspaceId/library/papers',
   'api/workspace/:workspaceId/library/items',
   'api/library/papers/:workspaceId',
   'api/library/:workspaceId/items',
@@ -53,19 +55,14 @@ export class CatalogController {
     });
 
     return {
-      success: true,
-      data: result.items,
-      meta: result.meta,
+      items: result.items,
+      pagination: result.meta,
     };
   }
 
   @Get('duplicates')
   async getDuplicates(@Param('workspaceId') workspaceId: string) {
-    const clusters = await this.catalogService.detectDuplicates(workspaceId);
-    return {
-      success: true,
-      data: clusters,
-    };
+    return this.catalogService.detectDuplicates(workspaceId);
   }
 
   @Post('merge')
@@ -73,20 +70,12 @@ export class CatalogController {
     @Param('workspaceId') workspaceId: string,
     @Body() dto: MergeDuplicatesDto,
   ) {
-    const merged = await this.catalogService.mergeDuplicates(workspaceId, dto);
-    return {
-      success: true,
-      data: merged,
-    };
+    return this.catalogService.mergeDuplicates(workspaceId, dto);
   }
 
   @Get(['quality-audit', 'integrity'])
   async getQualityAudit(@Param('workspaceId') workspaceId: string) {
-    const report = await this.catalogService.getQualityAudit(workspaceId);
-    return {
-      success: true,
-      data: report,
-    };
+    return this.catalogService.getQualityAudit(workspaceId);
   }
 
   @Get(':id')
@@ -106,10 +95,7 @@ export class CatalogController {
       );
     }
 
-    return {
-      success: true,
-      data: item,
-    };
+    return item;
   }
 
   @Get([':id/bundle', 'papers/:id/bundle'])
@@ -129,12 +115,7 @@ export class CatalogController {
       );
     }
 
-    return {
-      success: true,
-      data: item,
-      paper: item,
-      ...item,
-    };
+    return item;
   }
 
   @Post()
@@ -143,15 +124,10 @@ export class CatalogController {
     @CurrentUser('id') currentUserId: string,
     @Body() body: CreateCatalogItemDto,
   ) {
-    const item = await this.catalogService.createItem(workspaceId, {
+    return this.catalogService.createItem(workspaceId, {
       ...body,
       uploadedById: currentUserId || 'system',
     });
-
-    return {
-      success: true,
-      data: item,
-    };
   }
 
   @Patch(':id')
@@ -171,17 +147,12 @@ export class CatalogController {
     }
 
     const { expectedVersion: _, ...updateData } = body;
-    const updated = await this.catalogService.updateItem(
+    return this.catalogService.updateItem(
       workspaceId,
       id,
       expectedVersion,
       updateData,
     );
-
-    return {
-      success: true,
-      data: updated,
-    };
   }
 
   @Delete(':id')
@@ -199,10 +170,7 @@ export class CatalogController {
       expectedVersion,
     );
 
-    return {
-      success: true,
-      data: { deleted },
-    };
+    return { deleted, id };
   }
 
   @Post(':id/restore')
@@ -214,16 +182,11 @@ export class CatalogController {
     const expectedVersion = ifMatch
       ? parseInt(ifMatch.replace(/["']/g, ''), 10)
       : undefined;
-    const restored = await this.catalogService.restoreItem(
+    return this.catalogService.restoreItem(
       workspaceId,
       id,
       expectedVersion,
     );
-
-    return {
-      success: true,
-      data: restored,
-    };
   }
 
   @Delete(':id/purge')
@@ -232,11 +195,7 @@ export class CatalogController {
     @Param('id') id: string,
   ) {
     const purged = await this.catalogService.purgeItem(workspaceId, id);
-
-    return {
-      success: true,
-      data: { purged },
-    };
+    return { purged, id };
   }
 
   @Get([':id/relations', 'api/library/relations/:workspaceId/:id'])
@@ -279,16 +238,10 @@ export class CatalogController {
     @Param('id') id: string,
     @CurrentUser('id') currentUserId: string,
   ) {
-    const result = await this.catalogService.extractNotesFromAnnotations(
+    return this.catalogService.extractNotesFromAnnotations(
       workspaceId,
       id,
       currentUserId,
     );
-    return {
-      success: true,
-      data: result,
-      totalExtracted: result.totalExtracted,
-      literatureNote: result.literatureNote,
-    };
   }
 }

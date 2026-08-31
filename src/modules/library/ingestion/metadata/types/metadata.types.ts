@@ -21,14 +21,13 @@ export interface ClassifiedQuery {
   type: QueryType;
 }
 
-// ── Creator & Provenance Types ────────────────────────────────────────────────
+import {
+  CreatorCreditInput,
+  CreatorType,
+} from '../../../catalog/types/creator.types';
 
-export interface CreatorInput {
-  creatorType?: string;
-  name?: string;
-  firstName?: string;
-  lastName?: string;
-}
+export { CreatorCreditInput, CreatorType };
+export type CreatorInput = CreatorCreditInput;
 
 export interface Provenance {
   provider?: string;

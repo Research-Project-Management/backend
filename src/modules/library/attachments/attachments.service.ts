@@ -7,23 +7,13 @@ import {
 import { PrismaService } from '../../../core/database/prisma.service';
 import { createHash } from 'crypto';
 import { TransactionService } from '../sync/services/transaction.service';
+import {
+  CreateAttachmentInput,
+  ReplaceAttachmentFileInput,
+  validateAttachmentInvariants,
+} from './types/attachment.types';
 
-export interface CreateAttachmentInput {
-  catalogItemId: string;
-  filename: string;
-  url: string;
-  mimeType?: string;
-  size?: number;
-  fileHash?: string;
-  fileId?: string;
-}
-
-export interface ReplaceAttachmentFileInput {
-  url: string;
-  fileHash: string;
-  sizeBytes: number;
-  comment?: string;
-}
+export { CreateAttachmentInput, ReplaceAttachmentFileInput };
 
 @Injectable()
 export class AttachmentsService {
@@ -45,6 +35,14 @@ export class AttachmentsService {
    * Creates a new attachment with an initial Revision (revision 1).
    */
   async createAttachment(input: CreateAttachmentInput) {
+    validateAttachmentInvariants({
+      url: input.url,
+      filename: input.filename,
+      size: input.size,
+      mimeType: input.mimeType,
+      fileHash: input.fileHash,
+    });
+
     const item = await this.prisma.catalogItem.findUnique({
       where: { id: input.catalogItemId },
     });
@@ -104,6 +102,12 @@ export class AttachmentsService {
    * Replaces an attachment's current file by creating an immutable sequential revision.
    */
   async addRevision(attachmentId: string, input: ReplaceAttachmentFileInput) {
+    validateAttachmentInvariants({
+      url: input.url,
+      size: input.sizeBytes,
+      fileHash: input.fileHash,
+    });
+
     const attachment = await this.prisma.catalogAttachment.findUnique({
       where: { id: attachmentId },
       include: {

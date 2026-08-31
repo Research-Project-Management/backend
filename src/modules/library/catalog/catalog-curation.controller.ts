@@ -17,11 +17,7 @@ export class CatalogCurationController {
 
   @Get('duplicates')
   async getDuplicates(@Param('workspaceId') workspaceId: string) {
-    const clusters = await this.catalogService.detectDuplicates(workspaceId);
-    return {
-      success: true,
-      data: clusters,
-    };
+    return this.catalogService.detectDuplicates(workspaceId);
   }
 
   @Post('merge')
@@ -29,19 +25,11 @@ export class CatalogCurationController {
     @Param('workspaceId') workspaceId: string,
     @Body() dto: MergeDuplicatesDto,
   ) {
-    const merged = await this.catalogService.mergeDuplicates(workspaceId, dto);
-    return {
-      success: true,
-      data: merged,
-    };
+    return this.catalogService.mergeDuplicates(workspaceId, dto);
   }
 
   @Get(['quality-audit', 'integrity'])
   async getQualityAudit(@Param('workspaceId') workspaceId: string) {
-    const report = await this.catalogService.getQualityAudit(workspaceId);
-    return {
-      success: true,
-      data: report,
-    };
+    return this.catalogService.getQualityAudit(workspaceId);
   }
 }

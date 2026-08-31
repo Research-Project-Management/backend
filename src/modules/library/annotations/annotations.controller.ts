@@ -33,17 +33,11 @@ export class AnnotationsController {
   ) {
     const parsedPage =
       pageIndex !== undefined ? parseInt(pageIndex, 10) : undefined;
-    const annotations =
-      await this.annotationsService.getAnnotationsByAttachment(
-        workspaceId,
-        attachmentId,
-        parsedPage,
-      );
-
-    return {
-      success: true,
-      data: annotations,
-    };
+    return this.annotationsService.getAnnotationsByAttachment(
+      workspaceId,
+      attachmentId,
+      parsedPage,
+    );
   }
 
   @Post()
@@ -53,7 +47,7 @@ export class AnnotationsController {
     @CurrentUser('id') currentUserId: string,
     @Body() body: CreateAnnotationDto,
   ) {
-    const annotation = await this.annotationsService.createAnnotation(
+    return this.annotationsService.createAnnotation(
       workspaceId,
       {
         attachmentId,
@@ -66,11 +60,6 @@ export class AnnotationsController {
         authorId: currentUserId || 'system',
       },
     );
-
-    return {
-      success: true,
-      data: annotation,
-    };
   }
 
   @Patch(':id')
@@ -90,17 +79,12 @@ export class AnnotationsController {
     }
 
     const { expectedVersion: _, ...updateData } = body;
-    const updated = await this.annotationsService.updateAnnotation(
+    return this.annotationsService.updateAnnotation(
       workspaceId,
       id,
       expectedVersion,
       updateData,
     );
-
-    return {
-      success: true,
-      data: updated,
-    };
   }
 
   @Delete(':id')
@@ -121,9 +105,6 @@ export class AnnotationsController {
       throw new NotFoundException(`Annotation ${id} not found`);
     }
 
-    return {
-      success: true,
-      data: { deleted },
-    };
+    return { deleted, id };
   }
 }

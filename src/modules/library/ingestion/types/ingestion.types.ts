@@ -1,5 +1,15 @@
-import { IngestionStatus } from '@prisma/client';
-import { CreatorInput } from '../../catalog/types/item.types';
+import { CreatorCreditInput } from '../../catalog/types/creator.types';
+
+export type IngestionStatus =
+  | 'pending'
+  | 'processing'
+  | 'extracting'
+  | 'normalizing'
+  | 'reconciling'
+  | 'indexing'
+  | 'completed'
+  | 'failed'
+  | 'review_required';
 
 export type IngestionSourceType = 'doi' | 'url' | 'bibtex' | 'pdf';
 
@@ -26,7 +36,7 @@ export type IngestionCommand =
         year?: number;
         publicationTitle?: string;
         itemType?: string;
-        creators?: CreatorInput[];
+        creators?: CreatorCreditInput[];
         tags?: string[];
         url?: string;
       };

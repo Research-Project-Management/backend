@@ -101,7 +101,7 @@ export class IngestionController {
         };
     }
 
-    const result = await this.ingestionService.submit({
+    return this.ingestionService.submit({
       workspaceId: targetWsId,
       userId,
       idempotencyKey: effectiveIdempotencyKey,
@@ -111,11 +111,6 @@ export class IngestionController {
       overrides: dto.overrides,
       contractVersion: dto.contractVersion,
     });
-
-    return {
-      success: true,
-      data: result,
-    };
   }
 
   /**
@@ -128,11 +123,7 @@ export class IngestionController {
     @Param('runId') runId: string,
   ) {
     const targetWsId = currentWorkspaceId || workspaceId;
-    const status = await this.ingestionService.getRunStatus(targetWsId, runId);
-    return {
-      success: true,
-      data: status,
-    };
+    return this.ingestionService.getRunStatus(targetWsId, runId);
   }
 
   /**
@@ -146,11 +137,7 @@ export class IngestionController {
     @Param('runId') runId: string,
   ) {
     const targetWsId = currentWorkspaceId || workspaceId;
-    const result = await this.ingestionService.retryRun(targetWsId, runId);
-    return {
-      success: true,
-      data: result,
-    };
+    return this.ingestionService.retryRun(targetWsId, runId);
   }
 
   // ── Backward Compatibility Endpoints ─────────────────────────────────────
@@ -226,11 +213,7 @@ export class IngestionController {
         };
     }
 
-    const result = await this.unifiedService.ingest(command);
-    return {
-      success: true,
-      data: result,
-    };
+    return this.unifiedService.ingest(command);
   }
 
   @Post('capture-url')
@@ -239,14 +222,10 @@ export class IngestionController {
     @CurrentUser('id') userId: string,
     @Body() dto: CaptureUrlDto,
   ) {
-    const metadata = await this.ingestionService.captureUrl(
+    return this.ingestionService.captureUrl(
       dto.url,
       workspaceId,
     );
-    return {
-      success: true,
-      data: metadata,
-    };
   }
 
   @Post('confirm-url')
@@ -255,15 +234,11 @@ export class IngestionController {
     @CurrentUser('id') userId: string,
     @Body() dto: ConfirmCapturedUrlDto,
   ) {
-    const item = await this.ingestionService.confirmCapturedUrl(
+    return this.ingestionService.confirmCapturedUrl(
       workspaceId,
       userId || 'system',
       dto,
     );
-    return {
-      success: true,
-      data: item,
-    };
   }
 
   @Post('start')
@@ -273,7 +248,7 @@ export class IngestionController {
     @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
     @Body() dto: StartIngestionDto,
   ) {
-    const run = await this.ingestionService.startRun(
+    return this.ingestionService.startRun(
       workspaceId,
       userId || 'system',
       {
@@ -281,10 +256,6 @@ export class IngestionController {
         idempotencyKey: idempotencyKeyHeader || dto.idempotencyKey,
       },
     );
-    return {
-      success: true,
-      data: run,
-    };
   }
 
   @Post('doi')
@@ -294,7 +265,7 @@ export class IngestionController {
     @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
     @Body() dto: IngestDoiDto,
   ) {
-    const item = await this.ingestionService.ingestDoi(
+    return this.ingestionService.ingestDoi(
       workspaceId,
       userId || 'system',
       {
@@ -302,10 +273,6 @@ export class IngestionController {
         idempotencyKey: idempotencyKeyHeader || dto.idempotencyKey,
       },
     );
-    return {
-      success: true,
-      data: item,
-    };
   }
 
   @Post('bibtex')
@@ -315,7 +282,7 @@ export class IngestionController {
     @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
     @Body() dto: IngestBibtexDto,
   ) {
-    const item = await this.ingestionService.ingestBibtex(
+    return this.ingestionService.ingestBibtex(
       workspaceId,
       userId || 'system',
       {
@@ -323,10 +290,6 @@ export class IngestionController {
         idempotencyKey: idempotencyKeyHeader || dto.idempotencyKey,
       },
     );
-    return {
-      success: true,
-      data: item,
-    };
   }
 
   @Post('pdf')
@@ -336,7 +299,7 @@ export class IngestionController {
     @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
     @Body() dto: IngestPdfDto,
   ) {
-    const result = await this.unifiedService.ingest({
+    return this.unifiedService.ingest({
       source: 'pdf',
       workspaceId,
       userId,
@@ -346,9 +309,5 @@ export class IngestionController {
       overrides: dto.overrides,
       idempotencyKey: idempotencyKeyHeader || dto.idempotencyKey,
     });
-    return {
-      success: true,
-      data: result,
-    };
   }
 }

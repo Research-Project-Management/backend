@@ -12,12 +12,14 @@ import {
 import { randomUUID } from 'crypto';
 
 export interface CreateIngestionRunData {
+  id?: string;
   requesterId?: string;
   inputParams: Prisma.InputJsonValue;
   inputHash: string;
   idempotencyKey?: string;
   contractVersion?: string;
   pipelineVersion?: string;
+  status?: IngestionStatus;
 }
 
 export interface CreateIngestionStageData {
@@ -49,8 +51,11 @@ export interface CreateIngestionDecisionData {
 export interface CreateIngestionReviewCaseData {
   targetItemId?: string;
   reason: string;
-  evidence: Prisma.InputJsonValue;
+  evidence?: Prisma.InputJsonValue;
   options?: Prisma.InputJsonValue;
+  status?: string; // PENDING, RESOLVED, DISMISSED
+  resolution?: string;
+  assignedToUserId?: string;
   assignedToId?: string;
 }
 
@@ -60,6 +65,10 @@ export class IngestionRepository {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  private getClient(tx?: Prisma.TransactionClient): PrismaService | Prisma.TransactionClient {
+    return tx || this.prisma;
+  }
+
   // ── Run Operations ────────────────────────────────────────────────────────
 
   async createRun(
@@ -67,39 +76,20 @@ export class IngestionRepository {
     data: CreateIngestionRunData,
     tx?: Prisma.TransactionClient,
   ): Promise<IngestionRun> {
-    const client = (tx || this.prisma) as any;
-    if (client.ingestionRun?.create) {
-      return (await client.ingestionRun.create({
-        data: {
-          workspaceId,
-          requesterId: data.requesterId,
-          inputParams: data.inputParams,
-          inputHash: data.inputHash,
-          idempotencyKey: data.idempotencyKey,
-          contractVersion: data.contractVersion || '1.0.0',
-          pipelineVersion: data.pipelineVersion || '1.0.0',
-          status: IngestionStatus.RECEIVED,
-        },
-      })) as IngestionRun;
-    }
-    return {
-      id: randomUUID(),
-      workspaceId,
-      requesterId: data.requesterId ?? null,
-      itemId: null,
-      status: IngestionStatus.RECEIVED,
-      idempotencyKey: data.idempotencyKey ?? null,
-      inputParams: data.inputParams,
-      inputHash: data.inputHash,
-      contractVersion: data.contractVersion || '1.0.0',
-      pipelineVersion: data.pipelineVersion || '1.0.0',
-      attempts: 0,
-      maxRetries: 3,
-      lastError: null,
-      executionLog: null,
-      startedAt: new Date(),
-      completedAt: null,
-    } as IngestionRun;
+    const client = this.getClient(tx);
+    return client.ingestionRun.create({
+      data: {
+        id: data.id || randomUUID(),
+        workspaceId,
+        requesterId: data.requesterId,
+        inputParams: data.inputParams,
+        inputHash: data.inputHash,
+        idempotencyKey: data.idempotencyKey,
+        contractVersion: data.contractVersion || '1.0.0',
+        pipelineVersion: data.pipelineVersion || '1.0.0',
+        status: IngestionStatus.RECEIVED,
+      },
+    });
   }
 
   async findRunById(
@@ -115,29 +105,19 @@ export class IngestionRepository {
       })
     | null
   > {
-    const client = (tx || this.prisma) as any;
-    if (client.ingestionRun?.findFirst) {
-      return (await client.ingestionRun.findFirst({
-        where: {
-          id: runId,
-          workspaceId,
-        },
-        include: {
-          stages: { orderBy: { executedAt: 'asc' } },
-          candidates: { orderBy: { fetchedAt: 'asc' } },
-          decisions: { orderBy: { decidedAt: 'desc' } },
-          reviewCases: { orderBy: { createdAt: 'desc' } },
-        },
-      })) as
-        | (IngestionRun & {
-            stages: IngestionStage[];
-            candidates: IngestionCandidate[];
-            decisions: IngestionDecision[];
-            reviewCases: IngestionReviewCase[];
-          })
-        | null;
-    }
-    return null;
+    const client = this.getClient(tx);
+    return client.ingestionRun.findFirst({
+      where: {
+        id: runId,
+        workspaceId,
+      },
+      include: {
+        stages: { orderBy: { executedAt: 'asc' } },
+        candidates: { orderBy: { fetchedAt: 'asc' } },
+        decisions: { orderBy: { decidedAt: 'desc' } },
+        reviewCases: { orderBy: { createdAt: 'desc' } },
+      },
+    });
   }
 
   async findRunByIdempotencyKey(
@@ -145,16 +125,13 @@ export class IngestionRepository {
     idempotencyKey: string,
     tx?: Prisma.TransactionClient,
   ): Promise<IngestionRun | null> {
-    const client = (tx || this.prisma) as any;
-    if (client.ingestionRun?.findFirst) {
-      return (await client.ingestionRun.findFirst({
-        where: {
-          workspaceId,
-          idempotencyKey,
-        },
-      })) as IngestionRun | null;
-    }
-    return null;
+    const client = this.getClient(tx);
+    return client.ingestionRun.findFirst({
+      where: {
+        workspaceId,
+        idempotencyKey,
+      },
+    });
   }
 
   async updateRunStatus(
@@ -169,37 +146,27 @@ export class IngestionRepository {
     },
     tx?: Prisma.TransactionClient,
   ): Promise<IngestionRun> {
-    const client = (tx || this.prisma) as any;
-    if (client.ingestionRun?.update) {
-      return (await client.ingestionRun.update({
-        where: {
-          id: runId,
-          workspaceId,
-        },
-        data: {
-          status,
-          ...(details?.itemId !== undefined ? { itemId: details.itemId } : {}),
-          ...(details?.lastError !== undefined
-            ? { lastError: details.lastError }
-            : {}),
-          ...(details?.completedAt !== undefined
-            ? { completedAt: details.completedAt }
-            : {}),
-          ...(details?.executionLog !== undefined
-            ? { executionLog: details.executionLog }
-            : {}),
-          attempts: { increment: 1 },
-        },
-      })) as IngestionRun;
-    }
-    return {
-      id: runId,
-      workspaceId,
-      status,
-      itemId: details?.itemId ?? null,
-      lastError: details?.lastError ?? null,
-      completedAt: details?.completedAt ?? null,
-    } as IngestionRun;
+    const client = this.getClient(tx);
+    return client.ingestionRun.update({
+      where: {
+        id: runId,
+        workspaceId,
+      },
+      data: {
+        status,
+        ...(details?.itemId !== undefined ? { itemId: details.itemId } : {}),
+        ...(details?.lastError !== undefined
+          ? { lastError: details.lastError }
+          : {}),
+        ...(details?.completedAt !== undefined
+          ? { completedAt: details.completedAt }
+          : {}),
+        ...(details?.executionLog !== undefined
+          ? { executionLog: details.executionLog }
+          : {}),
+        attempts: { increment: 1 },
+      },
+    });
   }
 
   // ── Stage Operations ──────────────────────────────────────────────────────
@@ -209,47 +176,30 @@ export class IngestionRepository {
     data: CreateIngestionStageData,
     tx?: Prisma.TransactionClient,
   ): Promise<IngestionStage> {
-    const client = (tx || this.prisma) as any;
-    if (client.ingestionStage?.create) {
-      return (await client.ingestionStage.create({
-        data: {
-          ingestionRunId,
-          stageName: data.stageName,
-          durationMs: data.durationMs ?? 0,
-          success: data.success ?? true,
-          errorMessage: data.errorMessage,
-          outputSnapshot: data.outputSnapshot,
-          leaseToken: data.leaseToken,
-          leaseExpiresAt: data.leaseExpiresAt,
-        },
-      })) as IngestionStage;
-    }
-    return {
-      id: randomUUID(),
-      ingestionRunId,
-      stageName: data.stageName,
-      durationMs: data.durationMs ?? 0,
-      success: data.success ?? true,
-      errorMessage: data.errorMessage ?? null,
-      outputSnapshot: data.outputSnapshot ?? null,
-      leaseToken: data.leaseToken ?? null,
-      leaseExpiresAt: data.leaseExpiresAt ?? null,
-      executedAt: new Date(),
-    } as IngestionStage;
+    const client = this.getClient(tx);
+    return client.ingestionStage.create({
+      data: {
+        ingestionRunId,
+        stageName: data.stageName,
+        durationMs: data.durationMs ?? 0,
+        success: data.success ?? true,
+        errorMessage: data.errorMessage,
+        outputSnapshot: data.outputSnapshot,
+        leaseToken: data.leaseToken,
+        leaseExpiresAt: data.leaseExpiresAt,
+      },
+    });
   }
 
   async findStages(
     ingestionRunId: string,
     tx?: Prisma.TransactionClient,
   ): Promise<IngestionStage[]> {
-    const client = (tx || this.prisma) as any;
-    if (client.ingestionStage?.findMany) {
-      return (await client.ingestionStage.findMany({
-        where: { ingestionRunId },
-        orderBy: { executedAt: 'asc' },
-      })) as IngestionStage[];
-    }
-    return [];
+    const client = this.getClient(tx);
+    return client.ingestionStage.findMany({
+      where: { ingestionRunId },
+      orderBy: { executedAt: 'asc' },
+    });
   }
 
   // ── Candidate Operations ──────────────────────────────────────────────────
@@ -259,43 +209,28 @@ export class IngestionRepository {
     data: CreateIngestionCandidateData,
     tx?: Prisma.TransactionClient,
   ): Promise<IngestionCandidate> {
-    const client = (tx || this.prisma) as any;
-    if (client.ingestionCandidate?.create) {
-      return (await client.ingestionCandidate.create({
-        data: {
-          ingestionRunId,
-          sourceProvider: data.sourceProvider,
-          sourceRecordId: data.sourceRecordId,
-          confidenceScore: data.confidenceScore ?? 1.0,
-          metadataPayload: data.metadataPayload,
-          rawEvidenceRef: data.rawEvidenceRef,
-        },
-      })) as IngestionCandidate;
-    }
-    return {
-      id: randomUUID(),
-      ingestionRunId,
-      sourceProvider: data.sourceProvider,
-      sourceRecordId: data.sourceRecordId ?? null,
-      confidenceScore: data.confidenceScore ?? 1.0,
-      metadataPayload: data.metadataPayload,
-      rawEvidenceRef: data.rawEvidenceRef ?? null,
-      fetchedAt: new Date(),
-    } as IngestionCandidate;
+    const client = this.getClient(tx);
+    return client.ingestionCandidate.create({
+      data: {
+        ingestionRunId,
+        sourceProvider: data.sourceProvider,
+        sourceRecordId: data.sourceRecordId,
+        confidenceScore: data.confidenceScore ?? 1.0,
+        metadataPayload: data.metadataPayload,
+        rawEvidenceRef: data.rawEvidenceRef,
+      },
+    });
   }
 
   async findCandidates(
     ingestionRunId: string,
     tx?: Prisma.TransactionClient,
   ): Promise<IngestionCandidate[]> {
-    const client = (tx || this.prisma) as any;
-    if (client.ingestionCandidate?.findMany) {
-      return (await client.ingestionCandidate.findMany({
-        where: { ingestionRunId },
-        orderBy: { fetchedAt: 'asc' },
-      })) as IngestionCandidate[];
-    }
-    return [];
+    const client = this.getClient(tx);
+    return client.ingestionCandidate.findMany({
+      where: { ingestionRunId },
+      orderBy: { fetchedAt: 'asc' },
+    });
   }
 
   // ── Decision Operations ───────────────────────────────────────────────────
@@ -305,43 +240,28 @@ export class IngestionRepository {
     data: CreateIngestionDecisionData,
     tx?: Prisma.TransactionClient,
   ): Promise<IngestionDecision> {
-    const client = (tx || this.prisma) as any;
-    if (client.ingestionDecision?.create) {
-      return (await client.ingestionDecision.create({
-        data: {
-          ingestionRunId,
-          decisionType: data.decisionType,
-          decisionReason: data.decisionReason,
-          proposedItem: data.proposedItem,
-          fieldDecisions: data.fieldDecisions,
-          duplicateMatch: data.duplicateMatch,
-        },
-      })) as IngestionDecision;
-    }
-    return {
-      id: randomUUID(),
-      ingestionRunId,
-      decisionType: data.decisionType,
-      decisionReason: data.decisionReason,
-      proposedItem: data.proposedItem,
-      fieldDecisions: data.fieldDecisions ?? null,
-      duplicateMatch: data.duplicateMatch ?? null,
-      decidedAt: new Date(),
-    } as IngestionDecision;
+    const client = this.getClient(tx);
+    return client.ingestionDecision.create({
+      data: {
+        ingestionRunId,
+        decisionType: data.decisionType,
+        decisionReason: data.decisionReason,
+        proposedItem: data.proposedItem,
+        fieldDecisions: data.fieldDecisions,
+        duplicateMatch: data.duplicateMatch,
+      },
+    });
   }
 
   async findDecisions(
     ingestionRunId: string,
     tx?: Prisma.TransactionClient,
   ): Promise<IngestionDecision[]> {
-    const client = (tx || this.prisma) as any;
-    if (client.ingestionDecision?.findMany) {
-      return (await client.ingestionDecision.findMany({
-        where: { ingestionRunId },
-        orderBy: { decidedAt: 'desc' },
-      })) as IngestionDecision[];
-    }
-    return [];
+    const client = this.getClient(tx);
+    return client.ingestionDecision.findMany({
+      where: { ingestionRunId },
+      orderBy: { decidedAt: 'desc' },
+    });
   }
 
   // ── Review Case Operations ────────────────────────────────────────────────
@@ -352,34 +272,19 @@ export class IngestionRepository {
     data: CreateIngestionReviewCaseData,
     tx?: Prisma.TransactionClient,
   ): Promise<IngestionReviewCase> {
-    const client = (tx || this.prisma) as any;
-    if (client.ingestionReviewCase?.create) {
-      return (await client.ingestionReviewCase.create({
-        data: {
-          workspaceId,
-          ingestionRunId,
-          targetItemId: data.targetItemId,
-          reason: data.reason,
-          evidence: data.evidence,
-          options: data.options,
-          assignedToId: data.assignedToId,
-          status: 'PENDING',
-        },
-      })) as IngestionReviewCase;
-    }
-    return {
-      id: randomUUID(),
-      workspaceId,
-      ingestionRunId,
-      targetItemId: data.targetItemId ?? null,
-      status: 'PENDING',
-      reason: data.reason,
-      evidence: data.evidence,
-      options: data.options ?? null,
-      assignedToId: data.assignedToId ?? null,
-      resolvedAt: null,
-      createdAt: new Date(),
-    } as IngestionReviewCase;
+    const client = this.getClient(tx);
+    return client.ingestionReviewCase.create({
+      data: {
+        workspaceId,
+        ingestionRunId,
+        targetItemId: data.targetItemId,
+        reason: data.reason,
+        evidence: data.evidence ?? Prisma.JsonNull,
+        options: data.options ?? Prisma.JsonNull,
+        assignedToId: data.assignedToId,
+        status: 'PENDING',
+      },
+    });
   }
 
   async findReviewCases(
@@ -387,18 +292,15 @@ export class IngestionRepository {
     options?: { status?: string; limit?: number },
     tx?: Prisma.TransactionClient,
   ): Promise<IngestionReviewCase[]> {
-    const client = (tx || this.prisma) as any;
-    if (client.ingestionReviewCase?.findMany) {
-      return (await client.ingestionReviewCase.findMany({
-        where: {
-          workspaceId,
-          ...(options?.status ? { status: options.status } : {}),
-        },
-        take: options?.limit ?? 50,
-        orderBy: { createdAt: 'desc' },
-      })) as IngestionReviewCase[];
-    }
-    return [];
+    const client = this.getClient(tx);
+    return client.ingestionReviewCase.findMany({
+      where: {
+        workspaceId,
+        ...(options?.status ? { status: options.status } : {}),
+      },
+      take: options?.limit ?? 50,
+      orderBy: { createdAt: 'desc' },
+    });
   }
 
   async findReviewCaseById(
@@ -406,16 +308,13 @@ export class IngestionRepository {
     id: string,
     tx?: Prisma.TransactionClient,
   ): Promise<IngestionReviewCase | null> {
-    const client = (tx || this.prisma) as any;
-    if (client.ingestionReviewCase?.findFirst) {
-      return (await client.ingestionReviewCase.findFirst({
-        where: {
-          id,
-          workspaceId,
-        },
-      })) as IngestionReviewCase | null;
-    }
-    return null;
+    const client = this.getClient(tx);
+    return client.ingestionReviewCase.findFirst({
+      where: {
+        id,
+        workspaceId,
+      },
+    });
   }
 
   async updateReviewCaseStatus(
@@ -424,24 +323,16 @@ export class IngestionRepository {
     status: 'APPROVED' | 'REJECTED' | 'DISMISSED',
     tx?: Prisma.TransactionClient,
   ): Promise<IngestionReviewCase> {
-    const client = (tx || this.prisma) as any;
-    if (client.ingestionReviewCase?.update) {
-      return (await client.ingestionReviewCase.update({
-        where: {
-          id,
-          workspaceId,
-        },
-        data: {
-          status,
-          resolvedAt: new Date(),
-        },
-      })) as IngestionReviewCase;
-    }
-    return {
-      id,
-      workspaceId,
-      status,
-      resolvedAt: new Date(),
-    } as IngestionReviewCase;
+    const client = this.getClient(tx);
+    return client.ingestionReviewCase.update({
+      where: {
+        id,
+        workspaceId,
+      },
+      data: {
+        status,
+        resolvedAt: new Date(),
+      },
+    });
   }
 }

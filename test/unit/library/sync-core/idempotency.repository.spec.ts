@@ -357,7 +357,7 @@ describe('IdempotencyRepository Unit & Concurrency Safety', () => {
       };
 
       const success = await repository.markSucceededInTx(
-        mockTx,
+        mockTx as any,
         workspaceId,
         idempotencyKey,
         200,
@@ -390,7 +390,7 @@ describe('IdempotencyRepository Unit & Concurrency Safety', () => {
       };
 
       const success = await repository.markSucceededInTx(
-        mockTx,
+        mockTx as any,
         workspaceId,
         idempotencyKey,
         200,

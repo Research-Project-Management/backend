@@ -39,7 +39,6 @@ import { IdempotencyRepository } from '../sync/repositories/idempotency.reposito
   providers: [
     // Repository
     IngestionRepository,
-    IdempotencyRepository,
 
     // Parsers
     DoiParser,
@@ -70,8 +69,6 @@ import { IdempotencyRepository } from '../sync/repositories/idempotency.reposito
   exports: [
     INGESTION_PORT,
     IngestionService,
-    IngestionRepository,
-    UrlCaptureProvider,
     DoiParser,
     BibtexParser,
     RisParser,

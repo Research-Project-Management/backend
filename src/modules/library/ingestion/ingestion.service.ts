@@ -221,7 +221,7 @@ export class IngestionService implements IngestionPort {
     // 2. Create IngestionRun Record
     const run = await this.ingestionRepo.createRun(workspaceId, {
       requesterId: envelope.userId,
-      inputParams: envelope.payload as any,
+      inputParams: envelope.payload as unknown as Prisma.InputJsonValue,
       inputHash: requestHash,
       idempotencyKey,
       contractVersion: envelope.contractVersion || '1.0.0',
@@ -446,29 +446,21 @@ export class IngestionService implements IngestionPort {
       );
     } else if (this.libraryTx) {
       createdItem = await this.libraryTx.executeInTransaction(
-        async (tx: any, helpers: any) => {
-          let it: any = null;
-          if ((this.prisma as any).catalogItem?.create) {
-            it = await (this.prisma as any).catalogItem.create({
-              data: {
-                workspaceId,
+        async (tx: Prisma.TransactionClient, helpers: any) => {
+          if (this.catalogService) {
+            return this.catalogService.createItem(
+              workspaceId,
+              {
                 title: decision.proposedItem.title || 'Untitled Document',
                 doi: decision.proposedItem.doi,
-                year: decision.proposedItem.year,
+                year: decision.proposedItem.year ?? undefined,
                 publicationTitle: decision.proposedItem.publicationTitle,
                 uploadedById: envelope.userId || 'system',
               },
-            });
-          } else {
-            it = {
-              id: 'item-1',
-              workspaceId,
-              title: decision.proposedItem.title || 'Untitled Document',
-              doi: decision.proposedItem.doi,
-              year: decision.proposedItem.year,
-            };
+              { tx, helpers, source: 'manual' },
+            );
           }
-          return it;
+          throw new Error('CatalogService is required to commit ingestion item');
         },
       );
     }
@@ -502,23 +494,13 @@ export class IngestionService implements IngestionPort {
   async getRunStatus(workspaceId: string, runId: string): Promise<any> {
     const run = await this.ingestionRepo.findRunById(workspaceId, runId);
     if (!run) {
-      return {
-        runId,
-        workspaceId,
-        status: IngestionStatus.READY,
-        itemId: 'item-1',
-        inputHash: '',
-        attempts: 1,
-        startedAt: new Date(),
-        completedAt: new Date(),
-        stages: [],
-        candidates: [],
-        decisions: [],
-        reviewCases: [],
-      };
+      throw new NotFoundException(
+        `Ingestion run "${runId}" not found in workspace "${workspaceId}"`,
+      );
     }
 
     return {
+      id: run.id,
       runId: run.id,
       workspaceId: run.workspaceId,
       status: run.status,
@@ -589,17 +571,75 @@ export class IngestionService implements IngestionPort {
     };
   }
 
+  private async saveIdempotency(
+    workspaceId: string,
+    idempotencyKey?: string,
+    requestHash?: string,
+    result?: IngestionResult,
+  ): Promise<void> {
+    if (idempotencyKey && result && this.idempotencyRepo?.markSucceeded) {
+      try {
+        await this.idempotencyRepo.markSucceeded(
+          workspaceId,
+          idempotencyKey,
+          200,
+          result,
+        );
+      } catch (err: any) {
+        this.logger.warn(
+          `Failed to record idempotency success for ${idempotencyKey}: ${err?.message}`,
+        );
+      }
+    }
+  }
+
+  private locks = new Map<string, Promise<void>>();
+
+  private async withKeyLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    while (this.locks.has(key)) {
+      await this.locks.get(key);
+    }
+    let resolveLock!: () => void;
+    const lockPromise = new Promise<void>((res) => {
+      resolveLock = res;
+    });
+    this.locks.set(key, lockPromise);
+    try {
+      return await fn();
+    } finally {
+      this.locks.delete(key);
+      resolveLock();
+    }
+  }
+
   // ── Backward Compatibility Adapter for IngestionPort ─────────────────────
 
   async ingest(command: IngestionCommand): Promise<IngestionResult> {
     const workspaceId = await this.resolveWorkspaceId(command.workspaceId);
+    const runId = randomUUID();
 
     // 1. Idempotency handling
+    let requestHash = '';
     if (command.idempotencyKey && this.idempotencyRepo?.claim) {
+      requestHash = createHash('sha256')
+        .update(
+          JSON.stringify({
+            source: command.source,
+            workspaceId,
+            doi: (command as any).doi,
+            url: (command as any).url,
+            content: (command as any).content,
+            fileId: (command as any).fileId,
+            filename: (command as any).filename,
+            overrides: (command as any).overrides,
+          }),
+        )
+        .digest('hex');
+
       const claimRes = await this.idempotencyRepo.claim(
         workspaceId,
         command.idempotencyKey,
-        'hash',
+        requestHash,
       );
       if (
         claimRes?.status === 'cached' &&
@@ -609,207 +649,729 @@ export class IngestionService implements IngestionPort {
       }
       if (claimRes?.status === 'mismatch') {
         throw new IngestionIdempotencyConflictException(
-          'Idempotency key mismatch',
+          'Idempotency key mismatch: payload does not match previously recorded request',
         );
       }
     }
 
-    // 2. Specific format handling for backward compatibility
-    if (command.source === 'doi') {
-      const cleanDoi = this.doiParserService.isValid(command.doi)
-        ? this.doiParserService.normalize(command.doi)
-        : command.doi.toLowerCase().trim();
-
-      // Check existing DOI in workspace
-      if ((this.prisma as any).catalogItem?.findFirst) {
-        const existing = await (this.prisma as any).catalogItem.findFirst({
-          where: {
-            workspaceId,
-            doi: cleanDoi,
-            deletedAt: null,
-          },
-        });
-        if (existing) {
-          return {
-            runId: randomUUID(),
-            status: 'completed',
-            itemId: existing.id,
-            attachmentIds: [],
-            deduplicated: true,
-            item: existing,
-          };
-        }
-      }
-
-      // Resolve via metadata service
-      let resolvedMeta: any = null;
-      if (this.metadataPort?.resolve) {
-        resolvedMeta = await this.metadataPort.resolve({
-          query: cleanDoi,
-          workspaceId,
-        });
-      }
-
-      const meta = resolvedMeta?.metadata ||
-        resolvedMeta || { title: 'Imported DOI Document', doi: cleanDoi };
-
-      let createdItem: any = null;
-      if (this.libraryTx?.executeInTransaction) {
-        createdItem = await this.libraryTx.executeInTransaction(
-          async (tx: any, helpers: any) => {
-            if ((this.prisma as any).catalogItem?.create) {
-              return await (this.prisma as any).catalogItem.create({
-                data: {
-                  workspaceId,
-                  title: meta.title || 'Untitled Document',
-                  doi: cleanDoi,
-                  year: meta.year,
-                  publicationTitle: meta.publicationTitle || meta.journal,
-                  uploadedById: command.userId || 'system',
-                },
-              });
-            }
-            return {
-              id: 'item-new-123',
-              title: meta.title,
-              doi: cleanDoi,
-              workspaceId,
-            };
-          },
-        );
-      }
-
-      return {
-        runId: randomUUID(),
-        status: 'completed',
-        itemId: createdItem?.id || 'item-new-123',
-        attachmentIds: [],
-        deduplicated: false,
-        item: createdItem,
-      };
-    }
-
-    if (command.source === 'url') {
+    if (this.ingestionRepo?.createRun) {
       try {
-        MetadataRoutingPolicy.validateUrl(command.url);
+        await this.ingestionRepo.createRun(workspaceId, {
+          id: runId,
+          requesterId: command.userId || 'system',
+          inputParams: command as any,
+          inputHash:
+            requestHash ||
+            createHash('sha256')
+              .update(JSON.stringify(command))
+              .digest('hex'),
+          idempotencyKey: (command as any).idempotencyKey,
+          contractVersion: '1.0.0',
+          pipelineVersion: '1.0.0',
+          status: IngestionStatus.RECEIVED,
+        });
       } catch (err: any) {
-        throw new IngestionValidationException(
-          `URL validation failed: ${err?.message || err}`,
+        this.logger.warn(`Could not create ingestion run record: ${err?.message}`);
+      }
+    }
+
+    // 2. Specific format handling via decoupled handlers
+    switch (command.source) {
+      case 'doi':
+        return this.handleDoiIngestion(command, workspaceId, runId, requestHash);
+      case 'url':
+        return this.handleUrlIngestion(command, workspaceId, runId, requestHash);
+      case 'bibtex':
+        return this.handleBibtexIngestion(command, workspaceId, runId, requestHash);
+      case 'pdf':
+        return this.handlePdfIngestion(command, workspaceId, runId, requestHash);
+      default:
+        throw new BadRequestException(`Unsupported ingestion source: ${(command as any).source}`);
+    }
+  }
+
+  // ── Handler: DOI Ingestion ────────────────────────────────────────────────
+
+  private async handleDoiIngestion(
+    command: IngestionCommand & { source: 'doi' },
+    workspaceId: string,
+    runId: string,
+    requestHash: string,
+  ): Promise<IngestionResult> {
+    const cleanDoi = this.doiParserService.isValid(command.doi)
+      ? this.doiParserService.normalize(command.doi)
+      : command.doi.toLowerCase().trim();
+
+    return await this.withKeyLock(`${workspaceId}:doi:${cleanDoi}`, async () => {
+      // Check dedup claim or existing item
+      const claim = await this.prisma.libraryDedupClaim.findUnique({
+      where: {
+        workspaceId_claimType_claimValue: {
+          workspaceId,
+          claimType: 'doi',
+          claimValue: cleanDoi,
+        },
+      },
+      include: {
+        catalogItem: true,
+      },
+    });
+
+    if (claim?.catalogItem) {
+      if (claim.catalogItem.deletedAt) {
+        const restored = await this.prisma.catalogItem.update({
+          where: { id: claim.catalogItem.id },
+          data: { deletedAt: null },
+        });
+        const result: IngestionResult = {
+          runId,
+          status: 'completed',
+          itemId: restored.id,
+          attachmentIds: [],
+          deduplicated: true,
+          item: restored,
+        };
+        await this.saveIdempotency(
+          workspaceId,
+          command.idempotencyKey,
+          requestHash,
+          result,
         );
+        await this.ingestionRepo.updateRunStatus(
+          workspaceId,
+          runId,
+          IngestionStatus.READY,
+          { itemId: restored.id, completedAt: new Date() },
+        ).catch(() => {});
+        return result;
       }
 
-      let captured: any = null;
-      if (this.urlConnector?.captureFromUrl) {
+      const result: IngestionResult = {
+        runId,
+        status: 'completed',
+        itemId: claim.catalogItem.id,
+        attachmentIds: [],
+        deduplicated: true,
+        item: claim.catalogItem,
+      };
+      await this.saveIdempotency(
+        workspaceId,
+        command.idempotencyKey,
+        requestHash,
+        result,
+      );
+      await this.ingestionRepo.updateRunStatus(
+        workspaceId,
+        runId,
+        IngestionStatus.READY,
+        { itemId: claim.catalogItem.id, completedAt: new Date() },
+      ).catch(() => {});
+      return result;
+    }
+
+    const existing = await this.prisma.catalogItem.findFirst({
+      where: {
+        workspaceId,
+        doi: cleanDoi,
+      },
+    });
+
+    if (existing) {
+      if (existing.deletedAt) {
+        const restored = await this.prisma.catalogItem.update({
+          where: { id: existing.id },
+          data: { deletedAt: null },
+        });
+        await this.prisma.libraryDedupClaim.upsert({
+          where: {
+            workspaceId_claimType_claimValue: {
+              workspaceId,
+              claimType: 'doi',
+              claimValue: cleanDoi,
+            },
+          },
+          update: { catalogItemId: restored.id },
+          create: {
+            workspaceId,
+            claimType: 'doi',
+            claimValue: cleanDoi,
+            catalogItemId: restored.id,
+          },
+        }).catch(() => {});
+
+        const result: IngestionResult = {
+          runId,
+          status: 'completed',
+          itemId: restored.id,
+          attachmentIds: [],
+          deduplicated: true,
+          item: restored,
+        };
+        await this.saveIdempotency(
+          workspaceId,
+          command.idempotencyKey,
+          requestHash,
+          result,
+        );
+        await this.ingestionRepo.updateRunStatus(
+          workspaceId,
+          runId,
+          IngestionStatus.READY,
+          { itemId: restored.id, completedAt: new Date() },
+        ).catch(() => {});
+        return result;
+      }
+
+      await this.prisma.libraryDedupClaim.upsert({
+        where: {
+          workspaceId_claimType_claimValue: {
+            workspaceId,
+            claimType: 'doi',
+            claimValue: cleanDoi,
+          },
+        },
+        update: { catalogItemId: existing.id },
+        create: {
+          workspaceId,
+          claimType: 'doi',
+          claimValue: cleanDoi,
+          catalogItemId: existing.id,
+        },
+      }).catch(() => {});
+
+      const result: IngestionResult = {
+        runId,
+        status: 'completed',
+        itemId: existing.id,
+        attachmentIds: [],
+        deduplicated: true,
+        item: existing,
+      };
+      await this.saveIdempotency(
+        workspaceId,
+        command.idempotencyKey,
+        requestHash,
+        result,
+      );
+      await this.ingestionRepo.updateRunStatus(
+        workspaceId,
+        runId,
+        IngestionStatus.READY,
+        { itemId: existing.id, completedAt: new Date() },
+      ).catch(() => {});
+      return result;
+    }
+
+    // Resolve via metadata service
+    let resolvedMeta: any = null;
+    if (this.metadataPort?.resolve) {
+      resolvedMeta = await this.metadataPort.resolve({
+        query: cleanDoi,
+        workspaceId,
+      });
+    }
+
+    const meta =
+      resolvedMeta?.metadata ||
+      resolvedMeta || { title: 'Imported DOI Document', doi: cleanDoi };
+
+    let createdItem: any = null;
+    let isDedup = false;
+    const itemData: any = {
+      title: meta.title || 'Untitled Document',
+      doi: cleanDoi,
+      year: meta.year,
+      authors: meta.authors || [],
+      abstract: meta.abstract,
+      publicationTitle: meta.publicationTitle || meta.journal,
+      journal: meta.journal,
+      uploadedById: command.userId || 'system',
+      collectionId: command.collectionId,
+      itemType: meta.itemType || 'journalArticle',
+    };
+
+    if (this.libraryTx?.executeInTransaction) {
+      createdItem = await this.libraryTx.executeInTransaction(
+        async (tx: Prisma.TransactionClient, helpers: any) => {
+          // Check race condition inside tx
+          const raceClaim = await tx.libraryDedupClaim.findUnique({
+            where: {
+              workspaceId_claimType_claimValue: {
+                workspaceId,
+                claimType: 'doi',
+                claimValue: cleanDoi,
+              },
+            },
+            include: { catalogItem: true },
+          });
+          if (raceClaim?.catalogItem) {
+            isDedup = true;
+            return raceClaim.catalogItem;
+          }
+
+          let item: any;
+          if (this.catalogService?.createItem) {
+            item = await this.catalogService.createItem(
+              workspaceId,
+              itemData,
+              {
+                tx,
+                helpers,
+                source: 'doi',
+              },
+            );
+          } else {
+            throw new Error('CatalogService is required to create DOI item');
+          }
+
+          try {
+            await tx.libraryDedupClaim.create({
+              data: {
+                workspaceId,
+                claimType: 'doi',
+                claimValue: cleanDoi,
+                catalogItemId: item.id,
+              },
+            });
+          } catch {
+            const winner = await tx.libraryDedupClaim.findUnique({
+              where: {
+                workspaceId_claimType_claimValue: {
+                  workspaceId,
+                  claimType: 'doi',
+                  claimValue: cleanDoi,
+                },
+              },
+              include: { catalogItem: true },
+            });
+            if (winner?.catalogItem) {
+              isDedup = true;
+              return winner.catalogItem;
+            }
+          }
+
+          return item;
+        },
+      );
+    } else if (this.catalogService?.createItem) {
+      createdItem = await this.catalogService.createItem(
+        workspaceId,
+        itemData,
+        {
+          source: 'doi',
+        },
+      );
+    }
+
+    const result: IngestionResult = {
+      runId,
+      status: 'completed',
+      itemId: createdItem?.id,
+      attachmentIds: [],
+      deduplicated: isDedup,
+      item: createdItem,
+    };
+
+    await this.saveIdempotency(
+      workspaceId,
+      command.idempotencyKey,
+      requestHash,
+      result,
+    );
+    await this.ingestionRepo.updateRunStatus(
+      workspaceId,
+      runId,
+      IngestionStatus.READY,
+      { itemId: result.itemId, completedAt: new Date() },
+    ).catch(() => {});
+
+      return result;
+    });
+  }
+
+  // ── Handler: URL Ingestion ────────────────────────────────────────────────
+
+  private async handleUrlIngestion(
+    command: IngestionCommand & { source: 'url' },
+    workspaceId: string,
+    runId: string,
+    requestHash: string,
+  ): Promise<IngestionResult> {
+    try {
+      MetadataRoutingPolicy.validateUrl(command.url);
+    } catch (err: any) {
+      throw new IngestionValidationException(
+        `SSRF violation: ${err?.message || err}`,
+      );
+    }
+
+    let captured: any = null;
+    if (this.urlConnector?.captureFromUrl) {
+      try {
         captured = await this.urlConnector.captureFromUrl(command.url, {
           workspaceId,
         });
+      } catch {
+        captured = {
+          title: command.overrides?.title || 'Web Page',
+          url: command.url,
+          itemType: 'webpage',
+        };
       }
+    }
 
-      let createdItem: any = null;
-      if (this.libraryTx?.executeInTransaction) {
-        createdItem = await this.libraryTx.executeInTransaction(
-          async (tx: any, helpers: any) => {
-            if ((this.prisma as any).catalogItem?.create) {
-              return await (this.prisma as any).catalogItem.create({
-                data: {
-                  workspaceId,
-                  title: captured?.title || 'Web Page',
-                  url: command.url,
-                  uploadedById: command.userId || 'system',
-                },
-              });
-            }
-            return {
-              id: 'item-url-123',
-              title: captured?.title || 'Web Page',
-              url: command.url,
+    let createdItem: any = null;
+    const urlItemData: any = {
+      title: command.overrides?.title || captured?.title || 'Web Page',
+      abstract: command.overrides?.abstract || captured?.abstract,
+      url: command.url,
+      fileUrl: command.url,
+      authors: captured?.authors || [],
+      labels: command.overrides?.tags || [],
+      keywords: command.overrides?.tags || [],
+      uploadedById: command.userId || 'system',
+      collectionId: command.collectionId,
+      itemType: captured?.itemType || 'webpage',
+    };
+
+    if (this.libraryTx?.executeInTransaction) {
+      createdItem = await this.libraryTx.executeInTransaction(
+        async (tx: Prisma.TransactionClient, helpers: any) => {
+          if (this.catalogService?.createItem) {
+            return await this.catalogService.createItem(
               workspaceId,
-            };
-          },
-        );
-      }
-
-      return {
-        runId: randomUUID(),
-        status: 'completed',
-        itemId: createdItem?.id || 'item-url-123',
-        attachmentIds: [],
-        deduplicated: false,
-        item: createdItem,
-      };
+              urlItemData,
+              {
+                tx,
+                helpers,
+                source: 'url',
+              },
+            );
+          }
+          throw new Error('CatalogService is required to create URL item');
+        },
+      );
+    } else if (this.catalogService?.createItem) {
+      createdItem = await this.catalogService.createItem(
+        workspaceId,
+        urlItemData,
+        {
+          source: 'url',
+        },
+      );
     }
 
-    if (command.source === 'bibtex') {
-      if (command.content && command.content.length > 10 * 1024 * 1024) {
-        throw new IngestionValidationException(
-          'BibTeX payload exceeds 10MB limit',
-        );
-      }
+    const result: IngestionResult = {
+      runId,
+      status: 'completed',
+      itemId: createdItem?.id,
+      attachmentIds: [],
+      deduplicated: false,
+      item: createdItem,
+    };
+    await this.saveIdempotency(
+      workspaceId,
+      command.idempotencyKey,
+      requestHash,
+      result,
+    );
+    await this.ingestionRepo.updateRunStatus(
+      workspaceId,
+      runId,
+      IngestionStatus.READY,
+      { itemId: result.itemId, completedAt: new Date() },
+    ).catch(() => {});
 
-      const entries = this.bibtexParserService.parse(command.content);
-      const first = entries[0] || { title: 'BibTeX Item' };
+    return result;
+  }
 
-      let createdItem: any = null;
-      if (this.libraryTx?.executeInTransaction) {
-        createdItem = await this.libraryTx.executeInTransaction(
-          async (tx: any, helpers: any) => {
-            if ((this.prisma as any).catalogItem?.create) {
-              return await (this.prisma as any).catalogItem.create({
-                data: {
-                  workspaceId,
-                  title: first.title,
-                  doi: first.doi,
-                  year: first.year,
-                  publicationTitle: first.journal || first.publisher,
-                  uploadedById: command.userId || 'system',
-                },
-              });
-            }
-            return { id: 'item-bib-123', title: first.title, workspaceId };
-          },
-        );
-      }
+  // ── Handler: BibTeX Ingestion ─────────────────────────────────────────────
 
-      return {
-        runId: randomUUID(),
-        status: 'completed',
-        itemId: createdItem?.id || 'item-bib-123',
-        attachmentIds: [],
-        deduplicated: false,
-        item: createdItem,
-      };
+  private async handleBibtexIngestion(
+    command: IngestionCommand & { source: 'bibtex' },
+    workspaceId: string,
+    runId: string,
+    requestHash: string,
+  ): Promise<IngestionResult> {
+    if (command.content && command.content.length > 10 * 1024 * 1024) {
+      throw new IngestionValidationException(
+        'BibTeX payload exceeds 10MB limit',
+      );
     }
 
-    if (command.source === 'pdf') {
-      if (this.storagePort?.readOwnedFile) {
-        let fileRecord: any;
-        try {
-          fileRecord = await (this.storagePort as any).readOwnedFile(
-            workspaceId,
-            command.fileId,
+    const entries = this.bibtexParserService.parse(command.content);
+    const first = entries[0] || { title: 'BibTeX Item' };
+
+    let createdItem: any = null;
+    const bibItemData: any = {
+      title: first.title,
+      doi: first.doi,
+      year: first.year,
+      authors: first.authors || [],
+      journal: first.journal,
+      publicationTitle: first.journal || first.publisher,
+      publisher: first.publisher,
+      citationKey: first.citationKey,
+      abstract: first.abstract,
+      uploadedById: command.userId || 'system',
+      collectionId: command.collectionId,
+      itemType: first.itemType || 'journalArticle',
+    };
+
+    if (this.libraryTx?.executeInTransaction) {
+      createdItem = await this.libraryTx.executeInTransaction(
+        async (tx: Prisma.TransactionClient, helpers: any) => {
+          if (this.catalogService?.createItem) {
+            return await this.catalogService.createItem(
+              workspaceId,
+              bibItemData,
+              {
+                tx,
+                helpers,
+                source: 'bibtex',
+              },
+            );
+          }
+          throw new Error('CatalogService is required to create BibTeX item');
+        },
+      );
+    } else if (this.catalogService?.createItem) {
+      createdItem = await this.catalogService.createItem(
+        workspaceId,
+        bibItemData,
+        {
+          source: 'bibtex',
+        },
+      );
+    }
+
+    const result: IngestionResult = {
+      runId,
+      status: 'completed',
+      itemId: createdItem?.id,
+      attachmentIds: [],
+      deduplicated: false,
+      item: createdItem,
+    };
+    await this.saveIdempotency(
+      workspaceId,
+      command.idempotencyKey,
+      requestHash,
+      result,
+    );
+    await this.ingestionRepo.updateRunStatus(
+      workspaceId,
+      runId,
+      IngestionStatus.READY,
+      { itemId: result.itemId, completedAt: new Date() },
+    ).catch(() => {});
+
+    return result;
+  }
+
+  // ── Handler: PDF Ingestion ────────────────────────────────────────────────
+
+  private async handlePdfIngestion(
+    command: IngestionCommand & { source: 'pdf' },
+    workspaceId: string,
+    runId: string,
+    requestHash: string,
+  ): Promise<IngestionResult> {
+    let fileRecord: any;
+    if (this.storagePort?.readOwnedFile) {
+      try {
+        fileRecord = await (this.storagePort as any).readOwnedFile(
+          workspaceId,
+          command.fileId,
+        );
+      } catch (err: any) {
+        if (
+          err?.status === 403 ||
+          err?.message?.includes('Access denied') ||
+          err?.name === 'ForbiddenException'
+        ) {
+          throw new IngestionValidationException(
+            err.message ||
+              'Access denied: file does not belong to workspace',
           );
-        } catch {
+        }
+        try {
           fileRecord = await (this.storagePort as any).readOwnedFile({
             workspaceId,
             fileId: command.fileId,
           });
-        }
-
-        if (fileRecord?.buffer) {
-          const magic = fileRecord.buffer.slice(0, 5).toString('ascii');
-          if (!magic.startsWith('%PDF')) {
+        } catch (innerErr: any) {
+          if (innerErr instanceof IngestionValidationException) throw innerErr;
+          if (
+            innerErr?.status === 403 ||
+            innerErr?.message?.includes('Access denied') ||
+            innerErr?.name === 'ForbiddenException'
+          ) {
             throw new IngestionValidationException(
-              'Missing %PDF magic bytes in uploaded file',
+              innerErr.message ||
+                'Access denied: file does not belong to workspace',
             );
           }
+          throw innerErr;
+        }
+      }
+    }
 
-          if ((this.prisma as any)?.libraryDedupClaim?.findUnique) {
-            const hash = createHash('sha256')
-              .update(fileRecord.buffer)
-              .digest('hex');
-            const claim = await (
-              this.prisma as any
-            ).libraryDedupClaim.findUnique({
+    let hash = '';
+    let extractedDoc: any = null;
+    if (fileRecord?.buffer) {
+      const magic = fileRecord.buffer.slice(0, 5).toString('ascii');
+      if (!magic.startsWith('%PDF')) {
+        throw new IngestionValidationException(
+          'Missing %PDF magic bytes in uploaded file',
+        );
+      }
+
+      hash = createHash('sha256')
+        .update(fileRecord.buffer)
+        .digest('hex');
+
+      if (this.extractorService?.extractDocumentFromBuffer) {
+        try {
+          extractedDoc = await this.extractorService.extractDocumentFromBuffer(
+            fileRecord.buffer,
+          );
+        } catch (err: any) {
+          this.logger.warn(`PDF extraction failed: ${err?.message}`);
+        }
+      }
+    }
+
+    return await this.withKeyLock(`${workspaceId}:pdf:${hash || command.fileId}`, async () => {
+      if (hash) {
+        const claim = await this.prisma.libraryDedupClaim.findUnique({
+        where: {
+          workspaceId_claimType_claimValue: {
+            workspaceId,
+            claimType: 'pdf_sha256',
+            claimValue: hash,
+          },
+        },
+        include: {
+          catalogItem: {
+            include: { attachments: true },
+          },
+        },
+      });
+
+      if (claim?.catalogItem && !claim.catalogItem.deletedAt) {
+        const it = claim.catalogItem;
+        const result: IngestionResult = {
+          runId,
+          status: 'completed',
+          itemId: it.id,
+          attachmentIds: it.attachments?.map((a: any) => a.id) || [],
+          deduplicated: true,
+          item: it,
+        };
+        await this.saveIdempotency(
+          workspaceId,
+          command.idempotencyKey,
+          requestHash,
+          result,
+        );
+        await this.ingestionRepo.updateRunStatus(
+          workspaceId,
+          runId,
+          IngestionStatus.READY,
+          { itemId: it.id, completedAt: new Date() },
+        ).catch(() => {});
+        return result;
+      }
+    }
+
+    // Also check if an attachment with same fileId or fileHash exists
+    const existingAtt = await this.prisma.catalogAttachment.findFirst({
+      where: {
+        OR: [
+          {
+            fileId: command.fileId,
+            catalogItem: { workspaceId, deletedAt: null },
+          },
+          ...(hash
+            ? [
+                {
+                  fileHash: hash,
+                  catalogItem: { workspaceId, deletedAt: null },
+                },
+              ]
+            : []),
+        ],
+      },
+      include: {
+        catalogItem: {
+          include: { attachments: true },
+        },
+      },
+    });
+
+    if (existingAtt?.catalogItem && !existingAtt.catalogItem.deletedAt) {
+      const it = existingAtt.catalogItem;
+      const result: IngestionResult = {
+        runId,
+        status: 'completed',
+        itemId: it.id,
+        attachmentIds: it.attachments?.map((a: any) => a.id) || [
+          existingAtt.id,
+        ],
+        deduplicated: true,
+        item: it,
+      };
+      await this.saveIdempotency(
+        workspaceId,
+        command.idempotencyKey,
+        requestHash,
+        result,
+      );
+      await this.ingestionRepo.updateRunStatus(
+        workspaceId,
+        runId,
+        IngestionStatus.READY,
+        { itemId: it.id, completedAt: new Date() },
+      ).catch(() => {});
+      return result;
+    }
+
+    let createdItem: any = null;
+    let createdAttachment: any = null;
+    let isDedup = false;
+
+    const pdfItemData: any = {
+      title:
+        command.overrides?.title ||
+        extractedDoc?.title ||
+        command.filename ||
+        'PDF Document',
+      filename: command.filename || 'PDF Document',
+      uploadedById: command.userId || 'system',
+      collectionId: command.collectionId,
+      authors: command.overrides?.authors || extractedDoc?.authors || [],
+      abstract: command.overrides?.abstract || extractedDoc?.abstract,
+      doi: command.overrides?.doi || extractedDoc?.doi,
+      labels:
+        command.overrides?.keywords ||
+        command.overrides?.tags ||
+        extractedDoc?.keywords ||
+        [],
+      keywords:
+        command.overrides?.keywords ||
+        command.overrides?.tags ||
+        extractedDoc?.keywords ||
+        [],
+      itemType: 'journalArticle',
+    };
+
+    if (this.libraryTx?.executeInTransaction) {
+      createdItem = await this.libraryTx.executeInTransaction(
+        async (tx: Prisma.TransactionClient, helpers: any) => {
+          // Check race condition in tx
+          if (hash) {
+            const raceClaim = await tx.libraryDedupClaim.findUnique({
               where: {
                 workspaceId_claimType_claimValue: {
                   workspaceId,
@@ -817,72 +1379,123 @@ export class IngestionService implements IngestionPort {
                   claimValue: hash,
                 },
               },
+              include: { catalogItem: { include: { attachments: true } } },
             });
-            if (claim?.catalogItem || claim) {
-              const it = claim.catalogItem || {
-                id: 'item-existing-1',
-                attachments: [{ id: 'att-existing-1' }],
-              };
-              return {
-                runId: randomUUID(),
-                status: 'completed',
-                itemId: it.id,
-                attachmentIds: it.attachments?.map((a: any) => a.id) || [
-                  'att-existing-1',
-                ],
-                deduplicated: true,
-                item: it,
-              };
+            if (raceClaim?.catalogItem) {
+              isDedup = true;
+              return raceClaim.catalogItem;
             }
           }
 
-          if (this.extractorService?.extractDocumentFromBuffer) {
-            await this.extractorService.extractDocumentFromBuffer(
-              fileRecord.buffer,
+          let item: any;
+          if (this.catalogService?.createItem) {
+            item = await this.catalogService.createItem(
+              workspaceId,
+              pdfItemData,
+              {
+                tx,
+                helpers,
+                source: 'pdf',
+              },
             );
+          } else {
+            throw new Error('CatalogService is required to create PDF item');
           }
-        }
-      }
 
-      let createdItem: any = null;
-      if (this.libraryTx?.executeInTransaction) {
-        createdItem = await this.libraryTx.executeInTransaction(
-          async (tx: any, helpers: any) => {
-            if ((this.prisma as any).catalogItem?.create) {
-              return await (this.prisma as any).catalogItem.create({
+          // Create attachment for PDF
+          createdAttachment = await tx.catalogAttachment.create({
+            data: {
+              catalogItemId: item.id,
+              fileId: command.fileId || null,
+              filename: command.filename || 'document.pdf',
+              url: command.fileId
+                ? `/api/files/${command.fileId}`
+                : `/api/files/temp`,
+              fileHash: hash || null,
+              size: fileRecord?.buffer?.length || 0,
+              mimeType: 'application/pdf',
+              attachmentType: 'primary_pdf',
+              revisions: {
+                create: {
+                  revisionNumber: 1,
+                  fileHash: hash || '',
+                  sizeBytes: fileRecord?.buffer?.length || 0,
+                  url: command.fileId
+                    ? `/api/files/${command.fileId}`
+                    : `/api/files/temp`,
+                },
+              },
+            },
+          });
+
+          if (hash) {
+            try {
+              await tx.libraryDedupClaim.create({
                 data: {
                   workspaceId,
-                  title: command.filename || 'PDF Document',
-                  uploadedById: command.userId || 'system',
+                  claimType: 'pdf_sha256',
+                  claimValue: hash,
+                  catalogItemId: item.id,
                 },
               });
+            } catch {
+              const winner = await tx.libraryDedupClaim.findUnique({
+                where: {
+                  workspaceId_claimType_claimValue: {
+                    workspaceId,
+                    claimType: 'pdf_sha256',
+                    claimValue: hash,
+                  },
+                },
+                include: { catalogItem: { include: { attachments: true } } },
+              });
+              if (winner?.catalogItem) {
+                isDedup = true;
+                return winner.catalogItem;
+              }
             }
-            return {
-              id: 'item-pdf-123',
-              title: command.filename || 'PDF Document',
-              workspaceId,
-            };
-          },
-        );
-      }
+          }
 
-      return {
-        runId: randomUUID(),
-        status: 'completed',
-        itemId: createdItem?.id || 'item-pdf-123',
-        attachmentIds: ['att-1'],
-        deduplicated: false,
-        item: createdItem,
-      };
+          return item;
+        },
+      );
+    } else if (this.catalogService?.createItem) {
+      createdItem = await this.catalogService.createItem(
+        workspaceId,
+        pdfItemData,
+        {
+          source: 'pdf',
+        },
+      );
     }
 
-    return {
-      runId: randomUUID(),
+    const result: IngestionResult = {
+      runId,
       status: 'completed',
-      itemId: 'item-1',
-      attachmentIds: [],
-      deduplicated: false,
+      itemId: createdItem?.id,
+      attachmentIds: createdAttachment
+        ? [createdAttachment.id]
+        : createdItem?.attachments?.length
+          ? createdItem.attachments.map((a: any) => a.id)
+          : [],
+      deduplicated: isDedup,
+      item: createdItem,
     };
+    await this.saveIdempotency(
+      workspaceId,
+      command.idempotencyKey,
+      requestHash,
+      result,
+    );
+    await this.ingestionRepo.updateRunStatus(
+      workspaceId,
+      runId,
+      IngestionStatus.READY,
+      { itemId: result.itemId, completedAt: new Date() },
+    ).catch(() => {});
+
+      return result;
+    });
   }
 
   // Backward compatibility convenience methods
@@ -950,29 +1563,26 @@ export class IngestionService implements IngestionPort {
       };
     }
 
-    if ((this.prisma as any).capturePreview?.create) {
-      const { previewToken, ...metaWithoutToken } = result;
-      const tokenHash = previewToken
-        ? createHash('sha256').update(previewToken).digest('hex')
-        : createHash('sha256').update(url).digest('hex');
-      const metadataDigest = this.urlConnector?.calculateMetadataDigest
-        ? this.urlConnector.calculateMetadataDigest(metaWithoutToken)
-        : '';
+    const { previewToken, ...metaWithoutToken } = result;
+    const tokenHash = previewToken
+      ? createHash('sha256').update(previewToken).digest('hex')
+      : createHash('sha256').update(url).digest('hex');
+    const metadataDigest = this.urlConnector?.calculateMetadataDigest
+      ? this.urlConnector.calculateMetadataDigest(metaWithoutToken)
+      : '';
 
-      await (this.prisma as any).capturePreview.create({
-        data: {
-          url: result.url || url,
-          sourceUrl: result.url || url,
-          workspaceId,
-          userId: userId || null,
-          title: result.title || 'Captured Paper',
-          canonicalMetadata: metaWithoutToken,
-          metadataDigest,
-          tokenHash,
-          expiresAt: new Date(Date.now() + 15 * 60 * 1000),
-        },
-      });
-    }
+    await this.prisma.capturePreview.create({
+      data: {
+        sourceUrl: result.url || url,
+        workspaceId,
+        userId: userId || null,
+        title: result.title || 'Captured Paper',
+        canonicalMetadata: metaWithoutToken,
+        metadataDigest,
+        tokenHash,
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+      } as any,
+    });
 
     return result;
   }
@@ -986,7 +1596,7 @@ export class IngestionService implements IngestionPort {
       .update(dto.previewToken)
       .digest('hex');
 
-    const preview = await (this.prisma as any).capturePreview.findUnique({
+    const preview = await this.prisma.capturePreview.findUnique({
       where: { tokenHash },
     });
 
@@ -1021,7 +1631,7 @@ export class IngestionService implements IngestionPort {
       }
     }
 
-    const canonical = preview.canonicalMetadata || {};
+    const canonical = (preview.canonicalMetadata as any) || {};
     const title = dto.title || canonical.title || 'Untitled';
     const itemType = dto.itemType || canonical.itemType || 'webpage';
 
@@ -1051,11 +1661,12 @@ export class IngestionService implements IngestionPort {
       isbn: dto.isbn || canonical.isbn,
       collectionId: dto.collectionId,
       tags: dto.tags,
+      uploadedById: userId,
     };
 
     if (this.libraryTx?.executeInTransaction) {
       return this.libraryTx.executeInTransaction(
-        async (tx: any, helpers: any) => {
+        async (tx: Prisma.TransactionClient, helpers: any) => {
           const updateRes = await tx.capturePreview.updateMany({
             where: { id: preview.id, consumedAt: null },
             data: { consumedAt: new Date() },
@@ -1071,15 +1682,16 @@ export class IngestionService implements IngestionPort {
             return this.catalogService.createItem(workspaceId, itemData, {
               tx,
               helpers,
+              source: 'url',
             });
           }
 
-          return { id: randomUUID(), ...itemData, workspaceId };
+          throw new Error('CatalogService is required to confirm captured URL item');
         },
       );
     }
 
-    const updateRes = await (this.prisma as any).capturePreview.updateMany({
+    const updateRes = await this.prisma.capturePreview.updateMany({
       where: { id: preview.id, consumedAt: null },
       data: { consumedAt: new Date() },
     });
@@ -1091,15 +1703,16 @@ export class IngestionService implements IngestionPort {
     }
 
     if (this.catalogService?.createItem) {
-      return this.catalogService.createItem(workspaceId, itemData);
+      return this.catalogService.createItem(workspaceId, itemData, {
+        source: 'url',
+      });
     }
 
-    return { id: randomUUID(), ...itemData, workspaceId };
+    throw new Error('CatalogService is required to confirm captured URL item');
   }
 
   async cleanupExpiredPreviews(retentionDays = 7): Promise<number> {
-    const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
-    const res = await (this.prisma as any).capturePreview?.deleteMany?.({
+    const res = await this.prisma.capturePreview.deleteMany({
       where: {
         OR: [
           { consumedAt: { lte: new Date() } },

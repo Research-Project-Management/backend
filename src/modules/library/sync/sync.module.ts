@@ -26,7 +26,7 @@ import { SyncService } from './sync.service';
       useExisting: SyncService,
     },
   ],
-  exports: [SYNC_PORT, SyncService, TransactionService],
+  exports: [SYNC_PORT, SyncService, TransactionService, IdempotencyRepository],
 })
 export class SyncModule implements OnModuleInit {
   constructor(

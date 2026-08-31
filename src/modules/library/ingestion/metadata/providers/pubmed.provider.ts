@@ -65,7 +65,7 @@ export class PubMedProvider implements MetadataProvider {
       );
     }
 
-    let json: any;
+    let json: unknown;
     try {
       json = await response.json();
     } catch {
@@ -78,23 +78,38 @@ export class PubMedProvider implements MetadataProvider {
       );
     }
 
-    const item = json?.result?.[cleanPmid];
+    const payload = json as {
+      result?: Record<string, Record<string, unknown>>;
+    } | null;
+    const item = payload?.result?.[cleanPmid];
     if (!item || item.error) return null;
 
     return this.transformPayload(item, cleanPmid);
   }
 
-  private transformPayload(item: any, cleanPmid: string): ProviderResult {
-    const title = (item.title || 'Untitled PubMed Article')
-      .replace(/\.$/, '')
-      .trim();
+  private transformPayload(
+    item: Record<string, unknown>,
+    cleanPmid: string,
+  ): ProviderResult {
+    const rawTitle =
+      typeof item.title === 'string' ? item.title : 'Untitled PubMed Article';
+    const title = rawTitle.replace(/\.$/, '').trim();
 
-    const authors: string[] = Array.isArray(item.authors)
-      ? item.authors.map((a: any) => a.name).filter(Boolean)
-      : [];
+    const authors: string[] = [];
+    if (Array.isArray(item.authors)) {
+      for (const a of item.authors) {
+        if (
+          a &&
+          typeof a === 'object' &&
+          typeof (a as { name?: string }).name === 'string'
+        ) {
+          authors.push((a as { name: string }).name.trim());
+        }
+      }
+    }
 
     let year: number | null = null;
-    if (item.pubdate) {
+    if (typeof item.pubdate === 'string') {
       const match = item.pubdate.match(/^(\d{4})/);
       if (match) year = Number(match[1]);
     }
@@ -102,12 +117,20 @@ export class PubMedProvider implements MetadataProvider {
     let doi: string | undefined;
     let pmcid: string | undefined;
     if (Array.isArray(item.articleids)) {
-      const doiObj = item.articleids.find((id: any) => id.idtype === 'doi');
-      if (doiObj?.value) doi = normalizeDoi(doiObj.value);
-      const pmcObj = item.articleids.find(
-        (id: any) => id.idtype === 'pmc' || id.idtype === 'pmcid',
-      );
-      if (pmcObj?.value) pmcid = normalizePmcid(pmcObj.value);
+      for (const rawId of item.articleids) {
+        if (rawId && typeof rawId === 'object') {
+          const idObj = rawId as { idtype?: string; value?: string };
+          if (idObj.idtype === 'doi' && typeof idObj.value === 'string') {
+            doi = normalizeDoi(idObj.value);
+          }
+          if (
+            (idObj.idtype === 'pmc' || idObj.idtype === 'pmcid') &&
+            typeof idObj.value === 'string'
+          ) {
+            pmcid = normalizePmcid(idObj.value);
+          }
+        }
+      }
     }
 
     const rawVersion = createHash('md5')
@@ -115,6 +138,19 @@ export class PubMedProvider implements MetadataProvider {
       .digest('hex');
 
     const canonicalUrl = `https://pubmed.ncbi.nlm.nih.gov/${cleanPmid}/`;
+
+    const fullJournalName =
+      typeof item.fulljournalname === 'string' ? item.fulljournalname : undefined;
+    const sourceStr =
+      typeof item.source === 'string' ? item.source : undefined;
+    const volumeStr =
+      typeof item.volume === 'string' ? item.volume : undefined;
+    const issueStr =
+      typeof item.issue === 'string' ? item.issue : undefined;
+    const pagesStr =
+      typeof item.pages === 'string' ? item.pages : undefined;
+    const issnStr =
+      typeof item.issn === 'string' ? item.issn : undefined;
 
     return {
       provider: this.id,
@@ -125,12 +161,12 @@ export class PubMedProvider implements MetadataProvider {
         pmid: cleanPmid,
         pmcid,
         doi,
-        journal: item.fulljournalname || item.source || undefined,
-        journalAbbr: item.source || undefined,
-        volume: item.volume || undefined,
-        issue: item.issue || undefined,
-        pages: item.pages || undefined,
-        issn: item.issn || undefined,
+        journal: fullJournalName || sourceStr || undefined,
+        journalAbbr: sourceStr || undefined,
+        volume: volumeStr || undefined,
+        issue: issueStr || undefined,
+        pages: pagesStr || undefined,
+        issn: issnStr || undefined,
         itemType: 'journalArticle',
         url: canonicalUrl,
         provenance: {

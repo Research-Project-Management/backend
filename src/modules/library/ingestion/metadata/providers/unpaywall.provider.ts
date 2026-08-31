@@ -61,7 +61,7 @@ export class UnpaywallProvider implements MetadataProvider {
       );
     }
 
-    let json: any;
+    let json: unknown;
     try {
       json = await response.json();
     } catch {
@@ -74,23 +74,33 @@ export class UnpaywallProvider implements MetadataProvider {
       );
     }
 
-    const isOa = Boolean(json?.is_oa);
-    const bestOaLocation = json?.best_oa_location;
+    const payload = json as {
+      is_oa?: boolean;
+      title?: string;
+      journal_name?: string;
+      best_oa_location?: {
+        url_for_pdf?: string;
+        url?: string;
+      };
+    } | null;
+
+    const isOa = Boolean(payload?.is_oa);
+    const bestOaLocation = payload?.best_oa_location;
     const pdfUrl =
       bestOaLocation?.url_for_pdf || bestOaLocation?.url || undefined;
 
     if (!pdfUrl) return null;
 
     const rawVersion = createHash('md5')
-      .update(JSON.stringify(json))
+      .update(JSON.stringify(payload))
       .digest('hex');
 
     return {
       provider: this.id,
       metadata: {
         doi: cleanDoi,
-        title: json.title,
-        journal: json.journal_name,
+        title: typeof payload?.title === 'string' ? payload.title : undefined,
+        journal: typeof payload?.journal_name === 'string' ? payload.journal_name : undefined,
         openAccessPdfUrl: pdfUrl,
         provenance: {
           originProvider: this.id,

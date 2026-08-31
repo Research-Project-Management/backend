@@ -71,7 +71,7 @@ export class CrossRefProvider implements MetadataProvider {
       );
     }
 
-    let json: any;
+    let json: unknown;
     try {
       json = await response.json();
     } catch {
@@ -84,8 +84,9 @@ export class CrossRefProvider implements MetadataProvider {
       );
     }
 
-    if (!json?.message) return null;
-    return this.transformMessage(json.message, doi, true);
+    const payload = json as { message?: Record<string, unknown> } | null;
+    if (!payload?.message) return null;
+    return this.transformMessage(payload.message, doi, true);
   }
 
   private async searchByTitle(
@@ -120,7 +121,7 @@ export class CrossRefProvider implements MetadataProvider {
       );
     }
 
-    let json: any;
+    let json: unknown;
     try {
       json = await response.json();
     } catch {
@@ -133,73 +134,164 @@ export class CrossRefProvider implements MetadataProvider {
       );
     }
 
-    const item = json?.message?.items?.[0];
+    const payload = json as {
+      message?: { items?: Array<Record<string, unknown>> };
+    } | null;
+    const item = payload?.message?.items?.[0];
     if (!item) return null;
 
-    const doi = normalizeDoi(item.DOI) || item.DOI || '';
+    const rawDoi = typeof item.DOI === 'string' ? item.DOI : '';
+    const doi = normalizeDoi(rawDoi) || rawDoi;
     return this.transformMessage(item, doi, false);
   }
 
   private transformMessage(
-    message: Record<string, any>,
+    message: Record<string, unknown>,
     doi: string,
     isDirectDoi: boolean,
   ): ProviderResult {
-    const title = Array.isArray(message.title)
-      ? message.title[0] || 'Untitled'
-      : message.title || 'Untitled';
+    const rawTitle = message.title;
+    const title = Array.isArray(rawTitle)
+      ? (typeof rawTitle[0] === 'string' ? rawTitle[0] : 'Untitled')
+      : typeof rawTitle === 'string'
+        ? rawTitle
+        : 'Untitled';
 
     const authors: string[] = [];
     if (Array.isArray(message.author)) {
-      for (const auth of message.author) {
-        if (auth.given && auth.family) {
-          authors.push(`${auth.family}, ${auth.given}`);
-        } else if (auth.family) {
-          authors.push(auth.family);
-        } else if (auth.name) {
-          authors.push(auth.name);
+      for (const rawAuth of message.author) {
+        if (rawAuth && typeof rawAuth === 'object') {
+          const auth = rawAuth as {
+            given?: string;
+            family?: string;
+            name?: string;
+          };
+          if (auth.given && auth.family) {
+            authors.push(`${auth.family}, ${auth.given}`);
+          } else if (auth.family) {
+            authors.push(auth.family);
+          } else if (auth.name) {
+            authors.push(auth.name);
+          }
         }
       }
     }
 
     let year: number | null = null;
+    const pubPrint = message['published-print'] as
+      | { 'date-parts'?: number[][] }
+      | undefined;
+    const pubOnline = message['published-online'] as
+      | { 'date-parts'?: number[][] }
+      | undefined;
+    const issued = message.issued as
+      | { 'date-parts'?: number[][] }
+      | undefined;
+
     const dateParts =
-      message['published-print']?.['date-parts']?.[0] ||
-      message['published-online']?.['date-parts']?.[0] ||
-      message.issued?.['date-parts']?.[0];
+      pubPrint?.['date-parts']?.[0] ||
+      pubOnline?.['date-parts']?.[0] ||
+      issued?.['date-parts']?.[0];
     if (dateParts && dateParts[0]) {
       year = Number(dateParts[0]);
     }
 
-    const journal = Array.isArray(message['container-title'])
-      ? message['container-title'][0]
-      : message['container-title'] || undefined;
+    const containerTitle = message['container-title'];
+    const journal = Array.isArray(containerTitle)
+      ? typeof containerTitle[0] === 'string'
+        ? containerTitle[0]
+        : undefined
+      : typeof containerTitle === 'string'
+        ? containerTitle
+        : undefined;
 
+    const typeStr = typeof message.type === 'string' ? message.type : '';
     const itemType =
-      message.type === 'journal-article'
+      typeStr === 'journal-article'
         ? 'journalArticle'
-        : message.type === 'proceedings-article'
+        : typeStr === 'proceedings-article'
           ? 'conferencePaper'
-          : message.type === 'book'
+          : typeStr === 'book'
             ? 'book'
-            : message.type || 'journalArticle';
+            : typeStr || 'journalArticle';
 
     const keywords: string[] = [];
     if (Array.isArray(message.subject)) {
-      keywords.push(...message.subject.filter(Boolean));
+      for (const subj of message.subject) {
+        if (typeof subj === 'string' && subj.trim()) {
+          keywords.push(subj.trim());
+        }
+      }
     }
 
-    const journalAbbr = Array.isArray(message['short-container-title'])
-      ? message['short-container-title'][0]
-      : message['short-container-title'] || undefined;
+    const shortContainer = message['short-container-title'];
+    const journalAbbr = Array.isArray(shortContainer)
+      ? typeof shortContainer[0] === 'string'
+        ? shortContainer[0]
+        : undefined
+      : typeof shortContainer === 'string'
+        ? shortContainer
+        : undefined;
 
-    const series = Array.isArray(message['collection-title'])
-      ? message['collection-title'][0]
-      : message['collection-title'] || undefined;
+    const collectionTitle = message['collection-title'];
+    const series = Array.isArray(collectionTitle)
+      ? typeof collectionTitle[0] === 'string'
+        ? collectionTitle[0]
+        : undefined
+      : typeof collectionTitle === 'string'
+        ? collectionTitle
+        : undefined;
 
     const rawVersion = createHash('md5')
       .update(JSON.stringify(message))
       .digest('hex');
+
+    const publisher =
+      typeof message.publisher === 'string' ? message.publisher : undefined;
+    const volume =
+      typeof message.volume === 'string' ? message.volume : undefined;
+    const issue =
+      typeof message.issue === 'string' ? message.issue : undefined;
+    const pages =
+      typeof message.page === 'string' ? message.page : undefined;
+
+    const rawIssn = message.ISSN;
+    const issn = Array.isArray(rawIssn)
+      ? typeof rawIssn[0] === 'string'
+        ? rawIssn[0]
+        : undefined
+      : typeof rawIssn === 'string'
+        ? rawIssn
+        : undefined;
+
+    const rawIsbn = message.ISBN;
+    const isbn = Array.isArray(rawIsbn)
+      ? typeof rawIsbn[0] === 'string'
+        ? rawIsbn[0]
+        : undefined
+      : typeof rawIsbn === 'string'
+        ? rawIsbn
+        : undefined;
+
+    const rawUrl =
+      typeof message.URL === 'string'
+        ? message.URL
+        : doi
+          ? `https://doi.org/${doi}`
+          : undefined;
+
+    const abstract =
+      typeof message.abstract === 'string'
+        ? message.abstract.replace(/<[^>]*>/g, '').trim()
+        : undefined;
+
+    const links = Array.isArray(message.link) ? message.link : [];
+    const isOpenAccess = links.some(
+      (l) =>
+        l &&
+        typeof l === 'object' &&
+        (l as Record<string, unknown>)['content-type'] === 'application/pdf',
+    );
 
     return {
       provider: this.id,
@@ -210,32 +302,25 @@ export class CrossRefProvider implements MetadataProvider {
         year,
         journal,
         journalAbbr,
-        publisher: message.publisher,
-        volume: message.volume,
-        issue: message.issue,
-        pages: message.page,
+        publisher,
+        volume,
+        issue,
+        pages,
         series,
-        issn: Array.isArray(message.ISSN) ? message.ISSN[0] : message.ISSN,
-        isbn: Array.isArray(message.ISBN) ? message.ISBN[0] : message.ISBN,
-        url: message.URL || (doi ? `https://doi.org/${doi}` : undefined),
-        abstract: message.abstract
-          ? message.abstract.replace(/<[^>]*>/g, '').trim()
-          : undefined,
+        issn,
+        isbn,
+        url: rawUrl,
+        abstract,
         keywords: keywords.length ? keywords : undefined,
         itemType,
         provenance: {
           originProvider: this.id,
           resolvedAt: new Date().toISOString(),
           canonicalId: doi ? `doi:${doi}` : `crossref:${title}`,
-          canonicalUrl:
-            message.URL || (doi ? `https://doi.org/${doi}` : undefined),
+          canonicalUrl: rawUrl,
           confidenceScore: isDirectDoi ? 0.99 : 0.85,
           rawSnapshotHash: rawVersion,
-          isOpenAccess: Boolean(
-            message.link?.some(
-              (l: any) => l['content-type'] === 'application/pdf',
-            ),
-          ),
+          isOpenAccess,
         },
       },
       confidence: isDirectDoi ? 0.99 : 0.85,

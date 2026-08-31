@@ -30,16 +30,11 @@ export class SyncController {
     const parsedSeq = sinceSeq !== undefined ? BigInt(sinceSeq) : BigInt(0);
     const parsedLimit = limit !== undefined ? parseInt(limit, 10) : 100;
 
-    const data = await this.syncService.pullDelta(
+    return this.syncService.pullDelta(
       workspaceId,
       parsedSeq,
       parsedLimit,
     );
-
-    return {
-      success: true,
-      data,
-    };
   }
 
   @Post('push')
@@ -67,22 +62,16 @@ export class SyncController {
       body.mutations,
     );
 
-    return {
-      success: true,
-      data: { applied },
-    };
+    return { applied };
   }
 
   @Post('resync')
   async initiateFullResync(@Param('workspaceId') workspaceId: string) {
     const latestSeq = await this.syncService.getLatestSequence(workspaceId);
     return {
-      success: true,
-      data: {
-        requiresFullResync: true,
-        latestSeq: latestSeq.toString(),
-        timestamp: new Date().toISOString(),
-      },
+      requiresFullResync: true,
+      latestSeq: latestSeq.toString(),
+      timestamp: new Date().toISOString(),
     };
   }
 }
