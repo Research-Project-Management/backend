@@ -41,6 +41,55 @@ export class ProjectRoleGuard implements CanActivate {
       request.query?.projectId ||
       request.body?.projectId;
 
+    // Resolve project from taskId if present
+    if (
+      !projectId &&
+      (request.params?.taskId || request.params?.id) &&
+      this.prisma?.task
+    ) {
+      const taskIdToLookup = request.params?.taskId || request.params?.id;
+      const task = await this.prisma.task.findUnique({
+        where: { id: taskIdToLookup },
+        select: { projectId: true },
+      });
+      if (task?.projectId) {
+        projectId = task.projectId;
+      }
+    }
+
+    // Resolve project from pageId if present
+    if (!projectId && request.params?.pageId && this.prisma?.page) {
+      const page = await this.prisma.page.findUnique({
+        where: { id: request.params.pageId },
+        select: { projectId: true },
+      });
+      if (page?.projectId) {
+        projectId = page.projectId;
+      }
+    }
+
+    // Resolve project from cycleId if present
+    if (!projectId && request.params?.cycleId && this.prisma?.cycle) {
+      const cycle = await this.prisma.cycle.findUnique({
+        where: { id: request.params.cycleId },
+        select: { projectId: true },
+      });
+      if (cycle?.projectId) {
+        projectId = cycle.projectId;
+      }
+    }
+
+    // Resolve project from fileId if present
+    if (!projectId && request.params?.fileId && this.prisma?.file) {
+      const file = await this.prisma.file.findUnique({
+        where: { id: request.params.fileId },
+        select: { linkedToType: true, linkedToId: true },
+      });
+      if (file?.linkedToType === 'project' && file.linkedToId) {
+        projectId = file.linkedToId;
+      }
+    }
+
     // Direct /project/:id fallback
     if (
       !projectId &&
