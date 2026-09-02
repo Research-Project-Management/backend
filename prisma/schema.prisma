@@ -1263,6 +1263,9 @@ model Task {
   labels         String[]       @default([])
   rank           Float          @default(0)
   priority       TaskPriority   @default(none)
+  issueType      String?        @default("task") @map("issue_type")
+  storyPoints    Int?           @map("story_points")
+  relations      Json?          @default("[]")
   estimate       Float?
   identifier     String?        @map("identifier")
   sequenceNumber Int?           @map("sequence_number")
