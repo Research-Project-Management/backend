@@ -60,8 +60,8 @@ async function main() {
   await prisma.cycle.deleteMany();
   await prisma.pageVersion.deleteMany();
   await prisma.page.deleteMany();
-  await prisma.paperAttachment.deleteMany();
-  await prisma.paper.deleteMany();
+  await prisma.catalogAttachment.deleteMany();
+  await prisma.catalogItem.deleteMany();
   await prisma.collection.deleteMany();
   await prisma.label.deleteMany();
   await prisma.file.deleteMany();
@@ -142,7 +142,7 @@ async function main() {
       createdById: adminUser.id,
     },
   });
-  const paper1 = await prisma.paper.create({
+  const paper1 = await prisma.catalogItem.create({
     data: {
       title: 'Fourier Neural Operator for Parametric Partial Differential Equations',
       abstract: 'We propose a new framework for learning operators: Fourier Neural Operator (FNO). FNO maps infinite-dimensional function spaces with mesh-independent zero-shot super-resolution.',
@@ -158,7 +158,7 @@ async function main() {
       uploadedById: adminUser.id,
     },
   });
-  const paper2 = await prisma.paper.create({
+  const paper2 = await prisma.catalogItem.create({
     data: {
       title: 'Physics-Informed Neural Networks: A Deep Learning Framework for Solving Forward and Inverse Problems',
       abstract: 'We introduce physics-informed neural networks -- neural networks that are trained to solve supervised learning tasks while respecting physical conservation laws described by general nonlinear PDEs.',
