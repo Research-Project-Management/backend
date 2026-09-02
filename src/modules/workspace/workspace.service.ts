@@ -3,10 +3,12 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  Optional,
 } from '@nestjs/common';
 import { WorkspaceRepository } from './workspace.repository';
 import { WorkspaceInvitationRepository } from './workspace-invitation.repository';
 import { RedisCacheService } from '@/core/cache/redis-cache.service';
+import { MailService } from '@/core/mail/mail.service';
 import { WORKSPACE_REDIS_KEYS } from './constants/redis-keys.constant';
 import {
   CreateWorkspaceDto,
@@ -28,6 +30,7 @@ export class WorkspaceService {
     private readonly workspaceRepo: WorkspaceRepository,
     private readonly invitationRepo: WorkspaceInvitationRepository,
     private readonly cache: RedisCacheService,
+    @Optional() private readonly mailService?: MailService,
   ) {}
 
   async getMyWorkspaces(userId: string) {
@@ -322,27 +325,97 @@ export class WorkspaceService {
   async createInvitation(
     workspaceId: string,
     invitedById: string,
-    dto: CreateWorkspaceInvitationDto,
+    dto: CreateWorkspaceInvitationDto | any,
   ) {
     const workspace = await this.workspaceRepo.findById(workspaceId);
     if (!workspace) {
       throw new NotFoundException('Workspace not found');
     }
 
-    const invitation = await this.invitationRepo.createInvitation({
-      workspaceId,
-      email: dto.email,
-      role: dto.role || WorkspaceMemberRole.member,
-      invitedById,
-      expiresInDays: dto.expiresInDays || 7,
-    });
+    const inviter = await this.workspaceRepo.findMember(workspaceId, invitedById);
+
+    // Support both single email and batch emails
+    const emails: string[] = Array.isArray(dto.emails)
+      ? dto.emails.map((e: any) => (typeof e === 'string' ? e : e?.email)).filter(Boolean)
+      : dto.email
+        ? [dto.email]
+        : [];
+
+    if (emails.length === 0) {
+      throw new BadRequestException('At least one email is required');
+    }
+
+    const role = dto.role || WorkspaceMemberRole.member;
+    const expiresInDays = dto.expiresInDays || 7;
+    const createdInvitations: any[] = [];
+    const skipped: any[] = [];
+
+    for (const rawEmail of emails) {
+      const email = rawEmail.trim().toLowerCase();
+      try {
+        const invitation = await this.invitationRepo.createInvitation({
+          workspaceId,
+          email,
+          role,
+          invitedById,
+          expiresInDays,
+        });
+
+        createdInvitations.push(invitation);
+
+        if (this.mailService) {
+          try {
+            await this.mailService.sendWorkspaceInvite({
+              to: email,
+              inviterName: (inviter as any)?.user?.name || 'A team member',
+              workspaceName: workspace.name,
+              workspaceUrl: workspace.url || workspace.id,
+              role,
+              token: invitation.token,
+              expiresAt: invitation.expiresAt,
+            });
+          } catch {
+            // Non-blocking mail failure
+          }
+        }
+      } catch (err: any) {
+        skipped.push({ email, reason: err.message || 'Failed to create invite' });
+      }
+    }
 
     await this.cache.del(WORKSPACE_REDIS_KEYS.pendingInvitations(workspaceId));
 
     return {
-      message: 'Invitation created successfully',
-      invitation,
+      message: `Sent ${createdInvitations.length} invitation(s)`,
+      invitation: createdInvitations[0],
+      invitations: createdInvitations,
+      skipped,
     };
+  }
+
+  async getInvitationByToken(token: string) {
+    const invitation = await this.invitationRepo.findByToken(token);
+    if (!invitation) {
+      throw new NotFoundException('Invitation not found');
+    }
+    return {
+      invitation,
+      workspace: invitation.workspace,
+      invitedBy: invitation.invitedBy,
+    };
+  }
+
+  async declineInvitation(token: string) {
+    const invitation = await this.invitationRepo.findByToken(token);
+    if (!invitation) {
+      throw new NotFoundException('Invitation not found');
+    }
+    if (invitation.status !== 'pending') {
+      throw new BadRequestException(`Invitation is already ${invitation.status}`);
+    }
+    await this.invitationRepo.updateStatus(invitation.id, 'declined');
+    await this.cache.del(WORKSPACE_REDIS_KEYS.pendingInvitations(invitation.workspaceId));
+    return { message: 'Invitation declined successfully' };
   }
 
   async listPendingInvitations(workspaceId: string) {
@@ -405,6 +478,7 @@ export class WorkspaceService {
     return {
       message: 'Invitation accepted successfully',
       workspaceId: invitation.workspaceId,
+      workspace: invitation.workspace,
     };
   }
 

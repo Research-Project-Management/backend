@@ -20,6 +20,7 @@ import {
   UpdateProjectMemberDto,
   AddColumnDto,
   UpdateColumnDto,
+  ReorderColumnsDto,
 } from './dto/project.dto';
 import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
 import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
@@ -237,5 +238,30 @@ export class ProjectController {
       fallbackColumnId,
       userId,
     );
+  }
+
+  @Put([
+    'project/:projectId/columns/reorder',
+    'projects/:projectId/columns/reorder',
+  ])
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin')
+  @ApiOperation({ summary: 'Reorder project board columns' })
+  async reorderColumns(
+    @Param('projectId') projectId: string,
+    @Body() dto: ReorderColumnsDto,
+  ) {
+    return this.projectService.reorderColumns(projectId, dto);
+  }
+
+  @Post([
+    'project/:projectId/columns/reset',
+    'projects/:projectId/columns/reset',
+  ])
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin')
+  @ApiOperation({ summary: 'Reset project board columns to default' })
+  async resetColumns(@Param('projectId') projectId: string) {
+    return this.projectService.resetColumns(projectId);
   }
 }

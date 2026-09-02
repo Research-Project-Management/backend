@@ -8,7 +8,11 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ProjectRepository } from './project.repository';
 import { Prisma, ProjectMemberRole, EntityType } from '@prisma/client';
-import { parseTaskColumns, TaskColumn } from './types/project.types';
+import {
+  parseTaskColumns,
+  DEFAULT_TASK_COLUMNS,
+  TaskColumn,
+} from './types/project.types';
 import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
 import { RedisCacheService } from '@/core/cache/redis-cache.service';
 import { PROJECT_REDIS_KEYS } from './constants/redis-keys.constant';
@@ -20,6 +24,7 @@ import {
   UpdateProjectMemberDto,
   AddColumnDto,
   UpdateColumnDto,
+  ReorderColumnsDto,
 } from './dto/project.dto';
 
 const VALID_PROJECT_ROLES = new Set<string>(Object.values(ProjectMemberRole));
@@ -549,5 +554,72 @@ export class ProjectService {
     );
 
     return { columns: updatedColumns, migratedTo: targetFallback };
+  }
+
+  async reorderColumns(projectId: string, dto: ReorderColumnsDto) {
+    const project = await this.projectRepo.findProjectById(projectId);
+
+    if (!project) {
+      throw new NotFoundException('Project not found');
+    }
+
+    if (!Array.isArray(dto.columns) || dto.columns.length === 0) {
+      throw new BadRequestException('Columns list cannot be empty');
+    }
+
+    const validColumns: TaskColumn[] = dto.columns.map((c) => ({
+      id: c.id,
+      title: c.title.trim(),
+      isDefault: Boolean(c.isDefault),
+      accentColor: c.accentColor || '#6366F1',
+    }));
+
+    await this.projectRepo.updateProject(projectId, {
+      taskColumns: validColumns as unknown as Prisma.InputJsonValue,
+    });
+
+    await this.invalidateProjectCache(projectId, project.workspaceId);
+
+    this.eventEmitter?.emit(
+      'project.updated',
+      new DomainActivityEvent({
+        entityType: 'project' as unknown as EntityType,
+        entityId: projectId,
+        verb: 'updated',
+        actorId: '',
+        workspaceId: project.workspaceId,
+        projectId,
+      }),
+    );
+
+    return { columns: validColumns };
+  }
+
+  async resetColumns(projectId: string) {
+    const project = await this.projectRepo.findProjectById(projectId);
+
+    if (!project) {
+      throw new NotFoundException('Project not found');
+    }
+
+    await this.projectRepo.updateProject(projectId, {
+      taskColumns: DEFAULT_TASK_COLUMNS as unknown as Prisma.InputJsonValue,
+    });
+
+    await this.invalidateProjectCache(projectId, project.workspaceId);
+
+    this.eventEmitter?.emit(
+      'project.updated',
+      new DomainActivityEvent({
+        entityType: 'project' as unknown as EntityType,
+        entityId: projectId,
+        verb: 'updated',
+        actorId: '',
+        workspaceId: project.workspaceId,
+        projectId,
+      }),
+    );
+
+    return { columns: DEFAULT_TASK_COLUMNS };
   }
 }
