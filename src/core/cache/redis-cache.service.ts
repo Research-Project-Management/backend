@@ -262,6 +262,21 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Helper to build standardized tenant-isolated cache keys (Redis Core convention)
+   * Format: tenant:{workspaceId}:{domain}:{segments...}
+   */
+  buildTenantKey(
+    workspaceId: string,
+    domain: string,
+    ...segments: (string | number | undefined)[]
+  ): string {
+    const validSegments = segments.filter(
+      (s) => s !== undefined && s !== null && s !== '',
+    );
+    return ['tenant', workspaceId, domain, ...validSegments].join(':');
+  }
+
+  /**
    * Invalidate all keys matching a workspace scope
    */
   async invalidateWorkspace(workspaceId: string): Promise<void> {

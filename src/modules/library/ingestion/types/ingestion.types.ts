@@ -1,4 +1,4 @@
-import { CreatorCreditInput } from '../../catalog/types/creator.types';
+import { CreatorCreditInput } from '../../catalog/types/catalog.types';
 
 export type IngestionStatus =
   | 'pending'
@@ -21,6 +21,7 @@ export type IngestionCommand =
       userId?: string;
       collectionId?: string;
       idempotencyKey?: string;
+      overrides?: Record<string, any>;
     }
   | {
       source: 'url';
@@ -82,14 +83,18 @@ export interface IngestionRunSnapshot {
   failedItems: number;
   startedAt: Date;
   completedAt?: Date | null;
+  lastError?: string | null;
+  itemId?: string | null;
+  stages: any[];
+  candidates: any[];
+  decisions: any[];
+  reviews: any[];
+  errors: any[];
 }
 
 export const INGESTION_PORT = Symbol('INGESTION_PORT');
 
 export interface IngestionPort {
   ingest(command: IngestionCommand): Promise<IngestionResult>;
-  getRunStatus(
-    workspaceId: string,
-    runId: string,
-  ): Promise<IngestionRunSnapshot>;
+  getRunStatus(workspaceId: string, runId: string): Promise<any>;
 }

@@ -71,6 +71,25 @@ export class ReconciliationService {
       OpenAlex: 0.9,
       SemanticScholar: 0.85,
     },
+    creators: {
+      UserOverride: 1.0,
+      CrossRef: 0.95,
+      PubMed: 0.95,
+      arXiv: 0.92,
+      OpenAlex: 0.9,
+      SemanticScholar: 0.9,
+      OpenLibrary: 0.85,
+      LocalPDFExtraction: 0.6,
+    },
+    extraFields: {
+      UserOverride: 1.0,
+      CrossRef: 0.9,
+      OpenLibrary: 0.9,
+      arXiv: 0.9,
+      PubMed: 0.9,
+      OpenAlex: 0.85,
+      SemanticScholar: 0.85,
+    },
     year: {
       UserOverride: 1.0,
       CrossRef: 0.96,
@@ -113,6 +132,9 @@ export class ReconciliationService {
       const fallbackMetadata: ItemMetadata = {
         title: userOverrides.title || 'Untitled Document',
         authors: userOverrides.authors ? [...userOverrides.authors] : [],
+        creators: userOverrides.creators
+          ? [...userOverrides.creators]
+          : undefined,
         year: userOverrides.year ?? null,
         itemType: userOverrides.itemType || 'journalArticle',
         ...userOverrides,
@@ -145,6 +167,7 @@ export class ReconciliationService {
       'title',
       'shortTitle',
       'authors',
+      'creators',
       'editors',
       'year',
       'publicationDate',
@@ -174,6 +197,7 @@ export class ReconciliationService {
       'archiveLocation',
       'callNumber',
       'extra',
+      'extraFields',
       'citationKey',
     ];
 

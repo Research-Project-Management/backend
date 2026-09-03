@@ -234,12 +234,6 @@ export class CollectionsRepository {
       },
       update: {},
     });
-
-    // 2. Dual-write to collectionId on catalogItem
-    await client.catalogItem.updateMany({
-      where: { id: itemId, workspaceId },
-      data: { collectionId },
-    });
   }
 
   async addItem(
@@ -269,12 +263,6 @@ export class CollectionsRepository {
         catalogItemId: itemId,
       },
     });
-
-    // 2. If legacy column pointed to this collection, nullify it
-    await client.catalogItem.updateMany({
-      where: { id: itemId, workspaceId, collectionId },
-      data: { collectionId: null },
-    });
   }
 
   async removeItem(
@@ -303,10 +291,6 @@ export class CollectionsRepository {
         where: {
           catalogItemId: { in: itemIds },
         },
-      });
-      await client.catalogItem.updateMany({
-        where: { id: { in: itemIds }, workspaceId },
-        data: { collectionId: null },
       });
     } else {
       for (const itemId of itemIds) {
@@ -365,19 +349,6 @@ export class CollectionsRepository {
       orderBy: { sortOrder: 'asc' },
     });
 
-    if (items.length > 0) {
-      return items.map((i) => i.catalogItemId);
-    }
-
-    const legacyItems = await client.catalogItem.findMany({
-      where: {
-        collectionId,
-        workspaceId,
-        deletedAt: null,
-      },
-      select: { id: true },
-      orderBy: { createdAt: 'desc' },
-    });
-    return legacyItems.map((i) => i.id);
+    return items.map((i) => i.catalogItemId);
   }
 }

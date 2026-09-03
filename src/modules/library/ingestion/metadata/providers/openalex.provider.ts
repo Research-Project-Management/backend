@@ -24,6 +24,18 @@ export class OpenAlexProvider implements MetadataProvider {
   private readonly logger = new Logger(OpenAlexProvider.name);
   private readonly BASE_URL = 'https://api.openalex.org/works';
 
+  private get mailto(): string {
+    return (
+      process.env.OPENALEX_EMAIL ||
+      process.env.ACADEMIC_EMAIL ||
+      'contact@flux.academic'
+    );
+  }
+
+  private get apiKey(): string | undefined {
+    return process.env.OPENALEX_API_KEY;
+  }
+
   supports(queryType: QueryType): boolean {
     return this.capabilities.queryTypes.includes(queryType);
   }
@@ -45,12 +57,14 @@ export class OpenAlexProvider implements MetadataProvider {
     doi: string,
     signal?: AbortSignal,
   ): Promise<ProviderResult | null> {
-    const url = `${this.BASE_URL}/https://doi.org/${encodeURIComponent(doi)}?mailto=contact@flux.academic`;
+    let url = `${this.BASE_URL}/https://doi.org/${encodeURIComponent(doi)}?mailto=${encodeURIComponent(this.mailto)}`;
+    if (this.apiKey) {
+      url += `&api_key=${encodeURIComponent(this.apiKey)}`;
+    }
 
     const response = await fetch(url, {
       headers: {
-        'User-Agent':
-          'FluxResearchPlatform/1.0 (mailto:contact@flux.academic; https://flux.study)',
+        'User-Agent': `FluxResearchPlatform/1.0 (mailto:${this.mailto}; https://flux.study)`,
         Accept: 'application/json',
       },
       signal,
@@ -95,12 +109,14 @@ export class OpenAlexProvider implements MetadataProvider {
     const cleanTitle = title.trim();
     if (!cleanTitle) return null;
 
-    const url = `${this.BASE_URL}?filter=title.search:${encodeURIComponent(cleanTitle)}&per-page=1&mailto=contact@flux.academic`;
+    let url = `${this.BASE_URL}?filter=title.search:${encodeURIComponent(cleanTitle)}&per-page=1&mailto=${encodeURIComponent(this.mailto)}`;
+    if (this.apiKey) {
+      url += `&api_key=${encodeURIComponent(this.apiKey)}`;
+    }
 
     const response = await fetch(url, {
       headers: {
-        'User-Agent':
-          'FluxResearchPlatform/1.0 (mailto:contact@flux.academic; https://flux.study)',
+        'User-Agent': `FluxResearchPlatform/1.0 (mailto:${this.mailto}; https://flux.study)`,
         Accept: 'application/json',
       },
       signal,
@@ -147,7 +163,8 @@ export class OpenAlexProvider implements MetadataProvider {
     identifier: string,
     confidence: number,
   ): ProviderResult {
-    const rawTitle = typeof item.title === 'string' ? item.title.trim() : 'Untitled Paper';
+    const rawTitle =
+      typeof item.title === 'string' ? item.title.trim() : 'Untitled Paper';
     const title = rawTitle || 'Untitled Paper';
 
     const authors: string[] = [];
@@ -168,14 +185,21 @@ export class OpenAlexProvider implements MetadataProvider {
       typeof item.publication_year === 'number' ? item.publication_year : null;
 
     const primLoc = item.primary_location as
-      | { source?: { display_name?: string; host_organization_name?: string; issn_l?: string; issn?: string[] }; pdf_url?: string; landing_page_url?: string }
+      | {
+          source?: {
+            display_name?: string;
+            host_organization_name?: string;
+            issn_l?: string;
+            issn?: string[];
+          };
+          pdf_url?: string;
+          landing_page_url?: string;
+        }
       | undefined;
     const hostVenue = item.host_venue as { display_name?: string } | undefined;
 
     const journal =
-      primLoc?.source?.display_name ||
-      hostVenue?.display_name ||
-      undefined;
+      primLoc?.source?.display_name || hostVenue?.display_name || undefined;
 
     let itemType = 'journalArticle';
     const typeStr = typeof item.type === 'string' ? item.type : '';
@@ -187,11 +211,17 @@ export class OpenAlexProvider implements MetadataProvider {
 
     // Decode inverted index abstract
     let abstract: string | undefined;
-    if (item.abstract_inverted_index && typeof item.abstract_inverted_index === 'object') {
-      abstract = this.decodeInvertedIndex(item.abstract_inverted_index as Record<string, number[]>);
+    if (
+      item.abstract_inverted_index &&
+      typeof item.abstract_inverted_index === 'object'
+    ) {
+      abstract = this.decodeInvertedIndex(
+        item.abstract_inverted_index as Record<string, number[]>,
+      );
     }
 
-    const openAccess = item.open_access as { oa_url?: string; is_oa?: boolean } | undefined;
+    const openAccess = item.open_access as
+      { oa_url?: string; is_oa?: boolean } | undefined;
     const openAccessPdfUrl =
       openAccess?.oa_url || primLoc?.pdf_url || undefined;
 
@@ -215,23 +245,42 @@ export class OpenAlexProvider implements MetadataProvider {
         ? `${biblio.first_page}-${biblio.last_page}`
         : biblio.first_page
       : undefined;
-    const publisher =
-      primLoc?.source?.host_organization_name || undefined;
+    const publisher = primLoc?.source?.host_organization_name || undefined;
     const issn =
-      primLoc?.source?.issn_l ||
-      primLoc?.source?.issn?.[0] ||
-      undefined;
+      primLoc?.source?.issn_l || primLoc?.source?.issn?.[0] || undefined;
 
     const citationCount =
       typeof item.cited_by_count === 'number' ? item.cited_by_count : undefined;
 
     const itemIdStr = typeof item.id === 'string' ? item.id : title;
 
+    const keywords: string[] = [];
+    if (Array.isArray(item.concepts)) {
+      for (const c of item.concepts) {
+        if (typeof c?.display_name === 'string' && c.display_name.trim()) {
+          keywords.push(c.display_name.trim());
+        }
+      }
+    } else if (Array.isArray(item.keywords)) {
+      for (const k of item.keywords) {
+        if (typeof k?.keyword === 'string' && k.keyword.trim()) {
+          keywords.push(k.keyword.trim());
+        }
+      }
+    }
+
+    const creators = authors.map((name, idx) => ({
+      orderIndex: idx,
+      creatorType: 'author',
+      fullName: name,
+    }));
+
     return {
       provider: this.id,
       metadata: {
         title,
         authors,
+        creators,
         year,
         doi: doi || undefined,
         journal,
@@ -244,6 +293,8 @@ export class OpenAlexProvider implements MetadataProvider {
         citationCount,
         itemType,
         url: canonicalUrl,
+        keywords: keywords.length ? keywords : undefined,
+        tags: keywords.length ? keywords : undefined,
         openAccessPdfUrl,
         provenance: {
           originProvider: this.id,

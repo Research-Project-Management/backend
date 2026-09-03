@@ -58,7 +58,9 @@ export class MetadataService implements MetadataPort {
     const startedAt = Date.now();
 
     // 1. Classification
-    let classified = QueryClassifier.classify(cleanQuery);
+    let classified = request.queryType
+      ? { raw: cleanQuery, clean: cleanQuery, type: request.queryType }
+      : QueryClassifier.classify(cleanQuery);
 
     // 2. SSRF check for URL queries
     if (classified.type === 'URL') {

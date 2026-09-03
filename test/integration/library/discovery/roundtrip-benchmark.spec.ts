@@ -88,8 +88,6 @@ describe('Discovery PostgreSQL Benchmark & Roundtrip Fidelity (Integration)', ()
         title: `Research Breakthrough Paper #${i + 1} on Advanced Models`,
         itemType: i % 2 === 0 ? 'journalArticle' : 'conferencePaper',
         year: 2020 + (i % 5),
-        filename: `paper-${i + 1}.pdf`,
-        fileUrl: `https://example.com/paper-${i + 1}.pdf`,
         doi: `10.1000/benchmark.${i + 1}`,
         citationKey: `author202${i % 5}benchmark${i + 1}`,
         version: 1,

@@ -11,10 +11,7 @@ export type AttachmentType =
   | 'preview';
 
 export type AttachmentExtractionStatus =
-  | 'PENDING'
-  | 'PROCESSING'
-  | 'COMPLETED'
-  | 'FAILED';
+  'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
 
 export interface AttachmentRevisionEntity {
   id: string;
@@ -87,6 +84,8 @@ export function validateAttachmentInvariants(input: {
   }
 
   if (input.filename !== undefined && input.filename.trim() === '') {
-    throw new AttachmentInvariantError('Attachment filename cannot be empty whitespace.');
+    throw new AttachmentInvariantError(
+      'Attachment filename cannot be empty whitespace.',
+    );
   }
 }

@@ -270,7 +270,7 @@ describe('Zotero Product Wiring & Release Verification (Steps 1-12)', () => {
           previewToken: withToken.previewToken!,
         },
       );
-      const confirmed = confirmedRes as any;
+      const confirmed = confirmedRes;
 
       expect(confirmed.id).toBeDefined();
       expect(confirmed.title).toBe('Attention Is All You Need');

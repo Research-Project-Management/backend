@@ -41,7 +41,6 @@ describe('Integration: Canonical Metadata Cutover & Transaction Atomicity', () =
         canonicalId: `doi:${doi}`,
         metadata: {
           title: 'Quantum Advantage Demonstration',
-          authors: ['Physicist A', 'Physicist B'],
           year: 2024,
           journal: 'Nature',
           itemType: 'journalArticle',
@@ -95,7 +94,6 @@ describe('Integration: Canonical Metadata Cutover & Transaction Atomicity', () =
         canonicalId: `doi:${doi}`,
         metadata: {
           title: 'Rollback Paper',
-          authors: ['Author X'],
           year: 2024,
           journal: 'Nature',
           itemType: 'journalArticle',

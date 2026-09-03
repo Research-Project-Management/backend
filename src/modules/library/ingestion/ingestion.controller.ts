@@ -27,11 +27,7 @@ import {
 } from './dto/ingestion.dto';
 import { CaptureUrlDto, ConfirmCapturedUrlDto } from './dto/capture-url.dto';
 
-@Controller([
-  'api/v1/workspaces/:workspaceId/library/ingestion',
-  'api/library/papers/:workspaceId/ingest',
-  'api/library/ingest',
-])
+@Controller('api/v1/workspaces/:workspaceId/library/ingestion')
 @UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
 export class IngestionController {
   constructor(
@@ -140,9 +136,12 @@ export class IngestionController {
     return this.ingestionService.retryRun(targetWsId, runId);
   }
 
-  // ── Backward Compatibility Endpoints ─────────────────────────────────────
+  // â”€â”€ Backward Compatibility Endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-  @Post(['', 'unified'])
+  // ─── Legacy Backward-Compatibility Endpoint ─────────────────────────────────
+  // POST /api/v1/workspaces/:workspaceId/library/ingestion
+  // Kept for frontend consumers that have not yet migrated to /submit.
+  @Post()
   @HttpCode(HttpStatus.OK)
   async ingestUnified(
     @Param('workspaceId') workspaceId: string,
@@ -222,10 +221,7 @@ export class IngestionController {
     @CurrentUser('id') userId: string,
     @Body() dto: CaptureUrlDto,
   ) {
-    return this.ingestionService.captureUrl(
-      dto.url,
-      workspaceId,
-    );
+    return this.ingestionService.captureUrl(dto.url, workspaceId);
   }
 
   @Post('confirm-url')
@@ -248,14 +244,10 @@ export class IngestionController {
     @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
     @Body() dto: StartIngestionDto,
   ) {
-    return this.ingestionService.startRun(
-      workspaceId,
-      userId || 'system',
-      {
-        ...dto,
-        idempotencyKey: idempotencyKeyHeader || dto.idempotencyKey,
-      },
-    );
+    return this.ingestionService.startRun(workspaceId, userId || 'system', {
+      ...dto,
+      idempotencyKey: idempotencyKeyHeader || dto.idempotencyKey,
+    });
   }
 
   @Post('doi')
@@ -265,14 +257,10 @@ export class IngestionController {
     @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
     @Body() dto: IngestDoiDto,
   ) {
-    return this.ingestionService.ingestDoi(
-      workspaceId,
-      userId || 'system',
-      {
-        ...dto,
-        idempotencyKey: idempotencyKeyHeader || dto.idempotencyKey,
-      },
-    );
+    return this.ingestionService.ingestDoi(workspaceId, userId || 'system', {
+      ...dto,
+      idempotencyKey: idempotencyKeyHeader || dto.idempotencyKey,
+    });
   }
 
   @Post('bibtex')
@@ -282,14 +270,10 @@ export class IngestionController {
     @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
     @Body() dto: IngestBibtexDto,
   ) {
-    return this.ingestionService.ingestBibtex(
-      workspaceId,
-      userId || 'system',
-      {
-        ...dto,
-        idempotencyKey: idempotencyKeyHeader || dto.idempotencyKey,
-      },
-    );
+    return this.ingestionService.ingestBibtex(workspaceId, userId || 'system', {
+      ...dto,
+      idempotencyKey: idempotencyKeyHeader || dto.idempotencyKey,
+    });
   }
 
   @Post('pdf')

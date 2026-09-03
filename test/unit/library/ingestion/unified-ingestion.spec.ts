@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { IngestionService } from '@/modules/library/ingestion/ingestion.service';
 import { PrismaService } from '@/core/database/prisma.service';
+import { IngestionRepository } from '@/modules/library/ingestion/ingestion.repository';
 import { TransactionService } from '@/modules/library/sync/services/transaction.service';
 import { UrlCaptureProvider } from '@/modules/library/ingestion/providers/url-capture.provider';
 import { METADATA_PORT } from '@/modules/library/ingestion/metadata/types/metadata.types';
@@ -15,6 +16,7 @@ import {
 import { createHash } from 'crypto';
 import { STORAGE_PORT } from '@/modules/storage/storage.port';
 import { CatalogService } from '@/modules/library/catalog/catalog.service';
+import { IngestionStrategyRegistry } from '@/modules/library/ingestion/strategies/ingestion-strategy.registry';
 
 describe('Unified Ingestion Pipeline (DOI / URL / BibTeX / PDF / Zotero)', () => {
   let service: IngestionService;
@@ -175,10 +177,23 @@ describe('Unified Ingestion Pipeline (DOI / URL / BibTeX / PDF / Zotero)', () =>
 
     bibtexParser = new BibtexParser();
 
+    const mockIngestionRepo: Partial<IngestionRepository> = {
+      createRun: jest
+        .fn()
+        .mockResolvedValue({ id: 'run-1', status: 'pending', attempts: 0 }),
+      updateRunStatus: jest.fn().mockResolvedValue(undefined),
+      findRunByIdempotencyKey: jest.fn().mockResolvedValue(null),
+      findRunById: jest.fn().mockResolvedValue(null),
+      createStage: jest.fn().mockResolvedValue({ id: 'stage-1' }),
+      createCandidate: jest.fn().mockResolvedValue({ id: 'cand-1' }),
+      createDecision: jest.fn().mockResolvedValue({ id: 'dec-1' }),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         IngestionService,
         { provide: PrismaService, useValue: prisma },
+        { provide: IngestionRepository, useValue: mockIngestionRepo },
         { provide: TransactionService, useValue: libraryTx },
         { provide: UrlCaptureProvider, useValue: urlCapture },
         { provide: METADATA_PORT, useValue: metadataService },
@@ -187,6 +202,7 @@ describe('Unified Ingestion Pipeline (DOI / URL / BibTeX / PDF / Zotero)', () =>
         { provide: STORAGE_PORT, useValue: storagePort },
         { provide: BibtexParser, useValue: bibtexParser },
         { provide: CatalogService, useValue: mockCatalogService },
+        { provide: IngestionStrategyRegistry, useValue: null },
       ],
     }).compile();
 
@@ -338,6 +354,24 @@ describe('Unified Ingestion Pipeline (DOI / URL / BibTeX / PDF / Zotero)', () =>
 
       expect(result.status).toBe('completed');
       expect(result.attachmentIds).toHaveLength(1);
+      expect(storagePort.readOwnedFile).toHaveBeenCalledWith({
+        workspaceId,
+        fileId: 'file-123',
+      });
+      expect(prisma.catalogAttachment.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            url: '/api/files/file-123/content',
+            attachmentType: 'primary_pdf',
+            revisions: {
+              create: expect.objectContaining({
+                url: '/api/files/file-123/content',
+              }),
+            },
+          }),
+        }),
+      );
+      expect((result.item as any)?.fileUrl).toBe('/api/files/file-123/content');
       expect(extractorService.extractDocumentFromBuffer).toHaveBeenCalledWith(
         validPdfBuffer,
       );

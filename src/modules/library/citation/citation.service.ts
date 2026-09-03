@@ -12,8 +12,10 @@ import {
   CitationItemInput,
   FormattedCitationResult,
 } from './types/citation.types';
-
 import { CatalogRepository } from '../catalog/catalog.repository';
+import { DoiContentNegotiationService } from './services/doi-content-negotiation.service';
+import { CslEngineService } from './services/csl-engine.service';
+import { CslJsonMapper } from './mappers/csl-json.mapper';
 
 export interface ReferenceData {
   doi?: string;
@@ -42,7 +44,16 @@ export class CitationService {
   constructor(
     @Optional() private readonly prisma?: PrismaService,
     @Optional() private readonly catalogRepo?: CatalogRepository,
-  ) {}
+    @Optional() private readonly doiService?: DoiContentNegotiationService,
+    @Optional() private readonly cslEngine?: CslEngineService,
+  ) {
+    if (!this.doiService) {
+      this.doiService = new DoiContentNegotiationService();
+    }
+    if (!this.cslEngine) {
+      this.cslEngine = new CslEngineService();
+    }
+  }
 
   /**
    * Returns list of supported CSL styles.
@@ -52,13 +63,31 @@ export class CitationService {
   }
 
   /**
-   * Formats a single citation item in the requested style.
+   * Formats a single citation item in the requested style using official CSL engine.
    */
   formatItem(
     item: CitationItemInput,
     styleId: CitationStyleId = 'apa-7th',
     index: number = 1,
   ): FormattedCitationResult {
+    if (this.cslEngine) {
+      try {
+        const cslItem = CslJsonMapper.toCsl(item);
+        const res = this.cslEngine.format(cslItem, styleId, index);
+        return {
+          styleId,
+          inText: res.inText,
+          bibliography: res.bibliography,
+          bibliographyHtml: res.bibliographyHtml,
+          source: 'csl-engine',
+        };
+      } catch (err: any) {
+        this.logger.warn(
+          `CslEngineService format error: ${err?.message || err}. Falling back to registry.`,
+        );
+      }
+    }
+
     const style = this.registry.getStyle(styleId);
     if (!style) {
       throw new BadRequestException(`Unsupported citation style: ${styleId}`);
@@ -77,6 +106,22 @@ export class CitationService {
     citations: Array<{ id?: string; inText: string; bibliography: string }>;
     bibliographyText: string;
   } {
+    if (this.cslEngine) {
+      try {
+        const cslItems = items.map((it) => CslJsonMapper.toCsl(it));
+        const res = this.cslEngine.formatBatch(cslItems, styleId);
+        return {
+          styleId,
+          citations: res.citations,
+          bibliographyText: res.bibliographyText,
+        };
+      } catch (err: any) {
+        this.logger.warn(
+          `CslEngineService batch error: ${err?.message || err}`,
+        );
+      }
+    }
+
     const style = this.registry.getStyle(styleId);
     if (!style) {
       throw new BadRequestException(`Unsupported citation style: ${styleId}`);
@@ -183,17 +228,17 @@ export class CitationService {
   /**
    * Formats citation directly for a stored CatalogItem by ID.
    */
-  async formatPaperById(
+  async formatItemById(
     workspaceId: string,
-    paperId: string,
+    itemId: string,
     styleId: CitationStyleId = 'apa-7th',
     index: number = 1,
   ) {
     const item = this.catalogRepo
-      ? await this.catalogRepo.findById(workspaceId, paperId)
+      ? await this.catalogRepo.findById(workspaceId, itemId)
       : await this.prisma?.catalogItem.findFirst({
           where: {
-            id: paperId,
+            id: itemId,
             workspaceId,
             deletedAt: null,
           },
@@ -208,18 +253,69 @@ export class CitationService {
       throw new NotFoundException('Paper not found in workspace');
     }
 
+    // Tier 1: Official In-Process CSL Engine (Instant, Offline-capable, Consistent with library metadata)
+    if (this.cslEngine) {
+      try {
+        const cslItem = CslJsonMapper.toCsl(item);
+        const engineRes = this.cslEngine.format(cslItem, styleId, index);
+        if (engineRes && engineRes.bibliography) {
+          return {
+            styleId,
+            inText: engineRes.inText,
+            bibliography: engineRes.bibliography,
+            bibliographyHtml: engineRes.bibliographyHtml,
+            source: 'csl-engine',
+          };
+        }
+      } catch (err: any) {
+        this.logger.warn(
+          `CslEngineService format error for item ${item.id}: ${err?.message || err}. Falling back to publisher DOI.`,
+        );
+      }
+    }
+
+    // Tier 2: Fallback to publisher DOI content negotiation if engine had an issue and DOI exists
+    if (
+      item.doi &&
+      this.doiService &&
+      styleId !== 'bibtex' &&
+      styleId !== 'ris'
+    ) {
+      const doiCitation = await this.doiService.resolveCitation(
+        item.doi,
+        styleId,
+      );
+      if (doiCitation) {
+        return {
+          styleId,
+          inText:
+            doiCitation.inText ||
+            `(${item.contributors?.[0]?.lastName || 'Anonymous'}, ${item.year || 'n.d.'})`,
+          bibliography: doiCitation.bibliography,
+          bibliographyHtml: doiCitation.bibliographyHtml,
+          source: 'publisher',
+        };
+      }
+    }
+
     const citationInput: CitationItemInput = {
       id: item.id,
       title: item.title,
       itemType: item.itemType || 'journalArticle',
-      authors: item.authors || [],
+      authors:
+        item.contributors
+          ?.filter((c: any) => c.creatorType === 'author')
+          .map(
+            (c: any) =>
+              c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+          ) || [],
       creators: item.contributors?.map((c: any) => ({
         firstName: c.firstName || '',
         lastName: c.lastName || '',
         name: c.fullName,
       })),
-      publicationTitle: item.publicationTitle || item.journal || undefined,
-      journal: item.journal || item.publicationTitle || undefined,
+      publicationTitle: item.publicationTitle || undefined,
+      journal: item.publicationTitle || undefined,
       publisher: item.publisher || undefined,
       volume: item.volume || undefined,
       issue: item.issue || undefined,
@@ -236,16 +332,16 @@ export class CitationService {
   /**
    * Formats citations in batch for stored CatalogItems by IDs.
    */
-  async formatPaperBatch(
+  async formatItemBatch(
     workspaceId: string,
-    paperIds: string[],
+    itemIds: string[],
     styleId: CitationStyleId = 'apa-7th',
   ) {
     const items = this.catalogRepo
-      ? await this.catalogRepo.findByIds(workspaceId, paperIds)
+      ? await this.catalogRepo.findByIds(workspaceId, itemIds)
       : (await this.prisma?.catalogItem.findMany({
           where: {
-            id: { in: paperIds },
+            id: { in: itemIds },
             workspaceId,
             deletedAt: null,
           },
@@ -257,36 +353,94 @@ export class CitationService {
         })) || [];
 
     const citationMap = new Map<string, FormattedCitationResult>();
-    items.forEach((item, index) => {
-      const citationInput: CitationItemInput = {
-        id: item.id,
-        title: item.title,
-        itemType: item.itemType || 'journalArticle',
-        authors: item.authors || [],
-        creators: item.contributors?.map((c) => ({
-          firstName: c.firstName || '',
-          lastName: c.lastName || '',
-          name: c.fullName,
-        })),
-        publicationTitle: item.publicationTitle || item.journal || undefined,
-        journal: item.journal || item.publicationTitle || undefined,
-        publisher: item.publisher || undefined,
-        volume: item.volume || undefined,
-        issue: item.issue || undefined,
-        pages: item.pages || undefined,
-        year: item.year || undefined,
-        doi: item.doi || undefined,
-        url: item.url || undefined,
-        citationKey: item.citationKey || undefined,
-      };
-      citationMap.set(
-        item.id,
-        this.formatItem(citationInput, styleId, index + 1),
-      );
-    });
+    for (let index = 0; index < items.length; index++) {
+      const item = items[index];
+      let formatted: FormattedCitationResult | null = null;
 
-    const citations = paperIds.map((id) => ({
-      paperId: id,
+      // Tier 1: Official In-Process CSL Engine
+      if (this.cslEngine) {
+        try {
+          const engineRes = this.cslEngine.format(
+            CslJsonMapper.toCsl(item),
+            styleId,
+            index + 1,
+          );
+          if (engineRes && engineRes.bibliography) {
+            formatted = {
+              styleId,
+              inText: engineRes.inText,
+              bibliography: engineRes.bibliography,
+              bibliographyHtml: engineRes.bibliographyHtml,
+              source: 'csl-engine',
+            };
+          }
+        } catch (err: any) {
+          this.logger.warn(
+            `Batch CSL format error for item ${item.id}: ${err?.message || err}`,
+          );
+        }
+      }
+
+      // Tier 2: Fallback to publisher DOI content negotiation
+      if (
+        !formatted &&
+        item.doi &&
+        this.doiService &&
+        styleId !== 'bibtex' &&
+        styleId !== 'ris'
+      ) {
+        const doiCitation = await this.doiService.resolveCitation(
+          item.doi,
+          styleId,
+        );
+        if (doiCitation) {
+          formatted = {
+            styleId,
+            inText: doiCitation.inText || `[${index + 1}]`,
+            bibliography: doiCitation.bibliography,
+            bibliographyHtml: doiCitation.bibliographyHtml,
+            source: 'publisher',
+          };
+        }
+      }
+
+      if (!formatted) {
+        const citationInput: CitationItemInput = {
+          id: item.id,
+          title: item.title,
+          itemType: item.itemType || 'journalArticle',
+          authors:
+            item.contributors
+              ?.filter((c) => c.creatorType === 'author')
+              .map(
+                (c) =>
+                  c.fullName ||
+                  `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+              ) || [],
+          creators: item.contributors?.map((c) => ({
+            firstName: c.firstName || '',
+            lastName: c.lastName || '',
+            name: c.fullName,
+          })),
+          publicationTitle: item.publicationTitle || undefined,
+          journal: item.publicationTitle || undefined,
+          publisher: item.publisher || undefined,
+          volume: item.volume || undefined,
+          issue: item.issue || undefined,
+          pages: item.pages || undefined,
+          year: item.year || undefined,
+          doi: item.doi || undefined,
+          url: item.url || undefined,
+          citationKey: item.citationKey || undefined,
+        };
+        formatted = this.formatItem(citationInput, styleId, index + 1);
+      }
+
+      citationMap.set(item.id, formatted);
+    }
+
+    const citations = itemIds.map((id) => ({
+      itemId: id,
       citation: citationMap.get(id) || {
         styleId,
         inText: '',

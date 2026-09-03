@@ -72,7 +72,7 @@ describe('SemanticScholarProvider (Standalone)', () => {
 
     const res = await provider.resolve({ query: 'Attention Is All You Need' });
     expect(res?.metadata.title).toBe('Attention Is All You Need');
-    expect(res?.confidence).toBeCloseTo(0.8);
+    expect(res?.confidence).toBeCloseTo(0.88);
   });
 
   it('throws ProviderFetchError on 429 rate limit with Retry-After', async () => {

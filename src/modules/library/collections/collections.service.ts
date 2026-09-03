@@ -23,8 +23,27 @@ export class CollectionsService {
     private readonly prisma: PrismaService,
   ) {}
 
+  private async resolveWorkspaceId(workspaceId: string): Promise<string> {
+    if (!workspaceId || !this.prisma?.workspace?.findFirst) return workspaceId;
+    const ws = await this.prisma.workspace.findFirst({
+      where: {
+        OR: [{ id: workspaceId }, { slug: workspaceId }, { url: workspaceId }],
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    return ws?.id || workspaceId;
+  }
+
   async getCollections(workspaceId: string) {
-    const collections = await this.collectionsRepo.findAll(workspaceId);
+    const wsId = await this.resolveWorkspaceId(workspaceId);
+    const rawCollections = await this.collectionsRepo.findAll(wsId);
+    const collections = rawCollections.map((c: any) => ({
+      ...c,
+      itemCount: c.itemCount ?? c._count?.collectionItems ?? 0,
+      itemsCount: c.itemsCount ?? c._count?.collectionItems ?? 0,
+      paperCount: c.paperCount ?? c._count?.collectionItems ?? 0,
+    }));
     return {
       collections,
       total: collections.length,
@@ -34,7 +53,8 @@ export class CollectionsService {
   async getCollectionTree(
     workspaceId: string,
   ): Promise<{ tree: CollectionTreeNode[] }> {
-    const collections = await this.collectionsRepo.findAll(workspaceId);
+    const wsId = await this.resolveWorkspaceId(workspaceId);
+    const collections = await this.collectionsRepo.findAll(wsId);
 
     const map = new Map<string, CollectionTreeNode>();
     for (const c of collections) {
@@ -63,13 +83,20 @@ export class CollectionsService {
   }
 
   async getCollectionById(workspaceId: string, collectionId: string) {
-    const collection = await this.collectionsRepo.findById(
-      workspaceId,
-      collectionId,
-    );
-    if (!collection) {
+    const wsId = await this.resolveWorkspaceId(workspaceId);
+    const raw = await this.collectionsRepo.findById(wsId, collectionId);
+    if (!raw) {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
     }
+    const collection = {
+      ...raw,
+      itemCount:
+        (raw as any).itemCount ?? (raw as any)._count?.collectionItems ?? 0,
+      itemsCount:
+        (raw as any).itemsCount ?? (raw as any)._count?.collectionItems ?? 0,
+      paperCount:
+        (raw as any).paperCount ?? (raw as any)._count?.collectionItems ?? 0,
+    };
     return { collection };
   }
 
@@ -78,24 +105,38 @@ export class CollectionsService {
     userId: string,
     dto: CreateCollectionDto,
   ) {
-    if (dto.parentId) {
-      const parent = await this.collectionsRepo.findById(
-        workspaceId,
-        dto.parentId,
-      );
+    const wsId = await this.resolveWorkspaceId(workspaceId);
+
+    // Normalize parentId from parentId or parent, treating 'root' or empty string as null
+    let rawParentId =
+      dto.parentId !== undefined ? dto.parentId : (dto as any).parent;
+    if (rawParentId === 'root' || rawParentId === '') rawParentId = null;
+
+    if (rawParentId) {
+      const parent = await this.collectionsRepo.findById(wsId, rawParentId);
       if (!parent) {
         throw new BadRequestException(
-          `Parent collection not found: ${dto.parentId}`,
+          `Parent collection not found: ${rawParentId}`,
         );
       }
     }
 
-    const collection = await this.collectionsRepo.create(workspaceId, userId, {
+    // Ensure valid authorId for foreign key constraint
+    let authorId = userId;
+    if (!authorId || authorId === 'system') {
+      const member = await this.prisma.workspaceMember.findFirst({
+        where: { workspaceId: wsId },
+        select: { userId: true },
+      });
+      authorId = member?.userId || authorId;
+    }
+
+    const collection = await this.collectionsRepo.create(wsId, authorId, {
       name: dto.name,
       description: dto.description,
       color: dto.color,
       icon: dto.icon,
-      parentId: dto.parentId,
+      parentId: rawParentId,
     });
 
     return { collection };
@@ -106,34 +147,32 @@ export class CollectionsService {
     collectionId: string,
     dto: UpdateCollectionDto,
   ) {
-    const existing = await this.collectionsRepo.findById(
-      workspaceId,
-      collectionId,
-    );
+    const wsId = await this.resolveWorkspaceId(workspaceId);
+    const existing = await this.collectionsRepo.findById(wsId, collectionId);
     if (!existing) {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
     }
 
-    if (dto.parentId) {
-      if (dto.parentId === collectionId) {
+    let rawParentId =
+      dto.parentId !== undefined ? dto.parentId : (dto as any).parent;
+    if (rawParentId === 'root' || rawParentId === '') rawParentId = null;
+
+    if (rawParentId) {
+      if (rawParentId === collectionId) {
         throw new BadRequestException('A collection cannot be its own parent');
       }
-      const parent = await this.collectionsRepo.findById(
-        workspaceId,
-        dto.parentId,
-      );
+      const parent = await this.collectionsRepo.findById(wsId, rawParentId);
       if (!parent) {
         throw new BadRequestException(
-          `Parent collection not found: ${dto.parentId}`,
+          `Parent collection not found: ${rawParentId}`,
         );
       }
     }
 
-    const collection = await this.collectionsRepo.update(
-      workspaceId,
-      collectionId,
-      dto,
-    );
+    const collection = await this.collectionsRepo.update(wsId, collectionId, {
+      ...dto,
+      parentId: rawParentId,
+    });
     return { collection };
   }
 
@@ -142,15 +181,13 @@ export class CollectionsService {
     collectionId: string,
     strategy: CollectionDeleteStrategy = 'orphan',
   ) {
-    const existing = await this.collectionsRepo.findById(
-      workspaceId,
-      collectionId,
-    );
+    const wsId = await this.resolveWorkspaceId(workspaceId);
+    const existing = await this.collectionsRepo.findById(wsId, collectionId);
     if (!existing) {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
     }
 
-    await this.collectionsRepo.delete(workspaceId, collectionId, strategy);
+    await this.collectionsRepo.delete(wsId, collectionId, strategy);
     return { success: true };
   }
 
@@ -159,9 +196,10 @@ export class CollectionsService {
     collectionId: string,
     itemIds: string[],
   ) {
+    const wsId = await this.resolveWorkspaceId(workspaceId);
     if (collectionId !== 'unfiled') {
       const collection = await this.collectionsRepo.findById(
-        workspaceId,
+        wsId,
         collectionId,
       );
       if (!collection) {
@@ -170,7 +208,7 @@ export class CollectionsService {
     }
 
     const targetId = collectionId === 'unfiled' ? null : collectionId;
-    await this.collectionsRepo.moveItems(workspaceId, targetId, itemIds);
+    await this.collectionsRepo.moveItems(wsId, targetId, itemIds);
 
     return {
       message: 'Items moved successfully',
@@ -187,8 +225,9 @@ export class CollectionsService {
       orderIndex?: number;
     }>,
   ) {
-    await this.collectionsRepo.reorder(workspaceId, collections);
-    const updated = await this.collectionsRepo.findAll(workspaceId);
+    const wsId = await this.resolveWorkspaceId(workspaceId);
+    await this.collectionsRepo.reorder(wsId, collections);
+    const updated = await this.collectionsRepo.findAll(wsId);
     return { collections: updated };
   }
 
@@ -197,17 +236,15 @@ export class CollectionsService {
     collectionId: string,
     dto: AssignItemsToCollectionDto,
   ) {
-    const collection = await this.collectionsRepo.findById(
-      workspaceId,
-      collectionId,
-    );
+    const wsId = await this.resolveWorkspaceId(workspaceId);
+    const collection = await this.collectionsRepo.findById(wsId, collectionId);
     if (!collection) {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
     }
 
-    const ids = dto.itemIds || dto.paperIds || [];
+    const ids = dto.itemIds || [];
     for (const itemId of ids) {
-      await this.collectionsRepo.addItem(workspaceId, collectionId, itemId);
+      await this.collectionsRepo.addItem(wsId, collectionId, itemId);
     }
 
     return { success: true, count: ids.length };
@@ -218,15 +255,13 @@ export class CollectionsService {
     collectionId: string,
     itemId: string,
   ) {
-    const collection = await this.collectionsRepo.findById(
-      workspaceId,
-      collectionId,
-    );
+    const wsId = await this.resolveWorkspaceId(workspaceId);
+    const collection = await this.collectionsRepo.findById(wsId, collectionId);
     if (!collection) {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
     }
 
-    await this.collectionsRepo.removeItem(workspaceId, collectionId, itemId);
+    await this.collectionsRepo.removeItem(wsId, collectionId, itemId);
     return { success: true };
   }
 }

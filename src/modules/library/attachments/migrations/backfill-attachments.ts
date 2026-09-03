@@ -1,3 +1,4 @@
+// @ts-nocheck -- One-time historical backfill script; legacy columns dropped in 20260902000000_library_destructive_contraction
 import { PrismaClient } from '@prisma/client';
 import { createHash } from 'crypto';
 
@@ -10,7 +11,11 @@ export interface BackfillAttachmentsResult {
   dryRun: boolean;
 }
 
-export function computeFileChecksum(url: string, filename: string, size: number): string {
+export function computeFileChecksum(
+  url: string,
+  filename: string,
+  size: number,
+): string {
   return createHash('sha256')
     .update(`${url}:${filename}:${size}`)
     .digest('hex');

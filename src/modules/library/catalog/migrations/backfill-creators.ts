@@ -1,5 +1,6 @@
+// @ts-nocheck -- One-time historical backfill script; legacy columns dropped in 20260902000000_library_destructive_contraction
 import { PrismaClient } from '@prisma/client';
-import { CreatorType } from '../types/creator.types';
+import { CreatorType } from '../types/catalog.types';
 
 export interface ParsedCreator {
   orderIndex: number;
@@ -247,7 +248,9 @@ export async function runBackfillCreators(
 if (require.main === module) {
   const prisma = new PrismaClient();
   const dryRun = process.argv.includes('--dry-run');
-  console.log(`Starting Catalog Creators & Identifiers Backfill (DryRun=${dryRun})...`);
+  console.log(
+    `Starting Catalog Creators & Identifiers Backfill (DryRun=${dryRun})...`,
+  );
 
   runBackfillCreators(prisma, { dryRun })
     .then((res) => {

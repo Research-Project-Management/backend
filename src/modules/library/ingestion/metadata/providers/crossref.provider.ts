@@ -23,6 +23,14 @@ export class CrossRefProvider implements MetadataProvider {
 
   private readonly logger = new Logger(CrossRefProvider.name);
 
+  private get mailto(): string {
+    return (
+      process.env.CROSSREF_EMAIL ||
+      process.env.ACADEMIC_EMAIL ||
+      'contact@flux.academic'
+    );
+  }
+
   supports(queryType: QueryType): boolean {
     return this.capabilities.queryTypes.includes(queryType);
   }
@@ -44,12 +52,11 @@ export class CrossRefProvider implements MetadataProvider {
     doi: string,
     signal?: AbortSignal,
   ): Promise<ProviderResult | null> {
-    const url = `https://api.crossref.org/works/${encodeURIComponent(doi)}`;
+    const url = `https://api.crossref.org/works/${encodeURIComponent(doi)}?mailto=${encodeURIComponent(this.mailto)}`;
 
     const response = await fetch(url, {
       headers: {
-        'User-Agent':
-          'FluxResearchPlatform/1.0 (mailto:contact@flux.academic; https://flux.study)',
+        'User-Agent': `FluxResearchPlatform/1.0 (mailto:${this.mailto}; https://flux.study)`,
         Accept: 'application/json',
       },
       signal,
@@ -152,41 +159,72 @@ export class CrossRefProvider implements MetadataProvider {
   ): ProviderResult {
     const rawTitle = message.title;
     const title = Array.isArray(rawTitle)
-      ? (typeof rawTitle[0] === 'string' ? rawTitle[0] : 'Untitled')
+      ? typeof rawTitle[0] === 'string'
+        ? rawTitle[0]
+        : 'Untitled'
       : typeof rawTitle === 'string'
         ? rawTitle
         : 'Untitled';
 
     const authors: string[] = [];
-    if (Array.isArray(message.author)) {
-      for (const rawAuth of message.author) {
-        if (rawAuth && typeof rawAuth === 'object') {
-          const auth = rawAuth as {
-            given?: string;
-            family?: string;
-            name?: string;
-          };
-          if (auth.given && auth.family) {
-            authors.push(`${auth.family}, ${auth.given}`);
-          } else if (auth.family) {
-            authors.push(auth.family);
-          } else if (auth.name) {
-            authors.push(auth.name);
+    const creators: Array<{
+      orderIndex: number;
+      creatorType: string;
+      firstName?: string;
+      lastName?: string;
+      fullName: string;
+    }> = [];
+
+    const addCreators = (list: unknown, role: string) => {
+      if (Array.isArray(list)) {
+        for (const rawAuth of list) {
+          if (rawAuth && typeof rawAuth === 'object') {
+            const auth = rawAuth as {
+              given?: string;
+              family?: string;
+              name?: string;
+            };
+            const firstName = auth.given?.trim();
+            const lastName = auth.family?.trim();
+            let fullName = '';
+            if (firstName && lastName) {
+              fullName = `${lastName}, ${firstName}`;
+            } else if (lastName) {
+              fullName = lastName;
+            } else if (firstName) {
+              fullName = firstName;
+            } else if (auth.name) {
+              fullName = auth.name.trim();
+            }
+
+            if (fullName) {
+              if (role === 'author') {
+                authors.push(fullName);
+              }
+              creators.push({
+                orderIndex: creators.length,
+                creatorType: role,
+                firstName: firstName || undefined,
+                lastName: lastName || undefined,
+                fullName,
+              });
+            }
           }
         }
       }
-    }
+    };
+
+    addCreators(message.author, 'author');
+    addCreators(message.editor, 'editor');
+    addCreators(message.translator, 'translator');
+    addCreators(message.chair, 'presenter');
 
     let year: number | null = null;
     const pubPrint = message['published-print'] as
-      | { 'date-parts'?: number[][] }
-      | undefined;
+      { 'date-parts'?: number[][] } | undefined;
     const pubOnline = message['published-online'] as
-      | { 'date-parts'?: number[][] }
-      | undefined;
-    const issued = message.issued as
-      | { 'date-parts'?: number[][] }
-      | undefined;
+      { 'date-parts'?: number[][] } | undefined;
+    const issued = message.issued as { 'date-parts'?: number[][] } | undefined;
 
     const dateParts =
       pubPrint?.['date-parts']?.[0] ||
@@ -206,14 +244,35 @@ export class CrossRefProvider implements MetadataProvider {
         : undefined;
 
     const typeStr = typeof message.type === 'string' ? message.type : '';
-    const itemType =
-      typeStr === 'journal-article'
-        ? 'journalArticle'
-        : typeStr === 'proceedings-article'
-          ? 'conferencePaper'
-          : typeStr === 'book'
-            ? 'book'
-            : typeStr || 'journalArticle';
+    let itemType = 'journalArticle';
+    if (typeStr === 'journal-article') {
+      itemType = 'journalArticle';
+    } else if (typeStr === 'book-chapter' || typeStr === 'book-section') {
+      itemType = 'bookSection';
+    } else if (
+      typeStr === 'proceedings-article' ||
+      typeStr === 'conference-paper' ||
+      typeStr === 'proceedings'
+    ) {
+      itemType = 'conferencePaper';
+    } else if (
+      typeStr === 'book' ||
+      typeStr === 'monograph' ||
+      typeStr === 'edited-book' ||
+      typeStr === 'reference-book'
+    ) {
+      itemType = 'book';
+    } else if (typeStr === 'dissertation') {
+      itemType = 'thesis';
+    } else if (typeStr === 'report' || typeStr === 'report-series') {
+      itemType = 'report';
+    } else if (typeStr === 'posted-content' || typeStr === 'preprint') {
+      itemType = 'preprint';
+    } else if (typeStr === 'dataset') {
+      itemType = 'dataset';
+    } else if (typeStr === 'standard' || typeStr === 'component') {
+      itemType = 'standard';
+    }
 
     const keywords: string[] = [];
     if (Array.isArray(message.subject)) {
@@ -250,10 +309,8 @@ export class CrossRefProvider implements MetadataProvider {
       typeof message.publisher === 'string' ? message.publisher : undefined;
     const volume =
       typeof message.volume === 'string' ? message.volume : undefined;
-    const issue =
-      typeof message.issue === 'string' ? message.issue : undefined;
-    const pages =
-      typeof message.page === 'string' ? message.page : undefined;
+    const issue = typeof message.issue === 'string' ? message.issue : undefined;
+    const pages = typeof message.page === 'string' ? message.page : undefined;
 
     const rawIssn = message.ISSN;
     const issn = Array.isArray(rawIssn)
@@ -299,6 +356,7 @@ export class CrossRefProvider implements MetadataProvider {
         doi: doi || undefined,
         title,
         authors,
+        creators,
         year,
         journal,
         journalAbbr,

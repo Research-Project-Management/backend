@@ -1,4 +1,9 @@
-import { Injectable, Logger, BadRequestException, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  Optional,
+} from '@nestjs/common';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { CitationService } from '../citation/citation.service';
 import { CatalogRepository } from '../catalog/catalog.repository';
@@ -38,20 +43,33 @@ export class ExportsService {
           : {}),
         ...(dto.tagId ? { itemTags: { some: { tagId: dto.tagId } } } : {}),
       },
+      include: {
+        contributors: { orderBy: { orderIndex: 'asc' } },
+      },
       orderBy: { createdAt: 'desc' },
     });
+
+    // Helper: derive author name list from contributors
+    const getAuthorNames = (item: (typeof items)[0]) =>
+      item.contributors
+        .filter((c) => c.creatorType === 'author')
+        .map(
+          (c) =>
+            c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+        );
 
     const timestamp = new Date().toISOString().split('T')[0];
 
     switch (dto.format) {
       case 'bibtex': {
         const entries = items.map((it) => {
+          const authors = getAuthorNames(it);
           const res = this.citationService.formatItem(
             {
               id: it.id,
               itemType: it.itemType ?? 'journalArticle',
               title: it.title,
-              authors: it.authors,
+              authors,
               publicationTitle: it.publicationTitle ?? undefined,
               year: it.year ?? undefined,
               volume: it.volume ?? undefined,
@@ -76,12 +94,13 @@ export class ExportsService {
 
       case 'ris': {
         const entries = items.map((it) => {
+          const authors = getAuthorNames(it);
           const res = this.citationService.formatItem(
             {
               id: it.id,
               itemType: it.itemType ?? 'journalArticle',
               title: it.title,
-              authors: it.authors,
+              authors,
               publicationTitle: it.publicationTitle ?? undefined,
               year: it.year ?? undefined,
               volume: it.volume ?? undefined,
@@ -111,7 +130,7 @@ export class ExportsService {
               ? 'paper-conference'
               : 'article-journal',
           title: it.title,
-          author: (it.authors || []).map((a) => {
+          author: getAuthorNames(it).map((a) => {
             const parts = a.trim().split(/\s+/);
             const family = parts.pop() || '';
             const given = parts.join(' ');
@@ -147,7 +166,7 @@ export class ExportsService {
         const rows = items.map((it) => [
           `"${it.id}"`,
           `"${(it.title || '').replace(/"/g, '""')}"`,
-          `"${(it.authors || []).join('; ').replace(/"/g, '""')}"`,
+          `"${getAuthorNames(it).join('; ').replace(/"/g, '""')}"`,
           it.year || '',
           `"${(it.publicationTitle || '').replace(/"/g, '""')}"`,
           `"${it.doi || ''}"`,
@@ -171,9 +190,9 @@ export class ExportsService {
       case 'markdown': {
         const mdLines = [`# Library Export (${timestamp})\n`];
         items.forEach((it, idx) => {
-          const auth = (it.authors || []).join(', ') || 'Unknown Authors';
+          const auth = getAuthorNames(it).join(', ') || 'Unknown Authors';
           const yr = it.year ? ` (${it.year})` : '';
-          mdLines.push(`${idx + 1}. **${it.title}** — *${auth}*${yr}`);
+          mdLines.push(`${idx + 1}. **${it.title}** â€” *${auth}*${yr}`);
           if (it.publicationTitle)
             mdLines.push(`   *Published in:* ${it.publicationTitle}`);
           if (it.doi)
@@ -195,5 +214,57 @@ export class ExportsService {
           `Unsupported export format: ${(dto as { format: string }).format}`,
         );
     }
+  }
+
+  async exportBundle(workspaceId: string, collectionId: string) {
+    const collection = await this.prisma.collection.findFirst({
+      where: { id: collectionId, workspaceId, deletedAt: null },
+    });
+
+    if (!collection) {
+      throw new BadRequestException(`Collection ${collectionId} not found`);
+    }
+
+    const items = await this.prisma.catalogItem.findMany({
+      where: {
+        workspaceId,
+        deletedAt: null,
+        collectionItems: { some: { collectionId } },
+      },
+      include: {
+        attachments: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const bibtexRes = await this.exportLibrary(workspaceId, {
+      format: 'bibtex',
+      collectionId,
+    });
+
+    const files: Array<{
+      itemId: string;
+      title: string;
+      filename: string;
+      fileUrl: string;
+    }> = [];
+    for (const it of items) {
+      for (const att of it.attachments) {
+        files.push({
+          itemId: it.id,
+          title: it.title,
+          filename: att.filename,
+          fileUrl: att.url,
+        });
+      }
+    }
+
+    return {
+      collection: { id: collection.id, name: collection.name },
+      totalItems: items.length,
+      totalFiles: files.length,
+      bibtex: bibtexRes.content,
+      files,
+    };
   }
 }

@@ -52,6 +52,11 @@ export class AttachmentsService {
       );
     }
 
+    const resolvedFileId =
+      input.fileId ||
+      input.url?.match(/\/api\/files\/([a-zA-Z0-9-]+)\/content/)?.[1] ||
+      null;
+
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
       const attachment = await tx.catalogAttachment.create({
         data: {
@@ -61,7 +66,7 @@ export class AttachmentsService {
           mimeType: input.mimeType ?? 'application/pdf',
           size: input.size ?? 0,
           fileHash: input.fileHash ?? '',
-          fileId: input.fileId ?? null,
+          fileId: resolvedFileId,
           revisions: {
             create: {
               revisionNumber: 1,
@@ -78,6 +83,16 @@ export class AttachmentsService {
           },
         },
       });
+
+      if (resolvedFileId && tx.file?.updateMany) {
+        await tx.file.updateMany({
+          where: { id: resolvedFileId },
+          data: {
+            linkedToType: 'Paper',
+            linkedToId: input.catalogItemId,
+          },
+        });
+      }
 
       await helpers.appendChange(item.workspaceId, {
         entityType: 'Attachment',

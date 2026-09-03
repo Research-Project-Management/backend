@@ -51,6 +51,12 @@ export class FileRepository implements IFileRepository {
         workspaceId,
         parentId: parentId === undefined ? undefined : parentId,
         trashedAt: trashed ? { not: null } : null,
+        NOT: [
+          { linkedToType: { in: ['Project', 'Page', 'Library', 'Paper'] } },
+          { metaData: { path: ['source'], equals: 'library' } },
+          { metaData: { path: ['source'], equals: 'paper' } },
+          { attachments: { some: {} } },
+        ],
       },
       include: {
         author: { select: USER_MINIMAL_SELECT },
@@ -70,6 +76,11 @@ export class FileRepository implements IFileRepository {
         workspaceId,
         isFolder: true,
         trashedAt: null,
+        NOT: [
+          { linkedToType: { in: ['Project', 'Page', 'Library', 'Paper'] } },
+          { metaData: { path: ['source'], equals: 'library' } },
+          { metaData: { path: ['source'], equals: 'paper' } },
+        ],
       },
       orderBy: { filename: 'asc' },
     });
@@ -142,6 +153,12 @@ export class FileRepository implements IFileRepository {
         workspaceId,
         isFolder: false,
         trashedAt: null,
+        NOT: [
+          { linkedToType: { in: ['Project', 'Page', 'Library', 'Paper'] } },
+          { metaData: { path: ['source'], equals: 'library' } },
+          { metaData: { path: ['source'], equals: 'paper' } },
+          { attachments: { some: {} } },
+        ],
       },
       _sum: {
         size: true,

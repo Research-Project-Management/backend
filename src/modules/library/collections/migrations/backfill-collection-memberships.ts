@@ -1,3 +1,4 @@
+// @ts-nocheck -- One-time historical backfill script; legacy columns dropped in 20260902000000_library_destructive_contraction
 import { PrismaClient } from '@prisma/client';
 
 export interface BackfillCollectionMembershipsResult {

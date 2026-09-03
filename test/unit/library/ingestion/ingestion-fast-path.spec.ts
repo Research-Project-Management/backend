@@ -1,18 +1,15 @@
+import { Test } from '@nestjs/testing';
 import { IngestionService } from '@/modules/library/ingestion/ingestion.service';
 import { IngestionRepository } from '@/modules/library/ingestion/ingestion.repository';
-import { DoiParser } from '@/modules/library/ingestion/parsers/doi.parser';
-import { BibtexParser } from '@/modules/library/ingestion/parsers/bibtex.parser';
-import { RisParser } from '@/modules/library/ingestion/parsers/ris.parser';
-import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
-import { ReconciliationPolicy } from '@/modules/library/ingestion/policies/reconciliation.policy';
-import { DuplicatePolicy } from '@/modules/library/ingestion/policies/duplicate.policy';
-import { IdentifyStage } from '@/modules/library/ingestion/stages/identify.stage';
-import { NormalizeStage } from '@/modules/library/ingestion/stages/normalize.stage';
-import { EnrichStage } from '@/modules/library/ingestion/stages/enrich.stage';
-import { ReconcileStage } from '@/modules/library/ingestion/stages/reconcile.stage';
-import { MatchStage } from '@/modules/library/ingestion/stages/match.stage';
-import { CommitStage } from '@/modules/library/ingestion/stages/commit.stage';
 import { IdempotencyRepository } from '@/modules/library/sync/repositories/idempotency.repository';
+import { PrismaService } from '@/core/database/prisma.service';
+import { CatalogService } from '@/modules/library/catalog/catalog.service';
+import { METADATA_PORT } from '@/modules/library/ingestion/metadata/types/metadata.types';
+import { STORAGE_PORT } from '@/modules/storage/storage.port';
+import { UrlCaptureProvider } from '@/modules/library/ingestion/providers/url-capture.provider';
+import { PdfExtractorProvider } from '@/modules/library/attachments/providers/pdf-extractor.provider';
+import { TransactionService } from '@/modules/library/sync/services/transaction.service';
+import { IngestionStrategyRegistry } from '@/modules/library/ingestion/strategies/ingestion-strategy.registry';
 import { ConflictException } from '@nestjs/common';
 import { IngestionStatus } from '@prisma/client';
 
@@ -25,7 +22,7 @@ describe('Library Ingestion Foundation + Metadata Fast Path (Vertical Slice)', (
   const workspaceId = 'ws-test-100';
   const userId = 'user-100';
 
-  beforeEach(() => {
+  beforeEach(async () => {
     const runsDb = new Map<string, any>();
     const stagesDb: any[] = [];
     const candidatesDb: any[] = [];
@@ -157,10 +154,7 @@ describe('Library Ingestion Foundation + Metadata Fast Path (Vertical Slice)', (
           const items: any[] = [];
           for (const it of catalogDb.values()) {
             if (it.workspaceId === where.workspaceId) {
-              items.push({
-                ...it,
-                contributors: it.creators || [],
-              });
+              items.push({ ...it, contributors: it.creators || [] });
             }
           }
           return Promise.resolve(items);
@@ -196,7 +190,14 @@ describe('Library Ingestion Foundation + Metadata Fast Path (Vertical Slice)', (
               publicationTitle: 'Nature',
               volume: '579',
               pages: '270-273',
-              authors: ['Zhou, Peng', 'Yang, Xing-Lou'],
+              creators: [
+                { lastName: 'Zhou', firstName: 'Peng', creatorType: 'author' },
+                {
+                  lastName: 'Yang',
+                  firstName: 'Xing-Lou',
+                  creatorType: 'author',
+                },
+              ],
             },
             provenance: {
               title: {
@@ -223,41 +224,120 @@ describe('Library Ingestion Foundation + Metadata Fast Path (Vertical Slice)', (
       }),
     };
 
-    const doiParser = new DoiParser();
-    const bibtexParser = new BibtexParser();
-    const risParser = new RisParser();
-    const normalizer = new NormalizationPolicy();
-    const reconciler = new ReconciliationPolicy();
-    const duplicatePolicy = new DuplicatePolicy();
+    const mockIngestionRepo: Partial<IngestionRepository> = {
+      createRun: jest.fn().mockImplementation(async (wsId: string, data: any) =>
+        mockPrisma.ingestionRun.create({
+          data: { workspaceId: wsId, ...data },
+        }),
+      ),
+      updateRunStatus: jest
+        .fn()
+        .mockImplementation(
+          async (wsId: string, id: string, status: any, details?: any) => {
+            return mockPrisma.ingestionRun.update({
+              where: { id },
+              data: { status, ...details },
+            });
+          },
+        ),
+      findRunByIdempotencyKey: jest
+        .fn()
+        .mockImplementation(async (wsId: string, key: string) => {
+          return mockPrisma.ingestionRun.findFirst({
+            where: { workspaceId: wsId, idempotencyKey: key },
+          });
+        }),
+      findRunById: jest
+        .fn()
+        .mockImplementation(async (wsId: string, id: string) =>
+          mockPrisma.ingestionRun.findFirst({
+            where: { id, workspaceId: wsId },
+          }),
+        ),
+      createStage: jest
+        .fn()
+        .mockImplementation(async (runId: string, data: any) =>
+          mockPrisma.ingestionStage.create({
+            data: { ingestionRunId: runId, ...data },
+          }),
+        ),
+      createCandidate: jest
+        .fn()
+        .mockImplementation(async (runId: string, data: any) =>
+          mockPrisma.ingestionCandidate.create({
+            data: { ingestionRunId: runId, ...data },
+          }),
+        ),
+      createDecision: jest
+        .fn()
+        .mockImplementation(async (runId: string, data: any) =>
+          mockPrisma.ingestionDecision.create({
+            data: { ingestionRunId: runId, ...data },
+          }),
+        ),
+      createReviewCase: jest
+        .fn()
+        .mockImplementation(async (wsId: string, runId: string, data: any) =>
+          mockPrisma.ingestionReviewCase.create({
+            data: { workspaceId: wsId, ingestionRunId: runId, ...data },
+          }),
+        ),
+      findStages: jest
+        .fn()
+        .mockImplementation(async (runId: string) =>
+          stagesDb.filter((s) => s.ingestionRunId === runId),
+        ),
+      findCandidates: jest
+        .fn()
+        .mockImplementation(async (runId: string) =>
+          candidatesDb.filter((c) => c.ingestionRunId === runId),
+        ),
+      findDecisions: jest
+        .fn()
+        .mockImplementation(async (runId: string) =>
+          decisionsDb.filter((d) => d.ingestionRunId === runId),
+        ),
+      findReviewCases: jest
+        .fn()
+        .mockImplementation(async (wsId: string) =>
+          reviewCasesDb.filter((r) => r.workspaceId === wsId),
+        ),
+    };
 
-    const repo = new IngestionRepository(mockPrisma);
-    const idempotencyRepo = new IdempotencyRepository(mockPrisma);
-    const identifyStage = new IdentifyStage(
-      doiParser,
-      bibtexParser,
-      risParser,
-      normalizer,
-    );
-    const normalizeStage = new NormalizeStage(normalizer);
-    const enrichStage = new EnrichStage(mockMetadataPort, normalizer);
-    const reconcileStage = new ReconcileStage(reconciler);
-    const matchStage = new MatchStage(mockPrisma, duplicatePolicy);
-    const commitStage = new CommitStage(mockCatalogService);
+    const mockIdempotencyRepo: Partial<IdempotencyRepository> = {
+      claim: jest
+        .fn()
+        .mockResolvedValue({ status: 'acquired', leaseToken: 'tok' }),
+      markSucceeded: jest.fn().mockResolvedValue(true),
+      markFailed: jest.fn().mockResolvedValue(false),
+    };
 
-    service = new IngestionService(
-      mockPrisma,
-      undefined,
-      idempotencyRepo,
-      undefined,
-      undefined,
-      undefined,
-      mockMetadataPort,
-      mockCatalogService,
-      repo,
-    );
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        IngestionService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: IngestionRepository, useValue: mockIngestionRepo },
+        { provide: IdempotencyRepository, useValue: mockIdempotencyRepo },
+        { provide: CatalogService, useValue: mockCatalogService },
+        { provide: METADATA_PORT, useValue: mockMetadataPort },
+        { provide: STORAGE_PORT, useValue: null },
+        { provide: UrlCaptureProvider, useValue: null },
+        { provide: PdfExtractorProvider, useValue: null },
+        { provide: TransactionService, useValue: null },
+        { provide: IngestionStrategyRegistry, useValue: null },
+      ],
+    }).compile();
+
+    service = moduleRef.get<IngestionService>(IngestionService);
+    // Directly inject mocks into private fields via casting
+    (service as any).prisma = mockPrisma;
+    (service as any).ingestionRepo = mockIngestionRepo;
+    (service as any).idempotencyRepo = mockIdempotencyRepo;
+    (service as any).catalogService = mockCatalogService;
+    (service as any).metadataPort = mockMetadataPort;
   });
 
-  it('executes end-to-end DOI fast-path: detect -> normalize -> enrich -> reconcile -> match -> Catalog commit', async () => {
+  it('executes end-to-end DOI fast-path: identify → normalize → enrich → reconcile → match → commit', async () => {
     const result = await service.submit({
       workspaceId,
       userId,

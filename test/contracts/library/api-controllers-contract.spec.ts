@@ -2,7 +2,6 @@ import { ExecutionContext, CallHandler } from '@nestjs/common';
 import { of } from 'rxjs';
 import { TransformInterceptor } from '../../../src/core/interceptors/transform.interceptor';
 import { CatalogController } from '../../../src/modules/library/catalog/catalog.controller';
-import { CatalogCurationController } from '../../../src/modules/library/catalog/catalog-curation.controller';
 import { CollectionsController } from '../../../src/modules/library/collections/collections.controller';
 import { NotesController } from '../../../src/modules/library/notes/notes.controller';
 import { AttachmentsController } from '../../../src/modules/library/attachments/attachments.controller';
@@ -79,8 +78,8 @@ describe('Library Canonical API Contracts (T048)', () => {
           meta: { hasNextPage: false, totalCount: 1 },
         }),
       };
-      const controller = new CatalogController(mockCatalogService);
-      const result = await controller.listItems('ws-1', 'usr-1', {});
+      const controller = new CatalogController(mockCatalogService, {} as any);
+      const result = await controller.listItems('ws-1', 'ws-1', 'usr-1', {});
 
       expect(result).toEqual({
         items: [{ id: 'item-1', title: 'Test Paper' }],
@@ -92,7 +91,10 @@ describe('Library Canonical API Contracts (T048)', () => {
       const transformed = await runThroughInterceptor(result);
       expect(transformed.success).toBe(true);
       expect(transformed.data).toEqual([{ id: 'item-1', title: 'Test Paper' }]);
-      expect(transformed.pagination).toEqual({ hasNextPage: false, totalCount: 1 });
+      expect(transformed.pagination).toEqual({
+        hasNextPage: false,
+        totalCount: 1,
+      });
     });
 
     it('CatalogController.getItem should return domain entity directly', async () => {
@@ -100,8 +102,13 @@ describe('Library Canonical API Contracts (T048)', () => {
       const mockCatalogService: any = {
         getItem: jest.fn().mockResolvedValue(mockItem),
       };
-      const controller = new CatalogController(mockCatalogService);
-      const result = await controller.getItem('ws-1', 'item-1', 'usr-1');
+      const controller = new CatalogController(mockCatalogService, {} as any);
+      const result = await controller.getItem(
+        'ws-1',
+        'ws-1',
+        'item-1',
+        'usr-1',
+      );
 
       expect(result).toBe(mockItem);
       expect((result as any).success).toBeUndefined();
@@ -130,7 +137,9 @@ describe('Library Canonical API Contracts (T048)', () => {
     it('AnnotationsController.listAnnotations should return annotations array directly', async () => {
       const mockAnnotations = [{ id: 'anno-1', color: '#ff0000' }];
       const mockService: any = {
-        getAnnotationsByAttachment: jest.fn().mockResolvedValue(mockAnnotations),
+        getAnnotationsByAttachment: jest
+          .fn()
+          .mockResolvedValue(mockAnnotations),
       };
       const controller = new AnnotationsController(mockService);
       const result = await controller.listAnnotations('ws-1', 'att-1', '0');
@@ -215,23 +224,29 @@ describe('Library Canonical API Contracts (T048)', () => {
 
   describe('Optimistic Concurrency Guards', () => {
     it('CatalogController.updateItem should reject update without expectedVersion or If-Match', async () => {
-      const controller = new CatalogController({} as any);
+      const controller = new CatalogController({} as any, {} as any);
       await expect(
-        controller.updateItem('ws-1', 'item-1', undefined, { title: 'New Title' }),
+        controller.updateItem('ws-1', 'ws-1', 'item-1', undefined, {
+          title: 'New Title',
+        }),
       ).rejects.toThrow('Optimistic locking requirement');
     });
 
     it('NotesController.updateNote should reject update without expectedVersion or If-Match', async () => {
       const controller = new NotesController({} as any);
       await expect(
-        controller.updateNote('ws-1', 'note-1', undefined, { title: 'New Title' }),
+        controller.updateNote('ws-1', 'note-1', undefined, {
+          title: 'New Title',
+        }),
       ).rejects.toThrow('Optimistic locking requirement');
     });
 
     it('AnnotationsController.updateAnnotation should reject update without expectedVersion or If-Match', async () => {
       const controller = new AnnotationsController({} as any);
       await expect(
-        controller.updateAnnotation('ws-1', 'anno-1', undefined, { comment: 'Updated' }),
+        controller.updateAnnotation('ws-1', 'anno-1', undefined, {
+          comment: 'Updated',
+        }),
       ).rejects.toThrow('Optimistic locking requirement');
     });
   });

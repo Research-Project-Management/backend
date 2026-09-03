@@ -1,4 +1,10 @@
-import { IsString, IsOptional, MaxLength, IsUUID } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  MaxLength,
+  ValidateIf,
+  IsUUID,
+} from 'class-validator';
 
 export class UpdateCollectionDto {
   @IsString()
@@ -21,7 +27,17 @@ export class UpdateCollectionDto {
   @MaxLength(50)
   icon?: string;
 
-  @IsUUID()
   @IsOptional()
+  @ValidateIf(
+    (o) =>
+      o.parentId !== null &&
+      o.parentId !== undefined &&
+      o.parentId !== '' &&
+      o.parentId !== 'root',
+  )
+  @IsUUID()
   parentId?: string | null;
+
+  @IsOptional()
+  parent?: string | null;
 }

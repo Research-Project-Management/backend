@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { extractText, getDocumentProxy } from 'unpdf';
+import { extractText, getDocumentProxy, getMeta } from 'unpdf';
 import { isIP } from 'node:net';
 
 export interface ExtractedPdfMetadata {
@@ -40,9 +40,57 @@ export class PdfExtractorProvider {
     }> = [];
 
     let combinedText = '';
+    const unpdfMeta: ExtractedPdfMetadata = {};
 
     try {
       const document = await getDocumentProxy(buffer);
+
+      try {
+        const docInfo = await getMeta(document);
+        if (docInfo?.info) {
+          const info = docInfo.info;
+          if (typeof info.Title === 'string') {
+            const cleanTitle = info.Title.trim();
+            if (
+              cleanTitle.length > 5 &&
+              !cleanTitle.toLowerCase().endsWith('.pdf') &&
+              !/^(untitled|document|microsoft word)/i.test(cleanTitle)
+            ) {
+              unpdfMeta.title = cleanTitle;
+            }
+          }
+          if (typeof info.Author === 'string') {
+            const cleanAuthor = info.Author.trim();
+            if (
+              cleanAuthor.length > 2 &&
+              !/^(administrator|user|owner|unknown)$/i.test(cleanAuthor)
+            ) {
+              const list = cleanAuthor
+                .split(/[,;\n]|\band\b/i)
+                .map((a: string) => a.trim())
+                .filter((a: string) => a.length > 1 && !/^\d+$/.test(a));
+              if (list.length > 0) {
+                unpdfMeta.authors = list;
+              }
+            }
+          }
+          if (typeof info.CreationDate === 'string') {
+            const yearMatch = info.CreationDate.match(/D:(\d{4})/);
+            if (yearMatch?.[1]) {
+              unpdfMeta.year = parseInt(yearMatch[1], 10);
+            }
+          }
+          if (typeof info.Keywords === 'string') {
+            const kw = info.Keywords.split(/[,;]/)
+              .map((k: string) => k.trim())
+              .filter(Boolean);
+            if (kw.length > 0) unpdfMeta.keywords = kw;
+          }
+        }
+      } catch {
+        // Optional metadata inspection
+      }
+
       const extracted = await extractText(document, { mergePages: false });
       const rawPages = Array.isArray(extracted?.text)
         ? extracted.text
@@ -74,20 +122,31 @@ export class PdfExtractorProvider {
       : {};
 
     const metadata: ExtractedPdfMetadata = {
-      doi: textMeta.doi || headerMeta.doi,
-      arxivId: textMeta.arxivId || headerMeta.arxivId,
-      pmid: textMeta.pmid || headerMeta.pmid,
-      title: headerMeta.title || textMeta.title,
+      doi: textMeta.doi || unpdfMeta.doi || headerMeta.doi,
+      arxivId: textMeta.arxivId || unpdfMeta.arxivId || headerMeta.arxivId,
+      title:
+        textMeta.title ||
+        unpdfMeta.title ||
+        (headerMeta.title &&
+        !headerMeta.title.toLowerCase().endsWith('.pdf') &&
+        !/^\d{4}\.\d{4,5}/.test(headerMeta.title) &&
+        headerMeta.title.length > 5
+          ? headerMeta.title
+          : undefined),
       authors:
-        headerMeta.authors && headerMeta.authors.length > 0
-          ? headerMeta.authors
-          : textMeta.authors,
-      year: headerMeta.year || textMeta.year,
+        textMeta.authors && textMeta.authors.length > 0
+          ? textMeta.authors
+          : unpdfMeta.authors && unpdfMeta.authors.length > 0
+            ? unpdfMeta.authors
+            : headerMeta.authors,
+      year: textMeta.year || unpdfMeta.year || headerMeta.year,
       abstract: textMeta.abstract || headerMeta.abstract,
       keywords:
         textMeta.keywords && textMeta.keywords.length > 0
           ? textMeta.keywords
-          : headerMeta.keywords,
+          : unpdfMeta.keywords && unpdfMeta.keywords.length > 0
+            ? unpdfMeta.keywords
+            : headerMeta.keywords,
       rawText: combinedText.slice(0, PdfExtractorProvider.TEXT_SCAN_LIMIT),
     };
 
@@ -179,14 +238,27 @@ export class PdfExtractorProvider {
     );
     if (doi) metadata.doi = doi;
 
-    const arxivMatch = scan.match(/arxiv:\s*(\d{4}\.\d{4,5}(?:v\d+)?)/i);
-    if (arxivMatch?.[1]) metadata.arxivId = arxivMatch[1];
+    const arxivMatch = scan.match(
+      /(?:arxiv[:\s._\/-]+)(\d{4}\.\d{4,5}(?:v\d+)?)/i,
+    );
+    if (arxivMatch?.[1]) {
+      metadata.arxivId = arxivMatch[1];
+    } else {
+      const standalone = scan
+        .slice(0, 1500)
+        .match(/\b(1[0-9]{3}\.[0-9]{4,5}(?:v[0-9]+)?)\b/);
+      if (standalone?.[1]) metadata.arxivId = standalone[1];
+    }
 
     const abstractMatch = scan.match(
-      /Abstract[—:\-\s]+([\s\S]*?)(?:\n\s*(?:Index Terms|Keywords|1\.|I\. INTRODUCTION|INTRODUCTION)\b)/i,
+      /Abstract[—:\-\s]+([\s\S]*?)(?=(?:\n\s*(?:Index Terms|Keywords|1\.|I\. INTRODUCTION|INTRODUCTION)\b)|$)/i,
     );
-    if (abstractMatch?.[1])
-      metadata.abstract = abstractMatch[1].replace(/\s+/g, ' ').trim();
+    if (abstractMatch?.[1]) {
+      const cleanAbstract = abstractMatch[1].replace(/\s+/g, ' ').trim();
+      if (cleanAbstract.length > 10) {
+        metadata.abstract = cleanAbstract.slice(0, 2500);
+      }
+    }
 
     const keywordsMatch = scan.match(
       /(?:Index Terms|Keywords)[—:\-\s]+([^\n.]+)/i,
@@ -196,6 +268,114 @@ export class PdfExtractorProvider {
         .split(/[,;]/)
         .map((keyword) => keyword.trim())
         .filter(Boolean);
+    }
+
+    // Extract Title and Authors from first page header lines
+    const lines = scan
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean);
+
+    let abstractIndex = -1;
+    for (let i = 0; i < Math.min(lines.length, 60); i++) {
+      if (/^abstract\b/i.test(lines[i])) {
+        abstractIndex = i;
+        break;
+      }
+    }
+
+    const headerLines =
+      abstractIndex !== -1 ? lines.slice(0, abstractIndex) : lines.slice(0, 25);
+    const cleanLines = headerLines.filter((l) => {
+      if (
+        /^(arxiv[:\s._\/-]*\d|https?:\/\/|\d+$|submitted to|accepted (as|at)|proceedings of|ieee|acm|springer|elsevier)/i.test(
+          l,
+        )
+      )
+        return false;
+      if (/copyright|all rights reserved|doi:\s*10\./i.test(l)) return false;
+      return true;
+    });
+
+    if (cleanLines.length > 0) {
+      const titleLines: string[] = [];
+      let authorStartIndex = -1;
+
+      for (let i = 0; i < cleanLines.length; i++) {
+        const l = cleanLines[i];
+        if (
+          /@|univ|institute|department|college|laboratory|school|hospital|center/i.test(
+            l,
+          )
+        ) {
+          if (authorStartIndex === -1) authorStartIndex = i;
+          break;
+        }
+        const hasCommaOrAnd = /(?:,|\band\b)/i.test(l);
+        const words = l.split(/\s+/);
+        const looksLikeMultipleNames =
+          words.length >= 4 &&
+          words.every((w) => /^[A-ZÀ-Ỹ]/.test(w) || /[*†‡§\d]/.test(w));
+
+        if (
+          titleLines.length > 0 &&
+          (hasCommaOrAnd || looksLikeMultipleNames)
+        ) {
+          authorStartIndex = i;
+          break;
+        }
+
+        titleLines.push(l);
+        if (l.length >= 25 || titleLines.length >= 2) {
+          authorStartIndex = i + 1;
+          break;
+        }
+      }
+
+      const candidateTitle = titleLines.join(' ').replace(/\s+/g, ' ').trim();
+      if (candidateTitle.length > 5 && candidateTitle.length < 250) {
+        metadata.title = candidateTitle;
+      }
+
+      const parsedAuthors: string[] = [];
+      if (authorStartIndex !== -1 && authorStartIndex < cleanLines.length) {
+        for (let i = authorStartIndex; i < cleanLines.length; i++) {
+          const l = cleanLines[i];
+          if (
+            /@|univ|institute|department|college|laboratory|school|hospital|center|research|microsoft|google/i.test(
+              l,
+            )
+          ) {
+            break;
+          }
+          if (l.includes(',')) {
+            const rawNames = l.replace(/[*†‡§\d]/g, '').split(/[,;]|\band\b/i);
+            for (const raw of rawNames) {
+              const cleanName = raw.replace(/\s+/g, ' ').trim();
+              const parts = cleanName.split(' ');
+              if (
+                parts.length >= 2 &&
+                parts.length <= 4 &&
+                parts.every((p) => /^[A-ZÀ-Ỹ]/.test(p))
+              ) {
+                parsedAuthors.push(cleanName);
+              }
+            }
+          } else {
+            const words = l
+              .replace(/[*†‡§\d]/g, '')
+              .split(/\s+/)
+              .filter((w) => /^[A-ZÀ-Ỹ]/.test(w));
+            for (let j = 0; j < words.length - 1; j += 2) {
+              parsedAuthors.push(`${words[j]} ${words[j + 1]}`);
+            }
+          }
+        }
+      }
+
+      if (parsedAuthors.length > 0) {
+        metadata.authors = parsedAuthors;
+      }
     }
 
     return metadata;

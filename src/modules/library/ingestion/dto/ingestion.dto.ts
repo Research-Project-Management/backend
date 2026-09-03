@@ -5,6 +5,7 @@ import {
   IsIn,
   IsNumber,
   IsObject,
+  IsBoolean,
 } from 'class-validator';
 
 export class StartIngestionDto {
@@ -69,6 +70,10 @@ export class IngestPdfDto {
   @IsOptional()
   @IsString()
   idempotencyKey?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  silent?: boolean;
 }
 
 export class UnifiedIngestionDto {
@@ -115,4 +120,8 @@ export class UnifiedIngestionDto {
   @IsOptional()
   @IsString()
   idempotencyKey?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  silent?: boolean;
 }

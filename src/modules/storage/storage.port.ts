@@ -7,9 +7,14 @@ export interface ReadOwnedFileOutput {
   fileId: string;
   filename: string;
   mimeType: string;
-  size?: number;
+  size: number;
   storageKey: string;
+  contentUrl: string;
   buffer: Buffer;
+}
+
+export function getFileContentPath(fileId: string): string {
+  return `/api/files/${encodeURIComponent(fileId)}/content`;
 }
 
 export interface IStoragePort {

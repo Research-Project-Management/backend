@@ -139,10 +139,7 @@ describe('Library Architecture Boundaries (T007)', () => {
       (f) => f.endsWith('.module.ts') && f !== 'library.module.ts',
     );
 
-    const forbiddenExportPatterns = [
-      /Repository$/,
-      /PrismaService/,
-    ];
+    const forbiddenExportPatterns = [/Repository$/, /PrismaService/];
 
     const violations: { file: string; forbiddenExport: string }[] = [];
 

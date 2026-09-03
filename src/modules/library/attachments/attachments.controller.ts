@@ -2,7 +2,6 @@ import {
   Controller,
   Get,
   Post,
-  Put,
   Delete,
   Body,
   Param,
@@ -20,11 +19,8 @@ import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-
 import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
 
 @Controller([
+  'api/v1/workspaces/:workspaceId/library/items/:itemId/attachments',
   'api/v1/workspaces/:workspaceId/library/attachments',
-  'api/workspace/:workspaceId/library/items/:itemId/attachments',
-  'api/library/:workspaceId/items/:itemId/attachments',
-  'api/library/papers/:workspaceId/:itemId/attachments',
-  'api/library/attachments',
 ])
 @UseGuards(JwtAuthGuard)
 export class AttachmentsController {

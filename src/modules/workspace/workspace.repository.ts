@@ -298,7 +298,11 @@ export class WorkspaceRepository implements IWorkspaceRepository {
         OR: [
           { title: { contains: query, mode: 'insensitive' } },
           { abstract: { contains: query, mode: 'insensitive' } },
-          { authors: { has: query } },
+          {
+            contributors: {
+              some: { fullName: { contains: query, mode: 'insensitive' } },
+            },
+          },
         ],
       },
       select: {

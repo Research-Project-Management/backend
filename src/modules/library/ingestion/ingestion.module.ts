@@ -23,7 +23,11 @@ import { MatchStage } from './stages/match.stage';
 import { CommitStage } from './stages/commit.stage';
 import { UrlCaptureProvider } from './providers/url-capture.provider';
 import { INGESTION_PORT } from './types/ingestion.types';
-import { IdempotencyRepository } from '../sync/repositories/idempotency.repository';
+import { DoiIngestionStrategy } from './strategies/doi-ingestion.strategy';
+import { UrlIngestionStrategy } from './strategies/url-ingestion.strategy';
+import { PdfIngestionStrategy } from './strategies/pdf-ingestion.strategy';
+import { BibtexIngestionStrategy } from './strategies/bibtex-ingestion.strategy';
+import { IngestionStrategyRegistry } from './strategies/ingestion-strategy.registry';
 
 @Module({
   imports: [
@@ -58,6 +62,13 @@ import { IdempotencyRepository } from '../sync/repositories/idempotency.reposito
     MatchStage,
     CommitStage,
 
+    // Strategies
+    DoiIngestionStrategy,
+    UrlIngestionStrategy,
+    PdfIngestionStrategy,
+    BibtexIngestionStrategy,
+    IngestionStrategyRegistry,
+
     // Service & Adapters
     IngestionService,
     {
@@ -69,6 +80,7 @@ import { IdempotencyRepository } from '../sync/repositories/idempotency.reposito
   exports: [
     INGESTION_PORT,
     IngestionService,
+    IngestionStrategyRegistry,
     DoiParser,
     BibtexParser,
     RisParser,

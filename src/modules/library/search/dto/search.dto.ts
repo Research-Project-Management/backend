@@ -24,14 +24,3 @@ export class SearchCatalogQueryDto {
   @IsString()
   tagId?: string;
 }
-
-export class SavedSearchDto {
-  @IsString()
-  name!: string;
-
-  @IsString()
-  query!: string;
-
-  @IsOptional()
-  filters?: Record<string, any>;
-}

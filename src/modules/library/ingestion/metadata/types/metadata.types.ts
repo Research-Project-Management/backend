@@ -24,7 +24,7 @@ export interface ClassifiedQuery {
 import {
   CreatorCreditInput,
   CreatorType,
-} from '../../../catalog/types/creator.types';
+} from '../../../catalog/types/catalog.types';
 
 export { CreatorCreditInput, CreatorType };
 export type CreatorInput = CreatorCreditInput;
@@ -83,6 +83,7 @@ export interface ItemMetadata {
   url?: string;
   pdfUrl?: string;
   fileUrl?: string;
+  fileId?: string;
   filename?: string;
   storageId?: string;
   openAccessPdfUrl?: string;
@@ -100,6 +101,7 @@ export interface ItemMetadata {
   archiveLocation?: string;
   callNumber?: string;
   libraryCatalog?: string;
+  extraFields?: Record<string, any>;
 
   provenance?: Provenance;
 }
@@ -225,6 +227,7 @@ export interface ResolvedMetadata {
 
 export interface MetadataRequest {
   query: string;
+  queryType?: QueryType;
   workspaceId?: string;
   forceRefresh?: boolean;
   signal?: AbortSignal;

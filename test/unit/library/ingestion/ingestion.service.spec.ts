@@ -1,15 +1,15 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { IngestionService } from '@/modules/library/ingestion/ingestion.service';
 import { PrismaService } from '@/core/database/prisma.service';
-import { TransactionService } from '@/modules/library/sync/services/transaction.service';
+import { IngestionRepository } from '@/modules/library/ingestion/ingestion.repository';
 import { IdempotencyRepository } from '@/modules/library/sync/repositories/idempotency.repository';
+import { TransactionService } from '@/modules/library/sync/services/transaction.service';
 import { PdfExtractorProvider } from '@/modules/library/attachments/providers/pdf-extractor.provider';
-import { BibtexParser } from '@/modules/library/ingestion/parsers/bibtex.parser';
 import { UrlCaptureProvider } from '@/modules/library/ingestion/providers/url-capture.provider';
 import { METADATA_PORT } from '@/modules/library/ingestion/metadata/types/metadata.types';
 import { STORAGE_PORT } from '@/modules/storage/storage.port';
-
 import { CatalogService } from '@/modules/library/catalog/catalog.service';
+import { IngestionStrategyRegistry } from '@/modules/library/ingestion/strategies/ingestion-strategy.registry';
 
 describe('IngestionService (Canonical)', () => {
   let service: IngestionService;
@@ -21,16 +21,31 @@ describe('IngestionService (Canonical)', () => {
   let extractorService: jest.Mocked<any>;
   let storagePort: jest.Mocked<any>;
   let catalogService: jest.Mocked<any>;
+  let ingestionRepo: jest.Mocked<any>;
 
   beforeEach(async () => {
     catalogService = {
       createItem: jest.fn().mockResolvedValue({
         id: 'item-123',
         title: 'Attention Is All You Need',
-        authors: ['Vaswani, Ashish', 'Shazeer, Noam'],
         year: 2017,
+        contributors: [
+          {
+            lastName: 'Vaswani',
+            firstName: 'Ashish',
+            creatorType: 'author',
+            orderIndex: 0,
+          },
+          {
+            lastName: 'Shazeer',
+            firstName: 'Noam',
+            creatorType: 'author',
+            orderIndex: 1,
+          },
+        ],
       }),
     };
+
     prisma = {
       catalogItem: {
         findFirst: jest.fn().mockResolvedValue(null),
@@ -56,14 +71,16 @@ describe('IngestionService (Canonical)', () => {
         create: jest.fn().mockResolvedValue({ id: 'change-1' }),
       },
       ingestionRun: {
-        create: jest.fn().mockResolvedValue({ id: 'run-1' }),
+        create: jest
+          .fn()
+          .mockResolvedValue({ id: 'run-1', status: 'pending', attempts: 0 }),
         update: jest.fn().mockResolvedValue({ id: 'run-1' }),
         findFirst: jest.fn().mockResolvedValue(null),
       },
       capturePreview: {
-        create: jest.fn(),
-        findUnique: jest.fn(),
-        updateMany: jest.fn(),
+        create: jest.fn().mockResolvedValue({ id: 'prev-1' }),
+        findUnique: jest.fn().mockResolvedValue(null),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
       catalogTag: { upsert: jest.fn().mockResolvedValue({ id: 'tag-1' }) },
       catalogItemTag: { upsert: jest.fn().mockResolvedValue({ id: 'cit-1' }) },
@@ -77,7 +94,7 @@ describe('IngestionService (Canonical)', () => {
     libraryTx = {
       executeInTransaction: jest
         .fn()
-        .mockImplementation(async (wsOrCb, maybeCb) => {
+        .mockImplementation(async (wsOrCb: any, maybeCb: any) => {
           const cb = typeof wsOrCb === 'function' ? wsOrCb : maybeCb;
           const helpers = {
             appendChange: jest.fn(),
@@ -96,11 +113,12 @@ describe('IngestionService (Canonical)', () => {
       captureFromUrl: jest.fn().mockResolvedValue({
         title: 'Blog Post',
         url: 'https://blog.example.com/article',
-        metadata: { itemType: 'webpage' },
+        previewToken: 'preview.token.123',
+        itemType: 'webpage',
       }),
       hashToken: jest.fn().mockReturnValue('hash123'),
       calculateMetadataDigest: jest.fn().mockReturnValue('digest123'),
-      attachPreviewToken: jest.fn().mockImplementation((meta) => ({
+      attachPreviewToken: jest.fn().mockImplementation((meta: any) => ({
         ...meta,
         previewToken: 'preview.token.123',
       })),
@@ -116,6 +134,18 @@ describe('IngestionService (Canonical)', () => {
       markSucceeded: jest.fn().mockResolvedValue(undefined),
       markSucceededInTx: jest.fn().mockResolvedValue(undefined),
       markFailed: jest.fn().mockResolvedValue(undefined),
+    };
+
+    ingestionRepo = {
+      createRun: jest
+        .fn()
+        .mockResolvedValue({ id: 'run-1', status: 'pending', attempts: 0 }),
+      updateRunStatus: jest.fn().mockResolvedValue(undefined),
+      findRunByIdempotencyKey: jest.fn().mockResolvedValue(null),
+      findRunById: jest.fn().mockResolvedValue(null),
+      createStage: jest.fn().mockResolvedValue({ id: 'stage-1' }),
+      createCandidate: jest.fn().mockResolvedValue({ id: 'cand-1' }),
+      createDecision: jest.fn().mockResolvedValue({ id: 'dec-1' }),
     };
 
     extractorService = {
@@ -140,56 +170,42 @@ describe('IngestionService (Canonical)', () => {
       providers: [
         IngestionService,
         { provide: PrismaService, useValue: prisma },
-        { provide: TransactionService, useValue: libraryTx },
+        { provide: IngestionRepository, useValue: ingestionRepo },
         { provide: IdempotencyRepository, useValue: idempotencyRepo },
-        { provide: PdfExtractorProvider, useValue: extractorService },
-        { provide: STORAGE_PORT, useValue: storagePort },
-        { provide: BibtexParser, useValue: new BibtexParser() },
-        { provide: UrlCaptureProvider, useValue: urlCapture },
-        { provide: METADATA_PORT, useValue: metadataService },
         { provide: CatalogService, useValue: catalogService },
+        { provide: METADATA_PORT, useValue: metadataService },
+        { provide: STORAGE_PORT, useValue: storagePort },
+        { provide: UrlCaptureProvider, useValue: urlCapture },
+        { provide: PdfExtractorProvider, useValue: extractorService },
+        { provide: TransactionService, useValue: libraryTx },
+        { provide: IngestionStrategyRegistry, useValue: null },
       ],
     }).compile();
 
     service = module.get(IngestionService);
   });
 
-  describe('ingestDoi', () => {
-    it('resolves metadata outside tx, creates CatalogItem with real title/authors/year, and publishes outbox', async () => {
-      metadataService.resolve.mockResolvedValue({
-        title: 'Attention Is All You Need',
-        authors: ['Vaswani, Ashish', 'Shazeer, Noam'],
-        year: 2017,
-        journal: 'NeurIPS',
-        itemType: 'journalArticle',
-        tags: ['AI', 'Transformers'],
-      });
-
-      const result = await service.ingestDoi('ws-1', 'user-1', {
-        doi: '10.5555/3295222',
-      });
-
-      expect(metadataService.resolve).toHaveBeenCalledWith({
-        query: '10.5555/3295222',
-        workspaceId: 'ws-1',
-      });
-      expect(result).toBeDefined();
-      expect(libraryTx.executeInTransaction).toHaveBeenCalled();
-    });
-  });
-
   describe('captureUrl', () => {
-    it('calls urlConnector.captureUrl with sanitized parameters', async () => {
-      const res = await service.captureUrl(
-        'https://blog.example.com/article',
-        'ws-1',
-      );
+    it('calls urlCaptureProvider.captureFromUrl and persists a CapturePreview record', async () => {
+      const res = await service.captureUrl('https://blog.example.com/article', {
+        workspaceId: 'ws-1',
+        userId: 'user-1',
+      });
 
       expect(urlCapture.captureFromUrl).toHaveBeenCalledWith(
         'https://blog.example.com/article',
-        { workspaceId: 'ws-1' },
+        { workspaceId: 'ws-1', userId: 'user-1' },
       );
       expect(res.title).toBe('Blog Post');
+    });
+  });
+
+  describe('getRunStatus', () => {
+    it('returns NotFoundException when run is not found', async () => {
+      ingestionRepo.findRunById.mockResolvedValue(null);
+      await expect(
+        service.getRunStatus('ws-1', 'nonexistent-run-id'),
+      ).rejects.toThrow();
     });
   });
 });

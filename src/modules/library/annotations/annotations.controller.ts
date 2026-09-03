@@ -47,19 +47,16 @@ export class AnnotationsController {
     @CurrentUser('id') currentUserId: string,
     @Body() body: CreateAnnotationDto,
   ) {
-    return this.annotationsService.createAnnotation(
-      workspaceId,
-      {
-        attachmentId,
-        type: body.type,
-        pageIndex: body.pageIndex,
-        color: body.color,
-        quoteText: body.quoteText,
-        comment: body.comment,
-        rectCoords: body.rectCoords,
-        authorId: currentUserId || 'system',
-      },
-    );
+    return this.annotationsService.createAnnotation(workspaceId, {
+      attachmentId,
+      type: body.type,
+      pageIndex: body.pageIndex,
+      color: body.color,
+      quoteText: body.quoteText,
+      comment: body.comment,
+      rectCoords: body.rectCoords,
+      authorId: currentUserId || 'system',
+    });
   }
 
   @Patch(':id')

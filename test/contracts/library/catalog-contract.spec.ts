@@ -2,21 +2,17 @@ import {
   CATALOG_READ_PORT,
   ICatalogReadPort,
   CatalogItemDetail,
-} from '../../../src/modules/library/catalog/ports/catalog-read.port';
-import {
   CATALOG_COMMIT_PORT,
   ICatalogCommitPort,
-} from '../../../src/modules/library/catalog/ports/catalog-commit.port';
-import {
   ITEM_EXISTENCE_PORT,
   IItemExistencePort,
-} from '../../../src/modules/library/catalog/ports/item-existence.port';
+} from '../../../src/modules/library/catalog/ports/catalog.ports';
 import {
   CatalogItemSummary,
   ItemMetadata,
   CreatorCredit,
   ItemIdentifier,
-} from '../../../src/modules/library/catalog/types/item.types';
+} from '../../../src/modules/library/catalog/types/catalog.types';
 
 describe('Library Catalog Contracts & Port Conventions (T012)', () => {
   describe('Port DI Tokens', () => {

@@ -150,11 +150,7 @@ export class SyncService implements SyncPort {
     }
 
     const relationTags = item.itemTags.map((it) => it.tag.name);
-    const tags = normalizeTags([
-      ...(item.labels ?? []),
-      ...(item.keywords ?? []),
-      ...relationTags,
-    ]);
+    const tags = normalizeTags(relationTags);
 
     return {
       id: item.id,
@@ -264,10 +260,10 @@ export class SyncService implements SyncPort {
   async applyExternalSyncBatch(
     command: ApplyExternalSyncBatchCommand,
   ): Promise<ExternalSyncBatchResult> {
-    // ── 1. Deterministic, non-mutating request hash ────────────────────────
+    // 1. Deterministic, non-mutating request hash
     const requestHash = this.computeRequestHash(command);
 
-    // ── 2. Pre-flight idempotency check (fast-path, outside tx) ───────────
+    // 2. Pre-flight idempotency check (fast-path, outside tx)
     if (command.idempotencyKey) {
       const existing = await this.prisma.idempotencyRecord.findUnique({
         where: {
@@ -295,10 +291,10 @@ export class SyncService implements SyncPort {
       }
     }
 
-    // ── 3. Topological sort of collection operations ───────────────────────
+    // 3. Topological sort of collection operations
     const sortedOperations = this.topoSortOperations(command.operations);
 
-    // ── 4. Execute all canonical writes in one atomic Library transaction ──
+    // 4. Execute all canonical writes in one atomic Library transaction
     return this.txService.executeInTransaction(async (tx, helpers) => {
       // ── 4a. Claim idempotency record inside tx (prevents concurrent duplicate writes)
       if (command.idempotencyKey) {
@@ -345,7 +341,7 @@ export class SyncService implements SyncPort {
         }
       }
 
-      // ── 4b. Execute operations in topo-sorted order ─────────────────────
+      // 4b. Execute operations in topo-sorted order
       const refMap = new Map<string, string>();
       const results: ExternalSyncBatchOperationResult[] = [];
 
@@ -446,7 +442,7 @@ export class SyncService implements SyncPort {
 
       const batchResult: ExternalSyncBatchResult = { results };
 
-      // ── 4c. Mark idempotency record as succeeded INSIDE the same tx ──────
+      // 4c. Mark idempotency record as succeeded INSIDE the same tx
       // If canonical writes rollback, this update also rollbacks — record stays 'in_progress'
       // and the next retry can re-acquire.
       if (command.idempotencyKey) {
@@ -612,8 +608,8 @@ export class SyncService implements SyncPort {
         },
       });
       return { id: event.id };
-    } catch (err: any) {
-      if (err.code === 'P2002' && dedupeKey) {
+    } catch (err: unknown) {
+      if (err instanceof Error && (err as any).code === 'P2002' && dedupeKey) {
         this.logger.debug(
           `Outbox event with dedupeKey ${dedupeKey} already exists. Skipping duplicate insert.`,
         );
@@ -643,9 +639,9 @@ export class SyncService implements SyncPort {
     this.outboxWorker.registerHandler(eventType, dispatchHandler);
   }
 
-  // ───────────────────────────────────────────────────────────────────────────
+  //
   // Internal Transactional Execution Helpers
-  // ───────────────────────────────────────────────────────────────────────────
+  //
 
   private async executeUpsertCollection(
     tx: Prisma.TransactionClient,
@@ -741,9 +737,13 @@ export class SyncService implements SyncPort {
         );
       }
 
+      const existingItemTags = await tx.catalogItemTag.findMany({
+        where: { catalogItemId: command.existingId },
+        include: { tag: true },
+      });
+      const existingTagNames = existingItemTags.map((it) => it.tag.name);
       const mergedTags = normalizeTags([
-        ...(existing.labels || []),
-        ...(existing.keywords || []),
+        ...existingTagNames,
         ...(command.tags || []),
       ]);
 
@@ -763,8 +763,6 @@ export class SyncService implements SyncPort {
           isbn: command.isbn,
           url: command.url,
           itemType: command.itemType,
-          labels: mergedTags,
-          keywords: mergedTags,
           version: { increment: 1 },
         },
       });
@@ -777,6 +775,13 @@ export class SyncService implements SyncPort {
         data: { title: command.title },
       });
 
+      await this.syncTagsToItem(
+        tx,
+        command.workspaceId,
+        updated.id,
+        mergedTags,
+      );
+
       return { id: updated.id, isNew: false, version: updated.version };
     } else {
       const newTags = command.tags ? normalizeTags(command.tags) : [];
@@ -784,8 +789,6 @@ export class SyncService implements SyncPort {
         data: {
           workspaceId: command.workspaceId,
           uploadedById: command.userId,
-          filename: command.filename || 'item.pdf',
-          fileUrl: command.fileUrl || command.url || '',
           title: command.title,
           abstract: command.abstract,
           year: command.year,
@@ -799,11 +802,11 @@ export class SyncService implements SyncPort {
           isbn: command.isbn,
           url: command.url,
           itemType: command.itemType,
-          labels: newTags,
-          keywords: newTags,
           version: 1,
         },
       });
+
+      await this.syncTagsToItem(tx, command.workspaceId, created.id, newTags);
 
       await helpers.appendChange(command.workspaceId, {
         entityType: 'CatalogItem',
@@ -1117,166 +1120,226 @@ export class SyncService implements SyncPort {
     helpers: TransactionHelpers,
     command: DeleteSyncEntityCommand,
   ): Promise<void> {
+    const { workspaceId, entityType, entityId } = command;
+
+    const handlers: Record<
+      string,
+      (
+        tx: Prisma.TransactionClient,
+        helpers: TransactionHelpers,
+        cmd: DeleteSyncEntityCommand,
+      ) => Promise<void>
+    > = {
+      CatalogItem: this.deleteCatalogItem.bind(this),
+      Collection: this.deleteCollection.bind(this),
+      CatalogAttachment: this.deleteAttachment.bind(this),
+      Note: this.deleteNote.bind(this),
+      Annotation: this.deleteAnnotation.bind(this),
+    };
+
+    const handler = handlers[entityType];
+    if (handler) {
+      await handler(tx, helpers, command);
+    } else {
+      this.logger.warn(
+        `executeDeleteEntity: unknown entityType "${entityType}" for ${entityId} in workspace ${workspaceId}`,
+      );
+    }
+  }
+
+  private async deleteCatalogItem(
+    tx: Prisma.TransactionClient,
+    helpers: TransactionHelpers,
+    command: DeleteSyncEntityCommand,
+  ): Promise<void> {
     const {
       workspaceId,
-      entityType,
       entityId,
       reason,
       publishOutboxEventType,
       publishOutboxPayload,
     } = command;
+    const existing = await tx.catalogItem.findUnique({
+      where: { id: entityId },
+    });
+    if (!existing) return;
 
-    if (entityType === 'CatalogItem') {
-      const existing = await tx.catalogItem.findUnique({
-        where: { id: entityId },
-      });
-
-      if (!existing) {
-        return;
-      }
-
-      if (existing.workspaceId !== workspaceId) {
-        throw new ForbiddenException(
-          `Catalog item ${entityId} does not belong to workspace ${workspaceId}`,
-        );
-      }
-
-      await tx.catalogItem.update({
-        where: { id: entityId },
-        data: { deletedAt: new Date() },
-      });
-
-      await helpers.appendChange(workspaceId, {
-        entityType: 'CatalogItem',
-        entityId,
-        action: 'delete',
-        version: existing.version + 1,
-        data: { reason },
-      });
-
-      await helpers.recordTombstone(workspaceId, {
-        entityType: 'CatalogItem',
-        entityId,
-      });
-
-      const eventType = publishOutboxEventType || 'library.item.deleted';
-      const payload = publishOutboxPayload || { itemId: entityId, reason };
-
-      await helpers.publishOutbox(
-        workspaceId,
-        entityId,
-        eventType,
-        payload as any,
+    if (existing.workspaceId !== workspaceId) {
+      throw new ForbiddenException(
+        `Catalog item ${entityId} does not belong to workspace ${workspaceId}`,
       );
-    } else if (entityType === 'Collection') {
-      const existing = await tx.collection.findUnique({
-        where: { id: entityId },
+    }
+
+    await tx.catalogItem.update({
+      where: { id: entityId },
+      data: { deletedAt: new Date() },
+    });
+    await helpers.appendChange(workspaceId, {
+      entityType: 'CatalogItem',
+      entityId,
+      action: 'delete',
+      version: existing.version + 1,
+      data: { reason },
+    });
+    await helpers.recordTombstone(workspaceId, {
+      entityType: 'CatalogItem',
+      entityId,
+    });
+    await helpers.publishOutbox(
+      workspaceId,
+      entityId,
+      publishOutboxEventType ?? 'library.item.deleted',
+      (publishOutboxPayload ?? { itemId: entityId, reason }) as any,
+    );
+  }
+
+  private async deleteCollection(
+    tx: Prisma.TransactionClient,
+    helpers: TransactionHelpers,
+    command: DeleteSyncEntityCommand,
+  ): Promise<void> {
+    const { workspaceId, entityId } = command;
+    const existing = await tx.collection.findUnique({
+      where: { id: entityId },
+    });
+    if (!existing) return;
+
+    if (existing.workspaceId !== workspaceId) {
+      throw new ForbiddenException(
+        `Collection ${entityId} does not belong to workspace ${workspaceId}`,
+      );
+    }
+
+    await tx.collection.update({
+      where: { id: entityId },
+      data: { deletedAt: new Date() },
+    });
+    await helpers.appendChange(workspaceId, {
+      entityType: 'Collection',
+      entityId,
+      action: 'delete',
+      version: existing.version + 1,
+    });
+    await helpers.recordTombstone(workspaceId, {
+      entityType: 'Collection',
+      entityId,
+    });
+  }
+
+  private async deleteAttachment(
+    tx: Prisma.TransactionClient,
+    helpers: TransactionHelpers,
+    command: DeleteSyncEntityCommand,
+  ): Promise<void> {
+    const { workspaceId, entityId } = command;
+    const existing = await tx.catalogAttachment.findUnique({
+      where: { id: entityId },
+      include: { catalogItem: true },
+    });
+    if (!existing) return;
+
+    if (existing.catalogItem.workspaceId !== workspaceId) {
+      throw new ForbiddenException(
+        `Attachment ${entityId} does not belong to workspace ${workspaceId}`,
+      );
+    }
+
+    await tx.catalogAttachment.delete({ where: { id: entityId } });
+    await helpers.appendChange(workspaceId, {
+      entityType: 'CatalogAttachment',
+      entityId,
+      action: 'delete',
+      version: 1,
+    });
+  }
+
+  private async deleteNote(
+    tx: Prisma.TransactionClient,
+    helpers: TransactionHelpers,
+    command: DeleteSyncEntityCommand,
+  ): Promise<void> {
+    const { workspaceId, entityId } = command;
+    const existing = await tx.note.findUnique({ where: { id: entityId } });
+    if (!existing) return;
+
+    if (existing.workspaceId !== workspaceId) {
+      throw new ForbiddenException(
+        `Note ${entityId} does not belong to workspace ${workspaceId}`,
+      );
+    }
+
+    await tx.note.update({
+      where: { id: entityId },
+      data: { deletedAt: new Date() },
+    });
+    await helpers.appendChange(workspaceId, {
+      entityType: 'Note',
+      entityId,
+      action: 'delete',
+      version: existing.version + 1,
+    });
+  }
+
+  private async deleteAnnotation(
+    tx: Prisma.TransactionClient,
+    helpers: TransactionHelpers,
+    command: DeleteSyncEntityCommand,
+  ): Promise<void> {
+    const { workspaceId, entityId } = command;
+    const existing = await tx.annotation.findUnique({
+      where: { id: entityId },
+      include: { attachment: { include: { catalogItem: true } } },
+    });
+    if (!existing) return;
+
+    if (existing.attachment.catalogItem.workspaceId !== workspaceId) {
+      throw new ForbiddenException(
+        `Annotation ${entityId} does not belong to workspace ${workspaceId}`,
+      );
+    }
+
+    await tx.annotation.update({
+      where: { id: entityId },
+      data: { deletedAt: new Date() },
+    });
+    await helpers.appendChange(workspaceId, {
+      entityType: 'Annotation',
+      entityId,
+      action: 'delete',
+      version: existing.version + 1,
+    });
+  }
+
+  /**
+   * Resolves or creates each tag by name and upserts the CatalogItemTag join record.
+   * Extracted to eliminate duplicated N+1 tag loops in executeUpsertCatalogItem.
+   */
+  private async syncTagsToItem(
+    tx: Prisma.TransactionClient,
+    workspaceId: string,
+    catalogItemId: string,
+    tagNames: string[],
+  ): Promise<void> {
+    if (tagNames.length === 0) return;
+
+    for (const tagName of tagNames) {
+      let tag = await tx.catalogTag.findFirst({
+        where: {
+          workspaceId,
+          name: { equals: tagName, mode: 'insensitive' },
+        },
       });
 
-      if (!existing) {
-        return;
+      if (!tag) {
+        tag = await tx.catalogTag.create({
+          data: { workspaceId, name: tagName },
+        });
       }
 
-      if (existing.workspaceId !== workspaceId) {
-        throw new ForbiddenException(
-          `Collection ${entityId} does not belong to workspace ${workspaceId}`,
-        );
-      }
-
-      await tx.collection.update({
-        where: { id: entityId },
-        data: { deletedAt: new Date() },
-      });
-
-      await helpers.appendChange(workspaceId, {
-        entityType: 'Collection',
-        entityId,
-        action: 'delete',
-        version: existing.version + 1,
-      });
-
-      await helpers.recordTombstone(workspaceId, {
-        entityType: 'Collection',
-        entityId,
-      });
-    } else if (entityType === 'CatalogAttachment') {
-      const existing = await tx.catalogAttachment.findUnique({
-        where: { id: entityId },
-        include: { catalogItem: true },
-      });
-
-      if (!existing) {
-        return;
-      }
-
-      if (existing.catalogItem.workspaceId !== workspaceId) {
-        throw new ForbiddenException(
-          `Attachment ${entityId} does not belong to workspace ${workspaceId}`,
-        );
-      }
-
-      await tx.catalogAttachment.delete({
-        where: { id: entityId },
-      });
-
-      await helpers.appendChange(workspaceId, {
-        entityType: 'CatalogAttachment',
-        entityId,
-        action: 'delete',
-        version: 1,
-      });
-    } else if (entityType === 'Note') {
-      const existing = await tx.note.findUnique({
-        where: { id: entityId },
-      });
-
-      if (!existing) {
-        return;
-      }
-
-      if (existing.workspaceId !== workspaceId) {
-        throw new ForbiddenException(
-          `Note ${entityId} does not belong to workspace ${workspaceId}`,
-        );
-      }
-
-      await tx.note.update({
-        where: { id: entityId },
-        data: { deletedAt: new Date() },
-      });
-
-      await helpers.appendChange(workspaceId, {
-        entityType: 'Note',
-        entityId,
-        action: 'delete',
-        version: existing.version + 1,
-      });
-    } else if (entityType === 'Annotation') {
-      const existing = await tx.annotation.findUnique({
-        where: { id: entityId },
-        include: { attachment: { include: { catalogItem: true } } },
-      });
-
-      if (!existing) {
-        return;
-      }
-
-      if (existing.attachment.catalogItem.workspaceId !== workspaceId) {
-        throw new ForbiddenException(
-          `Annotation ${entityId} does not belong to workspace ${workspaceId}`,
-        );
-      }
-
-      await tx.annotation.update({
-        where: { id: entityId },
-        data: { deletedAt: new Date() },
-      });
-
-      await helpers.appendChange(workspaceId, {
-        entityType: 'Annotation',
-        entityId,
-        action: 'delete',
-        version: existing.version + 1,
+      await tx.catalogItemTag.upsert({
+        where: { tagId_catalogItemId: { tagId: tag.id, catalogItemId } },
+        create: { tagId: tag.id, catalogItemId },
+        update: {},
       });
     }
   }

@@ -127,14 +127,91 @@ export class NormalizationPolicy {
       }
     }
 
-    // 10. Tags
-    if (raw.tags && Array.isArray(raw.tags)) {
-      result.tags = this.normalizeTags(raw.tags);
+    // 10. Tags & Keywords (Zotero tags)
+    const rawTagList: string[] = [];
+    if (Array.isArray(raw.tags)) rawTagList.push(...raw.tags);
+    if (Array.isArray(raw.keywords)) rawTagList.push(...raw.keywords);
+    if (Array.isArray(raw.labels)) rawTagList.push(...raw.labels);
+
+    if (rawTagList.length > 0) {
+      const normalizedTags = this.normalizeTags(rawTagList);
+      if (normalizedTags.length > 0) {
+        result.tags = normalizedTags;
+        result.keywords = normalizedTags;
+        result.labels = normalizedTags;
+      }
     }
 
-    // 11. Citation Key
+    // 11. Notes & Comments (Zotero notes / annote)
+    if (Array.isArray(raw.notes) && raw.notes.length > 0) {
+      const cleanNotes = raw.notes
+        .map((n: any) => {
+          if (typeof n === 'string') {
+            const clean = n.trim();
+            return clean ? { content: clean } : null;
+          }
+          if (n && typeof n === 'object' && n.content) {
+            const clean = String(n.content).trim();
+            return clean
+              ? {
+                  content: clean,
+                  source: n.source ? String(n.source).trim() : undefined,
+                }
+              : null;
+          }
+          return null;
+        })
+        .filter((n): n is { content: string; source?: string } =>
+          Boolean(n && n.content),
+        );
+
+      if (cleanNotes.length > 0) {
+        result.notes = cleanNotes;
+      }
+    }
+
+    // 12. Citation Key
     const citKey = this.cleanString(raw.citationKey || raw.explicitCitationKey);
     if (citKey) result.citationKey = citKey;
+
+    // 13. Extra Zotero & Extended Metadata
+    if (raw.language) {
+      const cleanLang = this.cleanString(raw.language);
+      if (cleanLang) result.language = cleanLang;
+    }
+    if (raw.rights) {
+      const cleanRights = this.cleanString(raw.rights);
+      if (cleanRights) result.rights = cleanRights;
+    }
+    if (raw.license) {
+      const cleanLicense = this.cleanString(raw.license);
+      if (cleanLicense) result.license = cleanLicense;
+    }
+    if (raw.extra) {
+      const cleanExtra = this.cleanString(raw.extra);
+      if (cleanExtra) result.extra = cleanExtra;
+    }
+    if (raw.extraFields && typeof raw.extraFields === 'object') {
+      result.extraFields = raw.extraFields;
+    }
+    if (raw.libraryCatalog) {
+      const cleanCat = this.cleanString(raw.libraryCatalog);
+      if (cleanCat) result.libraryCatalog = cleanCat;
+    }
+    if (raw.callNumber) {
+      const cleanCall = this.cleanString(raw.callNumber);
+      if (cleanCall) result.callNumber = cleanCall;
+    }
+    if (raw.archive) {
+      const cleanArch = this.cleanString(raw.archive);
+      if (cleanArch) result.archive = cleanArch;
+    }
+
+    // 14. File & Attachment references
+    if (raw.fileId) result.fileId = this.cleanString(raw.fileId);
+    if (raw.filename) result.filename = this.cleanString(raw.filename);
+    if (raw.fileUrl) result.fileUrl = this.cleanString(raw.fileUrl);
+    if (raw.pdfUrl) result.pdfUrl = this.cleanString(raw.pdfUrl);
 
     return result;
   }

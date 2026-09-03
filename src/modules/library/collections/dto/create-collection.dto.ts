@@ -3,6 +3,7 @@ import {
   IsNotEmpty,
   IsOptional,
   MaxLength,
+  ValidateIf,
   IsUUID,
 } from 'class-validator';
 
@@ -27,7 +28,17 @@ export class CreateCollectionDto {
   @MaxLength(50)
   icon?: string;
 
-  @IsUUID()
   @IsOptional()
+  @ValidateIf(
+    (o) =>
+      o.parentId !== null &&
+      o.parentId !== undefined &&
+      o.parentId !== '' &&
+      o.parentId !== 'root',
+  )
+  @IsUUID()
   parentId?: string | null;
+
+  @IsOptional()
+  parent?: string | null;
 }

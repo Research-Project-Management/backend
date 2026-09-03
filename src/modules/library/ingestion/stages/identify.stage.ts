@@ -1,10 +1,12 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { SubmissionPayload } from '../types/ingestion-submission.types';
 import { MetadataCandidate } from '../types/metadata-candidate.types';
 import { DoiParser } from '../parsers/doi.parser';
 import { BibtexParser } from '../parsers/bibtex.parser';
 import { RisParser } from '../parsers/ris.parser';
 import { NormalizationPolicy } from '../policies/normalization.policy';
+import { IStoragePort, STORAGE_PORT } from '../../../storage/storage.port';
+import { PdfExtractorProvider } from '../../attachments/providers/pdf-extractor.provider';
 import { randomUUID } from 'crypto';
 
 @Injectable()
@@ -16,14 +18,19 @@ export class IdentifyStage {
     private readonly bibtexParser: BibtexParser,
     private readonly risParser: RisParser,
     private readonly normalizer: NormalizationPolicy,
+    @Optional()
+    @Inject(STORAGE_PORT)
+    private readonly storagePort?: IStoragePort,
+    @Optional() private readonly pdfExtractor?: PdfExtractorProvider,
   ) {}
 
   /**
    * Executes identification and initial format translation.
    */
-  execute(
+  async execute(
     runId: string,
     payload: SubmissionPayload,
+    workspaceId?: string,
   ): Promise<MetadataCandidate[]> {
     const candidates: MetadataCandidate[] = [];
 
@@ -121,6 +128,13 @@ export class IdentifyStage {
               url: item.url,
               abstract: item.abstract,
               citationKey: item.citationKey,
+              tags: item.keywords,
+              keywords: item.keywords,
+              notes: item.notes?.map((n) => ({ content: n, source: 'bibtex' })),
+              language: item.language,
+              rights: item.rights,
+              fileUrl: item.fileUrl,
+              extra: item.extra,
             };
             const normalized = this.normalizer.normalize(rawMetadata);
             candidates.push({
@@ -185,6 +199,49 @@ export class IdentifyStage {
       }
 
       case 'FILE': {
+        let extractedMetadata: any = {};
+        if (
+          this.storagePort?.readOwnedFile &&
+          this.pdfExtractor?.extractDocumentFromBuffer &&
+          payload.fileId &&
+          workspaceId
+        ) {
+          try {
+            const fileRecord = await this.storagePort.readOwnedFile({
+              workspaceId,
+              fileId: payload.fileId,
+            });
+            if (fileRecord?.buffer) {
+              const doc = await this.pdfExtractor.extractDocumentFromBuffer(
+                fileRecord.buffer,
+              );
+              if (doc?.metadata) {
+                extractedMetadata = doc.metadata;
+              }
+            }
+          } catch (err: any) {
+            this.logger.warn(
+              `PDF metadata extraction failed for file ${payload.fileId}: ${err?.message}`,
+            );
+          }
+        }
+
+        const rawFileMeta = {
+          title:
+            extractedMetadata.title || payload.filename || 'Uploaded Document',
+          doi: extractedMetadata.doi,
+          arxivId: extractedMetadata.arxivId,
+          pmid: extractedMetadata.pmid,
+          authors: extractedMetadata.authors,
+          year: extractedMetadata.year,
+          abstract: extractedMetadata.abstract,
+          keywords: extractedMetadata.keywords,
+          tags: extractedMetadata.keywords,
+          fileId: payload.fileId,
+          filename: payload.filename,
+        };
+        const normalized = this.normalizer.normalize(rawFileMeta);
+
         candidates.push({
           candidateId: randomUUID(),
           sourceKind: 'FILE',
@@ -192,11 +249,13 @@ export class IdentifyStage {
           sourceRecordId: payload.fileId,
           retrievedAt: new Date().toISOString(),
           schemaVersion: '1.0.0',
-          fields: {},
-          normalizedMetadata: {
-            title: payload.filename || 'Uploaded Document',
-          },
-          confidenceScore: 0.7,
+          fields: this.buildEvidenceFields(
+            rawFileMeta,
+            normalized,
+            'StagedPdf',
+          ),
+          normalizedMetadata: normalized,
+          confidenceScore: extractedMetadata.doi ? 0.95 : 0.7,
         });
         break;
       }

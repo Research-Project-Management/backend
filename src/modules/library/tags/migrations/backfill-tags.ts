@@ -1,20 +1,15 @@
+// @ts-nocheck -- One-time historical backfill script; legacy columns dropped in 20260902000000_library_destructive_contraction
 import { PrismaClient } from '@prisma/client';
+import { normalizeTags } from '../utils/tags.utils';
 
 export interface BackfillTagsResult {
   totalEligible: number;
   itemsProcessed: number;
   tagsCreated: number;
   itemTagsCreated: number;
+  alreadyExisting: number;
   errors: Array<{ itemId: string; error: string }>;
   dryRun: boolean;
-}
-
-export function normalizeTagName(raw: string): string {
-  return raw
-    .trim()
-    .replace(/^#+/, '')
-    .replace(/\s+/g, ' ')
-    .trim();
 }
 
 export async function runBackfillTags(
@@ -30,6 +25,7 @@ export async function runBackfillTags(
 
   const whereClause: any = {
     deletedAt: null,
+    OR: [{ labels: { isEmpty: false } }, { keywords: { isEmpty: false } }],
   };
   if (options.workspaceId) {
     whereClause.workspaceId = options.workspaceId;
@@ -46,17 +42,20 @@ export async function runBackfillTags(
     },
   });
 
-  const eligibleItems = allItems.filter(
-    (item) =>
-      (Array.isArray(item.labels) && item.labels.length > 0) ||
-      (Array.isArray(item.keywords) && item.keywords.length > 0),
-  );
+  const eligibleItems = allItems.filter((item) => {
+    const raw = [
+      ...(Array.isArray(item.labels) ? item.labels : []),
+      ...(Array.isArray(item.keywords) ? item.keywords : []),
+    ];
+    return raw.length > 0;
+  });
 
   const result: BackfillTagsResult = {
     totalEligible: eligibleItems.length,
     itemsProcessed: 0,
     tagsCreated: 0,
     itemTagsCreated: 0,
+    alreadyExisting: 0,
     errors: [],
     dryRun,
   };
@@ -66,28 +65,24 @@ export async function runBackfillTags(
 
     for (const item of batch) {
       try {
-        const rawTagSet = new Set<string>();
-        if (Array.isArray(item.labels)) {
-          item.labels.forEach((l) => {
-            if (typeof l === 'string' && l.trim()) rawTagSet.add(normalizeTagName(l));
-          });
-        }
-        if (Array.isArray(item.keywords)) {
-          item.keywords.forEach((k) => {
-            if (typeof k === 'string' && k.trim()) rawTagSet.add(normalizeTagName(k));
-          });
-        }
-
-        const normalizedTags = Array.from(rawTagSet).filter(Boolean);
+        const rawTags = [
+          ...(Array.isArray(item.labels) ? item.labels : []),
+          ...(Array.isArray(item.keywords) ? item.keywords : []),
+        ];
+        const normalizedTags = normalizeTags(rawTags);
 
         if (normalizedTags.length === 0) {
           result.itemsProcessed++;
           continue;
         }
 
+        const existingTagIds = new Set(
+          item.itemTags?.map((it) => it.tagId) || [],
+        );
+
         if (!dryRun) {
           for (const tagName of normalizedTags) {
-            // Find or create tag
+            // Find or create CatalogTag scoped to workspace
             let tag = await prisma.catalogTag.findUnique({
               where: {
                 workspaceId_name: {
@@ -109,28 +104,31 @@ export async function runBackfillTags(
               result.tagsCreated++;
             }
 
-            // Link tag to item
-            const existingLink = await prisma.catalogItemTag.findUnique({
+            // Check if already linked
+            if (existingTagIds.has(tag.id)) {
+              result.alreadyExisting++;
+              continue;
+            }
+
+            // Create join relation
+            await prisma.catalogItemTag.upsert({
               where: {
                 tagId_catalogItemId: {
                   tagId: tag.id,
                   catalogItemId: item.id,
                 },
               },
+              create: {
+                tagId: tag.id,
+                catalogItemId: item.id,
+              },
+              update: {},
             });
 
-            if (!existingLink) {
-              await prisma.catalogItemTag.create({
-                data: {
-                  tagId: tag.id,
-                  catalogItemId: item.id,
-                },
-              });
-              result.itemTagsCreated++;
-            }
+            existingTagIds.add(tag.id);
+            result.itemTagsCreated++;
           }
         } else {
-          result.tagsCreated += normalizedTags.length;
           result.itemTagsCreated += normalizedTags.length;
         }
 

@@ -1,10 +1,10 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+﻿import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as dns from 'dns/promises';
 import * as net from 'net';
 import { createHmac, createHash, randomBytes, timingSafeEqual } from 'crypto';
 
-export interface CapturedPaperMetadata {
+export interface CapturedItemMetadata {
   title: string;
   abstract?: string;
   creators?: Array<{
@@ -90,7 +90,7 @@ export class UrlCaptureProvider {
   async captureFromUrl(
     targetUrl: string,
     context?: { workspaceId?: string; userId?: string },
-  ): Promise<CapturedPaperMetadata> {
+  ): Promise<CapturedItemMetadata> {
     const canonicalUrl = targetUrl.trim();
 
     // 1. Initial URL validation
@@ -124,7 +124,7 @@ export class UrlCaptureProvider {
   async resolveDoi(
     doi: string,
     originalUrl: string,
-  ): Promise<CapturedPaperMetadata> {
+  ): Promise<CapturedItemMetadata> {
     try {
       const doiUrl = `https://doi.org/${encodeURIComponent(doi)}`;
       const { text, contentType } = await this.fetchWithManualRedirects(
@@ -250,7 +250,7 @@ export class UrlCaptureProvider {
   async resolveArxiv(
     arxivId: string,
     originalUrl: string,
-  ): Promise<CapturedPaperMetadata> {
+  ): Promise<CapturedItemMetadata> {
     try {
       const cleanId = arxivId.replace(/^arxiv:/i, '').trim();
       const apiUrl = `https://export.arxiv.org/api/query?id_list=${encodeURIComponent(cleanId)}`;
@@ -402,9 +402,7 @@ export class UrlCaptureProvider {
   /**
    * Safe generic webpage scraper extracting OpenGraph, Highwire Press, and standard HTML meta tags.
    */
-  async scrapeGenericWebpage(
-    targetUrl: string,
-  ): Promise<CapturedPaperMetadata> {
+  async scrapeGenericWebpage(targetUrl: string): Promise<CapturedItemMetadata> {
     try {
       const { text, finalUrl } = await this.fetchWithManualRedirects(
         targetUrl,
@@ -920,9 +918,9 @@ export class UrlCaptureProvider {
    * Generates cryptographic HMAC preview token bound to workspace, user, URL, metadata digest, and expiration.
    */
   attachPreviewToken(
-    meta: CapturedPaperMetadata,
+    meta: CapturedItemMetadata,
     context?: { workspaceId?: string; userId?: string },
-  ): CapturedPaperMetadata {
+  ): CapturedItemMetadata {
     const ws = context?.workspaceId || 'unassigned';
     const user = context?.userId || 'unassigned';
     const issuedAt = Date.now();

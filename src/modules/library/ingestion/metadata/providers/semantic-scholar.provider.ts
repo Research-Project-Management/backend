@@ -22,13 +22,27 @@ export class SemanticScholarProvider implements MetadataProvider {
     queryTypes: ['DOI', 'ARXIV', 'PMID', 'TITLE', 'URL'],
     isAuthoritative: false,
     timeoutMs: 8000,
-    maxConcurrency: 2,
+    maxConcurrency: 1,
   };
 
   private readonly logger = new Logger(SemanticScholarProvider.name);
   private readonly BASE_URL = 'https://api.semanticscholar.org/graph/v1/paper';
   private readonly FIELDS =
     'title,authors,year,venue,publicationVenue,journal,externalIds,abstract,citationCount,referenceCount,influentialCitationCount,openAccessPdf,tldr,publicationTypes,publicationDate,url';
+
+  private getHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      'User-Agent':
+        'FluxResearchPlatform/1.0 (mailto:contact@flux.academic; https://flux.study)',
+      Accept: 'application/json',
+    };
+    const apiKey =
+      process.env.SEMANTIC_SCHOLAR_API_KEY || process.env.S2_API_KEY;
+    if (apiKey) {
+      headers['x-api-key'] = apiKey;
+    }
+    return headers;
+  }
 
   supports(queryType: QueryType): boolean {
     return this.capabilities.queryTypes.includes(queryType);
@@ -69,11 +83,7 @@ export class SemanticScholarProvider implements MetadataProvider {
     const url = `${this.BASE_URL}/${encodeURIComponent(paperId)}?fields=${this.FIELDS}`;
 
     const response = await fetch(url, {
-      headers: {
-        'User-Agent':
-          'FluxResearchPlatform/1.0 (mailto:contact@flux.academic; https://flux.study)',
-        Accept: 'application/json',
-      },
+      headers: this.getHeaders(),
       signal,
     });
 
@@ -105,7 +115,8 @@ export class SemanticScholarProvider implements MetadataProvider {
     }
 
     const payload = item as Record<string, unknown> | null;
-    if (!payload || payload.error || typeof payload.title !== 'string') return null;
+    if (!payload || payload.error || typeof payload.title !== 'string')
+      return null;
 
     return this.transformPayload(payload, rawQuery, 0.9);
   }
@@ -117,14 +128,32 @@ export class SemanticScholarProvider implements MetadataProvider {
     const cleanTitle = title.trim();
     if (!cleanTitle) return null;
 
+    // 1. Try specialized paper match endpoint first (optimized for title matching)
+    try {
+      const matchUrl = `${this.BASE_URL}/search/match?query=${encodeURIComponent(cleanTitle)}&fields=${this.FIELDS}`;
+      const matchRes = await fetch(matchUrl, {
+        headers: this.getHeaders(),
+        signal,
+      });
+
+      if (matchRes.ok) {
+        const matchJson = (await matchRes.json()) as {
+          data?: Array<Record<string, unknown>>;
+        } | null;
+        const matchedItem = matchJson?.data?.[0];
+        if (matchedItem && typeof matchedItem.title === 'string') {
+          return this.transformPayload(matchedItem, cleanTitle, 0.88);
+        }
+      }
+    } catch {
+      // Fallback to standard search if match fails
+    }
+
+    // 2. Fallback to standard search endpoint
     const url = `${this.BASE_URL}/search?query=${encodeURIComponent(cleanTitle)}&limit=1&fields=${this.FIELDS}`;
 
     const response = await fetch(url, {
-      headers: {
-        'User-Agent':
-          'FluxResearchPlatform/1.0 (mailto:contact@flux.academic; https://flux.study)',
-        Accept: 'application/json',
-      },
+      headers: this.getHeaders(),
       signal,
     });
 
@@ -167,22 +196,36 @@ export class SemanticScholarProvider implements MetadataProvider {
     rawQuery: string,
     baseConfidence: number,
   ): ProviderResult {
-    const rawTitle = typeof item.title === 'string' ? item.title.trim() : 'Untitled Paper';
+    const rawTitle =
+      typeof item.title === 'string' ? item.title.trim() : 'Untitled Paper';
     const title = rawTitle || 'Untitled Paper';
 
     const authors: string[] = [];
     if (Array.isArray(item.authors)) {
       for (const a of item.authors) {
-        if (a && typeof a === 'object' && typeof (a as { name?: string }).name === 'string') {
+        if (
+          a &&
+          typeof a === 'object' &&
+          typeof (a as { name?: string }).name === 'string'
+        ) {
           authors.push((a as { name: string }).name.trim());
         }
       }
     }
 
-    const externalIds = (item.externalIds || {}) as Record<string, string | undefined>;
-    const doi = normalizeDoi(typeof externalIds.DOI === 'string' ? externalIds.DOI : undefined);
-    const arxivId = normalizeArxivId(typeof externalIds.ArXiv === 'string' ? externalIds.ArXiv : undefined);
-    const pmid = normalizePmid(typeof externalIds.PubMed === 'string' ? externalIds.PubMed : undefined);
+    const externalIds = (item.externalIds || {}) as Record<
+      string,
+      string | undefined
+    >;
+    const doi = normalizeDoi(
+      typeof externalIds.DOI === 'string' ? externalIds.DOI : undefined,
+    );
+    const arxivId = normalizeArxivId(
+      typeof externalIds.ArXiv === 'string' ? externalIds.ArXiv : undefined,
+    );
+    const pmid = normalizePmid(
+      typeof externalIds.PubMed === 'string' ? externalIds.PubMed : undefined,
+    );
 
     const year = typeof item.year === 'number' ? item.year : null;
     const journalObj = item.journal as { name?: string } | undefined;
@@ -190,10 +233,7 @@ export class SemanticScholarProvider implements MetadataProvider {
     const venueStr = typeof item.venue === 'string' ? item.venue : undefined;
 
     const journal =
-      journalObj?.name ||
-      pubVenueObj?.name ||
-      venueStr ||
-      undefined;
+      journalObj?.name || pubVenueObj?.name || venueStr || undefined;
 
     let itemType = 'journalArticle';
     if (Array.isArray(item.publicationTypes)) {
@@ -238,11 +278,31 @@ export class SemanticScholarProvider implements MetadataProvider {
         ? item.influentialCitationCount
         : undefined;
 
+    const creators = authors.map((name, idx) => ({
+      orderIndex: idx,
+      creatorType: 'author',
+      fullName: name,
+    }));
+
+    const keywords: string[] = [];
+    if (Array.isArray(item.fieldsOfStudy)) {
+      for (const fos of item.fieldsOfStudy) {
+        if (typeof fos === 'string' && fos.trim()) {
+          keywords.push(fos.trim());
+        }
+      }
+    }
+
+    const notes = tldrStr
+      ? [{ content: `TL;DR: ${tldrStr}`, source: 'SemanticScholar' }]
+      : undefined;
+
     return {
       provider: this.id,
       metadata: {
         title,
         authors,
+        creators,
         year,
         doi,
         arxivId,
@@ -250,6 +310,9 @@ export class SemanticScholarProvider implements MetadataProvider {
         journal,
         abstract: abstractStr || undefined,
         tldr: tldrStr || undefined,
+        notes,
+        keywords: keywords.length ? keywords : undefined,
+        tags: keywords.length ? keywords : undefined,
         citationCount,
         referenceCount,
         influentialCitationCount,

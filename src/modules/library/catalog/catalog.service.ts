@@ -20,8 +20,10 @@ import {
   MergeDuplicatesDto,
   DuplicateClusterResult,
   ALLOWED_MERGE_METADATA_FIELDS,
-} from './dto/curation.dto';
+} from './dto/duplicate.dto';
 import { normalizeTags } from '../tags/utils/tags.utils';
+import { CatalogItemMapper } from './mappers/catalog-item.mapper';
+import { randomUUID } from 'crypto';
 
 @Injectable()
 export class CatalogService {
@@ -33,12 +35,28 @@ export class CatalogService {
     private readonly prisma: PrismaService,
   ) {}
 
-  private mapFlattenedState(item: any, userId?: string) {
+  private async resolveWorkspaceId(workspaceId: string): Promise<string> {
+    if (!workspaceId) return workspaceId;
+    const ws = await this.prisma.workspace.findFirst({
+      where: {
+        OR: [{ id: workspaceId }, { slug: workspaceId }, { url: workspaceId }],
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    return ws?.id ?? workspaceId;
+  }
+
+  private mapFlattenedState(
+    item: Record<string, any>,
+    userId?: string,
+  ): Record<string, any> | null {
     if (!item) return null;
-    const userState = Array.isArray(item.userStates)
-      ? item.userStates[0]
+    const normalized = CatalogItemMapper.toDomain(item);
+    const userState = Array.isArray(normalized.userStates)
+      ? normalized.userStates[0]
       : undefined;
-    const { userStates, ...rest } = item;
+    const { userStates: _userStates, ...rest } = normalized;
     return {
       ...rest,
       readStatus: userState?.readStatus ?? 'unread',
@@ -50,7 +68,8 @@ export class CatalogService {
   }
 
   async getItem(workspaceId: string, id: string, userId?: string) {
-    const item = await this.catalogRepo.findById(workspaceId, id);
+    const wsId = await this.resolveWorkspaceId(workspaceId);
+    const item = await this.catalogRepo.findById(wsId, id);
     if (!item) return null;
     return this.mapFlattenedState(item, userId);
   }
@@ -67,10 +86,11 @@ export class CatalogService {
       cursor?: string;
     },
   ): Promise<CursorPaginatedResult<any>> {
+    const wsId = await this.resolveWorkspaceId(workspaceId);
     const limit = Math.min(options.limit ?? 50, 100);
     const [totalCount, rawItems] = await Promise.all([
-      this.catalogRepo.count(workspaceId, options),
-      this.catalogRepo.findMany(workspaceId, {
+      this.catalogRepo.count(wsId, options),
+      this.catalogRepo.findMany(wsId, {
         ...options,
         limit,
       }),
@@ -108,10 +128,15 @@ export class CatalogService {
       source?: import('../sync/events/library.events').LibraryItemSource;
     },
   ): Promise<any> {
-    if (context?.tx && context?.helpers) {
-      const item = await this.catalogRepo.create(workspaceId, data, context.tx);
+    const wsId = await this.resolveWorkspaceId(workspaceId);
 
-      await context.helpers.appendChange(workspaceId, {
+    const execute = async (
+      tx: import('@prisma/client').Prisma.TransactionClient,
+      helpers: import('../sync/services/transaction.service').TransactionHelpers,
+    ) => {
+      const item = await this.catalogRepo.create(wsId, data, tx);
+
+      await helpers.appendChange(wsId, {
         entityType: 'CatalogItem',
         entityId: item.id,
         action: 'create',
@@ -121,72 +146,50 @@ export class CatalogService {
 
       const payload = buildItemCreatedOutboxPayload({
         itemId: item.id,
-        workspaceId,
+        workspaceId: wsId,
         title: item.title,
-        source: context.source || 'manual',
-        doi: item.doi,
-      });
-
-      await context.helpers.publishOutbox(
-        workspaceId,
-        item.id,
-        SYNC_EVENT_TYPES.ITEM_CREATED,
-        payload,
-      );
-
-      return item;
-    }
-
-    return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const item = await this.catalogRepo.create(workspaceId, data, tx);
-
-      await helpers.appendChange(workspaceId, {
-        entityType: 'CatalogItem',
-        entityId: item.id,
-        action: 'create',
-        version: item.version,
-        data: item,
-      });
-
-      const payload = buildItemCreatedOutboxPayload({
-        itemId: item.id,
-        workspaceId,
-        title: item.title,
-        source: context?.source || 'manual',
+        source: context?.source ?? 'manual',
         doi: item.doi,
       });
 
       await helpers.publishOutbox(
-        workspaceId,
+        wsId,
         item.id,
         SYNC_EVENT_TYPES.ITEM_CREATED,
         payload,
       );
 
-      return item;
-    });
+      return CatalogItemMapper.toDomain(item);
+    };
+
+    if (context?.tx && context?.helpers) {
+      return execute(context.tx, context.helpers);
+    }
+
+    return this.libraryTx.executeInTransaction(execute);
   }
 
   async updateItem(
     workspaceId: string,
     id: string,
-    expectedVersion: number,
+    expectedVersion: number | undefined,
     data: UpdateCatalogItemData,
     context?: {
       tx: import('@prisma/client').Prisma.TransactionClient;
       helpers: import('../sync/services/transaction.service').TransactionHelpers;
     },
   ): Promise<any> {
+    const wsId = await this.resolveWorkspaceId(workspaceId);
     if (context) {
       const updated = await this.catalogRepo.update(
-        workspaceId,
+        wsId,
         id,
         expectedVersion,
         data,
         context.tx,
       );
 
-      await context.helpers.appendChange(workspaceId, {
+      await context.helpers.appendChange(wsId, {
         entityType: 'CatalogItem',
         entityId: id,
         action: 'update',
@@ -195,21 +198,43 @@ export class CatalogService {
       });
 
       await context.helpers.publishOutbox(
-        workspaceId,
+        wsId,
         id,
         SYNC_EVENT_TYPES.ITEM_UPDATED,
         updated,
       );
 
-      return updated;
+      return CatalogItemMapper.toDomain(updated);
     }
 
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      return this.updateItem(workspaceId, id, expectedVersion, data, {
+      return this.updateItem(wsId, id, expectedVersion, data, {
         tx,
         helpers,
       });
     });
+  }
+
+  async reindexItem(workspaceId: string, id: string, userId: string) {
+    const wsId = await this.resolveWorkspaceId(workspaceId);
+    const item = await this.catalogRepo.findById(wsId, id);
+    if (!item) {
+      throw new NotFoundException(`Item ${id} not found in workspace ${wsId}`);
+    }
+
+    await this.libraryTx.executeInTransaction(async (_tx, helpers) => {
+      await helpers.publishOutbox(wsId, id, 'library.item.reindexed', {
+        itemId: id,
+        workspaceId: wsId,
+        userId,
+      });
+    });
+
+    return {
+      success: true,
+      message: 'Item re-indexed successfully',
+      itemId: id,
+    };
   }
 
   async deleteItem(
@@ -221,49 +246,46 @@ export class CatalogService {
       helpers: import('../sync/services/transaction.service').TransactionHelpers;
     },
   ): Promise<boolean> {
+    const wsId = await this.resolveWorkspaceId(workspaceId);
     if (context) {
       const deleted = await this.catalogRepo.softDelete(
-        workspaceId,
+        wsId,
         id,
         expectedVersion,
         context.tx,
       );
 
       if (deleted) {
-        await context.helpers.recordTombstone(workspaceId, {
+        await context.helpers.recordTombstone(wsId, {
           entityType: 'CatalogItem',
           entityId: id,
         });
 
-        await context.helpers.publishOutbox(
-          workspaceId,
+        await context.helpers.publishOutbox(wsId, id, 'library.item.deleted', {
           id,
-          'library.item.deleted',
-          {
-            id,
-            deletedAt: new Date(),
-          },
-        );
+          deletedAt: new Date(),
+        });
       }
 
       return deleted;
     }
 
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      return this.deleteItem(workspaceId, id, expectedVersion, { tx, helpers });
+      return this.deleteItem(wsId, id, expectedVersion, { tx, helpers });
     });
   }
 
   async restoreItem(workspaceId: string, id: string, expectedVersion?: number) {
+    const wsId = await this.resolveWorkspaceId(workspaceId);
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
       const restored = await this.catalogRepo.restore(
-        workspaceId,
+        wsId,
         id,
         expectedVersion,
         tx,
       );
 
-      await helpers.appendChange(workspaceId, {
+      await helpers.appendChange(wsId, {
         entityType: 'CatalogItem',
         entityId: id,
         action: 'update',
@@ -271,25 +293,28 @@ export class CatalogService {
         data: restored,
       });
 
-      await helpers.publishOutbox(workspaceId, id, 'library.item.restored', {
+      await helpers.publishOutbox(wsId, id, 'library.item.restored', {
         id,
         restoredAt: new Date(),
       });
 
-      return restored;
+      // Normalize through mapper so response shape is consistent with
+      // getItem / createItem / updateItem (creators, fileUrl, tags, etc.)
+      return CatalogItemMapper.toDomain(restored);
     });
   }
 
   async purgeItem(workspaceId: string, id: string): Promise<boolean> {
+    const wsId = await this.resolveWorkspaceId(workspaceId);
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const purged = await this.catalogRepo.purge(workspaceId, id, tx);
+      const purged = await this.catalogRepo.purge(wsId, id, tx);
 
-      await helpers.recordTombstone(workspaceId, {
+      await helpers.recordTombstone(wsId, {
         entityType: 'CatalogItem',
         entityId: id,
       });
 
-      await helpers.publishOutbox(workspaceId, id, 'library.item.purged', {
+      await helpers.publishOutbox(wsId, id, 'library.item.purged', {
         id,
         purgedAt: new Date(),
       });
@@ -299,7 +324,8 @@ export class CatalogService {
   }
 
   async getRelatedItems(workspaceId: string, itemId: string) {
-    const item = await this.catalogRepo.findById(workspaceId, itemId);
+    const wsId = await this.resolveWorkspaceId(workspaceId);
+    const item = await this.catalogRepo.findById(wsId, itemId);
     if (!item) {
       throw new NotFoundException(`Item ${itemId} not found`);
     }
@@ -307,7 +333,6 @@ export class CatalogService {
     const relations = await this.catalogRepo.getRelations(itemId);
     return {
       relatedItems: relations,
-      relatedPapers: relations,
       total: relations.length,
     };
   }
@@ -317,36 +342,26 @@ export class CatalogService {
     sourceItemId: string,
     data: { targetItemId: string; relationType?: string; note?: string },
   ) {
-    const sourceItem = await this.catalogRepo.findById(
-      workspaceId,
-      sourceItemId,
-    );
+    const wsId = await this.resolveWorkspaceId(workspaceId);
+    const sourceItem = await this.catalogRepo.findById(wsId, sourceItemId);
     if (!sourceItem) {
       throw new NotFoundException(`Source item ${sourceItemId} not found`);
     }
 
-    const targetItem = await this.catalogRepo.findById(
-      workspaceId,
-      data.targetItemId,
-    );
+    const targetItem = await this.catalogRepo.findById(wsId, data.targetItemId);
     if (!targetItem) {
       throw new NotFoundException(`Target item ${data.targetItemId} not found`);
     }
 
-    const linkedAt = new Date().toISOString();
-    const type = data.relationType || 'related';
+    const type = data.relationType ?? 'related';
+    const now = new Date().toISOString();
 
     const relation = {
-      id: `rel_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      id: randomUUID(),
       targetItemId: data.targetItemId,
-      targetPaperId: data.targetItemId,
-      targetId: data.targetItemId,
       relationType: type,
-      type,
       note: data.note,
-      description: data.note,
-      linkedAt,
-      createdAt: linkedAt,
+      linkedAt: now,
     };
 
     await this.catalogRepo.putRelation(sourceItemId, relation);
@@ -363,10 +378,8 @@ export class CatalogService {
     sourceItemId: string,
     targetItemId: string,
   ) {
-    const sourceItem = await this.catalogRepo.findById(
-      workspaceId,
-      sourceItemId,
-    );
+    const wsId = await this.resolveWorkspaceId(workspaceId);
+    const sourceItem = await this.catalogRepo.findById(wsId, sourceItemId);
     if (!sourceItem) {
       throw new NotFoundException(`Source item ${sourceItemId} not found`);
     }
@@ -388,23 +401,38 @@ export class CatalogService {
   async detectDuplicates(
     workspaceId: string,
   ): Promise<DuplicateClusterResult[]> {
+    const wsId = await this.resolveWorkspaceId(workspaceId);
     const items = await this.prisma.catalogItem.findMany({
-      where: { workspaceId, deletedAt: null },
+      where: { workspaceId: wsId, deletedAt: null },
       select: {
         id: true,
         title: true,
         doi: true,
         citationKey: true,
         year: true,
-        authors: true,
-        collectionId: true,
+        contributors: {
+          where: { creatorType: 'author' },
+          select: {
+            fullName: true,
+            firstName: true,
+            lastName: true,
+            orderIndex: true,
+          },
+          orderBy: { orderIndex: 'asc' },
+        },
       },
     });
+
+    // Helper to get author strings from contributors
+    const getItemAuthors = (item: (typeof items)[0]): string[] =>
+      item.contributors.map(
+        (c) => c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+      );
 
     const clusters: DuplicateClusterResult[] = [];
     const groupedItemIds = new Set<string>();
 
-    // ── Tier 1: Exact normalized DOI ──────────────────────────────────────────
+    // ── Tier 1: Exact normalized DOI ─────────────────────────────────────────────
     const normalizeDoi = (raw?: string | null): string => {
       if (!raw) return '';
       return raw
@@ -437,15 +465,14 @@ export class CatalogService {
             title: m.title,
             doi: m.doi ?? undefined,
             year: m.year ?? undefined,
-            authors: m.authors,
+            authors: getItemAuthors(m),
             citationKey: m.citationKey ?? undefined,
-            collectionId: m.collectionId,
           })),
         });
       }
     });
 
-    // ── Tier 2: Fuzzy Title + Year (+/-1) + First Author ──────────────────────
+    // ── Tier 2: Fuzzy Title + Year (+/-1) + First Author ─────────────────────────
     const remainingItems = items.filter((item) => !groupedItemIds.has(item.id));
 
     const normalizeTitle = (t: string) =>
@@ -470,7 +497,7 @@ export class CatalogService {
       const normTitle = normalizeTitle(item.title);
       if (normTitle.length < 5) continue;
 
-      const authorFamily = getFirstAuthorFamily(item.authors);
+      const authorFamily = getFirstAuthorFamily(getItemAuthors(item));
       const bucketKey = `${normTitle.substring(0, 32)}::${authorFamily}`;
       const bucket = fuzzyBuckets.get(bucketKey) || [];
       bucket.push(item);
@@ -513,9 +540,8 @@ export class CatalogService {
               title: m.title,
               doi: m.doi ?? undefined,
               year: m.year ?? undefined,
-              authors: m.authors,
+              authors: getItemAuthors(m),
               citationKey: m.citationKey ?? undefined,
-              collectionId: m.collectionId,
             })),
           });
         }
@@ -529,6 +555,7 @@ export class CatalogService {
    * Non-destructive, atomic merge of duplicate items into a primary item.
    */
   async mergeDuplicates(workspaceId: string, dto: MergeDuplicatesDto) {
+    const wsId = await this.resolveWorkspaceId(workspaceId);
     if (!dto.primaryItemId) {
       throw new BadRequestException('primaryItemId is required');
     }
@@ -558,7 +585,7 @@ export class CatalogService {
     const items = await this.prisma.catalogItem.findMany({
       where: {
         id: { in: allItemIds },
-        workspaceId,
+        workspaceId: wsId,
         deletedAt: null,
       },
       include: {
@@ -581,29 +608,21 @@ export class CatalogService {
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
       const now = new Date();
 
-      // ── 1. Reassign Attachments to Primary ───────────────────────────────────
+      // ── 1. Reassign Attachments to Primary ─────────────────────────────────────
       await tx.catalogAttachment.updateMany({
         where: { catalogItemId: { in: uniqueDupIds } },
         data: { catalogItemId: primary.id },
       });
 
-      // ── 2. Reassign Canonical Notes to Primary ──────────────────────────────
+      // ── 2. Reassign Canonical Notes to Primary ─────────────────────────────────
       await tx.note.updateMany({
-        where: { itemId: { in: uniqueDupIds }, workspaceId },
+        where: { itemId: { in: uniqueDupIds }, workspaceId: wsId },
         data: { itemId: primary.id },
       });
 
-      // ── 3. Consolidate Tags & Labels ────────────────────────────────────────
-      const allLabels = [
-        ...(primary.labels || []),
-        ...duplicates.flatMap((d) => d.labels || []),
-      ];
-      const allKeywords = [
-        ...(primary.keywords || []),
-        ...duplicates.flatMap((d) => d.keywords || []),
-      ];
-      const consolidatedLabels = normalizeTags(allLabels);
-      const consolidatedKeywords = normalizeTags(allKeywords);
+      // ── 3. Consolidate Tags & Labels ─────────────────────────────────────────
+
+      // Tags are consolidated via CatalogItemTag relation below
 
       // Reassign CatalogItemTag relations
       const primaryTagIds = new Set(primary.itemTags.map((t) => t.tagId));
@@ -631,7 +650,7 @@ export class CatalogService {
         where: { catalogItemId: { in: uniqueDupIds } },
       });
 
-      // ── 4. Consolidate Collection Memberships ───────────────────────────────
+      // ── 4. Consolidate Collection Memberships ────────────────────────────────
       const primaryCollectionIds = new Set(
         primary.collectionItems.map((ci) => ci.collectionId),
       );
@@ -659,7 +678,7 @@ export class CatalogService {
         where: { catalogItemId: { in: uniqueDupIds } },
       });
 
-      // ── 5. Rewire Item Relations ────────────────────────────────────────────
+      // ── 5. Rewire Item Relations ──────────────────────────────────────────────
       // Source rewiring
       await tx.itemRelation.updateMany({
         where: { sourceItemId: { in: uniqueDupIds } },
@@ -695,32 +714,31 @@ export class CatalogService {
         }
       }
 
-      // ── 6. Merge UserItemState per User ─────────────────────────────────────
-      const allStates = await tx.userItemState.findMany({
-        where: { itemId: { in: allItemIds } },
-      });
-      const statesByUser = new Map<string, typeof allStates>();
-      for (const st of allStates) {
-        const list = statesByUser.get(st.userId) || [];
-        list.push(st);
-        statesByUser.set(st.userId, list);
+      // ── 6. Merge User States (Preserve highest rating, read status, recent read)
+      const allUserStates = [
+        ...(primary.userStates || []),
+        ...duplicates.flatMap((d) => d.userStates || []),
+      ];
+      const userStateByUser = new Map<string, typeof allUserStates>();
+      for (const us of allUserStates) {
+        const list = userStateByUser.get(us.userId) || [];
+        list.push(us);
+        userStateByUser.set(us.userId, list);
       }
 
-      for (const [userId, userStateList] of statesByUser.entries()) {
-        const dates = userStateList
-          .map((s) => (s.lastReadAt ? new Date(s.lastReadAt).getTime() : 0))
-          .filter((t) => t > 0);
-        const lastReadAt =
-          dates.length > 0 ? new Date(Math.max(...dates)) : null;
-
-        let readStatus: 'unread' | 'reading' | 'completed' = 'unread';
-        if (userStateList.some((s) => s.readStatus === 'completed')) {
-          readStatus = 'completed';
-        } else if (userStateList.some((s) => s.readStatus === 'reading')) {
-          readStatus = 'reading';
-        }
-
-        const rating = Math.max(...userStateList.map((s) => s.rating || 0), 0);
+      for (const [userId, states] of userStateByUser.entries()) {
+        const maxRating = Math.max(...states.map((s) => s.rating || 0));
+        const isCompleted = states.some((s) => s.readStatus === 'completed');
+        const isReading = states.some((s) => s.readStatus === 'reading');
+        const readStatus = isCompleted
+          ? 'completed'
+          : isReading
+            ? 'reading'
+            : 'unread';
+        const latestReadAt = states
+          .map((s) => s.lastReadAt)
+          .filter((d): d is Date => d !== null)
+          .sort((a, b) => b.getTime() - a.getTime())[0];
 
         await tx.userItemState.upsert({
           where: {
@@ -732,25 +750,22 @@ export class CatalogService {
           create: {
             userId,
             itemId: primary.id,
-            isFavorite: false,
+            rating: maxRating,
             readStatus,
-            rating,
-            lastReadAt,
+            lastReadAt: latestReadAt || null,
           },
           update: {
+            rating: maxRating,
             readStatus,
-            rating,
-            lastReadAt,
+            lastReadAt: latestReadAt || undefined,
           },
         });
       }
-
-      // Clean up duplicate items' UserItemStates
       await tx.userItemState.deleteMany({
         where: { itemId: { in: uniqueDupIds } },
       });
 
-      // ── 7. Provenance & Alias Citation Keys ─────────────────────────────────
+      // ── 7. Provenance & Alias Citation Keys ──────────────────────────────────
       let extraObj: Record<string, any> = {};
       try {
         extraObj = primary.extra ? JSON.parse(primary.extra) : {};
@@ -771,19 +786,17 @@ export class CatalogService {
         new Set([...existingAliases, ...dupCitationKeys]),
       );
 
-      // ── 8. Update Primary Item ──────────────────────────────────────────────
+      // ── 8. Update Primary Item ───────────────────────────────────────────────
       const updatedPrimary = await tx.catalogItem.update({
         where: { id: primary.id },
         data: {
           ...(dto.fieldSelections || {}),
-          labels: consolidatedLabels,
-          keywords: consolidatedKeywords,
           extra: JSON.stringify(extraObj),
           version: { increment: 1 },
         },
       });
 
-      await helpers.appendChange(workspaceId, {
+      await helpers.appendChange(wsId, {
         entityType: 'CatalogItem',
         entityId: updatedPrimary.id,
         action: 'update',
@@ -792,7 +805,7 @@ export class CatalogService {
       });
 
       await helpers.publishOutbox(
-        workspaceId,
+        wsId,
         primary.id,
         SYNC_EVENT_TYPES.ITEM_MERGED,
         {
@@ -803,7 +816,7 @@ export class CatalogService {
         },
       );
 
-      // ── 9. Soft-Delete Duplicates with Merge Marker ─────────────────────────
+      // ── 9. Soft-Delete Duplicates with Merge Marker ──────────────────────────
       for (const dup of duplicates) {
         let dupExtra: Record<string, any> = {};
         try {
@@ -823,12 +836,12 @@ export class CatalogService {
           },
         });
 
-        await helpers.recordTombstone(workspaceId, {
+        await helpers.recordTombstone(wsId, {
           entityType: 'CatalogItem',
           entityId: dup.id,
         });
 
-        await helpers.appendChange(workspaceId, {
+        await helpers.appendChange(wsId, {
           entityType: 'CatalogItem',
           entityId: dup.id,
           action: 'delete',
@@ -836,22 +849,32 @@ export class CatalogService {
           data: softDeleted,
         });
 
-        await helpers.publishOutbox(
-          workspaceId,
-          dup.id,
-          'library.item.merged_into',
-          {
-            duplicateId: dup.id,
-            primaryId: primary.id,
-            workspaceId,
-          },
-        );
+        await helpers.publishOutbox(wsId, dup.id, 'library.item.merged_into', {
+          duplicateId: dup.id,
+          primaryId: primary.id,
+          workspaceId: wsId,
+        });
       }
 
+      // Reload primary item with full relations so response is complete & normalized
+      const reloadedPrimary = await tx.catalogItem.findUnique({
+        where: { id: primary.id },
+        include: {
+          contributors: { orderBy: { orderIndex: 'asc' } },
+          identifiers: true,
+          collectionItems: { include: { collection: true } },
+          itemTags: { include: { tag: true } },
+          notesList: { where: { deletedAt: null } },
+          attachments: { include: { revisions: true } },
+        },
+      });
+
       return {
-        masterPaper: updatedPrimary,
+        primaryItem: CatalogItemMapper.toDomain(
+          reloadedPrimary ?? updatedPrimary,
+        ),
         mergedCount: duplicates.length,
-        softDeletedPaperIds: uniqueDupIds,
+        softDeletedItemIds: uniqueDupIds,
       };
     });
   }
@@ -860,15 +883,19 @@ export class CatalogService {
    * Evaluates library metadata completeness and quality metrics.
    */
   async getQualityAudit(workspaceId: string) {
+    const wsId = await this.resolveWorkspaceId(workspaceId);
     const items = await this.prisma.catalogItem.findMany({
-      where: { workspaceId, deletedAt: null },
+      where: { workspaceId: wsId, deletedAt: null },
       select: {
         id: true,
         title: true,
         doi: true,
         abstract: true,
         year: true,
-        authors: true,
+        contributors: {
+          where: { creatorType: 'author' },
+          select: { id: true },
+        },
         publicationTitle: true,
       },
     });
@@ -881,7 +908,7 @@ export class CatalogService {
     for (const it of items) {
       let score = 0;
       if (it.title && it.title.length > 3) score += 25;
-      if (it.authors && it.authors.length > 0) score += 25;
+      if (it.contributors && it.contributors.length > 0) score += 25;
       if (it.year && it.year > 1900) score += 20;
       else missingYear += 1;
       if (it.doi) score += 15;
@@ -911,18 +938,19 @@ export class CatalogService {
    */
   async extractNotesFromAnnotations(
     workspaceId: string,
-    paperId: string,
+    itemId: string,
     userId: string,
   ) {
-    const item = await this.catalogRepo.findById(workspaceId, paperId);
+    const wsId = await this.resolveWorkspaceId(workspaceId);
+    const item = await this.catalogRepo.findById(wsId, itemId);
     if (!item) {
       throw new NotFoundException(
-        `Paper ${paperId} not found in workspace ${workspaceId}`,
+        `Item ${itemId} not found in workspace ${wsId}`,
       );
     }
 
     const attachments = await this.prisma.catalogAttachment.findMany({
-      where: { catalogItemId: paperId },
+      where: { catalogItemId: itemId },
       select: { id: true, filename: true },
     });
 
@@ -939,14 +967,14 @@ export class CatalogService {
       return {
         success: true,
         totalExtracted: 0,
-        message: 'No annotations found for this paper',
+        message: 'No annotations found for this item',
       };
     }
 
     const lines: string[] = [
       `# Literature Notes: ${item.title || 'Untitled'}`,
       '',
-      `**Authors:** ${Array.isArray(item.authors) ? item.authors.join(', ') : 'Unknown'}  `,
+      `**Authors:** ${Array.isArray(item.contributors) ? item.contributors.map((c: any) => c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim()).join(', ') : 'Unknown'}  `,
       `**Year:** ${item.year || 'N/A'} | **DOI:** ${item.doi || 'N/A'}`,
       '',
       '---',
@@ -978,8 +1006,8 @@ export class CatalogService {
 
     const note = await this.prisma.note.create({
       data: {
-        workspaceId,
-        itemId: paperId,
+        workspaceId: wsId,
+        itemId: itemId,
         title: `Literature Notes — ${item.title?.slice(0, 50) || 'Untitled'}`,
         contentMd: markdown,
         contentJson: {
@@ -999,20 +1027,22 @@ export class CatalogService {
     };
   }
 
-  // ── Port Implementations (IItemExistencePort & ICatalogReadPort) ───────────
+  // ── Port Implementations (IItemExistencePort & ICatalogReadPort) ────────────
 
   async exists(workspaceId: string, itemId: string): Promise<boolean> {
+    const wsId = await this.resolveWorkspaceId(workspaceId);
     const count = await this.prisma.catalogItem.count({
-      where: { id: itemId, workspaceId, deletedAt: null },
+      where: { id: itemId, workspaceId: wsId, deletedAt: null },
     });
     return count > 0;
   }
 
   async assertExists(workspaceId: string, itemId: string): Promise<void> {
-    const isPresent = await this.exists(workspaceId, itemId);
+    const wsId = await this.resolveWorkspaceId(workspaceId);
+    const isPresent = await this.exists(wsId, itemId);
     if (!isPresent) {
       throw new NotFoundException(
-        `Item ${itemId} not found in workspace ${workspaceId}`,
+        `Item ${itemId} not found in workspace ${wsId}`,
       );
     }
   }
@@ -1022,8 +1052,9 @@ export class CatalogService {
     itemIds: string[],
   ): Promise<Map<string, boolean>> {
     if (itemIds.length === 0) return new Map();
+    const wsId = await this.resolveWorkspaceId(workspaceId);
     const found = await this.prisma.catalogItem.findMany({
-      where: { id: { in: itemIds }, workspaceId, deletedAt: null },
+      where: { id: { in: itemIds }, workspaceId: wsId, deletedAt: null },
       select: { id: true },
     });
     const foundSet = new Set(found.map((it: { id: string }) => it.id));
@@ -1034,12 +1065,10 @@ export class CatalogService {
     return result;
   }
 
-  async findSummaryById(
-    workspaceId: string,
-    itemId: string,
-  ) {
+  async findSummaryById(workspaceId: string, itemId: string) {
+    const wsId = await this.resolveWorkspaceId(workspaceId);
     const item = await this.prisma.catalogItem.findFirst({
-      where: { id: itemId, workspaceId, deletedAt: null },
+      where: { id: itemId, workspaceId: wsId, deletedAt: null },
       select: {
         id: true,
         workspaceId: true,
@@ -1047,7 +1076,12 @@ export class CatalogService {
         itemType: true,
         year: true,
         doi: true,
-        authors: true,
+        contributors: {
+          where: { creatorType: 'author' },
+          select: { fullName: true, firstName: true, lastName: true },
+          orderBy: { orderIndex: 'asc' },
+          take: 3,
+        },
         createdAt: true,
         updatedAt: true,
       },
@@ -1060,19 +1094,19 @@ export class CatalogService {
       itemType: item.itemType || undefined,
       year: item.year,
       doi: item.doi || null,
-      primaryAuthors: Array.isArray(item.authors) ? item.authors : [],
+      primaryAuthors: item.contributors.map(
+        (c) => c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+      ),
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
     };
   }
 
-  async findSummariesByIds(
-    workspaceId: string,
-    itemIds: string[],
-  ) {
+  async findSummariesByIds(workspaceId: string, itemIds: string[]) {
     if (itemIds.length === 0) return [];
+    const wsId = await this.resolveWorkspaceId(workspaceId);
     const items = await this.prisma.catalogItem.findMany({
-      where: { id: { in: itemIds }, workspaceId, deletedAt: null },
+      where: { id: { in: itemIds }, workspaceId: wsId, deletedAt: null },
       select: {
         id: true,
         workspaceId: true,
@@ -1080,22 +1114,29 @@ export class CatalogService {
         itemType: true,
         year: true,
         doi: true,
-        authors: true,
+        contributors: {
+          where: { creatorType: 'author' },
+          select: { fullName: true, firstName: true, lastName: true },
+          orderBy: { orderIndex: 'asc' },
+          take: 3,
+        },
         createdAt: true,
         updatedAt: true,
       },
     });
-    return items.map((item: any) => ({
+
+    return items.map((item) => ({
       id: item.id,
       workspaceId: item.workspaceId,
       title: item.title,
       itemType: item.itemType || undefined,
       year: item.year,
       doi: item.doi || null,
-      primaryAuthors: Array.isArray(item.authors) ? item.authors : [],
+      primaryAuthors: item.contributors.map(
+        (c) => c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+      ),
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
     }));
   }
 }
-

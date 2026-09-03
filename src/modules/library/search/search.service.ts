@@ -5,7 +5,7 @@ import {
   PageAnchorMatch,
   PageTextExtraction,
 } from './providers/full-text-indexer.provider';
-import { SearchCatalogQueryDto, SavedSearchDto } from './dto/search.dto';
+import { SearchCatalogQueryDto } from './dto/search.dto';
 
 @Injectable()
 export class SearchService {
@@ -74,28 +74,6 @@ export class SearchService {
   }
 
   /**
-   * Saved search operations
-   */
-  async createSavedSearch(
-    workspaceId: string,
-    userId: string,
-    dto: SavedSearchDto,
-  ) {
-    return this.searchRepo.createSavedSearch(workspaceId, userId, {
-      name: dto.name,
-      query: dto.filters || { q: dto.query },
-    });
-  }
-
-  async listSavedSearches(workspaceId: string, userId: string) {
-    return this.searchRepo.listSavedSearches(workspaceId, userId);
-  }
-
-  async deleteSavedSearch(workspaceId: string, userId: string, id: string) {
-    return this.searchRepo.deleteSavedSearch(workspaceId, userId, id);
-  }
-
-  /**
    * Rebuilds full-text and faceted search index for a given workspace.
    */
   async rebuildIndex(
@@ -103,7 +81,10 @@ export class SearchService {
   ): Promise<{ indexedItems: number; indexedAttachments: number }> {
     this.logger.log(`Rebuilding search index for workspace ${workspaceId}...`);
     const facets = await this.searchRepo.computeFacets(workspaceId, {});
-    const totalTypes = Object.values(facets.itemTypes).reduce((a, b) => a + b, 0);
+    const totalTypes = Object.values(facets.itemTypes).reduce(
+      (a, b) => a + b,
+      0,
+    );
     this.logger.log(
       `Search index validated for workspace ${workspaceId}: ${totalTypes} active items indexed.`,
     );

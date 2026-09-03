@@ -1,6 +1,6 @@
-import {
+﻿import {
   UrlCaptureProvider,
-  CapturedPaperMetadata,
+  CapturedItemMetadata,
 } from '../../../src/modules/library/ingestion/providers/url-capture.provider';
 
 describe('UrlCaptureProvider (SSRF & Security)', () => {
@@ -44,7 +44,7 @@ describe('UrlCaptureProvider (SSRF & Security)', () => {
   });
 
   it('generates cryptographic v1 preview tokens bound to workspace and user', () => {
-    const meta: CapturedPaperMetadata = {
+    const meta: CapturedItemMetadata = {
       title: 'Attention Is All You Need',
       url: 'https://arxiv.org/abs/1706.03762',
       doi: '10.48550/arXiv.1706.03762',
@@ -81,7 +81,7 @@ describe('UrlCaptureProvider (SSRF & Security)', () => {
   });
 
   it('rejects expired preview tokens', () => {
-    const meta: CapturedPaperMetadata = {
+    const meta: CapturedItemMetadata = {
       title: 'Deep Residual Learning for Image Recognition',
       url: 'https://arxiv.org/abs/1512.03385',
       year: 2015,
@@ -99,7 +99,7 @@ describe('UrlCaptureProvider (SSRF & Security)', () => {
   });
 
   it('rejects malformed preview tokens', () => {
-    const meta: CapturedPaperMetadata = {
+    const meta: CapturedItemMetadata = {
       title: 'BERT: Pre-training of Deep Bidirectional Transformers',
       url: 'https://arxiv.org/abs/1810.04805',
       year: 2018,

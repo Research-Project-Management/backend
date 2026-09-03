@@ -1,4 +1,4 @@
-import { CreatorInput, IdentifierScheme } from '../types/item.types';
+import { CreatorInput, IdentifierScheme } from '../types/catalog.types';
 
 export function normalizeDoi(doi?: string | null): string | undefined {
   if (!doi || typeof doi !== 'string') return undefined;
@@ -143,7 +143,7 @@ export function normalizeCreators(
   return [];
 }
 
-const CANONICAL_ITEM_TYPES = new Set([
+export const BIBLIOGRAPHIC_ITEM_TYPES = [
   'artwork',
   'audioRecording',
   'bill',
@@ -151,7 +151,9 @@ const CANONICAL_ITEM_TYPES = new Set([
   'book',
   'bookSection',
   'case',
+  'computerProgram',
   'conferencePaper',
+  'dataset',
   'dictionaryEntry',
   'document',
   'email',
@@ -167,25 +169,69 @@ const CANONICAL_ITEM_TYPES = new Set([
   'manuscript',
   'map',
   'newspaperArticle',
-  'note',
   'patent',
   'podcast',
+  'preprint',
   'presentation',
   'radioBroadcast',
   'report',
+  'standard',
   'statute',
-  'tvBroadcast',
   'thesis',
+  'tvBroadcast',
   'videoRecording',
   'webpage',
+] as const;
+
+export const SPECIAL_ITEM_TYPES = ['attachment', 'note', 'annotation'] as const;
+
+export const CANONICAL_ITEM_TYPES = new Set<string>([
+  ...BIBLIOGRAPHIC_ITEM_TYPES,
+  ...SPECIAL_ITEM_TYPES,
 ]);
 
 const ITEM_TYPE_ALIASES: Record<string, string> = {
   paper: 'journalArticle',
   article: 'journalArticle',
-  preprint: 'journalArticle',
-  dataset: 'document',
+  journal_article: 'journalArticle',
+  'journal-article': 'journalArticle',
+  conference_paper: 'conferencePaper',
+  'conference-paper': 'conferencePaper',
+  proceeding: 'conferencePaper',
+  proceedings: 'conferencePaper',
+  inproceedings: 'conferencePaper',
+  book_section: 'bookSection',
+  'book-section': 'bookSection',
   chapter: 'bookSection',
+  incollection: 'bookSection',
+  inbook: 'bookSection',
+  dissertation: 'thesis',
+  phdthesis: 'thesis',
+  mastersthesis: 'thesis',
+  techreport: 'report',
+  software: 'computerProgram',
+  code: 'computerProgram',
+  program: 'computerProgram',
+  data: 'dataset',
+  spec: 'standard',
+  specification: 'standard',
+  rfc: 'standard',
+  web: 'webpage',
+  website: 'webpage',
+  online: 'webpage',
+  audio: 'audioRecording',
+  sound: 'audioRecording',
+  video: 'videoRecording',
+  movie: 'film',
+  tv: 'tvBroadcast',
+  radio: 'radioBroadcast',
+  blog: 'blogPost',
+  forum: 'forumPost',
+  mail: 'email',
+  message: 'instantMessage',
+  talk: 'presentation',
+  slide: 'presentation',
+  slides: 'presentation',
 };
 
 export function normalizeItemType(type?: string | null): string {

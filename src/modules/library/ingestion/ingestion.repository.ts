@@ -65,7 +65,9 @@ export class IngestionRepository {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  private getClient(tx?: Prisma.TransactionClient): PrismaService | Prisma.TransactionClient {
+  private getClient(
+    tx?: Prisma.TransactionClient,
+  ): PrismaService | Prisma.TransactionClient {
     return tx || this.prisma;
   }
 

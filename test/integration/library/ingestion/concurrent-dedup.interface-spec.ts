@@ -36,7 +36,6 @@ describe('Integration: Database-Backed Deduplication & Concurrency Race Resistan
       const doi = '10.1038/s41586-023-00001-concurrent';
       const mockMeta = {
         title: 'Concurrent Quantum Computing Breakthrough',
-        authors: ['Eve Researcher'],
         year: 2024,
       };
 
@@ -106,7 +105,6 @@ describe('Integration: Database-Backed Deduplication & Concurrency Race Resistan
       const doi = '10.1038/s41586-multitenant-isolated';
       const mockMeta = {
         title: 'Cross-Tenant Isolated Paper',
-        authors: ['Grace Hopper'],
         year: 2025,
       };
 
@@ -155,6 +153,8 @@ describe('Integration: Database-Backed Deduplication & Concurrency Race Resistan
         data: {
           id: fileId,
           filename: 'concurrent-test.pdf',
+          mimeType: 'application/pdf',
+          size: 1024,
           authorId: fixtureA.ownerUserId,
           workspaceId: fixtureA.workspaceId,
           url: `/api/files/r2/workspaces/${fixtureA.workspaceId}/concurrent-test.pdf`,
@@ -178,7 +178,6 @@ describe('Integration: Database-Backed Deduplication & Concurrency Race Resistan
           workspaceId: fixtureA.workspaceId,
           userId: fixtureA.ownerUserId,
           fileId,
-          filename: 'concurrent-test.pdf',
         }),
       );
 
@@ -199,7 +198,6 @@ describe('Integration: Database-Backed Deduplication & Concurrency Race Resistan
       const doi = '10.1038/s41586-softdelete-recovery';
       const mockMeta = {
         title: 'Soft-Deleted Paper Restored',
-        authors: ['Alan Turing'],
         year: 2026,
       };
 

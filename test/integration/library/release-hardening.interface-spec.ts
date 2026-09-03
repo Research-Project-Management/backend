@@ -77,7 +77,6 @@ describe('Library Critical Path Release Hardening (14-Step Invariant Suite)', ()
       workspaceId: wsId,
       userId,
       fileId,
-      filename: 'quantum_computing_advances.pdf',
     });
 
     expect(ingestResultA.status).toBe('completed');
@@ -98,7 +97,6 @@ describe('Library Critical Path Release Hardening (14-Step Invariant Suite)', ()
       workspaceId: wsId,
       userId,
       fileId,
-      filename: 'quantum_computing_advances.pdf',
     });
     expect(duplicateIngest.deduplicated).toBe(true);
     expect(duplicateIngest.itemId).toBe(itemAId);
@@ -139,16 +137,10 @@ describe('Library Critical Path Release Hardening (14-Step Invariant Suite)', ()
     );
     expect(updatedA.title).toBe('Quantum Computing Advances in 2026');
 
-    // STEP 10: Citation Formatting
-    const bibtexCitation = citationService.formatItem(
-      {
-        id: itemBId,
-        title: itemB!.title,
-        itemType: itemB!.itemType || 'journalArticle',
-        authors: ['John Preskill'],
-        year: itemB!.year ?? 2021,
-        publicationTitle: 'Quantum',
-      },
+    // STEP 10: Citation Formatting (load contributors from DB for accurate author names)
+    const bibtexCitation = await citationService.formatItemById(
+      wsId,
+      itemBId,
       'bibtex',
     );
     expect(bibtexCitation.bibliography).toContain('@article');

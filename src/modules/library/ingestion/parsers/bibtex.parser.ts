@@ -1,4 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { Cite } = require('@citation-js/core');
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+require('@citation-js/plugin-bibtex');
 
 export interface ParsedBibtexEntry {
   citationKey?: string;
@@ -17,16 +22,124 @@ export interface ParsedBibtexEntry {
   url?: string;
   abstract?: string;
   series?: string;
+  keywords?: string[];
+  notes?: string[];
+  language?: string;
+  rights?: string;
+  fileUrl?: string;
+  extra?: string;
 }
 
 @Injectable()
 export class BibtexParser {
+  private readonly logger = new Logger(BibtexParser.name);
+
   /**
-   * Parse a raw BibTeX string containing one or multiple entries
+   * Parse a raw BibTeX string containing one or multiple entries using @citation-js engine.
    */
   parse(rawBibtex: string): ParsedBibtexEntry[] {
-    if (!rawBibtex || typeof rawBibtex !== 'string') return [];
+    if (!rawBibtex || typeof rawBibtex !== 'string' || !rawBibtex.trim()) {
+      return [];
+    }
 
+    try {
+      const cite = new Cite(rawBibtex);
+      const data = cite.data || [];
+
+      return data.map((csl: any) => {
+        // Authors formatting: preserve author strings "Given Family" or "Family, Given"
+        const authors: string[] = (csl.author || [])
+          .map((a: any) => {
+            if (a.literal) return a.literal.trim();
+            if (a.given && a.family) return `${a.given} ${a.family}`.trim();
+            return (a.family || a.given || '').trim();
+          })
+          .filter(Boolean);
+
+        const year =
+          csl.issued?.['date-parts']?.[0]?.[0] != null
+            ? Number(csl.issued['date-parts'][0][0])
+            : null;
+
+        const itemType = this.mapCslTypeToItemType(
+          csl.type || 'article-journal',
+        );
+
+        // Tags / keywords extraction
+        const rawKeywords = csl.keyword || csl.keywords || csl.subject;
+        let keywords: string[] | undefined;
+        if (Array.isArray(rawKeywords)) {
+          keywords = rawKeywords
+            .map((k: any) => String(k).trim())
+            .filter(Boolean);
+        } else if (typeof rawKeywords === 'string' && rawKeywords.trim()) {
+          keywords = rawKeywords
+            .split(/[,;\n]/)
+            .map((k: string) => k.trim())
+            .filter(Boolean);
+        }
+
+        // Notes / annotations / comments extraction
+        const rawNotes =
+          csl.note || csl.annote || csl.comment || csl['annote'] || csl['note'];
+        let notes: string[] | undefined;
+        if (Array.isArray(rawNotes)) {
+          notes = rawNotes.map((n: any) => String(n).trim()).filter(Boolean);
+        } else if (typeof rawNotes === 'string' && rawNotes.trim()) {
+          notes = [rawNotes.trim()];
+        }
+
+        return {
+          citationKey: csl['citation-key'] || csl.id || undefined,
+          itemType,
+          title: (csl.title || 'Untitled Reference').trim(),
+          authors,
+          year,
+          journal: csl['container-title'] || undefined,
+          publisher: csl.publisher || undefined,
+          volume: csl.volume ? String(csl.volume) : undefined,
+          issue: csl.issue ? String(csl.issue) : undefined,
+          pages: csl.page ? String(csl.page) : undefined,
+          doi: csl.DOI || undefined,
+          isbn: csl.ISBN || undefined,
+          issn: csl.ISSN || undefined,
+          url: csl.URL || undefined,
+          abstract: csl.abstract || undefined,
+          series: csl['collection-title'] || undefined,
+          keywords: keywords && keywords.length > 0 ? keywords : undefined,
+          notes: notes && notes.length > 0 ? notes : undefined,
+          language: csl.language ? String(csl.language).trim() : undefined,
+          rights: csl.rights ? String(csl.rights).trim() : undefined,
+        };
+      });
+    } catch (err: any) {
+      this.logger.warn(
+        `Citation.js BibTeX parser error: ${err?.message || err}. Attempting fallback parsing.`,
+      );
+      return this.fallbackParse(rawBibtex);
+    }
+  }
+
+  private mapCslTypeToItemType(cslType: string): string {
+    const map: Record<string, string> = {
+      'article-journal': 'journalArticle',
+      'paper-conference': 'conferencePaper',
+      book: 'book',
+      chapter: 'bookSection',
+      thesis: 'thesis',
+      report: 'report',
+      webpage: 'webpage',
+      patent: 'patent',
+      dataset: 'dataset',
+      software: 'computerProgram',
+    };
+    return map[cslType] || 'journalArticle';
+  }
+
+  /**
+   * Resilient regex fallback for non-standard BibTeX dialects
+   */
+  private fallbackParse(rawBibtex: string): ParsedBibtexEntry[] {
     const entries: ParsedBibtexEntry[] = [];
     const entryRegex =
       /@([a-zA-Z]+)\s*\{\s*([^,\s]*)\s*,([\s\S]*?)(?=\n\s*@[a-zA-Z]+\s*\{|\s*$)/g;
@@ -34,7 +147,6 @@ export class BibtexParser {
     let match: RegExpExecArray | null;
     while ((match = entryRegex.exec(rawBibtex)) !== null) {
       const rawType = match[1].toLowerCase();
-      // Skip comments or preamble
       if (
         rawType === 'comment' ||
         rawType === 'preamble' ||
@@ -46,276 +158,67 @@ export class BibtexParser {
       const citationKey = match[2]?.trim() || '';
       const body = match[3] || '';
 
-      const fields = this.parseFields(body);
-      const itemType = this.mapBibtexTypeToItemType(rawType);
-
-      // Parse authors
-      const authors: string[] = [];
-      if (fields.author) {
-        const rawAuthors = fields.author.split(/\s+and\s+/i);
-        for (const auth of rawAuthors) {
-          const cleanAuth = this.cleanValue(auth);
-          if (cleanAuth) authors.push(cleanAuth);
-        }
+      const fields: Record<string, string> = {};
+      const fieldRegex = /([a-zA-Z_-]+)\s*=\s*(?:\{([^}]*)\}|"([^"]*)"|(\d+))/g;
+      let fieldMatch: RegExpExecArray | null;
+      while ((fieldMatch = fieldRegex.exec(body)) !== null) {
+        const key = fieldMatch[1].toLowerCase();
+        const value = fieldMatch[2] ?? fieldMatch[3] ?? fieldMatch[4] ?? '';
+        fields[key] = value.trim();
       }
 
-      // Parse year
-      let year: number | null = null;
-      if (fields.year) {
-        const num = parseInt(
-          this.cleanValue(fields.year).replace(/\D/g, ''),
-          10,
-        );
-        if (!isNaN(num)) year = num;
-      }
+      const authors = fields.author
+        ? fields.author
+            .split(/\s+and\s+/i)
+            .map((a) => a.trim())
+            .filter(Boolean)
+        : [];
 
-      const pages = fields.pages
-        ? this.cleanValue(fields.pages).replace(/--/g, '-')
+      // Extract keywords / tags
+      const rawKeywords = fields.keywords || fields.keyword || fields.tags;
+      const keywords = rawKeywords
+        ? rawKeywords
+            .split(/[,;\n]/)
+            .map((k) => k.trim())
+            .filter(Boolean)
         : undefined;
 
-      const title = this.cleanValue(fields.title || 'Untitled');
-      const journal = this.cleanValue(fields.journal || fields.booktitle || '');
-      const publisher = this.cleanValue(
-        fields.publisher || fields.institution || fields.school || '',
-      );
-      const volume = this.cleanValue(fields.volume || '');
-      const issue = this.cleanValue(fields.number || fields.issue || '');
-      const doi = this.cleanValue(fields.doi || '');
-      const url = this.cleanValue(fields.url || '');
-      const abstract = this.cleanValue(fields.abstract || '');
-      const isbn = this.cleanValue(fields.isbn || '');
-      const issn = this.cleanValue(fields.issn || '');
-      const series = this.cleanValue(fields.series || '');
+      // Extract notes / annote / comment
+      const rawNote = fields.note || fields.annote || fields.comment;
+      const notes = rawNote ? [rawNote.trim()] : undefined;
+
+      // Extract file path from Zotero/Mendeley BibTeX :path/to/file.pdf:PDF format
+      let fileUrl: string | undefined;
+      const rawFile = fields.file || fields.pdf;
+      if (rawFile) {
+        const cleanFile = rawFile.replace(/^:([^:]+):.*$/, '$1').trim();
+        if (cleanFile) fileUrl = cleanFile;
+      }
 
       entries.push({
         citationKey: citationKey || undefined,
-        itemType,
-        title,
+        itemType: this.mapCslTypeToItemType(rawType),
+        title: fields.title || 'Untitled Reference',
         authors,
-        year,
-        journal: journal || undefined,
-        publisher: publisher || undefined,
-        volume: volume || undefined,
-        issue: issue || undefined,
-        pages: pages || undefined,
-        doi: doi || undefined,
-        isbn: isbn || undefined,
-        issn: issn || undefined,
-        url: url || undefined,
-        abstract: abstract || undefined,
-        series: series || undefined,
+        year: fields.year ? parseInt(fields.year, 10) || null : null,
+        journal: fields.journal || fields.booktitle,
+        publisher: fields.publisher,
+        volume: fields.volume,
+        issue: fields.number || fields.issue,
+        pages: fields.pages,
+        doi: fields.doi,
+        isbn: fields.isbn,
+        issn: fields.issn,
+        url: fields.url,
+        abstract: fields.abstract,
+        keywords,
+        notes,
+        language: fields.language || undefined,
+        rights: fields.rights || fields.license || undefined,
+        fileUrl,
       });
     }
 
     return entries;
-  }
-
-  /**
-   * Parse key-value fields inside BibTeX entry body handling arbitrary nested braces
-   */
-  private parseFields(body: string): Record<string, string> {
-    const fields: Record<string, string> = {};
-    let i = 0;
-
-    while (i < body.length) {
-      // Skip whitespace, commas, and newlines
-      while (i < body.length && /[\s,]/.test(body[i])) i++;
-      if (i >= body.length) break;
-
-      // Read key
-      const keyStart = i;
-      while (i < body.length && /[a-zA-Z0-9_-]/.test(body[i])) i++;
-      const key = body.slice(keyStart, i).toLowerCase().trim();
-      if (!key) {
-        i++;
-        continue;
-      }
-
-      // Skip whitespace to '='
-      while (i < body.length && /\s/.test(body[i])) i++;
-      if (i >= body.length || body[i] !== '=') {
-        continue;
-      }
-      i++; // Skip '='
-
-      // Skip whitespace to value
-      while (i < body.length && /\s/.test(body[i])) i++;
-      if (i >= body.length) break;
-
-      let value = '';
-      if (body[i] === '{') {
-        // Balanced braces parsing
-        let depth = 1;
-        const valStart = i + 1;
-        i++;
-        while (i < body.length && depth > 0) {
-          if (body[i] === '{') depth++;
-          else if (body[i] === '}') depth--;
-          i++;
-        }
-        value = body.slice(valStart, depth === 0 ? i - 1 : i);
-      } else if (body[i] === '"') {
-        // Quoted string parsing
-        const valStart = i + 1;
-        i++;
-        while (i < body.length && body[i] !== '"') {
-          if (body[i] === '\\' && i + 1 < body.length) i += 2;
-          else i++;
-        }
-        value = body.slice(valStart, i);
-        if (i < body.length && body[i] === '"') i++;
-      } else {
-        // Unquoted value
-        const valStart = i;
-        while (
-          i < body.length &&
-          body[i] !== ',' &&
-          body[i] !== '\n' &&
-          body[i] !== '\r' &&
-          body[i] !== '}'
-        ) {
-          i++;
-        }
-        value = body.slice(valStart, i).trim();
-      }
-
-      fields[key] = value;
-    }
-
-    return fields;
-  }
-
-  /**
-   * Strip outer braces, quotes, and decode LaTeX diacritics
-   */
-  private cleanValue(str: string): string {
-    if (!str) return '';
-    let cleaned = str
-      .replace(/[\r\n\t]+/g, ' ')
-      .replace(/\s{2,}/g, ' ')
-      .trim();
-
-    // Strip matched outer quotes
-    if (
-      cleaned.startsWith('"') &&
-      cleaned.endsWith('"') &&
-      cleaned.length >= 2
-    ) {
-      cleaned = cleaned.slice(1, -1).trim();
-    }
-
-    // Strip outer balanced braces if wrapped entirely
-    while (
-      cleaned.startsWith('{') &&
-      cleaned.endsWith('}') &&
-      cleaned.length >= 2
-    ) {
-      let depth = 0;
-      let wrapsEntire = true;
-      for (let j = 0; j < cleaned.length - 1; j++) {
-        if (cleaned[j] === '{') depth++;
-        else if (cleaned[j] === '}') depth--;
-        if (depth === 0) {
-          wrapsEntire = false;
-          break;
-        }
-      }
-      if (wrapsEntire) {
-        cleaned = cleaned.slice(1, -1).trim();
-      } else {
-        break;
-      }
-    }
-
-    // LaTeX accent mappings
-    const accentMap: Record<string, string> = {
-      "'e": 'é',
-      "'a": 'á',
-      "'o": 'ó',
-      "'i": 'í',
-      "'u": 'ú',
-      "'c": 'ć',
-      '`e': 'è',
-      '`a': 'à',
-      '`o': 'ò',
-      '`u': 'ù',
-      '^e': 'ê',
-      '^a': 'â',
-      '^o': 'ô',
-      '^i': 'î',
-      '^u': 'û',
-      '"a': 'ä',
-      '"o': 'ö',
-      '"u': 'ü',
-      '"e': 'ë',
-      '"i': 'ï',
-      '~a': 'ã',
-      '~o': 'õ',
-      '~n': 'ñ',
-      'c{c}': 'ç',
-      'c c': 'ç',
-      'acute{e}': 'é',
-      'grave{e}': 'è',
-      'circ{e}': 'ê',
-      'tilde{a}': 'ã',
-      'H{o}': 'ő',
-    };
-
-    // Decode {\\command} or \\command
-    for (const [tex, unicode] of Object.entries(accentMap)) {
-      const escapedTex = tex.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      cleaned = cleaned.replace(
-        new RegExp(`\\{\\\\${escapedTex}\\}|\\\\${escapedTex}`, 'g'),
-        unicode,
-      );
-    }
-
-    cleaned = cleaned
-      .replace(/\{\\ss\}|\\ss\b/g, 'ß')
-      .replace(/\\&/g, '&')
-      .replace(/\\%/g, '%')
-      .replace(/\\\$/g, '$')
-      .replace(/\\_/g, '_')
-      .replace(/\\#/g, '#');
-
-    // Remove inner braces used for case preservation {{BERT}} -> BERT
-    cleaned = cleaned.replace(/\{([^{}]+)\}/g, '$1');
-    cleaned = cleaned.replace(/\{([^{}]+)\}/g, '$1');
-    cleaned = cleaned.replace(/[{}]/g, '');
-
-    return cleaned.trim();
-  }
-
-  /**
-   * Map standard BibTeX types to application itemType
-   */
-  private mapBibtexTypeToItemType(type: string): string {
-    switch (type.toLowerCase()) {
-      case 'inproceedings':
-      case 'conference':
-      case 'proceedings':
-        return 'conferencePaper';
-      case 'book':
-        return 'book';
-      case 'incollection':
-      case 'booksection':
-      case 'chapter':
-        return 'bookSection';
-      case 'phdthesis':
-      case 'mastersthesis':
-      case 'thesis':
-        return 'thesis';
-      case 'techreport':
-      case 'report':
-        return 'report';
-      case 'online':
-      case 'webpage':
-      case 'misc':
-      case 'preprint':
-        return 'webpage';
-      case 'article':
-      default:
-        return 'journalArticle';
-    }
   }
 }

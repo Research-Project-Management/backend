@@ -140,6 +140,12 @@ export class ArxivProvider implements MetadataProvider {
 
     const rawVersion = createHash('md5').update(xml).digest('hex');
 
+    const creators = authors.map((name, idx) => ({
+      orderIndex: idx,
+      creatorType: 'author',
+      fullName: name,
+    }));
+
     return {
       provider: this.id,
       metadata: {
@@ -147,13 +153,19 @@ export class ArxivProvider implements MetadataProvider {
         doi,
         title,
         authors,
+        creators,
         year,
         publicationDate,
-        journal,
+        journal: journal || 'arXiv preprint',
+        publisher: 'arXiv',
         abstract,
         itemType: 'preprint',
         url: canonicalUrl,
         openAccessPdfUrl: pdfUrl,
+        extraFields: {
+          repository: 'arXiv',
+          archiveID: `arXiv:${cleanId}`,
+        },
         provenance: {
           originProvider: this.id,
           resolvedAt: new Date().toISOString(),

@@ -8,7 +8,8 @@ import { Prisma } from '@prisma/client';
 import { VersionMismatchException } from './errors/catalog.errors';
 import { normalizeTags } from '../tags/utils/tags.utils';
 import { parseCreatorString } from './migrations/backfill-creators';
-import { CatalogItemSummary } from './types/item.types';
+import { CatalogItemSummary } from './types/catalog.types';
+import { getFileContentPath } from '../../storage/storage.port';
 
 export interface CreateCatalogItemData {
   title: string;
@@ -32,6 +33,7 @@ export interface CreateCatalogItemData {
   series?: string;
   seriesTitle?: string;
   seriesText?: string;
+  seriesNumber?: string;
   issn?: string;
   isbn?: string;
   pmid?: string;
@@ -54,6 +56,7 @@ export interface CreateCatalogItemData {
   labels?: string[];
   keywords?: string[];
   fileUrl?: string;
+  fileId?: string;
   filename?: string;
   mimeType?: string;
 
@@ -61,14 +64,23 @@ export interface CreateCatalogItemData {
   collectionId?: string | null;
   uploadedById: string;
   contributors?: any;
+  creators?: any[];
+  extraFields?: Record<string, any>;
+  arxivId?: string;
+  citationCount?: number | null;
+  influentialCitationCount?: number | null;
 }
 
 export interface UpdateCatalogItemData {
   title?: string;
   authors?: string[];
+  creators?: any[];
+  extraFields?: Record<string, any>;
   year?: number | null;
   doi?: string;
+  arxivId?: string;
   abstract?: string;
+  abstractNote?: string;
   itemType?: string;
   editors?: string[];
   journal?: string;
@@ -85,6 +97,7 @@ export interface UpdateCatalogItemData {
   series?: string;
   seriesTitle?: string;
   seriesText?: string;
+  seriesNumber?: string;
   issn?: string;
   isbn?: string;
   pmid?: string;
@@ -97,6 +110,8 @@ export interface UpdateCatalogItemData {
   rights?: string;
   license?: string;
   citationKey?: string;
+  citationCount?: number | null;
+  influentialCitationCount?: number | null;
   libraryCatalog?: string;
   archive?: string;
   archiveLocation?: string;
@@ -106,7 +121,66 @@ export interface UpdateCatalogItemData {
   notes?: any;
   labels?: string[];
   keywords?: string[];
+  tags?: string[];
   collectionId?: string | null;
+  // Type-specific fields (stored in extraFields if no dedicated column)
+  edition?: string;
+  numPages?: string;
+  numberOfVolumes?: string;
+  bookTitle?: string;
+  proceedingsTitle?: string;
+  conferenceName?: string;
+  eventPlace?: string;
+  websiteTitle?: string;
+  websiteType?: string;
+  university?: string;
+  institution?: string;
+  country?: string;
+  assignee?: string;
+  issuingAuthority?: string;
+  patentNumber?: string;
+  applicationNumber?: string;
+  reportNumber?: string;
+  reportType?: string;
+  thesisType?: string;
+  genre?: string;
+  filingDate?: string;
+  legalStatus?: string;
+  versionNumber?: string;
+  blogTitle?: string;
+  forumTitle?: string;
+  postType?: string;
+  presentationType?: string;
+  meetingName?: string;
+  letterType?: string;
+  manuscriptType?: string;
+  mapType?: string;
+  artworkMedium?: string;
+  artworkSize?: string;
+  distributor?: string;
+  runningTime?: string;
+  programTitle?: string;
+  episodeNumber?: string;
+  podcastType?: string;
+  interviewMedium?: string;
+  dictionaryTitle?: string;
+  encyclopediaTitle?: string;
+  originalDate?: string;
+  originalPublisher?: string;
+  originalPlace?: string;
+  court?: string;
+  docketNumber?: string;
+  firstPage?: string;
+  dateDecided?: string;
+  reporter?: string;
+  reporterVolume?: string;
+  codeNumber?: string;
+  publicLawNumber?: string;
+  dateEnacted?: string;
+  billNumber?: string;
+  legislativeBody?: string;
+  programmingLanguage?: string;
+  standardNumber?: string;
 }
 
 @Injectable()
@@ -239,7 +313,9 @@ export class CatalogRepository {
       notesList: {
         where: { deletedAt: null },
       },
-      attachments: true,
+      attachments: {
+        include: { revisions: true },
+      },
       userStates: options.userId
         ? {
             where: { userId: options.userId },
@@ -248,10 +324,24 @@ export class CatalogRepository {
     };
 
     if (view === 'recent' && options.userId) {
+      // For recent view, cursor-based pagination uses itemId (catalogItem.id).
+      // Since userItemState has no unique constraint on itemId alone, we resolve
+      // the cursor to a lastReadAt timestamp and use that for keyset pagination.
+      let cursorLastReadAt: Date | undefined;
+      if (options.cursor) {
+        const cursorState = await client.userItemState.findFirst({
+          where: { userId: options.userId, itemId: options.cursor },
+          select: { lastReadAt: true },
+        });
+        cursorLastReadAt = cursorState?.lastReadAt ?? undefined;
+      }
+
       const userStates = await client.userItemState.findMany({
         where: {
           userId: options.userId,
-          lastReadAt: { not: null },
+          lastReadAt: cursorLastReadAt
+            ? { not: null, lt: cursorLastReadAt }
+            : { not: null },
           item: {
             workspaceId,
             deletedAt: null,
@@ -296,36 +386,56 @@ export class CatalogRepository {
           lastReadAt: 'desc',
         },
         take: limit + 1,
-        ...(options.cursor ? { cursor: { id: options.cursor }, skip: 1 } : {}),
       });
 
-      return userStates.map((us) => us.item).filter(Boolean);
+      return userStates
+        .filter((us) => Boolean(us.item))
+        .map((us) => ({
+          ...us.item,
+          lastReadAt: us.lastReadAt,
+        }));
     }
 
-    const where: Prisma.CatalogItemWhereInput = {
-      workspaceId,
-    };
+    return client.catalogItem.findMany({
+      where: this.buildWhereClause(workspaceId, options),
+      take: limit + 1,
+      ...(options.cursor ? { cursor: { id: options.cursor }, skip: 1 } : {}),
+      orderBy: { createdAt: 'desc' },
+      include: itemInclude,
+    });
+  }
+
+  /**
+   * Builds a shared CatalogItem WHERE clause from the common filter options.
+   * Used by both findMany and count to avoid duplicated logic.
+   */
+  private buildWhereClause(
+    workspaceId: string,
+    options: {
+      view?: 'all' | 'recent' | 'unfiled' | 'trash';
+      collectionId?: string;
+      tagId?: string;
+      search?: string;
+    },
+  ): Prisma.CatalogItemWhereInput {
+    const view = options.view ?? 'all';
+    const where: Prisma.CatalogItemWhereInput = { workspaceId };
 
     if (view === 'trash') {
       where.deletedAt = { not: null };
     } else {
       where.deletedAt = null;
-
       if (view === 'unfiled') {
         where.collectionItems = { none: {} };
       }
     }
 
     if (options.collectionId) {
-      where.collectionItems = {
-        some: { collectionId: options.collectionId },
-      };
+      where.collectionItems = { some: { collectionId: options.collectionId } };
     }
 
     if (options.tagId) {
-      where.itemTags = {
-        some: { tagId: options.tagId },
-      };
+      where.itemTags = { some: { tagId: options.tagId } };
     }
 
     if (options.search) {
@@ -336,26 +446,7 @@ export class CatalogRepository {
       ];
     }
 
-    return client.catalogItem.findMany({
-      where,
-      take: limit + 1,
-      ...(options.cursor ? { cursor: { id: options.cursor }, skip: 1 } : {}),
-      orderBy: { createdAt: 'desc' },
-      include: {
-        collectionItems: {
-          include: { collection: true },
-        },
-        itemTags: {
-          include: { tag: true },
-        },
-        attachments: true,
-        userStates: options.userId
-          ? {
-              where: { userId: options.userId },
-            }
-          : false,
-      },
-    });
+    return where;
   }
 
   async count(
@@ -415,41 +506,9 @@ export class CatalogRepository {
       });
     }
 
-    const where: Prisma.CatalogItemWhereInput = {
-      workspaceId,
-    };
-
-    if (view === 'trash') {
-      where.deletedAt = { not: null };
-    } else {
-      where.deletedAt = null;
-
-      if (view === 'unfiled') {
-        where.collectionItems = { none: {} };
-      }
-    }
-
-    if (options.collectionId) {
-      where.collectionItems = {
-        some: { collectionId: options.collectionId },
-      };
-    }
-
-    if (options.tagId) {
-      where.itemTags = {
-        some: { tagId: options.tagId },
-      };
-    }
-
-    if (options.search) {
-      where.OR = [
-        { title: { contains: options.search, mode: 'insensitive' } },
-        { abstract: { contains: options.search, mode: 'insensitive' } },
-        { doi: { contains: options.search, mode: 'insensitive' } },
-      ];
-    }
-
-    return client.catalogItem.count({ where });
+    return client.catalogItem.count({
+      where: this.buildWhereClause(workspaceId, options),
+    });
   }
 
   async create(
@@ -458,17 +517,18 @@ export class CatalogRepository {
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
+    const resolvedFileId =
+      data.fileId ||
+      data.fileUrl?.match(/\/api\/files\/([a-zA-Z0-9-]+)\/content/)?.[1] ||
+      null;
     const createData: Prisma.CatalogItemUncheckedCreateInput = {
       workspaceId,
       title: data.title,
-      authors: data.authors ?? [],
       year: data.year ?? null,
       doi: data.doi ?? '',
       abstract: data.abstract ?? '',
       itemType: data.itemType ?? 'journalArticle',
-      editors: data.editors ?? [],
-      journal: data.journal ?? '',
-      publicationTitle: data.publicationTitle ?? data.journal ?? '',
+      publicationTitle: data.publicationTitle ?? (data as any).journal ?? '',
       publicationDate:
         data.publicationDate ?? (data.year ? String(data.year) : ''),
       publisher: data.publisher ?? '',
@@ -499,15 +559,77 @@ export class CatalogRepository {
       archiveLocation: data.archiveLocation ?? '',
       callNumber: data.callNumber ?? '',
       accessedAt: data.accessedAt ?? null,
-      extra: data.extra ?? '',
-      notes: data.notes ?? [],
-      labels: normalizeTags(data.labels ?? data.keywords ?? []),
-      keywords: normalizeTags(data.keywords ?? data.labels ?? []),
-      fileUrl: data.fileUrl ?? '',
-      filename: data.filename ?? data.title,
-      mimeType: data.mimeType ?? 'application/pdf',
-      size: data.size ?? 0,
-      collectionId: data.collectionId ?? null,
+      extra: (() => {
+        // Merge extra (raw text/JSON), extraFields, and type-specific fields that have no dedicated DB column
+        let merged: Record<string, any> = {};
+        let rawExtraPreserved = false;
+        if (typeof data.extra === 'string' && data.extra.trim()) {
+          if (data.extra.trim().startsWith('{')) {
+            try {
+              merged = JSON.parse(data.extra);
+            } catch {
+              // Non-JSON extra: preserve as _rawExtra so it is not lost
+              merged._rawExtra = data.extra;
+              rawExtraPreserved = true;
+            }
+          } else {
+            // Plain text extra (e.g. Zotero "Citations: 23526") — preserve unconditionally
+            merged._rawExtra = data.extra;
+            rawExtraPreserved = true;
+          }
+        }
+        if (
+          data.extraFields &&
+          typeof data.extraFields === 'object' &&
+          Object.keys(data.extraFields).length > 0
+        ) {
+          merged = { ...merged, ...data.extraFields };
+        }
+        // Capture type-specific fields that have no dedicated DB column
+        const typeSpecificKeys = [
+          'seriesNumber',
+          'abstractNote',
+          'edition',
+          'numPages',
+          'numberOfVolumes',
+          'bookTitle',
+          'proceedingsTitle',
+          'conferenceName',
+          'eventPlace',
+          'websiteTitle',
+          'websiteType',
+          'university',
+          'institution',
+          'country',
+          'assignee',
+          'issuingAuthority',
+          'patentNumber',
+          'applicationNumber',
+          'reportNumber',
+          'reportType',
+          'thesisType',
+          'genre',
+          'filingDate',
+          'legalStatus',
+          'versionNumber',
+        ] as const;
+        for (const key of typeSpecificKeys) {
+          if ((data as any)[key] !== undefined && (data as any)[key] !== '') {
+            merged[key] = (data as any)[key];
+          }
+        }
+        // If we only have the raw extra and nothing else merged, return raw text as-is
+        const mergedKeys = Object.keys(merged);
+        if (
+          mergedKeys.length === 1 &&
+          rawExtraPreserved &&
+          mergedKeys[0] === '_rawExtra'
+        ) {
+          return data.extra ?? '';
+        }
+        if (mergedKeys.length > 0) return JSON.stringify(merged);
+        return data.extra ?? '';
+      })(),
       uploadedById: data.uploadedById || 'system',
       version: 1,
       ...(data.collectionId
@@ -524,30 +646,148 @@ export class CatalogRepository {
         ? {
             contributors: data.contributors,
           }
-        : data.authors && data.authors.length > 0
+        : data.creators && data.creators.length > 0
           ? {
               contributors: {
-                create: data.authors.map((authorName: string, index: number) => {
-                  const parsed = parseCreatorString(authorName, index);
-                  return {
-                    creatorType: parsed.creatorType,
-                    firstName: parsed.firstName,
-                    lastName: parsed.lastName,
-                    fullName: parsed.fullName,
-                    orderIndex: parsed.orderIndex,
-                  };
-                }),
+                create: data.creators.map((c: any, index: number) => ({
+                  creatorType: c.creatorType || 'author',
+                  firstName: c.firstName || '',
+                  lastName: c.lastName || '',
+                  fullName:
+                    c.fullName ||
+                    [c.firstName, c.lastName].filter(Boolean).join(' ') ||
+                    c.name ||
+                    '',
+                  orderIndex: c.orderIndex !== undefined ? c.orderIndex : index,
+                })),
               },
             }
-          : {}),
-      ...(data.doi && data.doi.trim() !== ''
+          : data.authors && data.authors.length > 0
+            ? {
+                contributors: {
+                  create: data.authors.map(
+                    (authorName: string, index: number) => {
+                      const parsed = parseCreatorString(authorName, index);
+                      return {
+                        creatorType: parsed.creatorType,
+                        firstName: parsed.firstName,
+                        lastName: parsed.lastName,
+                        fullName: parsed.fullName,
+                        orderIndex: parsed.orderIndex,
+                      };
+                    },
+                  ),
+                },
+              }
+            : {}),
+      ...(data.doi || data.arxivId || data.pmid || data.isbn
         ? {
             identifiers: {
               create: [
+                ...(data.doi && data.doi.trim()
+                  ? [
+                      {
+                        type: 'doi',
+                        value: data.doi.trim(),
+                        canonicalUri: `https://doi.org/${data.doi.trim()}`,
+                      },
+                    ]
+                  : []),
+                ...(data.arxivId && data.arxivId.trim()
+                  ? [
+                      {
+                        type: 'arxiv',
+                        value: data.arxivId.trim(),
+                        canonicalUri: `https://arxiv.org/abs/${data.arxivId.trim()}`,
+                      },
+                    ]
+                  : []),
+                ...(data.pmid && data.pmid.trim()
+                  ? [
+                      {
+                        type: 'pmid',
+                        value: data.pmid.trim(),
+                        canonicalUri: `https://pubmed.ncbi.nlm.nih.gov/${data.pmid.trim()}/`,
+                      },
+                    ]
+                  : []),
+                ...(data.isbn && data.isbn.trim()
+                  ? [
+                      {
+                        type: 'isbn',
+                        value: data.isbn.trim(),
+                        canonicalUri: `urn:isbn:${data.isbn.trim()}`,
+                      },
+                    ]
+                  : []),
+              ],
+            },
+          }
+        : {}),
+      ...((data as any).labels?.length ||
+      (data as any).keywords?.length ||
+      (data as any).tags?.length
+        ? {
+            itemTags: {
+              create: Array.from(
+                new Set(
+                  [
+                    ...((data as any).labels || []),
+                    ...((data as any).keywords || []),
+                    ...((data as any).tags || []),
+                  ].filter(
+                    (t): t is string =>
+                      typeof t === 'string' && t.trim().length > 0,
+                  ),
+                ),
+              )
+                .slice(0, 30)
+                .map((name) => ({
+                  tag: {
+                    connectOrCreate: {
+                      where: {
+                        workspaceId_name: {
+                          workspaceId,
+                          name,
+                        },
+                      },
+                      create: {
+                        workspaceId,
+                        name,
+                      },
+                    },
+                  },
+                })),
+            },
+          }
+        : {}),
+      ...(data.fileUrl || resolvedFileId
+        ? {
+            attachments: {
+              create: [
                 {
-                  type: 'doi',
-                  value: data.doi.trim(),
-                  canonicalUri: `https://doi.org/${data.doi.trim()}`,
+                  filename: data.filename || 'document.pdf',
+                  url:
+                    data.fileUrl ||
+                    (resolvedFileId ? getFileContentPath(resolvedFileId) : ''),
+                  fileId: resolvedFileId,
+                  size: data.size || 0,
+                  mimeType: data.mimeType || 'application/pdf',
+                  attachmentType: 'primary_pdf',
+                  revisions: {
+                    create: [
+                      {
+                        revisionNumber: 1,
+                        url:
+                          data.fileUrl ||
+                          (resolvedFileId
+                            ? getFileContentPath(resolvedFileId)
+                            : ''),
+                        sizeBytes: data.size || 0,
+                        fileHash: '',
+                      },
+                    ],
+                  },
                 },
               ],
             },
@@ -555,7 +795,7 @@ export class CatalogRepository {
         : {}),
     };
 
-    return client.catalogItem.create({
+    const item = await client.catalogItem.create({
       data: createData,
       include: {
         collectionItems: {
@@ -571,12 +811,78 @@ export class CatalogRepository {
         attachments: true,
       },
     });
+
+    if (resolvedFileId && client.file?.updateMany) {
+      await client.file.updateMany({
+        where: { id: resolvedFileId },
+        data: {
+          linkedToType: 'Paper',
+          linkedToId: item.id,
+        },
+      });
+    }
+
+    const rawTags = (data as any).tags || data.keywords || data.labels || [];
+    const normalizedTagsList = normalizeTags(rawTags);
+    if (normalizedTagsList.length > 0) {
+      for (const tagName of normalizedTagsList) {
+        const tag = await client.catalogTag.upsert({
+          where: {
+            workspaceId_name: {
+              workspaceId,
+              name: tagName,
+            },
+          },
+          create: {
+            workspaceId,
+            name: tagName,
+          },
+          update: {},
+        });
+        await client.catalogItemTag.upsert({
+          where: {
+            tagId_catalogItemId: {
+              tagId: tag.id,
+              catalogItemId: item.id,
+            },
+          },
+          create: {
+            tagId: tag.id,
+            catalogItemId: item.id,
+          },
+          update: {},
+        });
+      }
+
+      const reloaded = await client.catalogItem.findUnique({
+        where: { id: item.id },
+        include: {
+          collectionItems: {
+            include: { collection: true },
+          },
+          itemTags: {
+            include: { tag: true },
+          },
+          contributors: {
+            orderBy: { orderIndex: 'asc' },
+          },
+          identifiers: true,
+          attachments: {
+            include: { revisions: true },
+          },
+        },
+      });
+
+      return reloaded || item;
+    }
+
+    return item;
   }
 
   async update(
     workspaceId: string,
     id: string,
-    expectedVersion: number,
+    expectedVersion: number | undefined,
     data: UpdateCatalogItemData,
     tx?: Prisma.TransactionClient,
   ) {
@@ -591,7 +897,7 @@ export class CatalogRepository {
       );
     }
 
-    if (existing.version !== expectedVersion) {
+    if (expectedVersion !== undefined && existing.version !== expectedVersion) {
       throw new VersionMismatchException({
         aggregateType: 'CatalogItem',
         entityId: id,
@@ -600,18 +906,17 @@ export class CatalogRepository {
       });
     }
 
-    return client.catalogItem.update({
+    const updated = await client.catalogItem.update({
       where: { id },
       data: {
         title: data.title ?? existing.title,
-        authors: data.authors ?? existing.authors,
         year: data.year !== undefined ? data.year : existing.year,
         doi: data.doi ?? existing.doi,
         abstract: data.abstract ?? existing.abstract,
         itemType: data.itemType ?? existing.itemType,
-        editors: data.editors ?? existing.editors,
-        journal: data.journal ?? existing.journal,
-        publicationTitle: data.publicationTitle ?? existing.publicationTitle,
+        publicationTitle:
+          data.publicationTitle ?? data.journal ?? existing.publicationTitle,
+
         publicationDate: data.publicationDate ?? existing.publicationDate,
         publisher: data.publisher ?? existing.publisher,
         place: data.place ?? existing.place,
@@ -642,24 +947,179 @@ export class CatalogRepository {
         callNumber: data.callNumber ?? existing.callNumber,
         accessedAt:
           data.accessedAt !== undefined ? data.accessedAt : existing.accessedAt,
-        extra: data.extra ?? existing.extra,
-        notes: data.notes !== undefined ? data.notes : existing.notes,
-        labels:
-          data.labels !== undefined
-            ? normalizeTags(data.labels)
-            : data.keywords !== undefined
-              ? normalizeTags(data.keywords)
-              : existing.labels,
-        keywords:
-          data.keywords !== undefined
-            ? normalizeTags(data.keywords)
-            : data.labels !== undefined
-              ? normalizeTags(data.labels)
-              : existing.keywords,
-        collectionId:
-          data.collectionId !== undefined
-            ? data.collectionId
-            : existing.collectionId,
+        extra: (() => {
+          // Build merged extraFields: start from existing, overlay incoming extraFields, then type-specific fields
+          let merged: Record<string, any> = {};
+          let existingIsPlainText = false;
+          if (existing.extra && existing.extra.trim()) {
+            if (existing.extra.trim().startsWith('{')) {
+              try {
+                merged = JSON.parse(existing.extra);
+              } catch {
+                // Existing extra is non-JSON plain text — preserve it
+                merged._rawExtra = existing.extra;
+                existingIsPlainText = true;
+              }
+            } else {
+              // Plain text (Zotero style) — preserve unconditionally
+              merged._rawExtra = existing.extra;
+              existingIsPlainText = true;
+            }
+          }
+          // Incoming extra (from update payload) may override
+          if (typeof data.extra === 'string' && data.extra.trim()) {
+            if (data.extra.trim().startsWith('{')) {
+              try {
+                const incomingParsed = JSON.parse(data.extra);
+                merged = { ...merged, ...incomingParsed };
+                // Incoming is valid JSON — clear plain-text guard if it existed
+                existingIsPlainText = false;
+              } catch {
+                merged._rawExtra = data.extra;
+                existingIsPlainText = true;
+              }
+            } else {
+              merged._rawExtra = data.extra;
+              existingIsPlainText = true;
+            }
+          }
+          if (data.extraFields && typeof data.extraFields === 'object') {
+            merged = { ...merged, ...data.extraFields };
+            existingIsPlainText = false; // structured extraFields always win
+          }
+          // Merge type-specific fields that have no dedicated DB column
+          const typeSpecificFields: (keyof UpdateCatalogItemData)[] = [
+            'edition',
+            'numPages',
+            'numberOfVolumes',
+            'bookTitle',
+            'proceedingsTitle',
+            'conferenceName',
+            'eventPlace',
+            'websiteTitle',
+            'websiteType',
+            'university',
+            'institution',
+            'country',
+            'assignee',
+            'issuingAuthority',
+            'patentNumber',
+            'applicationNumber',
+            'reportNumber',
+            'reportType',
+            'thesisType',
+            'genre',
+            'filingDate',
+            'legalStatus',
+            'versionNumber',
+            'blogTitle',
+            'forumTitle',
+            'postType',
+            'presentationType',
+            'meetingName',
+            'letterType',
+            'manuscriptType',
+            'mapType',
+            'artworkMedium',
+            'artworkSize',
+            'distributor',
+            'runningTime',
+            'programTitle',
+            'episodeNumber',
+            'podcastType',
+            'interviewMedium',
+            'dictionaryTitle',
+            'encyclopediaTitle',
+            'originalDate',
+            'originalPublisher',
+            'originalPlace',
+            'court',
+            'docketNumber',
+            'firstPage',
+            'dateDecided',
+            'reporter',
+            'reporterVolume',
+            'codeNumber',
+            'publicLawNumber',
+            'dateEnacted',
+            'billNumber',
+            'legislativeBody',
+            'programmingLanguage',
+            'standardNumber',
+            'abstractNote',
+          ];
+          for (const key of typeSpecificFields) {
+            if (data[key] !== undefined) {
+              merged[key] = data[key];
+              existingIsPlainText = false;
+            }
+          }
+          // If only _rawExtra key present and no structured data, return plain text
+          const mergedKeys = Object.keys(merged);
+          if (
+            existingIsPlainText &&
+            mergedKeys.length === 1 &&
+            mergedKeys[0] === '_rawExtra'
+          ) {
+            return merged._rawExtra;
+          }
+          return mergedKeys.length > 0
+            ? JSON.stringify(merged)
+            : (data.extra ?? existing.extra ?? '');
+        })(),
+
+        ...(data.collectionId !== undefined
+          ? {
+              collectionItems:
+                data.collectionId !== null
+                  ? {
+                      deleteMany: {},
+                      create: {
+                        collectionId: data.collectionId,
+                        sortOrder: 0,
+                      },
+                    }
+                  : {
+                      deleteMany: {},
+                    },
+            }
+          : {}),
+        ...(data.creators && data.creators.length > 0
+          ? {
+              contributors: {
+                deleteMany: {},
+                create: data.creators.map((c: any, index: number) => ({
+                  creatorType: c.creatorType || 'author',
+                  firstName: c.firstName || '',
+                  lastName: c.lastName || '',
+                  fullName:
+                    c.fullName ||
+                    [c.firstName, c.lastName].filter(Boolean).join(' ') ||
+                    c.name ||
+                    '',
+                  orderIndex: c.orderIndex !== undefined ? c.orderIndex : index,
+                })),
+              },
+            }
+          : data.authors && data.authors.length > 0
+            ? {
+                contributors: {
+                  deleteMany: {},
+                  create: data.authors.map(
+                    (authorName: string, index: number) => {
+                      const parsed = parseCreatorString(authorName, index);
+                      return {
+                        creatorType: parsed.creatorType,
+                        firstName: parsed.firstName,
+                        lastName: parsed.lastName,
+                        fullName: parsed.fullName,
+                        orderIndex: parsed.orderIndex,
+                      };
+                    },
+                  ),
+                },
+              }
+            : {}),
         version: { increment: 1 },
       },
       include: {
@@ -669,8 +1129,165 @@ export class CatalogRepository {
         itemTags: {
           include: { tag: true },
         },
+        contributors: {
+          orderBy: { orderIndex: 'asc' },
+        },
+        identifiers: true,
+        attachments: {
+          include: { revisions: true },
+        },
+        notesList: {
+          where: { deletedAt: null },
+        },
       },
     });
+
+    // ── Sync identifiers table when DOI/arXiv/PMID/PMCID/ISBN/ISSN change ──────
+    // We replace each identifier type individually so we never drop identifiers
+    // belonging to other types that were not part of this update payload.
+    const identifierChanges: Array<{
+      type: string;
+      value: string;
+      canonicalUri: string;
+    }> = [];
+    if (data.doi !== undefined && data.doi !== existing.doi) {
+      identifierChanges.push({
+        type: 'doi',
+        value: (data.doi ?? '').trim(),
+        canonicalUri: data.doi ? `https://doi.org/${data.doi.trim()}` : '',
+      });
+    }
+    if (
+      data.arxivId !== undefined &&
+      data.arxivId !== (existing as any).arxivId
+    ) {
+      identifierChanges.push({
+        type: 'arxiv',
+        value: (data.arxivId ?? '').trim(),
+        canonicalUri: data.arxivId
+          ? `https://arxiv.org/abs/${data.arxivId.trim()}`
+          : '',
+      });
+    }
+    if (data.pmid !== undefined && data.pmid !== existing.pmid) {
+      identifierChanges.push({
+        type: 'pmid',
+        value: (data.pmid ?? '').trim(),
+        canonicalUri: data.pmid
+          ? `https://pubmed.ncbi.nlm.nih.gov/${data.pmid.trim()}/`
+          : '',
+      });
+    }
+    if (data.pmcid !== undefined && data.pmcid !== existing.pmcid) {
+      identifierChanges.push({
+        type: 'pmcid',
+        value: (data.pmcid ?? '').trim(),
+        canonicalUri: data.pmcid
+          ? `https://www.ncbi.nlm.nih.gov/pmc/articles/${data.pmcid.trim()}/`
+          : '',
+      });
+    }
+    if (data.isbn !== undefined && data.isbn !== existing.isbn) {
+      identifierChanges.push({
+        type: 'isbn',
+        value: (data.isbn ?? '').trim(),
+        canonicalUri: data.isbn ? `urn:isbn:${data.isbn.trim()}` : '',
+      });
+    }
+    if (data.issn !== undefined && data.issn !== existing.issn) {
+      identifierChanges.push({
+        type: 'issn',
+        value: (data.issn ?? '').trim(),
+        canonicalUri: data.issn ? `urn:issn:${data.issn.trim()}` : '',
+      });
+    }
+    for (const ident of identifierChanges) {
+      // Always delete existing record(s) for this type first
+      await client.catalogIdentifier.deleteMany({
+        where: { catalogItemId: updated.id, type: ident.type },
+      });
+      // Re-create only if new value is non-empty
+      if (ident.value) {
+        await client.catalogIdentifier.create({
+          data: {
+            catalogItemId: updated.id,
+            type: ident.type,
+            value: ident.value,
+            canonicalUri: ident.canonicalUri || undefined,
+          },
+        });
+      }
+    }
+
+    const rawTags = data.tags || data.keywords || data.labels;
+    if (rawTags && Array.isArray(rawTags)) {
+      const normalizedTagsList = normalizeTags(rawTags);
+      if (normalizedTagsList.length === 0) {
+        await client.catalogItemTag.deleteMany({
+          where: { catalogItemId: updated.id },
+        });
+      } else {
+        await client.catalogItemTag.deleteMany({
+          where: {
+            catalogItemId: updated.id,
+            tag: {
+              name: { notIn: normalizedTagsList },
+            },
+          },
+        });
+        for (const tagName of normalizedTagsList) {
+          const tag = await client.catalogTag.upsert({
+            where: {
+              workspaceId_name: {
+                workspaceId,
+                name: tagName,
+              },
+            },
+            create: {
+              workspaceId,
+              name: tagName,
+            },
+            update: {},
+          });
+          await client.catalogItemTag.upsert({
+            where: {
+              tagId_catalogItemId: {
+                tagId: tag.id,
+                catalogItemId: updated.id,
+              },
+            },
+            create: {
+              tagId: tag.id,
+              catalogItemId: updated.id,
+            },
+            update: {},
+          });
+        }
+      }
+
+      const reloaded = await client.catalogItem.findUnique({
+        where: { id: updated.id },
+        include: {
+          collectionItems: {
+            include: { collection: true },
+          },
+          itemTags: {
+            include: { tag: true },
+          },
+          contributors: {
+            orderBy: { orderIndex: 'asc' },
+          },
+          identifiers: true,
+          attachments: true,
+          notesList: {
+            where: { deletedAt: null },
+          },
+        },
+      });
+      return reloaded || updated;
+    }
+
+    return updated;
   }
 
   async softDelete(
@@ -749,9 +1366,12 @@ export class CatalogRepository {
         version: { increment: 1 },
       },
       include: {
+        contributors: { orderBy: { orderIndex: 'asc' } },
+        identifiers: true,
         collectionItems: { include: { collection: true } },
         itemTags: { include: { tag: true } },
-        attachments: true,
+        notesList: { where: { deletedAt: null } },
+        attachments: { include: { revisions: true } },
       },
     });
   }
@@ -822,8 +1442,7 @@ export class CatalogRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
     const client = this.getClient(tx);
-    const targetItemId =
-      relation.targetItemId || relation.targetPaperId || relation.targetId;
+    const targetItemId = relation.targetItemId || relation.targetId;
     if (!targetItemId) return;
 
     const source = await client.catalogItem.findUnique({
@@ -863,8 +1482,7 @@ export class CatalogRepository {
         ? extraObj.relations
         : [];
       const filtered = existing.filter(
-        (r: any) =>
-          (r.targetItemId || r.targetPaperId || r.targetId) !== targetItemId,
+        (r: any) => (r.targetItemId || r.targetId) !== targetItemId,
       );
       filtered.push(relation);
       extraObj.relations = filtered;
@@ -897,9 +1515,7 @@ export class CatalogRepository {
         const extraObj = JSON.parse(item.extra);
         if (Array.isArray(extraObj.relations)) {
           extraObj.relations = extraObj.relations.filter(
-            (r: any) =>
-              (r.targetItemId || r.targetPaperId || r.targetId) !==
-              targetItemId,
+            (r: any) => (r.targetItemId || r.targetId) !== targetItemId,
           );
           await client.catalogItem.update({
             where: { id: itemId },
@@ -913,16 +1529,14 @@ export class CatalogRepository {
   }
 
   toDomainSummary(item: any): CatalogItemSummary {
-    const authors: string[] =
-      Array.isArray(item.contributors) && item.contributors.length > 0
-        ? item.contributors
-            .map((c: any) =>
+    const authors: string[] = Array.isArray(item.contributors)
+      ? item.contributors
+          .map(
+            (c: any) =>
               c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
-            )
-            .filter(Boolean)
-        : Array.isArray(item.authors)
-          ? item.authors
-          : [];
+          )
+          .filter(Boolean)
+      : [];
 
     const doiIdent = Array.isArray(item.identifiers)
       ? item.identifiers.find((i: any) => i.type === 'doi')?.value

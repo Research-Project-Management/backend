@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../core/database/prisma.service';
-import { Prisma, SavedSearch } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 
 export interface SearchOptions {
   q?: string;
@@ -87,6 +87,26 @@ export class SearchRepository {
                   mode: 'insensitive',
                 },
               },
+              {
+                contributors: {
+                  some: {
+                    OR: [
+                      {
+                        fullName: {
+                          contains: options.q.trim(),
+                          mode: 'insensitive',
+                        },
+                      },
+                      {
+                        lastName: {
+                          contains: options.q.trim(),
+                          mode: 'insensitive',
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
             ],
           }
         : {}),
@@ -105,6 +125,10 @@ export class SearchRepository {
       take: limit + 1,
       ...(options.cursor ? { cursor: { id: options.cursor }, skip: 1 } : {}),
       include: {
+        contributors: {
+          orderBy: { orderIndex: 'asc' },
+        },
+        identifiers: true,
         attachments: {
           take: 5,
         },
@@ -177,48 +201,5 @@ export class SearchRepository {
     }
 
     return { itemTypes, years, tags };
-  }
-
-  async createSavedSearch(
-    workspaceId: string,
-    userId: string,
-    data: {
-      name: string;
-      query: Record<string, any>;
-      color?: string;
-      icon?: string;
-    },
-  ): Promise<SavedSearch> {
-    return this.prisma.savedSearch.create({
-      data: {
-        workspaceId,
-        userId,
-        name: data.name,
-        query: data.query,
-        color: data.color ?? '#3370ff',
-        icon: data.icon ?? 'search',
-      },
-    });
-  }
-
-  async listSavedSearches(
-    workspaceId: string,
-    userId: string,
-  ): Promise<SavedSearch[]> {
-    return this.prisma.savedSearch.findMany({
-      where: { workspaceId, userId },
-      orderBy: { createdAt: 'desc' },
-    });
-  }
-
-  async deleteSavedSearch(
-    workspaceId: string,
-    userId: string,
-    id: string,
-  ): Promise<boolean> {
-    const deleted = await this.prisma.savedSearch.deleteMany({
-      where: { id, workspaceId, userId },
-    });
-    return deleted.count > 0;
   }
 }

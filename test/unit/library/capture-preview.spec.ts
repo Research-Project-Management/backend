@@ -1,11 +1,16 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
 import { UrlCaptureProvider } from '../../../src/modules/library/ingestion/providers/url-capture.provider';
 import { IngestionService } from '../../../src/modules/library/ingestion/ingestion.service';
-import { CatalogService } from '../../../src/modules/library/catalog/catalog.service';
-import { TransactionService } from '../../../src/modules/library/sync/services/transaction.service';
+import { IngestionRepository } from '../../../src/modules/library/ingestion/ingestion.repository';
 import { IdempotencyRepository } from '../../../src/modules/library/sync/repositories/idempotency.repository';
+import { PrismaService } from '../../../src/core/database/prisma.service';
+import { CatalogService } from '../../../src/modules/library/catalog/catalog.service';
+import { METADATA_PORT } from '../../../src/modules/library/ingestion/metadata/types/metadata.types';
+import { STORAGE_PORT } from '../../../src/modules/storage/storage.port';
 import { PdfExtractorProvider } from '../../../src/modules/library/attachments/providers/pdf-extractor.provider';
-import { BibtexParser } from '../../../src/modules/library/ingestion/parsers/bibtex.parser';
+import { TransactionService } from '../../../src/modules/library/sync/services/transaction.service';
+import { IngestionStrategyRegistry } from '../../../src/modules/library/ingestion/strategies/ingestion-strategy.registry';
 import { createHash } from 'crypto';
 
 describe('Gate H: URL Capture Security & Persistent CapturePreview Record', () => {
@@ -13,15 +18,13 @@ describe('Gate H: URL Capture Security & Persistent CapturePreview Record', () =
     'test_secret_key_minimum_32_bytes_entropy_abcdef1234567890';
   let connector: UrlCaptureProvider;
   let mockPrisma: any;
-  let mockLibraryTx: any;
   let mockCatalogService: any;
-  let mockMetadataService: any;
   let ingestionService: IngestionService;
 
   const workspaceId = 'ws-test-123';
   const userId = 'usr-test-456';
 
-  beforeEach(() => {
+  beforeEach(async () => {
     process.env.URL_CAPTURE_SECRET = testSecret;
     const mockConfigService = {
       get: jest.fn((key: string) => {
@@ -38,19 +41,17 @@ describe('Gate H: URL Capture Security & Persistent CapturePreview Record', () =
         findUnique: jest.fn(),
         updateMany: jest.fn(),
         update: jest.fn(),
+        deleteMany: jest.fn().mockResolvedValue({ count: 42 }),
       },
+      $transaction: jest.fn(async (fn: any) => fn(mockPrisma)),
     };
 
     mockCatalogService = {
       createItem: jest.fn(),
     };
 
-    mockMetadataService = {
-      resolve: jest.fn().mockResolvedValue(null),
-    };
-
-    mockLibraryTx = {
-      executeInTransaction: jest.fn(async (op) => {
+    const mockTxService = {
+      executeInTransaction: jest.fn(async (op: any) => {
         const helpers = {
           appendChange: jest.fn(),
           recordTombstone: jest.fn(),
@@ -60,26 +61,45 @@ describe('Gate H: URL Capture Security & Persistent CapturePreview Record', () =
       }),
     };
 
-    const mockStoragePort = {
-      readOwnedFile: jest.fn().mockResolvedValue({
-        fileId: 'file-1',
-        filename: 'document.pdf',
-        mimeType: 'application/pdf',
-        buffer: Buffer.from('%PDF-1.4 Mock'),
-      }),
+    const mockIngestionRepo: Partial<IngestionRepository> = {
+      createRun: jest
+        .fn()
+        .mockResolvedValue({ id: 'run-1', status: 'pending' }),
+      updateRunStatus: jest.fn().mockResolvedValue(undefined),
+      findRunByIdempotencyKey: jest.fn().mockResolvedValue(null),
     };
 
-    ingestionService = new IngestionService(
-      mockPrisma,
-      mockLibraryTx,
-      new IdempotencyRepository(mockPrisma),
-      new PdfExtractorProvider(),
-      new BibtexParser(),
-      mockStoragePort,
-      connector,
-      mockMetadataService,
-      mockCatalogService,
-    );
+    const mockIdempotencyRepo: Partial<IdempotencyRepository> = {
+      claim: jest
+        .fn()
+        .mockResolvedValue({ status: 'acquired', leaseToken: 'tok' }),
+      markSucceeded: jest.fn().mockResolvedValue(true),
+      markFailed: jest.fn().mockResolvedValue(false),
+    };
+
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        IngestionService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: IngestionRepository, useValue: mockIngestionRepo },
+        { provide: IdempotencyRepository, useValue: mockIdempotencyRepo },
+        { provide: CatalogService, useValue: mockCatalogService },
+        { provide: METADATA_PORT, useValue: null },
+        { provide: STORAGE_PORT, useValue: null },
+        { provide: UrlCaptureProvider, useValue: connector },
+        { provide: PdfExtractorProvider, useValue: null },
+        { provide: TransactionService, useValue: mockTxService },
+        { provide: IngestionStrategyRegistry, useValue: null },
+      ],
+    }).compile();
+
+    ingestionService = moduleRef.get<IngestionService>(IngestionService);
+    // Inject prisma directly since it's resolved at runtime
+    (ingestionService as any).prisma = mockPrisma;
+    (ingestionService as any).catalogService = mockCatalogService;
+    (ingestionService as any).urlCaptureProvider = connector;
+    (ingestionService as any).txService = mockTxService;
+    (ingestionService as any).ingestionRepo = mockIngestionRepo;
   });
 
   describe('Section A: Token Security & Bypasses Closure', () => {
@@ -271,7 +291,7 @@ describe('Gate H: URL Capture Security & Persistent CapturePreview Record', () =
         },
       );
 
-      expect((result as any).id).toBe('item-1');
+      expect(result.id).toBe('item-1');
       expect(mockPrisma.capturePreview.updateMany).toHaveBeenCalledWith({
         where: { id: 'preview-1', consumedAt: null },
         data: { consumedAt: expect.any(Date) },
@@ -409,7 +429,7 @@ describe('Gate H: URL Capture Security & Persistent CapturePreview Record', () =
       );
     });
 
-    it('14. Preserves structured creators and maps deterministically to authors list', async () => {
+    it('14. Preserves structured creators and maps to contributors on createItem', async () => {
       const meta = {
         title: 'Attention Is All You Need',
         url: 'https://arxiv.org/abs/1706.03762',
@@ -451,10 +471,16 @@ describe('Gate H: URL Capture Security & Persistent CapturePreview Record', () =
         previewToken: signed.previewToken!,
       });
 
+      // creators should be passed through (repository maps to contributors)
       expect(mockCatalogService.createItem).toHaveBeenCalledWith(
         workspaceId,
         expect.objectContaining({
-          authors: ['Vaswani, Ashish', 'Shazeer, Noam'],
+          creators: expect.arrayContaining([
+            expect.objectContaining({
+              lastName: 'Vaswani',
+              firstName: 'Ashish',
+            }),
+          ]),
         }),
         expect.any(Object),
       );
@@ -483,10 +509,6 @@ describe('Gate H: URL Capture Security & Persistent CapturePreview Record', () =
     });
 
     it('16. Cleans up expired and consumed preview records according to retention window', async () => {
-      mockPrisma.capturePreview.deleteMany = jest
-        .fn()
-        .mockResolvedValue({ count: 42 });
-
       const count = await ingestionService.cleanupExpiredPreviews(7);
       expect(count).toBe(42);
       expect(mockPrisma.capturePreview.deleteMany).toHaveBeenCalledWith({

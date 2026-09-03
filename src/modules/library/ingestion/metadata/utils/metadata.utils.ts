@@ -15,7 +15,7 @@ export {
 export type {
   CreatorInput,
   IdentifierScheme,
-} from '../../../catalog/types/item.types';
+} from '../../../catalog/types/catalog.types';
 
 export { normalizeTags } from '../../../tags/utils/tags.utils';
 export type { TagInput, TagObjectInput } from '../../../tags/types/tag.types';

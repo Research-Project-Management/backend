@@ -446,6 +446,94 @@ export class FileController {
     return this.fileService.batchToggleStar(dto.ids, dto.starred);
   }
 
+  @Get(':fileId/content')
+  @ApiOperation({ summary: 'Stream binary content of file' })
+  async getFileContent(
+    @Param('fileId') fileId: string,
+    @CurrentUser('id') userId: string,
+    @Req() req: FastifyRequest,
+    @Res() res: FastifyReply,
+  ) {
+    const rangeHeader = req.headers?.range;
+
+    try {
+      const {
+        stream,
+        contentType,
+        contentLength,
+        contentRange,
+        filename,
+        statusCode,
+      } = await this.fileService.getFileContentStream(
+        fileId,
+        userId,
+        rangeHeader,
+      );
+
+      res.status(
+        statusCode ||
+          (contentRange ? HttpStatus.PARTIAL_CONTENT : HttpStatus.OK),
+      );
+      res.header('Content-Type', contentType);
+      if (contentLength !== undefined && contentLength !== null) {
+        res.header('Content-Length', contentLength);
+      }
+      if (contentRange) {
+        res.header('Content-Range', contentRange);
+      }
+      res.header('Accept-Ranges', 'bytes');
+      res.header('X-Content-Type-Options', 'nosniff');
+      res.header('Cache-Control', 'private, no-cache, no-transform');
+
+      // Safe inline policy: only PDF and safe image MIME types are permitted to be rendered inline
+      const safeInlineTypes = new Set([
+        'application/pdf',
+        'image/jpeg',
+        'image/png',
+        'image/webp',
+        'image/gif',
+      ]);
+      const isInline = safeInlineTypes.has(contentType);
+      const dispositionType = isInline ? 'inline' : 'attachment';
+
+      // Sanitize filename against CRLF / Header injection
+      const sanitizedFilename = (filename || 'file').replace(/[\r\n\t"]/g, '_');
+      const encodedFilename = encodeURIComponent(sanitizedFilename);
+
+      res.header(
+        'Content-Disposition',
+        `${dispositionType}; filename="${sanitizedFilename}"; filename*=UTF-8''${encodedFilename}`,
+      );
+
+      const streamBody = stream as {
+        on?: (event: string, listener: (...args: any[]) => void) => void;
+      };
+      if (typeof streamBody?.on === 'function') {
+        streamBody.on('error', () => {
+          // Suppress stream error when client disconnects/aborts early
+        });
+      }
+
+      return res.send(stream);
+    } catch (err: any) {
+      if (
+        err?.$metadata?.httpStatusCode === 416 ||
+        err?.statusCode === 416 ||
+        err?.status === 416 ||
+        err?.response?.statusCode === 416
+      ) {
+        if (err?.response?.contentRange) {
+          res.header('Content-Range', err.response.contentRange);
+        }
+        res.header('Accept-Ranges', 'bytes');
+        return res
+          .status(HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
+          .send({ message: 'Requested range not satisfiable' });
+      }
+      throw err;
+    }
+  }
+
   @Get(':fileId')
   @ApiOperation({ summary: 'Get file metadata by ID' })
   async getFile(

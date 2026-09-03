@@ -53,7 +53,7 @@ export type LibraryEventType =
   (typeof SYNC_EVENT_TYPES)[keyof typeof SYNC_EVENT_TYPES];
 
 export type LibraryItemSource =
-  'doi' | 'url' | 'bibtex' | 'pdf' | 'manual' | 'external_sync';
+  'doi' | 'url' | 'bibtex' | 'ris' | 'pdf' | 'manual' | 'external_sync';
 
 export interface ItemCreatedOutboxPayload {
   itemId: string;

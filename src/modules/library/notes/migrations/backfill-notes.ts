@@ -1,3 +1,4 @@
+// @ts-nocheck -- One-time historical backfill script; legacy columns dropped in 20260902000000_library_destructive_contraction
 import { PrismaClient } from '@prisma/client';
 
 export interface BackfillNotesResult {
@@ -62,7 +63,8 @@ export function extractNotePayloads(rawNotes: any): ExtractedNoteContent[] {
           results.push({
             title: titleStr,
             contentMd: contentStr.trim(),
-            contentJson: entry.contentJson || (entry.type === 'doc' ? entry : undefined),
+            contentJson:
+              entry.contentJson || (entry.type === 'doc' ? entry : undefined),
           });
         }
       }
@@ -138,7 +140,8 @@ export async function runBackfillNotes(
   const eligibleItems = allItems.filter((item) => {
     if (!item.notes) return false;
     if (Array.isArray(item.notes) && item.notes.length === 0) return false;
-    if (typeof item.notes === 'string' && item.notes.trim() === '') return false;
+    if (typeof item.notes === 'string' && item.notes.trim() === '')
+      return false;
     return true;
   });
 

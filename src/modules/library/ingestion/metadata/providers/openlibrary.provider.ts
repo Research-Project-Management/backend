@@ -85,7 +85,8 @@ export class OpenLibraryProvider implements MetadataProvider {
     item: Record<string, unknown>,
     cleanIsbn: string,
   ): ProviderResult {
-    const rawTitle = typeof item.title === 'string' ? item.title.trim() : 'Untitled Book';
+    const rawTitle =
+      typeof item.title === 'string' ? item.title.trim() : 'Untitled Book';
     const title = rawTitle || 'Untitled Book';
 
     const authors: string[] = [];
@@ -116,7 +117,8 @@ export class OpenLibraryProvider implements MetadataProvider {
     }
 
     const pages =
-      typeof item.number_of_pages === 'number' || typeof item.number_of_pages === 'string'
+      typeof item.number_of_pages === 'number' ||
+      typeof item.number_of_pages === 'string'
         ? String(item.number_of_pages)
         : undefined;
 
@@ -127,17 +129,28 @@ export class OpenLibraryProvider implements MetadataProvider {
     const rawUrl = typeof item.url === 'string' ? item.url : undefined;
     const canonicalUrl = rawUrl || `https://openlibrary.org/isbn/${cleanIsbn}`;
 
+    const creators = authors.map((name, idx) => ({
+      orderIndex: idx,
+      creatorType: 'author',
+      fullName: name,
+    }));
+
     return {
       provider: this.id,
       metadata: {
         title,
         authors,
+        creators,
         year,
         isbn: cleanIsbn,
         publisher,
         pages,
         itemType: 'book',
         url: canonicalUrl,
+        extraFields: {
+          numPages: pages,
+          isbn: cleanIsbn,
+        },
         provenance: {
           originProvider: this.id,
           resolvedAt: new Date().toISOString(),

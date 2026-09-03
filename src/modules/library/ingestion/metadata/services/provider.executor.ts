@@ -277,7 +277,12 @@ export class ProviderExecutor {
             retryDelay =
               retryAfterMs && retryAfterMs > 0
                 ? Math.min(retryAfterMs, ProviderExecutor.MAX_RETRY_AFTER_MS)
-                : Math.min(200 * Math.pow(2, attempt), 2000);
+                : status === 'rate_limited'
+                  ? Math.min(
+                      1200 * Math.pow(1.5, attempt),
+                      ProviderExecutor.MAX_RETRY_AFTER_MS,
+                    )
+                  : Math.min(200 * Math.pow(2, attempt), 2000);
           } else {
             this.logger.warn(
               JSON.stringify({

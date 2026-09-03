@@ -82,6 +82,77 @@ export class ReconciliationPolicy {
       });
 
       const best = sorted[0];
+
+      // Special handling for array fields: Union tags/keywords and notes across providers
+      if (field === 'tags' || field === 'keywords' || field === 'labels') {
+        const unionSet = new Set<string>();
+        for (const ev of evidences) {
+          if (Array.isArray(ev.normalizedValue)) {
+            for (const t of ev.normalizedValue) {
+              if (typeof t === 'string' && t.trim()) {
+                unionSet.add(t.trim().toLowerCase());
+              }
+            }
+          }
+        }
+        const mergedArray = Array.from(unionSet);
+        selectedFields[field] = {
+          ...best,
+          normalizedValue: mergedArray,
+        };
+        proposedItem[field] = mergedArray;
+        rejectedFields[field] = [];
+        continue;
+      }
+
+      if (field === 'notes') {
+        const mergedNotes: Array<{ content: string; source?: string }> = [];
+        const seen = new Set<string>();
+        for (const ev of evidences) {
+          if (Array.isArray(ev.normalizedValue)) {
+            for (const n of ev.normalizedValue) {
+              const text =
+                typeof n === 'string'
+                  ? n.trim()
+                  : n && typeof n === 'object'
+                    ? String(n.content || '').trim()
+                    : '';
+              if (text && !seen.has(text)) {
+                seen.add(text);
+                mergedNotes.push(
+                  typeof n === 'string'
+                    ? { content: text }
+                    : { content: text, source: n.source },
+                );
+              }
+            }
+          }
+        }
+        selectedFields[field] = {
+          ...best,
+          normalizedValue: mergedNotes,
+        };
+        proposedItem[field] = mergedNotes;
+        rejectedFields[field] = [];
+        continue;
+      }
+
+      if (field === 'extraFields') {
+        const mergedExtra: Record<string, any> = {};
+        for (const ev of evidences) {
+          if (ev.normalizedValue && typeof ev.normalizedValue === 'object') {
+            Object.assign(mergedExtra, ev.normalizedValue);
+          }
+        }
+        selectedFields[field] = {
+          ...best,
+          normalizedValue: mergedExtra,
+        };
+        proposedItem[field] = mergedExtra;
+        rejectedFields[field] = [];
+        continue;
+      }
+
       selectedFields[field] = best;
       proposedItem[field] = best.normalizedValue;
       rejectedFields[field] = sorted.slice(1);

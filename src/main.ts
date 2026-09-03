@@ -43,20 +43,20 @@ async function bootstrap() {
   );
 
   // Multipart file uploads (Cloudflare R2 / S3 streaming)
-  await app.register(multipart as any, {
+  await app.register(multipart, {
     limits: {
       fileSize: 100 * 1024 * 1024, // 100MB
     },
   });
 
   // Security Headers (Helmet)
-  await app.register(helmet as any, {
+  await app.register(helmet, {
     contentSecurityPolicy: false,
     crossOriginEmbedderPolicy: false,
   });
 
   // Rate Limiting (Throttle & Brute-force protection)
-  await app.register(rateLimit as any, {
+  await app.register(rateLimit, {
     max: 150,
     timeWindow: '1 minute',
     allowList: ['127.0.0.1', 'localhost'],
@@ -189,7 +189,7 @@ async function bootstrap() {
   });
 
   const port = Number(process.env.PORT) || 3000;
-  const host = process.env.HOST || '0.0.0.0';
+  const host = process.env.HOST || '::';
   await app.listen(port, host);
   logger.log(`🚀 NestJS + Fastify running on http://localhost:${port}`);
   logger.log(`📚 Swagger Documentation ready at http://localhost:${port}/docs`);

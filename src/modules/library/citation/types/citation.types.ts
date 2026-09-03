@@ -44,4 +44,6 @@ export interface FormattedCitationResult {
   styleId: CitationStyleId;
   inText: string;
   bibliography: string;
+  bibliographyHtml?: string;
+  source?: 'publisher' | 'csl-engine';
 }

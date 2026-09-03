@@ -3,13 +3,18 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  HttpException,
+  HttpStatus,
+  ServiceUnavailableException,
   Optional,
   Logger,
+  OnModuleInit,
 } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FileRepository } from './file.repository';
 import { R2Service } from '../r2/r2.service';
+import { parseByteRange } from './utils/range.utils';
 import { PrismaService } from '@/core/database/prisma.service';
 import { Prisma, EntityType } from '@prisma/client';
 import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
@@ -32,8 +37,15 @@ export type FormattedFile<
   parent?: string | null;
 };
 
+export const NON_WORKSPACE_STORAGE_EXCLUSION: Prisma.FileWhereInput['NOT'] = [
+  { linkedToType: { in: ['Project', 'Page', 'Library', 'Paper'] } },
+  { metaData: { path: ['source'], equals: 'library' } },
+  { metaData: { path: ['source'], equals: 'paper' } },
+  { attachments: { some: {} } },
+];
+
 @Injectable()
-export class FileService {
+export class FileService implements OnModuleInit {
   private readonly logger = new Logger(FileService.name);
 
   constructor(
@@ -43,6 +55,34 @@ export class FileService {
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
+
+  async onModuleInit() {
+    try {
+      // Self-healing migration: update legacy library files in files table to linkedToType: 'Library'
+      const updated = await this.prisma.file.updateMany({
+        where: {
+          linkedToType: 'Workspace',
+          OR: [
+            { metaData: { path: ['source'], equals: 'library' } },
+            { metaData: { path: ['source'], equals: 'paper' } },
+            { attachments: { some: {} } },
+          ],
+        },
+        data: {
+          linkedToType: 'Library',
+        },
+      });
+      if (updated.count > 0) {
+        this.logger.log(
+          `[Remediation] Isolated ${updated.count} legacy library files from Workspace Storage`,
+        );
+      }
+    } catch (err) {
+      this.logger.debug?.(
+        `[Remediation] Legacy library file isolation check bypassed: ${err}`,
+      );
+    }
+  }
 
   private async invalidateStorageCache(
     workspaceId?: string | null,
@@ -146,6 +186,29 @@ export class FileService {
     const file = await this.fileRepo.findFileById(fileId);
     if (!file) throw new NotFoundException('File not found');
 
+    if (required === 'write') {
+      let isLibraryFile =
+        file.linkedToType === 'Library' ||
+        file.linkedToType === 'Paper' ||
+        (file.metaData as any)?.source === 'library' ||
+        (file.metaData as any)?.source === 'paper' ||
+        (Array.isArray((file as any).attachments) &&
+          (file as any).attachments.length > 0);
+
+      if (!isLibraryFile && this.prisma?.catalogAttachment) {
+        const attCount = await this.prisma.catalogAttachment.count({
+          where: { fileId: file.id },
+        });
+        if (attCount > 0) isLibraryFile = true;
+      }
+
+      if (isLibraryFile) {
+        throw new ForbiddenException(
+          'Cannot modify or delete Library documents through Storage Drive APIs. Use the Library module.',
+        );
+      }
+    }
+
     if (file.authorId === userId) return file;
 
     const directShare = file.sharedWith?.find((s) => s.userId === userId);
@@ -183,6 +246,31 @@ export class FileService {
           );
         }
         return file;
+      }
+    }
+
+    if (
+      file.linkedToType === 'Paper' &&
+      file.linkedToId &&
+      this.prisma?.catalogItem
+    ) {
+      const paper = await this.prisma.catalogItem.findUnique({
+        where: { id: file.linkedToId },
+        select: { workspaceId: true },
+      });
+      if (paper?.workspaceId) {
+        const role = await this.fileRepo.findWorkspaceMemberRole(
+          paper.workspaceId,
+          userId,
+        );
+        if (role) {
+          if (required === 'write' && role === 'viewer') {
+            throw new ForbiddenException(
+              'Viewers cannot modify files in this workspace',
+            );
+          }
+          return file;
+        }
       }
     }
 
@@ -353,13 +441,19 @@ export class FileService {
 
     const resolvedWorkspaceId = await this.resolveWorkspaceId(scope);
 
+    const isLibrary =
+      scope.source?.toLowerCase() === 'library' ||
+      scope.source?.toLowerCase() === 'paper';
+
     const linkedToType = scope.pageId
       ? 'Page'
       : scope.projectId
         ? 'Project'
-        : resolvedWorkspaceId
-          ? 'Workspace'
-          : null;
+        : isLibrary
+          ? 'Library'
+          : resolvedWorkspaceId
+            ? 'Workspace'
+            : null;
     const linkedToId =
       scope.pageId || scope.projectId || resolvedWorkspaceId || null;
 
@@ -385,7 +479,7 @@ export class FileService {
           await this.invalidateStorageCache(resolvedWorkspaceId, file.id);
         }
 
-        if (file) {
+        if (file && linkedToType !== 'Library') {
           this.eventEmitter?.emit(
             'file.created',
             new DomainActivityEvent({
@@ -509,6 +603,123 @@ export class FileService {
     return { file: formatted };
   }
 
+  async getFileContentStream(
+    fileId: string,
+    userId: string,
+    rangeHeader?: string,
+  ) {
+    const file = await this.assertCanAccessFile(userId, fileId, 'read');
+
+    if (file.trashedAt !== null || (file as any).isTrash) {
+      throw new NotFoundException(`File ${fileId} is in trash`);
+    }
+
+    let storageKey = '';
+    const R2_PREFIX = '/api/files/r2/';
+    if (file.url && file.url.startsWith(R2_PREFIX)) {
+      storageKey = file.url.slice(R2_PREFIX.length).trim();
+    } else if (
+      file.url &&
+      !file.url.startsWith('http') &&
+      !file.url.startsWith('/api/files/')
+    ) {
+      storageKey = file.url.trim();
+    } else if ((file.metaData as any)?.storageKey) {
+      storageKey = (file.metaData as any).storageKey;
+    } else if (file.url) {
+      storageKey = file.url.replace(/^\/+/, '');
+    }
+
+    if (!storageKey) {
+      throw new NotFoundException(
+        `Storage object key not found for file ${fileId}`,
+      );
+    }
+
+    const totalSize = file.size ?? 0;
+    let validatedRange: {
+      start: number;
+      end: number;
+      length: number;
+      contentRange: string;
+    } | null = null;
+
+    if (rangeHeader) {
+      const rangeResult = parseByteRange(rangeHeader, totalSize);
+      if (!rangeResult.success) {
+        throw new HttpException(
+          {
+            statusCode: HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE,
+            message: 'Requested range not satisfiable',
+            contentRange: rangeResult.contentRange,
+          },
+          HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE,
+        );
+      }
+      validatedRange = rangeResult;
+    }
+
+    const key = decodeURIComponent(storageKey);
+    const rangeParam = validatedRange
+      ? `bytes=${validatedRange.start}-${validatedRange.end}`
+      : undefined;
+
+    let output: any = null;
+    try {
+      output = await this.r2Service.getObjectStream(key, rangeParam);
+    } catch (err: any) {
+      if (
+        err?.name === 'NoSuchKey' ||
+        err?.$metadata?.httpStatusCode === 404 ||
+        err?.code === 'ENOENT'
+      ) {
+        throw new NotFoundException(
+          `File content not found in storage: ${fileId}`,
+        );
+      }
+      this.logger.error(
+        `Storage service error for file ${fileId} (key: ${key}): ${err?.message || err}`,
+      );
+      throw new ServiceUnavailableException(
+        `Storage service unavailable for file ${fileId}`,
+      );
+    }
+
+    if (!output?.Body) {
+      throw new NotFoundException(
+        `File content stream not found for file ${fileId}`,
+      );
+    }
+
+    let contentType =
+      file.mimeType || output.ContentType || 'application/octet-stream';
+    if (contentType === 'application/octet-stream') {
+      const lower = (file.filename || key).toLowerCase();
+      if (lower.endsWith('.pdf')) contentType = 'application/pdf';
+      else if (lower.endsWith('.png')) contentType = 'image/png';
+      else if (lower.endsWith('.jpg') || lower.endsWith('.jpeg'))
+        contentType = 'image/jpeg';
+      else if (lower.endsWith('.svg')) contentType = 'image/svg+xml';
+      else if (lower.endsWith('.webp')) contentType = 'image/webp';
+      else if (lower.endsWith('.gif')) contentType = 'image/gif';
+      else if (lower.endsWith('.mp4')) contentType = 'video/mp4';
+      else if (lower.endsWith('.mp3')) contentType = 'audio/mpeg';
+      else if (lower.endsWith('.json')) contentType = 'application/json';
+      else if (lower.endsWith('.txt')) contentType = 'text/plain';
+    }
+
+    return {
+      stream: output.Body,
+      contentType,
+      contentLength: validatedRange
+        ? validatedRange.length
+        : (output.ContentLength ?? file.size),
+      contentRange: validatedRange ? validatedRange.contentRange : undefined,
+      filename: file.filename || 'document.pdf',
+      statusCode: validatedRange ? HttpStatus.PARTIAL_CONTENT : HttpStatus.OK,
+    };
+  }
+
   async getFolderPath(folderId: string) {
     const path: { id: string | null; name: string }[] = [];
     let currentId: string | null = folderId;
@@ -552,7 +763,15 @@ export class FileService {
   async batchDeleteFiles(ids: string[]) {
     if (!ids || ids.length === 0)
       return { message: 'No files provided', count: 0 };
-    const res = await this.fileRepo.batchUpdateFiles(ids, {
+    const safeFiles = await this.fileRepo.findFiles({
+      id: { in: ids },
+      NOT: NON_WORKSPACE_STORAGE_EXCLUSION,
+    });
+    const safeIds = safeFiles.map((f) => f.id);
+    if (safeIds.length === 0) {
+      return { message: 'No valid workspace files to delete', count: 0 };
+    }
+    const res = await this.fileRepo.batchUpdateFiles(safeIds, {
       trashedAt: new Date(),
     });
     return { message: 'Files moved to trash', count: res.count };
@@ -568,7 +787,15 @@ export class FileService {
   async batchRestoreFiles(ids: string[]) {
     if (!ids || ids.length === 0)
       return { message: 'No files provided', count: 0 };
-    const res = await this.fileRepo.batchUpdateFiles(ids, {
+    const safeFiles = await this.fileRepo.findFiles({
+      id: { in: ids },
+      NOT: NON_WORKSPACE_STORAGE_EXCLUSION,
+    });
+    const safeIds = safeFiles.map((f) => f.id);
+    if (safeIds.length === 0) {
+      return { message: 'No valid workspace files to restore', count: 0 };
+    }
+    const res = await this.fileRepo.batchUpdateFiles(safeIds, {
       trashedAt: null,
     });
     return { message: 'Files restored successfully', count: res.count };
@@ -593,13 +820,23 @@ export class FileService {
   async batchPermanentlyDeleteFiles(ids: string[]) {
     if (!ids || ids.length === 0)
       return { message: 'No files provided', count: 0 };
-    const files = await this.fileRepo.findFilesByIds(ids);
+    const safeFiles = await this.fileRepo.findFiles({
+      id: { in: ids },
+      NOT: NON_WORKSPACE_STORAGE_EXCLUSION,
+    });
+    const safeIds = safeFiles.map((f) => f.id);
+    if (safeIds.length === 0) {
+      return {
+        message: 'No valid workspace files to permanently delete',
+        count: 0,
+      };
+    }
 
     const deletePromises: Promise<unknown>[] = [
-      this.fileRepo.batchDeleteFiles(ids),
+      this.fileRepo.batchDeleteFiles(safeIds),
     ];
 
-    for (const file of files) {
+    for (const file of safeFiles) {
       if (file.url && file.url.includes('/api/files/r2/')) {
         const key = file.url.replace('/api/files/r2/', '');
         deletePromises.push(this.r2Service.deleteObject(key));
@@ -607,7 +844,7 @@ export class FileService {
     }
 
     await Promise.all(deletePromises);
-    return { message: 'Files permanently deleted', count: files.length };
+    return { message: 'Files permanently deleted', count: safeFiles.length };
   }
 
   async toggleStar(fileId: string, userId: string) {
@@ -625,7 +862,15 @@ export class FileService {
   async batchToggleStar(ids: string[], starred: boolean) {
     if (!ids || ids.length === 0)
       return { message: 'No files provided', count: 0 };
-    const res = await this.fileRepo.batchUpdateFiles(ids, {
+    const safeFiles = await this.fileRepo.findFiles({
+      id: { in: ids },
+      NOT: NON_WORKSPACE_STORAGE_EXCLUSION,
+    });
+    const safeIds = safeFiles.map((f) => f.id);
+    if (safeIds.length === 0) {
+      return { message: 'No valid workspace files to update', count: 0 };
+    }
+    const res = await this.fileRepo.batchUpdateFiles(safeIds, {
       starred,
     });
     return {
@@ -732,9 +977,7 @@ export class FileService {
       where.linkedToType = 'Project';
     } else if (workspaceId) {
       where.workspaceId = workspaceId;
-      where.NOT = {
-        linkedToType: { in: ['Project', 'Page', 'Library', 'Paper'] },
-      };
+      where.NOT = NON_WORKSPACE_STORAGE_EXCLUSION;
     }
 
     if (scope.parentId !== undefined) {
@@ -764,9 +1007,7 @@ export class FileService {
         workspaceId,
         trashedAt: null,
         parentId: null,
-        NOT: {
-          linkedToType: { in: ['Project', 'Page', 'Library', 'Paper'] },
-        },
+        NOT: NON_WORKSPACE_STORAGE_EXCLUSION,
       },
       [{ isFolder: 'desc' }, { createdAt: 'desc' }],
       50,
@@ -791,9 +1032,7 @@ export class FileService {
         ...(workspaceId &&
           !projectId && {
             workspaceId,
-            NOT: {
-              linkedToType: { in: ['Project', 'Page', 'Library', 'Paper'] },
-            },
+            NOT: NON_WORKSPACE_STORAGE_EXCLUSION,
           }),
         ...(projectId && { linkedToId: projectId, linkedToType: 'Project' }),
       },
@@ -815,9 +1054,7 @@ export class FileService {
         ...(workspaceId &&
           !projectId && {
             workspaceId,
-            NOT: {
-              linkedToType: { in: ['Project', 'Page', 'Library', 'Paper'] },
-            },
+            NOT: NON_WORKSPACE_STORAGE_EXCLUSION,
           }),
         ...(projectId && { linkedToId: projectId, linkedToType: 'Project' }),
       },
@@ -848,6 +1085,17 @@ export class FileService {
           (f.linkedToId !== projectId || f.linkedToType !== 'Project')
         )
           return false;
+        if (
+          ['Project', 'Page', 'Library', 'Paper'].includes(
+            f.linkedToType || '',
+          ) ||
+          (f.metaData as any)?.source === 'library' ||
+          (f.metaData as any)?.source === 'paper' ||
+          (Array.isArray((f as any).attachments) &&
+            (f as any).attachments.length > 0)
+        ) {
+          return false;
+        }
         return true;
       });
 
@@ -865,9 +1113,7 @@ export class FileService {
         ...(workspaceId &&
           !projectId && {
             workspaceId,
-            NOT: {
-              linkedToType: { in: ['Project', 'Page', 'Library', 'Paper'] },
-            },
+            NOT: NON_WORKSPACE_STORAGE_EXCLUSION,
           }),
         ...(projectId && { linkedToId: projectId, linkedToType: 'Project' }),
       },
