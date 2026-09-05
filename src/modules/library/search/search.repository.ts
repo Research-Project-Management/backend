@@ -31,15 +31,11 @@ export class SearchRepository {
     return tx || this.prisma;
   }
 
-  async searchItems(
+  private buildSearchWhere(
     workspaceId: string,
     options: SearchOptions,
-    tx?: Prisma.TransactionClient,
-  ) {
-    const client = this.getClient(tx);
-    const limit = Math.min(options.limit ?? 20, 100);
-
-    const where: Prisma.CatalogItemWhereInput = {
+  ): Prisma.CatalogItemWhereInput {
+    return {
       workspaceId,
       deletedAt: null,
       ...(options.itemType ? { itemType: options.itemType } : {}),
@@ -111,6 +107,16 @@ export class SearchRepository {
           }
         : {}),
     };
+  }
+
+  async searchItems(
+    workspaceId: string,
+    options: SearchOptions,
+    tx?: Prisma.TransactionClient,
+  ) {
+    const client = this.getClient(tx);
+    const limit = Math.min(options.limit ?? 20, 100);
+    const where = this.buildSearchWhere(workspaceId, options);
 
     const orderBy: Prisma.CatalogItemOrderByWithRelationInput =
       options.sortBy === 'year'
@@ -163,16 +169,17 @@ export class SearchRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<FacetResult> {
     const client = this.getClient(tx);
+    const where = this.buildSearchWhere(workspaceId, options);
 
+    // Limit facet sampling to top 2,000 matches to prevent OOM on massive libraries
     const items = await client.catalogItem.findMany({
-      where: {
-        workspaceId,
-        deletedAt: null,
-      },
+      where,
+      take: 2000,
       select: {
         itemType: true,
         year: true,
         itemTags: {
+          take: 10,
           select: {
             tag: {
               select: { name: true },

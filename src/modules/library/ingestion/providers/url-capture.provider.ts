@@ -1,8 +1,16 @@
-﻿import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as dns from 'dns/promises';
 import * as net from 'net';
 import { createHmac, createHash, randomBytes, timingSafeEqual } from 'crypto';
+import {
+  cleanBibliographicText,
+  decodeHtmlEntities,
+  normalizeDoi,
+  normalizeIsbn,
+  normalizeIssn,
+} from '../metadata/utils/metadata.utils';
+import { parseCreatorString } from '../../items/creator-parser.util';
 
 export interface CapturedItemMetadata {
   title: string;
@@ -37,6 +45,8 @@ export interface CapturedItemMetadata {
   publicationDate?: string;
   journalAbbr?: string;
   shortTitle?: string;
+  language?: string;
+  pdfUrl?: string;
   rights?: string;
   license?: string;
   citationKey?: string;
@@ -372,6 +382,8 @@ export class UrlCaptureProvider {
         libraryCatalog: 'arXiv.org',
         callNumber: `arXiv:${cleanId}`,
         itemType: 'preprint',
+        language: 'en',
+        pdfUrl: `https://arxiv.org/pdf/${cleanId}.pdf`,
         rights,
         license: rights,
         citationKey,
@@ -523,47 +535,24 @@ export class UrlCaptureProvider {
       const authors: string[] = [];
       let authorMatch: RegExpExecArray | null;
       while ((authorMatch = authorRegex.exec(text)) !== null) {
-        const name = authorMatch[1].trim();
-        if (name.includes(',')) {
-          const [last, first] = name.split(',').map((s) => s.trim());
-          const full = `${first} ${last}`.trim();
-          authors.push(full);
-          creators.push({
-            firstName: first,
-            lastName: last,
-            fullName: full,
-            creatorType: 'author',
-          });
-        } else {
-          authors.push(name);
-          creators.push({
-            lastName: name,
-            fullName: name,
-            creatorType: 'author',
-          });
-        }
+        const rawName = decodeHtmlEntities(authorMatch[1].trim());
+        if (!rawName) continue;
+        const parsed = parseCreatorString(rawName, creators.length);
+        authors.push(parsed.fullName);
+        creators.push({
+          firstName: parsed.firstName,
+          lastName: parsed.lastName,
+          fullName: parsed.fullName,
+          creatorType: parsed.creatorType,
+        });
       }
 
       const title = titleMatch
-        ? titleMatch[1]
-            .replace(/&amp;/g, '&')
-            .replace(/&lt;/g, '<')
-            .replace(/&gt;/g, '>')
-            .replace(/&quot;/g, '"')
-            .replace(/&#39;/g, "'")
-            .trim()
-            .slice(0, 500)
+        ? cleanBibliographicText(titleMatch[1])?.slice(0, 500) || finalUrl
         : finalUrl;
 
       const abstract = abstractMatch
-        ? abstractMatch[1]
-            .replace(/&amp;/g, '&')
-            .replace(/&lt;/g, '<')
-            .replace(/&gt;/g, '>')
-            .replace(/&quot;/g, '"')
-            .replace(/&#39;/g, "'")
-            .trim()
-            .slice(0, 15000)
+        ? cleanBibliographicText(abstractMatch[1])?.slice(0, 15000)
         : undefined;
 
       let year: number | undefined;
@@ -579,6 +568,47 @@ export class UrlCaptureProvider {
         : undefined;
       const isArxiv = Boolean(cleanArxivId) || finalUrl.includes('arxiv.org');
 
+      const languageMatch =
+        text.match(
+          /<meta\s+(?:property|name)=["'](?:citation_language|og:locale|language)["']\s+content=["'](.*?)["']/i,
+        ) ||
+        text.match(
+          /<meta\s+content=["'](.*?)["']\s+(?:property|name)=["'](?:citation_language|og:locale|language)["']/i,
+        ) ||
+        text.match(/<html[^>]*\slang=["']([a-zA-Z_-]+)["']/i);
+      const language = languageMatch
+        ? languageMatch[1].trim().split(/[-_]/)[0].toLowerCase()
+        : isArxiv
+          ? 'en'
+          : undefined;
+
+      const pdfUrlMatch =
+        text.match(
+          /<meta\s+(?:property|name)=["']citation_pdf_url["']\s+content=["'](.*?)["']/i,
+        ) ||
+        text.match(
+          /<meta\s+content=["'](.*?)["']\s+(?:property|name)=["']citation_pdf_url["']/i,
+        );
+      const pdfUrl = pdfUrlMatch
+        ? pdfUrlMatch[1].trim()
+        : cleanArxivId
+          ? `https://arxiv.org/pdf/${cleanArxivId}.pdf`
+          : undefined;
+
+      const keywordsMatch =
+        text.match(
+          /<meta\s+(?:property|name)=["'](?:citation_keywords|keywords)["']\s+content=["'](.*?)["']/i,
+        ) ||
+        text.match(
+          /<meta\s+content=["'](.*?)["']\s+(?:property|name)=["'](?:citation_keywords|keywords)["']/i,
+        );
+      const keywords = keywordsMatch
+        ? keywordsMatch[1]
+            .split(/[,;]/)
+            .map((k) => k.trim())
+            .filter(Boolean)
+        : undefined;
+
       return {
         title: title || finalUrl,
         abstract,
@@ -586,25 +616,28 @@ export class UrlCaptureProvider {
         authors: authors.length > 0 ? authors : undefined,
         year,
         publicationDate,
-        doi: doiMatch ? doiMatch[1].trim() : undefined,
+        doi: doiMatch ? (normalizeDoi(doiMatch[1]) || doiMatch[1].trim()) : undefined,
         arxivId: cleanArxivId,
         url: finalUrl,
+        pdfUrl,
+        language,
+        keywords: keywords && keywords.length > 0 ? keywords : undefined,
         publicationTitle: journalMatch
-          ? journalMatch[1].trim()
+          ? cleanBibliographicText(journalMatch[1])
           : isArxiv
             ? 'arXiv'
             : undefined,
         journal: journalMatch
-          ? journalMatch[1].trim()
+          ? cleanBibliographicText(journalMatch[1])
           : isArxiv
             ? 'arXiv'
             : undefined,
-        publisher: publisherMatch ? publisherMatch[1].trim() : undefined,
+        publisher: publisherMatch ? cleanBibliographicText(publisherMatch[1]) : undefined,
         volume: volumeMatch ? volumeMatch[1].trim() : undefined,
         issue: issueMatch ? issueMatch[1].trim() : undefined,
         pages,
-        issn: issnMatch ? issnMatch[1].trim() : undefined,
-        isbn: isbnMatch ? isbnMatch[1].trim() : undefined,
+        issn: issnMatch ? (normalizeIssn(issnMatch[1]) || issnMatch[1].trim()) : undefined,
+        isbn: isbnMatch ? (normalizeIsbn(isbnMatch[1]) || isbnMatch[1].trim()) : undefined,
         archive: isArxiv ? 'arXiv' : undefined,
         libraryCatalog: isArxiv ? 'arXiv.org' : undefined,
         callNumber: cleanArxivId ? `arXiv:${cleanArxivId}` : undefined,

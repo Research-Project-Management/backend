@@ -1,4 +1,4 @@
-import { CatalogItemMapper } from '@/modules/library/catalog/mappers/catalog-item.mapper';
+import { CatalogItemMapper } from '@/modules/library/items/items.mapper';
 
 describe('CatalogItemMapper Unit Tests (Primary Attachment & URL Normalization)', () => {
   it('selects primary_pdf attachment when attachmentType is primary_pdf even if it is at index 1', () => {
@@ -105,5 +105,37 @@ describe('CatalogItemMapper Unit Tests (Primary Attachment & URL Normalization)'
 
     const mapped = CatalogItemMapper.toDomain(rawDedupItem);
     expect(mapped.fileUrl).toBe('/api/files/file-dedup-1/content');
+  });
+
+  it('projects all persisted identifiers and keeps editors out of the author list', () => {
+    const mapped = CatalogItemMapper.toDomain({
+      id: 'item-identifiers',
+      title: 'Metadata record',
+      fileUrl: null,
+      attachments: [],
+      doi: '10.1000/example',
+      arxivId: '2401.12345',
+      pmid: '12345678',
+      pmcid: 'PMC1234567',
+      isbn: '978-1-4028-9462-6',
+      issn: '1234-5678',
+      contributors: [
+        { creatorType: 'author', fullName: 'Ada Lovelace' },
+        { creatorType: 'editor', fullName: 'Grace Hopper' },
+      ],
+      identifiers: [],
+    });
+
+    expect((mapped as any).authors).toEqual(['Ada Lovelace']);
+    expect((mapped as any).identifiers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'doi', value: '10.1000/example' }),
+        expect.objectContaining({ type: 'arxiv', value: '2401.12345' }),
+        expect.objectContaining({ type: 'pmid', value: '12345678' }),
+        expect.objectContaining({ type: 'pmcid', value: 'PMC1234567' }),
+        expect.objectContaining({ type: 'isbn', value: '978-1-4028-9462-6' }),
+        expect.objectContaining({ type: 'issn', value: '1234-5678' }),
+      ]),
+    );
   });
 });

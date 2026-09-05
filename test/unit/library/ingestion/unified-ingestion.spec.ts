@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { IngestionService } from '@/modules/library/ingestion/ingestion.service';
 import { PrismaService } from '@/core/database/prisma.service';
 import { IngestionRepository } from '@/modules/library/ingestion/ingestion.repository';
-import { TransactionService } from '@/modules/library/sync/services/transaction.service';
+import { TransactionService } from '@/modules/library/outbox/transaction.service';
 import { UrlCaptureProvider } from '@/modules/library/ingestion/providers/url-capture.provider';
 import { METADATA_PORT } from '@/modules/library/ingestion/metadata/types/metadata.types';
 import { IdempotencyRepository } from '@/modules/library/sync/repositories/idempotency.repository';
@@ -15,8 +15,20 @@ import {
 } from '@/modules/library/ingestion/errors/ingestion.errors';
 import { createHash } from 'crypto';
 import { STORAGE_PORT } from '@/modules/storage/storage.port';
-import { CatalogService } from '@/modules/library/catalog/catalog.service';
+import { CatalogService } from '@/modules/library/items/items.service';
 import { IngestionStrategyRegistry } from '@/modules/library/ingestion/strategies/ingestion-strategy.registry';
+import { DoiIngestionStrategy } from '@/modules/library/ingestion/strategies/doi-ingestion.strategy';
+import { UrlIngestionStrategy } from '@/modules/library/ingestion/strategies/url-ingestion.strategy';
+import { PdfIngestionStrategy } from '@/modules/library/ingestion/strategies/pdf-ingestion.strategy';
+import { BibtexIngestionStrategy } from '@/modules/library/ingestion/strategies/bibtex-ingestion.strategy';
+import { DoiParser } from '@/modules/library/ingestion/parsers/doi.parser';
+import { IdentifyStage } from '@/modules/library/ingestion/stages/identify.stage';
+import { NormalizeStage } from '@/modules/library/ingestion/stages/normalize.stage';
+import { EnrichStage } from '@/modules/library/ingestion/stages/enrich.stage';
+import { ReconcileStage } from '@/modules/library/ingestion/stages/reconcile.stage';
+import { MatchStage } from '@/modules/library/ingestion/stages/match.stage';
+import { CommitStage } from '@/modules/library/ingestion/stages/commit.stage';
+import { NotesService } from '@/modules/library/notes/notes.service';
 
 describe('Unified Ingestion Pipeline (DOI / URL / BibTeX / PDF / Zotero)', () => {
   let service: IngestionService;
@@ -189,6 +201,39 @@ describe('Unified Ingestion Pipeline (DOI / URL / BibTeX / PDF / Zotero)', () =>
       createDecision: jest.fn().mockResolvedValue({ id: 'dec-1' }),
     };
 
+    const doiParser = new DoiParser();
+    const doiStrategy = new DoiIngestionStrategy(
+      prisma,
+      doiParser,
+      metadataService,
+      mockCatalogService as any,
+      libraryTx,
+    );
+    const urlStrategy = new UrlIngestionStrategy(
+      urlCapture,
+      mockCatalogService as any,
+      libraryTx,
+    );
+    const pdfStrategy = new PdfIngestionStrategy(
+      prisma,
+      storagePort,
+      extractorService,
+      mockCatalogService as any,
+      libraryTx,
+      metadataService,
+    );
+    const bibtexStrategy = new BibtexIngestionStrategy(
+      bibtexParser,
+      mockCatalogService as any,
+      libraryTx,
+    );
+    const strategyRegistry = new IngestionStrategyRegistry(
+      doiStrategy,
+      urlStrategy,
+      pdfStrategy,
+      bibtexStrategy,
+    );
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         IngestionService,
@@ -202,7 +247,14 @@ describe('Unified Ingestion Pipeline (DOI / URL / BibTeX / PDF / Zotero)', () =>
         { provide: STORAGE_PORT, useValue: storagePort },
         { provide: BibtexParser, useValue: bibtexParser },
         { provide: CatalogService, useValue: mockCatalogService },
-        { provide: IngestionStrategyRegistry, useValue: null },
+        { provide: IngestionStrategyRegistry, useValue: strategyRegistry },
+        { provide: IdentifyStage, useValue: { execute: jest.fn() } },
+        { provide: NormalizeStage, useValue: { execute: jest.fn() } },
+        { provide: EnrichStage, useValue: { execute: jest.fn() } },
+        { provide: ReconcileStage, useValue: { execute: jest.fn() } },
+        { provide: MatchStage, useValue: { execute: jest.fn() } },
+        { provide: CommitStage, useValue: { execute: jest.fn() } },
+        { provide: NotesService, useValue: { createLiteratureNote: jest.fn() } },
       ],
     }).compile();
 

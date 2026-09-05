@@ -200,6 +200,7 @@ export class IdentifyStage {
 
       case 'FILE': {
         let extractedMetadata: any = {};
+        let fileBuffer: Buffer | undefined;
         if (
           this.storagePort?.readOwnedFile &&
           this.pdfExtractor?.extractDocumentFromBuffer &&
@@ -212,31 +213,66 @@ export class IdentifyStage {
               fileId: payload.fileId,
             });
             if (fileRecord?.buffer) {
+              fileBuffer = fileRecord.buffer;
               const doc = await this.pdfExtractor.extractDocumentFromBuffer(
-                fileRecord.buffer,
+                fileBuffer,
               );
-              if (doc?.metadata) {
-                extractedMetadata = doc.metadata;
+              extractedMetadata = doc?.metadata || doc || {};
+
+              // Some PDF adapters can read the document header even when the
+              // full document parser fails. Preserve that partial metadata.
+              if (
+                Object.keys(extractedMetadata).length === 0 &&
+                this.pdfExtractor.extractMetadataFromBuffer
+              ) {
+                extractedMetadata =
+                  this.pdfExtractor.extractMetadataFromBuffer(
+                    fileRecord.buffer,
+                  ) || {};
               }
             }
           } catch (err: any) {
             this.logger.warn(
               `PDF metadata extraction failed for file ${payload.fileId}: ${err?.message}`,
             );
+            // A damaged or encrypted PDF may still expose its document-info
+            // header. Keep that lightweight fallback so a DOI can be enriched
+            // rather than reducing the entire import to a filename.
+            try {
+              extractedMetadata =
+                fileBuffer && this.pdfExtractor.extractMetadataFromBuffer
+                  ? this.pdfExtractor.extractMetadataFromBuffer(fileBuffer)
+                  : {};
+            } catch {
+              extractedMetadata = {};
+            }
           }
         }
 
+        // Keep the complete extractor result at the ingestion boundary.  This
+        // is deliberately a projection rather than a hand-maintained list:
+        // adding a field to the PDF extractor must not silently discard it
+        // before normalization and reconciliation can use it.
+        const {
+          rawText: _rawText,
+          creationDate: _creationDate,
+          ...extractedItemMetadata
+        } = extractedMetadata;
+
+        const filenameDoi = payload.filename?.match(
+          /10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/,
+        )?.[0]?.replace(/[.,;:)\]]+$/, '');
+        const filenameArxivId = payload.filename?.match(
+          /(?:arxiv[:_.\-]*)?(\d{4}\.\d{4,5}(?:v\d+)?)/i,
+        )?.[1];
+
         const rawFileMeta = {
+          ...extractedItemMetadata,
+          doi: extractedMetadata.doi || filenameDoi,
+          arxivId: extractedMetadata.arxivId || filenameArxivId,
           title:
             extractedMetadata.title || payload.filename || 'Uploaded Document',
-          doi: extractedMetadata.doi,
-          arxivId: extractedMetadata.arxivId,
-          pmid: extractedMetadata.pmid,
-          authors: extractedMetadata.authors,
-          year: extractedMetadata.year,
-          abstract: extractedMetadata.abstract,
-          keywords: extractedMetadata.keywords,
-          tags: extractedMetadata.keywords,
+          tags: extractedMetadata.tags || extractedMetadata.keywords,
           fileId: payload.fileId,
           filename: payload.filename,
         };

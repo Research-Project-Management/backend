@@ -1,7 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { Prisma } from '@prisma/client';
-import { VersionMismatchException } from '../catalog/errors/catalog.errors';
+import { VersionMismatchException } from '../items/items.errors';
 import { CollectionDeleteStrategy } from './types/collection.types';
 
 export interface CreateCollectionInput {

@@ -1,5 +1,5 @@
 import { SearchEventHandler } from '../../../../src/modules/library/search/handlers/search-event.handler';
-import { SYNC_EVENT_TYPES } from '../../../../src/modules/library/sync/events/library.events';
+import { SYNC_EVENT_TYPES } from '../../../../src/modules/library/outbox/outbox.events';
 
 describe('SearchEventHandler (Unit)', () => {
   let handler: SearchEventHandler;

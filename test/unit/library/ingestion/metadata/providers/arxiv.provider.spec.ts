@@ -30,6 +30,8 @@ describe('ArxivProvider (Standalone)', () => {
           <summary>The dominant sequence transduction models are based on complex recurrent or convolutional neural networks.</summary>
           <author><name>Ashish Vaswani</name></author>
           <author><name>Noam Shazeer</name></author>
+          <category term="cs.LG" />
+          <category term="cs.CL" />
           <arxiv:doi xmlns:arxiv="http://arxiv.org/schemas/atom">10.5555/3295222</arxiv:doi>
         </entry>
       </feed>
@@ -51,6 +53,13 @@ describe('ArxivProvider (Standalone)', () => {
     expect(res?.metadata.openAccessPdfUrl).toBe(
       'https://arxiv.org/pdf/1706.03762.pdf',
     );
+    expect(res?.metadata.keywords).toEqual(['cs.LG', 'cs.CL']);
+    expect(res?.metadata.tags).toEqual(['cs.LG', 'cs.CL']);
+    expect(res?.metadata.extraFields).toMatchObject({
+      repository: 'arXiv',
+      archiveId: '1706.03762',
+    });
+    expect(res?.metadata.extraFields).not.toHaveProperty('archiveID');
   });
 
   it('returns null on 404', async () => {

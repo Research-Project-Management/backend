@@ -1,44 +1,36 @@
-import { Module, OnModuleInit } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { SyncController } from './sync.controller';
-import { ChangeLogRepository } from './repositories/change-log.repository';
 import { IdempotencyRepository } from './repositories/idempotency.repository';
-import { TransactionService } from './services/transaction.service';
-import { OutboxWorker } from './workers/outbox.worker';
-import { SyncMetricsService } from './metrics/sync.metrics';
-import { EventDispatcher, SYNC_EVENT_TYPES } from './events/library.events';
 import { CoreModule } from '../../../core/core.module';
+import { OutboxModule } from '../outbox/outbox.module';
+import { CollectionsModule } from '../collections/collections.module';
+import { ItemsModule } from '../items/items.module';
+import { AttachmentsModule } from '../attachments/attachments.module';
+import { NotesModule } from '../notes/notes.module';
+import { AnnotationsModule } from '../annotations/annotations.module';
 import { SYNC_PORT } from './ports/sync.port';
 import { SyncService } from './sync.service';
 
 @Module({
-  imports: [CoreModule],
+  imports: [
+    CoreModule,
+    OutboxModule,
+    CollectionsModule,
+    ItemsModule,
+    AttachmentsModule,
+    NotesModule,
+    AnnotationsModule,
+  ],
   controllers: [SyncController],
   providers: [
-    ChangeLogRepository,
     IdempotencyRepository,
-    TransactionService,
-    OutboxWorker,
-    SyncMetricsService,
-    EventDispatcher,
     SyncService,
     {
       provide: SYNC_PORT,
       useExisting: SyncService,
     },
   ],
-  exports: [SYNC_PORT, SyncService, TransactionService, IdempotencyRepository],
+  exports: [SYNC_PORT, SyncService],
 })
-export class SyncModule implements OnModuleInit {
-  constructor(
-    private readonly outboxWorker: OutboxWorker,
-    private readonly dispatcher: EventDispatcher,
-  ) {}
+export class SyncModule {}
 
-  onModuleInit() {
-    for (const evtType of Object.values(SYNC_EVENT_TYPES)) {
-      if (!this.outboxWorker.hasHandler(evtType)) {
-        this.outboxWorker.registerHandler(evtType, this.dispatcher);
-      }
-    }
-  }
-}

@@ -8,6 +8,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../../core/database/prisma.service';
+import { resolveTenantWorkspaceId } from '../../../core/utils/tenant.util';
 import {
   IngestionSubmissionEnvelope,
   IngestionAcceptedResult,
@@ -26,26 +27,17 @@ import { EnrichStage } from './stages/enrich.stage';
 import { ReconcileStage } from './stages/reconcile.stage';
 import { MatchStage } from './stages/match.stage';
 import { CommitStage } from './stages/commit.stage';
-import { LibraryItemSource } from '../sync/events/library.events';
-import { DoiParser } from './parsers/doi.parser';
-import { BibtexParser } from './parsers/bibtex.parser';
-import { RisParser } from './parsers/ris.parser';
-import { NormalizationPolicy } from './policies/normalization.policy';
-import { ReconciliationPolicy } from './policies/reconciliation.policy';
-import { DuplicatePolicy } from './policies/duplicate.policy';
-import { IdempotencyRepository } from '../sync/repositories/idempotency.repository';
-import { TransactionService } from '../sync/services/transaction.service';
+import { LibraryItemSource } from '../outbox/outbox.events';
+import { TransactionService } from '../outbox/transaction.service';
 import { METADATA_PORT, MetadataPort } from './metadata/types/metadata.types';
 import { STORAGE_PORT, IStoragePort } from '../../storage/storage.port';
 import { UrlCaptureProvider } from './providers/url-capture.provider';
 import { PdfExtractorProvider } from '../attachments/providers/pdf-extractor.provider';
-import { CatalogService } from '../catalog/catalog.service';
+import { CatalogService } from '../items/items.service';
+import { NotesService } from '../notes/notes.service';
+import { IdempotencyRepository } from '../sync/repositories/idempotency.repository';
 import { IngestionStatus, Prisma } from '@prisma/client';
 import { IngestionStrategyRegistry } from './strategies/ingestion-strategy.registry';
-import { DoiIngestionStrategy } from './strategies/doi-ingestion.strategy';
-import { UrlIngestionStrategy } from './strategies/url-ingestion.strategy';
-import { PdfIngestionStrategy } from './strategies/pdf-ingestion.strategy';
-import { BibtexIngestionStrategy } from './strategies/bibtex-ingestion.strategy';
 import { IngestionExecutionContext } from './strategies/ingestion-strategy.interface';
 import { createHash, randomUUID } from 'crypto';
 
@@ -53,18 +45,17 @@ import { createHash, randomUUID } from 'crypto';
 export class IngestionService implements IngestionPort {
   private readonly logger = new Logger(IngestionService.name);
 
-  private readonly identifyStage: IdentifyStage;
-  private readonly normalizeStage: NormalizeStage;
-  private readonly enrichStage: EnrichStage;
-  private readonly reconcileStage: ReconcileStage;
-  private readonly matchStage: MatchStage;
-  private readonly commitStage?: CommitStage;
-  private readonly strategyRegistry: IngestionStrategyRegistry;
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly ingestionRepo: IngestionRepository,
-    private readonly idempotencyRepo: IdempotencyRepository,
+    @Optional() private readonly identifyStage?: IdentifyStage,
+    @Optional() private readonly normalizeStage?: NormalizeStage,
+    @Optional() private readonly enrichStage?: EnrichStage,
+    @Optional() private readonly reconcileStage?: ReconcileStage,
+    @Optional() private readonly matchStage?: MatchStage,
+    @Optional() private readonly commitStage?: CommitStage,
+    @Optional() private readonly strategyRegistry?: IngestionStrategyRegistry,
+    @Optional() private readonly txService?: TransactionService,
     @Optional() private readonly catalogService?: CatalogService,
     @Optional()
     @Inject(METADATA_PORT)
@@ -74,64 +65,9 @@ export class IngestionService implements IngestionPort {
     private readonly storagePort?: IStoragePort,
     @Optional() private readonly urlCaptureProvider?: UrlCaptureProvider,
     @Optional() private readonly pdfExtractor?: PdfExtractorProvider,
-    @Optional() private readonly txService?: TransactionService,
-    @Optional()
-    private readonly strategyRegistryInjected?: IngestionStrategyRegistry,
-  ) {
-    const normalizer = new NormalizationPolicy();
-    const doiParser = new DoiParser();
-    const bibtexParser = new BibtexParser();
-    const risParser = new RisParser();
-    const reconciler = new ReconciliationPolicy();
-    const duplicatePolicy = new DuplicatePolicy();
-
-    this.identifyStage = new IdentifyStage(
-      doiParser,
-      bibtexParser,
-      risParser,
-      normalizer,
-      this.storagePort,
-      this.pdfExtractor,
-    );
-    this.normalizeStage = new NormalizeStage(normalizer);
-    this.enrichStage = new EnrichStage(this.metadataPort, normalizer);
-    this.reconcileStage = new ReconcileStage(reconciler);
-    this.matchStage = new MatchStage(prisma, duplicatePolicy);
-
-    if (this.catalogService) {
-      this.commitStage = new CommitStage(this.catalogService, this.prisma);
-    }
-
-    this.strategyRegistry =
-      strategyRegistryInjected ??
-      new IngestionStrategyRegistry(
-        new DoiIngestionStrategy(
-          prisma,
-          doiParser,
-          this.metadataPort,
-          this.catalogService,
-          this.txService,
-        ),
-        new UrlIngestionStrategy(
-          this.urlCaptureProvider,
-          this.catalogService,
-          this.txService,
-        ),
-        new PdfIngestionStrategy(
-          prisma,
-          this.storagePort,
-          this.pdfExtractor,
-          this.catalogService,
-          this.txService,
-          this.metadataPort,
-        ),
-        new BibtexIngestionStrategy(
-          bibtexParser,
-          this.catalogService,
-          this.txService,
-        ),
-      );
-  }
+    @Optional() private readonly notesService?: NotesService,
+    @Optional() private readonly idempotencyRepo?: IdempotencyRepository,
+  ) {}
 
   /**
    * Primary Fast-Path Submission Entry Point (Async 202 Contract)
@@ -177,7 +113,7 @@ export class IngestionService implements IngestionPort {
     // 2. Create IngestionRun Record
     const run = await this.ingestionRepo.createRun(workspaceId, {
       requesterId: envelope.userId,
-      inputParams: envelope.payload as unknown as Prisma.InputJsonValue,
+      inputParams: envelope as unknown as Prisma.InputJsonValue,
       inputHash: requestHash,
       idempotencyKey,
       contractVersion: envelope.contractVersion || '1.0.0',
@@ -186,22 +122,22 @@ export class IngestionService implements IngestionPort {
     const runId = run?.id || randomUUID();
     const statusUrl = `/api/v1/workspaces/${workspaceId}/library/ingestion/status/${runId}`;
 
-    // 3. Execute Pipeline (Fast-path runs stages sequentially with durable checkpoints)
-    try {
-      await this.executePipeline(runId, workspaceId, envelope);
-    } catch (err: any) {
-      this.logger.error(
-        `Ingestion pipeline failed for run ${runId}: ${err?.message || err}`,
-      );
-      await this.ingestionRepo.updateRunStatus(
-        workspaceId,
-        runId,
-        IngestionStatus.FAILED_FINAL,
-        { lastError: err?.message || 'Unknown ingestion pipeline failure' },
-      );
-    }
-
-    const updatedRun = await this.ingestionRepo.findRunById(workspaceId, runId);
+    // 3. Return the durable run immediately. Provider resolution and PDF
+    // extraction can exceed an HTTP request budget, so they must never hold
+    // the caller open after the run is persisted.
+    void this.executePipeline(runId, workspaceId, envelope).catch(
+      async (err: any) => {
+        this.logger.error(
+          `Ingestion pipeline failed for run ${runId}: ${err?.message || err}`,
+        );
+        await this.ingestionRepo.updateRunStatus(
+          workspaceId,
+          runId,
+          IngestionStatus.FAILED_FINAL,
+          { lastError: err?.message || 'Unknown ingestion pipeline failure' },
+        );
+      },
+    );
 
     return {
       runId,
@@ -210,8 +146,8 @@ export class IngestionService implements IngestionPort {
         ? run.startedAt.toISOString()
         : new Date().toISOString(),
       requestHash,
-      status: (updatedRun?.status || IngestionStatus.READY) as any,
-      existingItemId: updatedRun?.itemId ?? undefined,
+      status: (run?.status || IngestionStatus.RECEIVED) as any,
+      existingItemId: run?.itemId ?? undefined,
       deduplicated: false,
     };
   }
@@ -224,13 +160,31 @@ export class IngestionService implements IngestionPort {
     workspaceId: string,
     envelope: IngestionSubmissionEnvelope,
   ): Promise<void> {
+    if (
+      !this.identifyStage ||
+      !this.normalizeStage ||
+      !this.enrichStage ||
+      !this.reconcileStage ||
+      !this.matchStage ||
+      !this.commitStage
+    ) {
+      throw new Error('Ingestion pipeline stages are not configured');
+    }
+
     // Stage 1: IDENTIFY & PARSE
     const identifyStart = Date.now();
-    const initialCandidates = await this.identifyStage.execute(
+    const identifiedCandidates = await this.identifyStage.execute(
       runId,
       envelope.payload,
       workspaceId,
     );
+    const initialCandidates = identifiedCandidates.map((candidate) => ({
+      ...candidate,
+      normalizedMetadata: {
+        ...candidate.normalizedMetadata,
+        ...(envelope.overrides || {}),
+      },
+    }));
     await this.ingestionRepo.createStage(runId, {
       stageName: 'IDENTIFY',
       durationMs: Date.now() - identifyStart,
@@ -282,6 +236,56 @@ export class IngestionService implements IngestionPort {
         candidateCount: enrichedCandidates.length,
       },
     });
+
+    // ── Multi-Record Ingestion Handling (BibTeX / RIS batches) ────────────────
+    if (envelope.payload.kind === 'RECORD' && enrichedCandidates.length > 1) {
+      const createdItemIds: string[] = [];
+      for (const candidate of enrichedCandidates) {
+        const itemDecision = await this.reconcileStage.execute([candidate]);
+        const matchRes = await this.matchStage.execute(
+          workspaceId,
+          itemDecision.proposedItem,
+        );
+        if (matchRes.matchType === 'EXACT' && matchRes.targetItemId) {
+          createdItemIds.push(matchRes.targetItemId);
+          continue;
+        }
+        const created = await this.commitStage.execute(
+          workspaceId,
+          itemDecision.proposedItem,
+          {
+            collectionIds: envelope.collectionIds,
+            tagIds: envelope.tagIds,
+            userId: envelope.userId,
+            source: this.mapPayloadToSource(envelope.payload.kind),
+          },
+        );
+        if (created?.id) {
+          createdItemIds.push(created.id);
+        }
+      }
+
+      await this.ingestionRepo.createStage(runId, {
+        stageName: 'COMMIT',
+        durationMs: Date.now() - identifyStart,
+        success: true,
+        outputSnapshot: {
+          itemIds: createdItemIds,
+          totalProcessed: createdItemIds.length,
+        },
+      });
+
+      await this.ingestionRepo.updateRunStatus(
+        workspaceId,
+        runId,
+        IngestionStatus.READY,
+        {
+          itemId: createdItemIds[0],
+          completedAt: new Date(),
+        },
+      );
+      return;
+    }
 
     // Stage 4: RECONCILE (Field Provenance & Conflict Detection)
     const reconcileStart = Date.now();
@@ -342,13 +346,28 @@ export class IngestionService implements IngestionPort {
         };
 
         maybeEnrich('abstract', p.abstract);
+        maybeEnrich('title', p.title);
+        maybeEnrich('journal', p.journal);
         maybeEnrich('publicationTitle', p.publicationTitle);
+        maybeEnrich('publicationDate', p.publicationDate);
         maybeEnrich('publisher', p.publisher);
+        maybeEnrich('place', p.place);
         maybeEnrich('volume', p.volume);
         maybeEnrich('issue', p.issue);
         maybeEnrich('pages', p.pages);
+        maybeEnrich('section', p.section);
+        maybeEnrich('partNumber', p.partNumber);
+        maybeEnrich('partTitle', p.partTitle);
+        maybeEnrich('series', p.series);
+        maybeEnrich('seriesTitle', p.seriesTitle);
+        maybeEnrich('seriesText', p.seriesText);
         maybeEnrich('year', p.year);
         maybeEnrich('url', p.url);
+        maybeEnrich('arxivId', p.arxivId);
+        maybeEnrich('pmid', p.pmid);
+        maybeEnrich('pmcid', p.pmcid);
+        maybeEnrich('itemType', p.itemType);
+        maybeEnrich('type', p.type);
         maybeEnrich('citationKey', p.citationKey);
         maybeEnrich('issn', (p as any).issn);
         maybeEnrich('isbn', (p as any).isbn);
@@ -359,8 +378,20 @@ export class IngestionService implements IngestionPort {
         maybeEnrich('libraryCatalog', p.libraryCatalog);
         maybeEnrich('callNumber', p.callNumber);
         maybeEnrich('archive', p.archive);
+        maybeEnrich('archiveLocation', p.archiveLocation);
+        maybeEnrich('extraFields', p.extraFields);
         if (p.authors?.length && !(existing as any)?.authors?.length) {
           enrichPatch['authors'] = p.authors;
+        }
+        if (p.editors?.length && !(existing as any)?.editors?.length) {
+          enrichPatch['editors'] = p.editors;
+        }
+        if (p.creators?.length && !(existing as any)?.creators?.length) {
+          enrichPatch['creators'] = p.creators;
+        }
+        if (p.keywords?.length && !(existing as any)?.keywords?.length) {
+          enrichPatch['keywords'] = p.keywords;
+          enrichPatch['labels'] = p.keywords;
         }
 
         if (Object.keys(enrichPatch).length > 0) {
@@ -381,43 +412,23 @@ export class IngestionService implements IngestionPort {
         }
 
         // Add literature notes from proposed item if not already recorded
-        if (Array.isArray(p.notes) && p.notes.length > 0 && this.prisma) {
+        if (Array.isArray(p.notes) && p.notes.length > 0 && this.notesService) {
           for (const note of p.notes) {
             const content =
               typeof note === 'string' ? note : (note as any)?.content;
             if (!content || !String(content).trim()) continue;
-            const existingNote = await this.prisma.note.findFirst({
-              where: {
-                workspaceId,
-                itemId: matchResult.targetItemId,
-                contentMd: String(content).trim(),
-                deletedAt: null,
-              },
-            });
-            if (!existingNote) {
-              const src =
-                typeof note === 'object' ? (note as any)?.source : undefined;
-              await this.prisma.note.create({
-                data: {
-                  workspaceId,
-                  itemId: matchResult.targetItemId,
-                  title: src ? `Imported Note (${src})` : 'Imported Note',
-                  contentMd: String(content).trim(),
-                  contentJson: {
-                    type: 'doc',
-                    content: [
-                      { type: 'paragraph', text: String(content).trim() },
-                    ],
-                  },
-                  createdById: envelope.userId || 'system',
-                  tags: ['imported', ...(src ? [src] : [])],
-                  version: 1,
-                },
-              });
-              this.logger.log(
-                `[EXACT_MERGE] Added literature note to item ${matchResult.targetItemId}`,
-              );
-            }
+            const src =
+              typeof note === 'object' ? (note as any)?.source : undefined;
+            await this.notesService.createLiteratureNote(
+              workspaceId,
+              matchResult.targetItemId,
+              envelope.userId || 'system',
+              String(content).trim(),
+              src,
+            );
+            this.logger.log(
+              `[EXACT_MERGE] Added literature note to item ${matchResult.targetItemId}`,
+            );
           }
         }
       }
@@ -484,79 +495,27 @@ export class IngestionService implements IngestionPort {
       return;
     }
 
-    // NO_MATCH → Stage 6: COMMIT (create new CatalogItem)
+    // Stage 6: COMMIT (create new CatalogItem via CommitStage)
     const commitStart = Date.now();
-    let createdItem: any = null;
+    const createdItem = await this.commitStage.execute(
+      workspaceId,
+      decision.proposedItem,
+      {
+        collectionIds: envelope.collectionIds,
+        tagIds: envelope.tagIds,
+        userId: envelope.userId,
+        source: this.mapPayloadToSource(envelope.payload.kind),
+        fileId:
+          envelope.payload.kind === 'FILE'
+            ? envelope.payload.fileId
+            : undefined,
+        filename:
+          envelope.payload.kind === 'FILE'
+            ? envelope.payload.filename
+            : undefined,
+      },
+    );
 
-    // Always delegate to CommitStage when available (single source of truth for create logic)
-    if (this.commitStage) {
-      createdItem = await this.commitStage.execute(
-        workspaceId,
-        decision.proposedItem,
-        {
-          collectionIds: envelope.collectionIds,
-          tagIds: envelope.tagIds,
-          userId: envelope.userId,
-          source: this.mapPayloadToSource(envelope.payload.kind),
-          fileId:
-            envelope.payload.kind === 'FILE'
-              ? envelope.payload.fileId
-              : undefined,
-          filename:
-            envelope.payload.kind === 'FILE'
-              ? envelope.payload.filename
-              : undefined,
-        },
-      );
-    } else {
-      // Fallback: catalogService not wired through CommitStage (test/bootstrap context)
-      this.logger.warn(
-        `CommitStage not available for run ${runId} — falling back to direct catalogService.createItem`,
-      );
-      if (this.catalogService) {
-        const p = decision.proposedItem;
-        createdItem = await this.catalogService.createItem(
-          workspaceId,
-          {
-            title: p.title || 'Untitled Document',
-            itemType: p.itemType || 'journalArticle',
-            doi: p.doi,
-            year: p.year ?? undefined,
-            publicationTitle: p.publicationTitle,
-            publisher: p.publisher,
-            volume: p.volume,
-            issue: p.issue,
-            pages: p.pages,
-            abstract: p.abstract,
-            url: p.url,
-            citationKey: p.citationKey,
-            authors: p.authors,
-            contributors: p.creators,
-            labels: p.tags || p.keywords || [],
-            keywords: p.keywords || p.tags || [],
-            fileId:
-              envelope.payload.kind === 'FILE'
-                ? envelope.payload.fileId
-                : p.fileId,
-            filename:
-              envelope.payload.kind === 'FILE'
-                ? envelope.payload.filename
-                : p.filename,
-            fileUrl: p.fileUrl || p.pdfUrl,
-            language: p.language,
-            rights: p.rights,
-            license: p.license,
-            extra: p.extra,
-            libraryCatalog: p.libraryCatalog,
-            callNumber: p.callNumber,
-            archive: p.archive,
-            collectionId: envelope.collectionIds?.[0] || null,
-            uploadedById: envelope.userId || 'system',
-          },
-          { source: this.mapPayloadToSource(envelope.payload.kind) },
-        );
-      }
-    }
 
     await this.ingestionRepo.createStage(runId, {
       stageName: 'COMMIT',
@@ -678,6 +637,10 @@ export class IngestionService implements IngestionPort {
       withKeyLock: <T>(key: string, fn: () => Promise<T>) =>
         this.withKeyLock(key, fn),
     };
+
+    if (!this.strategyRegistry) {
+      throw new Error('IngestionStrategyRegistry is not configured');
+    }
 
     const strategy = this.strategyRegistry.getStrategy(command.source);
     return await strategy.execute(command, context);
@@ -930,16 +893,17 @@ export class IngestionService implements IngestionPort {
     result: IngestionResult,
     leaseToken?: string,
   ): Promise<void> {
-    if (!idempotencyKey || !this.idempotencyRepo) return;
+    const idempotencyRepo = this.idempotencyRepo;
+    if (!idempotencyKey || !idempotencyRepo) return;
 
     try {
       if (
         this.txService?.executeInTransaction &&
-        typeof this.idempotencyRepo.markSucceededInTx === 'function'
+        typeof idempotencyRepo.markSucceededInTx === 'function'
       ) {
         await this.txService.executeInTransaction(
           async (tx: Prisma.TransactionClient) => {
-            await this.idempotencyRepo.markSucceededInTx(
+            await idempotencyRepo.markSucceededInTx(
               tx,
               workspaceId,
               idempotencyKey,
@@ -949,8 +913,8 @@ export class IngestionService implements IngestionPort {
             );
           },
         );
-      } else if (typeof this.idempotencyRepo.markSucceeded === 'function') {
-        await this.idempotencyRepo.markSucceeded(
+      } else if (typeof idempotencyRepo.markSucceeded === 'function') {
+        await idempotencyRepo.markSucceeded(
           workspaceId,
           idempotencyKey,
           200,
@@ -986,16 +950,8 @@ export class IngestionService implements IngestionPort {
     }
   }
 
-  private async resolveWorkspaceId(workspaceId: string): Promise<string> {
-    if (!workspaceId || !this.prisma?.workspace?.findFirst) return workspaceId;
-    const ws = await this.prisma.workspace.findFirst({
-      where: {
-        OR: [{ id: workspaceId }, { slug: workspaceId }, { url: workspaceId }],
-        deletedAt: null,
-      },
-      select: { id: true },
-    });
-    return ws?.id || workspaceId;
+  private resolveWorkspaceId(workspaceId: string): Promise<string> {
+    return resolveTenantWorkspaceId(this.prisma, workspaceId);
   }
 
   private mapPayloadToSource(kind: string): LibraryItemSource {

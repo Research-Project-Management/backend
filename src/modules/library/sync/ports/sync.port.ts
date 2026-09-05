@@ -68,6 +68,36 @@ export interface UpsertSyncCatalogItemCommand {
   filename?: string;
   fileUrl?: string;
   tags?: string[];
+  authors?: string[];
+  creators?: Array<{
+    creatorType?: string;
+    firstName?: string;
+    lastName?: string;
+    fullName?: string;
+    name?: string;
+    orderIndex?: number;
+  }>;
+  collectionId?: string;
+  collectionIds?: string[];
+  editors?: string[];
+  journal?: string;
+  journalAbbr?: string;
+  publicationDate?: string;
+  publisher?: string;
+  place?: string;
+  series?: string;
+  seriesTitle?: string;
+  seriesText?: string;
+  seriesNumber?: string;
+  rights?: string;
+  license?: string;
+  archive?: string;
+  archiveLocation?: string;
+  libraryCatalog?: string;
+  callNumber?: string;
+  language?: string;
+  extraFields?: Record<string, unknown>;
+  extra?: string;
 }
 
 export interface UpsertSyncAttachmentCommand {

@@ -355,6 +355,21 @@ export class ZoteroPullWorker {
       }
     }
 
+    // 3. Batch load collection bindings to map collectionKeys -> collectionIds
+    const collectionBindings = await this.prisma.zoteroItemBinding.findMany({
+      where: {
+        bindingId,
+        entityType: 'collection',
+      },
+      select: {
+        remoteKey: true,
+        entityId: true,
+      },
+    });
+    const collectionBindingMap = new Map(
+      collectionBindings.map((b) => [b.remoteKey, b.entityId]),
+    );
+
     const operations: ExternalSyncOperation[] = [];
 
     // Top-level Catalog Items
@@ -368,6 +383,37 @@ export class ZoteroPullWorker {
         const mapped = this.mapper.mapZoteroItem(rawItem);
         const existing = bindingMap.get(mapped.remoteKey);
 
+        const collectionIds = mapped.collectionKeys
+          .map((k) => collectionBindingMap.get(k))
+          .filter((id): id is string => Boolean(id));
+
+        const creators = mapped.creators.map((c, idx) => ({
+          creatorType: c.creatorType || 'author',
+          firstName: c.firstName,
+          lastName: c.lastName,
+          fullName:
+            c.name ||
+            [c.firstName, c.lastName].filter(Boolean).join(' ') ||
+            '',
+          name:
+            c.name ||
+            [c.firstName, c.lastName].filter(Boolean).join(' ') ||
+            '',
+          orderIndex: c.sortOrder ?? idx,
+        }));
+
+        const authors = mapped.creators
+          .filter(
+            (creator) =>
+              creator.creatorType === 'author' || !creator.creatorType,
+          )
+          .map(
+            (creator) =>
+              creator.name ||
+              [creator.firstName, creator.lastName].filter(Boolean).join(' '),
+          )
+          .filter(Boolean);
+
         operations.push({
           operationId: `item:${mapped.remoteKey}`,
           op: 'upsertCatalogItem',
@@ -379,8 +425,13 @@ export class ZoteroPullWorker {
             abstract: mapped.abstract,
             year: mapped.year,
             doi: mapped.doi,
+            journal: mapped.publicationTitle,
+            journalAbbr: mapped.journalAbbreviation,
             citationKey: mapped.citationKey,
             publicationTitle: mapped.publicationTitle,
+            publicationDate: mapped.publicationDate,
+            publisher: mapped.publisher,
+            place: mapped.place,
             volume: mapped.volume,
             issue: mapped.issue,
             pages: mapped.pages,
@@ -388,10 +439,30 @@ export class ZoteroPullWorker {
             isbn: mapped.isbn,
             url: mapped.url,
             itemType: mapped.itemType,
+            rights: mapped.rights,
+            language: mapped.language,
+            series: mapped.series,
+            seriesTitle: mapped.seriesTitle,
+            seriesText: mapped.seriesText,
+            seriesNumber: mapped.seriesNumber,
+            archive: mapped.archive,
+            archiveLocation: mapped.archiveLocation,
+            libraryCatalog: mapped.libraryCatalog,
+            callNumber: mapped.callNumber,
             filename: `${mapped.remoteKey}.pdf`,
             fileUrl:
               mapped.url || `https://api.zotero.org/items/${mapped.remoteKey}`,
             tags: mapped.tags.map((t) => t.name).filter(Boolean),
+            creators: creators.length > 0 ? creators : undefined,
+            authors: authors.length > 0 ? authors : undefined,
+            collectionIds: collectionIds.length > 0 ? collectionIds : undefined,
+            collectionId: collectionIds[0] || undefined,
+            editors: mapped.creators
+              .filter((creator) => creator.creatorType === 'editor')
+              .map((creator) => creator.name || '')
+              .filter(Boolean),
+            extraFields: mapped.extraFields,
+            extra: mapped.extra,
           },
         });
       }

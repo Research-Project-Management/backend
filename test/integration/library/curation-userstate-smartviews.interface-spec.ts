@@ -3,8 +3,8 @@ import {
   LibraryTestHarness,
   TestWorkspaceFixture,
 } from './library-test-harness';
-import { CatalogService } from '../../../src/modules/library/catalog/catalog.service';
-import { CatalogRepository } from '../../../src/modules/library/catalog/catalog.repository';
+import { CatalogService } from '../../../src/modules/library/items/items.service';
+import { CatalogRepository } from '../../../src/modules/library/items/items.repository';
 import { ReadingService } from '../../../src/modules/library/reading/reading.service';
 import { ReadingStatus } from '../../../src/modules/library/reading/types/reading.types';
 import { BadRequestException } from '@nestjs/common';

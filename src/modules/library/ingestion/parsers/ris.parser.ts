@@ -22,6 +22,12 @@ export class RisParser {
     }
 
     try {
+      const normalized = content.replace(/\r\n/g, '\n').trim();
+      const rawRecords = normalized
+        .split(/(?=^TY\s+-)/m)
+        .map((r) => r.trim())
+        .filter((r) => r.startsWith('TY'));
+
       const cite = new Cite(content);
       const data = cite.data || [];
 
@@ -29,7 +35,7 @@ export class RisParser {
         return this.fallbackParse(content);
       }
 
-      return data.map((csl: any) => {
+      return data.map((csl: any, idx: number) => {
         const rawAuthors: string[] = [];
         const creators: CreatorInput[] = [];
 
@@ -49,6 +55,62 @@ export class RisParser {
             });
           }
         });
+
+        const rawEditors: string[] = [];
+        (csl.editor || []).forEach((e: any) => {
+          const family = e.family?.trim() || '';
+          const given = e.given?.trim() || '';
+          const fullName =
+            e.literal?.trim() ||
+            (family && given ? `${family}, ${given}` : family || given);
+
+          if (fullName) {
+            rawEditors.push(fullName);
+            creators.push({
+              firstName: given || undefined,
+              lastName: family || undefined,
+              fullName,
+              creatorType: 'editor',
+            });
+          }
+        });
+
+        const currentRawRecord =
+          rawRecords[idx] || (rawRecords.length === 1 ? rawRecords[0] : '');
+
+        // Citation.js RIS plugin omits 'ED  -' (and sometimes variations of 'A2  -').
+        // Enrich editors from the raw record so they are never dropped.
+        if (currentRawRecord) {
+          const editorMatches = [
+            ...currentRawRecord.matchAll(/^(?:ED|A2)\s*-\s*(.+)$/gim),
+          ];
+          for (const m of editorMatches) {
+            const edStr = m[1]?.trim();
+            if (
+              edStr &&
+              !rawEditors.some(
+                (existing) => existing.toLowerCase() === edStr.toLowerCase(),
+              )
+            ) {
+              rawEditors.push(edStr);
+              const parts = edStr.split(',').map((p) => p.trim());
+              if (parts.length >= 2) {
+                creators.push({
+                  lastName: parts[0],
+                  firstName: parts.slice(1).join(' '),
+                  fullName: `${parts.slice(1).join(' ')} ${parts[0]}`,
+                  creatorType: 'editor',
+                });
+              } else {
+                creators.push({
+                  lastName: edStr,
+                  fullName: edStr,
+                  creatorType: 'editor',
+                });
+              }
+            }
+          }
+        }
 
         // Tags / keywords handling
         const tags: string[] = [];
@@ -82,22 +144,66 @@ export class RisParser {
           ? [{ content: String(rawNote).trim(), source: 'ris' }]
           : undefined;
 
+        let archive = csl.archive || undefined;
+        let callNumber = csl['call-number'] || undefined;
+        let series = csl['collection-title'] || undefined;
+        let edition = csl.edition ? String(csl.edition).trim() : undefined;
+        let language = csl.language ? String(csl.language).trim() : undefined;
+        let place = csl['publisher-place'] || undefined;
+
+        if (currentRawRecord) {
+          if (!archive) {
+            const l4Match = currentRawRecord.match(/^L4\s*-\s*(.+)$/m);
+            if (l4Match) archive = l4Match[1].trim();
+          }
+          if (!callNumber) {
+            const cnMatch = currentRawRecord.match(/^(?:CN|CA|C1)\s*-\s*(.+)$/m);
+            if (cnMatch) callNumber = cnMatch[1].trim();
+          }
+          if (!series) {
+            const t3Match = currentRawRecord.match(/^(?:T3|SE)\s*-\s*(.+)$/m);
+            if (t3Match) series = t3Match[1].trim();
+          }
+          if (!edition) {
+            const etMatch = currentRawRecord.match(/^ET\s*-\s*(.+)$/m);
+            if (etMatch) edition = etMatch[1].trim();
+          }
+          if (!language) {
+            const laMatch = currentRawRecord.match(/^LA\s*-\s*(.+)$/m);
+            if (laMatch) language = laMatch[1].trim();
+          }
+          if (!place) {
+            const placeMatch = currentRawRecord.match(/^(?:CY|AD)\s*-\s*(.+)$/m);
+            if (placeMatch) place = placeMatch[1].trim();
+          }
+        }
+
         return {
           itemType,
           title: (csl.title || 'Untitled Reference').trim(),
           authors: rawAuthors,
           creators,
+          editors: rawEditors.length > 0 ? rawEditors : undefined,
           year,
           publicationDate: year ? String(year) : undefined,
           journal: csl['container-title'] || undefined,
           publicationTitle: csl['container-title'] || undefined,
           publisher: csl.publisher || undefined,
+          place,
           volume: csl.volume ? String(csl.volume) : undefined,
           issue: csl.issue ? String(csl.issue) : undefined,
           pages: csl.page ? String(csl.page) : undefined,
           doi: csl.DOI || undefined,
+          isbn: csl.ISBN || undefined,
+          issn: csl.ISSN || undefined,
           url: csl.URL || undefined,
           abstract: csl.abstract || undefined,
+          series,
+          edition,
+          language,
+          rights: csl.rights ? String(csl.rights).trim() : undefined,
+          callNumber,
+          archive,
           tags,
           keywords: tags,
           notes,
@@ -136,6 +242,7 @@ export class RisParser {
     let currentRecord:
       | (Partial<ItemMetadata> & {
           rawAuthors: string[];
+          rawEditors?: string[];
           rawTags: string[];
           rawNotes?: string[];
           startPage?: string;
@@ -162,6 +269,7 @@ export class RisParser {
         currentRecord = {
           itemType: 'journalArticle',
           rawAuthors: [],
+          rawEditors: [],
           rawTags: [],
           rawNotes: [],
         };
@@ -186,6 +294,11 @@ export class RisParser {
         case 'AU':
         case 'A1':
           currentRecord.rawAuthors.push(value);
+          break;
+        case 'ED':
+        case 'A2':
+          if (!currentRecord.rawEditors) currentRecord.rawEditors = [];
+          currentRecord.rawEditors.push(value);
           break;
         case 'PY':
         case 'Y1':
@@ -213,6 +326,42 @@ export class RisParser {
         case 'DO':
           currentRecord.doi = value;
           break;
+        case 'PB':
+          currentRecord.publisher = value;
+          break;
+        case 'CY':
+        case 'AD':
+          currentRecord.place = value;
+          break;
+        case 'LA':
+          currentRecord.language = value;
+          break;
+        case 'SN':
+          if (value.replace(/[^0-9X]/gi, '').length === 8) {
+            currentRecord.issn = value;
+          } else {
+            currentRecord.isbn = value;
+          }
+          break;
+        case 'UR':
+        case 'L1':
+          if (!currentRecord.url) currentRecord.url = value;
+          break;
+        case 'ET':
+          currentRecord.edition = value;
+          break;
+        case 'CN':
+        case 'CA':
+        case 'C1':
+          currentRecord.callNumber = value;
+          break;
+        case 'L4':
+          currentRecord.archive = value;
+          break;
+        case 'T3':
+        case 'SE':
+          currentRecord.series = value;
+          break;
         case 'KW':
           currentRecord.rawTags.push(value);
           break;
@@ -237,6 +386,7 @@ export class RisParser {
   private finalizeRecord(
     record: Partial<ItemMetadata> & {
       rawAuthors: string[];
+      rawEditors?: string[];
       rawTags: string[];
       rawNotes?: string[];
       startPage?: string;
@@ -249,14 +399,36 @@ export class RisParser {
         return {
           lastName: parts[0],
           firstName: parts.slice(1).join(' '),
+          fullName: `${parts.slice(1).join(' ')} ${parts[0]}`,
           creatorType: 'author',
         };
       }
       return {
         lastName: authorStr,
+        fullName: authorStr,
         creatorType: 'author',
       };
     });
+
+    if (record.rawEditors && record.rawEditors.length > 0) {
+      for (const editorStr of record.rawEditors) {
+        const parts = editorStr.split(',').map((p) => p.trim());
+        if (parts.length >= 2) {
+          creators.push({
+            lastName: parts[0],
+            firstName: parts.slice(1).join(' '),
+            fullName: `${parts.slice(1).join(' ')} ${parts[0]}`,
+            creatorType: 'editor',
+          });
+        } else {
+          creators.push({
+            lastName: editorStr,
+            fullName: editorStr,
+            creatorType: 'editor',
+          });
+        }
+      }
+    }
 
     let pages = record.pages;
     if (!pages && record.startPage) {
@@ -269,14 +441,26 @@ export class RisParser {
       itemType: record.itemType || 'journalArticle',
       title: record.title || 'Untitled Reference',
       authors: record.rawAuthors,
+      editors: record.rawEditors && record.rawEditors.length > 0 ? record.rawEditors : undefined,
       creators,
       year: record.year,
+      publicationDate: record.year ? String(record.year) : undefined,
       journal: record.journal,
       publicationTitle: record.publicationTitle,
+      publisher: record.publisher,
+      place: record.place,
       volume: record.volume,
       issue: record.issue,
       pages,
       doi: record.doi,
+      isbn: record.isbn,
+      issn: record.issn,
+      url: record.url,
+      language: record.language,
+      edition: record.edition,
+      callNumber: record.callNumber,
+      archive: record.archive,
+      series: record.series,
       tags: record.rawTags,
       keywords: record.rawTags,
       abstract: record.abstract,

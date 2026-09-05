@@ -3,13 +3,25 @@ import { IngestionService } from '@/modules/library/ingestion/ingestion.service'
 import { IngestionRepository } from '@/modules/library/ingestion/ingestion.repository';
 import { IdempotencyRepository } from '@/modules/library/sync/repositories/idempotency.repository';
 import { PrismaService } from '@/core/database/prisma.service';
-import { CatalogService } from '@/modules/library/catalog/catalog.service';
+import { CatalogService } from '@/modules/library/items/items.service';
 import { METADATA_PORT } from '@/modules/library/ingestion/metadata/types/metadata.types';
 import { STORAGE_PORT } from '@/modules/storage/storage.port';
 import { UrlCaptureProvider } from '@/modules/library/ingestion/providers/url-capture.provider';
 import { PdfExtractorProvider } from '@/modules/library/attachments/providers/pdf-extractor.provider';
-import { TransactionService } from '@/modules/library/sync/services/transaction.service';
+import { TransactionService } from '@/modules/library/outbox/transaction.service';
 import { IngestionStrategyRegistry } from '@/modules/library/ingestion/strategies/ingestion-strategy.registry';
+import { DoiParser } from '@/modules/library/ingestion/parsers/doi.parser';
+import { BibtexParser } from '@/modules/library/ingestion/parsers/bibtex.parser';
+import { RisParser } from '@/modules/library/ingestion/parsers/ris.parser';
+import { NormalizationPolicy } from '@/modules/library/ingestion/policies/normalization.policy';
+import { ReconciliationPolicy } from '@/modules/library/ingestion/policies/reconciliation.policy';
+import { DuplicatePolicy } from '@/modules/library/ingestion/policies/duplicate.policy';
+import { IdentifyStage } from '@/modules/library/ingestion/stages/identify.stage';
+import { NormalizeStage } from '@/modules/library/ingestion/stages/normalize.stage';
+import { EnrichStage } from '@/modules/library/ingestion/stages/enrich.stage';
+import { ReconcileStage } from '@/modules/library/ingestion/stages/reconcile.stage';
+import { MatchStage } from '@/modules/library/ingestion/stages/match.stage';
+import { CommitStage } from '@/modules/library/ingestion/stages/commit.stage';
 import { ConflictException } from '@nestjs/common';
 import { IngestionStatus } from '@prisma/client';
 
@@ -21,6 +33,14 @@ describe('Library Ingestion Foundation + Metadata Fast Path (Vertical Slice)', (
 
   const workspaceId = 'ws-test-100';
   const userId = 'user-100';
+
+  const waitFor = async (condition: () => boolean) => {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if (condition()) return;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error('Timed out waiting for asynchronous ingestion');
+  };
 
   beforeEach(async () => {
     const runsDb = new Map<string, any>();
@@ -312,6 +332,25 @@ describe('Library Ingestion Foundation + Metadata Fast Path (Vertical Slice)', (
       markFailed: jest.fn().mockResolvedValue(false),
     };
 
+    const doiParser = new DoiParser();
+    const bibtexParser = new BibtexParser();
+    const risParser = new RisParser();
+    const normalizer = new NormalizationPolicy();
+    const reconciler = new ReconciliationPolicy();
+    const duplicatePolicy = new DuplicatePolicy();
+
+    const identifyStage = new IdentifyStage(
+      doiParser,
+      bibtexParser,
+      risParser,
+      normalizer,
+    );
+    const normalizeStage = new NormalizeStage(normalizer);
+    const enrichStage = new EnrichStage(mockMetadataPort, normalizer);
+    const reconcileStage = new ReconcileStage(reconciler);
+    const matchStage = new MatchStage(mockPrisma, duplicatePolicy);
+    const commitStage = new CommitStage(mockCatalogService);
+
     const moduleRef = await Test.createTestingModule({
       providers: [
         IngestionService,
@@ -325,6 +364,12 @@ describe('Library Ingestion Foundation + Metadata Fast Path (Vertical Slice)', (
         { provide: PdfExtractorProvider, useValue: null },
         { provide: TransactionService, useValue: null },
         { provide: IngestionStrategyRegistry, useValue: null },
+        { provide: IdentifyStage, useValue: identifyStage },
+        { provide: NormalizeStage, useValue: normalizeStage },
+        { provide: EnrichStage, useValue: enrichStage },
+        { provide: ReconcileStage, useValue: reconcileStage },
+        { provide: MatchStage, useValue: matchStage },
+        { provide: CommitStage, useValue: commitStage },
       ],
     }).compile();
 
@@ -335,6 +380,12 @@ describe('Library Ingestion Foundation + Metadata Fast Path (Vertical Slice)', (
     (service as any).idempotencyRepo = mockIdempotencyRepo;
     (service as any).catalogService = mockCatalogService;
     (service as any).metadataPort = mockMetadataPort;
+    (service as any).identifyStage = identifyStage;
+    (service as any).normalizeStage = normalizeStage;
+    (service as any).enrichStage = enrichStage;
+    (service as any).reconcileStage = reconcileStage;
+    (service as any).matchStage = matchStage;
+    (service as any).commitStage = commitStage;
   });
 
   it('executes end-to-end DOI fast-path: identify → normalize → enrich → reconcile → match → commit', async () => {
@@ -349,8 +400,8 @@ describe('Library Ingestion Foundation + Metadata Fast Path (Vertical Slice)', (
     });
 
     expect(result.runId).toBeDefined();
-    expect(result.status).toBe('READY');
-    expect(result.existingItemId).toBeDefined();
+    expect(result.status).toBe(IngestionStatus.RECEIVED);
+    await waitFor(() => mockCatalogService.createItem.mock.calls.length > 0);
 
     const status = await service.getRunStatus(workspaceId, result.runId);
     expect(status.status).toBe(IngestionStatus.READY);
@@ -395,7 +446,8 @@ describe('Library Ingestion Foundation + Metadata Fast Path (Vertical Slice)', (
       },
     });
 
-    expect(result.status).toBe('READY');
+    expect(result.status).toBe(IngestionStatus.RECEIVED);
+    await waitFor(() => mockCatalogService.createItem.mock.calls.length > 0);
     expect(mockCatalogService.createItem).toHaveBeenCalledWith(
       workspaceId,
       expect.objectContaining({

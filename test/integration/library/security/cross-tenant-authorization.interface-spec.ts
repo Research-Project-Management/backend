@@ -181,7 +181,7 @@ describe('Cross-Tenant Isolation & WorkspaceRoleGuard Authorization (Security E2
     });
 
     const { CatalogRepository } =
-      await import('../../../../src/modules/library/catalog/catalog.repository');
+      await import('../../../../src/modules/library/items/items.repository');
     const catalogRepo = harness.moduleRef.get(CatalogRepository);
 
     // Query with tenant A workspace -> null

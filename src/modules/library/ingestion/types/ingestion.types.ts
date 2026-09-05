@@ -1,4 +1,4 @@
-import { CreatorCreditInput } from '../../catalog/types/catalog.types';
+import { CreatorCreditInput } from '../../items/items.types';
 
 export type IngestionStatus =
   | 'pending'

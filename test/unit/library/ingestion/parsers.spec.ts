@@ -105,5 +105,75 @@ ER  -
       expect(entry.authors).toHaveLength(4);
       expect(entry.doi).toBe('10.5555/3295222.3295349');
     });
+
+    it('preserves language, editor, place, edition, and series from BibTeX', () => {
+      const bibtex = `
+@book{knuth1997art,
+  title={The Art of Computer Programming},
+  author={Knuth, Donald E.},
+  editor={Guy, Richard K.},
+  publisher={Addison-Wesley},
+  address={Boston, MA},
+  year={1997},
+  edition={3rd},
+  series={The Art of Computer Programming Series},
+  language={english},
+  isbn={978-0201896831}
+}
+`;
+      const results = parser.parse(bibtex);
+      expect(results).toHaveLength(1);
+      const entry = results[0];
+      expect(entry.title).toBe('The Art of Computer Programming');
+      expect(entry.authors).toContain('Donald E. Knuth');
+      expect(entry.publisher).toBe('Addison-Wesley');
+      expect(entry.language).toBe('english');
+      expect(entry.isbn).toBe('978-0201896831');
+      expect(entry.edition).toBe('3rd');
+      expect(entry.series).toBe('The Art of Computer Programming Series');
+      expect(entry.editors).toBeDefined();
+      expect(entry.editors![0]).toContain('Guy');
+    });
+  });
+
+  describe('RisParser comprehensive field preservation', () => {
+    let parser: RisParser;
+
+    beforeEach(() => {
+      parser = new RisParser();
+    });
+
+    it('extracts language, isbn, publisher, place, edition, editors, and call number in RIS', () => {
+      const ris = `
+TY  - BOOK
+TI  - Concrete Mathematics: A Foundation for Computer Science
+AU  - Graham, Ronald L.
+AU  - Knuth, Donald E.
+AU  - Patashnik, Oren
+ED  - Smith, John
+PB  - Addison-Wesley
+CY  - Reading, MA
+PY  - 1994
+SN  - 978-0201558029
+LA  - en
+ET  - 2nd
+CN  - QA39.2 .G733 1994
+ER  - 
+`;
+      const results = parser.parse(ris);
+      expect(results).toHaveLength(1);
+      const item = results[0];
+      expect(item.title).toBe('Concrete Mathematics: A Foundation for Computer Science');
+      expect(item.authors).toHaveLength(3);
+      expect(item.publisher).toBe('Addison-Wesley');
+      expect(item.place).toBe('Reading, MA');
+      expect(item.year).toBe(1994);
+      expect(item.isbn).toBe('978-0201558029');
+      expect(item.language).toBe('en');
+      expect(item.edition).toBe('2nd');
+      expect(item.callNumber).toBe('QA39.2 .G733 1994');
+      expect(item.editors).toBeDefined();
+      expect(item.editors![0]).toContain('Smith');
+    });
   });
 });

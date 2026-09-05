@@ -3,7 +3,7 @@ import {
   TestWorkspaceFixture,
 } from './library-test-harness';
 import { IngestionService } from '../../../src/modules/library/ingestion/ingestion.service';
-import { CatalogService } from '../../../src/modules/library/catalog/catalog.service';
+import { CatalogService } from '../../../src/modules/library/items/items.service';
 import { CitationService } from '../../../src/modules/library/citation/citation.service';
 import {
   STORAGE_PORT,

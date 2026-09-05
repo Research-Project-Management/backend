@@ -1,6 +1,6 @@
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
-import { CatalogService } from '../../catalog/catalog.service';
-import { TransactionService } from '../../sync/services/transaction.service';
+import { CatalogService } from '../../items/items.service';
+import { TransactionService } from '../../outbox/transaction.service';
 import { UrlCaptureProvider } from '../providers/url-capture.provider';
 import { MetadataRoutingPolicy } from '../metadata/policies/metadata.policy';
 import { IngestionValidationException } from '../errors/ingestion.errors';

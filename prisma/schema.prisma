@@ -906,7 +906,7 @@ model IngestionRun {
   itemId          String?         @map("item_id")
   item            CatalogItem?    @relation(fields: [itemId], references: [id], onDelete: SetNull)
   status          IngestionStatus @default(RECEIVED)
-  idempotencyKey  String?         @unique @map("idempotency_key")
+  idempotencyKey  String?         @map("idempotency_key")
   inputParams     Json            @map("input_params") // { rawInput, inputType, options }
   inputHash       String          @map("input_hash")
   contractVersion String          @default("1.0.0") @map("contract_version")
@@ -923,6 +923,9 @@ model IngestionRun {
   candidates  IngestionCandidate[]
   decisions   IngestionDecision[]
   reviewCases IngestionReviewCase[]
+
+  @@unique([workspaceId, idempotencyKey])
+  @@index([idempotencyKey, workspaceId])
 
   @@index([workspaceId, status])
   @@index([inputHash])

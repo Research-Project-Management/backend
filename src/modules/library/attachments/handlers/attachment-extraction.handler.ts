@@ -4,7 +4,7 @@ import { PdfExtractorProvider } from '../providers/pdf-extractor.provider';
 import { SearchService } from '../../search/search.service';
 import { STORAGE_PORT, IStoragePort } from '../../../storage/storage.port';
 import { OutboxEvent } from '@prisma/client';
-import { OutboxDispatchHandler } from '../../sync/workers/outbox.worker';
+import { OutboxDispatchHandler } from '../../outbox/outbox.types';
 import { AttachmentStorageException } from '../errors/attachments.errors';
 
 export const EXTRACTION_EVENT_TYPES = {

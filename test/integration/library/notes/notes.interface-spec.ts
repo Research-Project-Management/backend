@@ -1,5 +1,5 @@
 import { LibraryTestHarness } from '../library-test-harness';
-import { VersionMismatchException } from '../../../../src/modules/library/catalog/errors/catalog.errors';
+import { VersionMismatchException } from '../../../../src/modules/library/items/items.errors';
 
 describe('Notes Interface & Invariants (Integration)', () => {
   let harness: LibraryTestHarness;

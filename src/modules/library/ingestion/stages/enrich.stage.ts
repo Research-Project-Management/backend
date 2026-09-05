@@ -19,7 +19,11 @@ export class EnrichStage {
   ) {}
 
   /**
-   * Executes external enrichment for candidates with valid identifiers (DOI, arXiv, PMID, etc.).
+   * Executes external enrichment for candidates with recognized identifiers.
+   * A PDF whose first page yields a credible title but no identifier is also
+   * eligible for a title lookup. MetadataService validates title similarity
+   * before accepting such a result, so a filename fallback cannot be promoted
+   * into unrelated bibliographic data.
    */
   async execute(
     workspaceId: string,
@@ -38,7 +42,13 @@ export class EnrichStage {
       const doi = candidate.normalizedMetadata.doi;
       const arxivId = candidate.normalizedMetadata.arxivId;
       const pmid = candidate.normalizedMetadata.pmid;
-      const query = doi || arxivId || pmid;
+      const title = candidate.normalizedMetadata.title?.trim();
+      const isCredibleTitle =
+        Boolean(title) &&
+        title!.length >= 12 &&
+        !/\.pdf$/i.test(title!) &&
+        !/^(uploaded document|untitled|document)$/i.test(title!);
+      const query = doi || arxivId || pmid || (isCredibleTitle ? title : undefined);
 
       if (!query) continue;
 

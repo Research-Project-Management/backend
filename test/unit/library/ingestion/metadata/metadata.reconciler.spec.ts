@@ -106,4 +106,72 @@ describe('ReconciliationService (Canonical)', () => {
     expect(result.metadata.title).toBe('Attention Is All You Need');
     expect(result.metadata.year).toBe(2017);
   });
+
+  it('retains enriched fields outside the basic bibliographic set', () => {
+    const result = reconciler.reconcile([
+      {
+        id: 'semantic:complete',
+        sourceProvider: 'SemanticScholar',
+        metadata: {
+          title: 'Complete record',
+          authors: ['Ada Lovelace'],
+          pmcid: 'PMC1234567',
+          partNumber: 'II',
+          seriesNumber: '8',
+          referenceCount: 42,
+          openAccessPdfUrl: 'https://example.test/open.pdf',
+          tags: ['metadata'],
+          extraFields: { conferenceName: 'FluxConf' },
+        },
+        confidenceScore: 0.9,
+        fetchedAt: new Date().toISOString(),
+      },
+    ]);
+
+    expect(result.metadata).toMatchObject({
+      pmcid: 'PMC1234567',
+      partNumber: 'II',
+      seriesNumber: '8',
+      referenceCount: 42,
+      openAccessPdfUrl: 'https://example.test/open.pdf',
+      tags: ['metadata'],
+      extraFields: { conferenceName: 'FluxConf' },
+    });
+  });
+
+  it('merges provider enrichment that is additive by nature', () => {
+    const result = reconciler.reconcile([
+      {
+        id: 'crossref:complete',
+        sourceProvider: 'CrossRef',
+        metadata: {
+          title: 'Complete record',
+          tags: ['crossref'],
+          notes: [{ content: 'CrossRef note', source: 'CrossRef' }],
+          extraFields: { conferenceName: 'FluxConf' },
+        },
+        confidenceScore: 0.99,
+        fetchedAt: new Date().toISOString(),
+      },
+      {
+        id: 'semantic:complete',
+        sourceProvider: 'SemanticScholar',
+        metadata: {
+          title: 'Complete record',
+          tags: ['semantic'],
+          notes: [{ content: 'Semantic note', source: 'SemanticScholar' }],
+          extraFields: { referenceCount: 42 },
+        },
+        confidenceScore: 0.9,
+        fetchedAt: new Date().toISOString(),
+      },
+    ]);
+
+    expect(result.metadata.tags).toEqual(['crossref', 'semantic']);
+    expect(result.metadata.notes).toHaveLength(2);
+    expect(result.metadata.extraFields).toEqual({
+      conferenceName: 'FluxConf',
+      referenceCount: 42,
+    });
+  });
 });

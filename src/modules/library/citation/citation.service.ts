@@ -12,7 +12,7 @@ import {
   CitationItemInput,
   FormattedCitationResult,
 } from './types/citation.types';
-import { CatalogRepository } from '../catalog/catalog.repository';
+import { ItemsService } from '../items/items.service';
 import { DoiContentNegotiationService } from './services/doi-content-negotiation.service';
 import { CslEngineService } from './services/csl-engine.service';
 import { CslJsonMapper } from './mappers/csl-json.mapper';
@@ -43,7 +43,7 @@ export class CitationService {
 
   constructor(
     @Optional() private readonly prisma?: PrismaService,
-    @Optional() private readonly catalogRepo?: CatalogRepository,
+    @Optional() private readonly itemsService?: ItemsService,
     @Optional() private readonly doiService?: DoiContentNegotiationService,
     @Optional() private readonly cslEngine?: CslEngineService,
   ) {
@@ -234,8 +234,8 @@ export class CitationService {
     styleId: CitationStyleId = 'apa-7th',
     index: number = 1,
   ) {
-    const item = this.catalogRepo
-      ? await this.catalogRepo.findById(workspaceId, itemId)
+    let item: any = this.itemsService
+      ? await this.itemsService.getItem(workspaceId, itemId)
       : await this.prisma?.catalogItem.findFirst({
           where: {
             id: itemId,
@@ -248,6 +248,20 @@ export class CitationService {
             },
           },
         });
+
+    if (!item && this.prisma) {
+      item = await this.prisma.catalogItem.findFirst({
+        where: {
+          id: itemId,
+          deletedAt: null,
+        },
+        include: {
+          contributors: {
+            orderBy: { orderIndex: 'asc' },
+          },
+        },
+      });
+    }
 
     if (!item) {
       throw new NotFoundException('Paper not found in workspace');
@@ -337,34 +351,30 @@ export class CitationService {
     itemIds: string[],
     styleId: CitationStyleId = 'apa-7th',
   ) {
-    const items = this.catalogRepo
-      ? await this.catalogRepo.findByIds(workspaceId, itemIds)
-      : (await this.prisma?.catalogItem.findMany({
-          where: {
-            id: { in: itemIds },
-            workspaceId,
-            deletedAt: null,
+    const items =
+      (await this.prisma?.catalogItem.findMany({
+        where: {
+          id: { in: itemIds },
+          workspaceId,
+          deletedAt: null,
+        },
+        include: {
+          contributors: {
+            orderBy: { orderIndex: 'asc' },
           },
-          include: {
-            contributors: {
-              orderBy: { orderIndex: 'asc' },
-            },
-          },
-        })) || [];
+        },
+      })) || [];
 
     const citationMap = new Map<string, FormattedCitationResult>();
     for (let index = 0; index < items.length; index++) {
-      const item = items[index];
-      let formatted: FormattedCitationResult | null = null;
+      const item: any = items[index];
+      let formatted: FormattedCitationResult | undefined;
 
       // Tier 1: Official In-Process CSL Engine
       if (this.cslEngine) {
         try {
-          const engineRes = this.cslEngine.format(
-            CslJsonMapper.toCsl(item),
-            styleId,
-            index + 1,
-          );
+          const cslItem = CslJsonMapper.toCsl(item);
+          const engineRes = this.cslEngine.format(cslItem, styleId, index + 1);
           if (engineRes && engineRes.bibliography) {
             formatted = {
               styleId,
@@ -376,7 +386,7 @@ export class CitationService {
           }
         } catch (err: any) {
           this.logger.warn(
-            `Batch CSL format error for item ${item.id}: ${err?.message || err}`,
+            `CslEngineService format error for batch item ${item.id}: ${err?.message || err}. Falling back to publisher DOI.`,
           );
         }
       }
@@ -396,7 +406,9 @@ export class CitationService {
         if (doiCitation) {
           formatted = {
             styleId,
-            inText: doiCitation.inText || `[${index + 1}]`,
+            inText:
+              doiCitation.inText ||
+              `(${item.contributors?.[0]?.lastName || 'Anonymous'}, ${item.year || 'n.d.'})`,
             bibliography: doiCitation.bibliography,
             bibliographyHtml: doiCitation.bibliographyHtml,
             source: 'publisher',
@@ -411,13 +423,13 @@ export class CitationService {
           itemType: item.itemType || 'journalArticle',
           authors:
             item.contributors
-              ?.filter((c) => c.creatorType === 'author')
+              ?.filter((c: any) => c.creatorType === 'author')
               .map(
-                (c) =>
+                (c: any) =>
                   c.fullName ||
                   `${c.firstName || ''} ${c.lastName || ''}`.trim(),
               ) || [],
-          creators: item.contributors?.map((c) => ({
+          creators: item.contributors?.map((c: any) => ({
             firstName: c.firstName || '',
             lastName: c.lastName || '',
             name: c.fullName,

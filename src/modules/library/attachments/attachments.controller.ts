@@ -56,11 +56,13 @@ export class AttachmentsController {
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member')
   async createAttachment(
+    @Param('workspaceId') workspaceId: string,
     @Param('itemId') itemId: string,
     @Body() dto: CreateAttachmentDto,
   ) {
     return this.attachmentsService.createAttachment({
       ...dto,
+      workspaceId,
       catalogItemId: itemId,
     });
   }
@@ -68,8 +70,14 @@ export class AttachmentsController {
   @Get(':attachmentId/revisions')
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
-  async getRevisions(@Param('attachmentId') attachmentId: string) {
-    const revisions = await this.attachmentsService.getRevisions(attachmentId);
+  async getRevisions(
+    @Param('workspaceId') workspaceId: string,
+    @Param('attachmentId') attachmentId: string,
+  ) {
+    const revisions = await this.attachmentsService.getRevisions(
+      workspaceId,
+      attachmentId,
+    );
     return { revisions };
   }
 
@@ -78,10 +86,11 @@ export class AttachmentsController {
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member')
   async addRevision(
+    @Param('workspaceId') workspaceId: string,
     @Param('attachmentId') attachmentId: string,
     @Body() dto: ReplaceAttachmentFileDto,
   ) {
-    return this.attachmentsService.addRevision(attachmentId, dto);
+    return this.attachmentsService.addRevision(workspaceId, attachmentId, dto);
   }
 
   @Delete(':attachmentId')

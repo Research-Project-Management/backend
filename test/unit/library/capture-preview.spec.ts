@@ -5,11 +5,11 @@ import { IngestionService } from '../../../src/modules/library/ingestion/ingesti
 import { IngestionRepository } from '../../../src/modules/library/ingestion/ingestion.repository';
 import { IdempotencyRepository } from '../../../src/modules/library/sync/repositories/idempotency.repository';
 import { PrismaService } from '../../../src/core/database/prisma.service';
-import { CatalogService } from '../../../src/modules/library/catalog/catalog.service';
+import { CatalogService } from '../../../src/modules/library/items/items.service';
 import { METADATA_PORT } from '../../../src/modules/library/ingestion/metadata/types/metadata.types';
 import { STORAGE_PORT } from '../../../src/modules/storage/storage.port';
 import { PdfExtractorProvider } from '../../../src/modules/library/attachments/providers/pdf-extractor.provider';
-import { TransactionService } from '../../../src/modules/library/sync/services/transaction.service';
+import { TransactionService } from '../../../src/modules/library/outbox/transaction.service';
 import { IngestionStrategyRegistry } from '../../../src/modules/library/ingestion/strategies/ingestion-strategy.registry';
 import { createHash } from 'crypto';
 

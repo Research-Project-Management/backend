@@ -1,7 +1,7 @@
 import { ExecutionContext, CallHandler } from '@nestjs/common';
 import { of } from 'rxjs';
 import { TransformInterceptor } from '../../../src/core/interceptors/transform.interceptor';
-import { CatalogController } from '../../../src/modules/library/catalog/catalog.controller';
+import { CatalogController } from '../../../src/modules/library/items/items.controller';
 import { CollectionsController } from '../../../src/modules/library/collections/collections.controller';
 import { NotesController } from '../../../src/modules/library/notes/notes.controller';
 import { AttachmentsController } from '../../../src/modules/library/attachments/attachments.controller';

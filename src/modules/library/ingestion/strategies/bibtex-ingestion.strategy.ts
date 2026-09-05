@@ -1,8 +1,9 @@
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
-import { CatalogService } from '../../catalog/catalog.service';
-import { TransactionService } from '../../sync/services/transaction.service';
+import { CatalogService } from '../../items/items.service';
+import { TransactionService } from '../../outbox/transaction.service';
 import { BibtexParser } from '../parsers/bibtex.parser';
 import { IngestionValidationException } from '../errors/ingestion.errors';
+import { toCatalogItemData } from '../stages/commit.stage';
 import { IngestionCommand, IngestionResult } from '../types/ingestion.types';
 import { IngestionStatus, Prisma } from '@prisma/client';
 import {
@@ -37,6 +38,7 @@ export class BibtexIngestionStrategy implements IIngestionStrategy<
   ): Promise<IngestionResult> {
     const { workspaceId, runId, requestHash } = context;
 
+
     if (command.content && command.content.length > 10 * 1024 * 1024) {
       throw new IngestionValidationException(
         'BibTeX payload exceeds 10MB limit',
@@ -44,70 +46,134 @@ export class BibtexIngestionStrategy implements IIngestionStrategy<
     }
 
     const entries = this.bibtexParserService.parse(command.content);
-    const first = entries[0] || { title: 'BibTeX Item' };
+    if (!entries || entries.length === 0) {
+      throw new IngestionValidationException(
+        'No valid BibTeX entries found in content',
+      );
+    }
 
-    let createdItem: any = null;
-    const bibItemData: any = {
-      title: first.title,
-      doi: first.doi,
-      year: first.year,
-      authors: first.authors || [],
-      journal: first.journal,
-      publicationTitle: first.journal || first.publisher,
-      publisher: first.publisher,
-      volume: first.volume,
-      issue: first.issue,
-      pages: first.pages,
-      isbn: first.isbn,
-      issn: first.issn,
-      url: first.url,
-      citationKey: first.citationKey,
-      abstract: first.abstract,
-      labels: first.keywords || [],
-      keywords: first.keywords || [],
-      notes: first.notes,
-      language: first.language,
-      rights: first.rights,
-      fileUrl: first.fileUrl,
-      uploadedById: command.userId || 'system',
-      collectionId: command.collectionId,
-      itemType: first.itemType || 'journalArticle',
-    };
+    const createdItems: any[] = [];
 
     if (this.libraryTx?.executeInTransaction) {
-      createdItem = await this.libraryTx.executeInTransaction(
+      await this.libraryTx.executeInTransaction(
         async (tx: Prisma.TransactionClient, helpers: any) => {
-          if (this.catalogService?.createItem) {
-            return await this.catalogService.createItem(
+          if (!this.catalogService?.createItem) {
+            throw new Error('CatalogService is required to create BibTeX item');
+          }
+          for (const entry of entries) {
+            const bibItemData: any = {
+              title: entry.title || 'BibTeX Item',
+              doi: entry.doi,
+              year: entry.year,
+              authors: entry.authors || [],
+              journal: entry.journal,
+              publicationTitle: entry.journal || entry.publisher,
+              publisher: entry.publisher,
+              volume: entry.volume,
+              issue: entry.issue,
+              pages: entry.pages,
+              isbn: entry.isbn,
+              issn: entry.issn,
+              url: entry.url,
+              citationKey: entry.citationKey,
+              abstract: entry.abstract,
+              labels: entry.keywords || [],
+              keywords: entry.keywords || [],
+              notes: entry.notes,
+              language: entry.language,
+              rights: entry.rights,
+              fileUrl: entry.fileUrl,
+              uploadedById: command.userId || 'system',
+              collectionId: command.collectionId,
+              itemType: entry.itemType || 'journalArticle',
+            };
+            const createItemData = toCatalogItemData(
+              {
+                ...entry,
+                ...((command as any).overrides || {}),
+                ...bibItemData,
+              },
+              {
+                collectionIds: command.collectionId
+                  ? [command.collectionId]
+                  : [],
+                userId: command.userId,
+              },
+            );
+            const item = await this.catalogService.createItem(
               workspaceId,
-              bibItemData,
+              createItemData,
               {
                 tx,
                 helpers,
                 source: 'bibtex',
               },
             );
+            createdItems.push(item);
           }
-          throw new Error('CatalogService is required to create BibTeX item');
         },
       );
     } else if (this.catalogService?.createItem) {
-      createdItem = await this.catalogService.createItem(
-        workspaceId,
-        bibItemData,
-        {
-          source: 'bibtex',
-        },
-      );
+      for (const entry of entries) {
+        const bibItemData: any = {
+          title: entry.title || 'BibTeX Item',
+          doi: entry.doi,
+          year: entry.year,
+          authors: entry.authors || [],
+          journal: entry.journal,
+          publicationTitle: entry.journal || entry.publisher,
+          publisher: entry.publisher,
+          volume: entry.volume,
+          issue: entry.issue,
+          pages: entry.pages,
+          isbn: entry.isbn,
+          issn: entry.issn,
+          url: entry.url,
+          citationKey: entry.citationKey,
+          abstract: entry.abstract,
+          labels: entry.keywords || [],
+          keywords: entry.keywords || [],
+          notes: entry.notes,
+          language: entry.language,
+          rights: entry.rights,
+          fileUrl: entry.fileUrl,
+          uploadedById: command.userId || 'system',
+          collectionId: command.collectionId,
+          itemType: entry.itemType || 'journalArticle',
+        };
+        const createItemData = toCatalogItemData(
+          {
+            ...entry,
+            ...((command as any).overrides || {}),
+            ...bibItemData,
+          },
+          {
+            collectionIds: command.collectionId
+              ? [command.collectionId]
+              : [],
+            userId: command.userId,
+          },
+        );
+        const item = await this.catalogService.createItem(
+          workspaceId,
+          createItemData,
+          {
+            source: 'bibtex',
+          },
+        );
+        createdItems.push(item);
+      }
     }
+
+    const firstCreated = createdItems[0] || null;
 
     const result: IngestionResult = {
       runId,
       status: 'completed',
-      itemId: createdItem?.id,
+      itemId: firstCreated?.id,
       attachmentIds: [],
       deduplicated: false,
-      item: createdItem,
+      item: firstCreated,
     };
 
     await context.saveIdempotency(

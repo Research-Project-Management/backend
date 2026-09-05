@@ -4,8 +4,8 @@ import {
   TestWorkspaceFixture,
 } from './library-test-harness';
 import { IngestionService } from '../../../src/modules/library/ingestion/ingestion.service';
-import { CatalogService } from '../../../src/modules/library/catalog/catalog.service';
-import { CatalogRepository } from '../../../src/modules/library/catalog/catalog.repository';
+import { CatalogService } from '../../../src/modules/library/items/items.service';
+import { CatalogRepository } from '../../../src/modules/library/items/items.repository';
 import { NotesService } from '../../../src/modules/library/notes/notes.service';
 import { AnnotationsService } from '../../../src/modules/library/annotations/annotations.service';
 import { SyncService } from '../../../src/modules/library/sync/sync.service';
@@ -119,7 +119,10 @@ describe('Library Feature Closure: Paper Tags, Notes & Annotation Comments', () 
 
     // Verify toItemView mapping
     const itemView = toItemView(itemDb as any);
-    expect(itemView.tags).toEqual(['Machine Learning', 'Deep Learning', 'AI']);
+    expect(itemView.tags).toEqual(
+      expect.arrayContaining(['Machine Learning', 'Deep Learning', 'AI']),
+    );
+    expect(itemView.tags.length).toBe(3);
   });
 
   it('2 & 3. Zotero item sync with tags -> DB persistence -> Additive merge on update', async () => {

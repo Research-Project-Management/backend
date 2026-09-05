@@ -1,10 +1,24 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  ForbiddenException,
+} from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import {
   AnnotationsRepository,
   CreateAnnotationData,
   UpdateAnnotationData,
 } from './annotations.repository';
-import { TransactionService } from '../sync/services/transaction.service';
+import {
+  TransactionService,
+  TransactionHelpers,
+} from '../outbox/transaction.service';
+import type {
+  UpsertSyncAnnotationCommand,
+  DeleteSyncEntityCommand,
+  UpsertSyncEntityResult,
+} from '../sync/ports/sync.port';
 
 @Injectable()
 export class AnnotationsService {
@@ -120,6 +134,133 @@ export class AnnotationsService {
       }
 
       return deleted;
+    });
+  }
+
+  /**
+   * Sync protocol adapter: transactional upsert for an Annotation from an external sync batch.
+   */
+  async upsertFromSync(
+    command: UpsertSyncAnnotationCommand,
+    tx: Prisma.TransactionClient,
+    helpers: TransactionHelpers,
+  ): Promise<UpsertSyncEntityResult> {
+    if (command.existingId) {
+      const existing = await tx.annotation.findUnique({
+        where: { id: command.existingId },
+        include: { attachment: { include: { catalogItem: true } } },
+      });
+
+      if (!existing) {
+        throw new NotFoundException(
+          `Annotation ${command.existingId} not found in workspace ${command.workspaceId}`,
+        );
+      }
+
+      if (existing.attachment.catalogItem.workspaceId !== command.workspaceId) {
+        throw new ForbiddenException(
+          `Annotation ${command.existingId} does not belong to workspace ${command.workspaceId}`,
+        );
+      }
+
+      const updated = await tx.annotation.update({
+        where: { id: command.existingId },
+        data: {
+          quoteText: command.quoteText,
+          comment: command.comment,
+          color: command.color,
+          pageIndex: command.pageIndex,
+          version: { increment: 1 },
+        },
+      });
+
+      await helpers.appendChange(command.workspaceId, {
+        entityType: 'Annotation',
+        entityId: updated.id,
+        action: 'update',
+        version: updated.version,
+      });
+
+      return { id: updated.id, isNew: false, version: updated.version };
+    } else {
+      if (!command.attachmentId) {
+        throw new NotFoundException(
+          `Parent attachment ID required for annotation on page ${command.pageIndex}`,
+        );
+      }
+
+      const att = await tx.catalogAttachment.findUnique({
+        where: { id: command.attachmentId },
+        include: { catalogItem: true },
+      });
+
+      if (!att || att.catalogItem.workspaceId !== command.workspaceId) {
+        throw new NotFoundException(
+          `Attachment ${command.attachmentId} not found in workspace ${command.workspaceId}`,
+        );
+      }
+
+      const created = await tx.annotation.create({
+        data: {
+          attachmentId: command.attachmentId,
+          authorId: command.userId,
+          pageIndex: command.pageIndex,
+          quoteText: command.quoteText || '',
+          comment: command.comment || '',
+          color: command.color || '#ffd400',
+          type: (command.type as any) || 'highlight',
+          version: 1,
+        },
+      });
+
+      await helpers.appendChange(command.workspaceId, {
+        entityType: 'Annotation',
+        entityId: created.id,
+        action: 'create',
+        version: 1,
+      });
+
+      await helpers.publishOutbox(
+        command.workspaceId,
+        created.id,
+        'library.annotation.created',
+        { annotationId: created.id },
+      );
+
+      return { id: created.id, isNew: true, version: 1 };
+    }
+  }
+
+  /**
+   * Sync protocol adapter: transactional soft-delete for an Annotation from an external sync batch.
+   */
+  async deleteFromSync(
+    command: DeleteSyncEntityCommand,
+    tx: Prisma.TransactionClient,
+    helpers: TransactionHelpers,
+  ): Promise<void> {
+    const { workspaceId, entityId } = command;
+    const existing = await tx.annotation.findUnique({
+      where: { id: entityId },
+      include: { attachment: { include: { catalogItem: true } } },
+    });
+    if (!existing) return;
+
+    if (existing.attachment.catalogItem.workspaceId !== workspaceId) {
+      throw new ForbiddenException(
+        `Annotation ${entityId} does not belong to workspace ${workspaceId}`,
+      );
+    }
+
+    await tx.annotation.update({
+      where: { id: entityId },
+      data: { deletedAt: new Date() },
+    });
+    await helpers.appendChange(workspaceId, {
+      entityType: 'Annotation',
+      entityId,
+      action: 'delete',
+      version: existing.version + 1,
     });
   }
 }

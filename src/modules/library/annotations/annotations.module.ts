@@ -3,10 +3,10 @@ import { AnnotationsController } from './annotations.controller';
 import { AnnotationsService } from './annotations.service';
 import { AnnotationsRepository } from './annotations.repository';
 import { CoreModule } from '../../../core/core.module';
-import { SyncModule } from '../sync/sync.module';
+import { OutboxModule } from '../outbox/outbox.module';
 
 @Module({
-  imports: [CoreModule, SyncModule],
+  imports: [CoreModule, OutboxModule],
   controllers: [AnnotationsController],
   providers: [AnnotationsRepository, AnnotationsService],
   exports: [AnnotationsService],

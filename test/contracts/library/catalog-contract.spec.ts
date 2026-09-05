@@ -6,13 +6,13 @@ import {
   ICatalogCommitPort,
   ITEM_EXISTENCE_PORT,
   IItemExistencePort,
-} from '../../../src/modules/library/catalog/ports/catalog.ports';
+} from '../../../src/modules/library/items/items.ports';
 import {
   CatalogItemSummary,
   ItemMetadata,
   CreatorCredit,
   ItemIdentifier,
-} from '../../../src/modules/library/catalog/types/catalog.types';
+} from '../../../src/modules/library/items/items.types';
 
 describe('Library Catalog Contracts & Port Conventions (T012)', () => {
   describe('Port DI Tokens', () => {

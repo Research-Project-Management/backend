@@ -10,9 +10,11 @@ export interface ParsedBibtexEntry {
   itemType: string;
   title: string;
   authors: string[];
+  editors?: string[];
   year: number | null;
   journal?: string;
   publisher?: string;
+  place?: string;
   volume?: string;
   issue?: string;
   pages?: string;
@@ -22,6 +24,7 @@ export interface ParsedBibtexEntry {
   url?: string;
   abstract?: string;
   series?: string;
+  edition?: string;
   keywords?: string[];
   notes?: string[];
   language?: string;
@@ -53,6 +56,14 @@ export class BibtexParser {
             if (a.literal) return a.literal.trim();
             if (a.given && a.family) return `${a.given} ${a.family}`.trim();
             return (a.family || a.given || '').trim();
+          })
+          .filter(Boolean);
+
+        const editors: string[] = (csl.editor || [])
+          .map((e: any) => {
+            if (e.literal) return e.literal.trim();
+            if (e.given && e.family) return `${e.given} ${e.family}`.trim();
+            return (e.family || e.given || '').trim();
           })
           .filter(Boolean);
 
@@ -94,9 +105,11 @@ export class BibtexParser {
           itemType,
           title: (csl.title || 'Untitled Reference').trim(),
           authors,
+          editors: editors && editors.length > 0 ? editors : undefined,
           year,
           journal: csl['container-title'] || undefined,
           publisher: csl.publisher || undefined,
+          place: csl['publisher-place'] || undefined,
           volume: csl.volume ? String(csl.volume) : undefined,
           issue: csl.issue ? String(csl.issue) : undefined,
           pages: csl.page ? String(csl.page) : undefined,
@@ -106,6 +119,7 @@ export class BibtexParser {
           url: csl.URL || undefined,
           abstract: csl.abstract || undefined,
           series: csl['collection-title'] || undefined,
+          edition: csl.edition ? String(csl.edition).trim() : undefined,
           keywords: keywords && keywords.length > 0 ? keywords : undefined,
           notes: notes && notes.length > 0 ? notes : undefined,
           language: csl.language ? String(csl.language).trim() : undefined,
@@ -174,6 +188,13 @@ export class BibtexParser {
             .filter(Boolean)
         : [];
 
+      const editors = fields.editor
+        ? fields.editor
+            .split(/\s+and\s+/i)
+            .map((e) => e.trim())
+            .filter(Boolean)
+        : [];
+
       // Extract keywords / tags
       const rawKeywords = fields.keywords || fields.keyword || fields.tags;
       const keywords = rawKeywords
@@ -200,9 +221,11 @@ export class BibtexParser {
         itemType: this.mapCslTypeToItemType(rawType),
         title: fields.title || 'Untitled Reference',
         authors,
+        editors: editors.length > 0 ? editors : undefined,
         year: fields.year ? parseInt(fields.year, 10) || null : null,
         journal: fields.journal || fields.booktitle,
         publisher: fields.publisher,
+        place: fields.address || fields.place || undefined,
         volume: fields.volume,
         issue: fields.number || fields.issue,
         pages: fields.pages,
@@ -211,6 +234,8 @@ export class BibtexParser {
         issn: fields.issn,
         url: fields.url,
         abstract: fields.abstract,
+        series: fields.series || fields.series_title || undefined,
+        edition: fields.edition || undefined,
         keywords,
         notes,
         language: fields.language || undefined,

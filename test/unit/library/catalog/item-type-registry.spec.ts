@@ -1,9 +1,9 @@
-import { ItemTypeRegistryService } from '../../../../src/modules/library/catalog/registry/item-type-registry.service';
+import { ItemTypeRegistryService } from '../../../../src/modules/library/types/types.service';
 import {
   BIBLIOGRAPHIC_ITEM_TYPES,
   SPECIAL_ITEM_TYPES,
   normalizeItemType,
-} from '../../../../src/modules/library/catalog/utils/item.utils';
+} from '../../../../src/modules/library/items/items.utils';
 
 describe('ItemTypeRegistryService & normalizeItemType', () => {
   let registry: ItemTypeRegistryService;

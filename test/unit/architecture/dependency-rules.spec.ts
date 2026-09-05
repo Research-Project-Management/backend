@@ -6,7 +6,6 @@ import { ZoteroService } from '@/modules/integrations/zotero/zotero.service';
 import { SyncModule } from '@/modules/library/sync/sync.module';
 import { SYNC_PORT } from '@/modules/library/sync/ports/sync.port';
 import { SyncService } from '@/modules/library/sync/sync.service';
-import { TransactionService } from '@/modules/library/sync/services/transaction.service';
 
 describe('Architecture & Integration Boundary Enforcement (ADR-0007)', () => {
   const backendRoot = path.resolve(__dirname, '../../../');
@@ -102,9 +101,9 @@ describe('Architecture & Integration Boundary Enforcement (ADR-0007)', () => {
   });
 
   describe('Rule 4: Sync Module Public Surface Constraint', () => {
-    it('exports strictly SYNC_PORT, SyncService, and TransactionService', () => {
+    it('exports strictly SYNC_PORT and SyncService', () => {
       const exports = Reflect.getMetadata('exports', SyncModule) || [];
-      expect(exports).toEqual([SYNC_PORT, SyncService, TransactionService]);
+      expect(exports).toEqual([SYNC_PORT, SyncService]);
     });
   });
 

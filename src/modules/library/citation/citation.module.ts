@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { CoreModule } from '../../../core/core.module';
-import { CatalogModule } from '../catalog/catalog.module';
+import { ItemsModule } from '../items/items.module';
 import { CitationService } from './citation.service';
 import { CitationController } from './citation.controller';
 
@@ -8,7 +8,7 @@ import { DoiContentNegotiationService } from './services/doi-content-negotiation
 import { CslEngineService } from './services/csl-engine.service';
 
 @Module({
-  imports: [CoreModule, CatalogModule],
+  imports: [CoreModule, ItemsModule],
   controllers: [CitationController],
   providers: [CitationService, DoiContentNegotiationService, CslEngineService],
   exports: [CitationService, DoiContentNegotiationService, CslEngineService],

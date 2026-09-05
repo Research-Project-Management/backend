@@ -88,11 +88,15 @@ export class AnnotationsController {
   async deleteAnnotation(
     @Param('workspaceId') workspaceId: string,
     @Param('id') id: string,
+    @Query('expectedVersion') expectedVersionQuery?: string,
     @Headers('if-match') ifMatch?: string,
   ) {
-    const expectedVersion = ifMatch
-      ? parseInt(ifMatch.replace(/["']/g, ''), 10)
-      : undefined;
+    const expectedVersion =
+      expectedVersionQuery !== undefined
+        ? parseInt(expectedVersionQuery, 10)
+        : ifMatch
+          ? parseInt(ifMatch.replace(/["']/g, ''), 10)
+          : undefined;
     const deleted = await this.annotationsService.deleteAnnotation(
       workspaceId,
       id,

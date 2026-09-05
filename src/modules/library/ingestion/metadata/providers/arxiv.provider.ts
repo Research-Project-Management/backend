@@ -8,7 +8,12 @@ import {
   ProviderResult,
   QueryType,
 } from '../types/metadata.types';
-import { normalizeArxivId, normalizeDoi } from '../utils/metadata.utils';
+import {
+  normalizeArxivId,
+  normalizeDoi,
+  cleanBibliographicText,
+  decodeHtmlEntities,
+} from '../utils/metadata.utils';
 import { ProviderFetchError } from '../services/provider.executor';
 
 @Injectable()
@@ -88,7 +93,7 @@ export class ArxivProvider implements MetadataProvider {
     // Title
     const titleMatch = entry.match(/<title>([\s\S]*?)<\/title>/i);
     const title = titleMatch
-      ? titleMatch[1].replace(/\s+/g, ' ').trim()
+      ? cleanBibliographicText(titleMatch[1]) || 'Untitled arXiv Paper'
       : 'Untitled arXiv Paper';
 
     // Authors
@@ -98,7 +103,10 @@ export class ArxivProvider implements MetadataProvider {
     );
     for (const match of authorMatches) {
       if (match[1]) {
-        authors.push(match[1].trim());
+        const cleanName = decodeHtmlEntities(match[1].trim());
+        if (cleanName) {
+          authors.push(cleanName);
+        }
       }
     }
 
@@ -115,8 +123,13 @@ export class ArxivProvider implements MetadataProvider {
     // Abstract / summary
     const summaryMatch = entry.match(/<summary>([\s\S]*?)<\/summary>/i);
     const abstract = summaryMatch
-      ? summaryMatch[1].replace(/\s+/g, ' ').trim()
+      ? cleanBibliographicText(summaryMatch[1])
       : undefined;
+
+    const keywords = Array.from(
+      entry.matchAll(/<category[^>]*term=["']([^"']+)["'][^>]*>/gi),
+      (match) => decodeHtmlEntities(match[1].trim()),
+    ).filter(Boolean);
 
     // DOI (if exists in arxiv:doi)
     let doi: string | undefined;
@@ -131,7 +144,7 @@ export class ArxivProvider implements MetadataProvider {
       /<arxiv:journal_ref[^>]*>([\s\S]*?)<\/arxiv:journal_ref>/i,
     );
     if (journalMatch) {
-      journal = journalMatch[1].replace(/\s+/g, ' ').trim();
+      journal = cleanBibliographicText(journalMatch[1]);
     }
 
     // PDF link
@@ -159,12 +172,18 @@ export class ArxivProvider implements MetadataProvider {
         journal: journal || 'arXiv preprint',
         publisher: 'arXiv',
         abstract,
+        language: 'en',
+        archive: 'arXiv',
+        libraryCatalog: 'arXiv.org',
+        callNumber: `arXiv:${cleanId}`,
+        keywords: keywords.length > 0 ? keywords : undefined,
+        tags: keywords.length > 0 ? keywords : undefined,
         itemType: 'preprint',
         url: canonicalUrl,
         openAccessPdfUrl: pdfUrl,
         extraFields: {
           repository: 'arXiv',
-          archiveID: `arXiv:${cleanId}`,
+          archiveId: cleanId,
         },
         provenance: {
           originProvider: this.id,

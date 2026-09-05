@@ -171,7 +171,10 @@ export class ReconciliationService {
       'editors',
       'year',
       'publicationDate',
+      'date',
+      'accessedAt',
       'itemType',
+      'type',
       'journal',
       'publicationTitle',
       'journalAbbr',
@@ -180,25 +183,40 @@ export class ReconciliationService {
       'volume',
       'issue',
       'section',
+      'partNumber',
+      'partTitle',
       'pages',
       'series',
       'seriesTitle',
+      'seriesText',
+      'seriesNumber',
       'language',
       'abstract',
+      'abstractNote',
       'tldr',
       'keywords',
       'citationCount',
       'referenceCount',
       'influentialCitationCount',
       'openAccessPdfUrl',
+      'pdfUrl',
+      'fileUrl',
+      'fileId',
+      'filename',
+      'storageId',
       'license',
       'rights',
       'archive',
       'archiveLocation',
       'callNumber',
+      'libraryCatalog',
       'extra',
       'extraFields',
       'citationKey',
+      'explicitCitationKey',
+      'tags',
+      'labels',
+      'notes',
     ];
 
     for (const field of allFields) {
@@ -248,6 +266,71 @@ export class ReconciliationService {
 
       // Sort by highest effective weight
       fieldVariants.sort((a, b) => b.effectiveWeight - a.effectiveWeight);
+
+      if (field === 'extraFields') {
+        const merged = fieldVariants
+          .slice()
+          .reverse()
+          .reduce<Record<string, unknown>>(
+            (accumulator, variant) => ({
+              ...accumulator,
+              ...(variant.val as Record<string, unknown>),
+            }),
+            {},
+          );
+        resolved.extraFields = merged;
+        assertions.push({
+          field,
+          value: this.cloneValue(merged),
+          sourceProvider: fieldVariants[0].candidate.sourceProvider,
+          confidenceScore: Number(fieldVariants[0].effectiveWeight.toFixed(3)),
+          isUserOverride: false,
+          timestamp: new Date().toISOString(),
+        });
+        continue;
+      }
+
+      if (field === 'tags' || field === 'labels' || field === 'keywords') {
+        const values = Array.from(
+          new Set(
+            fieldVariants.flatMap((variant) =>
+              Array.isArray(variant.val) ? variant.val : [],
+            ),
+          ),
+        );
+        resolved[field] = values as any;
+        assertions.push({
+          field,
+          value: [...values],
+          sourceProvider: fieldVariants[0].candidate.sourceProvider,
+          confidenceScore: Number(fieldVariants[0].effectiveWeight.toFixed(3)),
+          isUserOverride: false,
+          timestamp: new Date().toISOString(),
+        });
+        continue;
+      }
+
+      if (field === 'notes') {
+        const values = fieldVariants.flatMap((variant) =>
+          Array.isArray(variant.val) ? variant.val : [],
+        );
+        const unique = Array.from(
+          new Map(
+            values.map((value) => [JSON.stringify(value), value]),
+          ).values(),
+        );
+        resolved.notes = unique as ItemMetadata['notes'];
+        assertions.push({
+          field,
+          value: this.cloneValue(unique),
+          sourceProvider: fieldVariants[0].candidate.sourceProvider,
+          confidenceScore: Number(fieldVariants[0].effectiveWeight.toFixed(3)),
+          isUserOverride: false,
+          timestamp: new Date().toISOString(),
+        });
+        continue;
+      }
+
       const winner = fieldVariants[0];
 
       resolved[field] = this.cloneValue(winner.val) as any;

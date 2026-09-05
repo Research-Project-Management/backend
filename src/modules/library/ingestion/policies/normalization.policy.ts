@@ -1,5 +1,17 @@
 import { Injectable } from '@nestjs/common';
 import { ItemMetadata, CreatorInput } from '../metadata/types/metadata.types';
+import {
+  cleanBibliographicText,
+  cleanBannedString,
+  normalizeDoi,
+  normalizeArxivId,
+  normalizePmid,
+  normalizePmcid,
+  normalizeIsbn,
+  normalizeIssn,
+  normalizeTags as canonicalNormalizeTags,
+} from '../metadata/utils/metadata.utils';
+import { parseCreatorString } from '../../items/creator-parser.util';
 
 @Injectable()
 export class NormalizationPolicy {
@@ -40,12 +52,7 @@ export class NormalizationPolicy {
     if (raw.doi) {
       const cleanDoi = this.cleanString(raw.doi);
       if (cleanDoi) {
-        result.doi = cleanDoi
-          .replace(/^(https?:\/\/)?(dx\.)?doi\.org\//i, '')
-          .replace(/^doi:\s*/i, '')
-          .replace(/[.,;]+$/, '')
-          .trim()
-          .toLowerCase();
+        result.doi = normalizeDoi(cleanDoi) || cleanDoi;
       }
     }
 
@@ -53,19 +60,23 @@ export class NormalizationPolicy {
     if (raw.arxivId) {
       const cleanArxiv = this.cleanString(raw.arxivId);
       if (cleanArxiv)
-        result.arxivId = cleanArxiv.replace(/^arxiv:\s*/i, '').trim();
+        result.arxivId = normalizeArxivId(cleanArxiv) || cleanArxiv;
     }
     if (raw.pmid) {
       const cleanPmid = this.cleanString(raw.pmid);
-      if (cleanPmid) result.pmid = cleanPmid.replace(/^pmid:\s*/i, '').trim();
+      if (cleanPmid) result.pmid = normalizePmid(cleanPmid) || cleanPmid;
+    }
+    if (raw.pmcid) {
+      const cleanPmcid = this.cleanString(raw.pmcid);
+      if (cleanPmcid) result.pmcid = normalizePmcid(cleanPmcid) || cleanPmcid;
     }
     if (raw.isbn) {
       const cleanIsbn = this.cleanString(raw.isbn);
-      if (cleanIsbn) result.isbn = cleanIsbn.replace(/[- ]/g, '').trim();
+      if (cleanIsbn) result.isbn = normalizeIsbn(cleanIsbn) || cleanIsbn;
     }
     if (raw.issn) {
       const cleanIssn = this.cleanString(raw.issn);
-      if (cleanIssn) result.issn = cleanIssn.trim();
+      if (cleanIssn) result.issn = normalizeIssn(cleanIssn) || cleanIssn;
     }
 
     // 5. Year & Dates
@@ -89,12 +100,30 @@ export class NormalizationPolicy {
         }
       }
     }
+    if (raw.date && !result.publicationDate) {
+      const cleanDate = this.cleanString(raw.date);
+      if (cleanDate) result.date = cleanDate;
+    }
+    if (raw.accessedAt) {
+      const parsed =
+        raw.accessedAt instanceof Date
+          ? raw.accessedAt
+          : new Date(String(raw.accessedAt));
+      if (!Number.isNaN(parsed.getTime())) result.accessedAt = parsed;
+    }
 
     // 6. Authors & Creators
-    const creators = this.normalizeCreators(raw.creators, raw.authors);
+    const creators = this.normalizeCreators(
+      raw.creators,
+      raw.authors,
+      raw.editors,
+    );
     if (creators.length > 0) {
       result.creators = creators;
-      result.authors = creators
+      const authorCreators = creators.filter(
+        (creator) => creator.creatorType === 'author',
+      );
+      result.authors = (authorCreators.length > 0 ? authorCreators : creators)
         .map((c) => c.name || `${c.firstName || ''} ${c.lastName || ''}`.trim())
         .filter(Boolean);
     }
@@ -112,18 +141,49 @@ export class NormalizationPolicy {
     const issue = this.cleanString(raw.issue);
     if (issue) result.issue = issue;
 
+    const stringFields: (keyof ItemMetadata)[] = [
+      'journal',
+      'journalAbbr',
+      'place',
+      'section',
+      'partNumber',
+      'partTitle',
+      'series',
+      'seriesTitle',
+      'seriesText',
+      'seriesNumber',
+      'type',
+      'archiveLocation',
+      'storageId',
+      'explicitCitationKey',
+    ];
+    for (const field of stringFields) {
+      const value = this.cleanString(raw[field]);
+      if (value) (result as Record<string, unknown>)[field] = value;
+    }
+
     const pages = this.cleanString(raw.pages);
     if (pages) result.pages = pages.replace(/--/g, '-');
 
     // 8. Abstract
     const abstractText = this.cleanString(raw.abstract || raw.abstractNote);
     if (abstractText) result.abstract = abstractText;
+    const abstractNote = this.cleanString(raw.abstractNote);
+    if (abstractNote) result.abstractNote = abstractNote;
+    const tldr = this.cleanString(raw.tldr);
+    if (tldr) result.tldr = tldr;
 
     // 9. URL
     if (raw.url) {
       const cleanUrl = this.cleanString(raw.url);
       if (cleanUrl && /^https?:\/\//i.test(cleanUrl)) {
         result.url = cleanUrl;
+      }
+    }
+    if (raw.openAccessPdfUrl) {
+      const cleanPdfUrl = this.cleanString(raw.openAccessPdfUrl);
+      if (cleanPdfUrl && /^https?:\/\//i.test(cleanPdfUrl)) {
+        result.openAccessPdfUrl = cleanPdfUrl;
       }
     }
 
@@ -192,7 +252,7 @@ export class NormalizationPolicy {
       if (cleanExtra) result.extra = cleanExtra;
     }
     if (raw.extraFields && typeof raw.extraFields === 'object') {
-      result.extraFields = raw.extraFields;
+      result.extraFields = this.cleanExtraFields(raw.extraFields);
     }
     if (raw.libraryCatalog) {
       const cleanCat = this.cleanString(raw.libraryCatalog);
@@ -207,11 +267,58 @@ export class NormalizationPolicy {
       if (cleanArch) result.archive = cleanArch;
     }
 
+    if (Array.isArray(raw.editors)) {
+      const editors = raw.editors
+        .map((editor) => this.cleanString(editor))
+        .filter((editor): editor is string => Boolean(editor));
+      if (editors.length > 0) result.editors = editors;
+    }
+
+    for (const field of [
+      'citationCount',
+      'referenceCount',
+      'influentialCitationCount',
+    ] as const) {
+      const value = raw[field];
+      if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+        result[field] = value;
+      }
+    }
+
     // 14. File & Attachment references
     if (raw.fileId) result.fileId = this.cleanString(raw.fileId);
     if (raw.filename) result.filename = this.cleanString(raw.filename);
     if (raw.fileUrl) result.fileUrl = this.cleanString(raw.fileUrl);
     if (raw.pdfUrl) result.pdfUrl = this.cleanString(raw.pdfUrl);
+
+    // Keep provider/type-specific fields that are not part of the canonical
+    // columns. This prevents a newer metadata provider from losing fields at
+    // the normalization boundary before commit.
+    const canonicalFields = new Set([
+      'title', 'shortTitle', 'itemType', 'doi', 'arxivId', 'pmid', 'pmcid',
+      'isbn', 'issn', 'year', 'publicationDate', 'date', 'accessedAt',
+      'creators', 'authors', 'editors', 'publicationTitle', 'journal',
+      'publisher', 'volume', 'issue', 'pages', 'abstract', 'abstractNote',
+      'tldr', 'url', 'openAccessPdfUrl', 'tags', 'keywords', 'labels',
+      'notes', 'citationKey', 'explicitCitationKey', 'language', 'rights',
+      'license', 'extra', 'extraFields', 'fileId', 'filename', 'fileUrl',
+      'pdfUrl', 'type', 'place', 'section', 'partNumber', 'partTitle',
+      'series', 'seriesTitle', 'seriesText', 'seriesNumber', 'journalAbbr',
+      'storageId', 'archive', 'archiveLocation', 'libraryCatalog', 'callNumber',
+      'citationCount', 'referenceCount', 'influentialCitationCount',
+    ]);
+    const preservedFields = Object.fromEntries(
+      Object.entries(raw).filter(
+        ([key, value]) =>
+          !canonicalFields.has(key) && value !== undefined && value !== null,
+      ),
+    );
+    if (Object.keys(preservedFields).length > 0) {
+      result.extraFields = {
+        ...(result.extraFields || {}),
+        ...this.cleanExtraFields(preservedFields),
+      };
+    }
 
     return result;
   }
@@ -220,7 +327,7 @@ export class NormalizationPolicy {
     if (val === undefined || val === null) return undefined;
     let str: string;
     if (typeof val === 'string') {
-      str = val.trim();
+      str = cleanBibliographicText(val) || '';
     } else if (
       typeof val === 'number' ||
       typeof val === 'boolean' ||
@@ -230,10 +337,23 @@ export class NormalizationPolicy {
     } else {
       return undefined;
     }
-    if (NormalizationPolicy.BANNED_STRINGS.has(str.toLowerCase())) {
-      return undefined;
+    return cleanBannedString(str);
+  }
+
+  private cleanExtraFields(fields: Record<string, unknown>): Record<string, unknown> {
+    const cleaned: Record<string, unknown> = {};
+
+    for (const [rawKey, value] of Object.entries(fields)) {
+      if (value === undefined || value === null) continue;
+      if (typeof value === 'string' && !value.trim()) continue;
+      if (Array.isArray(value) && value.length === 0) continue;
+
+      const key = rawKey === 'archiveID' ? 'archiveId' : rawKey;
+      if (key === 'archiveId' && cleaned[key] !== undefined) continue;
+      cleaned[key] = value;
     }
-    return str;
+
+    return cleaned;
   }
 
   private stripLatexBraces(str: string): string {
@@ -243,8 +363,18 @@ export class NormalizationPolicy {
   private normalizeCreators(
     creatorsInput?: CreatorInput[],
     authorsInput?: string[],
+    editorsInput?: string[],
   ): CreatorInput[] {
     const list: CreatorInput[] = [];
+    const known = new Set<string>();
+
+    const append = (creator: CreatorInput) => {
+      const name = creator.name || creator.fullName || '';
+      const key = `${creator.creatorType || 'author'}:${name.toLocaleLowerCase()}`;
+      if (!name || known.has(key)) return;
+      known.add(key);
+      list.push(creator);
+    };
 
     if (Array.isArray(creatorsInput) && creatorsInput.length > 0) {
       for (const c of creatorsInput) {
@@ -259,7 +389,7 @@ export class NormalizationPolicy {
         const effectiveName =
           name || `${firstName || ''} ${lastName || ''}`.trim();
 
-        list.push({
+        append({
           creatorType,
           name: effectiveName,
           firstName: firstName || undefined,
@@ -268,7 +398,7 @@ export class NormalizationPolicy {
       }
     }
 
-    if (list.length === 0 && Array.isArray(authorsInput)) {
+    if (Array.isArray(authorsInput)) {
       for (const a of authorsInput) {
         const cleanA = this.cleanString(a);
         if (!cleanA) continue;
@@ -278,18 +408,25 @@ export class NormalizationPolicy {
         if (parts.length === 2) {
           const last = parts[0].trim();
           const first = parts[1].trim();
-          list.push({
+          append({
             creatorType: 'author',
             name: `${first} ${last}`,
             firstName: first,
             lastName: last,
           });
         } else {
-          list.push({
+          append({
             creatorType: 'author',
             name: cleanA,
           });
         }
+      }
+    }
+
+    if (Array.isArray(editorsInput)) {
+      for (const editor of editorsInput) {
+        const cleanEditor = this.cleanString(editor);
+        if (cleanEditor) append({ creatorType: 'editor', name: cleanEditor });
       }
     }
 

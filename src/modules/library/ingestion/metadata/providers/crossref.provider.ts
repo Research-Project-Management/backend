@@ -8,7 +8,12 @@ import {
   ProviderResult,
   QueryType,
 } from '../types/metadata.types';
-import { normalizeDoi } from '../utils/metadata.utils';
+import {
+  normalizeDoi,
+  normalizeIsbn,
+  normalizeIssn,
+  cleanBibliographicText,
+} from '../utils/metadata.utils';
 import { ProviderFetchError } from '../services/provider.executor';
 
 @Injectable()
@@ -158,13 +163,14 @@ export class CrossRefProvider implements MetadataProvider {
     isDirectDoi: boolean,
   ): ProviderResult {
     const rawTitle = message.title;
-    const title = Array.isArray(rawTitle)
+    const rawTitleStr = Array.isArray(rawTitle)
       ? typeof rawTitle[0] === 'string'
         ? rawTitle[0]
         : 'Untitled'
       : typeof rawTitle === 'string'
         ? rawTitle
         : 'Untitled';
+    const title = cleanBibliographicText(rawTitleStr) || 'Untitled';
 
     const authors: string[] = [];
     const creators: Array<{
@@ -235,13 +241,14 @@ export class CrossRefProvider implements MetadataProvider {
     }
 
     const containerTitle = message['container-title'];
-    const journal = Array.isArray(containerTitle)
+    const rawJournal = Array.isArray(containerTitle)
       ? typeof containerTitle[0] === 'string'
         ? containerTitle[0]
         : undefined
       : typeof containerTitle === 'string'
         ? containerTitle
         : undefined;
+    const journal = cleanBibliographicText(rawJournal);
 
     const typeStr = typeof message.type === 'string' ? message.type : '';
     let itemType = 'journalArticle';
@@ -284,51 +291,56 @@ export class CrossRefProvider implements MetadataProvider {
     }
 
     const shortContainer = message['short-container-title'];
-    const journalAbbr = Array.isArray(shortContainer)
+    const rawJournalAbbr = Array.isArray(shortContainer)
       ? typeof shortContainer[0] === 'string'
         ? shortContainer[0]
         : undefined
       : typeof shortContainer === 'string'
         ? shortContainer
         : undefined;
+    const journalAbbr = cleanBibliographicText(rawJournalAbbr);
 
     const collectionTitle = message['collection-title'];
-    const series = Array.isArray(collectionTitle)
+    const rawSeries = Array.isArray(collectionTitle)
       ? typeof collectionTitle[0] === 'string'
         ? collectionTitle[0]
         : undefined
       : typeof collectionTitle === 'string'
         ? collectionTitle
         : undefined;
+    const series = cleanBibliographicText(rawSeries);
 
     const rawVersion = createHash('md5')
       .update(JSON.stringify(message))
       .digest('hex');
 
-    const publisher =
-      typeof message.publisher === 'string' ? message.publisher : undefined;
+    const publisher = cleanBibliographicText(
+      typeof message.publisher === 'string' ? message.publisher : undefined,
+    );
     const volume =
       typeof message.volume === 'string' ? message.volume : undefined;
     const issue = typeof message.issue === 'string' ? message.issue : undefined;
     const pages = typeof message.page === 'string' ? message.page : undefined;
 
     const rawIssn = message.ISSN;
-    const issn = Array.isArray(rawIssn)
+    const rawIssnStr = Array.isArray(rawIssn)
       ? typeof rawIssn[0] === 'string'
         ? rawIssn[0]
         : undefined
       : typeof rawIssn === 'string'
         ? rawIssn
         : undefined;
+    const issn = normalizeIssn(rawIssnStr) || rawIssnStr;
 
     const rawIsbn = message.ISBN;
-    const isbn = Array.isArray(rawIsbn)
+    const rawIsbnStr = Array.isArray(rawIsbn)
       ? typeof rawIsbn[0] === 'string'
         ? rawIsbn[0]
         : undefined
       : typeof rawIsbn === 'string'
         ? rawIsbn
         : undefined;
+    const isbn = normalizeIsbn(rawIsbnStr) || rawIsbnStr;
 
     const rawUrl =
       typeof message.URL === 'string'
@@ -337,10 +349,9 @@ export class CrossRefProvider implements MetadataProvider {
           ? `https://doi.org/${doi}`
           : undefined;
 
-    const abstract =
-      typeof message.abstract === 'string'
-        ? message.abstract.replace(/<[^>]*>/g, '').trim()
-        : undefined;
+    const abstract = cleanBibliographicText(
+      typeof message.abstract === 'string' ? message.abstract : undefined,
+    );
 
     const links = Array.isArray(message.link) ? message.link : [];
     const isOpenAccess = links.some(
@@ -349,12 +360,42 @@ export class CrossRefProvider implements MetadataProvider {
         typeof l === 'object' &&
         (l as Record<string, unknown>)['content-type'] === 'application/pdf',
     );
+    const language =
+      typeof message.language === 'string' && message.language.trim()
+        ? message.language.trim()
+        : undefined;
+
+    let license: string | undefined;
+    if (Array.isArray(message.license) && message.license.length > 0) {
+      const firstLicense = message.license[0] as { URL?: string };
+      if (firstLicense && typeof firstLicense.URL === 'string') {
+        license = firstLicense.URL.trim();
+      }
+    }
+
+    let archive: string | undefined;
+    if (Array.isArray(message.archive) && message.archive.length > 0) {
+      archive = String(message.archive[0]).trim();
+    } else if (typeof message.archive === 'string' && message.archive.trim()) {
+      archive = message.archive.trim();
+    }
+
+    const shortTitleRaw = message['short-title'];
+    const rawShortTitle = Array.isArray(shortTitleRaw)
+      ? typeof shortTitleRaw[0] === 'string'
+        ? shortTitleRaw[0].trim()
+        : undefined
+      : typeof shortTitleRaw === 'string'
+        ? shortTitleRaw.trim()
+        : undefined;
+    const shortTitle = cleanBibliographicText(rawShortTitle);
 
     return {
       provider: this.id,
       metadata: {
         doi: doi || undefined,
         title,
+        shortTitle,
         authors,
         creators,
         year,
@@ -369,6 +410,10 @@ export class CrossRefProvider implements MetadataProvider {
         isbn,
         url: rawUrl,
         abstract,
+        language,
+        license,
+        rights: license,
+        archive,
         keywords: keywords.length ? keywords : undefined,
         itemType,
         provenance: {

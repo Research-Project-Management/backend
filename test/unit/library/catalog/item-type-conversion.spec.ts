@@ -1,6 +1,6 @@
-﻿import { ItemTypeConversionService } from '../../../../src/modules/library/catalog/services/item-type-conversion.service';
-import { ItemTypeRegistryService } from '../../../../src/modules/library/catalog/registry/item-type-registry.service';
-import { CatalogRepository } from '../../../../src/modules/library/catalog/catalog.repository';
+import { ItemTypeConversionService } from '../../../../src/modules/library/types/conversion.service';
+import { ItemTypeRegistryService } from '../../../../src/modules/library/types/types.service';
+import { CatalogRepository } from '../../../../src/modules/library/items/items.repository';
 
 describe('ItemTypeConversionService', () => {
   let service: ItemTypeConversionService;

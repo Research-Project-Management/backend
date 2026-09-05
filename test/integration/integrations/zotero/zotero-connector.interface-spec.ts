@@ -131,6 +131,61 @@ describe('Zotero Connector, Mapper & Sync Invariants (Integration)', () => {
       expect(mapped.rawPayload).toBeDefined();
     });
 
+    it('normalizes DOI from Zotero lowercase, extra text, or DOI URL fields', () => {
+      expect(
+        mapper.mapZoteroItem({
+          key: 'DOI_VARIANT',
+          version: 1,
+          data: {
+            key: 'DOI_VARIANT',
+            version: 1,
+            itemType: 'journalArticle',
+            title: 'DOI variant',
+            doi: 'https://doi.org/10.1000/ABC123',
+          },
+        }).doi,
+      ).toBe('10.1000/abc123');
+
+      expect(
+        mapper.mapZoteroItem({
+          key: 'DOI_EXTRA',
+          version: 1,
+          data: {
+            key: 'DOI_EXTRA',
+            version: 1,
+            itemType: 'journalArticle',
+            title: 'DOI in extra',
+            extra: 'DOI: 10.2000/xyz-7',
+          },
+        }).doi,
+      ).toBe('10.2000/xyz-7');
+    });
+
+    it('preserves Zotero Extra text and parses its structured identifiers', () => {
+      const mapped = mapper.mapZoteroItem({
+        key: 'EXTRA_FIELDS',
+        version: 1,
+        data: {
+          key: 'EXTRA_FIELDS',
+          version: 1,
+          itemType: 'preprint',
+          title: 'Extra metadata',
+          extra:
+            'Citation Key: sample2018\nDOI: 10.3000/sample\narXiv: 1801.12345v2 [cs.LG cs.CL]',
+        },
+      });
+
+      expect(mapped.extra).toContain('Citation Key: sample2018');
+      expect(mapped.citationKey).toBe('sample2018');
+      expect(mapped.doi).toBe('10.3000/sample');
+      expect(mapped.extraFields).toMatchObject({
+        citationKey: 'sample2018',
+        doi: '10.3000/sample',
+        arxivId: '1801.12345v2',
+        arxivCategories: ['cs.LG', 'cs.CL'],
+      });
+    });
+
     it('maps attachment, note, and annotation with hierarchical link keys', () => {
       const mappedAtt = mapper.mapZoteroAttachment(schemaCorpus.attachments[0]);
       expect(mappedAtt.parentItemKey).toBe('ZOTERO_ITEM_001');

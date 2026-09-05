@@ -7,7 +7,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from '../../../src/app.module';
 import { PrismaService } from '../../../src/core/database/prisma.service';
 import { RedisCacheService } from '../../../src/core/cache/redis-cache.service';
-import { VersionMismatchException } from '../../../src/modules/library/catalog/errors/catalog.errors';
+import { VersionMismatchException } from '../../../src/modules/library/items/items.errors';
 
 export interface TestWorkspaceFixture {
   workspaceId: string;

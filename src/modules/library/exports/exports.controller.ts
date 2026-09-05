@@ -12,22 +12,17 @@ import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-
 import { ExportsService } from './exports.service';
 import { ExportLibraryDto, ExportFormatType } from './dto/export.dto';
 
-import { PdfExportService } from './pdf-export.service';
-
 @Controller('api/v1/workspaces/:workspaceId/library/exports')
 @UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
 export class ExportsController {
-  constructor(
-    private readonly exportsService: ExportsService,
-    private readonly pdfExportService: PdfExportService,
-  ) {}
+  constructor(private readonly exportsService: ExportsService) {}
 
   @Get('items/:itemId/annotated-pdf')
   async exportAnnotatedPdf(
     @Param('workspaceId') workspaceId: string,
     @Param('itemId') itemId: string,
   ) {
-    const res = await this.pdfExportService.exportAnnotatedItemPdf(
+    const res = await this.exportsService.exportAnnotatedItemPdf(
       workspaceId,
       itemId,
     );

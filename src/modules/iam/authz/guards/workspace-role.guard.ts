@@ -149,12 +149,8 @@ export class WorkspaceRoleGuard implements CanActivate {
           .catch(() => null);
       }
 
-      // 3.2. In non-production or local environment, grant membership to authenticated user so workflow is unblocked
-      if (
-        !member &&
-        ws &&
-        (process.env.NODE_ENV !== 'production' || !process.env.NODE_ENV)
-      ) {
+      // 3.2. In development environment, grant membership to authenticated user so workflow is unblocked
+      if (!member && ws && process.env.NODE_ENV === 'development') {
         member = await this.prisma.workspaceMember
           .upsert({
             where: {

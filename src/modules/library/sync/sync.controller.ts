@@ -35,8 +35,18 @@ export class SyncController {
     @Query('sinceSeq') sinceSeq?: string,
     @Query('limit') limit?: string,
   ) {
-    const parsedSeq = sinceSeq !== undefined ? BigInt(sinceSeq) : BigInt(0);
-    const parsedLimit = limit !== undefined ? parseInt(limit, 10) : 100;
+    let parsedSeq: bigint;
+    let parsedLimit: number;
+    try {
+      parsedSeq = sinceSeq !== undefined ? BigInt(sinceSeq) : BigInt(0);
+      parsedLimit = limit !== undefined ? parseInt(limit, 10) : 100;
+    } catch {
+      throw new BadRequestException('Invalid sync cursor or limit');
+    }
+
+    if (!Number.isInteger(parsedLimit) || parsedLimit < 1) {
+      throw new BadRequestException('Invalid sync limit');
+    }
 
     return this.syncService.pullDelta(workspaceId, parsedSeq, parsedLimit);
   }
@@ -58,5 +68,33 @@ export class SyncController {
     );
 
     return { applied };
+  }
+
+  @Post('batch')
+  async applyBatch(
+    @Param('workspaceId') workspaceId: string,
+    @Body() body: any,
+  ) {
+    if (!body || !Array.isArray(body.operations)) {
+      throw new BadRequestException(
+        'Invalid payload: operations array is required',
+      );
+    }
+
+    return this.syncService.applyExternalSyncBatch({
+      workspaceId,
+      operations: body.operations,
+      idempotencyKey: body.idempotencyKey,
+    });
+  }
+
+  @Post('resync')
+  async resync(@Param('workspaceId') workspaceId: string) {
+    const latestSeq = await this.syncService.getLatestSequence(workspaceId);
+    return {
+      requiresFullResync: true,
+      latestSeq: latestSeq.toString(),
+      timestamp: new Date().toISOString(),
+    };
   }
 }

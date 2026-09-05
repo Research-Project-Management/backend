@@ -6,18 +6,13 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import * as crypto from 'crypto';
+import { topoSortOperations, computeRequestHash } from './utils/sync-batch.utils';
 import { PrismaService } from '../../../core/database/prisma.service';
 import {
   TransactionService,
   TransactionHelpers,
-} from './services/transaction.service';
-import {
-  SYNC_EVENT_TYPES,
-  buildItemCreatedOutboxPayload,
-} from './events/library.events';
-import { normalizeTags } from '../tags/utils/tags.utils';
-import { OutboxWorker, OutboxDispatchHandler } from './workers/outbox.worker';
+} from '../outbox/transaction.service';
+import { OutboxWorker, OutboxDispatchHandler } from '../outbox/outbox.worker';
 import {
   SyncPort,
   SyncItemSnapshot,
@@ -37,8 +32,11 @@ import {
   UpsertSyncEntityResult,
   IntegrationEventHandler,
 } from './ports/sync.port';
-
-import { ChangeLogRepository } from './repositories/change-log.repository';
+import { CollectionsService } from '../collections/collections.service';
+import { ItemsService } from '../items/items.service';
+import { AttachmentsService } from '../attachments/attachments.service';
+import { NotesService } from '../notes/notes.service';
+import { AnnotationsService } from '../annotations/annotations.service';
 
 @Injectable()
 export class SyncService implements SyncPort {
@@ -48,7 +46,11 @@ export class SyncService implements SyncPort {
     private readonly prisma: PrismaService,
     private readonly txService: TransactionService,
     private readonly outboxWorker: OutboxWorker,
-    private readonly changeLogRepo: ChangeLogRepository,
+    private readonly collectionsService: CollectionsService,
+    private readonly catalogService: ItemsService,
+    private readonly attachmentsService: AttachmentsService,
+    private readonly notesService: NotesService,
+    private readonly annotationsService: AnnotationsService,
   ) {}
 
   async pullDelta(
@@ -59,17 +61,17 @@ export class SyncService implements SyncPort {
     const parsedSeq = sinceSeq !== undefined ? BigInt(sinceSeq) : BigInt(0);
     const parsedLimit = Math.min(Math.max(limit, 1), 500);
 
-    const changes = await this.changeLogRepo.getChangesSince(
+    const changes = await this.txService.getChangesSince(
       workspaceId,
       parsedSeq,
       parsedLimit,
     );
-    const tombstones = await this.changeLogRepo.getTombstonesSince(
+    const tombstones = await this.txService.getTombstonesSince(
       workspaceId,
       parsedSeq,
       parsedLimit,
     );
-    const latestSeq = await this.changeLogRepo.getLatestSequence(workspaceId);
+    const latestSeq = await this.txService.getLatestSequence(workspaceId);
 
     const serializedChanges = changes.map((c) => ({
       ...c,
@@ -85,7 +87,8 @@ export class SyncService implements SyncPort {
       changes: serializedChanges,
       tombstones: serializedTombstones,
       latestSeq: latestSeq.toString(),
-      hasMore: changes.length === parsedLimit,
+      hasMore:
+        changes.length === parsedLimit || tombstones.length === parsedLimit,
     };
   }
 
@@ -99,10 +102,15 @@ export class SyncService implements SyncPort {
       data?: any;
     }>,
   ) {
-    return this.txService.executeInTransaction(async (_tx, helpers) => {
+    return this.txService.executeInTransaction(async (tx, helpers) => {
       const results = [];
       for (const mutation of mutations) {
         if (mutation.action === 'delete') {
+          await this.executeDeleteEntity(tx, helpers, {
+            workspaceId,
+            entityType: mutation.entityType as any,
+            entityId: mutation.entityId,
+          });
           const tombstone = await helpers.recordTombstone(workspaceId, {
             entityType: mutation.entityType,
             entityId: mutation.entityId,
@@ -113,6 +121,63 @@ export class SyncService implements SyncPort {
             seq: tombstone.seq?.toString(),
           });
         } else {
+          switch (mutation.entityType) {
+            case 'CatalogItem':
+              await this.executeUpsertCatalogItem(tx, helpers, {
+                workspaceId,
+                userId: mutation.data?.userId || 'system',
+                existingId: mutation.entityId,
+                title: mutation.data?.title || 'Untitled',
+                ...(mutation.data || {}),
+              });
+              break;
+            case 'Collection':
+              await this.executeUpsertCollection(tx, helpers, {
+                workspaceId,
+                userId: mutation.data?.userId || 'system',
+                existingId: mutation.entityId,
+                name: mutation.data?.name || 'Untitled',
+                ...(mutation.data || {}),
+              });
+              break;
+            case 'CatalogAttachment':
+              await this.executeUpsertAttachment(tx, helpers, {
+                workspaceId,
+                existingId: mutation.entityId,
+                catalogItemId: mutation.data?.catalogItemId,
+                filename: mutation.data?.filename || 'attachment',
+                url: mutation.data?.url || '',
+                mimeType: mutation.data?.mimeType || 'application/pdf',
+                ...(mutation.data || {}),
+              });
+              break;
+            case 'Note':
+              await this.executeUpsertNote(tx, helpers, {
+                workspaceId,
+                userId: mutation.data?.userId || 'system',
+                existingId: mutation.entityId,
+                catalogItemId: mutation.data?.catalogItemId,
+                title: mutation.data?.title || 'Note',
+                contentMd: mutation.data?.contentMd || '',
+                ...(mutation.data || {}),
+              });
+              break;
+            case 'Annotation':
+              await this.executeUpsertAnnotation(tx, helpers, {
+                workspaceId,
+                userId: mutation.data?.userId || 'system',
+                existingId: mutation.entityId,
+                attachmentId: mutation.data?.attachmentId,
+                pageIndex: mutation.data?.pageIndex ?? 1,
+                ...(mutation.data || {}),
+              });
+              break;
+            default:
+              this.logger.debug(
+                `Generic changelog recorded for entityType: ${mutation.entityType}`,
+              );
+          }
+
           const change = await helpers.appendChange(workspaceId, {
             entityType: mutation.entityType,
             entityId: mutation.entityId,
@@ -132,43 +197,16 @@ export class SyncService implements SyncPort {
   }
 
   async getLatestSequence(workspaceId: string): Promise<bigint> {
-    return this.changeLogRepo.getLatestSequence(workspaceId);
+    return this.txService.getLatestSequence(workspaceId);
   }
 
   async getItemSnapshot(
     query: GetSyncItemSnapshotQuery,
   ): Promise<SyncItemSnapshot | null> {
-    const item = await this.prisma.catalogItem.findUnique({
-      where: { id: query.itemId },
-      include: {
-        itemTags: { include: { tag: true } },
-      },
-    });
-
-    if (!item || item.workspaceId !== query.workspaceId || item.deletedAt) {
-      return null;
-    }
-
-    const relationTags = item.itemTags.map((it) => it.tag.name);
-    const tags = normalizeTags(relationTags);
-
-    return {
-      id: item.id,
-      workspaceId: item.workspaceId,
-      title: item.title,
-      abstract: item.abstract,
-      year: item.year,
-      doi: item.doi,
-      citationKey: item.citationKey,
-      publicationTitle: item.publicationTitle,
-      volume: item.volume,
-      issue: item.issue,
-      pages: item.pages,
-      issn: item.issn,
-      isbn: item.isbn,
-      url: item.url,
-      tags,
-    };
+    return this.catalogService.getItemSnapshot(
+      query.workspaceId,
+      query.itemId,
+    );
   }
 
   async getItemSnapshots(
@@ -178,22 +216,10 @@ export class SyncService implements SyncPort {
       return [];
     }
 
-    const items = await this.prisma.catalogItem.findMany({
-      where: {
-        workspaceId: query.workspaceId,
-        id: { in: query.itemIds },
-        deletedAt: null,
-      },
-      select: {
-        id: true,
-        title: true,
-        itemType: true,
-        version: true,
-        updatedAt: true,
-      },
-    });
-
-    return items;
+    return this.catalogService.getItemSnapshots(
+      query.workspaceId,
+      query.itemIds,
+    );
   }
 
   async upsertCollection(
@@ -261,7 +287,8 @@ export class SyncService implements SyncPort {
     command: ApplyExternalSyncBatchCommand,
   ): Promise<ExternalSyncBatchResult> {
     // 1. Deterministic, non-mutating request hash
-    const requestHash = this.computeRequestHash(command);
+    const requestHash = computeRequestHash(command);
+
 
     // 2. Pre-flight idempotency check (fast-path, outside tx)
     if (command.idempotencyKey) {
@@ -292,7 +319,8 @@ export class SyncService implements SyncPort {
     }
 
     // 3. Topological sort of collection operations
-    const sortedOperations = this.topoSortOperations(command.operations);
+    const sortedOperations = topoSortOperations(command.operations);
+
 
     // 4. Execute all canonical writes in one atomic Library transaction
     return this.txService.executeInTransaction(async (tx, helpers) => {
@@ -466,131 +494,6 @@ export class SyncService implements SyncPort {
     });
   }
 
-  /**
-   * Computes a deterministic SHA-256 hash from the batch operations without
-   * mutating `command.operations`. Uses stable field ordering to ensure that
-   * the same logical batch always produces the same hash across retries.
-   *
-   * Runtime-resolved IDs (existingId, catalogItemId, attachmentId,
-   * parentCollectionId) are excluded so that a retry with already-resolved
-   * bindings produces the same hash as the original request.
-   */
-  private computeRequestHash(command: ApplyExternalSyncBatchCommand): string {
-    const canonical = command.operations.map((op) => {
-      const { operationId, parentRef, op: opType, command: cmd } = op;
-      // Cast through unknown to safely work with the discriminated union as a plain record.
-      const raw = cmd as unknown as Record<string, unknown>;
-
-      // Extract stable identity fields; discard runtime-resolved reference IDs.
-      const {
-        workspaceId,
-        userId,
-        existingId: _existingId,
-        catalogItemId: _catalogItemId,
-        attachmentId: _attachmentId,
-        parentCollectionId: _parentCollectionId,
-        ...stableFields
-      } = raw;
-
-      // Stable field ordering: sort keys alphabetically so insertion order
-      // does not affect the hash across different JS engine versions.
-      const sortedStable = Object.fromEntries(
-        Object.entries(stableFields).sort(([a], [b]) => a.localeCompare(b)),
-      );
-
-      return {
-        op: opType,
-        operationId: operationId ?? null,
-        parentRef: parentRef ?? null,
-        workspaceId,
-        userId: userId ?? null,
-        ...sortedStable,
-      };
-    });
-
-    return crypto
-      .createHash('sha256')
-      .update(JSON.stringify(canonical))
-      .digest('hex');
-  }
-
-  /**
-   * Topologically sorts upsertCollection operations so that parent collections
-   * are processed before their children within the same batch.
-   * Non-collection operations retain their original relative order after collections.
-   * Throws ConflictException if a circular dependency is detected.
-   */
-  private topoSortOperations(
-    operations: ApplyExternalSyncBatchCommand['operations'],
-  ): ApplyExternalSyncBatchCommand['operations'] {
-    const colOps = operations.filter((op) => op.op === 'upsertCollection');
-    const otherOps = operations.filter((op) => op.op !== 'upsertCollection');
-
-    if (colOps.length === 0) return operations;
-
-    // Build a map: operationId → op, and determine edges (parentRef → operationId)
-    const byOpId = new Map(
-      colOps.filter((op) => op.operationId).map((op) => [op.operationId!, op]),
-    );
-
-    // Kahn's algorithm for topological sort
-    const inDegree = new Map<string, number>();
-    const children = new Map<string, string[]>(); // parentOpId → [childOpIds]
-
-    for (const op of colOps) {
-      if (op.operationId && !inDegree.has(op.operationId)) {
-        inDegree.set(op.operationId, 0);
-      }
-    }
-
-    for (const op of colOps) {
-      if (op.parentRef && op.operationId && byOpId.has(op.parentRef)) {
-        // Parent is in this batch — add an edge
-        const kids = children.get(op.parentRef) ?? [];
-        kids.push(op.operationId);
-        children.set(op.parentRef, kids);
-        inDegree.set(op.operationId, (inDegree.get(op.operationId) ?? 0) + 1);
-      }
-      // If parentRef is set but NOT in this batch, it's a cross-batch reference —
-      // the parent must already exist in the DB (resolved via existingId before tx).
-      // We don't fail here; strict enforcement happens later inside the tx via refMap.
-    }
-
-    const queue: string[] = [];
-    for (const [opId, deg] of inDegree.entries()) {
-      if (deg === 0) queue.push(opId);
-    }
-    // Include ops without operationId — they go first (no ordering constraint)
-    const noIdOps = colOps.filter((op) => !op.operationId);
-
-    const sorted: ApplyExternalSyncBatchCommand['operations'] = [...noIdOps];
-    let processed = 0;
-
-    while (queue.length > 0) {
-      const opId = queue.shift()!;
-      const op = byOpId.get(opId);
-      if (op) {
-        sorted.push(op);
-        processed++;
-      }
-      for (const childId of children.get(opId) ?? []) {
-        const newDeg = (inDegree.get(childId) ?? 1) - 1;
-        inDegree.set(childId, newDeg);
-        if (newDeg === 0) queue.push(childId);
-      }
-    }
-
-    // If we couldn't process all ops with operationIds, there's a cycle
-    if (processed !== byOpId.size) {
-      throw new ConflictException(
-        'Circular collection hierarchy detected in batch operations. ' +
-          'Collections cannot be their own ancestors.',
-      );
-    }
-
-    // Non-collection ops after all collections
-    return [...sorted, ...otherOps];
-  }
 
   async publishIntegrationEvent(
     command: PublishIntegrationEventCommand,
@@ -648,71 +551,7 @@ export class SyncService implements SyncPort {
     helpers: TransactionHelpers,
     command: UpsertSyncCollectionCommand,
   ): Promise<UpsertSyncEntityResult> {
-    if (command.existingId) {
-      const existing = await tx.collection.findUnique({
-        where: { id: command.existingId },
-      });
-
-      if (!existing) {
-        throw new NotFoundException(
-          `Collection ${command.existingId} not found in workspace ${command.workspaceId}`,
-        );
-      }
-
-      if (existing.workspaceId !== command.workspaceId) {
-        throw new ForbiddenException(
-          `Collection ${command.existingId} does not belong to workspace ${command.workspaceId}`,
-        );
-      }
-
-      const updated = await tx.collection.update({
-        where: { id: command.existingId },
-        data: {
-          name: command.name,
-          description: command.description,
-          parentId: command.parentCollectionId || null,
-          version: { increment: 1 },
-        },
-      });
-
-      await helpers.appendChange(command.workspaceId, {
-        entityType: 'Collection',
-        entityId: updated.id,
-        action: 'update',
-        version: updated.version,
-        data: { name: command.name },
-      });
-
-      return { id: updated.id, isNew: false, version: updated.version };
-    } else {
-      const created = await tx.collection.create({
-        data: {
-          workspaceId: command.workspaceId,
-          name: command.name,
-          description: command.description,
-          parentId: command.parentCollectionId || null,
-          createdById: command.userId,
-          version: 1,
-        },
-      });
-
-      await helpers.appendChange(command.workspaceId, {
-        entityType: 'Collection',
-        entityId: created.id,
-        action: 'create',
-        version: created.version,
-        data: { name: command.name },
-      });
-
-      await helpers.publishOutbox(
-        command.workspaceId,
-        created.id,
-        'library.collection.created',
-        { collectionId: created.id },
-      );
-
-      return { id: created.id, isNew: true, version: created.version };
-    }
+    return this.collectionsService.upsertFromSync(command, tx, helpers);
   }
 
   private async executeUpsertCatalogItem(
@@ -720,116 +559,7 @@ export class SyncService implements SyncPort {
     helpers: TransactionHelpers,
     command: UpsertSyncCatalogItemCommand,
   ): Promise<UpsertSyncEntityResult> {
-    if (command.existingId) {
-      const existing = await tx.catalogItem.findUnique({
-        where: { id: command.existingId },
-      });
-
-      if (!existing) {
-        throw new NotFoundException(
-          `Catalog item ${command.existingId} not found in workspace ${command.workspaceId}`,
-        );
-      }
-
-      if (existing.workspaceId !== command.workspaceId) {
-        throw new ForbiddenException(
-          `Catalog item ${command.existingId} does not belong to workspace ${command.workspaceId}`,
-        );
-      }
-
-      const existingItemTags = await tx.catalogItemTag.findMany({
-        where: { catalogItemId: command.existingId },
-        include: { tag: true },
-      });
-      const existingTagNames = existingItemTags.map((it) => it.tag.name);
-      const mergedTags = normalizeTags([
-        ...existingTagNames,
-        ...(command.tags || []),
-      ]);
-
-      const updated = await tx.catalogItem.update({
-        where: { id: command.existingId },
-        data: {
-          title: command.title,
-          abstract: command.abstract,
-          year: command.year,
-          doi: command.doi,
-          citationKey: command.citationKey,
-          publicationTitle: command.publicationTitle,
-          volume: command.volume,
-          issue: command.issue,
-          pages: command.pages,
-          issn: command.issn,
-          isbn: command.isbn,
-          url: command.url,
-          itemType: command.itemType,
-          version: { increment: 1 },
-        },
-      });
-
-      await helpers.appendChange(command.workspaceId, {
-        entityType: 'CatalogItem',
-        entityId: updated.id,
-        action: 'update',
-        version: updated.version,
-        data: { title: command.title },
-      });
-
-      await this.syncTagsToItem(
-        tx,
-        command.workspaceId,
-        updated.id,
-        mergedTags,
-      );
-
-      return { id: updated.id, isNew: false, version: updated.version };
-    } else {
-      const newTags = command.tags ? normalizeTags(command.tags) : [];
-      const created = await tx.catalogItem.create({
-        data: {
-          workspaceId: command.workspaceId,
-          uploadedById: command.userId,
-          title: command.title,
-          abstract: command.abstract,
-          year: command.year,
-          doi: command.doi,
-          citationKey: command.citationKey,
-          publicationTitle: command.publicationTitle,
-          volume: command.volume,
-          issue: command.issue,
-          pages: command.pages,
-          issn: command.issn,
-          isbn: command.isbn,
-          url: command.url,
-          itemType: command.itemType,
-          version: 1,
-        },
-      });
-
-      await this.syncTagsToItem(tx, command.workspaceId, created.id, newTags);
-
-      await helpers.appendChange(command.workspaceId, {
-        entityType: 'CatalogItem',
-        entityId: created.id,
-        action: 'create',
-        version: 1,
-        data: { title: command.title },
-      });
-
-      await helpers.publishOutbox(
-        command.workspaceId,
-        created.id,
-        SYNC_EVENT_TYPES.ITEM_CREATED,
-        buildItemCreatedOutboxPayload({
-          itemId: created.id,
-          workspaceId: command.workspaceId,
-          title: created.title,
-          source: 'external_sync',
-        }),
-      );
-
-      return { id: created.id, isNew: true, version: 1 };
-    }
+    return this.catalogService.upsertFromSync(command, tx, helpers);
   }
 
   private async executeUpsertAttachment(
@@ -837,115 +567,7 @@ export class SyncService implements SyncPort {
     helpers: TransactionHelpers,
     command: UpsertSyncAttachmentCommand,
   ): Promise<UpsertSyncEntityResult> {
-    if (command.existingId) {
-      const existing = await tx.catalogAttachment.findUnique({
-        where: { id: command.existingId },
-        include: { catalogItem: true },
-      });
-
-      if (!existing) {
-        throw new NotFoundException(
-          `Attachment ${command.existingId} not found in workspace ${command.workspaceId}`,
-        );
-      }
-
-      if (existing.catalogItem.workspaceId !== command.workspaceId) {
-        throw new ForbiddenException(
-          `Attachment ${command.existingId} does not belong to workspace ${command.workspaceId}`,
-        );
-      }
-
-      const revisionCount = await tx.attachmentRevision.count({
-        where: { attachmentId: command.existingId },
-      });
-      const nextRevisionNumber = revisionCount + 1;
-
-      const updated = await tx.catalogAttachment.update({
-        where: { id: command.existingId },
-        data: {
-          filename: command.filename,
-          url: command.url,
-          mimeType: command.mimeType,
-          fileHash: command.fileHash,
-          size: command.size !== undefined ? command.size : undefined,
-        },
-      });
-
-      await tx.attachmentRevision.create({
-        data: {
-          attachmentId: updated.id,
-          revisionNumber: nextRevisionNumber,
-          fileHash: command.fileHash || '',
-          sizeBytes: command.size || 0,
-          url: command.url,
-          comment: 'Sync update',
-        },
-      });
-
-      await helpers.appendChange(command.workspaceId, {
-        entityType: 'CatalogAttachment',
-        entityId: updated.id,
-        action: 'update',
-        version: nextRevisionNumber,
-      });
-
-      return { id: updated.id, isNew: false, version: nextRevisionNumber };
-    } else {
-      if (!command.catalogItemId) {
-        throw new NotFoundException(
-          `Parent catalog item ID required for attachment ${command.filename}`,
-        );
-      }
-
-      const item = await tx.catalogItem.findUnique({
-        where: { id: command.catalogItemId },
-      });
-
-      if (!item || item.workspaceId !== command.workspaceId) {
-        throw new NotFoundException(
-          `Catalog item ${command.catalogItemId} not found in workspace ${command.workspaceId}`,
-        );
-      }
-
-      const created = await tx.catalogAttachment.create({
-        data: {
-          catalogItemId: command.catalogItemId,
-          filename: command.filename,
-          url: command.url,
-          mimeType: command.mimeType,
-          fileHash: command.fileHash,
-          attachmentType: (command.attachmentType as any) || 'primary_pdf',
-          size: command.size || 0,
-        },
-      });
-
-      await tx.attachmentRevision.create({
-        data: {
-          attachmentId: created.id,
-          revisionNumber: 1,
-          fileHash: command.fileHash || '',
-          sizeBytes: command.size || 0,
-          url: command.url,
-          comment: 'Initial sync',
-        },
-      });
-
-      await helpers.appendChange(command.workspaceId, {
-        entityType: 'CatalogAttachment',
-        entityId: created.id,
-        action: 'create',
-        version: 1,
-      });
-
-      await helpers.publishOutbox(
-        command.workspaceId,
-        created.id,
-        'library.attachment.created',
-        { attachmentId: created.id },
-      );
-
-      return { id: created.id, isNew: true, version: 1 };
-    }
+    return this.attachmentsService.upsertFromSync(command, tx, helpers);
   }
 
   private async executeUpsertNote(
@@ -953,75 +575,7 @@ export class SyncService implements SyncPort {
     helpers: TransactionHelpers,
     command: UpsertSyncNoteCommand,
   ): Promise<UpsertSyncEntityResult> {
-    if (command.existingId) {
-      const existing = await tx.note.findUnique({
-        where: { id: command.existingId },
-      });
-
-      if (!existing) {
-        throw new NotFoundException(
-          `Note ${command.existingId} not found in workspace ${command.workspaceId}`,
-        );
-      }
-
-      if (existing.workspaceId !== command.workspaceId) {
-        throw new ForbiddenException(
-          `Note ${command.existingId} does not belong to workspace ${command.workspaceId}`,
-        );
-      }
-
-      const mergedNoteTags =
-        command.tags !== undefined
-          ? normalizeTags([...(existing.tags || []), ...command.tags])
-          : existing.tags;
-
-      const updated = await tx.note.update({
-        where: { id: command.existingId },
-        data: {
-          contentMd: command.contentMd,
-          title: command.title,
-          tags: mergedNoteTags,
-          version: { increment: 1 },
-        },
-      });
-
-      await helpers.appendChange(command.workspaceId, {
-        entityType: 'Note',
-        entityId: updated.id,
-        action: 'update',
-        version: updated.version,
-      });
-
-      return { id: updated.id, isNew: false, version: updated.version };
-    } else {
-      const created = await tx.note.create({
-        data: {
-          workspaceId: command.workspaceId,
-          createdById: command.userId,
-          itemId: command.catalogItemId,
-          contentMd: command.contentMd,
-          title: command.title || 'Note',
-          tags: command.tags ? normalizeTags(command.tags) : [],
-          version: 1,
-        },
-      });
-
-      await helpers.appendChange(command.workspaceId, {
-        entityType: 'Note',
-        entityId: created.id,
-        action: 'create',
-        version: 1,
-      });
-
-      await helpers.publishOutbox(
-        command.workspaceId,
-        created.id,
-        'library.note.created',
-        { noteId: created.id },
-      );
-
-      return { id: created.id, isNew: true, version: 1 };
-    }
+    return this.notesService.upsertFromSync(command, tx, helpers);
   }
 
   private async executeUpsertAnnotation(
@@ -1029,90 +583,7 @@ export class SyncService implements SyncPort {
     helpers: TransactionHelpers,
     command: UpsertSyncAnnotationCommand,
   ): Promise<UpsertSyncEntityResult> {
-    if (command.existingId) {
-      const existing = await tx.annotation.findUnique({
-        where: { id: command.existingId },
-        include: { attachment: { include: { catalogItem: true } } },
-      });
-
-      if (!existing) {
-        throw new NotFoundException(
-          `Annotation ${command.existingId} not found in workspace ${command.workspaceId}`,
-        );
-      }
-
-      if (existing.attachment.catalogItem.workspaceId !== command.workspaceId) {
-        throw new ForbiddenException(
-          `Annotation ${command.existingId} does not belong to workspace ${command.workspaceId}`,
-        );
-      }
-
-      const updated = await tx.annotation.update({
-        where: { id: command.existingId },
-        data: {
-          quoteText: command.quoteText,
-          comment: command.comment,
-          color: command.color,
-          pageIndex: command.pageIndex,
-          version: { increment: 1 },
-        },
-      });
-
-      await helpers.appendChange(command.workspaceId, {
-        entityType: 'Annotation',
-        entityId: updated.id,
-        action: 'update',
-        version: updated.version,
-      });
-
-      return { id: updated.id, isNew: false, version: updated.version };
-    } else {
-      if (!command.attachmentId) {
-        throw new NotFoundException(
-          `Parent attachment ID required for annotation on page ${command.pageIndex}`,
-        );
-      }
-
-      const att = await tx.catalogAttachment.findUnique({
-        where: { id: command.attachmentId },
-        include: { catalogItem: true },
-      });
-
-      if (!att || att.catalogItem.workspaceId !== command.workspaceId) {
-        throw new NotFoundException(
-          `Attachment ${command.attachmentId} not found in workspace ${command.workspaceId}`,
-        );
-      }
-
-      const created = await tx.annotation.create({
-        data: {
-          attachmentId: command.attachmentId,
-          authorId: command.userId,
-          pageIndex: command.pageIndex,
-          quoteText: command.quoteText || '',
-          comment: command.comment || '',
-          color: command.color || '#ffd400',
-          type: (command.type as any) || 'highlight',
-          version: 1,
-        },
-      });
-
-      await helpers.appendChange(command.workspaceId, {
-        entityType: 'Annotation',
-        entityId: created.id,
-        action: 'create',
-        version: 1,
-      });
-
-      await helpers.publishOutbox(
-        command.workspaceId,
-        created.id,
-        'library.annotation.created',
-        { annotationId: created.id },
-      );
-
-      return { id: created.id, isNew: true, version: 1 };
-    }
+    return this.annotationsService.upsertFromSync(command, tx, helpers);
   }
 
   private async executeDeleteEntity(
@@ -1120,227 +591,22 @@ export class SyncService implements SyncPort {
     helpers: TransactionHelpers,
     command: DeleteSyncEntityCommand,
   ): Promise<void> {
-    const { workspaceId, entityType, entityId } = command;
-
-    const handlers: Record<
-      string,
-      (
-        tx: Prisma.TransactionClient,
-        helpers: TransactionHelpers,
-        cmd: DeleteSyncEntityCommand,
-      ) => Promise<void>
-    > = {
-      CatalogItem: this.deleteCatalogItem.bind(this),
-      Collection: this.deleteCollection.bind(this),
-      CatalogAttachment: this.deleteAttachment.bind(this),
-      Note: this.deleteNote.bind(this),
-      Annotation: this.deleteAnnotation.bind(this),
-    };
-
-    const handler = handlers[entityType];
-    if (handler) {
-      await handler(tx, helpers, command);
-    } else {
-      this.logger.warn(
-        `executeDeleteEntity: unknown entityType "${entityType}" for ${entityId} in workspace ${workspaceId}`,
-      );
-    }
-  }
-
-  private async deleteCatalogItem(
-    tx: Prisma.TransactionClient,
-    helpers: TransactionHelpers,
-    command: DeleteSyncEntityCommand,
-  ): Promise<void> {
-    const {
-      workspaceId,
-      entityId,
-      reason,
-      publishOutboxEventType,
-      publishOutboxPayload,
-    } = command;
-    const existing = await tx.catalogItem.findUnique({
-      where: { id: entityId },
-    });
-    if (!existing) return;
-
-    if (existing.workspaceId !== workspaceId) {
-      throw new ForbiddenException(
-        `Catalog item ${entityId} does not belong to workspace ${workspaceId}`,
-      );
-    }
-
-    await tx.catalogItem.update({
-      where: { id: entityId },
-      data: { deletedAt: new Date() },
-    });
-    await helpers.appendChange(workspaceId, {
-      entityType: 'CatalogItem',
-      entityId,
-      action: 'delete',
-      version: existing.version + 1,
-      data: { reason },
-    });
-    await helpers.recordTombstone(workspaceId, {
-      entityType: 'CatalogItem',
-      entityId,
-    });
-    await helpers.publishOutbox(
-      workspaceId,
-      entityId,
-      publishOutboxEventType ?? 'library.item.deleted',
-      (publishOutboxPayload ?? { itemId: entityId, reason }) as any,
-    );
-  }
-
-  private async deleteCollection(
-    tx: Prisma.TransactionClient,
-    helpers: TransactionHelpers,
-    command: DeleteSyncEntityCommand,
-  ): Promise<void> {
-    const { workspaceId, entityId } = command;
-    const existing = await tx.collection.findUnique({
-      where: { id: entityId },
-    });
-    if (!existing) return;
-
-    if (existing.workspaceId !== workspaceId) {
-      throw new ForbiddenException(
-        `Collection ${entityId} does not belong to workspace ${workspaceId}`,
-      );
-    }
-
-    await tx.collection.update({
-      where: { id: entityId },
-      data: { deletedAt: new Date() },
-    });
-    await helpers.appendChange(workspaceId, {
-      entityType: 'Collection',
-      entityId,
-      action: 'delete',
-      version: existing.version + 1,
-    });
-    await helpers.recordTombstone(workspaceId, {
-      entityType: 'Collection',
-      entityId,
-    });
-  }
-
-  private async deleteAttachment(
-    tx: Prisma.TransactionClient,
-    helpers: TransactionHelpers,
-    command: DeleteSyncEntityCommand,
-  ): Promise<void> {
-    const { workspaceId, entityId } = command;
-    const existing = await tx.catalogAttachment.findUnique({
-      where: { id: entityId },
-      include: { catalogItem: true },
-    });
-    if (!existing) return;
-
-    if (existing.catalogItem.workspaceId !== workspaceId) {
-      throw new ForbiddenException(
-        `Attachment ${entityId} does not belong to workspace ${workspaceId}`,
-      );
-    }
-
-    await tx.catalogAttachment.delete({ where: { id: entityId } });
-    await helpers.appendChange(workspaceId, {
-      entityType: 'CatalogAttachment',
-      entityId,
-      action: 'delete',
-      version: 1,
-    });
-  }
-
-  private async deleteNote(
-    tx: Prisma.TransactionClient,
-    helpers: TransactionHelpers,
-    command: DeleteSyncEntityCommand,
-  ): Promise<void> {
-    const { workspaceId, entityId } = command;
-    const existing = await tx.note.findUnique({ where: { id: entityId } });
-    if (!existing) return;
-
-    if (existing.workspaceId !== workspaceId) {
-      throw new ForbiddenException(
-        `Note ${entityId} does not belong to workspace ${workspaceId}`,
-      );
-    }
-
-    await tx.note.update({
-      where: { id: entityId },
-      data: { deletedAt: new Date() },
-    });
-    await helpers.appendChange(workspaceId, {
-      entityType: 'Note',
-      entityId,
-      action: 'delete',
-      version: existing.version + 1,
-    });
-  }
-
-  private async deleteAnnotation(
-    tx: Prisma.TransactionClient,
-    helpers: TransactionHelpers,
-    command: DeleteSyncEntityCommand,
-  ): Promise<void> {
-    const { workspaceId, entityId } = command;
-    const existing = await tx.annotation.findUnique({
-      where: { id: entityId },
-      include: { attachment: { include: { catalogItem: true } } },
-    });
-    if (!existing) return;
-
-    if (existing.attachment.catalogItem.workspaceId !== workspaceId) {
-      throw new ForbiddenException(
-        `Annotation ${entityId} does not belong to workspace ${workspaceId}`,
-      );
-    }
-
-    await tx.annotation.update({
-      where: { id: entityId },
-      data: { deletedAt: new Date() },
-    });
-    await helpers.appendChange(workspaceId, {
-      entityType: 'Annotation',
-      entityId,
-      action: 'delete',
-      version: existing.version + 1,
-    });
-  }
-
-  /**
-   * Resolves or creates each tag by name and upserts the CatalogItemTag join record.
-   * Extracted to eliminate duplicated N+1 tag loops in executeUpsertCatalogItem.
-   */
-  private async syncTagsToItem(
-    tx: Prisma.TransactionClient,
-    workspaceId: string,
-    catalogItemId: string,
-    tagNames: string[],
-  ): Promise<void> {
-    if (tagNames.length === 0) return;
-
-    for (const tagName of tagNames) {
-      let tag = await tx.catalogTag.findFirst({
-        where: {
-          workspaceId,
-          name: { equals: tagName, mode: 'insensitive' },
-        },
-      });
-
-      if (!tag) {
-        tag = await tx.catalogTag.create({
-          data: { workspaceId, name: tagName },
-        });
-      }
-
-      await tx.catalogItemTag.upsert({
-        where: { tagId_catalogItemId: { tagId: tag.id, catalogItemId } },
-        create: { tagId: tag.id, catalogItemId },
-        update: {},
-      });
+    switch (command.entityType) {
+      case 'CatalogItem':
+        return this.catalogService.deleteFromSync(command, tx, helpers);
+      case 'Collection':
+        return this.collectionsService.deleteFromSync(command, tx, helpers);
+      case 'CatalogAttachment':
+        return this.attachmentsService.deleteFromSync(command, tx, helpers);
+      case 'Note':
+        return this.notesService.deleteFromSync(command, tx, helpers);
+      case 'Annotation':
+        return this.annotationsService.deleteFromSync(command, tx, helpers);
+      default:
+        this.logger.warn(
+          `executeDeleteEntity: unknown entityType "${command.entityType}" for ${command.entityId} in workspace ${command.workspaceId}`,
+        );
     }
   }
 }
+

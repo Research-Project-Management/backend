@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
 import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
+import { CurrentWorkspace } from '../../../modules/iam/authz/decorators/current-workspace.decorator';
 import { CitationService } from './citation.service';
 import { FormatCitationDto, FormatBatchCitationDto } from './dto/citation.dto';
 
@@ -82,14 +83,16 @@ export class CitationController {
   @Get('items/:itemId/citation')
   async getItemCitation(
     @Param('workspaceId') workspaceId: string,
+    @CurrentWorkspace() currentWorkspaceId: string,
     @Param('itemId') itemId: string,
     @Query('style') style?: string,
     @Query('index') index?: string,
   ) {
+    const targetWsId = currentWorkspaceId || workspaceId;
     const styleId = (style as any) || 'apa-7th';
     const numIndex = index ? parseInt(index, 10) : 1;
     const res = await this.citationService.formatItemById(
-      workspaceId,
+      targetWsId,
       itemId,
       styleId,
       numIndex,
@@ -108,16 +111,18 @@ export class CitationController {
   @Post('batch-items')
   async getBatchCitations(
     @Param('workspaceId') workspaceId: string,
+    @CurrentWorkspace() currentWorkspaceId: string,
     @Body('itemIds') itemIds: string[],
     @Body('paperIds') paperIds?: string[],
     @Body('style') style?: string,
   ) {
+    const targetWsId = currentWorkspaceId || workspaceId;
     const styleId = (style as any) || 'apa-7th';
     const ids = Array.isArray(itemIds)
       ? itemIds
       : Array.isArray(paperIds)
         ? paperIds
         : [];
-    return this.citationService.formatItemBatch(workspaceId, ids, styleId);
+    return this.citationService.formatItemBatch(targetWsId, ids, styleId);
   }
 }

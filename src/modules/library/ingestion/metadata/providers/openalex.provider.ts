@@ -275,6 +275,18 @@ export class OpenAlexProvider implements MetadataProvider {
       fullName: name,
     }));
 
+    const language =
+      typeof item.language === 'string' && item.language.trim()
+        ? item.language.trim()
+        : undefined;
+
+    const license =
+      typeof (primLoc as any)?.license === 'string' && (primLoc as any).license.trim()
+        ? (primLoc as any).license.trim()
+        : typeof (item.primary_location as any)?.license === 'string'
+          ? (item.primary_location as any).license.trim()
+          : undefined;
+
     return {
       provider: this.id,
       metadata: {
@@ -293,6 +305,9 @@ export class OpenAlexProvider implements MetadataProvider {
         citationCount,
         itemType,
         url: canonicalUrl,
+        language,
+        license,
+        rights: license,
         keywords: keywords.length ? keywords : undefined,
         tags: keywords.length ? keywords : undefined,
         openAccessPdfUrl,

@@ -1,8 +1,8 @@
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { PrismaService } from '../../../../core/database/prisma.service';
-import { CatalogService } from '../../catalog/catalog.service';
-import { TransactionService } from '../../sync/services/transaction.service';
-import { CatalogItemMapper } from '../../catalog/mappers/catalog-item.mapper';
+import { CatalogService } from '../../items/items.service';
+import { TransactionService } from '../../outbox/transaction.service';
+import { CatalogItemMapper } from '../../items/items.mapper';
 import {
   STORAGE_PORT,
   IStoragePort,
@@ -13,6 +13,7 @@ import {
   type ExtractedPdfMetadata,
 } from '../../attachments/providers/pdf-extractor.provider';
 import { IngestionValidationException } from '../errors/ingestion.errors';
+import { toCatalogItemData } from '../stages/commit.stage';
 import { IngestionCommand, IngestionResult } from '../types/ingestion.types';
 import { METADATA_PORT, MetadataPort } from '../metadata/types/metadata.types';
 import { IngestionStatus, Prisma } from '@prisma/client';
@@ -414,6 +415,15 @@ export class PdfIngestionStrategy implements IIngestionStrategy<
           itemType:
             command.overrides?.itemType || meta.itemType || 'journalArticle',
         };
+        const createItemData = toCatalogItemData(
+          { ...meta, ...(command.overrides || {}), ...pdfItemData },
+          {
+            collectionIds: command.collectionId ? [command.collectionId] : [],
+            userId: command.userId,
+            fileId: command.fileId,
+            filename: command.filename,
+          },
+        );
 
         if (this.libraryTx?.executeInTransaction) {
           createdItem = await this.libraryTx.executeInTransaction(
@@ -447,7 +457,7 @@ export class PdfIngestionStrategy implements IIngestionStrategy<
               if (this.catalogService?.createItem) {
                 item = await this.catalogService.createItem(
                   workspaceId,
-                  pdfItemData,
+                  createItemData,
                   {
                     tx,
                     helpers,
@@ -521,7 +531,7 @@ export class PdfIngestionStrategy implements IIngestionStrategy<
         } else if (this.catalogService?.createItem) {
           createdItem = await this.catalogService.createItem(
             workspaceId,
-            pdfItemData,
+            createItemData,
             {
               source: 'pdf',
             },

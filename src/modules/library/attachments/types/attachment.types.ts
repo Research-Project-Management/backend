@@ -44,6 +44,7 @@ export interface CatalogAttachmentEntity {
 }
 
 export interface CreateAttachmentInput {
+  workspaceId: string;
   catalogItemId: string;
   filename: string;
   url: string;

@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { CoreModule } from '../../../core/core.module';
-import { SyncModule } from '../sync/sync.module';
-import { CatalogModule } from '../catalog/catalog.module';
+import { OutboxModule } from '../outbox/outbox.module';
+import { ItemsModule } from '../items/items.module';
 import { AttachmentsModule } from '../attachments/attachments.module';
 import { SearchModule } from '../search/search.module';
 import { MetadataModule } from './metadata/metadata.module';
@@ -9,6 +9,7 @@ import { StorageModule } from '../../storage/storage.module';
 import { IngestionService } from './ingestion.service';
 import { IngestionController } from './ingestion.controller';
 import { IngestionRepository } from './ingestion.repository';
+import { IdempotencyRepository } from '../sync/repositories/idempotency.repository';
 import { DoiParser } from './parsers/doi.parser';
 import { BibtexParser } from './parsers/bibtex.parser';
 import { RisParser } from './parsers/ris.parser';
@@ -29,20 +30,24 @@ import { PdfIngestionStrategy } from './strategies/pdf-ingestion.strategy';
 import { BibtexIngestionStrategy } from './strategies/bibtex-ingestion.strategy';
 import { IngestionStrategyRegistry } from './strategies/ingestion-strategy.registry';
 
+import { NotesModule } from '../notes/notes.module';
+
 @Module({
   imports: [
     CoreModule,
-    SyncModule,
-    CatalogModule,
+    OutboxModule,
+    ItemsModule,
     AttachmentsModule,
     SearchModule,
     MetadataModule,
     StorageModule,
+    NotesModule,
   ],
   controllers: [IngestionController],
   providers: [
     // Repository
     IngestionRepository,
+    IdempotencyRepository,
 
     // Parsers
     DoiParser,

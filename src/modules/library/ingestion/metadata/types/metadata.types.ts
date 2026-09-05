@@ -24,7 +24,7 @@ export interface ClassifiedQuery {
 import {
   CreatorCreditInput,
   CreatorType,
-} from '../../../catalog/types/catalog.types';
+} from '../../../items/items.types';
 
 export { CreatorCreditInput, CreatorType };
 export type CreatorInput = CreatorCreditInput;
@@ -62,6 +62,7 @@ export interface ItemMetadata {
   year?: number | null;
   publicationDate?: string;
   date?: string;
+  accessedAt?: string | Date | null;
   journal?: string;
   journalAbbr?: string;
   publicationTitle?: string;
@@ -70,8 +71,13 @@ export interface ItemMetadata {
   volume?: string;
   issue?: string;
   section?: string;
+  partNumber?: string;
+  partTitle?: string;
   series?: string;
   seriesTitle?: string;
+  seriesText?: string;
+  seriesNumber?: string;
+  edition?: string;
   pages?: string;
   abstract?: string;
   abstractNote?: string;
@@ -88,6 +94,7 @@ export interface ItemMetadata {
   storageId?: string;
   openAccessPdfUrl?: string;
   itemType?: string;
+  type?: string;
   citationKey?: string;
   explicitCitationKey?: string;
   extra?: string;

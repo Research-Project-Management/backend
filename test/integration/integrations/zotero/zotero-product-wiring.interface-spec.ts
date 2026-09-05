@@ -4,7 +4,7 @@ import { ZoteroConnectionService } from '../../../../src/modules/integrations/zo
 import { ZoteroFileConnector } from '../../../../src/modules/integrations/zotero/zotero-file.connector';
 import { UrlCaptureProvider } from '../../../../src/modules/library/ingestion/providers/url-capture.provider';
 import { IngestionService } from '../../../../src/modules/library/ingestion/ingestion.service';
-import { CatalogService } from '../../../../src/modules/library/catalog/catalog.service';
+import { CatalogService } from '../../../../src/modules/library/items/items.service';
 
 jest.setTimeout(60000);
 

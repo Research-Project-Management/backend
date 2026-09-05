@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { Prisma } from '@prisma/client';
-import { VersionMismatchException } from '../catalog/errors/catalog.errors';
+import { VersionMismatchException } from '../items/items.errors';
 import { normalizeTags } from '../tags/utils/tags.utils';
 
 export interface CreateNoteData {

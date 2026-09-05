@@ -1,11 +1,11 @@
 import {
-  PdfExportService,
+  ExportsService,
   BurnableAnnotation,
-} from '../../../../src/modules/library/exports/pdf-export.service';
+} from '../../../../src/modules/library/exports/exports.service';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 
 describe('PdfExportService (Unit)', () => {
-  let service: PdfExportService;
+  let service: ExportsService;
   let mockPrisma: any;
 
   beforeEach(() => {
@@ -17,7 +17,7 @@ describe('PdfExportService (Unit)', () => {
         findMany: jest.fn(),
       },
     };
-    service = new PdfExportService(mockPrisma);
+    service = new ExportsService(mockPrisma, {} as any);
   });
 
   it('burns highlight rectangles and text notes into a multi-page PDF', async () => {

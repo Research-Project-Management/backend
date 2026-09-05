@@ -57,7 +57,7 @@ export class IngestionController {
         payload = {
           kind: 'IDENTIFIER',
           identifierType: dto.identifierType || 'DOI',
-          value: dto.value || '',
+          value: dto.value || dto.identifierValue || '',
         };
         break;
       case 'RECORD':
@@ -221,7 +221,7 @@ export class IngestionController {
     @CurrentUser('id') userId: string,
     @Body() dto: CaptureUrlDto,
   ) {
-    return this.ingestionService.captureUrl(dto.url, workspaceId);
+    return this.ingestionService.captureUrl(dto.url, { workspaceId, userId });
   }
 
   @Post('confirm-url')

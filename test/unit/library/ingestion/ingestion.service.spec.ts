@@ -3,13 +3,20 @@ import { IngestionService } from '@/modules/library/ingestion/ingestion.service'
 import { PrismaService } from '@/core/database/prisma.service';
 import { IngestionRepository } from '@/modules/library/ingestion/ingestion.repository';
 import { IdempotencyRepository } from '@/modules/library/sync/repositories/idempotency.repository';
-import { TransactionService } from '@/modules/library/sync/services/transaction.service';
+import { TransactionService } from '@/modules/library/outbox/transaction.service';
 import { PdfExtractorProvider } from '@/modules/library/attachments/providers/pdf-extractor.provider';
 import { UrlCaptureProvider } from '@/modules/library/ingestion/providers/url-capture.provider';
 import { METADATA_PORT } from '@/modules/library/ingestion/metadata/types/metadata.types';
 import { STORAGE_PORT } from '@/modules/storage/storage.port';
-import { CatalogService } from '@/modules/library/catalog/catalog.service';
+import { CatalogService } from '@/modules/library/items/items.service';
 import { IngestionStrategyRegistry } from '@/modules/library/ingestion/strategies/ingestion-strategy.registry';
+import { IdentifyStage } from '@/modules/library/ingestion/stages/identify.stage';
+import { NormalizeStage } from '@/modules/library/ingestion/stages/normalize.stage';
+import { EnrichStage } from '@/modules/library/ingestion/stages/enrich.stage';
+import { ReconcileStage } from '@/modules/library/ingestion/stages/reconcile.stage';
+import { MatchStage } from '@/modules/library/ingestion/stages/match.stage';
+import { CommitStage } from '@/modules/library/ingestion/stages/commit.stage';
+import { NotesService } from '@/modules/library/notes/notes.service';
 
 describe('IngestionService (Canonical)', () => {
   let service: IngestionService;

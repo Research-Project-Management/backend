@@ -95,6 +95,10 @@ export class IngestionSubmissionDto {
   @IsString()
   value?: string;
 
+  @IsOptional()
+  @IsString()
+  identifierValue?: string;
+
   // Record fields
   @IsOptional()
   @IsIn(['BIBTEX', 'RIS', 'CSL_JSON'])

@@ -1,4 +1,4 @@
-﻿import {
+import {
   Injectable,
   NotFoundException,
   BadRequestException,
@@ -7,7 +7,7 @@ import { FastifyReply } from 'fastify';
 import { EngineService } from '../engine/engine.service';
 import { RagAgentQueryDto } from './dto/rag-agent.dto';
 
-import { CatalogService } from '../../library/catalog/catalog.service';
+import { CatalogService } from '../../library/items/items.service';
 
 @Injectable()
 export class RagAgentService {

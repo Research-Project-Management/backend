@@ -1,7 +1,7 @@
 import {
   parseCreatorString,
   ParsedCreator,
-} from '../../../src/modules/library/catalog/migrations/backfill-creators';
+} from '../../../src/modules/library/items/creator-parser.util';
 
 describe('Catalog Creator Name Parsing & Multi-Cultural Fixtures (T015)', () => {
   describe('Western Standard Names', () => {

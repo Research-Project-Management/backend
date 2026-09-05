@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { SYNC_EVENT_TYPES } from '../../sync/events/library.events';
+import { LIBRARY_EVENT_TYPES } from '../../outbox/outbox.events';
 import { FullTextIndexer } from '../providers/full-text-indexer.provider';
 import { PrismaService } from '../../../../core/database/prisma.service';
 
@@ -22,7 +22,7 @@ export class SearchEventHandler {
     private readonly prisma: PrismaService,
   ) {}
 
-  @OnEvent(SYNC_EVENT_TYPES.ITEM_DELETED, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.ITEM_DELETED, { async: true })
   async handleItemDeleted(event: DomainEventEnvelope) {
     this.logger.debug(
       `[SearchEventHandler] Cleaning up full-text index for deleted item ${event.aggregateId} (workspace: ${event.workspaceId})`,
@@ -46,7 +46,7 @@ export class SearchEventHandler {
     }
   }
 
-  @OnEvent(SYNC_EVENT_TYPES.ATTACHMENT_DELETED, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.ATTACHMENT_DELETED, { async: true })
   async handleAttachmentDeleted(event: DomainEventEnvelope) {
     this.logger.debug(
       `[SearchEventHandler] Cleaning up full-text index for deleted attachment ${event.aggregateId}`,
@@ -63,7 +63,7 @@ export class SearchEventHandler {
     }
   }
 
-  @OnEvent(SYNC_EVENT_TYPES.ITEM_CREATED, { async: true })
+  @OnEvent(LIBRARY_EVENT_TYPES.ITEM_CREATED, { async: true })
   handleItemCreated(event: DomainEventEnvelope) {
     this.logger.debug(
       `[SearchEventHandler] New item indexed in catalog: ${event.aggregateId} (workspace: ${event.workspaceId})`,

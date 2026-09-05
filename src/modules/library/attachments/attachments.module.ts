@@ -1,4 +1,4 @@
-import { Module, OnModuleInit, Inject } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
 import { AttachmentsController } from './attachments.controller';
 import { AttachmentsService } from './attachments.service';
 import { PdfExtractorProvider } from './providers/pdf-extractor.provider';
@@ -7,15 +7,23 @@ import {
   EXTRACTION_EVENT_TYPES,
 } from './handlers/attachment-extraction.handler';
 import { CoreModule } from '../../../core/core.module';
-import { SyncModule } from '../sync/sync.module';
+import { OutboxModule } from '../outbox/outbox.module';
+import { OutboxWorker } from '../outbox/outbox.worker';
 import { SearchModule } from '../search/search.module';
-import { SYNC_PORT, SyncPort } from '../sync/ports/sync.port';
 import { StorageModule } from '../../storage/storage.module';
 
+import { AttachmentsRepository } from './attachments.repository';
+
 @Module({
-  imports: [CoreModule, SyncModule, SearchModule, StorageModule],
+  imports: [
+    CoreModule,
+    OutboxModule,
+    SearchModule,
+    StorageModule,
+  ],
   controllers: [AttachmentsController],
   providers: [
+    AttachmentsRepository,
     AttachmentsService,
     PdfExtractorProvider,
     AttachmentExtractionHandler,
@@ -24,15 +32,14 @@ import { StorageModule } from '../../storage/storage.module';
 })
 export class AttachmentsModule implements OnModuleInit {
   constructor(
-    @Inject(SYNC_PORT)
-    private readonly syncPort: SyncPort,
+    private readonly outboxWorker: OutboxWorker,
     private readonly extractionHandler: AttachmentExtractionHandler,
   ) {}
 
   onModuleInit() {
-    this.syncPort.registerIntegrationEventHandler(
+    this.outboxWorker.registerHandler(
       EXTRACTION_EVENT_TYPES.EXTRACTION_REQUESTED,
-      (evt) => this.extractionHandler.handle(evt as any),
+      this.extractionHandler,
     );
   }
 }

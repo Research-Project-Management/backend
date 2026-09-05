@@ -64,4 +64,54 @@ describe('NormalizationPolicy', () => {
       },
     ]);
   });
+
+  it('retains publication, identifier, metric, and attachment metadata', () => {
+    const normalized = policy.normalize({
+      title: 'Complete record',
+      pmcid: 'PMCID: PMC1234567',
+      date: '2026-09-04',
+      journalAbbr: 'J Complete Rec',
+      section: 'Research',
+      partNumber: 'II',
+      seriesNumber: '8',
+      abstractNote: 'Imported abstract note',
+      tldr: 'Short finding',
+      referenceCount: 42,
+      influentialCitationCount: 4,
+      openAccessPdfUrl: 'https://example.test/open.pdf',
+      archiveLocation: 'ia:complete-record',
+      editors: ['Grace Hopper'],
+    });
+
+    expect(normalized).toMatchObject({
+      pmcid: 'PMC1234567',
+      date: '2026-09-04',
+      journalAbbr: 'J Complete Rec',
+      section: 'Research',
+      partNumber: 'II',
+      seriesNumber: '8',
+      abstract: 'Imported abstract note',
+      abstractNote: 'Imported abstract note',
+      tldr: 'Short finding',
+      referenceCount: 42,
+      influentialCitationCount: 4,
+      openAccessPdfUrl: 'https://example.test/open.pdf',
+      archiveLocation: 'ia:complete-record',
+      editors: ['Grace Hopper'],
+    });
+  });
+
+  it('keeps authors and editors when providers supply them separately', () => {
+    const normalized = policy.normalize({
+      creators: [{ creatorType: 'editor', name: 'Grace Hopper' }],
+      authors: ['Ada Lovelace'],
+      editors: ['Grace Hopper'],
+    });
+
+    expect(normalized.creators).toEqual([
+      { creatorType: 'editor', name: 'Grace Hopper' },
+      { creatorType: 'author', name: 'Ada Lovelace' },
+    ]);
+    expect(normalized.authors).toEqual(['Ada Lovelace']);
+  });
 });
