@@ -1,4 +1,4 @@
-import { CreatorCreditInput } from '../../items/items.types';
+import { CreatorCreditInput } from '../../items/types/items.types';
 
 export type IngestionStatus =
   | 'pending'
@@ -98,3 +98,7 @@ export interface IngestionPort {
   ingest(command: IngestionCommand): Promise<IngestionResult>;
   getRunStatus(workspaceId: string, runId: string): Promise<any>;
 }
+
+export * from './ingestion-submission.types';
+export * from './metadata-candidate.types';
+

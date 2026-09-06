@@ -1,4 +1,4 @@
-import { TagInput } from '../types/tag.types';
+import { TagInput } from '../types/tags.types';
 
 /**
  * Normalizes an array of raw tag strings or tag objects into a unique, trimmed, non-empty list of tag strings.

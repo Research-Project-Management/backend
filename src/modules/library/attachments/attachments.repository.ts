@@ -10,23 +10,6 @@ export class AttachmentsRepository {
     return tx ?? this.prisma;
   }
 
-  async findCatalogItem(itemId: string, tx?: Prisma.TransactionClient) {
-    const client = this.getClient(tx);
-    return client.catalogItem.findUnique({
-      where: { id: itemId },
-    });
-  }
-
-  async findCatalogItemInWorkspace(
-    itemId: string,
-    workspaceId: string,
-    tx?: Prisma.TransactionClient,
-  ) {
-    const client = this.getClient(tx);
-    return client.catalogItem.findFirst({
-      where: { id: itemId, workspaceId, deletedAt: null },
-    });
-  }
 
   async findUnique(
     id: string,

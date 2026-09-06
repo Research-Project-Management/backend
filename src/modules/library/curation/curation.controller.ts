@@ -1,4 +1,4 @@
-﻿import {
+import {
   Controller,
   Get,
   Post,
@@ -6,14 +6,17 @@
   Body,
   UseGuards,
 } from '@nestjs/common';
-import { DuplicateService } from './duplicate.service';
-import { QualityService } from './quality.service';
-import { MergeDuplicatesDto } from './curation.dto';
+import { DuplicateService } from './services/duplicate.service';
+import { QualityService } from './services/quality.service';
+import { MergeDuplicatesDto } from './dto/curation.dto';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
 import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
-import { CurrentWorkspace } from '../../../modules/iam/authz/decorators/current-workspace.decorator';
+import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
 
-@Controller('api/v1/workspaces/:workspaceId/library/curation')
+@Controller([
+  'api/v1/workspaces/:workspaceId/library/curation',
+  'api/v1/workspace/:workspaceId/library/curation',
+])
 @UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
 export class CurationController {
   constructor(
@@ -22,34 +25,23 @@ export class CurationController {
   ) {}
 
   @Get('duplicates')
-  async getDuplicates(
-    @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
-  ) {
-    return this.duplicateService.detectDuplicates(
-      currentWorkspaceId || workspaceId,
-    );
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  async getDuplicates(@Param('workspaceId') workspaceId: string) {
+    return this.duplicateService.detectDuplicates(workspaceId);
   }
 
   @Post('merge')
+  @WorkspaceRoles('owner', 'admin')
   async mergeDuplicates(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
     @Body() dto: MergeDuplicatesDto,
   ) {
-    return this.duplicateService.mergeDuplicates(
-      currentWorkspaceId || workspaceId,
-      dto,
-    );
+    return this.duplicateService.mergeDuplicates(workspaceId, dto);
   }
 
   @Get(['quality-audit', 'quality', 'integrity'])
-  async getQualityAudit(
-    @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
-  ) {
-    return this.qualityService.getQualityAudit(
-      currentWorkspaceId || workspaceId,
-    );
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  async getQualityAudit(@Param('workspaceId') workspaceId: string) {
+    return this.qualityService.getQualityAudit(workspaceId);
   }
 }

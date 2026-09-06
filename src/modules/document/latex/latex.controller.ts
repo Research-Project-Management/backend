@@ -26,14 +26,14 @@ export class LatexController {
     return this.latexService.compile(dto);
   }
 
-  @Post('pages/:pageId/sync-project')
+  @Post(['pages/:pageId/sync-project', 'page/:pageId/sync-project'])
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Sync all page files to LaTeX project' })
   async syncProject(@Param('pageId') pageId: string) {
     return this.latexService.syncProject(pageId);
   }
 
-  @Post('pages/:pageId/sync-incremental')
+  @Post(['pages/:pageId/sync-incremental', 'page/:pageId/sync-incremental'])
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Incrementally sync only dirty/changed files to LaTeX',

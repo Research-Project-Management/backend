@@ -4,14 +4,7 @@ import { LIBRARY_EVENT_TYPES } from '../../outbox/outbox.events';
 import { FullTextIndexer } from '../providers/full-text-indexer.provider';
 import { PrismaService } from '../../../../core/database/prisma.service';
 
-export interface DomainEventEnvelope<T = any> {
-  eventId: string;
-  workspaceId: string;
-  aggregateId: string;
-  eventType: string;
-  payload: T;
-  createdAt: Date;
-}
+import { DomainEventEnvelope } from '../../outbox/ports/event-publisher.port';
 
 @Injectable()
 export class SearchEventHandler {

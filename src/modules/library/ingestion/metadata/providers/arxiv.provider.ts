@@ -147,6 +147,15 @@ export class ArxivProvider implements MetadataProvider {
       journal = cleanBibliographicText(journalMatch[1]);
     }
 
+    // Comment (e.g. conference publication note like "Published as a conference paper at ICLR 2015")
+    let comment: string | undefined;
+    const commentMatch = entry.match(
+      /<arxiv:comment[^>]*>([\s\S]*?)<\/arxiv:comment>/i,
+    );
+    if (commentMatch) {
+      comment = cleanBibliographicText(commentMatch[1]);
+    }
+
     // PDF link
     const pdfUrl = `https://arxiv.org/pdf/${cleanId}.pdf`;
     const canonicalUrl = `https://arxiv.org/abs/${cleanId}`;
@@ -170,6 +179,7 @@ export class ArxivProvider implements MetadataProvider {
         year,
         publicationDate,
         journal: journal || 'arXiv preprint',
+        publicationTitle: journal || (comment ? `arXiv preprint (${comment})` : 'arXiv preprint'),
         publisher: 'arXiv',
         abstract,
         language: 'en',
@@ -184,6 +194,7 @@ export class ArxivProvider implements MetadataProvider {
         extraFields: {
           repository: 'arXiv',
           archiveId: cleanId,
+          ...(comment ? { comment } : {}),
         },
         provenance: {
           originProvider: this.id,

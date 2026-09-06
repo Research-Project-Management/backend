@@ -13,7 +13,7 @@ import { AttachmentsService } from './attachments.service';
 import {
   CreateAttachmentDto,
   ReplaceAttachmentFileDto,
-} from './dto/attachment.dto';
+} from './dto/attachments.dto';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
 import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
 import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
@@ -21,8 +21,10 @@ import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-
 @Controller([
   'api/v1/workspaces/:workspaceId/library/items/:itemId/attachments',
   'api/v1/workspaces/:workspaceId/library/attachments',
+  'api/v1/workspace/:workspaceId/library/items/:itemId/attachments',
+  'api/v1/workspace/:workspaceId/library/attachments',
 ])
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
 export class AttachmentsController {
   constructor(private readonly attachmentsService: AttachmentsService) {}
 
@@ -41,8 +43,8 @@ export class AttachmentsController {
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async getItemAttachment(
     @Param('workspaceId') workspaceId: string,
-    @Param('itemId') itemId: string,
     @Param('attachmentId') attachmentId: string,
+    @Param('itemId') itemId?: string,
   ) {
     return this.attachmentsService.getItemAttachment(
       workspaceId,
@@ -95,7 +97,7 @@ export class AttachmentsController {
 
   @Delete(':attachmentId')
   @UseGuards(WorkspaceRoleGuard)
-  @WorkspaceRoles('owner', 'admin', 'member')
+  @WorkspaceRoles('owner', 'admin')
   async deleteAttachment(
     @Param('workspaceId') workspaceId: string,
     @Param('attachmentId') attachmentId: string,

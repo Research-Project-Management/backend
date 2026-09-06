@@ -15,17 +15,20 @@ import {
 import { AnnotationsService } from './annotations.service';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
 import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
+import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
 import { CurrentUser } from '../../../modules/iam/authn/decorators/current-user.decorator';
-import { CreateAnnotationDto, UpdateAnnotationDto } from './dto/annotation.dto';
+import { CreateAnnotationDto, UpdateAnnotationDto } from './dto/annotations.dto';
 
-@Controller(
+@Controller([
   'api/v1/workspaces/:workspaceId/library/attachments/:attachmentId/annotations',
-)
+  'api/v1/workspace/:workspaceId/library/attachments/:attachmentId/annotations',
+])
 @UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
 export class AnnotationsController {
   constructor(private readonly annotationsService: AnnotationsService) {}
 
   @Get()
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async listAnnotations(
     @Param('workspaceId') workspaceId: string,
     @Param('attachmentId') attachmentId: string,
@@ -41,6 +44,7 @@ export class AnnotationsController {
   }
 
   @Post()
+  @WorkspaceRoles('owner', 'admin', 'member')
   async createAnnotation(
     @Param('workspaceId') workspaceId: string,
     @Param('attachmentId') attachmentId: string,
@@ -60,9 +64,11 @@ export class AnnotationsController {
   }
 
   @Patch(':id')
+  @WorkspaceRoles('owner', 'admin', 'member')
   async updateAnnotation(
     @Param('workspaceId') workspaceId: string,
     @Param('id') id: string,
+    @CurrentUser('id') currentUserId: string,
     @Headers('if-match') ifMatch: string | undefined,
     @Body() body: UpdateAnnotationDto,
   ) {
@@ -81,13 +87,16 @@ export class AnnotationsController {
       id,
       expectedVersion,
       updateData,
+      currentUserId,
     );
   }
 
   @Delete(':id')
+  @WorkspaceRoles('owner', 'admin', 'member')
   async deleteAnnotation(
     @Param('workspaceId') workspaceId: string,
     @Param('id') id: string,
+    @CurrentUser('id') currentUserId: string,
     @Query('expectedVersion') expectedVersionQuery?: string,
     @Headers('if-match') ifMatch?: string,
   ) {
@@ -101,6 +110,7 @@ export class AnnotationsController {
       workspaceId,
       id,
       expectedVersion,
+      currentUserId,
     );
     if (!deleted) {
       throw new NotFoundException(`Annotation ${id} not found`);

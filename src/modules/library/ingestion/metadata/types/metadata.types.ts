@@ -24,7 +24,8 @@ export interface ClassifiedQuery {
 import {
   CreatorCreditInput,
   CreatorType,
-} from '../../../items/items.types';
+} from '../../../items/types/items.types';
+
 
 export { CreatorCreditInput, CreatorType };
 export type CreatorInput = CreatorCreditInput;
@@ -168,7 +169,9 @@ export type ProviderName =
   | 'OpenLibrary'
   | 'SemanticScholar'
   | 'OpenAlex'
-  | 'Unpaywall';
+  | 'Unpaywall'
+  | 'CORE';
+
 
 export interface ProviderCapability {
   queryTypes: QueryType[];

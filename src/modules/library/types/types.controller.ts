@@ -8,13 +8,18 @@ import {
 import { TypesService } from './types.service';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
 import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
+import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
 
-@Controller('api/v1/workspaces/:workspaceId/library/item-types')
+@Controller([
+  'api/v1/workspaces/:workspaceId/library/item-types',
+  'api/v1/workspace/:workspaceId/library/item-types',
+])
 @UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
 export class TypesController {
   constructor(private readonly typesService: TypesService) {}
 
   @Get()
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   listAllItemTypes() {
     return {
       success: true,
@@ -27,6 +32,7 @@ export class TypesController {
   }
 
   @Get(':itemType')
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   getItemTypeDefinition(@Param('itemType') itemType: string) {
     const definition = this.typesService.getItemType(itemType);
     if (!definition) {

@@ -6,6 +6,6 @@ import { LabelRepository } from './label.repository';
 @Module({
   controllers: [LabelController],
   providers: [LabelService, LabelRepository],
-  exports: [LabelService, LabelRepository],
+  exports: [LabelService],
 })
 export class LabelModule {}

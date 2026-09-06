@@ -31,7 +31,11 @@ export class SearchRepository {
     return tx || this.prisma;
   }
 
-  private buildSearchWhere(
+  /**
+   * Builds the base Prisma WHERE clause for non-text filters.
+   * Text search is handled separately via raw FTS or ILIKE fallback.
+   */
+  private buildBaseWhere(
     workspaceId: string,
     options: SearchOptions,
   ): Prisma.CatalogItemWhereInput {
@@ -50,62 +54,44 @@ export class SearchRepository {
       ...(options.collectionId
         ? {
             collectionItems: {
-              some: {
-                collectionId: options.collectionId,
-              },
+              some: { collectionId: options.collectionId },
             },
           }
         : {}),
       ...(options.tagId
         ? {
             itemTags: {
-              some: {
-                tagId: options.tagId,
-              },
+              some: { tagId: options.tagId },
             },
           }
         : {}),
-      ...(options.q && options.q.trim()
-        ? {
-            OR: [
-              { title: { contains: options.q.trim(), mode: 'insensitive' } },
-              { abstract: { contains: options.q.trim(), mode: 'insensitive' } },
-              { doi: { contains: options.q.trim(), mode: 'insensitive' } },
-              {
-                citationKey: {
-                  contains: options.q.trim(),
-                  mode: 'insensitive',
-                },
-              },
-              {
-                publicationTitle: {
-                  contains: options.q.trim(),
-                  mode: 'insensitive',
-                },
-              },
-              {
-                contributors: {
-                  some: {
-                    OR: [
-                      {
-                        fullName: {
-                          contains: options.q.trim(),
-                          mode: 'insensitive',
-                        },
-                      },
-                      {
-                        lastName: {
-                          contains: options.q.trim(),
-                          mode: 'insensitive',
-                        },
-                      },
-                    ],
-                  },
-                },
-              },
-            ],
-          }
-        : {}),
+    };
+  }
+
+  /**
+   * Builds a Prisma text-search OR clause using ILIKE.
+   * Used as fallback when tsvector is not available.
+   */
+  private buildTextWhereIlike(q: string): Prisma.CatalogItemWhereInput {
+    const trimmed = q.trim();
+    return {
+      OR: [
+        { title: { contains: trimmed, mode: 'insensitive' } },
+        { abstract: { contains: trimmed, mode: 'insensitive' } },
+        { doi: { contains: trimmed, mode: 'insensitive' } },
+        { citationKey: { contains: trimmed, mode: 'insensitive' } },
+        { publicationTitle: { contains: trimmed, mode: 'insensitive' } },
+        {
+          contributors: {
+            some: {
+              OR: [
+                { fullName: { contains: trimmed, mode: 'insensitive' } },
+                { lastName: { contains: trimmed, mode: 'insensitive' } },
+              ],
+            },
+          },
+        },
+      ],
     };
   }
 
@@ -114,9 +100,143 @@ export class SearchRepository {
     options: SearchOptions,
     tx?: Prisma.TransactionClient,
   ) {
-    const client = this.getClient(tx);
     const limit = Math.min(options.limit ?? 20, 100);
-    const where = this.buildSearchWhere(workspaceId, options);
+    const q = options.q?.trim();
+
+    // ── Full-Text Search via PostgreSQL tsvector ────────────────────────────
+    // Uses generated column `search_vector` (GIN index) added by migration
+    // `add_catalog_item_fts`. Falls back to ILIKE if migration hasn't run yet.
+    if (q && this.hasFtsColumn()) {
+      try {
+        return await this.searchItemsFts(workspaceId, options, q, limit, tx);
+      } catch (err: any) {
+        // Column might not exist yet (pre-migration) — fall through to ILIKE
+        this.logger.warn(
+          `FTS query failed, falling back to ILIKE: ${err?.message}`,
+        );
+      }
+    }
+    // ── ILIKE fallback (pre-migration or no text query) ────────────────────
+    return await this.searchItemsIlike(workspaceId, options, limit, tx);
+  }
+
+  private async searchItemsFts(
+    workspaceId: string,
+    options: SearchOptions,
+    q: string,
+    limit: number,
+    tx?: Prisma.TransactionClient,
+  ) {
+    // Build structured filters as SQL fragment
+    const baseFilters: string[] = [
+      `"workspaceId" = $1`,
+      `"deletedAt" IS NULL`,
+      `search_vector @@ plainto_tsquery('english', $2)`,
+    ];
+    const params: any[] = [workspaceId, q];
+    let paramIdx = 3;
+
+    if (options.itemType) {
+      baseFilters.push(`"itemType" = $${paramIdx++}`);
+      params.push(options.itemType);
+    }
+    if (options.yearFrom) {
+      baseFilters.push(`year >= $${paramIdx++}`);
+      params.push(options.yearFrom);
+    }
+    if (options.yearTo) {
+      baseFilters.push(`year <= $${paramIdx++}`);
+      params.push(options.yearTo);
+    }
+    if (options.cursor) {
+      baseFilters.push(`id > $${paramIdx++}`);
+      params.push(options.cursor);
+    }
+
+    // Collection and tag filters via subquery
+    if (options.collectionId) {
+      baseFilters.push(
+        `EXISTS (SELECT 1 FROM "CollectionItem" ci WHERE ci."itemId" = "CatalogItem".id AND ci."collectionId" = $${paramIdx++})`,
+      );
+      params.push(options.collectionId);
+    }
+    if (options.tagId) {
+      baseFilters.push(
+        `EXISTS (SELECT 1 FROM "ItemTag" it WHERE it."itemId" = "CatalogItem".id AND it."tagId" = $${paramIdx++})`,
+      );
+      params.push(options.tagId);
+    }
+
+    const whereClause = baseFilters.join(' AND ');
+
+    // ORDER BY: relevance when FTS, otherwise dateAdded
+    const orderExpr =
+      options.sortBy === 'year'
+        ? `year ${options.sortOrder === 'asc' ? 'ASC' : 'DESC'} NULLS LAST`
+        : options.sortBy === 'title'
+          ? `title ${options.sortOrder === 'asc' ? 'ASC' : 'DESC'} NULLS LAST`
+          : options.sortBy === 'relevance' || !options.sortBy
+            ? `ts_rank(search_vector, plainto_tsquery('english', $2)) DESC, "createdAt" DESC`
+            : `"createdAt" ${options.sortOrder === 'asc' ? 'ASC' : 'DESC'}`;
+
+    params.push(limit + 1);
+    const limitParam = paramIdx++;
+
+    const rows: any[] = await this.prisma.$queryRawUnsafe(
+      `SELECT id FROM "CatalogItem"
+       WHERE ${whereClause}
+       ORDER BY ${orderExpr}
+       LIMIT $${limitParam}`,
+      ...params,
+    );
+
+    let hasNextPage = false;
+    let nextCursor: string | undefined;
+    const ids = rows.map((r: any) => r.id as string);
+
+    if (ids.length > limit) {
+      hasNextPage = true;
+      const poppedId = ids.pop();
+      nextCursor = poppedId;
+    }
+
+    if (ids.length === 0) {
+      return { items: [], nextCursor: undefined, hasNextPage: false };
+    }
+
+    // Fetch full records with relations in original ranked order
+    const client = this.getClient(tx);
+    const items = await client.catalogItem.findMany({
+      where: { id: { in: ids } },
+      include: {
+        contributors: { orderBy: { orderIndex: 'asc' } },
+        identifiers: true,
+        attachments: { take: 5 },
+        itemTags: { include: { tag: true } },
+        collectionItems: { include: { collection: true } },
+      },
+    });
+
+    // Restore FTS rank order
+    const orderMap = new Map(ids.map((id, idx) => [id, idx]));
+    items.sort((a, b) => (orderMap.get(a.id) ?? 999) - (orderMap.get(b.id) ?? 999));
+
+    return { items, nextCursor, hasNextPage };
+  }
+
+  private async searchItemsIlike(
+    workspaceId: string,
+    options: SearchOptions,
+    limit: number,
+    tx?: Prisma.TransactionClient,
+  ) {
+    const client = this.getClient(tx);
+    const q = options.q?.trim();
+
+    const where: Prisma.CatalogItemWhereInput = {
+      ...this.buildBaseWhere(workspaceId, options),
+      ...(q ? this.buildTextWhereIlike(q) : {}),
+    };
 
     const orderBy: Prisma.CatalogItemOrderByWithRelationInput =
       options.sortBy === 'year'
@@ -131,19 +251,11 @@ export class SearchRepository {
       take: limit + 1,
       ...(options.cursor ? { cursor: { id: options.cursor }, skip: 1 } : {}),
       include: {
-        contributors: {
-          orderBy: { orderIndex: 'asc' },
-        },
+        contributors: { orderBy: { orderIndex: 'asc' } },
         identifiers: true,
-        attachments: {
-          take: 5,
-        },
-        itemTags: {
-          include: { tag: true },
-        },
-        collectionItems: {
-          include: { collection: true },
-        },
+        attachments: { take: 5 },
+        itemTags: { include: { tag: true } },
+        collectionItems: { include: { collection: true } },
       },
     });
 
@@ -156,11 +268,7 @@ export class SearchRepository {
       nextCursor = popped?.id;
     }
 
-    return {
-      items,
-      nextCursor,
-      hasNextPage,
-    };
+    return { items, nextCursor, hasNextPage };
   }
 
   async computeFacets(
@@ -169,7 +277,13 @@ export class SearchRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<FacetResult> {
     const client = this.getClient(tx);
-    const where = this.buildSearchWhere(workspaceId, options);
+
+    // Use the same text where logic as ILIKE for facets (FTS facets are computed same way)
+    const q = options.q?.trim();
+    const where: Prisma.CatalogItemWhereInput = {
+      ...this.buildBaseWhere(workspaceId, options),
+      ...(q ? this.buildTextWhereIlike(q) : {}),
+    };
 
     // Limit facet sampling to top 2,000 matches to prevent OOM on massive libraries
     const items = await client.catalogItem.findMany({
@@ -181,9 +295,7 @@ export class SearchRepository {
         itemTags: {
           take: 10,
           select: {
-            tag: {
-              select: { name: true },
-            },
+            tag: { select: { name: true } },
           },
         },
       },
@@ -208,5 +320,42 @@ export class SearchRepository {
     }
 
     return { itemTypes, years, tags };
+  }
+
+  /**
+   * Checks if the search_vector FTS column exists on CatalogItem.
+   * Used to gracefully degrade to ILIKE before the migration has run.
+   *
+   * Cached after first successful query to avoid repeated pg_attribute checks.
+   */
+  private ftsColumnExists: boolean | null = null;
+
+  private hasFtsColumn(): boolean {
+    // Optimistic: assume it exists unless explicitly determined otherwise
+    // The actual check happens via try/catch in searchItemsFts
+    return this.ftsColumnExists !== false;
+  }
+
+  /**
+   * Call during app startup (OnModuleInit) to warm the FTS column check.
+   */
+  async checkFtsColumnExists(): Promise<void> {
+    try {
+      await this.prisma.$queryRaw`
+        SELECT 1 FROM pg_attribute a
+        JOIN pg_class c ON c.oid = a.attrelid
+        WHERE c.relname = 'CatalogItem'
+          AND a.attname = 'search_vector'
+          AND NOT a.attisdropped
+        LIMIT 1
+      `;
+      this.ftsColumnExists = true;
+      this.logger.log('PostgreSQL FTS: search_vector column found — full-text search enabled');
+    } catch {
+      this.ftsColumnExists = false;
+      this.logger.warn(
+        'PostgreSQL FTS: search_vector column not found — run migration "add_catalog_item_fts" to enable. Falling back to ILIKE.',
+      );
+    }
   }
 }

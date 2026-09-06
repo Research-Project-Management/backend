@@ -35,6 +35,70 @@ services:
       timeout: 5s
       retries: 5
 
+  # ── OSS Academic Tools ────────────────────────────────────────────────────
+
+  # GROBID — ML-based academic PDF structured extraction (Apache 2.0)
+  # Docs: https://grobid.readthedocs.io/en/latest/Grobid-service/
+  # Docker image: lfoppiano/grobid:0.8.2-crf (CRF-only, ~500MB, CPU)
+  # For GPU/deep-learning: use lfoppiano/grobid:0.8.2-full (~4GB)
+  grobid:
+    image: lfoppiano/grobid:latest-crf
+    container_name: research_grobid
+    restart: unless-stopped
+    ports:
+      - "${GROBID_PORT:-8070}:8070"
+    mem_limit: 4g
+    environment:
+      GROBID_SERVICE_ALLOWED_ORIGINS: "*"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8070/api/isalive"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # Zotero Translation Server — 700+ academic publisher translators (AGPLv3)
+  # Docs: https://github.com/zotero/translation-server
+  # Used by Wikipedia Citoid — battle-tested at scale.
+  # AGPLv3: safe as separate Docker sidecar communicating via HTTP.
+  zotero-translation-server:
+    image: zotero/translation-server
+    container_name: research_zotero_ts
+    restart: unless-stopped
+    ports:
+      - "${ZOTERO_TS_PORT:-1969}:1969"
+    environment:
+      USER_AGENT: "FluxResearchPlatform/1.0 (contact@flux.app)"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:1969/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Meilisearch — typo-tolerant full-text search engine (MIT)
+  # Docs: https://docs.meilisearch.com
+  # Currently provisioned for future upgrade from PostgreSQL FTS.
+  # Set MEILISEARCH_MASTER_KEY in .env for production.
+  meilisearch:
+    image: getmeili/meilisearch:latest
+    container_name: research_meilisearch
+    restart: unless-stopped
+    ports:
+      - "${MEILISEARCH_PORT:-7700}:7700"
+    environment:
+      MEILI_ENV: ${MEILI_ENV:-development}
+      MEILI_MASTER_KEY: ${MEILISEARCH_MASTER_KEY:-dev-master-key-change-in-prod}
+    volumes:
+      - meilisearch_data:/meili_data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:7700/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ── NestJS Application ────────────────────────────────────────────────────
+
   # NestJS Fastify Application Server
   backend:
     build:
@@ -54,10 +118,26 @@ services:
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-this-refresh-secret-in-production-67890}
       JWT_EXPIRATION: 15m
       JWT_REFRESH_EXPIRATION: 7d
+      # OSS Sidecar URLs (Docker internal networking)
+      GROBID_URL: http://grobid:8070
+      GROBID_ENABLED: ${GROBID_ENABLED:-true}
+      ZOTERO_TRANSLATOR_URL: http://zotero-translation-server:1969
+      ZOTERO_TRANSLATOR_ENABLED: ${ZOTERO_TRANSLATOR_ENABLED:-true}
+      MEILISEARCH_URL: http://meilisearch:7700
+      MEILISEARCH_MASTER_KEY: ${MEILISEARCH_MASTER_KEY:-dev-master-key-change-in-prod}
+      # Academic API Keys
+      OPENALEX_API_KEY: ${OPENALEX_API_KEY:-}
+      OPENALEX_EMAIL: ${OPENALEX_EMAIL:-contact@flux.academic}
+      CORE_API_KEY: ${CORE_API_KEY:-}
+      SEMANTIC_SCHOLAR_API_KEY: ${SEMANTIC_SCHOLAR_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      grobid:
+        condition: service_healthy
+      zotero-translation-server:
         condition: service_healthy
 
 volumes:
@@ -65,3 +145,6 @@ volumes:
     driver: local
   redis_data:
     driver: local
+  meilisearch_data:
+    driver: local
+

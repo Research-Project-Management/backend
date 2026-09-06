@@ -125,3 +125,7 @@ export class UnifiedIngestionDto {
   @IsBoolean()
   silent?: boolean;
 }
+
+export * from './ingestion-submission.dto';
+export * from './capture-url.dto';
+

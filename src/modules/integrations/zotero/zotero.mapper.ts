@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { normalizeDoi } from '../../library/items/items.utils';
+import { normalizeDoi } from '../../library/items/utils/items.utils';
+
 
 export interface MappedCatalogItem {
   remoteKey: string;

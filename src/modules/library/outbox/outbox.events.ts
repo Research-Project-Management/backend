@@ -8,6 +8,8 @@ export const LIBRARY_EVENT_TYPES = {
   ITEM_CREATED: 'library.item.created',
   ITEM_UPDATED: 'library.item.updated',
   ITEM_DELETED: 'library.item.deleted',
+  ITEM_RESTORED: 'library.item.restored',
+  ITEM_PURGED: 'library.item.purged',
   ITEM_INGESTED_URL: 'library.item.ingested_url',
   ITEM_INGESTED_DOI: 'library.item.ingested_doi',
   ITEM_INGESTED_BIBTEX: 'library.item.ingested_bibtex',
@@ -43,6 +45,9 @@ export const LIBRARY_EVENT_TYPES = {
   COLLECTION_DELETED: 'library.collection.deleted',
   COLLECTION_ITEM_ADDED: 'library.collection.item_added',
   COLLECTION_ITEM_REMOVED: 'library.collection.item_removed',
+
+  // Reading
+  READING_STATE_UPDATED: 'library.reading.updated',
 } as const;
 
 /** @deprecated Use LIBRARY_EVENT_TYPES instead */
@@ -115,6 +120,22 @@ export const LIBRARY_EVENT_CATALOG: Record<string, EventCatalogEntry> = {
     retryPolicy: 'exponential_backoff',
     idempotency: 'aggregate_version',
     expectedSideEffect: 'Emits domain event for local tombstone listeners',
+  },
+  [LIBRARY_EVENT_TYPES.ITEM_RESTORED]: {
+    eventType: LIBRARY_EVENT_TYPES.ITEM_RESTORED,
+    producer: 'CatalogService.restoreItem',
+    consumer: 'EventDispatcher',
+    retryPolicy: 'exponential_backoff',
+    idempotency: 'aggregate_version',
+    expectedSideEffect: 'Emits domain event for local restore listeners',
+  },
+  [LIBRARY_EVENT_TYPES.ITEM_PURGED]: {
+    eventType: LIBRARY_EVENT_TYPES.ITEM_PURGED,
+    producer: 'CatalogService.purgeItem',
+    consumer: 'EventDispatcher',
+    retryPolicy: 'exponential_backoff',
+    idempotency: 'aggregate_version',
+    expectedSideEffect: 'Emits domain event for permanent purge cleanup',
   },
   [LIBRARY_EVENT_TYPES.ITEM_INGESTED_URL]: {
     eventType: LIBRARY_EVENT_TYPES.ITEM_INGESTED_URL,
@@ -318,5 +339,13 @@ export const LIBRARY_EVENT_CATALOG: Record<string, EventCatalogEntry> = {
     retryPolicy: 'exponential_backoff',
     idempotency: 'aggregate_version',
     expectedSideEffect: 'Emits domain event for collection item disassociation',
+  },
+  [LIBRARY_EVENT_TYPES.READING_STATE_UPDATED]: {
+    eventType: LIBRARY_EVENT_TYPES.READING_STATE_UPDATED,
+    producer: 'ReadingService.updateState',
+    consumer: 'EventDispatcher',
+    retryPolicy: 'exponential_backoff',
+    idempotency: 'aggregate_version',
+    expectedSideEffect: 'Emits domain event for reading state and sync change log',
   },
 };

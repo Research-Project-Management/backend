@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
+import { buildWorkspaceIdentifierWhere, isUuid } from '@/core/utils/tenant.util';
 import { Prisma, Task } from '@prisma/client';
 import {
   IWorkItemRepository,
@@ -37,24 +38,20 @@ export class WorkItemRepository implements IWorkItemRepository {
 
   async resolveWorkspace(workspaceIdOrSlug: string) {
     return this.prisma.workspace.findFirst({
-      where: {
-        OR: [
-          { id: workspaceIdOrSlug },
-          { slug: workspaceIdOrSlug },
-          { url: workspaceIdOrSlug },
-        ],
-        deletedAt: null,
-      },
+      where: buildWorkspaceIdentifierWhere(workspaceIdOrSlug),
       select: { id: true },
     });
   }
 
   async findWorkspaceTasks(workspaceId: string) {
     const ws = await this.resolveWorkspace(workspaceId);
-    const targetId = ws?.id || workspaceId;
+    const canonicalWorkspaceId =
+      ws?.id || (isUuid(workspaceId) ? workspaceId : null);
+    if (!canonicalWorkspaceId) return [];
+
     return this.prisma.task.findMany({
       where: {
-        project: { workspaceId: targetId, deletedAt: null },
+        project: { workspaceId: canonicalWorkspaceId, deletedAt: null },
         deletedAt: null,
       },
       include: {
@@ -76,8 +73,20 @@ export class WorkItemRepository implements IWorkItemRepository {
     projectId: string,
     filter?: string | WorkItemFilterOptions,
   ): Promise<WorkItemWithRelations[]> {
+    let canonicalProjectId = projectId;
+    if (!isUuid(canonicalProjectId)) {
+      const proj = await this.prisma.project
+        .findFirst({
+          where: { identifier: { equals: canonicalProjectId, mode: 'insensitive' }, deletedAt: null },
+          select: { id: true },
+        })
+        .catch(() => null);
+      if (!proj) return [];
+      canonicalProjectId = proj.id;
+    }
+
     const where: Prisma.TaskWhereInput = {
-      projectId,
+      projectId: canonicalProjectId,
       deletedAt: null,
     };
 
@@ -85,14 +94,34 @@ export class WorkItemRepository implements IWorkItemRepository {
     let skip: number | undefined;
 
     if (typeof filter === 'string') {
-      where.cycleId = filter;
+      if (filter === 'none' || filter === 'null' || filter === 'unassigned') {
+        where.cycleId = null;
+      } else if (isUuid(filter)) {
+        where.cycleId = filter;
+      }
     } else if (filter) {
-      if (filter.cycleId) where.cycleId = filter.cycleId;
+      if (filter.cycleId !== undefined) {
+        if (filter.cycleId === 'none' || filter.cycleId === 'null' || filter.cycleId === 'unassigned') {
+          where.cycleId = null;
+        } else if (filter.cycleId === null || isUuid(filter.cycleId)) {
+          where.cycleId = filter.cycleId;
+        }
+      }
       if (filter.columnId) where.columnId = filter.columnId;
       if (filter.priority) where.priority = filter.priority;
-      if (filter.assigneeId) where.assigneeId = filter.assigneeId;
+      if (filter.assigneeId !== undefined) {
+        if (filter.assigneeId === 'unassigned' || filter.assigneeId === 'none' || filter.assigneeId === 'null') {
+          where.assigneeId = null;
+        } else if (filter.assigneeId === null || isUuid(filter.assigneeId)) {
+          where.assigneeId = filter.assigneeId;
+        }
+      }
       if (filter.parentTaskId !== undefined) {
-        where.parentTaskId = filter.parentTaskId;
+        if (filter.parentTaskId === 'none' || filter.parentTaskId === 'null') {
+          where.parentTaskId = null;
+        } else if (filter.parentTaskId === null || isUuid(filter.parentTaskId)) {
+          where.parentTaskId = filter.parentTaskId;
+        }
       }
       if (filter.completed !== undefined) {
         where.completed = filter.completed;
@@ -135,6 +164,19 @@ export class WorkItemRepository implements IWorkItemRepository {
   }
 
   async findTaskById(taskId: string): Promise<WorkItemWithRelations | null> {
+    if (!isUuid(taskId)) {
+      return this.prisma.task.findFirst({
+        where: { identifier: taskId, deletedAt: null },
+        include: {
+          assignee: { select: USER_MINIMAL_SELECT },
+          cycle: { select: CYCLE_SELECT },
+          parentTask: { select: { id: true, title: true, identifier: true } },
+          subtasks: { select: SUBTASK_SELECT, orderBy: { rank: 'asc' } },
+          project: { select: { id: true, workspaceId: true } },
+        },
+      });
+    }
+
     return this.prisma.task.findFirst({
       where: { id: taskId, deletedAt: null },
       include: {
@@ -253,8 +295,10 @@ export class WorkItemRepository implements IWorkItemRepository {
       completed?: boolean;
     }>,
   ): Promise<Task[]> {
+    const validUpdates = updates.filter((u) => isUuid(u.id));
+    if (validUpdates.length === 0) return [];
     return this.prisma.$transaction(
-      updates.map((u) =>
+      validUpdates.map((u) =>
         this.prisma.task.update({
           where: { id: u.id },
           data: {
@@ -272,10 +316,12 @@ export class WorkItemRepository implements IWorkItemRepository {
     taskIds: string[],
     data: Prisma.TaskUpdateManyMutationInput,
   ) {
+    const validIds = taskIds.filter(isUuid);
+    if (validIds.length === 0) return { count: 0 };
     return this.prisma.task.updateMany({
       where: {
-        id: { in: taskIds },
-        ...(projectId ? { projectId } : {}),
+        id: { in: validIds },
+        ...(projectId && isUuid(projectId) ? { projectId } : {}),
       },
       data,
     });

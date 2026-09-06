@@ -5,7 +5,8 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { Prisma, AnnotationType } from '@prisma/client';
-import { VersionMismatchException } from '../items/items.errors';
+import { VersionMismatchException } from '../common/errors/version-mismatch.exception';
+
 
 export interface CreateAnnotationData {
   attachmentId: string;
@@ -34,22 +35,11 @@ export class AnnotationsRepository {
   }
 
   async findByAttachment(
-    workspaceId: string,
     attachmentId: string,
     pageIndex?: number,
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    // Verify attachment belongs to workspace
-    const attachment = await client.catalogAttachment.findUnique({
-      where: { id: attachmentId },
-      include: { catalogItem: true },
-    });
-
-    if (!attachment || attachment.catalogItem.workspaceId !== workspaceId) {
-      return [];
-    }
-
     return client.annotation.findMany({
       where: {
         attachmentId,
@@ -61,54 +51,20 @@ export class AnnotationsRepository {
   }
 
   async findById(
-    workspaceId: string,
     id: string,
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    const annotation = await client.annotation.findFirst({
+    return client.annotation.findFirst({
       where: { id, deletedAt: null },
-      include: {
-        attachment: {
-          include: { catalogItem: true },
-        },
-      },
     });
-
-    if (
-      !annotation ||
-      annotation.attachment.catalogItem.workspaceId !== workspaceId
-    ) {
-      return null;
-    }
-
-    return annotation;
   }
 
   async create(
-    workspaceId: string,
     data: CreateAnnotationData,
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    // Verify attachment belongs to workspace
-    const attachment = await client.catalogAttachment.findUnique({
-      where: { id: data.attachmentId },
-      include: { catalogItem: true },
-    });
-
-    if (!attachment) {
-      throw new NotFoundException(
-        `Attachment ${data.attachmentId} not found in workspace ${workspaceId}`,
-      );
-    }
-
-    if (attachment.catalogItem.workspaceId !== workspaceId) {
-      throw new ForbiddenException(
-        `Attachment does not belong to workspace ${workspaceId}`,
-      );
-    }
-
     return client.annotation.create({
       data: {
         attachmentId: data.attachmentId,
@@ -125,18 +81,15 @@ export class AnnotationsRepository {
   }
 
   async update(
-    workspaceId: string,
     id: string,
     expectedVersion: number,
     data: UpdateAnnotationData,
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    const existing = await this.findById(workspaceId, id, tx);
+    const existing = await this.findById(id, tx);
     if (!existing) {
-      throw new NotFoundException(
-        `Annotation ${id} not found in workspace ${workspaceId}`,
-      );
+      throw new NotFoundException(`Annotation ${id} not found`);
     }
 
     if (existing.version !== expectedVersion) {
@@ -163,14 +116,13 @@ export class AnnotationsRepository {
   }
 
   async softDelete(
-    workspaceId: string,
     id: string,
     expectedVersion?: number,
     tx?: Prisma.TransactionClient,
   ): Promise<boolean> {
     const client = this.getClient(tx);
     if (expectedVersion !== undefined) {
-      const existing = await this.findById(workspaceId, id, tx);
+      const existing = await this.findById(id, tx);
       if (existing && existing.version !== expectedVersion) {
         throw new VersionMismatchException({
           aggregateType: 'Annotation',
@@ -181,7 +133,7 @@ export class AnnotationsRepository {
       }
     }
 
-    const existing = await this.findById(workspaceId, id, tx);
+    const existing = await this.findById(id, tx);
     if (!existing) {
       return false;
     }
@@ -194,3 +146,4 @@ export class AnnotationsRepository {
     return result.count > 0;
   }
 }
+

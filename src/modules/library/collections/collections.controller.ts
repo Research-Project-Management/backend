@@ -13,43 +13,53 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { CollectionsService } from './collections.service';
-import { CreateCollectionDto } from './dto/create-collection.dto';
-import { UpdateCollectionDto } from './dto/update-collection.dto';
-import { MoveItemsDto } from './dto/move-items.dto';
-import { ReorderCollectionsDto } from './dto/reorder-collections.dto';
-import { AssignItemsToCollectionDto } from './dto/assign-items.dto';
-import { CollectionDeleteStrategy } from './types/collection.types';
+import {
+  CreateCollectionDto,
+  UpdateCollectionDto,
+  MoveItemsDto,
+  ReorderCollectionsDto,
+  AssignItemsToCollectionDto,
+} from './dto/collections.dto';
+import { CollectionDeleteStrategy } from './types/collections.types';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
 import { CurrentUser } from '../../../modules/iam/authn/decorators/current-user.decorator';
-import { CurrentWorkspace } from '../../../modules/iam/authz/decorators/current-workspace.decorator';
 import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
 import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
 
-@Controller('api/v1/workspaces/:workspaceId/library/collections')
-@UseGuards(JwtAuthGuard)
+@Controller([
+  'api/v1/workspaces/:workspaceId/library/collections',
+  'api/v1/workspace/:workspaceId/library/collections',
+])
+@UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
 export class CollectionsController {
   constructor(private readonly collectionsService: CollectionsService) {}
 
   @Get()
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
-  async getCollections(
-    @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
-  ) {
-    const targetWsId = currentWorkspaceId || workspaceId;
-    return this.collectionsService.getCollections(targetWsId);
+  async getCollections(@Param('workspaceId') workspaceId: string) {
+    return this.collectionsService.getCollections(workspaceId);
   }
 
   @Get('tree')
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
-  async getCollectionTree(
+  async getCollectionTree(@Param('workspaceId') workspaceId: string) {
+    return this.collectionsService.getCollectionTree(workspaceId);
+  }
+
+  @Patch('reorder')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member')
+  async reorderCollections(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
+    @Body() dto: ReorderCollectionsDto,
   ) {
-    const targetWsId = currentWorkspaceId || workspaceId;
-    return this.collectionsService.getCollectionTree(targetWsId);
+    return this.collectionsService.reorderCollections(
+      workspaceId,
+      dto.collections,
+    );
   }
 
   @Post()
@@ -58,12 +68,10 @@ export class CollectionsController {
   @WorkspaceRoles('owner', 'admin', 'member')
   async createCollection(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
     @CurrentUser('id') userId: string,
     @Body() dto: CreateCollectionDto,
   ) {
-    const targetWsId = currentWorkspaceId || workspaceId;
-    return this.collectionsService.createCollection(targetWsId, userId, dto);
+    return this.collectionsService.createCollection(workspaceId, userId, dto);
   }
 
   @Get(':collectionId')
@@ -71,11 +79,9 @@ export class CollectionsController {
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async getCollectionById(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
     @Param('collectionId') collectionId: string,
   ) {
-    const targetWsId = currentWorkspaceId || workspaceId;
-    return this.collectionsService.getCollectionById(targetWsId, collectionId);
+    return this.collectionsService.getCollectionById(workspaceId, collectionId);
   }
 
   @Put(':collectionId')
@@ -83,13 +89,11 @@ export class CollectionsController {
   @WorkspaceRoles('owner', 'admin', 'member')
   async updateCollection(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
     @Param('collectionId') collectionId: string,
     @Body() dto: UpdateCollectionDto,
   ) {
-    const targetWsId = currentWorkspaceId || workspaceId;
     return this.collectionsService.updateCollection(
-      targetWsId,
+      workspaceId,
       collectionId,
       dto,
     );
@@ -97,16 +101,14 @@ export class CollectionsController {
 
   @Delete(':collectionId')
   @UseGuards(WorkspaceRoleGuard)
-  @WorkspaceRoles('owner', 'admin', 'member')
+  @WorkspaceRoles('owner', 'admin')
   async deleteCollection(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
     @Param('collectionId') collectionId: string,
     @Query('strategy') strategy?: CollectionDeleteStrategy,
   ) {
-    const targetWsId = currentWorkspaceId || workspaceId;
     return this.collectionsService.deleteCollection(
-      targetWsId,
+      workspaceId,
       collectionId,
       strategy,
     );
@@ -118,31 +120,13 @@ export class CollectionsController {
   @WorkspaceRoles('owner', 'admin', 'member')
   async moveItems(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
     @Param('collectionId') collectionId: string,
     @Body() dto: MoveItemsDto,
   ) {
-    const targetWsId = currentWorkspaceId || workspaceId;
     return this.collectionsService.moveItems(
-      targetWsId,
+      workspaceId,
       collectionId,
       dto.itemIds || [],
-    );
-  }
-
-  @Patch('reorder')
-  @HttpCode(HttpStatus.OK)
-  @UseGuards(WorkspaceRoleGuard)
-  @WorkspaceRoles('owner', 'admin', 'member')
-  async reorderCollections(
-    @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
-    @Body() dto: ReorderCollectionsDto,
-  ) {
-    const targetWsId = currentWorkspaceId || workspaceId;
-    return this.collectionsService.reorderCollections(
-      targetWsId,
-      dto.collections,
     );
   }
 
@@ -152,13 +136,11 @@ export class CollectionsController {
   @WorkspaceRoles('owner', 'admin', 'member')
   async assignItemsToCollection(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
     @Param('collectionId') collectionId: string,
     @Body() dto: AssignItemsToCollectionDto,
   ) {
-    const targetWsId = currentWorkspaceId || workspaceId;
     return this.collectionsService.assignItemsToCollection(
-      targetWsId,
+      workspaceId,
       collectionId,
       dto,
     );
@@ -169,13 +151,11 @@ export class CollectionsController {
   @WorkspaceRoles('owner', 'admin', 'member')
   async detachItemFromCollection(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
     @Param('collectionId') collectionId: string,
     @Param('itemId') itemId: string,
   ) {
-    const targetWsId = currentWorkspaceId || workspaceId;
     return this.collectionsService.detachItemFromCollection(
-      targetWsId,
+      workspaceId,
       collectionId,
       itemId,
     );

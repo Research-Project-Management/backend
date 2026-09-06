@@ -12,7 +12,7 @@ import * as crypto from 'crypto';
 import { User, AuthProvider } from '@prisma/client';
 
 import { AuthnRepository } from './authn.repository';
-import { FederatedIdentityRepository } from '../user/federated-identity.repository';
+import { UserService } from '../user/user.service';
 import { AuditService } from '../audit/audit.service';
 import { RedisCacheService } from '@/core/cache/redis-cache.service';
 import { RegisterDto } from './dto/register.dto';
@@ -62,7 +62,7 @@ export class AuthnService {
 
   constructor(
     private readonly authnRepo: AuthnRepository,
-    private readonly federatedRepo: FederatedIdentityRepository,
+    private readonly userService: UserService,
     private readonly auditService: AuditService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
@@ -450,7 +450,7 @@ export class AuthnService {
     const providerEnum = profile.provider as AuthProvider;
 
     // 1. Check if federated identity exists
-    const federatedRecord = await this.federatedRepo.findByProviderSubject(
+    const federatedRecord = await this.userService.findFederatedIdentity(
       providerEnum,
       profile.id,
     );
@@ -479,7 +479,7 @@ export class AuthnService {
       }
 
       // Link federated identity
-      await this.federatedRepo.linkIdentity({
+      await this.userService.linkFederatedIdentity({
         userId: user.id,
         provider: providerEnum,
         providerSubjectId: profile.id,

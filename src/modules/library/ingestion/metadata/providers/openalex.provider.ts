@@ -8,14 +8,18 @@ import {
   ProviderResult,
   QueryType,
 } from '../types/metadata.types';
-import { normalizeDoi } from '../utils/metadata.utils';
+import {
+  normalizeDoi,
+  normalizeArxivId,
+  normalizePmid,
+} from '../utils/metadata.utils';
 import { ProviderFetchError } from '../services/provider.executor';
 
 @Injectable()
 export class OpenAlexProvider implements MetadataProvider {
   readonly id: ProviderName = 'OpenAlex';
   readonly capabilities: ProviderCapability = {
-    queryTypes: ['DOI', 'TITLE'],
+    queryTypes: ['DOI', 'TITLE', 'ARXIV', 'PMID'],
     isAuthoritative: false,
     timeoutMs: 8000,
     maxConcurrency: 2,
@@ -50,7 +54,70 @@ export class OpenAlexProvider implements MetadataProvider {
     if (cleanDoi) {
       return this.fetchByDoi(cleanDoi, signal);
     }
+
+    const cleanArxiv = normalizeArxivId(query, { stripVersion: true });
+    if (cleanArxiv) {
+      return this.fetchByDoi(`10.48550/arxiv.${cleanArxiv}`, signal);
+    }
+
+    const cleanPmid = normalizePmid(query);
+    if (cleanPmid) {
+      return this.fetchByPmid(cleanPmid, signal);
+    }
+
     return this.searchByTitle(query, signal);
+  }
+
+  private async fetchByPmid(
+    pmid: string,
+    signal?: AbortSignal,
+  ): Promise<ProviderResult | null> {
+    let url = `${this.BASE_URL}/pmid:${encodeURIComponent(pmid)}?mailto=${encodeURIComponent(this.mailto)}`;
+    if (this.apiKey) {
+      url += `&api_key=${encodeURIComponent(this.apiKey)}`;
+    }
+
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': `FluxResearchPlatform/1.0 (mailto:${this.mailto}; https://flux.study)`,
+        Accept: 'application/json',
+      },
+      signal,
+    });
+
+    if (response.status === 404) return null;
+
+    if (!response.ok) {
+      const retryAfterHeader = response.headers.get('retry-after');
+      const retryAfterMs = retryAfterHeader
+        ? parseInt(retryAfterHeader, 10) * 1000
+        : undefined;
+      throw new ProviderFetchError(
+        `OpenAlex API HTTP ${response.status} for PMID: ${pmid}`,
+        response.status,
+        retryAfterMs,
+      );
+    }
+
+    let item: unknown;
+    try {
+      item = await response.json();
+    } catch {
+      throw new ProviderFetchError(
+        `Failed to parse OpenAlex JSON for PMID: ${pmid}`,
+        undefined,
+        undefined,
+        false,
+        true,
+      );
+    }
+
+    if (!item || typeof item !== 'object') return null;
+    return this.transformPayload(
+      item as Record<string, unknown>,
+      `pmid:${pmid}`,
+      0.95,
+    );
   }
 
   private async fetchByDoi(
@@ -287,6 +354,18 @@ export class OpenAlexProvider implements MetadataProvider {
           ? (item.primary_location as any).license.trim()
           : undefined;
 
+    const ids = (item.ids || {}) as Record<string, string>;
+    const rawArxiv = ids.arxiv
+      ? ids.arxiv.replace(/^https?:\/\/arxiv\.org\/abs\//i, '')
+      : undefined;
+    const rawPmid = ids.pmid
+      ? ids.pmid.replace(/^https?:\/\/pubmed\.ncbi\.nlm\.nih\.gov\//i, '')
+      : undefined;
+    const publicationDate =
+      typeof item.publication_date === 'string'
+        ? item.publication_date
+        : undefined;
+
     return {
       provider: this.id,
       metadata: {
@@ -294,7 +373,10 @@ export class OpenAlexProvider implements MetadataProvider {
         authors,
         creators,
         year,
+        publicationDate,
         doi: doi || undefined,
+        arxivId: rawArxiv,
+        pmid: rawPmid,
         journal,
         volume: biblio.volume || undefined,
         issue: biblio.issue || undefined,

@@ -4,13 +4,13 @@ import {
   CreatorTypeDefinition,
   ItemTypeDefinition,
   SchemaRegistrySnapshot,
-} from './types.types';
+} from './types/types.types';
 import {
   SCHEMA_V42_DATA,
   LIBRARY_SCHEMA_VERSION,
   SCHEMA_SOURCE,
   ALL_CREATOR_ROLES,
-} from './types.data';
+} from './constants/types.constants';
 
 @Injectable()
 export class TypesService {

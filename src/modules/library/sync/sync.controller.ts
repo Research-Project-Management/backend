@@ -11,25 +11,20 @@ import {
 import { SyncService } from './sync.service';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
 import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
+import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
+import { CurrentUser } from '../../../modules/iam/authn/decorators/current-user.decorator';
+import { PushMutationsDto, ApplyExternalSyncBatchDto } from './dto/sync.dto';
 
-interface SyncMutation {
-  entityType: string;
-  entityId: string;
-  action: 'create' | 'update' | 'delete';
-  version: number;
-  data?: unknown;
-}
-
-interface PushMutationsBody {
-  mutations: SyncMutation[];
-}
-
-@Controller('api/v1/workspaces/:workspaceId/library/sync')
+@Controller([
+  'api/v1/workspaces/:workspaceId/library/sync',
+  'api/v1/workspace/:workspaceId/library/sync',
+])
 @UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
 export class SyncController {
   constructor(private readonly syncService: SyncService) {}
 
   @Get('pull')
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async pullDelta(
     @Param('workspaceId') workspaceId: string,
     @Query('sinceSeq') sinceSeq?: string,
@@ -52,9 +47,11 @@ export class SyncController {
   }
 
   @Post('push')
+  @WorkspaceRoles('owner', 'admin', 'member')
   async pushMutations(
     @Param('workspaceId') workspaceId: string,
-    @Body() body: PushMutationsBody,
+    @CurrentUser('id') userId: string,
+    @Body() body: PushMutationsDto,
   ) {
     if (!body || !Array.isArray(body.mutations)) {
       throw new BadRequestException(
@@ -64,16 +61,19 @@ export class SyncController {
 
     const applied = await this.syncService.pushMutations(
       workspaceId,
-      body.mutations,
+      body.mutations as any,
+      userId,
     );
 
     return { applied };
   }
 
   @Post('batch')
+  @WorkspaceRoles('owner', 'admin', 'member')
   async applyBatch(
     @Param('workspaceId') workspaceId: string,
-    @Body() body: any,
+    @CurrentUser('id') userId: string,
+    @Body() body: ApplyExternalSyncBatchDto,
   ) {
     if (!body || !Array.isArray(body.operations)) {
       throw new BadRequestException(
@@ -81,14 +81,18 @@ export class SyncController {
       );
     }
 
-    return this.syncService.applyExternalSyncBatch({
-      workspaceId,
-      operations: body.operations,
-      idempotencyKey: body.idempotencyKey,
-    });
+    return this.syncService.applyExternalSyncBatch(
+      {
+        workspaceId,
+        operations: body.operations as any,
+        idempotencyKey: body.idempotencyKey,
+      },
+      userId,
+    );
   }
 
   @Post('resync')
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async resync(@Param('workspaceId') workspaceId: string) {
     const latestSeq = await this.syncService.getLatestSequence(workspaceId);
     return {

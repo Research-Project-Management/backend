@@ -13,8 +13,8 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
 import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
+import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
 import { CurrentUser } from '../../../modules/iam/authn/decorators/current-user.decorator';
-import { CurrentWorkspace } from '../../../modules/iam/authz/decorators/current-workspace.decorator';
 import { IngestionPort, INGESTION_PORT } from './types/ingestion.types';
 import { IngestionService } from './ingestion.service';
 import { IngestionSubmissionDto } from './dto/ingestion-submission.dto';
@@ -27,7 +27,10 @@ import {
 } from './dto/ingestion.dto';
 import { CaptureUrlDto, ConfirmCapturedUrlDto } from './dto/capture-url.dto';
 
-@Controller('api/v1/workspaces/:workspaceId/library/ingestion')
+@Controller([
+  'api/v1/workspaces/:workspaceId/library/ingestion',
+  'api/v1/workspace/:workspaceId/library/ingestion',
+])
 @UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
 export class IngestionController {
   constructor(
@@ -41,14 +44,13 @@ export class IngestionController {
    */
   @Post('submit')
   @HttpCode(HttpStatus.ACCEPTED)
+  @WorkspaceRoles('owner', 'admin', 'member')
   async submit(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
     @CurrentUser('id') userId: string,
     @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
     @Body() dto: IngestionSubmissionDto,
   ) {
-    const targetWsId = currentWorkspaceId || workspaceId;
     const effectiveIdempotencyKey = idempotencyKeyHeader || dto.idempotencyKey;
 
     let payload: any;
@@ -98,7 +100,7 @@ export class IngestionController {
     }
 
     return this.ingestionService.submit({
-      workspaceId: targetWsId,
+      workspaceId,
       userId,
       idempotencyKey: effectiveIdempotencyKey,
       payload,
@@ -113,13 +115,12 @@ export class IngestionController {
    * Ingestion Run Status Endpoint
    */
   @Get('status/:runId')
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async getStatus(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
     @Param('runId') runId: string,
   ) {
-    const targetWsId = currentWorkspaceId || workspaceId;
-    return this.ingestionService.getRunStatus(targetWsId, runId);
+    return this.ingestionService.getRunStatus(workspaceId, runId);
   }
 
   /**
@@ -127,30 +128,28 @@ export class IngestionController {
    */
   @Post('retry/:runId')
   @HttpCode(HttpStatus.ACCEPTED)
+  @WorkspaceRoles('owner', 'admin', 'member')
   async retry(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
     @Param('runId') runId: string,
   ) {
-    const targetWsId = currentWorkspaceId || workspaceId;
-    return this.ingestionService.retryRun(targetWsId, runId);
+    return this.ingestionService.retryRun(workspaceId, runId);
   }
 
-  // â”€â”€ Backward Compatibility Endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ──────────────── Backward Compatibility Endpoints ──────────────────────────
 
   // ─── Legacy Backward-Compatibility Endpoint ─────────────────────────────────
   // POST /api/v1/workspaces/:workspaceId/library/ingestion
   // Kept for frontend consumers that have not yet migrated to /submit.
   @Post()
   @HttpCode(HttpStatus.OK)
+  @WorkspaceRoles('owner', 'admin', 'member')
   async ingestUnified(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
     @CurrentUser('id') userId: string,
     @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
     @Body() dto: UnifiedIngestionDto,
   ) {
-    const targetWsId = currentWorkspaceId || workspaceId;
     const effectiveIdempotencyKey = idempotencyKeyHeader || dto.idempotencyKey;
     let command: any;
 
@@ -158,7 +157,7 @@ export class IngestionController {
       case 'doi':
         command = {
           source: 'doi',
-          workspaceId: targetWsId,
+          workspaceId,
           userId,
           doi: dto.doi || '',
           collectionId: dto.collectionId,
@@ -169,7 +168,7 @@ export class IngestionController {
       case 'url':
         command = {
           source: 'url',
-          workspaceId: targetWsId,
+          workspaceId,
           userId,
           url: dto.url || '',
           previewToken: dto.previewToken,
@@ -182,7 +181,7 @@ export class IngestionController {
       case 'bibtex':
         command = {
           source: 'bibtex',
-          workspaceId: targetWsId,
+          workspaceId,
           userId,
           content: dto.content || dto.bibtex || '',
           collectionId: dto.collectionId,
@@ -193,7 +192,7 @@ export class IngestionController {
       case 'pdf':
         command = {
           source: 'pdf',
-          workspaceId: targetWsId,
+          workspaceId,
           userId,
           fileId: dto.fileId,
           filename: dto.filename,
@@ -206,7 +205,7 @@ export class IngestionController {
       default:
         command = {
           source: dto.source,
-          workspaceId: targetWsId,
+          workspaceId,
           userId,
           idempotencyKey: effectiveIdempotencyKey,
         };
@@ -216,6 +215,7 @@ export class IngestionController {
   }
 
   @Post('capture-url')
+  @WorkspaceRoles('owner', 'admin', 'member')
   async captureUrl(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
@@ -225,6 +225,7 @@ export class IngestionController {
   }
 
   @Post('confirm-url')
+  @WorkspaceRoles('owner', 'admin', 'member')
   async confirmUrl(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
@@ -238,6 +239,7 @@ export class IngestionController {
   }
 
   @Post('start')
+  @WorkspaceRoles('owner', 'admin', 'member')
   async startRun(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
@@ -251,6 +253,7 @@ export class IngestionController {
   }
 
   @Post('doi')
+  @WorkspaceRoles('owner', 'admin', 'member')
   async ingestDoi(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
@@ -264,6 +267,7 @@ export class IngestionController {
   }
 
   @Post('bibtex')
+  @WorkspaceRoles('owner', 'admin', 'member')
   async ingestBibtex(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
@@ -277,6 +281,7 @@ export class IngestionController {
   }
 
   @Post('pdf')
+  @WorkspaceRoles('owner', 'admin', 'member')
   async ingestPdf(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,

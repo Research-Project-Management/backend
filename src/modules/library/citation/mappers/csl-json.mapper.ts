@@ -45,6 +45,40 @@ export const ITEM_TYPE_TO_CSL_TYPE: Record<string, string> = {
 
 export class CslJsonMapper {
   /**
+   * Derives a clean list of author display strings from item contributors or creators.
+   */
+  static getAuthorNames(item: {
+    contributors?: any[];
+    creators?: any[];
+    authors?: string[];
+  }): string[] {
+    if (Array.isArray(item.contributors) && item.contributors.length > 0) {
+      return item.contributors
+        .filter((c) => (c.creatorType || 'author').toLowerCase() === 'author')
+        .map((c) => {
+          if (c.fullName && c.fullName.trim()) return c.fullName.trim();
+          const combined = `${c.firstName || ''} ${c.lastName || ''}`.trim();
+          return combined || c.name || 'Anonymous';
+        })
+        .filter(Boolean);
+    }
+    if (Array.isArray(item.creators) && item.creators.length > 0) {
+      return item.creators
+        .filter((c) => (c.creatorType || 'author').toLowerCase() === 'author')
+        .map((c) => {
+          if (c.fullName && c.fullName.trim()) return c.fullName.trim();
+          const combined = `${c.firstName || ''} ${c.lastName || ''}`.trim();
+          return combined || c.name || 'Anonymous';
+        })
+        .filter(Boolean);
+    }
+    if (Array.isArray(item.authors) && item.authors.length > 0) {
+      return item.authors.map((a) => String(a).trim()).filter(Boolean);
+    }
+    return [];
+  }
+
+  /**
    * Transforms a database CatalogItem and related entities into a standard CSL-JSON item.
    */
   static toCsl(item: any): CslItemData {

@@ -18,6 +18,6 @@ import { STORAGE_PORT } from '../storage.port';
       useExisting: StorageAdapter,
     },
   ],
-  exports: [FileService, FileRepository, R2Service, STORAGE_PORT],
+  exports: [FileService, R2Service, STORAGE_PORT],
 })
 export class FileModule {}

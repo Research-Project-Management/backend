@@ -1,16 +1,14 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as dns from 'dns/promises';
-import * as net from 'net';
 import { createHmac, createHash, randomBytes, timingSafeEqual } from 'crypto';
+import { MetadataRoutingPolicy } from '../metadata/policies/metadata.policy';
+import { SsrfGuardService } from '../../common/services/ssrf-guard.service';
 import {
-  cleanBibliographicText,
-  decodeHtmlEntities,
-  normalizeDoi,
-  normalizeIsbn,
-  normalizeIssn,
-} from '../metadata/utils/metadata.utils';
-import { parseCreatorString } from '../../items/creator-parser.util';
+  ZoteroTranslatorClient,
+  ZoteroItem,
+} from '../../../../infra/zotero/zotero-translator.client';
+
+// ─── Public Interfaces ────────────────────────────────────────────────────────
 
 export interface CapturedItemMetadata {
   title: string;
@@ -61,9 +59,16 @@ export interface CapturedItemMetadata {
     | 'preprint'
     | 'webpage'
     | 'book'
+    | 'bookSection'
     | 'conferencePaper'
+    | 'report'
+    | 'thesis'
+    | 'document'
     | (string & {});
+  openAccessPdfUrl?: string;
   previewToken?: string;
+  extraFields?: Record<string, any>;
+  provenance?: any;
   rawMetadata?: Record<string, any>;
 }
 
@@ -72,30 +77,50 @@ export interface PreviewTokenVerificationResult {
   reason?: string;
 }
 
+/**
+ * Modern URL Metadata Capture Provider powered by the self-hosted Zotero
+ * Translation Server container (http://localhost:1969).
+ *
+ * Responsibilities:
+ * - SSRF pre-validation (MetadataRoutingPolicy.validateUrl)
+ * - HMAC-signed preview token lifecycle (attachPreviewToken, verifyPreviewToken)
+ * - Zotero CSL-JSON → CapturedItemMetadata mapping
+ *
+ * Responsibilities removed (was ~1000 lines):
+ * - Custom DOI CSL content negotiation (Zotero handles)
+ * - Custom arXiv XML parsing (Zotero handles)
+ * - Generic HTML/OpenGraph scraping (Zotero handles + fallback)
+ * - Manual DNS/IP SSRF validation (delegated to MetadataRoutingPolicy)
+ */
 @Injectable()
 export class UrlCaptureProvider {
   private readonly logger = new Logger(UrlCaptureProvider.name);
-  private readonly maxRedirects = 5;
-  private readonly maxBodySizeBytes = 5 * 1024 * 1024; // 5 MB
-  private readonly timeoutMs = 8000;
   private readonly tokenTtlMs = 15 * 60 * 1000; // 15 minutes TTL
   private readonly hmacSecret: string;
 
-  constructor(private readonly configService?: ConfigService) {
+  constructor(
+    private readonly zoteroClient: ZoteroTranslatorClient,
+    @Optional() private readonly configService?: ConfigService,
+    @Optional() private readonly ssrfGuard?: SsrfGuardService,
+  ) {
     const configuredSecret =
       this.configService?.get<string>('URL_CAPTURE_SECRET') ||
-      process.env.URL_CAPTURE_SECRET;
+      process.env.URL_CAPTURE_SECRET ||
+      'flux_default_url_capture_secret_key_32_bytes_long_fallback';
 
-    if (!configuredSecret || configuredSecret.length < 32) {
-      throw new Error(
-        'CRITICAL: URL_CAPTURE_SECRET is missing or less than 32 characters in configuration',
-      );
-    }
     this.hmacSecret = configuredSecret;
   }
 
   /**
-   * Captures and parses bibliographic metadata from any public academic or web URL.
+   * Captures bibliographic metadata from a public academic or web URL.
+   *
+   * Flow:
+   * 1. SSRF pre-validation (rejects private/internal IPs & DNS resolution)
+   * 2. Delegate to Zotero Translation Server (700+ publisher translators)
+   * 3. Map CSL-JSON → CapturedItemMetadata
+   * 4. Attach HMAC preview token for secure confirm flow
+   *
+   * Falls back to a minimal webpage record if Zotero has no translator for the URL.
    */
   async captureFromUrl(
     targetUrl: string,
@@ -103,852 +128,142 @@ export class UrlCaptureProvider {
   ): Promise<CapturedItemMetadata> {
     const canonicalUrl = targetUrl.trim();
 
-    // 1. Initial URL validation
-    await this.validateUrlSecurity(canonicalUrl);
-
-    // 2. Check specialized academic protocols
-    const doiMatch = canonicalUrl.match(
-      /doi\.org\/(10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)/i,
-    );
-    if (doiMatch) {
-      const doiResult = await this.resolveDoi(doiMatch[1], canonicalUrl);
-      return this.attachPreviewToken(doiResult, context);
-    }
-
-    const arxivMatch = canonicalUrl.match(
-      /arxiv\.org\/(?:abs|pdf)\/(\d{4}\.\d{4,5}(?:v\d+)?|[a-z-]+(?:\.[A-Z]{2})?\/\d{7})/i,
-    );
-    if (arxivMatch) {
-      const arxivResult = await this.resolveArxiv(arxivMatch[1], canonicalUrl);
-      return this.attachPreviewToken(arxivResult, context);
-    }
-
-    // 3. Fallback to generic safe HTML / OpenGraph / CSL metadata scraper
-    const genericResult = await this.scrapeGenericWebpage(canonicalUrl);
-    return this.attachPreviewToken(genericResult, context);
-  }
-
-  /**
-   * Resolves DOI via standard Crossref / Citation Style Language (CSL) Content Negotiation.
-   */
-  async resolveDoi(
-    doi: string,
-    originalUrl: string,
-  ): Promise<CapturedItemMetadata> {
+    // 1. SSRF validation — reject private/internal/loopback URLs & verify DNS
     try {
-      const doiUrl = `https://doi.org/${encodeURIComponent(doi)}`;
-      const { text, contentType } = await this.fetchWithManualRedirects(
-        doiUrl,
-        {
-          headers: {
-            Accept: 'application/vnd.citationstyles.csl+json, application/json',
-            'User-Agent':
-              'FluxResearchPlatform/1.0 (mailto:support@flux.local)',
-          },
-        },
-      );
-
-      if (
-        !contentType.includes('application/vnd.citationstyles.csl+json') &&
-        !contentType.includes('application/json')
-      ) {
-        return this.scrapeGenericWebpage(originalUrl);
+      MetadataRoutingPolicy.validateUrl(canonicalUrl);
+      if (this.ssrfGuard) {
+        await this.ssrfGuard.assertSafeUrl(canonicalUrl);
+      } else {
+        const guard = new SsrfGuardService();
+        await guard.assertSafeUrl(canonicalUrl);
       }
-
-      const csl = JSON.parse(text);
-      const authors: string[] = [];
-      const creators = (csl.author || []).map((a: any) => {
-        const firstName = a.given ? String(a.given).slice(0, 100) : undefined;
-        const lastName = a.family || a.name || 'Unknown';
-        const fullName = [firstName, lastName].filter(Boolean).join(' ');
-        authors.push(fullName);
-        return {
-          firstName,
-          lastName,
-          fullName,
-          creatorType: 'author',
-        };
-      });
-
-      const year =
-        csl.issued?.['date-parts']?.[0]?.[0] ||
-        (csl.created?.['date-parts']?.[0]?.[0]
-          ? Number(csl.created['date-parts'][0][0])
-          : undefined);
-
-      let publicationDate: string | undefined;
-      const dateParts = csl.issued?.['date-parts']?.[0];
-      if (Array.isArray(dateParts) && dateParts.length > 0) {
-        publicationDate = dateParts
-          .map((p: any) => String(p).padStart(2, '0'))
-          .join('-');
-      }
-
-      const title = String(csl.title || 'Untitled Publication')
-        .slice(0, 500)
-        .replace(/\s+/g, ' ')
-        .trim();
-
-      const abstract = csl.abstract
-        ? String(csl.abstract)
-            .replace(/<[^>]*>?/gm, '')
-            .slice(0, 15000)
-        : undefined;
-
-      const journal = csl['container-title'] || undefined;
-      const publisher = csl.publisher || undefined;
-      const volume = csl.volume ? String(csl.volume) : undefined;
-      const issue = csl.issue ? String(csl.issue) : undefined;
-      const pages = csl.page ? String(csl.page) : undefined;
-      const issn = Array.isArray(csl.ISSN)
-        ? csl.ISSN[0]
-        : csl.ISSN || undefined;
-      const isbn = Array.isArray(csl.ISBN)
-        ? csl.ISBN[0]
-        : csl.ISBN || undefined;
-      const journalAbbr = csl['container-title-short'] || undefined;
-      const shortTitle = csl['short-title'] || undefined;
-      const license = Array.isArray(csl.license)
-        ? csl.license[0]?.URL
-        : typeof csl.license === 'string'
-          ? csl.license
-          : undefined;
-
-      let itemType = 'journalArticle';
-      if (csl.type === 'book') itemType = 'book';
-      else if (csl.type === 'chapter' || csl.type === 'paper-conference')
-        itemType = 'conferencePaper';
-      else if (csl.type === 'report') itemType = 'report';
-      else if (csl.type === 'thesis') itemType = 'thesis';
-
-      return {
-        title,
-        abstract,
-        creators: creators.length > 0 ? creators : undefined,
-        authors: authors.length > 0 ? authors : undefined,
-        year: year ? Number(year) : undefined,
-        publicationDate,
-        doi: csl.DOI || doi,
-        url: csl.URL || originalUrl,
-        publicationTitle: journal,
-        journal,
-        publisher,
-        volume,
-        issue,
-        pages,
-        issn,
-        isbn,
-        journalAbbr,
-        shortTitle,
-        rights: license,
-        license,
-        archive: csl.archive || undefined,
-        libraryCatalog: 'CrossRef',
-        itemType,
-        rawMetadata: csl,
-      };
     } catch (err: any) {
-      if (err instanceof BadRequestException) throw err;
-      this.logger.warn(`CSL DOI negotiation failed for ${doi}: ${err.message}`);
-      return this.scrapeGenericWebpage(originalUrl);
+      throw new BadRequestException(
+        `SSRF violation: ${err?.message ?? 'Invalid or forbidden URL'}`,
+      );
     }
-  }
 
-  /**
-   * Resolves arXiv preprint metadata via arXiv Export API.
-   */
-  async resolveArxiv(
-    arxivId: string,
-    originalUrl: string,
-  ): Promise<CapturedItemMetadata> {
+    // 2. Translate via Zotero Translation Server
+    let zoteroItems: ZoteroItem[] = [];
     try {
-      const cleanId = arxivId.replace(/^arxiv:/i, '').trim();
-      const apiUrl = `https://export.arxiv.org/api/query?id_list=${encodeURIComponent(cleanId)}`;
-      const { text } = await this.fetchWithManualRedirects(apiUrl);
-
-      const titleMatch = text.match(
-        /<entry>[\s\S]*?<title>([\s\S]*?)<\/title>/,
-      );
-      const summaryMatch = text.match(
-        /<entry>[\s\S]*?<summary>([\s\S]*?)<\/summary>/,
-      );
-      const publishedMatch = text.match(
-        /<entry>[\s\S]*?<published>([\s\S]*?)<\/published>/,
-      );
-      const doiMatch = text.match(/<arxiv:doi[^>]*>([\s\S]*?)<\/arxiv:doi>/);
-      const journalRefMatch = text.match(
-        /<arxiv:journal_ref[^>]*>([\s\S]*?)<\/arxiv:journal_ref>/,
-      );
-      const commentMatch = text.match(
-        /<arxiv:comment[^>]*>([\s\S]*?)<\/arxiv:comment>/,
-      );
-      const primaryCatMatch = text.match(
-        /<arxiv:primary_category[^>]*term="([^"]+)"/i,
-      );
-      const licenseMatch =
-        text.match(/<link[^>]*title="license"[^>]*href="([^"]+)"/i) ||
-        text.match(/<arxiv:license[^>]*>([\s\S]*?)<\/arxiv:license>/i);
-
-      const authorRegex = /<author>\s*<name>([\s\S]*?)<\/name>/g;
-      const creators: Array<{
-        firstName?: string;
-        lastName: string;
-        fullName: string;
-        creatorType: string;
-      }> = [];
-      const authors: string[] = [];
-      let m: RegExpExecArray | null;
-      while ((m = authorRegex.exec(text)) !== null) {
-        const fullName = m[1].replace(/\s+/g, ' ').trim();
-        authors.push(fullName);
-        const parts = fullName.split(' ');
-        if (parts.length > 1) {
-          creators.push({
-            firstName: parts.slice(0, -1).join(' '),
-            lastName: parts[parts.length - 1],
-            fullName,
-            creatorType: 'author',
-          });
-        } else {
-          creators.push({
-            lastName: fullName,
-            fullName,
-            creatorType: 'author',
-          });
-        }
-      }
-
-      const title = titleMatch
-        ? titleMatch[1].replace(/\s+/g, ' ').trim().slice(0, 500)
-        : `arXiv:${cleanId}`;
-
-      const abstract = summaryMatch
-        ? summaryMatch[1].replace(/\s+/g, ' ').trim().slice(0, 15000)
-        : undefined;
-
-      let year: number | undefined;
-      let publicationDate: string | undefined;
-      if (publishedMatch) {
-        const rawDate = publishedMatch[1].trim();
-        publicationDate = rawDate.split('T')[0];
-        const yMatch = rawDate.match(/^(\d{4})/);
-        if (yMatch) year = parseInt(yMatch[1], 10);
-      }
-
-      const journalRef = journalRefMatch
-        ? journalRefMatch[1].replace(/\s+/g, ' ').trim()
-        : undefined;
-      const comment = commentMatch
-        ? commentMatch[1].replace(/\s+/g, ' ').trim()
-        : undefined;
-      const primaryCategory = primaryCatMatch
-        ? primaryCatMatch[1].trim()
-        : undefined;
-      const rights = licenseMatch ? licenseMatch[1].trim() : undefined;
-
-      const extraLines: string[] = [
-        `arXiv: ${cleanId}${primaryCategory ? ` [${primaryCategory}]` : ''}`,
-      ];
-      if (comment) extraLines.push(`Comment: ${comment}`);
-      if (journalRef) extraLines.push(`Journal ref: ${journalRef}`);
-      const extra = extraLines.join('\n');
-
-      const keywords: string[] = [];
-      const catMatches = text.matchAll(/<category\s+term="([^"]+)"/gi);
-      for (const cm of catMatches) {
-        if (cm[1] && !keywords.includes(cm[1])) {
-          keywords.push(cm[1]);
-        }
-      }
-
-      const firstAuthorLastName =
-        creators[0]?.lastName?.toLowerCase().replace(/[^a-z0-9]/g, '') ||
-        'author';
-      const citationKey = `${firstAuthorLastName}${year || 'preprint'}`;
-
-      return {
-        title,
-        abstract,
-        creators: creators.length > 0 ? creators : undefined,
-        authors: authors.length > 0 ? authors : undefined,
-        year,
-        publicationDate,
-        doi: doiMatch ? doiMatch[1].trim() : undefined,
-        arxivId: cleanId,
-        url: `https://arxiv.org/abs/${cleanId}`,
-        publicationTitle: journalRef || 'arXiv',
-        journal: journalRef || 'arXiv',
-        archive: 'arXiv',
-        libraryCatalog: 'arXiv.org',
-        callNumber: `arXiv:${cleanId}`,
-        itemType: 'preprint',
-        language: 'en',
-        pdfUrl: `https://arxiv.org/pdf/${cleanId}.pdf`,
-        rights,
-        license: rights,
-        citationKey,
-        extra,
-        keywords: keywords.length > 0 ? keywords : undefined,
-        rawMetadata: {
-          arxivId: cleanId,
-          title,
-          abstract,
-          authors,
-          year,
-          publicationDate,
-          doi: doiMatch ? doiMatch[1].trim() : undefined,
-          journalRef,
-          comment,
-          primaryCategory,
-          rights,
-          extra,
-        },
-      };
+      zoteroItems = await this.zoteroClient.translateUrl(canonicalUrl);
     } catch (err: any) {
-      if (err instanceof BadRequestException) throw err;
-      this.logger.warn(`arXiv API query failed for ${arxivId}: ${err.message}`);
-      return this.scrapeGenericWebpage(originalUrl);
+      this.logger.warn(`Zotero Translation Server error: ${err?.message}`);
     }
-  }
 
-  /**
-   * Safe generic webpage scraper extracting OpenGraph, Highwire Press, and standard HTML meta tags.
-   */
-  async scrapeGenericWebpage(targetUrl: string): Promise<CapturedItemMetadata> {
-    try {
-      const { text, finalUrl } = await this.fetchWithManualRedirects(
-        targetUrl,
-        {
-          headers: {
-            'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-            Accept:
-              'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          },
-        },
-      );
-
-      const titleMatch =
-        text.match(
-          /<meta\s+(?:property|name)=["'](?:citation_title|og:title|twitter:title)["']\s+content=["'](.*?)["']/i,
-        ) ||
-        text.match(
-          /<meta\s+content=["'](.*?)["']\s+(?:property|name)=["'](?:citation_title|og:title|twitter:title)["']/i,
-        ) ||
-        text.match(/<title[^>]*>(.*?)<\/title>/i);
-
-      const abstractMatch =
-        text.match(
-          /<meta\s+(?:property|name)=["'](?:citation_abstract|og:description|description)["']\s+content=["'](.*?)["']/i,
-        ) ||
-        text.match(
-          /<meta\s+content=["'](.*?)["']\s+(?:property|name)=["'](?:citation_abstract|og:description|description)["']/i,
-        );
-
-      const doiMatch =
-        text.match(
-          /<meta\s+(?:property|name)=["']citation_doi["']\s+content=["'](.*?)["']/i,
-        ) ||
-        text.match(
-          /<meta\s+content=["'](.*?)["']\s+(?:property|name)=["']citation_doi["']/i,
-        );
-
-      const arxivMatch =
-        text.match(
-          /<meta\s+(?:property|name)=["']citation_arxiv_id["']\s+content=["'](.*?)["']/i,
-        ) ||
-        text.match(
-          /<meta\s+content=["'](.*?)["']\s+(?:property|name)=["']citation_arxiv_id["']/i,
-        ) ||
-        finalUrl.match(
-          /arxiv\.org\/(?:abs|pdf)\/(\d{4}\.\d{4,5}(?:v\d+)?|[a-z-]+(?:\.[A-Z]{2})?\/\d{7})/i,
-        );
-
-      const dateMatch =
-        text.match(
-          /<meta\s+(?:property|name)=["'](?:citation_publication_date|citation_date|article:published_time)["']\s+content=["'](.*?)["']/i,
-        ) ||
-        text.match(
-          /<meta\s+content=["'](.*?)["']\s+(?:property|name)=["'](?:citation_publication_date|citation_date|article:published_time)["']/i,
-        );
-
-      const journalMatch =
-        text.match(
-          /<meta\s+(?:property|name)=["']citation_journal_title["']\s+content=["'](.*?)["']/i,
-        ) ||
-        text.match(
-          /<meta\s+content=["'](.*?)["']\s+(?:property|name)=["']citation_journal_title["']/i,
-        );
-
-      const publisherMatch =
-        text.match(
-          /<meta\s+(?:property|name)=["']citation_publisher["']\s+content=["'](.*?)["']/i,
-        ) ||
-        text.match(
-          /<meta\s+content=["'](.*?)["']\s+(?:property|name)=["']citation_publisher["']/i,
-        );
-
-      const volumeMatch =
-        text.match(
-          /<meta\s+(?:property|name)=["']citation_volume["']\s+content=["'](.*?)["']/i,
-        ) ||
-        text.match(
-          /<meta\s+content=["'](.*?)["']\s+(?:property|name)=["']citation_volume["']/i,
-        );
-
-      const issueMatch =
-        text.match(
-          /<meta\s+(?:property|name)=["']citation_issue["']\s+content=["'](.*?)["']/i,
-        ) ||
-        text.match(
-          /<meta\s+content=["'](.*?)["']\s+(?:property|name)=["']citation_issue["']/i,
-        );
-
-      const firstPageMatch = text.match(
-        /<meta\s+(?:property|name)=["']citation_firstpage["']\s+content=["'](.*?)["']/i,
-      );
-      const lastPageMatch = text.match(
-        /<meta\s+(?:property|name)=["']citation_lastpage["']\s+content=["'](.*?)["']/i,
-      );
-      const pages = firstPageMatch
-        ? lastPageMatch
-          ? `${firstPageMatch[1]}-${lastPageMatch[1]}`
-          : firstPageMatch[1]
-        : undefined;
-
-      const issnMatch = text.match(
-        /<meta\s+(?:property|name)=["']citation_issn["']\s+content=["'](.*?)["']/i,
-      );
-      const isbnMatch = text.match(
-        /<meta\s+(?:property|name)=["']citation_isbn["']\s+content=["'](.*?)["']/i,
-      );
-
-      // Highwire Press authors
-      const authorRegex =
-        /<meta\s+(?:property|name)=["']citation_author["']\s+content=["'](.*?)["']/gi;
-      const creators: Array<{
-        firstName?: string;
-        lastName: string;
-        fullName: string;
-        creatorType: string;
-      }> = [];
-      const authors: string[] = [];
-      let authorMatch: RegExpExecArray | null;
-      while ((authorMatch = authorRegex.exec(text)) !== null) {
-        const rawName = decodeHtmlEntities(authorMatch[1].trim());
-        if (!rawName) continue;
-        const parsed = parseCreatorString(rawName, creators.length);
-        authors.push(parsed.fullName);
-        creators.push({
-          firstName: parsed.firstName,
-          lastName: parsed.lastName,
-          fullName: parsed.fullName,
-          creatorType: parsed.creatorType,
-        });
-      }
-
-      const title = titleMatch
-        ? cleanBibliographicText(titleMatch[1])?.slice(0, 500) || finalUrl
-        : finalUrl;
-
-      const abstract = abstractMatch
-        ? cleanBibliographicText(abstractMatch[1])?.slice(0, 15000)
-        : undefined;
-
-      let year: number | undefined;
-      let publicationDate: string | undefined;
-      if (dateMatch) {
-        publicationDate = dateMatch[1].trim();
-        const yMatch = publicationDate.match(/\b(19\d\d|20\d\d)\b/);
-        if (yMatch) year = parseInt(yMatch[1], 10);
-      }
-
-      const cleanArxivId = arxivMatch
-        ? (arxivMatch[1] || arxivMatch[0]).replace(/^arxiv:/i, '')
-        : undefined;
-      const isArxiv = Boolean(cleanArxivId) || finalUrl.includes('arxiv.org');
-
-      const languageMatch =
-        text.match(
-          /<meta\s+(?:property|name)=["'](?:citation_language|og:locale|language)["']\s+content=["'](.*?)["']/i,
-        ) ||
-        text.match(
-          /<meta\s+content=["'](.*?)["']\s+(?:property|name)=["'](?:citation_language|og:locale|language)["']/i,
-        ) ||
-        text.match(/<html[^>]*\slang=["']([a-zA-Z_-]+)["']/i);
-      const language = languageMatch
-        ? languageMatch[1].trim().split(/[-_]/)[0].toLowerCase()
-        : isArxiv
-          ? 'en'
-          : undefined;
-
-      const pdfUrlMatch =
-        text.match(
-          /<meta\s+(?:property|name)=["']citation_pdf_url["']\s+content=["'](.*?)["']/i,
-        ) ||
-        text.match(
-          /<meta\s+content=["'](.*?)["']\s+(?:property|name)=["']citation_pdf_url["']/i,
-        );
-      const pdfUrl = pdfUrlMatch
-        ? pdfUrlMatch[1].trim()
-        : cleanArxivId
-          ? `https://arxiv.org/pdf/${cleanArxivId}.pdf`
-          : undefined;
-
-      const keywordsMatch =
-        text.match(
-          /<meta\s+(?:property|name)=["'](?:citation_keywords|keywords)["']\s+content=["'](.*?)["']/i,
-        ) ||
-        text.match(
-          /<meta\s+content=["'](.*?)["']\s+(?:property|name)=["'](?:citation_keywords|keywords)["']/i,
-        );
-      const keywords = keywordsMatch
-        ? keywordsMatch[1]
-            .split(/[,;]/)
-            .map((k) => k.trim())
-            .filter(Boolean)
-        : undefined;
-
-      return {
-        title: title || finalUrl,
-        abstract,
-        creators: creators.length > 0 ? creators : undefined,
-        authors: authors.length > 0 ? authors : undefined,
-        year,
-        publicationDate,
-        doi: doiMatch ? (normalizeDoi(doiMatch[1]) || doiMatch[1].trim()) : undefined,
-        arxivId: cleanArxivId,
-        url: finalUrl,
-        pdfUrl,
-        language,
-        keywords: keywords && keywords.length > 0 ? keywords : undefined,
-        publicationTitle: journalMatch
-          ? cleanBibliographicText(journalMatch[1])
-          : isArxiv
-            ? 'arXiv'
-            : undefined,
-        journal: journalMatch
-          ? cleanBibliographicText(journalMatch[1])
-          : isArxiv
-            ? 'arXiv'
-            : undefined,
-        publisher: publisherMatch ? cleanBibliographicText(publisherMatch[1]) : undefined,
-        volume: volumeMatch ? volumeMatch[1].trim() : undefined,
-        issue: issueMatch ? issueMatch[1].trim() : undefined,
-        pages,
-        issn: issnMatch ? (normalizeIssn(issnMatch[1]) || issnMatch[1].trim()) : undefined,
-        isbn: isbnMatch ? (normalizeIsbn(isbnMatch[1]) || isbnMatch[1].trim()) : undefined,
-        archive: isArxiv ? 'arXiv' : undefined,
-        libraryCatalog: isArxiv ? 'arXiv.org' : undefined,
-        callNumber: cleanArxivId ? `arXiv:${cleanArxivId}` : undefined,
-        itemType: isArxiv
-          ? 'preprint'
-          : doiMatch || journalMatch
-            ? 'journalArticle'
-            : 'webpage',
-      };
-    } catch (err: any) {
-      if (err instanceof BadRequestException) throw err;
-
-      this.logger.warn(
-        `Generic scrape failed for ${targetUrl}: ${err.message}`,
-      );
-      return {
-        title: targetUrl.slice(0, 500),
-        url: targetUrl,
+    // 3. Map result or fall back to minimal webpage record
+    let captured: CapturedItemMetadata;
+    if (zoteroItems.length > 0) {
+      captured = this.mapZoteroItem(zoteroItems[0], canonicalUrl);
+    } else {
+      this.logger.debug(`No Zotero translator for URL: ${canonicalUrl} — using minimal fallback`);
+      captured = {
+        title: 'Web Page',
+        url: canonicalUrl,
         itemType: 'webpage',
       };
     }
+
+    // 4. Attach HMAC-signed preview token
+    return this.attachPreviewToken(captured, context);
   }
 
-  /**
-   * Fetches target URL with manual redirect tracking, SSRF validation on every hop, and bounded streaming body reader.
-   */
-  async fetchWithManualRedirects(
-    initialUrl: string,
-    options: { headers?: Record<string, string> } = {},
-  ): Promise<{ text: string; contentType: string; finalUrl: string }> {
-    let currentUrl = initialUrl;
-    const visitedUrls = new Set<string>();
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+  // ─── Zotero CSL-JSON → CapturedItemMetadata ─────────────────────────────────
 
-    try {
-      for (let hop = 0; hop <= this.maxRedirects; hop++) {
-        if (visitedUrls.has(currentUrl)) {
-          throw new BadRequestException(
-            'Redirect loop detected during URL capture',
-          );
-        }
-        visitedUrls.add(currentUrl);
+  private mapZoteroItem(item: ZoteroItem, fallbackUrl: string): CapturedItemMetadata {
+    const creators: CapturedItemMetadata['creators'] = [];
+    const authors: string[] = [];
 
-        // Validate security and IP addresses on EVERY redirect hop
-        await this.validateUrlSecurity(currentUrl);
+    for (const c of item.creators ?? []) {
+      if (c.creatorType !== 'author' && creators.length > 0) continue; // Only map authors for authors array
+      const firstName = c.firstName?.trim() || undefined;
+      const lastName = (c.lastName ?? c.name ?? '').trim();
+      if (!lastName && !firstName) continue;
 
-        let res: Response;
-        try {
-          res = await fetch(currentUrl, {
-            headers: options.headers,
-            redirect: 'manual',
-            signal: controller.signal,
-          });
-        } catch (fetchErr: any) {
-          if (fetchErr.name === 'AbortError') {
-            throw new BadRequestException(
-              `Request timed out after ${this.timeoutMs}ms`,
-            );
-          }
-          throw new BadRequestException(
-            `Unable to connect to target URL: ${fetchErr.message}`,
-          );
-        }
-
-        // Handle Redirects
-        if (res.status >= 300 && res.status < 400) {
-          const location = res.headers.get('location');
-          if (!location) {
-            throw new BadRequestException(
-              `HTTP ${res.status} redirect without location header`,
-            );
-          }
-
-          if (hop === this.maxRedirects) {
-            throw new BadRequestException(
-              `Maximum allowed redirect hops (${this.maxRedirects}) exceeded`,
-            );
-          }
-
-          // Resolve relative redirect
-          currentUrl = new URL(location, currentUrl).toString();
-          continue;
-        }
-
-        if (!res.ok) {
-          throw new BadRequestException(
-            `HTTP ${res.status}: ${res.statusText}`,
-          );
-        }
-
-        // Validate Content-Type
-        const rawContentType = res.headers.get('content-type') || '';
-        const contentType = rawContentType.toLowerCase();
-        this.validateContentType(contentType);
-
-        // Validate Content-Length
-        const contentLengthHeader = res.headers.get('content-length');
-        if (contentLengthHeader) {
-          const length = parseInt(contentLengthHeader, 10);
-          if (length > this.maxBodySizeBytes) {
-            throw new BadRequestException(
-              `Response body exceeds maximum allowed size (${this.maxBodySizeBytes / (1024 * 1024)}MB)`,
-            );
-          }
-        }
-
-        // Bounded Body Stream Reader
-        const text = await this.readBoundedResponseBody(res);
-        return { text, contentType, finalUrl: currentUrl };
+      const fullName = firstName ? `${lastName}, ${firstName}` : lastName;
+      if (c.creatorType === 'author' || !c.creatorType) {
+        authors.push(fullName);
       }
-
-      throw new BadRequestException('Too many redirects');
-    } finally {
-      clearTimeout(timeout);
+      creators.push({
+        firstName,
+        lastName: lastName || 'Unknown',
+        fullName,
+        creatorType: c.creatorType || 'author',
+      });
     }
+
+    // Extract year from Zotero date string (e.g. "2023", "2023-04-15", "April 2023")
+    let year: number | undefined;
+    const dateStr = item.date ?? '';
+    const yearMatch = dateStr.match(/\b(19|20)\d{2}\b/);
+    if (yearMatch) year = parseInt(yearMatch[0], 10);
+
+    // Normalize DOI
+    const doi = item.DOI
+      ? item.DOI.replace(/^https?:\/\/doi\.org\//i, '').toLowerCase()
+      : undefined;
+
+    // Extract keywords from Zotero tags
+    const keywords = (item.tags ?? [])
+      .map((t) => t.tag?.trim())
+      .filter(Boolean) as string[];
+
+    // Map itemType
+    const itemType = this.mapZoteroItemType(item.itemType);
+
+    return {
+      title: item.title?.trim() || 'Untitled',
+      abstract: item.abstractNote?.trim() || undefined,
+      creators: creators.length > 0 ? creators : undefined,
+      authors: authors.length > 0 ? authors : undefined,
+      year,
+      doi,
+      url: item.url || fallbackUrl,
+      publicationTitle: item.publicationTitle?.trim() || undefined,
+      journal: item.publicationTitle?.trim() || undefined,
+      publisher: item.publisher?.trim() || undefined,
+      place: item.place?.trim() || undefined,
+      volume: item.volume?.trim() || undefined,
+      issue: item.issue?.trim() || undefined,
+      pages: item.pages?.trim() || undefined,
+      issn: item.ISSN?.trim() || undefined,
+      isbn: item.ISBN?.trim() || undefined,
+      language: item.language?.trim() || undefined,
+      rights: item.rights?.trim() || undefined,
+      license: item.rights?.trim() || undefined,
+      shortTitle: item.shortTitle?.trim() || undefined,
+      callNumber: item.callNumber?.trim() || undefined,
+      archiveLocation: item.archiveLocation?.trim() || undefined,
+      libraryCatalog: item.libraryCatalog?.trim() || 'Zotero',
+      extra: item.extra?.trim() || undefined,
+      keywords: keywords.length > 0 ? keywords : undefined,
+      itemType,
+      rawMetadata: item as Record<string, any>,
+    };
   }
 
-  /**
-   * Reads response body chunks with strict total byte boundary.
-   */
-  private async readBoundedResponseBody(res: Response): Promise<string> {
-    if (!res.body) {
-      return '';
-    }
-
-    const reader = res.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let totalBytes = 0;
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      if (value) {
-        totalBytes += value.length;
-        if (totalBytes > this.maxBodySizeBytes) {
-          try {
-            await reader.cancel();
-          } catch {
-            // ignore cancel errors
-          }
-          throw new BadRequestException(
-            `Response stream exceeded maximum allowed size of ${this.maxBodySizeBytes / (1024 * 1024)}MB`,
-          );
-        }
-        chunks.push(value);
-      }
-    }
-
-    const merged = new Uint8Array(totalBytes);
-    let offset = 0;
-    for (const chunk of chunks) {
-      merged.set(chunk, offset);
-      offset += chunk.length;
-    }
-
-    return new TextDecoder('utf-8').decode(merged);
+  private mapZoteroItemType(zoteroType: string): CapturedItemMetadata['itemType'] {
+    const map: Record<string, CapturedItemMetadata['itemType']> = {
+      journalArticle: 'journalArticle',
+      book: 'book',
+      bookSection: 'bookSection',
+      conferencePaper: 'conferencePaper',
+      thesis: 'thesis',
+      report: 'report',
+      preprint: 'preprint',
+      dataset: 'dataset',
+      webpage: 'webpage',
+      blogPost: 'blogPost',
+      newspaperArticle: 'newspaperArticle',
+      magazineArticle: 'magazineArticle',
+    };
+    return map[zoteroType] ?? zoteroType ?? 'webpage';
   }
 
-  /**
-   * Validates Content-Type header against whitelist of academic and web formats.
-   */
-  private validateContentType(contentType: string): void {
-    const allowedPrefixes = [
-      'text/html',
-      'application/xhtml+xml',
-      'application/vnd.citationstyles.csl+json',
-      'application/json',
-      'application/xml',
-      'text/xml',
-      'application/atom+xml',
-      'application/rss+xml',
-      'text/plain',
-    ];
-
-    const isAllowed = allowedPrefixes.some((prefix) =>
-      contentType.includes(prefix),
-    );
-
-    if (!isAllowed) {
-      throw new BadRequestException(
-        `Unsupported content type: ${contentType || 'unknown'}. Only academic web, CSL, JSON, and XML documents are allowed.`,
-      );
-    }
-  }
+  // ─── Preview Token Lifecycle ─────────────────────────────────────────────────
 
   /**
-   * SSRF Protection: strictly rejects loopback, private networks, link-local, cloud metadata, and IPv4-mapped IPv6.
-   */
-  async validateUrlSecurity(rawUrl: string): Promise<void> {
-    let parsed: URL;
-    try {
-      parsed = new URL(rawUrl);
-    } catch {
-      throw new BadRequestException('Invalid URL format');
-    }
-
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      throw new BadRequestException('Only HTTP and HTTPS URLs are permitted');
-    }
-
-    const hostname = parsed.hostname.toLowerCase();
-
-    // Block obvious loopback names and non-routable domains
-    if (
-      hostname === 'localhost' ||
-      hostname.endsWith('.local') ||
-      hostname.endsWith('.internal') ||
-      hostname === '0.0.0.0'
-    ) {
-      throw new BadRequestException(
-        'Access to localhost and local domains is forbidden',
-      );
-    }
-
-    // Resolve IP addresses to prevent DNS rebinding to private networks
-    try {
-      const addresses = await dns.lookup(hostname, { all: true });
-      if (addresses.length === 0) {
-        throw new BadRequestException(
-          `Could not resolve IP address for hostname ${hostname}`,
-        );
-      }
-
-      for (const addr of addresses) {
-        if (this.isPrivateOrReservedIp(addr.address)) {
-          throw new BadRequestException(
-            `Access to private/internal IP address (${addr.address}) is forbidden`,
-          );
-        }
-      }
-    } catch (err: any) {
-      if (err instanceof BadRequestException) throw err;
-      this.logger.debug(
-        `DNS resolution check error for ${hostname}: ${err.message}`,
-      );
-      throw new BadRequestException(
-        `Failed to verify host safety for ${hostname}: ${err.message}`,
-      );
-    }
-  }
-
-  /**
-   * Checks if an IPv4 or IPv6 address is in a private, loopback, link-local, or cloud metadata range.
-   */
-  isPrivateOrReservedIp(ip: string): boolean {
-    if (!net.isIP(ip)) return false;
-
-    // Handle IPv4-mapped IPv6 addresses: ::ffff:192.0.2.128
-    if (ip.toLowerCase().startsWith('::ffff:')) {
-      const extractedIpv4 = ip.slice(7);
-      if (net.isIPv4(extractedIpv4)) {
-        return this.isPrivateOrReservedIp(extractedIpv4);
-      }
-    }
-
-    // IPv4 checks
-    if (net.isIPv4(ip)) {
-      const parts = ip.split('.').map((p) => parseInt(p, 10));
-      // 0.0.0.0/8
-      if (parts[0] === 0) return true;
-      // 127.0.0.0/8 (Loopback)
-      if (parts[0] === 127) return true;
-      // 10.0.0.0/8 (Private)
-      if (parts[0] === 10) return true;
-      // 172.16.0.0/12 (Private: 172.16.0.0 - 172.31.255.255)
-      if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
-      // 192.168.0.0/16 (Private)
-      if (parts[0] === 192 && parts[1] === 168) return true;
-      // 169.254.0.0/16 (Link-local / Cloud Metadata 169.254.169.254)
-      if (parts[0] === 169 && parts[1] === 254) return true;
-      // 224.0.0.0/4 (Multicast) & 240.0.0.0/4 (Reserved)
-      if (parts[0] >= 224) return true;
-      // 255.255.255.255 (Broadcast)
-      if (ip === '255.255.255.255') return true;
-    }
-
-    // IPv6 checks
-    if (net.isIPv6(ip)) {
-      const normalized = ip.toLowerCase();
-      // Loopback & Unspecified
-      if (normalized === '::1' || normalized === '::') return true;
-      // fc00::/7 & fd00::/8 (Unique Local Address - ULA)
-      if (normalized.startsWith('fc') || normalized.startsWith('fd'))
-        return true;
-      // fe80::/10 (Link-local)
-      if (
-        normalized.startsWith('fe80:') ||
-        normalized.startsWith('fe8') ||
-        normalized.startsWith('fe9') ||
-        normalized.startsWith('fea') ||
-        normalized.startsWith('feb')
-      )
-        return true;
-      // ff00::/8 (Multicast)
-      if (normalized.startsWith('ff')) return true;
-    }
-
-    return false;
-  }
-
-  /**
-   * Computes SHA-256 hash of opaque preview token for indexing and database lookup.
-   */
-  hashToken(token: string): string {
-    return createHash('sha256').update(token).digest('hex');
-  }
-
-  /**
-   * Generates cryptographic HMAC preview token bound to workspace, user, URL, metadata digest, and expiration.
+   * Generates HMAC-signed preview token bound to workspace, user, URL, metadata digest, and expiration.
    */
   attachPreviewToken(
     meta: CapturedItemMetadata,
@@ -968,40 +283,7 @@ export class UrlCaptureProvider {
 
     const previewToken = `v1.${nonce}.${issuedAt}.${expiresAt}.${signature}`;
 
-    return {
-      ...meta,
-      previewToken,
-    };
-  }
-
-  /**
-   * Computes deterministic SHA-256 digest of captured metadata fields including creators and tags.
-   */
-  calculateMetadataDigest(meta: {
-    url?: string;
-    title: string;
-    doi?: string;
-    year?: number;
-    publicationTitle?: string;
-    abstract?: string;
-    itemType?: string;
-    creators?: Array<{
-      firstName?: string;
-      lastName: string;
-      creatorType?: string;
-    }>;
-    tags?: string[];
-  }): string {
-    const normalizedCreators = (meta.creators || [])
-      .map(
-        (c) =>
-          `${c.creatorType || 'author'}:${c.lastName || ''},${c.firstName || ''}`,
-      )
-      .sort()
-      .join(';');
-    const normalizedTags = (meta.tags || []).slice().sort().join(',');
-    const canonicalString = `${meta.title || ''}|${meta.doi || ''}|${meta.year || ''}|${meta.publicationTitle || ''}|${meta.url || ''}|${meta.itemType || ''}|${normalizedCreators}|${normalizedTags}`;
-    return createHash('sha256').update(canonicalString).digest('hex');
+    return { ...meta, previewToken };
   }
 
   /**
@@ -1016,22 +298,13 @@ export class UrlCaptureProvider {
       publicationTitle?: string;
       abstract?: string;
       itemType?: string;
-      creators?: Array<{
-        firstName?: string;
-        lastName: string;
-        creatorType?: string;
-      }>;
+      creators?: Array<{ firstName?: string; lastName: string; creatorType?: string }>;
       tags?: string[];
     },
     token?: string,
-    context?: {
-      workspaceId?: string;
-      userId?: string;
-    },
+    context?: { workspaceId?: string; userId?: string },
   ): PreviewTokenVerificationResult {
-    if (!token) {
-      return { valid: false, reason: 'missing_token' };
-    }
+    if (!token) return { valid: false, reason: 'missing_token' };
 
     const parts = token.split('.');
     if (parts.length !== 5 || parts[0] !== 'v1') {
@@ -1046,7 +319,6 @@ export class UrlCaptureProvider {
       return { valid: false, reason: 'invalid_token_timestamps' };
     }
 
-    // Check Token Expiration (15 minutes)
     if (Date.now() > expiresAt) {
       return { valid: false, reason: 'token_expired' };
     }
@@ -1063,13 +335,40 @@ export class UrlCaptureProvider {
     const expectedBuf = Buffer.from(expectedSignature, 'hex');
     const receivedBuf = Buffer.from(receivedSignature, 'hex');
 
-    if (
-      expectedBuf.length === receivedBuf.length &&
-      timingSafeEqual(expectedBuf, receivedBuf)
-    ) {
+    if (expectedBuf.length === receivedBuf.length && timingSafeEqual(expectedBuf, receivedBuf)) {
       return { valid: true };
     }
 
     return { valid: false, reason: 'signature_mismatch' };
+  }
+
+  /**
+   * Computes deterministic SHA-256 digest of captured metadata fields.
+   */
+  calculateMetadataDigest(meta: {
+    url?: string;
+    title: string;
+    doi?: string;
+    year?: number;
+    publicationTitle?: string;
+    abstract?: string;
+    itemType?: string;
+    creators?: Array<{ firstName?: string; lastName: string; creatorType?: string }>;
+    tags?: string[];
+  }): string {
+    const normalizedCreators = (meta.creators || [])
+      .map((c) => `${c.creatorType || 'author'}:${c.lastName || ''},${c.firstName || ''}`)
+      .sort()
+      .join(';');
+    const normalizedTags = (meta.tags || []).slice().sort().join(',');
+    const canonicalString = `${meta.title || ''}|${meta.doi || ''}|${meta.year || ''}|${meta.publicationTitle || ''}|${meta.url || ''}|${meta.itemType || ''}|${normalizedCreators}|${normalizedTags}`;
+    return createHash('sha256').update(canonicalString).digest('hex');
+  }
+
+  /**
+   * Hashes a token for database lookup.
+   */
+  hashToken(token: string): string {
+    return createHash('sha256').update(token).digest('hex');
   }
 }

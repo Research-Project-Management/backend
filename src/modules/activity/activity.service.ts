@@ -127,7 +127,6 @@ export class ActivityService {
     const result = {
       activities: items.map((item) => ({
         id: item.id,
-        _id: item.id,
         entityType: item.entityType,
         entityId: item.entityId,
         verb: item.verb,
@@ -139,7 +138,6 @@ export class ActivityService {
         author: item.actor
           ? {
               id: item.actor.id,
-              _id: item.actor.id,
               name: item.actor.name,
               email: item.actor.email,
               avatar: item.actor.avatar,
@@ -148,7 +146,6 @@ export class ActivityService {
         user: item.actor
           ? {
               id: item.actor.id,
-              _id: item.actor.id,
               name: item.actor.name,
               email: item.actor.email,
               avatar: item.actor.avatar,

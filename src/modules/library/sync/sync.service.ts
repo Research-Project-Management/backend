@@ -6,7 +6,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { topoSortOperations, computeRequestHash } from './utils/sync-batch.utils';
+import { topoSortOperations, computeRequestHash } from './utils/sync.utils';
 import { PrismaService } from '../../../core/database/prisma.service';
 import {
   TransactionService,
@@ -98,14 +98,42 @@ export class SyncService implements SyncPort {
       entityType: string;
       entityId: string;
       action: 'create' | 'update' | 'delete';
-      version: number;
+      version?: number;
       data?: any;
     }>,
+    userId?: string,
   ) {
+    const currentUserId = userId || 'system';
+
+    const sanitizeData = (raw: unknown): Record<string, any> => {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+      const {
+        workspaceId: _w,
+        userId: _u,
+        existingId: _e,
+        id: _i,
+        __proto__: _p,
+        constructor: _c,
+        prototype: _pt,
+        ...rest
+      } = raw as Record<string, any>;
+      return rest;
+    };
+
     return this.txService.executeInTransaction(async (tx, helpers) => {
       const results = [];
       for (const mutation of mutations) {
         if (mutation.action === 'delete') {
+          if (userId) {
+            const member = await this.prisma.workspaceMember.findUnique({
+              where: { workspaceId_userId: { workspaceId, userId } },
+            });
+            if (member?.role !== 'owner' && member?.role !== 'admin') {
+              throw new ForbiddenException(
+                'Admin or owner role is required to delete entities via sync',
+              );
+            }
+          }
           await this.executeDeleteEntity(tx, helpers, {
             workspaceId,
             entityType: mutation.entityType as any,
@@ -121,55 +149,56 @@ export class SyncService implements SyncPort {
             seq: tombstone.seq?.toString(),
           });
         } else {
+          const cleanData = sanitizeData(mutation.data);
           switch (mutation.entityType) {
             case 'CatalogItem':
               await this.executeUpsertCatalogItem(tx, helpers, {
+                ...cleanData,
                 workspaceId,
-                userId: mutation.data?.userId || 'system',
+                userId: currentUserId,
                 existingId: mutation.entityId,
-                title: mutation.data?.title || 'Untitled',
-                ...(mutation.data || {}),
+                title: cleanData.title || 'Untitled',
               });
               break;
             case 'Collection':
               await this.executeUpsertCollection(tx, helpers, {
+                ...cleanData,
                 workspaceId,
-                userId: mutation.data?.userId || 'system',
+                userId: currentUserId,
                 existingId: mutation.entityId,
-                name: mutation.data?.name || 'Untitled',
-                ...(mutation.data || {}),
+                name: cleanData.name || 'Untitled',
               });
               break;
             case 'CatalogAttachment':
               await this.executeUpsertAttachment(tx, helpers, {
+                ...cleanData,
                 workspaceId,
                 existingId: mutation.entityId,
-                catalogItemId: mutation.data?.catalogItemId,
-                filename: mutation.data?.filename || 'attachment',
-                url: mutation.data?.url || '',
-                mimeType: mutation.data?.mimeType || 'application/pdf',
-                ...(mutation.data || {}),
+                catalogItemId: cleanData.catalogItemId,
+                filename: cleanData.filename || 'attachment',
+                url: cleanData.url || '',
+                mimeType: cleanData.mimeType || 'application/pdf',
               });
               break;
             case 'Note':
               await this.executeUpsertNote(tx, helpers, {
+                ...cleanData,
                 workspaceId,
-                userId: mutation.data?.userId || 'system',
+                userId: currentUserId,
                 existingId: mutation.entityId,
-                catalogItemId: mutation.data?.catalogItemId,
-                title: mutation.data?.title || 'Note',
-                contentMd: mutation.data?.contentMd || '',
-                ...(mutation.data || {}),
+                catalogItemId: cleanData.catalogItemId,
+                title: cleanData.title || 'Note',
+                contentMd: cleanData.contentMd || '',
               });
               break;
             case 'Annotation':
               await this.executeUpsertAnnotation(tx, helpers, {
+                ...cleanData,
                 workspaceId,
-                userId: mutation.data?.userId || 'system',
+                userId: currentUserId,
                 existingId: mutation.entityId,
-                attachmentId: mutation.data?.attachmentId,
-                pageIndex: mutation.data?.pageIndex ?? 1,
-                ...(mutation.data || {}),
+                attachmentId: cleanData.attachmentId,
+                pageIndex: cleanData.pageIndex ?? 1,
               });
               break;
             default:
@@ -182,8 +211,8 @@ export class SyncService implements SyncPort {
             entityType: mutation.entityType,
             entityId: mutation.entityId,
             action: mutation.action,
-            version: mutation.version,
-            data: mutation.data,
+            version: mutation.version ?? 1,
+            data: cleanData,
           });
           results.push({
             entityId: mutation.entityId,
@@ -285,6 +314,7 @@ export class SyncService implements SyncPort {
    */
   async applyExternalSyncBatch(
     command: ApplyExternalSyncBatchCommand,
+    userId?: string,
   ): Promise<ExternalSyncBatchResult> {
     // 1. Deterministic, non-mutating request hash
     const requestHash = computeRequestHash(command);
@@ -459,6 +489,21 @@ export class SyncService implements SyncPort {
           if (op.operationId) refMap.set(op.operationId, res.id);
           results.push({ operationId: op.operationId, op: op.op, result: res });
         } else if (op.op === 'deleteEntity') {
+          if (userId) {
+            const member = await this.prisma.workspaceMember.findUnique({
+              where: {
+                workspaceId_userId: {
+                  workspaceId: command.workspaceId,
+                  userId,
+                },
+              },
+            });
+            if (member?.role !== 'owner' && member?.role !== 'admin') {
+              throw new ForbiddenException(
+                'Admin or owner role is required to delete entities via sync',
+              );
+            }
+          }
           await this.executeDeleteEntity(tx, helpers, op.command);
           results.push({
             operationId: op.operationId,

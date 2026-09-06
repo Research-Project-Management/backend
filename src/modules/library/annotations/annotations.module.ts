@@ -4,9 +4,10 @@ import { AnnotationsService } from './annotations.service';
 import { AnnotationsRepository } from './annotations.repository';
 import { CoreModule } from '../../../core/core.module';
 import { OutboxModule } from '../outbox/outbox.module';
+import { AttachmentsModule } from '../attachments/attachments.module';
 
 @Module({
-  imports: [CoreModule, OutboxModule],
+  imports: [CoreModule, OutboxModule, AttachmentsModule],
   controllers: [AnnotationsController],
   providers: [AnnotationsRepository, AnnotationsService],
   exports: [AnnotationsService],

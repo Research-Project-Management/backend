@@ -37,11 +37,9 @@ import { WorkspaceRoleGuard } from '@/modules/iam/authz/guards/workspace-role.gu
 import { WorkspaceRoles } from '@/modules/iam/authz/decorators/workspace-roles.decorator';
 import { ProjectRoleGuard } from '@/modules/iam/authz/guards/project-role.guard';
 import { ProjectRoles } from '@/modules/iam/authz/decorators/project-roles.decorator';
-import { CurrentWorkspace } from '@/modules/iam/authz/decorators/current-workspace.decorator';
-
 @ApiTags('Storage & Assets')
 @ApiBearerAuth('JWT-auth')
-@Controller('api/files')
+@Controller(['api/files', 'api/file'])
 @UseGuards(JwtAuthGuard)
 export class FileController {
   constructor(private readonly fileService: FileService) {}
@@ -49,8 +47,11 @@ export class FileController {
   @Post('presign')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Generate presigned URL for direct client upload' })
-  async presign(@Body() dto: PresignDto) {
-    return this.fileService.presign(dto);
+  async presign(
+    @CurrentUser('id') userId: string,
+    @Body() dto: PresignDto,
+  ) {
+    return this.fileService.presign(userId, dto);
   }
 
   /**
@@ -67,12 +68,15 @@ export class FileController {
   }
 
   /**
-   * Serve / Stream R2 File by storage key (Public for browser media & PDF viewers)
+   * Serve / Stream R2 File by storage key (Requires authentication and file access)
    */
-  @Public()
   @Get('r2/*')
   @ApiOperation({ summary: 'Stream R2 stored file by storage key' })
-  async getR2File(@Req() req: FastifyRequest, @Res() res: FastifyReply) {
+  async getR2File(
+    @CurrentUser('id') userId: string,
+    @Req() req: FastifyRequest,
+    @Res() res: FastifyReply,
+  ) {
     const rawUrl = req.raw?.url || req.url || '';
     const prefix = '/api/files/r2/';
     const idx = rawUrl.indexOf(prefix);
@@ -86,6 +90,12 @@ export class FileController {
     }
 
     const key = decodeURIComponent(rawKey);
+
+    const file = await this.fileService.findFileByKey(key);
+    if (!file) {
+      return res.status(404).send({ message: 'File not found in storage' });
+    }
+    await this.fileService.assertCanAccessFile(userId, file.id, 'read');
 
     let output = null;
     try {
@@ -122,7 +132,30 @@ export class FileController {
     if (output.ContentLength) {
       res.header('Content-Length', output.ContentLength);
     }
-    res.header('Cache-Control', 'public, max-age=31536000, immutable');
+    res.header('X-Content-Type-Options', 'nosniff');
+    res.header('Cache-Control', 'private, no-cache, no-transform');
+
+    const safeInlineTypes = new Set([
+      'application/pdf',
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'image/gif',
+    ]);
+    const isInline = safeInlineTypes.has(contentType);
+    const dispositionType = isInline ? 'inline' : 'attachment';
+
+    if (contentType === 'image/svg+xml' || contentType === 'text/html') {
+      res.header('Content-Security-Policy', "default-src 'none'; sandbox");
+    }
+
+    const filename = file.filename || 'file';
+    const sanitizedFilename = filename.replace(/[\r\n\t"]/g, '_');
+    const encodedFilename = encodeURIComponent(sanitizedFilename);
+    res.header(
+      'Content-Disposition',
+      `${dispositionType}; filename="${sanitizedFilename}"; filename*=UTF-8''${encodedFilename}`,
+    );
 
     // Attach stream error safety to prevent uncaught error events if client closes connection early
     const streamBody = output.Body as {
@@ -139,43 +172,43 @@ export class FileController {
 
   // ── Workspace Scoped ────────────────────────────────────────────────────────
 
-  @Post('workspace/:workspaceId/upload')
+  // ── Workspace Scoped ────────────────────────────────────────────────────────
+
+  @Post(['workspaces/:workspaceId/upload', 'workspace/:workspaceId/upload'])
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member')
   @ApiOperation({ summary: 'Upload file to workspace storage' })
   async uploadWorkspaceFile(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
     @CurrentUser('id') userId: string,
     @Body() dto: UploadFileDto,
   ) {
     return this.fileService.upload(
       userId,
-      { workspaceId: currentWorkspaceId || workspaceId },
+      { workspaceId },
       dto,
     );
   }
 
-  @Post('workspace/:workspaceId/folder')
+  @Post(['workspaces/:workspaceId/folder', 'workspace/:workspaceId/folder'])
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member')
   @ApiOperation({ summary: 'Create folder in workspace' })
   async createWorkspaceFolder(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
     @CurrentUser('id') userId: string,
     @Body() dto: CreateFolderDto,
   ) {
     return this.fileService.createFolder(
       userId,
-      { workspaceId: currentWorkspaceId || workspaceId },
+      { workspaceId },
       dto,
     );
   }
 
-  @Get('workspace/:workspaceId/home')
+  @Get(['workspaces/:workspaceId/home', 'workspace/:workspaceId/home'])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'Get workspace home/root files' })
@@ -183,7 +216,7 @@ export class FileController {
     return this.fileService.getHomeFiles(workspaceId);
   }
 
-  @Get('workspace/:workspaceId/all')
+  @Get(['workspaces/:workspaceId/all', 'workspace/:workspaceId/all'])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({
@@ -196,7 +229,7 @@ export class FileController {
     return this.fileService.getFiles({ workspaceId, parentId });
   }
 
-  @Get('workspace/:workspaceId/my-files')
+  @Get(['workspaces/:workspaceId/my-files', 'workspace/:workspaceId/my-files'])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'Get files uploaded by current user in workspace' })
@@ -207,7 +240,7 @@ export class FileController {
     return this.fileService.getMyFiles(userId, workspaceId);
   }
 
-  @Get('workspace/:workspaceId/starred')
+  @Get(['workspaces/:workspaceId/starred', 'workspace/:workspaceId/starred'])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'Get starred files in workspace' })
@@ -215,7 +248,7 @@ export class FileController {
     return this.fileService.getStarredFiles(workspaceId);
   }
 
-  @Get('workspace/:workspaceId/shared')
+  @Get(['workspaces/:workspaceId/shared', 'workspace/:workspaceId/shared'])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'Get files shared with current user in workspace' })
@@ -226,7 +259,7 @@ export class FileController {
     return this.fileService.getSharedFiles(userId, workspaceId);
   }
 
-  @Get('workspace/:workspaceId/trash')
+  @Get(['workspaces/:workspaceId/trash', 'workspace/:workspaceId/trash'])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'Get trashed files in workspace' })
@@ -235,11 +268,14 @@ export class FileController {
   }
 
   @Get('folder/:folderId/path')
-  async getFolderPath(@Param('folderId') folderId: string) {
-    return this.fileService.getFolderPath(folderId);
+  async getFolderPath(
+    @Param('folderId') folderId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.fileService.getFolderPath(folderId, userId);
   }
 
-  @Get('workspace/:workspaceId/usage')
+  @Get(['workspaces/:workspaceId/usage', 'workspace/:workspaceId/usage'])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'Get workspace storage usage' })
@@ -247,7 +283,7 @@ export class FileController {
     return this.fileService.getStorageUsage(workspaceId);
   }
 
-  @Get('workspace/:workspaceId/stats')
+  @Get(['workspaces/:workspaceId/stats', 'workspace/:workspaceId/stats'])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'Get workspace storage stats (alias)' })
@@ -255,7 +291,7 @@ export class FileController {
     return this.fileService.getStorageUsage(workspaceId);
   }
 
-  @Get('workspace/:workspaceId')
+  @Get(['workspaces/:workspaceId', 'workspace/:workspaceId'])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'List workspace files by parent folder' })
@@ -268,7 +304,7 @@ export class FileController {
 
   // ── Project Scoped ──────────────────────────────────────────────────────────
 
-  @Post('project/:projectId/upload')
+  @Post(['projects/:projectId/upload', 'project/:projectId/upload'])
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor')
@@ -281,7 +317,7 @@ export class FileController {
     return this.fileService.upload(userId, { projectId }, dto);
   }
 
-  @Post('project/:projectId/folder')
+  @Post(['projects/:projectId/folder', 'project/:projectId/folder'])
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor')
@@ -294,7 +330,7 @@ export class FileController {
     return this.fileService.createFolder(userId, { projectId }, dto);
   }
 
-  @Get('project/:projectId/my-files')
+  @Get(['projects/:projectId/my-files', 'project/:projectId/my-files'])
   @ApiOperation({ summary: 'Get files uploaded by current user in project' })
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
@@ -305,7 +341,7 @@ export class FileController {
     return this.fileService.getMyFiles(userId, undefined, projectId);
   }
 
-  @Get('project/:projectId/starred')
+  @Get(['projects/:projectId/starred', 'project/:projectId/starred'])
   @ApiOperation({ summary: 'Get starred files in project' })
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
@@ -313,7 +349,7 @@ export class FileController {
     return this.fileService.getStarredFiles(undefined, projectId);
   }
 
-  @Get('project/:projectId/shared')
+  @Get(['projects/:projectId/shared', 'project/:projectId/shared'])
   @ApiOperation({ summary: 'Get files shared with current user in project' })
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
@@ -324,7 +360,7 @@ export class FileController {
     return this.fileService.getSharedFiles(userId, undefined, projectId);
   }
 
-  @Get('project/:projectId/trash')
+  @Get(['projects/:projectId/trash', 'project/:projectId/trash'])
   @ApiOperation({ summary: 'Get trashed files in project' })
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
@@ -332,7 +368,7 @@ export class FileController {
     return this.fileService.getTrashedFiles(undefined, projectId);
   }
 
-  @Get('project/:projectId')
+  @Get(['projects/:projectId', 'project/:projectId'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'List project files' })
@@ -345,7 +381,7 @@ export class FileController {
 
   // ── Page Scoped ────────────────────────────────────────────────────────────
 
-  @Post('page/:pageId/upload')
+  @Post(['pages/:pageId/upload', 'page/:pageId/upload'])
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor')
@@ -358,7 +394,7 @@ export class FileController {
     return this.fileService.upload(userId, { pageId }, dto);
   }
 
-  @Post('page/:pageId/folder')
+  @Post(['pages/:pageId/folder', 'page/:pageId/folder'])
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create folder in page' })
   @UseGuards(ProjectRoleGuard)
@@ -371,7 +407,7 @@ export class FileController {
     return this.fileService.createFolder(userId, { pageId }, dto);
   }
 
-  @Get('page/:pageId')
+  @Get(['pages/:pageId', 'page/:pageId'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'List files attached to a page' })
@@ -421,29 +457,41 @@ export class FileController {
   }
 
   // ── Batch Operations ──────────────────────────────────────────────────────
-
+ 
   @Post('batch/delete')
   @HttpCode(HttpStatus.OK)
-  async batchDelete(@Body() dto: BatchFileIdsDto) {
-    return this.fileService.batchDeleteFiles(dto.ids);
+  async batchDelete(
+    @CurrentUser('id') userId: string,
+    @Body() dto: BatchFileIdsDto,
+  ) {
+    return this.fileService.batchDeleteFiles(dto.ids, userId);
   }
 
   @Post('batch/restore')
   @HttpCode(HttpStatus.OK)
-  async batchRestore(@Body() dto: BatchFileIdsDto) {
-    return this.fileService.batchRestoreFiles(dto.ids);
+  async batchRestore(
+    @CurrentUser('id') userId: string,
+    @Body() dto: BatchFileIdsDto,
+  ) {
+    return this.fileService.batchRestoreFiles(dto.ids, userId);
   }
 
   @Post('batch/permanent-delete')
   @HttpCode(HttpStatus.OK)
-  async batchPermanentDelete(@Body() dto: BatchFileIdsDto) {
-    return this.fileService.batchPermanentlyDeleteFiles(dto.ids);
+  async batchPermanentDelete(
+    @CurrentUser('id') userId: string,
+    @Body() dto: BatchFileIdsDto,
+  ) {
+    return this.fileService.batchPermanentlyDeleteFiles(dto.ids, userId);
   }
 
   @Post('batch/star')
   @HttpCode(HttpStatus.OK)
-  async batchStar(@Body() dto: BatchStarDto) {
-    return this.fileService.batchToggleStar(dto.ids, dto.starred);
+  async batchStar(
+    @CurrentUser('id') userId: string,
+    @Body() dto: BatchStarDto,
+  ) {
+    return this.fileService.batchToggleStar(dto.ids, dto.starred, userId);
   }
 
   @Get(':fileId/content')
@@ -495,6 +543,10 @@ export class FileController {
       ]);
       const isInline = safeInlineTypes.has(contentType);
       const dispositionType = isInline ? 'inline' : 'attachment';
+
+      if (contentType === 'image/svg+xml' || contentType === 'text/html') {
+        res.header('Content-Security-Policy', "default-src 'none'; sandbox");
+      }
 
       // Sanitize filename against CRLF / Header injection
       const sanitizedFilename = (filename || 'file').replace(/[\r\n\t"]/g, '_');

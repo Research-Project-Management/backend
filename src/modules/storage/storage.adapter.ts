@@ -12,6 +12,7 @@ import {
   getFileContentPath,
 } from './storage.port';
 import { PrismaService } from '@/core/database/prisma.service';
+import { buildWorkspaceIdentifierWhere } from '@/core/utils/tenant.util';
 import { R2Service } from './r2/r2.service';
 import { Readable } from 'stream';
 
@@ -43,14 +44,7 @@ export class StorageAdapter implements IStoragePort {
       let matches = file.workspaceId === workspaceId;
       if (!matches && workspaceId) {
         const ws = await this.prisma.workspace.findFirst({
-          where: {
-            OR: [
-              { id: workspaceId },
-              { slug: workspaceId },
-              { url: workspaceId },
-            ],
-            deletedAt: null,
-          },
+          where: buildWorkspaceIdentifierWhere(workspaceId),
           select: { id: true },
         });
         if (ws?.id === file.workspaceId) {

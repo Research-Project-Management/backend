@@ -2,7 +2,8 @@ import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { PrismaService } from '../../../../core/database/prisma.service';
 import { CatalogService } from '../../items/items.service';
 import { TransactionService } from '../../outbox/transaction.service';
-import { CatalogItemMapper } from '../../items/items.mapper';
+import { CatalogItemMapper } from '../../items/mappers/items.mapper';
+
 import {
   STORAGE_PORT,
   IStoragePort,
@@ -133,10 +134,17 @@ export class PdfIngestionStrategy implements IIngestionStrategy<
 
           if (claim?.catalogItem) {
             if (claim.catalogItem.deletedAt) {
-              await this.prisma.catalogItem.update({
-                where: { id: claim.catalogItem.id },
-                data: { deletedAt: null },
-              });
+              if (this.catalogService) {
+                await this.catalogService.restoreItem(
+                  workspaceId,
+                  claim.catalogItem.id,
+                );
+              } else {
+                await this.prisma.catalogItem.update({
+                  where: { id: claim.catalogItem.id },
+                  data: { deletedAt: null },
+                });
+              }
               claim.catalogItem.deletedAt = null;
             }
             const it = CatalogItemMapper.toDomain(claim.catalogItem);
@@ -191,10 +199,17 @@ export class PdfIngestionStrategy implements IIngestionStrategy<
 
         if (existingAtt?.catalogItem) {
           if (existingAtt.catalogItem.deletedAt) {
-            await this.prisma.catalogItem.update({
-              where: { id: existingAtt.catalogItem.id },
-              data: { deletedAt: null },
-            });
+            if (this.catalogService) {
+              await this.catalogService.restoreItem(
+                workspaceId,
+                existingAtt.catalogItem.id,
+              );
+            } else {
+              await this.prisma.catalogItem.update({
+                where: { id: existingAtt.catalogItem.id },
+                data: { deletedAt: null },
+              });
+            }
             existingAtt.catalogItem.deletedAt = null;
           }
           const it = CatalogItemMapper.toDomain(existingAtt.catalogItem);
@@ -442,11 +457,31 @@ export class PdfIngestionStrategy implements IIngestionStrategy<
                 });
                 if (raceClaim?.catalogItem) {
                   if (raceClaim.catalogItem.deletedAt) {
-                    await tx.catalogItem.update({
+                    const restored = await tx.catalogItem.update({
                       where: { id: raceClaim.catalogItem.id },
-                      data: { deletedAt: null },
+                      data: {
+                        deletedAt: null,
+                        version: { increment: 1 },
+                      },
                     });
+                    await helpers.appendChange(workspaceId, {
+                      entityType: 'CatalogItem',
+                      entityId: raceClaim.catalogItem.id,
+                      action: 'update',
+                      version: restored.version,
+                      data: restored,
+                    });
+                    await helpers.publishOutbox(
+                      workspaceId,
+                      raceClaim.catalogItem.id,
+                      'library.item.restored',
+                      {
+                        id: raceClaim.catalogItem.id,
+                        restoredAt: new Date(),
+                      },
+                    );
                     raceClaim.catalogItem.deletedAt = null;
+                    raceClaim.catalogItem.version = restored.version;
                   }
                   isDedup = true;
                   return raceClaim.catalogItem;
@@ -470,37 +505,72 @@ export class PdfIngestionStrategy implements IIngestionStrategy<
                 );
               }
 
-              // Create attachment for PDF with canonical content URL
-              createdAttachment = await tx.catalogAttachment.create({
-                data: {
-                  catalogItemId: item.id,
-                  fileId: command.fileId || null,
-                  filename:
-                    command.filename || fileRecord?.filename || 'document.pdf',
-                  url: contentUrl,
-                  fileHash: hash || null,
-                  size: fileRecord?.size || fileRecord?.buffer?.length || 0,
-                  mimeType: 'application/pdf',
-                  attachmentType: 'primary_pdf',
-                  revisions: {
-                    create: {
+              // Ensure primary PDF attachment exists and has valid checksum and canonical content URL
+              const existingAttachment =
+                item.attachments?.find(
+                  (a: any) =>
+                    a.attachmentType === 'primary_pdf' ||
+                    (command.fileId && a.fileId === command.fileId),
+                ) || item.attachments?.[0];
+
+              if (existingAttachment) {
+                createdAttachment = await tx.catalogAttachment.update({
+                  where: { id: existingAttachment.id },
+                  data: {
+                    fileHash: hash || existingAttachment.fileHash || null,
+                    size:
+                      fileRecord?.size ||
+                      fileRecord?.buffer?.length ||
+                      existingAttachment.size ||
+                      0,
+                  },
+                });
+                if (hash) {
+                  await tx.attachmentRevision.updateMany({
+                    where: {
+                      attachmentId: existingAttachment.id,
                       revisionNumber: 1,
-                      fileHash: hash || '',
+                    },
+                    data: {
+                      fileHash: hash,
                       sizeBytes:
-                        fileRecord?.size || fileRecord?.buffer?.length || 0,
-                      url: contentUrl,
+                        fileRecord?.size ||
+                        fileRecord?.buffer?.length ||
+                        existingAttachment.size ||
+                        0,
+                    },
+                  });
+                }
+              } else {
+                createdAttachment = await tx.catalogAttachment.create({
+                  data: {
+                    catalogItemId: item.id,
+                    fileId: command.fileId || null,
+                    filename:
+                      command.filename || fileRecord?.filename || 'document.pdf',
+                    url: contentUrl,
+                    fileHash: hash || null,
+                    size: fileRecord?.size || fileRecord?.buffer?.length || 0,
+                    mimeType: 'application/pdf',
+                    attachmentType: 'primary_pdf',
+                    revisions: {
+                      create: {
+                        revisionNumber: 1,
+                        fileHash: hash || '',
+                        sizeBytes:
+                          fileRecord?.size || fileRecord?.buffer?.length || 0,
+                        url: contentUrl,
+                      },
                     },
                   },
-                },
-              });
+                });
+              }
 
-              if (command.fileId && tx.file?.updateMany) {
-                await tx.file.updateMany({
-                  where: { id: command.fileId },
-                  data: {
-                    linkedToType: 'Paper',
-                    linkedToId: item.id,
-                  },
+              if (command.fileId && this.storagePort?.linkFile) {
+                await this.storagePort.linkFile({
+                  fileId: command.fileId,
+                  linkedToType: 'Paper',
+                  linkedToId: item.id,
                 });
               }
 

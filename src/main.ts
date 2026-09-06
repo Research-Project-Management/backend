@@ -33,9 +33,20 @@ async function bootstrap() {
     logger.error(`[Uncaught Exception]: ${error.stack || error.message}`);
   });
 
+  const maxProxyHops = process.env.TRUST_PROXY_HOPS
+    ? parseInt(process.env.TRUST_PROXY_HOPS, 10)
+    : 1;
+
+  const trustProxyConfig =
+    process.env.TRUST_PROXY === 'false'
+      ? false
+      : process.env.TRUST_PROXY && process.env.TRUST_PROXY !== 'true'
+        ? process.env.TRUST_PROXY
+        : (_address: string, hop: number) => hop <= maxProxyHops;
+
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
-    new FastifyAdapter({ trustProxy: true }),
+    new FastifyAdapter({ trustProxy: trustProxyConfig }),
     {
       logger,
       bufferLogs: true,
@@ -57,9 +68,34 @@ async function bootstrap() {
 
   // Rate Limiting (Throttle & Brute-force protection)
   await app.register(rateLimit, {
-    max: 150,
     timeWindow: '1 minute',
-    allowList: ['127.0.0.1', 'localhost'],
+    max: (req) => {
+      const url = req.raw.url || '';
+      // Strict throttle on sensitive auth / authentication endpoints (10 req/min)
+      if (
+        url.startsWith('/auth/login') ||
+        url.startsWith('/auth/refresh') ||
+        url.startsWith('/auth/forgot-password') ||
+        url.startsWith('/auth/reset-password') ||
+        url.startsWith('/auth/oauth/exchange')
+      ) {
+        return 10;
+      }
+      return 150;
+    },
+    keyGenerator: (req) => {
+      const url = req.raw.url || '';
+      if (
+        url.startsWith('/auth/login') ||
+        url.startsWith('/auth/refresh') ||
+        url.startsWith('/auth/forgot-password') ||
+        url.startsWith('/auth/reset-password') ||
+        url.startsWith('/auth/oauth/exchange')
+      ) {
+        return `auth:${req.ip}`;
+      }
+      return req.ip;
+    },
     errorResponseBuilder: () => ({
       statusCode: 429,
       error: 'Too Many Requests',
@@ -86,7 +122,7 @@ async function bootstrap() {
     new ValidationPipe({
       whitelist: true,
       transform: true,
-      forbidNonWhitelisted: true,
+      forbidNonWhitelisted: false,
       transformOptions: {
         enableImplicitConversion: true,
       },
@@ -107,6 +143,7 @@ async function bootstrap() {
       'http://127.0.0.1:3000',
       'http://127.0.0.1:3001',
       'http://127.0.0.1:2915',
+      ...(process.env.CLIENT_URL ? [process.env.CLIENT_URL.trim()] : []),
       ...(process.env.ORIGINS
         ? process.env.ORIGINS.split(',').map((o) => o.trim())
         : []),

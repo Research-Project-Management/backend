@@ -17,8 +17,15 @@ export function getFileContentPath(fileId: string): string {
   return `/api/files/${encodeURIComponent(fileId)}/content`;
 }
 
+export interface LinkFileInput {
+  fileId: string;
+  linkedToType: string;
+  linkedToId: string;
+}
+
 export interface IStoragePort {
   readOwnedFile(input: ReadOwnedFileInput): Promise<ReadOwnedFileOutput>;
+  linkFile?(input: LinkFileInput): Promise<void>;
 }
 
 export const STORAGE_PORT = 'STORAGE_PORT';

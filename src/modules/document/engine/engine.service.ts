@@ -1,6 +1,12 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
-import { PageRepository } from '../page/page.repository';
-import { HistoryRepository } from '../history/history.repository';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
+import { PrismaService } from '@/core/database/prisma.service';
+import { PageService } from '../page/page.service';
+import { HistoryService } from '../history/history.service';
 import { LatexService } from '../latex/latex.service';
 import { SaveAndSyncDto, CompileDocumentDto } from './dto/engine.dto';
 import { LatexEngine } from '../latex/dto/latex.dto';
@@ -12,30 +18,23 @@ export class EngineService {
   private static readonly SNAPSHOT_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes auto-snapshot
 
   constructor(
-    private readonly pageRepo: PageRepository,
-    private readonly historyRepo: HistoryRepository,
+    private readonly prisma: PrismaService,
+    private readonly pageService: PageService,
+    private readonly historyService: HistoryService,
     private readonly latexService: LatexService,
   ) {}
 
   /**
-   * Multi-step transaction that atomically updates page content,
-   * creates version snapshot if needed, and triggers LaTeX tree synchronization.
+   * Atomically updates page content and creates a version snapshot (if needed)
+   * using prisma.$transaction, then triggers LaTeX tree synchronization.
    */
   async saveAndSync(pageId: string, userId: string, dto: SaveAndSyncDto) {
-    const page = await this.pageRepo.findPageWithVersions(pageId);
+    const page = await this.pageService.findPageWithVersions(pageId);
 
     if (!page) {
       throw new NotFoundException(`Page ${pageId} not found`);
     }
 
-    // Step 1: Update page content and bump version timestamp
-    const updatedPage = await this.pageRepo.updatePage(pageId, {
-      ...(dto.content !== undefined && { content: dto.content }),
-      ...(dto.title !== undefined && { title: dto.title }),
-      updatedAt: new Date(),
-    });
-
-    // Step 2: Determine if a snapshot should be minted
     const lastSnapshot = page.versions[0];
     const shouldSnapshot =
       dto.createSnapshot ||
@@ -43,26 +42,45 @@ export class EngineService {
       Date.now() - new Date(lastSnapshot.createdAt).getTime() >
         EngineService.SNAPSHOT_INTERVAL_MS;
 
-    let createdVersion = null;
-    if (shouldSnapshot) {
-      createdVersion = await this.historyRepo.createVersion({
-        pageId,
-        title: updatedPage.title,
-        content:
-          typeof updatedPage.content === 'string'
-            ? updatedPage.content
-            : JSON.stringify(updatedPage.content || ''),
-        label:
-          dto.versionDescription ||
-          (dto.createSnapshot ? 'Manual snapshot' : 'Auto-save snapshot'),
-        savedById: userId,
-        eventType: dto.createSnapshot
-          ? VersionEventType.manual_save
-          : VersionEventType.auto_save,
-      });
-    }
+    // Atomic: page update + optional version snapshot in a single transaction
+    const [updatedPage, createdVersion] = await this.prisma.$transaction(
+      async (tx) => {
+        const updated = await tx.page.update({
+          where: { id: pageId },
+          data: {
+            ...(dto.content !== undefined && { content: dto.content }),
+            ...(dto.title !== undefined && { title: dto.title }),
+            updatedAt: new Date(),
+          },
+          include: { author: { select: { id: true, name: true, email: true, avatar: true } } },
+        });
 
-    // Sync project structure for compilation
+        let version = null;
+        if (shouldSnapshot) {
+          version = await tx.pageVersion.create({
+            data: {
+              pageId,
+              title: updated.title,
+              content:
+                typeof updated.content === 'string'
+                  ? updated.content
+                  : JSON.stringify(updated.content || ''),
+              label:
+                dto.versionDescription ||
+                (dto.createSnapshot ? 'Manual snapshot' : 'Auto-save snapshot'),
+              savedById: userId,
+              eventType: dto.createSnapshot
+                ? VersionEventType.manual_save
+                : VersionEventType.auto_save,
+            },
+          });
+        }
+
+        return [updated, version] as const;
+      },
+    );
+
+    // Sync project structure for compilation (outside transaction — non-critical)
     const syncResult = await this.latexService.syncProject(
       page.parentPageId || pageId,
     );
@@ -108,15 +126,13 @@ export class EngineService {
    * formatting and compiling through the LaTeX engine.
    */
   async buildDocument(pageId: string, dto: CompileDocumentDto = {}) {
-    const [rootPage, childPages] = await Promise.all([
-      this.pageRepo.findPageById(pageId),
-      this.pageRepo.findChildPages(pageId),
-    ]);
+    const rootPage = await this.pageService.findPageById(pageId);
 
     if (!rootPage) {
       throw new NotFoundException(`Document page ${pageId} not found`);
     }
 
+    const childPages = rootPage.childPages || [];
     const assembledSource =
       dto.source ||
       this.assembleLatexSource(rootPage.title, rootPage.content, childPages);
@@ -142,16 +158,23 @@ export class EngineService {
    * Rollback to a previous snapshot and mark LaTeX compilation dirty
    */
   async rollbackAndSync(pageId: string, versionId: string) {
-    const version = await this.historyRepo.findVersionById(versionId);
+    const version = await this.historyService.findVersionById(versionId);
 
     if (!version) {
       throw new NotFoundException(`Version ${versionId} not found`);
     }
 
-    const updated = await this.pageRepo.updatePage(pageId, {
+    if (version.pageId !== pageId) {
+      throw new BadRequestException(
+        'Version does not belong to the specified page',
+      );
+    }
+
+    const updateRes = await this.pageService.updatePage(pageId, {
       content: version.content || '',
       title: version.title || undefined,
     });
+    const updated = updateRes.page;
 
     const syncResult = await this.latexService.syncProject(pageId);
 

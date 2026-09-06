@@ -29,8 +29,14 @@ import { UrlIngestionStrategy } from './strategies/url-ingestion.strategy';
 import { PdfIngestionStrategy } from './strategies/pdf-ingestion.strategy';
 import { BibtexIngestionStrategy } from './strategies/bibtex-ingestion.strategy';
 import { IngestionStrategyRegistry } from './strategies/ingestion-strategy.registry';
+import { IngestionWatchdogService } from './services/ingestion-watchdog.service';
+import { UrlCaptureService } from './services/url-capture.service';
+import { IngestionPipelineRunner } from './services/ingestion-pipeline.runner';
+import { ZoteroTranslatorClient } from '../../../infra/zotero/zotero-translator.client';
 
+import { SsrfGuardService } from '../common/services/ssrf-guard.service';
 import { NotesModule } from '../notes/notes.module';
+
 
 @Module({
   imports: [
@@ -75,17 +81,27 @@ import { NotesModule } from '../notes/notes.module';
     IngestionStrategyRegistry,
 
     // Service & Adapters
+    SsrfGuardService,
+    ZoteroTranslatorClient, // OSS: Zotero Translation Server client (700+ publisher translators)
+    UrlCaptureService,
+    IngestionPipelineRunner,
     IngestionService,
+    IngestionWatchdogService,
     {
       provide: INGESTION_PORT,
       useExisting: IngestionService,
     },
     UrlCaptureProvider,
+
   ],
   exports: [
     INGESTION_PORT,
     IngestionService,
+    IngestionPipelineRunner,
+    UrlCaptureService,
+    IngestionWatchdogService,
     IngestionStrategyRegistry,
+    SsrfGuardService,
     DoiParser,
     BibtexParser,
     RisParser,

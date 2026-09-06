@@ -1,0 +1,237 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ── Enums ───────────────────────────────────────────────────────────────────
+
+enum UserStatus {
+  active
+  suspended
+  pending_verification
+  deactivated
+}
+
+enum AuthProvider {
+  google
+  github
+  orcid
+  saml
+  local
+}
+
+enum InvitationStatus {
+  pending
+  accepted
+  declined
+  revoked
+  expired
+}
+
+enum SecurityEventType {
+  login_success
+  login_failed
+  logout
+  token_refreshed
+  token_revoked
+  token_breach_detected
+  password_reset_requested
+  password_reset_completed
+  oauth_account_linked
+  oauth_account_unlinked
+  member_invited
+  member_joined
+  member_role_updated
+  member_removed
+  mfa_enabled
+  mfa_disabled
+}
+
+enum WorkspaceMemberRole {
+  owner
+  admin
+  member
+  viewer
+}
+
+enum ProjectMemberRole {
+  admin
+  contributor
+  commenter
+  viewer
+}
+
+enum FilePermission {
+  view
+  edit
+}
+
+enum RagStatus {
+  pending
+  indexed
+  failed
+}
+
+enum AttachmentType {
+  primary_pdf
+  supplementary
+  dataset
+  slides
+  code
+  figure
+  other
+}
+
+enum AnnotationType {
+  highlight
+  underline
+  note
+  rect
+  image
+}
+
+enum RelationType {
+  cites
+  cited_by
+  replicates
+  extends
+  is_preprint_of
+  is_published_version_of
+  is_translation_of
+  supplements
+}
+
+enum IngestionStatus {
+  RECEIVED
+  DETECTED
+  EXTRACTED
+  RESOLVED
+  NORMALIZED
+  MERGED
+  NEEDS_REVIEW
+  COMMITTED
+  ENRICHING
+  READY
+  FAILED_RETRYABLE
+  FAILED_FINAL
+}
+
+enum AttachmentExtractionStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED_RETRYABLE
+  FAILED_FINAL
+}
+
+enum ReadStatus {
+  unread
+  reading
+  completed
+}
+
+enum OutboxStatus {
+  PENDING
+  PROCESSING
+  PUBLISHED
+  FAILED
+}
+
+enum PageStatus {
+  draft
+  published
+  archived
+}
+
+enum VersionEventType {
+  manual_save
+  auto_save
+  file_created
+  file_deleted
+  asset_uploaded
+  asset_deleted
+}
+
+enum TaskPriority {
+  urgent
+  high
+  medium
+  low
+  none
+}
+
+enum TaskRecurrence {
+  none
+  daily
+  mon_fri
+  weekly
+  monthly_day
+  monthly_week
+}
+
+enum TaskReminder {
+  none
+  at_time
+  m5
+  m10
+  m15
+  h1
+  h2
+  d1
+  d2
+}
+
+enum CycleStatus {
+  planned
+  active
+  completed
+  cancelled
+}
+
+enum CyclePhase {
+  topic_selection
+  literature_review
+  methodology
+  data_collection
+  data_analysis
+  writing
+  review_revision
+  submission
+  custom
+}
+
+enum CommentStatus {
+  open
+  resolved
+}
+
+enum StickyScope {
+  workspace
+  project
+}
+
+enum LabelType {
+  sticky
+  cycle
+  task
+}
+
+enum MessageRole {
+  user
+  assistant
+}
+
+enum EntityType {
+  task
+  paper
+  page
+  cycle
+  file
+  sticky
+  comment
+  collection
+  worklog
+}

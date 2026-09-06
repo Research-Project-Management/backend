@@ -39,6 +39,7 @@ export interface IStickyRepository {
     data: Prisma.StickyUpdateInput | Prisma.StickyUncheckedUpdateInput,
   ): Promise<StickyWithUser>;
   deleteSticky(stickyId: string): Promise<Sticky>;
+  findStickiesByIds(stickyIds: string[]): Promise<Sticky[]>;
   reorderStickies(stickyIds: string[]): Promise<Sticky[]>;
   findProjectWorkspaceId(projectId: string): Promise<string | null>;
   resolveWorkspace(workspaceIdOrSlug: string): Promise<{ id: string } | null>;

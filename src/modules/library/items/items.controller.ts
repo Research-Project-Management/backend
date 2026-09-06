@@ -13,31 +13,41 @@ import {
   NotFoundException,
   BadRequestException,
   Optional,
+  Inject,
 } from '@nestjs/common';
 import { ItemsService } from './items.service';
-import { ConversionService } from './conversion.service';
-import { NotesService } from '../notes/notes.service';
+import {
+  ITEM_NOTES_EXTRACTOR_PORT,
+  IItemNotesExtractorPort,
+} from './ports/items.ports';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
 import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
+import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
 import { CurrentUser } from '../../../modules/iam/authn/decorators/current-user.decorator';
-import { CurrentWorkspace } from '../../../modules/iam/authz/decorators/current-workspace.decorator';
-import { CursorPaginationQueryDto } from './items.dto';
-import { CreateCatalogItemDto, UpdateCatalogItemDto } from './items.dto';
+import {
+  CursorPaginationQueryDto,
+  CreateCatalogItemDto,
+  UpdateCatalogItemDto,
+} from './dto/items.dto';
 
-@Controller('api/v1/workspaces/:workspaceId/library/items')
+@Controller([
+  'api/v1/workspaces/:workspaceId/library/items',
+  'api/v1/workspace/:workspaceId/library/items',
+])
 @UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
 export class ItemsController {
   constructor(
     private readonly itemsService: ItemsService,
-    private readonly conversionService: ConversionService,
     @Optional()
-    private readonly notesService?: NotesService,
+    @Inject(ITEM_NOTES_EXTRACTOR_PORT)
+    private readonly notesExtractor?: IItemNotesExtractorPort,
   ) {}
 
+
   @Get()
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async listItems(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
     @CurrentUser('id') currentUserId: string,
     @Query()
     query: CursorPaginationQueryDto & {
@@ -47,8 +57,7 @@ export class ItemsController {
       search?: string;
     },
   ) {
-    const targetWsId = currentWorkspaceId || workspaceId;
-    const result = await this.itemsService.listItems(targetWsId, {
+    const result = await this.itemsService.listItems(workspaceId, {
       view: query.view,
       userId: currentUserId,
       collectionId: query.collectionId,
@@ -61,47 +70,45 @@ export class ItemsController {
   }
 
   @Get(':id')
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async getItem(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
     @Param('id') id: string,
     @CurrentUser('id') currentUserId: string,
   ) {
-    const targetWsId = currentWorkspaceId || workspaceId;
     const item = await this.itemsService.getItem(
-      targetWsId,
+      workspaceId,
       id,
       currentUserId,
     );
     if (!item)
       throw new NotFoundException(
-        `CatalogItem ${id} not found in workspace ${targetWsId}`,
+        `CatalogItem ${id} not found in workspace ${workspaceId}`,
       );
     return item;
   }
 
   @Post()
+  @WorkspaceRoles('owner', 'admin', 'member')
   async createItem(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
     @CurrentUser('id') currentUserId: string,
     @Body() body: CreateCatalogItemDto,
   ) {
-    return this.itemsService.createItem(currentWorkspaceId || workspaceId, {
+    return this.itemsService.createItem(workspaceId, {
       ...body,
       uploadedById: currentUserId || 'system',
     });
   }
 
   @Patch(':id')
+  @WorkspaceRoles('owner', 'admin', 'member')
   async updateItem(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
     @Param('id') id: string,
     @Headers('if-match') ifMatch: string | undefined,
     @Body() body: UpdateCatalogItemDto,
   ) {
-    const targetWsId = currentWorkspaceId || workspaceId;
     const parsedHeaderVersion = ifMatch
       ? parseInt(ifMatch.replace(/["']/g, ''), 10)
       : undefined;
@@ -115,7 +122,7 @@ export class ItemsController {
     }
     const { expectedVersion: _, ...updateData } = body;
     return this.itemsService.updateItem(
-      targetWsId,
+      workspaceId,
       id,
       expectedVersion,
       updateData,
@@ -123,50 +130,49 @@ export class ItemsController {
   }
 
   @Put(':id')
+  @WorkspaceRoles('owner', 'admin', 'member')
   async replaceItem(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
     @Param('id') id: string,
     @Headers('if-match') ifMatch: string | undefined,
     @Body() body: UpdateCatalogItemDto,
   ) {
-    return this.updateItem(workspaceId, currentWorkspaceId, id, ifMatch, body);
+    return this.updateItem(workspaceId, id, ifMatch, body);
   }
 
   @Post(':id/reindex')
+  @WorkspaceRoles('owner', 'admin', 'member')
   async reindexItem(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
     @Param('id') id: string,
     @CurrentUser('id') currentUserId: string,
   ) {
     return this.itemsService.reindexItem(
-      currentWorkspaceId || workspaceId,
+      workspaceId,
       id,
       currentUserId || 'system',
     );
   }
 
   @Post(':id/convert-type/preview')
+  @WorkspaceRoles('owner', 'admin', 'member')
   async previewTypeConversion(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
     @Param('id') id: string,
     @CurrentUser('id') currentUserId: string,
     @Body() body: { targetType: string; retainUnmappedInExtra?: boolean },
   ) {
-    const targetWsId = currentWorkspaceId || workspaceId;
     const item = await this.itemsService.getItem(
-      targetWsId,
+      workspaceId,
       id,
       currentUserId,
     );
     if (!item) {
       throw new NotFoundException(
-        `CatalogItem ${id} not found in workspace ${targetWsId}`,
+        `CatalogItem ${id} not found in workspace ${workspaceId}`,
       );
     }
-    const preview = this.conversionService.previewConversion(
+    const preview = this.itemsService.previewTypeConversion(
       item,
       body.targetType,
       {
@@ -177,9 +183,9 @@ export class ItemsController {
   }
 
   @Post(':id/convert-type')
+  @WorkspaceRoles('owner', 'admin', 'member')
   async convertItemType(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
     @Param('id') id: string,
     @Headers('if-match') ifMatch?: string,
     @Body()
@@ -189,15 +195,14 @@ export class ItemsController {
       retainUnmappedInExtra?: boolean;
     },
   ) {
-    const targetWsId = currentWorkspaceId || workspaceId;
     const expectedVersion =
       body?.expectedVersion !== undefined
-      ? body.expectedVersion
-      : ifMatch
-        ? parseInt(ifMatch.replace(/["']/g, ''), 10)
-        : undefined;
-    const result = await this.conversionService.convertItemType(
-      targetWsId,
+        ? body.expectedVersion
+        : ifMatch
+          ? parseInt(ifMatch.replace(/["']/g, ''), 10)
+          : undefined;
+    const result = await this.itemsService.convertItemType(
+      workspaceId,
       id,
       body?.targetType || 'journalArticle',
       {
@@ -205,6 +210,7 @@ export class ItemsController {
         retainUnmappedInExtra: body?.retainUnmappedInExtra ?? true,
       },
     );
+
     return {
       success: true,
       data: result.item,
@@ -214,9 +220,9 @@ export class ItemsController {
   }
 
   @Delete(':id')
+  @WorkspaceRoles('owner', 'admin')
   async deleteItem(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
     @Param('id') id: string,
     @Headers('if-match') ifMatch?: string,
   ) {
@@ -224,7 +230,7 @@ export class ItemsController {
       ? parseInt(ifMatch.replace(/["']/g, ''), 10)
       : undefined;
     const deleted = await this.itemsService.deleteItem(
-      currentWorkspaceId || workspaceId,
+      workspaceId,
       id,
       expectedVersion,
     );
@@ -232,21 +238,21 @@ export class ItemsController {
   }
 
   @Post(':id/restore')
+  @WorkspaceRoles('owner', 'admin', 'member')
   async restoreItem(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
     @Param('id') id: string,
     @Query('expectedVersion') expectedVersionQuery?: string,
     @Headers('if-match') ifMatch?: string,
   ) {
     const expectedVersion =
       expectedVersionQuery !== undefined
-      ? parseInt(expectedVersionQuery, 10)
-      : ifMatch
-        ? parseInt(ifMatch.replace(/["']/g, ''), 10)
-        : undefined;
+        ? parseInt(expectedVersionQuery, 10)
+        : ifMatch
+          ? parseInt(ifMatch.replace(/["']/g, ''), 10)
+          : undefined;
     const item = await this.itemsService.restoreItem(
-      currentWorkspaceId || workspaceId,
+      workspaceId,
       id,
       expectedVersion,
     );
@@ -254,71 +260,71 @@ export class ItemsController {
   }
 
   @Delete(':id/purge')
+  @WorkspaceRoles('owner', 'admin')
   async purgeItem(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
     @Param('id') id: string,
   ) {
     const purged = await this.itemsService.purgeItem(
-      currentWorkspaceId || workspaceId,
+      workspaceId,
       id,
     );
     return { success: true, purged, id };
   }
 
   @Get(':id/relations')
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async getRelatedItems(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
     @Param('id') id: string,
   ) {
     return this.itemsService.getRelatedItems(
-      currentWorkspaceId || workspaceId,
+      workspaceId,
       id,
     );
   }
 
   @Post([':id/relations', ':id/link'])
+  @WorkspaceRoles('owner', 'admin', 'member')
   async linkItems(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
     @Param('id') id: string,
     @Body()
     body: { targetItemId: string; relationType?: string; note?: string },
   ) {
     return this.itemsService.linkItems(
-      currentWorkspaceId || workspaceId,
+      workspaceId,
       id,
       body,
     );
   }
 
   @Delete([':id/relations/:targetId', ':id/link/:targetId'])
+  @WorkspaceRoles('owner', 'admin', 'member')
   async unlinkItems(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
     @Param('id') id: string,
-    @Param('targetId') targetId: string,
+    @Param('targetId') targetItemId: string,
   ) {
     return this.itemsService.unlinkItems(
-      currentWorkspaceId || workspaceId,
+      workspaceId,
       id,
-      targetId,
+      targetItemId,
     );
   }
 
   @Post(':id/extract-notes')
+  @WorkspaceRoles('owner', 'admin', 'member')
   async extractNotes(
     @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId: string,
     @Param('id') id: string,
     @CurrentUser('id') currentUserId: string,
   ) {
-    if (!this.notesService) {
+    if (!this.notesExtractor) {
       throw new BadRequestException('NotesService is not available');
     }
-    return this.notesService.extractNotesFromAnnotations(
-      currentWorkspaceId || workspaceId,
+    return this.notesExtractor.extractNotesFromAnnotations(
+      workspaceId,
       id,
       currentUserId,
     );

@@ -33,6 +33,8 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     let message = 'An unexpected internal server error occurred';
     let details: unknown = undefined;
 
+    const isProduction = process.env.NODE_ENV === 'production';
+
     if (exception instanceof HttpException) {
       statusCode = exception.getStatus();
       const res = exception.getResponse();
@@ -61,38 +63,63 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       typeof exception === 'object' &&
       'code' in exception
     ) {
-      // Prisma database errors
-      const prismaError = exception as {
-        code: string;
-        message: string;
+      const errorWithCode = exception as {
+        code: string | number;
+        message?: string;
         meta?: unknown;
+        detail?: string;
+        stack?: string;
       };
-      if (prismaError.code === 'P2002') {
+      const codeStr = String(errorWithCode.code);
+
+      if (codeStr === 'P2002' || codeStr === '23505') {
         statusCode = HttpStatus.CONFLICT;
         errorCode = 'UNIQUE_CONSTRAINT_VIOLATION';
         message = 'A record with this identifier already exists';
-        details = prismaError.meta;
-      } else if (prismaError.code === 'P2025') {
+        details = errorWithCode.meta || errorWithCode.detail;
+      } else if (codeStr === 'P2025') {
         statusCode = HttpStatus.NOT_FOUND;
         errorCode = 'RECORD_NOT_FOUND';
         message = 'The requested resource was not found';
-        details = prismaError.meta;
-      } else if (prismaError.code === 'P2003') {
+        details = errorWithCode.meta;
+      } else if (codeStr === 'P2003' || codeStr === '23503') {
         statusCode = HttpStatus.BAD_REQUEST;
         errorCode = 'FOREIGN_KEY_CONSTRAINT_VIOLATION';
         message = 'Referenced related entity does not exist';
-        details = prismaError.meta;
+        details = errorWithCode.meta || errorWithCode.detail;
+      } else if (codeStr === '22P02' || codeStr === 'P2023') {
+        statusCode = HttpStatus.BAD_REQUEST;
+        errorCode = 'INVALID_IDENTIFIER';
+        message = 'Invalid input format or identifier type';
+        details = errorWithCode.meta || errorWithCode.detail;
+      } else if (codeStr === '23502' || codeStr === 'P2011') {
+        statusCode = HttpStatus.BAD_REQUEST;
+        errorCode = 'MISSING_REQUIRED_FIELD';
+        message = 'A required field is missing';
+        details = errorWithCode.meta || errorWithCode.detail;
+      } else if (codeStr === 'P2000') {
+        statusCode = HttpStatus.BAD_REQUEST;
+        errorCode = 'VALUE_TOO_LONG';
+        message = 'Provided value exceeds maximum allowed length';
+        details = errorWithCode.meta;
       } else {
         this.logger.error(
-          `[Prisma Unhandled Error]: ${prismaError.code} - ${prismaError.message}`,
+          `[Unhandled Error with Code]: ${codeStr} - ${errorWithCode.message}`,
+          errorWithCode.stack,
         );
+        if (!isProduction) {
+          message = errorWithCode.message || 'Database query error';
+          details = { code: codeStr, meta: errorWithCode.meta, detail: errorWithCode.detail };
+        }
       }
     } else if (exception instanceof Error) {
-      this.logger.error(exception.stack);
-      const isProduction = process.env.NODE_ENV === 'production';
+      this.logger.error(exception.stack || exception.message);
       message = isProduction
         ? 'An unexpected internal server error occurred'
         : exception.message;
+      if (!isProduction) {
+        details = { stack: exception.stack };
+      }
     }
 
     const payload: ApiErrorEnvelope = {

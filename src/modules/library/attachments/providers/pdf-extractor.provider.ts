@@ -1,6 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { extractText, getDocumentProxy, getMeta } from 'unpdf';
 import { isIP } from 'node:net';
+import { GrobidClient } from '../../../../infra/grobid/grobid.client';
+import { SsrfGuardService } from '../../common/services/ssrf-guard.service';
 
 export interface ExtractedPdfMetadata {
   doi?: string;
@@ -10,7 +12,7 @@ export interface ExtractedPdfMetadata {
   authors?: string[];
   year?: number;
   abstract?: string;
-  keywords?: string[];
+  keywords?: string[]
   journal?: string;
   creationDate?: string;
   rawText?: string;
@@ -30,6 +32,12 @@ export class PdfExtractorProvider {
   private readonly logger = new Logger(PdfExtractorProvider.name);
   private static readonly TEXT_SCAN_LIMIT = 50_000;
 
+  constructor(
+    @Optional() private readonly grobidClient?: GrobidClient,
+    @Optional() private readonly ssrfGuard?: SsrfGuardService,
+  ) {}
+
+
   async extractDocumentFromBuffer(
     buffer: Buffer,
   ): Promise<ExtractedPdfDocument> {
@@ -43,7 +51,12 @@ export class PdfExtractorProvider {
     const unpdfMeta: ExtractedPdfMetadata = {};
 
     try {
-      const document = await getDocumentProxy(buffer);
+      const binaryDataArray = new Uint8Array(
+        buffer.buffer,
+        buffer.byteOffset,
+        buffer.byteLength,
+      );
+      const document = await getDocumentProxy(binaryDataArray);
 
       try {
         const docInfo = await getMeta(document);
@@ -150,17 +163,62 @@ export class PdfExtractorProvider {
       rawText: combinedText.slice(0, PdfExtractorProvider.TEXT_SCAN_LIMIT),
     };
 
+    // ── GROBID enrichment (optional, structured ML header extraction) ────────
+    // GROBID fills in missing fields that unpdf/regex heuristics miss.
+    // Requires GROBID Docker sidecar (lfoppiano/grobid:0.8.2-crf, Apache 2.0).
+    // Gracefully skipped if grobidClient is not injected or GROBID_ENABLED=false.
+    if (this.grobidClient) {
+      const needsEnrichment =
+        !metadata.title || !metadata.doi || !metadata.authors?.length;
+
+      if (needsEnrichment) {
+        try {
+          const grobidResult = await this.grobidClient.processHeaderDocument(buffer);
+          if (grobidResult) {
+            if (!metadata.title && grobidResult.title) {
+              metadata.title = grobidResult.title;
+            }
+            if (!metadata.doi && grobidResult.doi) {
+              metadata.doi = grobidResult.doi;
+            }
+            if (!metadata.arxivId && grobidResult.arxivId) {
+              metadata.arxivId = grobidResult.arxivId;
+            }
+            if ((!metadata.authors || metadata.authors.length === 0) && grobidResult.authors?.length) {
+              metadata.authors = grobidResult.authors;
+            }
+            if (!metadata.abstract && grobidResult.abstract) {
+              metadata.abstract = grobidResult.abstract;
+            }
+            if ((!metadata.keywords || metadata.keywords.length === 0) && grobidResult.keywords?.length) {
+              metadata.keywords = grobidResult.keywords;
+            }
+            if (!metadata.year && grobidResult.year) {
+              metadata.year = grobidResult.year;
+            }
+            if (!metadata.journal && grobidResult.journal) {
+              metadata.journal = grobidResult.journal;
+            }
+            this.logger.debug('GROBID enrichment applied to PDF metadata');
+          }
+        } catch (err: any) {
+          this.logger.warn(`GROBID enrichment failed (non-critical): ${err?.message}`);
+        }
+      }
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     return {
       metadata,
       pages,
     };
+
   }
 
   async extractMetadataFromUrl(fileUrl: string): Promise<ExtractedPdfMetadata> {
-    this.validateUrlSecurity(fileUrl);
-
     try {
-      const response = await fetch(fileUrl, {
+      const guard = this.ssrfGuard || new SsrfGuardService();
+      const response = await guard.safeFetch(fileUrl, {
         headers: { 'User-Agent': 'Flux-Extractor/1.0' },
       });
 

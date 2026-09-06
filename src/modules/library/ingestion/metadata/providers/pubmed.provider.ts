@@ -12,6 +12,7 @@ import {
   normalizeDoi,
   normalizePmcid,
   normalizePmid,
+  cleanBibliographicText,
 } from '../utils/metadata.utils';
 import { ProviderFetchError } from '../services/provider.executor';
 
@@ -52,27 +53,37 @@ export class PubMedProvider implements MetadataProvider {
     signal?: AbortSignal,
   ): Promise<ProviderResult | null> {
     const cleanPmid = normalizePmid(request.query);
-    if (!cleanPmid) return null;
+    const cleanPmcid = normalizePmcid(request.query);
+    if (!cleanPmid && !cleanPmcid) return null;
+
+    const isPmc = Boolean(cleanPmcid && !cleanPmid);
+    const targetId = isPmc ? cleanPmcid! : cleanPmid!;
 
     // 1. Try modern NCBI Citation API (fast, clean JSON, unaffected by eutils IP blocker)
     try {
-      const cslResult = await this.resolveViaCtxp(cleanPmid, signal);
+      const cslResult = await this.resolveViaCtxp(targetId, isPmc, signal);
       if (cslResult) return cslResult;
     } catch (err: any) {
       this.logger.debug(
-        `NCBI ctxp resolution failed for PMID ${cleanPmid}: ${err?.message}. Falling back to E-utilities.`,
+        `NCBI ctxp resolution failed for ${targetId}: ${err?.message}. Falling back to E-utilities.`,
       );
     }
 
-    // 2. Fallback to E-utilities with proper tool, email, and apiKey parameters
-    return this.resolveViaEutils(cleanPmid, signal);
+    // 2. Fallback to E-utilities with proper tool, email, and apiKey parameters (PMID only)
+    if (!isPmc) {
+      return this.resolveViaEutils(targetId, signal);
+    }
+    return null;
   }
 
   private async resolveViaCtxp(
-    cleanPmid: string,
+    id: string,
+    isPmc: boolean,
     signal?: AbortSignal,
   ): Promise<ProviderResult | null> {
-    let url = `${this.CTXP_BASE_URL}?format=csl&id=${encodeURIComponent(cleanPmid)}`;
+    const endpoint = isPmc ? 'pmc' : 'pubmed';
+    const numericId = isPmc ? id.replace(/^PMC/i, '') : id;
+    let url = `https://api.ncbi.nlm.nih.gov/lit/ctxp/v1/${endpoint}/?format=csl&id=${encodeURIComponent(numericId)}`;
     if (this.apiKey) {
       url += `&api_key=${encodeURIComponent(this.apiKey)}`;
     }
@@ -81,8 +92,7 @@ export class PubMedProvider implements MetadataProvider {
       headers: {
         'User-Agent':
           'FluxResearchPlatform/1.0 (mailto:contact@flux.academic; https://flux.study)',
-        Accept:
-          'application/vnd.citationstyles.csl+json, application/json, */*',
+        Accept: '*/*',
       },
       signal,
     });
@@ -90,7 +100,10 @@ export class PubMedProvider implements MetadataProvider {
     if (response.status === 404) return null;
     if (!response.ok) return null;
 
-    const contentType = response.headers.get('content-type') || '';
+    const contentType =
+      (typeof response.headers?.get === 'function'
+        ? response.headers.get('content-type')
+        : (response.headers as any)?.['content-type']) || '';
     if (contentType.includes('text/html')) return null;
 
     let data: any;
@@ -101,7 +114,7 @@ export class PubMedProvider implements MetadataProvider {
     }
 
     if (!data || !data.title) return null;
-    return this.transformCslPayload(data, cleanPmid);
+    return this.transformCslPayload(data, id, isPmc);
   }
 
   private async resolveViaEutils(
@@ -175,14 +188,13 @@ export class PubMedProvider implements MetadataProvider {
 
   private transformCslPayload(
     data: Record<string, any>,
-    cleanPmid: string,
+    id: string,
+    isPmc: boolean = false,
   ): ProviderResult {
     const rawTitle =
       typeof data.title === 'string' ? data.title : 'Untitled PubMed Article';
-    const title = rawTitle
-      .replace(/<[^>]*>/g, '')
-      .replace(/\.$/, '')
-      .trim();
+    const title =
+      cleanBibliographicText(rawTitle) || 'Untitled PubMed Article';
 
     const authors: string[] = [];
     const creators: Array<{
@@ -227,8 +239,19 @@ export class PubMedProvider implements MetadataProvider {
 
     const doi =
       typeof data.DOI === 'string' ? normalizeDoi(data.DOI) : undefined;
-    const pmcid =
-      typeof data.PMCID === 'string' ? normalizePmcid(data.PMCID) : undefined;
+    const resolvedPmcid =
+      typeof data.PMCID === 'string'
+        ? normalizePmcid(data.PMCID)
+        : isPmc
+          ? normalizePmcid(id)
+          : undefined;
+    const resolvedPmid =
+      typeof data.PMID === 'string' || typeof data.PMID === 'number'
+        ? String(data.PMID)
+        : !isPmc
+          ? id
+          : undefined;
+
     const journal =
       typeof data['container-title'] === 'string'
         ? data['container-title']
@@ -252,7 +275,9 @@ export class PubMedProvider implements MetadataProvider {
       .update(JSON.stringify(data))
       .digest('hex');
 
-    const canonicalUrl = `https://pubmed.ncbi.nlm.nih.gov/${cleanPmid}/`;
+    const canonicalUrl = isPmc
+      ? `https://www.ncbi.nlm.nih.gov/pmc/articles/${resolvedPmcid || id}/`
+      : `https://pubmed.ncbi.nlm.nih.gov/${resolvedPmid || id}/`;
 
     return {
       provider: this.id,
@@ -261,8 +286,8 @@ export class PubMedProvider implements MetadataProvider {
         authors,
         creators,
         year,
-        pmid: cleanPmid,
-        pmcid,
+        pmid: resolvedPmid,
+        pmcid: resolvedPmcid,
         doi,
         journal,
         journalAbbr,
@@ -275,15 +300,17 @@ export class PubMedProvider implements MetadataProvider {
         provenance: {
           originProvider: this.id,
           resolvedAt: new Date().toISOString(),
-          canonicalId: `pmid:${cleanPmid}`,
+          canonicalId: isPmc
+            ? `pmc:${resolvedPmcid || id}`
+            : `pmid:${resolvedPmid || id}`,
           canonicalUrl,
           confidenceScore: 0.98,
           rawSnapshotHash: rawVersion,
-          isOpenAccess: Boolean(pmcid),
+          isOpenAccess: Boolean(resolvedPmcid),
         },
       },
       confidence: 0.98,
-      identifier: cleanPmid,
+      identifier: resolvedPmid || resolvedPmcid || id,
       fetchedAt: new Date().toISOString(),
       rawVersion,
     };

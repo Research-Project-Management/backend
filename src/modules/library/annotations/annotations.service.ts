@@ -14,11 +14,13 @@ import {
   TransactionService,
   TransactionHelpers,
 } from '../outbox/transaction.service';
+import { AttachmentsService } from '../attachments/attachments.service';
+import { PrismaService } from '@/core/database/prisma.service';
 import type {
   UpsertSyncAnnotationCommand,
   DeleteSyncEntityCommand,
   UpsertSyncEntityResult,
-} from '../sync/ports/sync.port';
+} from '../common/types/sync.types';
 
 @Injectable()
 export class AnnotationsService {
@@ -27,6 +29,8 @@ export class AnnotationsService {
   constructor(
     private readonly annotationsRepo: AnnotationsRepository,
     private readonly libraryTx: TransactionService,
+    private readonly attachmentsService: AttachmentsService,
+    private readonly prisma: PrismaService,
   ) {}
 
   async getAnnotationsByAttachment(
@@ -34,21 +38,34 @@ export class AnnotationsService {
     attachmentId: string,
     pageIndex?: number,
   ) {
-    return this.annotationsRepo.findByAttachment(
+    await this.attachmentsService.assertAttachmentInWorkspace(
+      attachmentId,
       workspaceId,
+    );
+    return this.annotationsRepo.findByAttachment(
       attachmentId,
       pageIndex,
     );
   }
 
   async getAnnotation(workspaceId: string, id: string) {
-    return this.annotationsRepo.findById(workspaceId, id);
+    const annotation = await this.annotationsRepo.findById(id);
+    if (!annotation) return null;
+    await this.attachmentsService.assertAttachmentInWorkspace(
+      annotation.attachmentId,
+      workspaceId,
+    );
+    return annotation;
   }
 
   async createAnnotation(workspaceId: string, data: CreateAnnotationData) {
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const annotation = await this.annotationsRepo.create(
+      await this.attachmentsService.assertAttachmentInWorkspace(
+        data.attachmentId,
         workspaceId,
+        tx,
+      );
+      const annotation = await this.annotationsRepo.create(
         data,
         tx,
       );
@@ -72,15 +89,55 @@ export class AnnotationsService {
     });
   }
 
+  private async assertCanModifyAnnotation(
+    workspaceId: string,
+    annotation: { authorId?: string | null },
+    userId?: string,
+  ) {
+    if (!userId) {
+      throw new ForbiddenException('User is not authenticated');
+    }
+    // Author can always edit/delete their own annotation
+    if (annotation.authorId && annotation.authorId === userId) {
+      return;
+    }
+    // Otherwise user must have admin or owner role in the workspace
+    const member = await this.prisma.workspaceMember.findUnique({
+      where: {
+        workspaceId_userId: { workspaceId, userId },
+      },
+    });
+    if (member?.role === 'owner' || member?.role === 'admin') {
+      return;
+    }
+    throw new ForbiddenException(
+      'Only the annotation author or workspace admin/owner can modify or delete this annotation',
+    );
+  }
+
   async updateAnnotation(
     workspaceId: string,
     id: string,
     expectedVersion: number,
     data: UpdateAnnotationData,
+    userId?: string,
   ) {
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const updated = await this.annotationsRepo.update(
+      const existing = await this.annotationsRepo.findById(id, tx);
+      if (!existing) {
+        throw new NotFoundException(`Annotation ${id} not found`);
+      }
+      await this.attachmentsService.assertAttachmentInWorkspace(
+        existing.attachmentId,
         workspaceId,
+        tx,
+      );
+
+      if (userId) {
+        await this.assertCanModifyAnnotation(workspaceId, existing, userId);
+      }
+
+      const updated = await this.annotationsRepo.update(
         id,
         expectedVersion,
         data,
@@ -110,10 +167,24 @@ export class AnnotationsService {
     workspaceId: string,
     id: string,
     expectedVersion?: number,
+    userId?: string,
   ) {
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const deleted = await this.annotationsRepo.softDelete(
+      const existing = await this.annotationsRepo.findById(id, tx);
+      if (!existing) {
+        throw new NotFoundException(`Annotation ${id} not found`);
+      }
+      await this.attachmentsService.assertAttachmentInWorkspace(
+        existing.attachmentId,
         workspaceId,
+        tx,
+      );
+
+      if (userId) {
+        await this.assertCanModifyAnnotation(workspaceId, existing, userId);
+      }
+
+      const deleted = await this.annotationsRepo.softDelete(
         id,
         expectedVersion,
         tx,
@@ -148,7 +219,6 @@ export class AnnotationsService {
     if (command.existingId) {
       const existing = await tx.annotation.findUnique({
         where: { id: command.existingId },
-        include: { attachment: { include: { catalogItem: true } } },
       });
 
       if (!existing) {
@@ -157,11 +227,11 @@ export class AnnotationsService {
         );
       }
 
-      if (existing.attachment.catalogItem.workspaceId !== command.workspaceId) {
-        throw new ForbiddenException(
-          `Annotation ${command.existingId} does not belong to workspace ${command.workspaceId}`,
-        );
-      }
+      await this.attachmentsService.assertAttachmentInWorkspace(
+        existing.attachmentId,
+        command.workspaceId,
+        tx,
+      );
 
       const updated = await tx.annotation.update({
         where: { id: command.existingId },
@@ -189,16 +259,11 @@ export class AnnotationsService {
         );
       }
 
-      const att = await tx.catalogAttachment.findUnique({
-        where: { id: command.attachmentId },
-        include: { catalogItem: true },
-      });
-
-      if (!att || att.catalogItem.workspaceId !== command.workspaceId) {
-        throw new NotFoundException(
-          `Attachment ${command.attachmentId} not found in workspace ${command.workspaceId}`,
-        );
-      }
+      await this.attachmentsService.assertAttachmentInWorkspace(
+        command.attachmentId,
+        command.workspaceId,
+        tx,
+      );
 
       const created = await tx.annotation.create({
         data: {
@@ -242,15 +307,14 @@ export class AnnotationsService {
     const { workspaceId, entityId } = command;
     const existing = await tx.annotation.findUnique({
       where: { id: entityId },
-      include: { attachment: { include: { catalogItem: true } } },
     });
     if (!existing) return;
 
-    if (existing.attachment.catalogItem.workspaceId !== workspaceId) {
-      throw new ForbiddenException(
-        `Annotation ${entityId} does not belong to workspace ${workspaceId}`,
-      );
-    }
+    await this.attachmentsService.assertAttachmentInWorkspace(
+      existing.attachmentId,
+      workspaceId,
+      tx,
+    );
 
     await tx.annotation.update({
       where: { id: entityId },
@@ -264,3 +328,4 @@ export class AnnotationsService {
     });
   }
 }
+

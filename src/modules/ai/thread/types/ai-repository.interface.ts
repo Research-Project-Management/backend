@@ -19,6 +19,10 @@ export interface IAiRepository {
     projectId?: string | null,
   ): Promise<ChatWithMessages[]>;
   findChatById(chatId: string): Promise<ChatWithMessages | null>;
+  findChatByIdAndUser(
+    chatId: string,
+    userId: string,
+  ): Promise<ChatWithMessages | null>;
   findPageChat(
     pageId: string,
     workspaceSlug: string,

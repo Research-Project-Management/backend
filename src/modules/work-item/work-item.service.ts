@@ -458,14 +458,14 @@ export class WorkItemService {
   async duplicateTask(
     taskId: string,
     userId: string,
-    targetProjectId?: string,
+    destinationProjectId?: string,
   ) {
     const source = await this.workItemRepo.findTaskById(taskId);
     if (!source) {
       throw new NotFoundException('Task not found');
     }
 
-    const projectId = targetProjectId || source.projectId;
+    const projectId = destinationProjectId || source.projectId;
     const { identifier, sequenceNumber } =
       await this.workItemRepo.nextProjectTaskIdentifier(projectId);
 

@@ -82,8 +82,11 @@ export class WorklogController {
   @Delete('worklogs/:id')
   @ApiOperation({ summary: 'Delete a worklog entry' })
   @ApiResponse({ status: 200, description: 'Worklog deletion confirmation' })
-  async deleteWorklog(@Param('id') id: string) {
-    return this.worklogService.deleteWorklog(id);
+  async deleteWorklog(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.worklogService.deleteWorklog(id, userId);
   }
 
   @Put('worklogs/:id')
@@ -91,7 +94,11 @@ export class WorklogController {
     summary: 'Update a worklog entry (hours, description, date, task)',
   })
   @ApiResponse({ status: 200, description: 'Updated worklog entry' })
-  async updateWorklog(@Param('id') id: string, @Body() dto: UpdateWorklogDto) {
-    return this.worklogService.updateWorklog(id, dto);
+  async updateWorklog(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+    @Body() dto: UpdateWorklogDto,
+  ) {
+    return this.worklogService.updateWorklog(id, userId, dto);
   }
 }

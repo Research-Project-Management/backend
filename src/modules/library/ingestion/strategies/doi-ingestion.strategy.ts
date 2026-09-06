@@ -4,7 +4,10 @@ import { DoiParser } from '../parsers/doi.parser';
 import { METADATA_PORT, MetadataPort } from '../metadata/types/metadata.types';
 import { CatalogService } from '../../items/items.service';
 import { TransactionService } from '../../outbox/transaction.service';
-import { CatalogItemMapper } from '../../items/items.mapper';
+import { CatalogItemMapper } from '../../items/mappers/items.mapper';
+
+
+
 import { toCatalogItemData } from '../stages/commit.stage';
 import { IngestionCommand, IngestionResult } from '../types/ingestion.types';
 import { IngestionStatus, Prisma } from '@prisma/client';
@@ -66,10 +69,15 @@ export class DoiIngestionStrategy implements IIngestionStrategy<
 
         if (claim?.catalogItem) {
           if (claim.catalogItem.deletedAt) {
-            const restored = await this.prisma.catalogItem.update({
-              where: { id: claim.catalogItem.id },
-              data: { deletedAt: null },
-            });
+            const restored = this.catalogService
+              ? await this.catalogService.restoreItem(
+                  workspaceId,
+                  claim.catalogItem.id,
+                )
+              : await this.prisma.catalogItem.update({
+                  where: { id: claim.catalogItem.id },
+                  data: { deletedAt: null },
+                });
             const result: IngestionResult = {
               runId,
               status: 'completed',
@@ -126,10 +134,15 @@ export class DoiIngestionStrategy implements IIngestionStrategy<
 
         if (existing) {
           if (existing.deletedAt) {
-            const restored = await this.prisma.catalogItem.update({
-              where: { id: existing.id },
-              data: { deletedAt: null },
-            });
+            const restored = this.catalogService
+              ? await this.catalogService.restoreItem(
+                  workspaceId,
+                  existing.id,
+                )
+              : await this.prisma.catalogItem.update({
+                  where: { id: existing.id },
+                  data: { deletedAt: null },
+                });
 
             await this.prisma.libraryDedupClaim
               .upsert({
@@ -329,6 +342,33 @@ export class DoiIngestionStrategy implements IIngestionStrategy<
                 include: { catalogItem: true },
               });
               if (raceClaim?.catalogItem) {
+                if (raceClaim.catalogItem.deletedAt) {
+                  const restored = await tx.catalogItem.update({
+                    where: { id: raceClaim.catalogItem.id },
+                    data: {
+                      deletedAt: null,
+                      version: { increment: 1 },
+                    },
+                  });
+                  await helpers.appendChange(workspaceId, {
+                    entityType: 'CatalogItem',
+                    entityId: raceClaim.catalogItem.id,
+                    action: 'update',
+                    version: restored.version,
+                    data: restored,
+                  });
+                  await helpers.publishOutbox(
+                    workspaceId,
+                    raceClaim.catalogItem.id,
+                    'library.item.restored',
+                    {
+                      id: raceClaim.catalogItem.id,
+                      restoredAt: new Date(),
+                    },
+                  );
+                  raceClaim.catalogItem.deletedAt = null;
+                  raceClaim.catalogItem.version = restored.version;
+                }
                 isDedup = true;
                 return raceClaim.catalogItem;
               }

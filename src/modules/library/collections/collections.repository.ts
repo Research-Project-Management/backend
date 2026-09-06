@@ -1,8 +1,9 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { Prisma } from '@prisma/client';
-import { VersionMismatchException } from '../items/items.errors';
-import { CollectionDeleteStrategy } from './types/collection.types';
+import { VersionMismatchException } from '../common/errors/version-mismatch.exception';
+import { CollectionDeleteStrategy } from './types/collections.types';
+
 
 export interface CreateCollectionInput {
   name: string;
@@ -349,6 +350,6 @@ export class CollectionsRepository {
       orderBy: { sortOrder: 'asc' },
     });
 
-    return items.map((i) => i.catalogItemId);
+    return items.map((i: { catalogItemId: string }) => i.catalogItemId);
   }
 }

@@ -4,26 +4,24 @@ import {
   BadRequestException,
   NotFoundException,
   Optional,
+  Inject,
 } from '@nestjs/common';
 import { PrismaService } from '../../../core/database/prisma.service';
+import { resolveTenantWorkspaceId } from '../../../core/utils/tenant.util';
 import { CitationService } from '../citation/citation.service';
-import { ExportLibraryDto, ExportFormatType } from './dto/export.dto';
-import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import { CslJsonMapper } from '../citation/mappers/csl-json.mapper';
+import { ExportLibraryDto, ExportFormatType } from './dto/exports.dto';
+import { PDFDocument, StandardFonts } from 'pdf-lib';
+import { ITEM_READ_PORT, IItemReadPort } from '../items/ports/items.ports';
 
-export interface BurnableAnnotation {
-  pageIndex: number;
-  type?: string;
-  color?: string;
-  quoteText?: string;
-  comment?: string;
-  rectCoords?: {
-    x?: number;
-    y?: number;
-    width?: number;
-    height?: number;
-    rects?: Array<{ x: number; y: number; width: number; height: number }>;
-  };
-}
+import { ItemsService } from '../items/items.service';
+import { AnnotationsService } from '../annotations/annotations.service';
+import {
+  PdfBakerService,
+  BurnableAnnotation,
+} from './services/pdf-baker.service';
+
+export { BurnableAnnotation };
 
 export interface ExportResult {
   format: ExportFormatType;
@@ -31,7 +29,14 @@ export interface ExportResult {
   mimeType: string;
   content: string;
   itemCount: number;
+  /** True when the library has more items than the export cap (1000). */
+  truncated: boolean;
 }
+
+/** Maximum number of items exported in a single request. */
+const EXPORT_MAX_ITEMS = 1000;
+/** Cursor-page size used when fetching from the DB. */
+const EXPORT_CHUNK_SIZE = 200;
 
 @Injectable()
 export class ExportsService {
@@ -40,46 +45,127 @@ export class ExportsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly citationService: CitationService,
+    @Optional()
+    @Inject(ITEM_READ_PORT)
+    private readonly itemReadPort?: IItemReadPort,
+    @Optional()
+    @Inject(ItemsService)
+    private readonly itemsService?: ItemsService,
+    @Optional()
+    private readonly annotationsService?: AnnotationsService,
+    @Optional()
+    private readonly pdfBakerService: PdfBakerService = new PdfBakerService(),
   ) {}
 
+  private resolveWorkspaceId(workspaceId: string): Promise<string> {
+    return resolveTenantWorkspaceId(this.prisma, workspaceId);
+  }
+
+  /**
+   * Fetches items in cursor-based chunks to avoid loading the entire library
+   * into Node.js RAM in a single query.
+   *
+   * @param where  Prisma `CatalogItem` where clause.
+   * @param maxItems  Hard cap on total items returned (default: EXPORT_MAX_ITEMS).
+   * @returns `{ items, truncated }` — `truncated` is true when the library
+   *          contained more rows than `maxItems`.
+   */
+  private async fetchItemsInChunks(
+    where: any,
+    maxItems: number = EXPORT_MAX_ITEMS,
+  ): Promise<{ items: any[]; truncated: boolean }> {
+    const collected: any[] = [];
+    let cursor: string | undefined;
+    let truncated = false;
+
+    while (collected.length < maxItems) {
+      const remaining = maxItems - collected.length;
+      const pageSize = Math.min(EXPORT_CHUNK_SIZE, remaining);
+      const take = pageSize + 1; // +1 sentinel to detect if DB has more rows than this page
+
+      const chunk = await this.prisma.catalogItem.findMany({
+        where,
+        include: {
+          contributors: { orderBy: { orderIndex: 'asc' } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+
+      // hasMore: DB returned more rows than the page we requested → still more data in DB
+      const hasMore = chunk.length > pageSize;
+      if (hasMore) {
+        chunk.pop(); // discard the sentinel overflow row
+      }
+
+      collected.push(...chunk);
+
+      if (chunk.length === 0) break;
+
+      // truncated: we just consumed the last available slot (remaining === pageSize)
+      // and the DB still has more rows beyond this page → cap was hit
+      if (hasMore && remaining <= EXPORT_CHUNK_SIZE) {
+        truncated = true;
+        break;
+      }
+
+      if (!hasMore) break; // no more rows in DB
+
+      cursor = chunk[chunk.length - 1].id;
+    }
+
+    return { items: collected, truncated };
+  }
+
   async exportLibrary(
-    workspaceId: string,
+    rawWorkspaceId: string,
     dto: ExportLibraryDto,
   ): Promise<ExportResult> {
-    const items = await this.prisma.catalogItem.findMany({
-      where: {
-        workspaceId,
-        deletedAt: null,
-        ...(dto.itemIds && dto.itemIds.length > 0
-          ? { id: { in: dto.itemIds } }
-          : {}),
-        ...(dto.collectionId
-          ? { collectionItems: { some: { collectionId: dto.collectionId } } }
-          : {}),
-        ...(dto.tagId ? { itemTags: { some: { tagId: dto.tagId } } } : {}),
-      },
-      include: {
-        contributors: { orderBy: { orderIndex: 'asc' } },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 5000,
-    });
+    const workspaceId = await this.resolveWorkspaceId(rawWorkspaceId);
 
-    // Helper: derive author name list from contributors
-    const getAuthorNames = (item: (typeof items)[0]) =>
-      item.contributors
-        .filter((c) => c.creatorType === 'author')
-        .map(
-          (c) =>
-            c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+    const where = {
+      workspaceId,
+      deletedAt: null,
+      ...(dto.itemIds && dto.itemIds.length > 0
+        ? { id: { in: dto.itemIds } }
+        : {}),
+      ...(dto.collectionId
+        ? { collectionItems: { some: { collectionId: dto.collectionId } } }
+        : {}),
+      ...(dto.tagId ? { itemTags: { some: { tagId: dto.tagId } } } : {}),
+    };
+
+    // When the caller specifies explicit itemIds, fetch them directly (already scoped).
+    // Otherwise use cursor-based chunking to avoid OOM on large libraries.
+    let items: any[];
+    let truncated: boolean;
+
+    if (dto.itemIds && dto.itemIds.length > 0) {
+      items = this.itemReadPort
+        ? await this.itemReadPort.findByIds(workspaceId, dto.itemIds)
+        : await this.prisma.catalogItem.findMany({
+            where,
+            include: { contributors: { orderBy: { orderIndex: 'asc' } } },
+            orderBy: { createdAt: 'desc' },
+          });
+      truncated = false;
+    } else {
+      ({ items, truncated } = await this.fetchItemsInChunks(where));
+      if (truncated) {
+        this.logger.warn(
+          `exportLibrary: workspace=${workspaceId} has >${EXPORT_MAX_ITEMS} items; export truncated to ${EXPORT_MAX_ITEMS}.`,
         );
+      }
+    }
 
     const timestamp = new Date().toISOString().split('T')[0];
+
 
     switch (dto.format) {
       case 'bibtex': {
         const entries = items.map((it) => {
-          const authors = getAuthorNames(it);
+          const authors = CslJsonMapper.getAuthorNames(it);
           const res = this.citationService.formatItem(
             {
               id: it.id,
@@ -105,12 +191,13 @@ export class ExportsService {
           mimeType: 'application/x-bibtex',
           content: entries.join('\n\n'),
           itemCount: items.length,
+          truncated,
         };
       }
 
       case 'ris': {
         const entries = items.map((it) => {
-          const authors = getAuthorNames(it);
+          const authors = CslJsonMapper.getAuthorNames(it);
           const res = this.citationService.formatItem(
             {
               id: it.id,
@@ -135,30 +222,12 @@ export class ExportsService {
           mimeType: 'application/x-research-info-systems',
           content: entries.join('\n'),
           itemCount: items.length,
+          truncated,
         };
       }
 
       case 'csl-json': {
-        const cslList = items.map((it) => ({
-          id: it.citationKey || it.id,
-          type:
-            it.itemType === 'conferencePaper'
-              ? 'paper-conference'
-              : 'article-journal',
-          title: it.title,
-          author: getAuthorNames(it).map((a) => {
-            const parts = a.trim().split(/\s+/);
-            const family = parts.pop() || '';
-            const given = parts.join(' ');
-            return { given, family };
-          }),
-          issued: it.year ? { 'date-parts': [[it.year]] } : undefined,
-          'container-title': it.publicationTitle ?? undefined,
-          volume: it.volume ?? undefined,
-          page: it.pages ?? undefined,
-          DOI: it.doi ?? undefined,
-          URL: it.url ?? undefined,
-        }));
+        const cslList = items.map((it) => CslJsonMapper.toCsl(it));
 
         return {
           format: 'csl-json',
@@ -166,6 +235,7 @@ export class ExportsService {
           mimeType: 'application/json',
           content: JSON.stringify(cslList, null, 2),
           itemCount: items.length,
+          truncated,
         };
       }
 
@@ -182,7 +252,7 @@ export class ExportsService {
         const rows = items.map((it) => [
           `"${it.id}"`,
           `"${(it.title || '').replace(/"/g, '""')}"`,
-          `"${getAuthorNames(it).join('; ').replace(/"/g, '""')}"`,
+          `"${CslJsonMapper.getAuthorNames(it).join('; ').replace(/"/g, '""')}"`,
           it.year || '',
           `"${(it.publicationTitle || '').replace(/"/g, '""')}"`,
           `"${it.doi || ''}"`,
@@ -200,15 +270,16 @@ export class ExportsService {
           mimeType: 'text/csv',
           content: csvContent,
           itemCount: items.length,
+          truncated,
         };
       }
 
       case 'markdown': {
         const mdLines = [`# Library Export (${timestamp})\n`];
         items.forEach((it, idx) => {
-          const auth = getAuthorNames(it).join(', ') || 'Unknown Authors';
+          const auth = CslJsonMapper.getAuthorNames(it).join(', ') || 'Unknown Authors';
           const yr = it.year ? ` (${it.year})` : '';
-          mdLines.push(`${idx + 1}. **${it.title}** â€” *${auth}*${yr}`);
+          mdLines.push(`${idx + 1}. **${it.title}** — *${auth}*${yr}`);
           if (it.publicationTitle)
             mdLines.push(`   *Published in:* ${it.publicationTitle}`);
           if (it.doi)
@@ -222,6 +293,7 @@ export class ExportsService {
           mimeType: 'text/markdown',
           content: mdLines.join('\n'),
           itemCount: items.length,
+          truncated,
         };
       }
 
@@ -232,7 +304,8 @@ export class ExportsService {
     }
   }
 
-  async exportBundle(workspaceId: string, collectionId: string) {
+  async exportBundle(rawWorkspaceId: string, collectionId: string) {
+    const workspaceId = await this.resolveWorkspaceId(rawWorkspaceId);
     const collection = await this.prisma.collection.findFirst({
       where: { id: collectionId, workspaceId, deletedAt: null },
     });
@@ -251,6 +324,7 @@ export class ExportsService {
         attachments: true,
       },
       orderBy: { createdAt: 'desc' },
+      take: 2000,
     });
 
     const bibtexRes = await this.exportLibrary(workspaceId, {
@@ -265,7 +339,7 @@ export class ExportsService {
       fileUrl: string;
     }> = [];
     for (const it of items) {
-      for (const att of it.attachments) {
+      for (const att of it.attachments || []) {
         files.push({
           itemId: it.id,
           title: it.title,
@@ -291,107 +365,55 @@ export class ExportsService {
     rawPdfBuffer: Buffer | Uint8Array,
     annotations: BurnableAnnotation[],
   ): Promise<Uint8Array> {
-    const pdfDoc = await PDFDocument.load(rawPdfBuffer);
-    const pages = pdfDoc.getPages();
-    const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
-
-    for (const ann of annotations) {
-      if (ann.pageIndex < 0 || ann.pageIndex >= pages.length) {
-        continue;
-      }
-
-      const page = pages[ann.pageIndex];
-      const { height: pageHeight } = page.getSize();
-      const highlightColor = this.parseColor(ann.color);
-
-      // 1. Draw Bounding Rectangles / Highlights
-      const rectList: Array<{
-        x: number;
-        y: number;
-        width: number;
-        height: number;
-      }> = [];
-      if (ann.rectCoords?.rects && Array.isArray(ann.rectCoords.rects)) {
-        rectList.push(...ann.rectCoords.rects);
-      } else if (
-        ann.rectCoords?.x !== undefined &&
-        ann.rectCoords?.y !== undefined &&
-        ann.rectCoords?.width !== undefined &&
-        ann.rectCoords?.height !== undefined
-      ) {
-        rectList.push({
-          x: ann.rectCoords.x,
-          y: ann.rectCoords.y,
-          width: ann.rectCoords.width,
-          height: ann.rectCoords.height,
-        });
-      }
-
-      for (const r of rectList) {
-        // Adjust Y coordinates if coordinate origin is top-left
-        const adjustedY = r.y > pageHeight ? pageHeight - r.y : r.y;
-        page.drawRectangle({
-          x: Math.max(0, r.x),
-          y: Math.max(0, adjustedY),
-          width: Math.max(1, r.width),
-          height: Math.max(1, r.height),
-          color: highlightColor,
-          opacity: 0.35,
-        });
-      }
-
-      // 2. Draw Sticky Note / Comment Margin Indicator
-      if (ann.comment && ann.comment.trim()) {
-        const commentY = rectList[0]?.y ?? 40;
-        const safeY = Math.min(Math.max(20, commentY), pageHeight - 40);
-
-        page.drawText(`[Note: ${ann.comment.trim().slice(0, 80)}]`, {
-          x: 20,
-          y: safeY,
-          size: 8,
-          font: helvetica,
-          color: rgb(0.2, 0.2, 0.2),
-        });
-      }
-    }
-
-    return pdfDoc.save();
+    return this.pdfBakerService.burnAnnotationsToPdf(rawPdfBuffer, annotations);
   }
 
   /**
    * Exports an annotated PDF for a specific CatalogItem.
    */
   async exportAnnotatedItemPdf(
-    workspaceId: string,
+    rawWorkspaceId: string,
     itemId: string,
     rawPdfBuffer?: Buffer,
   ): Promise<{ filename: string; buffer: Uint8Array }> {
-    const item = await this.prisma.catalogItem.findFirst({
-      where: { id: itemId, workspaceId, deletedAt: null },
-      include: {
-        attachments: true,
-      },
-    });
+    const workspaceId = await this.resolveWorkspaceId(rawWorkspaceId);
+    const item: any = this.itemReadPort
+      ? await this.itemReadPort.findById(workspaceId, itemId)
+      : await this.prisma.catalogItem.findFirst({
+          where: { id: itemId, workspaceId, deletedAt: null },
+          include: {
+            attachments: true,
+          },
+        });
 
     if (!item) {
       throw new NotFoundException('Catalog item not found');
     }
 
     const pdfAttachment =
-      item.attachments.find((a) => a.mimeType === 'application/pdf') ||
-      item.attachments[0];
+      Array.isArray(item.attachments)
+        ? item.attachments.find((a: any) => a.mimeType === 'application/pdf') ||
+          item.attachments[0]
+        : undefined;
 
     if (!pdfAttachment && !rawPdfBuffer) {
       throw new NotFoundException('No PDF attachment found for this item');
     }
 
-    const annotations = await this.prisma.annotation.findMany({
-      where: {
-        attachmentId: pdfAttachment?.id,
-        deletedAt: null,
-      },
-      orderBy: { pageIndex: 'asc' },
-    });
+    const annotations =
+      this.annotationsService && pdfAttachment?.id
+        ? await this.annotationsService.getAnnotationsByAttachment(
+            workspaceId,
+            pdfAttachment.id,
+          )
+        : await this.prisma.annotation.findMany({
+            where: {
+              attachmentId: pdfAttachment?.id,
+              deletedAt: null,
+            },
+            orderBy: { pageIndex: 'asc' },
+          });
+
 
     // If no buffer passed, create minimal placeholder PDF if empty, or throw
     let bufferToUse = rawPdfBuffer;
@@ -417,16 +439,6 @@ export class ExportsService {
       filename: safeFilename,
       buffer: burned,
     };
-  }
-
-  private parseColor(colorStr?: string) {
-    if (!colorStr) return rgb(1, 0.9, 0.2); // Default yellow highlight
-    const s = colorStr.toLowerCase().trim();
-    if (s === 'green' || s.includes('#22c55e')) return rgb(0.2, 0.8, 0.4);
-    if (s === 'blue' || s.includes('#3b82f6')) return rgb(0.3, 0.6, 1);
-    if (s === 'pink' || s.includes('#ec4899')) return rgb(1, 0.4, 0.7);
-    if (s === 'orange' || s.includes('#f97316')) return rgb(1, 0.6, 0.2);
-    return rgb(1, 0.9, 0.2);
   }
 }
 

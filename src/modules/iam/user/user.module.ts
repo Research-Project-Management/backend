@@ -7,6 +7,6 @@ import { FederatedIdentityRepository } from './federated-identity.repository';
 @Module({
   controllers: [UserController],
   providers: [UserService, UserRepository, FederatedIdentityRepository],
-  exports: [UserService, UserRepository, FederatedIdentityRepository],
+  exports: [UserService],
 })
 export class UserModule {}

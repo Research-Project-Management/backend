@@ -8,27 +8,11 @@ import {
   YourWorkSummaryDto,
   WorkspaceStatsResponse,
 } from './dto/analytics.dto';
-
-interface ActivityFeedItem {
-  id: string;
-  entityType: string;
-  verb: string;
-  field?: string | null;
-  oldValue?: string | null;
-  newValue?: string | null;
-  actorId: string;
-  projectId?: string | null;
-  createdAt: Date;
-  entityId: string;
-  actor?: {
-    name?: string | null;
-    avatar?: string | null;
-  } | null;
-  project?: {
-    id: string;
-    name: string;
-  } | null;
-}
+import { ActivityFeedItem } from './types/analytics.types';
+import {
+  aggregateProjectDistributions,
+  calculateCycleMetrics,
+} from './utils/analytics.utils';
 
 @Injectable()
 export class AnalyticsService {
@@ -51,41 +35,7 @@ export class AnalyticsService {
       async () => {
         const tasks =
           await this.analyticsRepo.findProjectTasksWithAssignees(projectId);
-
-        const state: Record<string, number> = {};
-        const priority: Record<string, number> = {};
-        const assigneeMap = new Map<
-          string,
-          { userId: string; name: string; avatar: string | null; count: number }
-        >();
-
-        for (const task of tasks) {
-          // State / Column distribution
-          const column = task.columnId || 'unassigned';
-          state[column] = (state[column] || 0) + 1;
-
-          // Priority distribution
-          const prio = task.priority || 'none';
-          priority[prio] = (priority[prio] || 0) + 1;
-
-          // Assignee distribution
-          if (task.assigneeId && task.assignee) {
-            const existing = assigneeMap.get(task.assigneeId) || {
-              userId: task.assigneeId,
-              name: task.assignee.name || 'Anonymous',
-              avatar: task.assignee.avatar,
-              count: 0,
-            };
-            existing.count += 1;
-            assigneeMap.set(task.assigneeId, existing);
-          }
-        }
-
-        return {
-          state,
-          priority,
-          assignee: Array.from(assigneeMap.values()),
-        };
+        return aggregateProjectDistributions(tasks);
       },
       300, // 5 min TTL
     );
@@ -96,29 +46,7 @@ export class AnalyticsService {
    */
   async getCycleAnalytics(cycleId: string): Promise<CycleAnalyticsDto> {
     const tasks = await this.analyticsRepo.findCycleTasks(cycleId);
-    const totalTasks = tasks.length;
-    const completedTasks = tasks.filter(
-      (taskItem) => taskItem.completed,
-    ).length;
-    const inProgressTasks = tasks.filter(
-      (taskItem) =>
-        taskItem.columnId === 'doing' ||
-        taskItem.columnId === 'in_progress' ||
-        taskItem.columnId === 'review' ||
-        taskItem.columnId === 'in_review',
-    ).length;
-    const pendingTasks = totalTasks - completedTasks - inProgressTasks;
-    const completionRate =
-      totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
-
-    return {
-      cycleId,
-      totalTasks,
-      completedTasks,
-      inProgressTasks,
-      pendingTasks,
-      completionRate,
-    };
+    return calculateCycleMetrics(cycleId, tasks);
   }
 
   /**

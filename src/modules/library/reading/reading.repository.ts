@@ -11,18 +11,6 @@ export class ReadingRepository {
     return tx ?? this.prisma;
   }
 
-  async findItemInWorkspace(
-    workspaceId: string,
-    itemId: string,
-    tx?: Prisma.TransactionClient,
-  ) {
-    const client = this.getClient(tx);
-    return client.catalogItem.findFirst({
-      where: { id: itemId, workspaceId, deletedAt: null },
-      select: { id: true, workspaceId: true, title: true },
-    });
-  }
-
   async findState(
     workspaceId: string,
     itemId: string,

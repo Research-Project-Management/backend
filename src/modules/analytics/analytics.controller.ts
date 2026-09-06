@@ -15,7 +15,7 @@ import { ProjectRoles } from '@/modules/iam/authz/decorators/project-roles.decor
 export class AnalyticsController {
   constructor(private readonly analyticsService: AnalyticsService) {}
 
-  @Get('projects/:projectId')
+  @Get(['projects/:projectId', 'project/:projectId'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   @ApiOperation({
@@ -25,7 +25,7 @@ export class AnalyticsController {
     return this.analyticsService.getProjectAnalytics(projectId);
   }
 
-  @Get('cycles/:cycleId')
+  @Get(['cycles/:cycleId', 'cycle/:cycleId'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get cycle burndown and velocity analytics' })
@@ -33,7 +33,11 @@ export class AnalyticsController {
     return this.analyticsService.getCycleAnalytics(cycleId);
   }
 
-  @Get(['your-work/:workspaceId', 'workspaces/:workspaceId/your-work'])
+  @Get([
+    'your-work/:workspaceId',
+    'workspaces/:workspaceId/your-work',
+    'workspace/:workspaceId/your-work',
+  ])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'Get user summary workload and metrics' })
@@ -44,7 +48,10 @@ export class AnalyticsController {
     return this.analyticsService.getYourWork(workspaceId, userId);
   }
 
-  @Get('workspaces/:workspaceId/overview')
+  @Get([
+    'workspaces/:workspaceId/overview',
+    'workspace/:workspaceId/overview',
+  ])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'Get workspace aggregate metrics overview' })

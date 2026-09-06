@@ -11,7 +11,9 @@ import {
   normalizeIssn,
   normalizeTags as canonicalNormalizeTags,
 } from '../metadata/utils/metadata.utils';
-import { parseCreatorString } from '../../items/creator-parser.util';
+import { parseCreatorString } from '../../items/utils/items.utils';
+
+
 
 @Injectable()
 export class NormalizationPolicy {

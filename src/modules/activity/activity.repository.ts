@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
+import { buildWorkspaceIdentifierWhere, isUuid } from '@/core/utils/tenant.util';
 import { DomainActivityEvent } from './events/activity.events';
 import { EntityType, ActivityEvent } from '@prisma/client';
 import {
@@ -32,14 +33,7 @@ export class ActivityRepository implements IActivityRepository {
 
   async resolveWorkspace(workspaceIdOrSlug: string) {
     return this.prisma.workspace.findFirst({
-      where: {
-        OR: [
-          { id: workspaceIdOrSlug },
-          { slug: workspaceIdOrSlug },
-          { url: workspaceIdOrSlug },
-        ],
-        deletedAt: null,
-      },
+      where: buildWorkspaceIdentifierWhere(workspaceIdOrSlug),
       select: { id: true },
     });
   }
@@ -54,12 +48,15 @@ export class ActivityRepository implements IActivityRepository {
     },
   ): Promise<{ items: ActivityEventWithActor[]; total: number }> {
     const ws = await this.resolveWorkspace(workspaceId);
-    const targetWsId = ws?.id || workspaceId;
+    const canonicalWorkspaceId =
+      ws?.id || (isUuid(workspaceId) ? workspaceId : null);
+    if (!canonicalWorkspaceId) return { items: [], total: 0 };
+
     const limit = options?.limit ?? 50;
     const offset = options?.offset ?? 0;
 
-    const where: any = { workspaceId: targetWsId };
-    if (options?.projectId) {
+    const where: any = { workspaceId: canonicalWorkspaceId };
+    if (options?.projectId && isUuid(options.projectId)) {
       where.projectId = options.projectId;
     }
     if (options?.entityType) {
@@ -88,6 +85,7 @@ export class ActivityRepository implements IActivityRepository {
     entityId: string,
     limit = 50,
   ): Promise<ActivityEventWithActor[]> {
+    if (!isUuid(entityId)) return [];
     return this.prisma.activityEvent.findMany({
       where: {
         entityType,
@@ -108,10 +106,13 @@ export class ActivityRepository implements IActivityRepository {
     limit = 50,
   ): Promise<ActivityEvent[]> {
     const ws = await this.resolveWorkspace(workspaceId);
-    const targetWsId = ws?.id || workspaceId;
+    const canonicalWorkspaceId =
+      ws?.id || (isUuid(workspaceId) ? workspaceId : null);
+    if (!canonicalWorkspaceId || !isUuid(actorId)) return [];
+
     return this.prisma.activityEvent.findMany({
       where: {
-        workspaceId: targetWsId,
+        workspaceId: canonicalWorkspaceId,
         actorId,
       },
       orderBy: { createdAt: 'desc' },
@@ -128,22 +129,26 @@ export class ActivityRepository implements IActivityRepository {
     paperIds: string[],
     pageIds: string[],
   ): Promise<Map<string, string>> {
+    const validTaskIds = taskIds.filter(isUuid);
+    const validPaperIds = paperIds.filter(isUuid);
+    const validPageIds = pageIds.filter(isUuid);
+
     const [tasks, papers, pages] = await Promise.all([
-      taskIds.length
+      validTaskIds.length
         ? this.prisma.task.findMany({
-            where: { id: { in: taskIds }, deletedAt: null },
+            where: { id: { in: validTaskIds }, deletedAt: null },
             select: { id: true, title: true },
           })
         : [],
-      paperIds.length
+      validPaperIds.length
         ? this.prisma.catalogItem.findMany({
-            where: { id: { in: paperIds }, deletedAt: null },
+            where: { id: { in: validPaperIds }, deletedAt: null },
             select: { id: true, title: true },
           })
         : [],
-      pageIds.length
+      validPageIds.length
         ? this.prisma.page.findMany({
-            where: { id: { in: pageIds }, deletedAt: null },
+            where: { id: { in: validPageIds }, deletedAt: null },
             select: { id: true, title: true },
           })
         : [],
@@ -164,10 +169,17 @@ export class ActivityRepository implements IActivityRepository {
     userId: string,
     limit: number,
   ) {
+    const ws = await this.resolveWorkspace(workspaceId);
+    const canonicalWorkspaceId =
+      ws?.id || (isUuid(workspaceId) ? workspaceId : null);
+    if (!canonicalWorkspaceId || !isUuid(userId)) {
+      return { tasks: [], papers: [], pages: [] };
+    }
+
     const [tasks, papers, pages] = await Promise.all([
       this.prisma.task.findMany({
         where: {
-          project: { workspaceId },
+          project: { workspaceId: canonicalWorkspaceId },
           deletedAt: null,
           OR: [{ authorId: userId }, { assigneeId: userId }],
         },
@@ -176,7 +188,11 @@ export class ActivityRepository implements IActivityRepository {
         select: { id: true, title: true, projectId: true, updatedAt: true },
       }),
       this.prisma.catalogItem.findMany({
-        where: { workspaceId, uploadedById: userId, deletedAt: null },
+        where: {
+          workspaceId: canonicalWorkspaceId,
+          uploadedById: userId,
+          deletedAt: null,
+        },
         orderBy: { updatedAt: 'desc' },
         take: limit,
         select: { id: true, title: true, updatedAt: true },
@@ -185,8 +201,8 @@ export class ActivityRepository implements IActivityRepository {
         where: {
           deletedAt: null,
           OR: [
-            { workspaceId, authorId: userId },
-            { project: { workspaceId }, authorId: userId },
+            { workspaceId: canonicalWorkspaceId, authorId: userId },
+            { project: { workspaceId: canonicalWorkspaceId }, authorId: userId },
           ],
         },
         orderBy: { updatedAt: 'desc' },

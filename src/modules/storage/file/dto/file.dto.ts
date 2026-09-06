@@ -19,6 +19,22 @@ export class PresignDto {
   @IsString()
   @IsOptional()
   contentType?: string;
+
+  @IsString()
+  @IsOptional()
+  workspaceId?: string;
+
+  @IsString()
+  @IsOptional()
+  projectId?: string;
+
+  @IsString()
+  @IsOptional()
+  pageId?: string;
+
+  @IsNumber()
+  @IsOptional()
+  size?: number;
 }
 
 export class UploadFileDto {

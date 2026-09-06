@@ -171,6 +171,60 @@ export class IngestionRepository {
     });
   }
 
+  async findOrphanedRuns(
+    olderThan: Date,
+    options?: {
+      workspaceId?: string;
+      limit?: number;
+    },
+    tx?: Prisma.TransactionClient,
+  ): Promise<IngestionRun[]> {
+    const client = this.getClient(tx);
+    const nonTerminalStatuses: IngestionStatus[] = [
+      IngestionStatus.RECEIVED,
+      IngestionStatus.DETECTED,
+      IngestionStatus.EXTRACTED,
+      IngestionStatus.RESOLVED,
+      IngestionStatus.NORMALIZED,
+      IngestionStatus.MERGED,
+      IngestionStatus.ENRICHING,
+    ];
+
+    return client.ingestionRun.findMany({
+      where: {
+        ...(options?.workspaceId ? { workspaceId: options.workspaceId } : {}),
+        status: { in: nonTerminalStatuses },
+        startedAt: { lt: olderThan },
+        completedAt: null,
+      },
+      orderBy: { startedAt: 'asc' },
+      take: options?.limit ?? 100,
+    });
+  }
+
+  async reconcileRun(
+    workspaceId: string,
+    runId: string,
+    data: {
+      status: IngestionStatus;
+      lastError: string;
+      completedAt?: Date | null;
+      attemptsIncrement?: boolean;
+    },
+    tx?: Prisma.TransactionClient,
+  ): Promise<IngestionRun> {
+    const client = this.getClient(tx);
+    return client.ingestionRun.update({
+      where: { id: runId, workspaceId },
+      data: {
+        status: data.status,
+        lastError: data.lastError,
+        completedAt: data.completedAt,
+        ...(data.attemptsIncrement ? { attempts: { increment: 1 } } : {}),
+      },
+    });
+  }
+
   // ── Stage Operations ──────────────────────────────────────────────────────
 
   async createStage(

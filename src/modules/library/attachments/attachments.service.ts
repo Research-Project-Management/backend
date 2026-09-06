@@ -12,18 +12,22 @@ import {
   TransactionService,
   TransactionHelpers,
 } from '../outbox/transaction.service';
-import type {
-  UpsertSyncAttachmentCommand,
-  DeleteSyncEntityCommand,
-  UpsertSyncEntityResult,
-} from '../sync/ports/sync.port';
 import {
   CreateAttachmentInput,
   ReplaceAttachmentFileInput,
   validateAttachmentInvariants,
-} from './types/attachment.types';
+} from './types/attachments.types';
 
 import { AttachmentsRepository } from './attachments.repository';
+import { ITEM_EXISTENCE_PORT, IItemExistencePort } from '../items/ports/items.ports';
+
+
+import type {
+  UpsertSyncAttachmentCommand,
+  DeleteSyncEntityCommand,
+  UpsertSyncEntityResult,
+} from '../common/types/sync.types';
+import { Inject } from '@nestjs/common';
 
 export { CreateAttachmentInput, ReplaceAttachmentFileInput };
 
@@ -35,6 +39,8 @@ export class AttachmentsService {
     private readonly prisma: PrismaService,
     private readonly attachmentsRepo: AttachmentsRepository,
     private readonly libraryTx: TransactionService,
+    @Inject(ITEM_EXISTENCE_PORT)
+    private readonly itemExistencePort: IItemExistencePort,
   ) {}
 
   /**
@@ -56,14 +62,11 @@ export class AttachmentsService {
       fileHash: input.fileHash,
     });
 
-    const item = await this.attachmentsRepo.findCatalogItem(
+    await this.itemExistencePort.assertExists(
+      input.workspaceId,
       input.catalogItemId,
     );
-    if (!item || item.workspaceId !== input.workspaceId || item.deletedAt) {
-      throw new NotFoundException(
-        `CatalogItem ${input.catalogItemId} not found`,
-      );
-    }
+
 
     const resolvedFileId =
       input.fileId ||
@@ -97,17 +100,15 @@ export class AttachmentsService {
         },
       });
 
-      if (resolvedFileId && tx.file?.updateMany) {
-        await tx.file.updateMany({
-          where: { id: resolvedFileId },
-          data: {
-            linkedToType: 'Paper',
-            linkedToId: input.catalogItemId,
-          },
-        });
+      if (resolvedFileId) {
+        await this.attachmentsRepo.updateLinkedFile(
+          resolvedFileId,
+          input.catalogItemId,
+          tx,
+        );
       }
 
-      await helpers.appendChange(item.workspaceId, {
+      await helpers.appendChange(input.workspaceId, {
         entityType: 'Attachment',
         entityId: attachment.id,
         action: 'create',
@@ -116,7 +117,7 @@ export class AttachmentsService {
       });
 
       await helpers.publishOutbox(
-        item.workspaceId,
+        input.workspaceId,
         attachment.id,
         'library.attachment.created',
         attachment,
@@ -215,13 +216,8 @@ export class AttachmentsService {
    * Retrieves all attachments for a catalog item in a workspace.
    */
   async getItemAttachments(workspaceId: string, itemId: string) {
-    const item = await this.attachmentsRepo.findCatalogItemInWorkspace(
-      itemId,
-      workspaceId,
-    );
-    if (!item) {
-      throw new NotFoundException(`CatalogItem ${itemId} not found`);
-    }
+    await this.itemExistencePort.assertExists(workspaceId, itemId);
+
 
     const attachments = await this.attachmentsRepo.findManyByItemId(itemId);
 
@@ -233,15 +229,19 @@ export class AttachmentsService {
    */
   async getItemAttachment(
     workspaceId: string,
-    itemId: string,
+    itemId: string | undefined,
     attachmentId: string,
   ) {
+    const where: any = {
+      id: attachmentId,
+      catalogItem: { workspaceId, deletedAt: null },
+    };
+    if (itemId) {
+      where.catalogItemId = itemId;
+    }
+
     const attachment = await this.attachmentsRepo.findFirst(
-      {
-        id: attachmentId,
-        catalogItemId: itemId,
-        catalogItem: { workspaceId, deletedAt: null },
-      },
+      where,
       {
         revisions: { orderBy: { revisionNumber: 'desc' } },
       },
@@ -257,35 +257,30 @@ export class AttachmentsService {
   /**
    * Deletes an attachment and records a tombstone.
    */
-  async deleteAttachment(workspaceId?: string, attachmentId?: string) {
-    const targetId = attachmentId || workspaceId;
-    if (!targetId) {
+  async deleteAttachment(workspaceId: string, attachmentId: string) {
+    if (!attachmentId) {
       throw new BadRequestException('Attachment ID is required');
     }
 
     const attachment = await this.attachmentsRepo.findFirst(
       {
-        id: targetId,
-        ...(workspaceId && attachmentId
-          ? { catalogItem: { workspaceId } }
-          : {}),
+        id: attachmentId,
+        ...(workspaceId ? { catalogItem: { workspaceId } } : {}),
       },
       { catalogItem: true },
     );
 
     if (!attachment) {
-      throw new NotFoundException(`Attachment ${targetId} not found`);
+      throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
-    const effectiveWsId =
-      workspaceId && attachmentId
-        ? workspaceId
-        : attachment.catalogItem.workspaceId;
+    const canonicalWorkspaceId =
+      workspaceId || attachment.catalogItem.workspaceId;
 
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
       await tx.catalogAttachment.delete({ where: { id: attachment.id } });
 
-      await helpers.appendChange(effectiveWsId, {
+      await helpers.appendChange(canonicalWorkspaceId, {
         entityType: 'Attachment',
         entityId: attachment.id,
         action: 'delete',
@@ -294,7 +289,7 @@ export class AttachmentsService {
       });
 
       await helpers.publishOutbox(
-        effectiveWsId,
+        canonicalWorkspaceId,
         attachment.id,
         'library.attachment.deleted',
         { attachmentId: attachment.id },
@@ -463,4 +458,26 @@ export class AttachmentsService {
   ): Promise<void> {
     await this.attachmentsRepo.reassignToItem(sourceItemIds, targetItemId, tx);
   }
+
+  /**
+   * Domain boundary helper: asserts that an attachment belongs to the given workspace.
+   */
+  async assertAttachmentInWorkspace(
+    attachmentId: string,
+    workspaceId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<any> {
+    const attachment = await this.attachmentsRepo.findUnique(
+      attachmentId,
+      { catalogItem: true },
+      tx,
+    );
+    if (!attachment || attachment.catalogItem.workspaceId !== workspaceId) {
+      throw new NotFoundException(
+        `Attachment ${attachmentId} not found in workspace ${workspaceId}`,
+      );
+    }
+    return attachment;
+  }
 }
+

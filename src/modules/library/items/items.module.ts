@@ -1,42 +1,40 @@
 import { Module } from '@nestjs/common';
 import { ItemsController } from './items.controller';
-import { ItemsService } from './items.service';
+import { ItemsService, CatalogService } from './items.service';
 import { ItemsRepository } from './items.repository';
-import { ItemsMapper } from './items.mapper';
-import { ConversionService } from './conversion.service';
-import { TypesModule } from '../types/types.module';
+import { ItemQueryRepository } from './repositories/item-query.repository';
+import { ItemCommandRepository } from './repositories/item-command.repository';
+import { ItemsMapper } from './mappers/items.mapper';
 import { CoreModule } from '../../../core/core.module';
+import { TypesModule } from '../types/types.module';
 import { OutboxModule } from '../outbox/outbox.module';
 import { TagsModule } from '../tags/tags.module';
 import { CollectionsModule } from '../collections/collections.module';
-import { AttachmentsModule } from '../attachments/attachments.module';
-import { NotesModule } from '../notes/notes.module';
-import { ReadingModule } from '../reading/reading.module';
+import { SearchModule } from '../search/search.module';
 import {
   CATALOG_READ_PORT,
   CATALOG_COMMIT_PORT,
   ITEM_EXISTENCE_PORT,
   ITEM_READ_PORT,
   ITEM_COMMIT_PORT,
-} from './items.ports';
+} from './ports/items.ports';
 
 @Module({
   imports: [
     CoreModule,
     OutboxModule,
     TagsModule,
-    CollectionsModule,
-    AttachmentsModule,
-    NotesModule,
-    ReadingModule,
     TypesModule,
+    CollectionsModule,
+    SearchModule,
   ],
   controllers: [ItemsController],
   providers: [
+    ItemQueryRepository,
+    ItemCommandRepository,
     ItemsRepository,
     ItemsService,
     ItemsMapper,
-    ConversionService,
     {
       provide: CATALOG_READ_PORT,
       useExisting: ItemsService,
@@ -60,8 +58,8 @@ import {
   ],
   exports: [
     ItemsService,
+    CatalogService,
     ItemsMapper,
-    ConversionService,
     CATALOG_READ_PORT,
     CATALOG_COMMIT_PORT,
     ITEM_EXISTENCE_PORT,

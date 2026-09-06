@@ -5,6 +5,11 @@ import {
   PageAnchorMatch,
   PageTextExtraction,
 } from './providers/full-text-indexer.provider';
+import {
+  RagIndexerProvider,
+  RagIndexPaperInput,
+  RagIndexResult,
+} from './providers/rag-indexer.provider';
 import { SearchCatalogQueryDto } from './dto/search.dto';
 
 @Injectable()
@@ -14,7 +19,9 @@ export class SearchService {
   constructor(
     private readonly searchRepo: SearchRepository,
     private readonly fullTextIndexer: FullTextIndexer,
+    private readonly ragIndexer: RagIndexerProvider,
   ) {}
+
 
   /**
    * Faceted search returning items, facets, and cursor pagination metadata.
@@ -93,4 +100,12 @@ export class SearchService {
       indexedAttachments: 0,
     };
   }
+
+  /**
+   * Uploads and vectorizes an academic paper into Qdrant for RAG.
+   */
+  async indexPaperForRag(item: RagIndexPaperInput): Promise<RagIndexResult> {
+    return this.ragIndexer.indexPaper(item);
+  }
 }
+

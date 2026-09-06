@@ -22,13 +22,21 @@ import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorat
 export class HistoryController {
   constructor(private readonly historyService: HistoryService) {}
 
-  @Get(['project/:projectId/pages/:pageId/versions', 'pages/:pageId/versions'])
+  @Get([
+    'projects/:projectId/pages/:pageId/versions',
+    'project/:projectId/pages/:pageId/versions',
+    'pages/:pageId/versions',
+  ])
   @ApiOperation({ summary: 'List all versions of a page' })
   async getVersions(@Param('pageId') pageId: string) {
     return this.historyService.getVersions(pageId);
   }
 
-  @Post(['project/:projectId/pages/:pageId/versions', 'pages/:pageId/versions'])
+  @Post([
+    'projects/:projectId/pages/:pageId/versions',
+    'project/:projectId/pages/:pageId/versions',
+    'pages/:pageId/versions',
+  ])
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Save a new version snapshot of a page' })
   async createVersion(
@@ -40,6 +48,7 @@ export class HistoryController {
   }
 
   @Post([
+    'projects/:projectId/pages/:pageId/versions/:versionId/restore',
     'project/:projectId/pages/:pageId/versions/:versionId/restore',
     'pages/:pageId/versions/:versionId/restore',
   ])
@@ -53,21 +62,29 @@ export class HistoryController {
   }
 
   @Delete([
+    'projects/:projectId/pages/:pageId/versions/:versionId',
     'project/:projectId/pages/:pageId/versions/:versionId',
     'pages/:pageId/versions/:versionId',
   ])
-  @ApiOperation({ summary: 'Delete a specific version snapshot' })
-  async deleteVersion(@Param('versionId') versionId: string) {
-    return this.historyService.deleteVersion(versionId);
+  async deleteVersion(
+    @Param('versionId') versionId: string,
+    @Param('pageId') pageId?: string,
+  ) {
+    return this.historyService.deleteVersion(versionId, pageId);
   }
 
-  @Get(['project/:projectId/pages/:pageId/history', 'pages/:pageId/history'])
+  @Get([
+    'projects/:projectId/pages/:pageId/history',
+    'project/:projectId/pages/:pageId/history',
+    'pages/:pageId/history',
+  ])
   @ApiOperation({ summary: 'Get change history (activity log) for a page' })
   async getHistory(@Param('pageId') pageId: string) {
     return this.historyService.getHistory(pageId);
   }
 
   @Post([
+    'projects/:projectId/pages/:pageId/history/:eventId/restore',
     'project/:projectId/pages/:pageId/history/:eventId/restore',
     'pages/:pageId/history/:eventId/restore',
   ])

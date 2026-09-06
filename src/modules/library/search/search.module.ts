@@ -3,6 +3,7 @@ import { SearchController } from './search.controller';
 import { SearchService } from './search.service';
 import { SearchRepository } from './search.repository';
 import { FullTextIndexer } from './providers/full-text-indexer.provider';
+import { RagIndexerProvider } from './providers/rag-indexer.provider';
 import { SearchEventHandler } from './handlers/search-event.handler';
 import { CoreModule } from '../../../core/core.module';
 
@@ -13,8 +14,10 @@ import { CoreModule } from '../../../core/core.module';
     SearchRepository,
     SearchService,
     FullTextIndexer,
+    RagIndexerProvider,
     SearchEventHandler,
   ],
-  exports: [SearchService],
+  exports: [SearchService, RagIndexerProvider],
 })
 export class SearchModule {}
+

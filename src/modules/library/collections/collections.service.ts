@@ -6,20 +6,22 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import type { TransactionHelpers } from '../outbox/transaction.service';
 import type {
   UpsertSyncCollectionCommand,
   DeleteSyncEntityCommand,
   UpsertSyncEntityResult,
-} from '../sync/ports/sync.port';
-import type { TransactionHelpers } from '../outbox/transaction.service';
+} from '../common/types/sync.types';
 import { CollectionsRepository } from './collections.repository';
-import { CreateCollectionDto } from './dto/create-collection.dto';
-import { UpdateCollectionDto } from './dto/update-collection.dto';
-import { AssignItemsToCollectionDto } from './dto/assign-items.dto';
+import {
+  CreateCollectionDto,
+  UpdateCollectionDto,
+  AssignItemsToCollectionDto,
+} from './dto/collections.dto';
 import {
   CollectionDeleteStrategy,
   CollectionTreeNode,
-} from './types/collection.types';
+} from './types/collections.types';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { resolveTenantWorkspaceId } from '../../../core/utils/tenant.util';
 
@@ -37,8 +39,8 @@ export class CollectionsService {
   }
 
   async getCollections(workspaceId: string) {
-    const wsId = await this.resolveWorkspaceId(workspaceId);
-    const rawCollections = await this.collectionsRepo.findAll(wsId);
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    const rawCollections = await this.collectionsRepo.findAll(canonicalWorkspaceId);
     const collections = rawCollections.map((c: any) => ({
       ...c,
       itemCount: c.itemCount ?? c._count?.collectionItems ?? 0,
@@ -54,8 +56,8 @@ export class CollectionsService {
   async getCollectionTree(
     workspaceId: string,
   ): Promise<{ tree: CollectionTreeNode[] }> {
-    const wsId = await this.resolveWorkspaceId(workspaceId);
-    const collections = await this.collectionsRepo.findAll(wsId);
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    const collections = await this.collectionsRepo.findAll(canonicalWorkspaceId);
 
     const map = new Map<string, CollectionTreeNode>();
     for (const c of collections) {
@@ -84,8 +86,8 @@ export class CollectionsService {
   }
 
   async getCollectionById(workspaceId: string, collectionId: string) {
-    const wsId = await this.resolveWorkspaceId(workspaceId);
-    const raw = await this.collectionsRepo.findById(wsId, collectionId);
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    const raw = await this.collectionsRepo.findById(canonicalWorkspaceId, collectionId);
     if (!raw) {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
     }
@@ -106,7 +108,7 @@ export class CollectionsService {
     userId: string,
     dto: CreateCollectionDto,
   ) {
-    const wsId = await this.resolveWorkspaceId(workspaceId);
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
 
     // Normalize parentId from parentId or parent, treating 'root' or empty string as null
     let rawParentId =
@@ -114,7 +116,7 @@ export class CollectionsService {
     if (rawParentId === 'root' || rawParentId === '') rawParentId = null;
 
     if (rawParentId) {
-      const parent = await this.collectionsRepo.findById(wsId, rawParentId);
+      const parent = await this.collectionsRepo.findById(canonicalWorkspaceId, rawParentId);
       if (!parent) {
         throw new BadRequestException(
           `Parent collection not found: ${rawParentId}`,
@@ -126,13 +128,13 @@ export class CollectionsService {
     let authorId = userId;
     if (!authorId || authorId === 'system') {
       const member = await this.prisma.workspaceMember.findFirst({
-        where: { workspaceId: wsId },
+        where: { workspaceId: canonicalWorkspaceId },
         select: { userId: true },
       });
       authorId = member?.userId || authorId;
     }
 
-    const collection = await this.collectionsRepo.create(wsId, authorId, {
+    const collection = await this.collectionsRepo.create(canonicalWorkspaceId, authorId, {
       name: dto.name,
       description: dto.description,
       color: dto.color,
@@ -148,8 +150,8 @@ export class CollectionsService {
     collectionId: string,
     dto: UpdateCollectionDto,
   ) {
-    const wsId = await this.resolveWorkspaceId(workspaceId);
-    const existing = await this.collectionsRepo.findById(wsId, collectionId);
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    const existing = await this.collectionsRepo.findById(canonicalWorkspaceId, collectionId);
     if (!existing) {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
     }
@@ -162,7 +164,7 @@ export class CollectionsService {
       if (rawParentId === collectionId) {
         throw new BadRequestException('A collection cannot be its own parent');
       }
-      const parent = await this.collectionsRepo.findById(wsId, rawParentId);
+      const parent = await this.collectionsRepo.findById(canonicalWorkspaceId, rawParentId);
       if (!parent) {
         throw new BadRequestException(
           `Parent collection not found: ${rawParentId}`,
@@ -170,7 +172,7 @@ export class CollectionsService {
       }
     }
 
-    const collection = await this.collectionsRepo.update(wsId, collectionId, {
+    const collection = await this.collectionsRepo.update(canonicalWorkspaceId, collectionId, {
       ...dto,
       parentId: rawParentId,
     });
@@ -182,13 +184,13 @@ export class CollectionsService {
     collectionId: string,
     strategy: CollectionDeleteStrategy = 'orphan',
   ) {
-    const wsId = await this.resolveWorkspaceId(workspaceId);
-    const existing = await this.collectionsRepo.findById(wsId, collectionId);
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    const existing = await this.collectionsRepo.findById(canonicalWorkspaceId, collectionId);
     if (!existing) {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
     }
 
-    await this.collectionsRepo.delete(wsId, collectionId, strategy);
+    await this.collectionsRepo.delete(canonicalWorkspaceId, collectionId, strategy);
     return { success: true };
   }
 
@@ -197,10 +199,10 @@ export class CollectionsService {
     collectionId: string,
     itemIds: string[],
   ) {
-    const wsId = await this.resolveWorkspaceId(workspaceId);
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     if (collectionId !== 'unfiled') {
       const collection = await this.collectionsRepo.findById(
-        wsId,
+        canonicalWorkspaceId,
         collectionId,
       );
       if (!collection) {
@@ -208,13 +210,13 @@ export class CollectionsService {
       }
     }
 
-    const targetId = collectionId === 'unfiled' ? null : collectionId;
-    await this.collectionsRepo.moveItems(wsId, targetId, itemIds);
+    const destinationCollectionId = collectionId === 'unfiled' ? null : collectionId;
+    await this.collectionsRepo.moveItems(canonicalWorkspaceId, destinationCollectionId, itemIds);
 
     return {
       message: 'Items moved successfully',
       count: itemIds.length,
-      targetCollectionId: targetId,
+      targetCollectionId: destinationCollectionId,
     };
   }
 
@@ -226,9 +228,9 @@ export class CollectionsService {
       orderIndex?: number;
     }>,
   ) {
-    const wsId = await this.resolveWorkspaceId(workspaceId);
-    await this.collectionsRepo.reorder(wsId, collections);
-    const updated = await this.collectionsRepo.findAll(wsId);
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    await this.collectionsRepo.reorder(canonicalWorkspaceId, collections);
+    const updated = await this.collectionsRepo.findAll(canonicalWorkspaceId);
     return { collections: updated };
   }
 
@@ -237,15 +239,15 @@ export class CollectionsService {
     collectionId: string,
     dto: AssignItemsToCollectionDto,
   ) {
-    const wsId = await this.resolveWorkspaceId(workspaceId);
-    const collection = await this.collectionsRepo.findById(wsId, collectionId);
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    const collection = await this.collectionsRepo.findById(canonicalWorkspaceId, collectionId);
     if (!collection) {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
     }
 
     const ids = dto.itemIds || [];
     for (const itemId of ids) {
-      await this.collectionsRepo.addItem(wsId, collectionId, itemId);
+      await this.collectionsRepo.addItem(canonicalWorkspaceId, collectionId, itemId);
     }
 
     return { success: true, count: ids.length };
@@ -256,13 +258,13 @@ export class CollectionsService {
     collectionId: string,
     itemId: string,
   ) {
-    const wsId = await this.resolveWorkspaceId(workspaceId);
-    const collection = await this.collectionsRepo.findById(wsId, collectionId);
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    const collection = await this.collectionsRepo.findById(canonicalWorkspaceId, collectionId);
     if (!collection) {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
     }
 
-    await this.collectionsRepo.removeItem(wsId, collectionId, itemId);
+    await this.collectionsRepo.removeItem(canonicalWorkspaceId, collectionId, itemId);
     return { success: true };
   }
 
@@ -421,4 +423,51 @@ export class CollectionsService {
       where: { catalogItemId: { in: sourceItemIds } },
     });
   }
+
+  /**
+   * Sync protocol domain helper: reconciles collection memberships for an item within a transaction.
+   */
+  async syncCollectionsToItem(
+    tx: Prisma.TransactionClient,
+    workspaceId: string,
+    itemId: string,
+    targetCollectionIds: string[],
+  ): Promise<void> {
+    const rawIds = targetCollectionIds.filter(
+      (id): id is string => typeof id === 'string' && id.trim().length > 0,
+    );
+    const uniqueIds = Array.from(new Set(rawIds));
+
+    // Delete unlinked collection associations
+    await tx.collectionItem.deleteMany({
+      where: {
+        catalogItemId: itemId,
+        ...(uniqueIds.length > 0
+          ? { collectionId: { notIn: uniqueIds } }
+          : {}),
+      },
+    });
+
+    for (let i = 0; i < uniqueIds.length; i++) {
+      const collectionId = uniqueIds[i];
+      const collectionExists = await tx.collection.findFirst({
+        where: { id: collectionId, workspaceId },
+      });
+      if (collectionExists) {
+        const existingLink = await tx.collectionItem.findFirst({
+          where: { collectionId, catalogItemId: itemId },
+        });
+        if (!existingLink) {
+          await tx.collectionItem.create({
+            data: {
+              collectionId,
+              catalogItemId: itemId,
+              sortOrder: i,
+            },
+          });
+        }
+      }
+    }
+  }
 }
+

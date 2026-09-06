@@ -20,6 +20,7 @@ export class OutboxWorker
 {
   private readonly logger = new Logger(OutboxWorker.name);
   private readonly handlers = new Map<string, OutboxDispatchHandler>();
+  private defaultHandler?: OutboxDispatchHandler;
   private readonly maxRetries = 5;
   private readonly workerId: string;
 
@@ -42,6 +43,11 @@ export class OutboxWorker
   registerHandler(eventType: string, handler: OutboxDispatchHandler) {
     this.handlers.set(eventType, handler);
     this.logger.log(`Registered Outbox dispatch handler for: ${eventType}`);
+  }
+
+  registerDefaultHandler(handler: OutboxDispatchHandler) {
+    this.defaultHandler = handler;
+    this.logger.log('Registered default fallback Outbox dispatch handler');
   }
 
   hasHandler(eventType: string): boolean {
@@ -232,20 +238,98 @@ export class OutboxWorker
   }
 
   /**
-   * Processes pending events and recovers expired processing leases with strict atomic claiming and CAS heartbeat.
+   * Claims up to `batchSize` pending or expired-lease outbox events atomically.
+   * In PostgreSQL (production/integration), uses `SELECT ... FOR UPDATE SKIP LOCKED`
+   * with `UPDATE ... FROM ... RETURNING` in a single round-trip.
+   * If `$queryRaw` is not available (such as in unit tests mocking `outboxEvent`),
+   * falls back to the optimistic `findMany` + `updateMany` loop.
    */
-  async processPendingEvents(
+  async claimBatch(
     batchSize: number = 50,
     leaseMs: number = 60000,
-  ): Promise<{
-    processed: number;
-    failed: number;
-    deadLettered: number;
-    reclaimed: number;
-  }> {
+  ): Promise<Array<{ event: OutboxEvent; isLeaseRecovery: boolean }>> {
     const now = new Date();
+    const newLeaseExpiresAt = new Date(Date.now() + leaseMs);
 
-    // 1. Query candidate events: PENDING scheduled for now OR PROCESSING with expired lease
+    // 1. Production PostgreSQL path: Atomic batch claim with SKIP LOCKED
+    if (typeof (this.prisma as any).$queryRaw === 'function') {
+      try {
+        const rows: any[] = await (this.prisma as any).$queryRaw`
+          WITH candidates AS (
+            SELECT id, status, lease_expires_at
+            FROM outbox_events
+            WHERE (
+              (status = 'PENDING'::"OutboxStatus" AND (scheduled_at IS NULL OR scheduled_at <= ${now}))
+              OR
+              (status = 'PROCESSING'::"OutboxStatus" AND lease_expires_at <= ${now})
+            )
+            ORDER BY created_at ASC
+            LIMIT ${batchSize}
+            FOR UPDATE SKIP LOCKED
+          )
+          UPDATE outbox_events e
+          SET status = 'PROCESSING'::"OutboxStatus",
+              claimed_at = ${now},
+              lease_expires_at = ${newLeaseExpiresAt},
+              claimed_by = ${this.workerId}
+          FROM candidates c
+          WHERE e.id = c.id
+          RETURNING 
+            e.id,
+            e.workspace_id AS "workspaceId",
+            e.aggregate_id AS "aggregateId",
+            e.event_type AS "eventType",
+            e.payload,
+            e.status,
+            e.retry_count AS "retryCount",
+            e.error,
+            e.scheduled_at AS "scheduledAt",
+            e.claimed_at AS "claimedAt",
+            e.lease_expires_at AS "leaseExpiresAt",
+            e.claimed_by AS "claimedBy",
+            e.dedupe_key AS "dedupeKey",
+            e.created_at AS "createdAt",
+            e.updated_at AS "updatedAt",
+            e.processed_at AS "processedAt",
+            c.status AS "previousStatus",
+            c.lease_expires_at AS "previousLeaseExpiresAt";
+        `;
+
+        if (Array.isArray(rows) && rows.length > 0) {
+          return rows.map((r) => ({
+            event: {
+              id: r.id,
+              workspaceId: r.workspaceId,
+              aggregateId: r.aggregateId,
+              eventType: r.eventType,
+              payload: r.payload,
+              status: r.status,
+              retryCount: r.retryCount,
+              error: r.error,
+              scheduledAt: r.scheduledAt ? new Date(r.scheduledAt) : null,
+              claimedAt: r.claimedAt ? new Date(r.claimedAt) : null,
+              leaseExpiresAt: r.leaseExpiresAt ? new Date(r.leaseExpiresAt) : null,
+              claimedBy: r.claimedBy,
+              dedupeKey: r.dedupeKey,
+              createdAt: new Date(r.createdAt),
+              updatedAt: new Date(r.updatedAt),
+              processedAt: r.processedAt ? new Date(r.processedAt) : null,
+            } as OutboxEvent,
+            isLeaseRecovery:
+              r.previousStatus === OutboxStatus.PROCESSING &&
+              r.previousLeaseExpiresAt !== null &&
+              new Date(r.previousLeaseExpiresAt) <= now,
+          }));
+        }
+        return [];
+      } catch (err: any) {
+        this.logger.debug(
+          `Atomic raw claim skipped or unavailable (${err?.message}); falling back to ORM optimistic claim`,
+        );
+      }
+    }
+
+    // 2. Fallback path (unit test mocks without $queryRaw or non-PG env)
     const candidates = await this.prisma.outboxEvent.findMany({
       where: {
         OR: [
@@ -255,7 +339,7 @@ export class OutboxWorker
           },
           {
             status: OutboxStatus.PROCESSING,
-            leaseExpiresAt: { lte: now }, // Expired lease recovery
+            leaseExpiresAt: { lte: now },
           },
         ],
       },
@@ -263,10 +347,7 @@ export class OutboxWorker
       take: batchSize,
     });
 
-    let processed = 0;
-    let failed = 0;
-    let deadLettered = 0;
-    let reclaimed = 0;
+    const claimedList: Array<{ event: OutboxEvent; isLeaseRecovery: boolean }> = [];
 
     for (const event of candidates) {
       const isLeaseRecovery =
@@ -274,9 +355,6 @@ export class OutboxWorker
         event.leaseExpiresAt !== null &&
         event.leaseExpiresAt <= now;
 
-      const newLeaseExpiresAt = new Date(Date.now() + leaseMs);
-
-      // 2. Atomic optimistic claim & lease acquisition
       const claimResult = await this.prisma.outboxEvent.updateMany({
         where: {
           id: event.id,
@@ -299,11 +377,34 @@ export class OutboxWorker
         },
       });
 
-      if (claimResult.count === 0) {
-        // Lost claim race to another worker instance or lease was renewed
-        continue;
+      if (claimResult.count > 0) {
+        claimedList.push({ event, isLeaseRecovery });
       }
+    }
 
+    return claimedList;
+  }
+
+  /**
+   * Processes pending events and recovers expired processing leases with strict atomic claiming and CAS heartbeat.
+   */
+  async processPendingEvents(
+    batchSize: number = 50,
+    leaseMs: number = 60000,
+  ): Promise<{
+    processed: number;
+    failed: number;
+    deadLettered: number;
+    reclaimed: number;
+  }> {
+    const claimedItems = await this.claimBatch(batchSize, leaseMs);
+
+    let processed = 0;
+    let failed = 0;
+    let deadLettered = 0;
+    let reclaimed = 0;
+
+    for (const { event, isLeaseRecovery } of claimedItems) {
       if (isLeaseRecovery) {
         reclaimed++;
         this.metricsService?.incrementCounter('outbox_lease_reclaimed_total');
@@ -312,8 +413,8 @@ export class OutboxWorker
         );
       }
 
-      // 3. Unhandled event policy: Finite backoff retry and DLQ transition
-      const handler = this.handlers.get(event.eventType);
+      // 3. Unhandled event policy: Check registered handlers first, then default fallback handler
+      const handler = this.handlers.get(event.eventType) || this.defaultHandler;
       if (!handler) {
         const newRetryCount = event.retryCount + 1;
         this.metricsService?.incrementCounter('outbox_unhandled_event_total');

@@ -8,7 +8,7 @@ import {
 import { PrismaHealthIndicator } from './prisma.health';
 
 @ApiTags('Health')
-@Controller('health')
+@Controller(['health', 'api/health'])
 export class HealthController {
   constructor(
     private readonly health: HealthCheckService,

@@ -5,7 +5,7 @@ import {
   BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, RagStatus } from '@prisma/client';
 import {
   ItemsRepository,
   CreateCatalogItemData,
@@ -18,29 +18,38 @@ import {
   LibraryItemSource,
   buildItemCreatedOutboxPayload,
 } from '../outbox/outbox.events';
-import { CursorPaginatedResult } from './items.dto';
+import { CursorPaginatedResult } from './dto/items.dto';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { resolveTenantWorkspaceId } from '../../../core/utils/tenant.util';
 import { normalizeTags } from '../tags/utils/tags.utils';
 import { TagsService } from '../tags/tags.service';
 import { CollectionsService } from '../collections/collections.service';
-import { AttachmentsService } from '../attachments/attachments.service';
-import { NotesService } from '../notes/notes.service';
-import { ReadingService } from '../reading/reading.service';
-import { ItemsMapper } from './items.mapper';
-import { parseCreatorString } from './creator-parser.util';
+import { TypesService } from '../types/types.service';
+import { RagIndexerProvider } from '../search/providers/rag-indexer.provider';
+import { ItemsMapper } from './mappers/items.mapper';
 import {
+  FieldMappingChange,
+  DroppedField,
+  CreatorRoleChange,
+  TypeConversionPreview,
+  ConvertTypeOptions,
+} from './types/items.types';
+import {
+  parseCreatorString,
   normalizeDoi,
   normalizeIsbn,
   normalizeIssn,
-} from './items.utils';
-import { cleanBannedString } from './text-cleaner.util';
+  cleanBannedString,
+} from './utils/items.utils';
 import { randomUUID } from 'crypto';
+import { IItemReadPort, IItemExistencePort } from './ports/items.ports';
+
+
 import type {
   UpsertSyncCatalogItemCommand,
   DeleteSyncEntityCommand,
   UpsertSyncEntityResult,
-} from '../sync/ports/sync.port';
+} from '../common/types/sync.types';
 
 /** Transaction context passed to write methods for composing operations within a parent transaction. */
 export interface CatalogTransactionContext {
@@ -50,8 +59,32 @@ export interface CatalogTransactionContext {
 
 export type ItemTransactionContext = CatalogTransactionContext;
 
+const DB_SCALAR_COLUMNS = new Set([
+  'title',
+  'abstract',
+  'abstractNote',
+  'date',
+  'year',
+  'url',
+  'doi',
+  'isbn',
+  'issn',
+  'language',
+  'shortTitle',
+  'rights',
+  'extra',
+  'citationKey',
+  'publicationTitle',
+  'publisher',
+  'volume',
+  'issue',
+  'pages',
+  'series',
+  'seriesTitle',
+]);
+
 @Injectable()
-export class ItemsService {
+export class ItemsService implements IItemReadPort, IItemExistencePort {
   private readonly logger = new Logger(ItemsService.name);
 
   constructor(
@@ -60,10 +93,10 @@ export class ItemsService {
     private readonly prisma: PrismaService,
     private readonly tagsService: TagsService,
     private readonly collectionsService: CollectionsService,
-    private readonly attachmentsService: AttachmentsService,
-    private readonly notesService: NotesService,
-    private readonly readingService: ReadingService,
+    private readonly typesService: TypesService,
+    private readonly ragIndexer: RagIndexerProvider,
   ) {}
+
 
   private resolveWorkspaceId(workspaceId: string): Promise<string> {
     return resolveTenantWorkspaceId(this.prisma, workspaceId);
@@ -73,25 +106,12 @@ export class ItemsService {
     item: Record<string, any>,
     userId?: string,
   ): Record<string, any> | null {
-    if (!item) return null;
-    const normalized = ItemsMapper.toDomain(item);
-    const userState = Array.isArray(normalized.userStates)
-      ? normalized.userStates[0]
-      : undefined;
-    const { userStates: _userStates, ...rest } = normalized;
-    return {
-      ...rest,
-      readStatus: userState?.readStatus ?? 'unread',
-      rating: userState?.rating ?? 0,
-      lastReadAt: userState?.lastReadAt
-        ? userState.lastReadAt.toISOString()
-        : null,
-    };
+    return ItemsMapper.mapFlattenedState(item, userId);
   }
 
   async getItem(workspaceId: string, id: string, userId?: string) {
-    const wsId = await this.resolveWorkspaceId(workspaceId);
-    const item = await this.catalogRepo.findById(wsId, id);
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    const item = await this.catalogRepo.findById(canonicalWorkspaceId, id);
     if (!item) return null;
     return this.mapFlattenedState(item, userId);
   }
@@ -108,11 +128,11 @@ export class ItemsService {
       cursor?: string;
     },
   ): Promise<CursorPaginatedResult<any>> {
-    const wsId = await this.resolveWorkspaceId(workspaceId);
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     const limit = Math.min(options.limit ?? 50, 100);
     const [totalCount, rawItems] = await Promise.all([
-      this.catalogRepo.count(wsId, options),
-      this.catalogRepo.findMany(wsId, {
+      this.catalogRepo.count(canonicalWorkspaceId, options),
+      this.catalogRepo.findMany(canonicalWorkspaceId, {
         ...options,
         limit,
       }),
@@ -146,15 +166,15 @@ export class ItemsService {
     data: CreateCatalogItemData,
     context?: Partial<CatalogTransactionContext> & { source?: LibraryItemSource },
   ): Promise<any> {
-    const wsId = await this.resolveWorkspaceId(workspaceId);
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
 
     const execute = async (
       tx: Prisma.TransactionClient,
       helpers: TransactionHelpers,
     ) => {
-      const item = await this.catalogRepo.create(wsId, data, tx);
+      const item = await this.catalogRepo.create(canonicalWorkspaceId, data, tx);
 
-      await helpers.appendChange(wsId, {
+      await helpers.appendChange(canonicalWorkspaceId, {
         entityType: 'CatalogItem',
         entityId: item.id,
         action: 'create',
@@ -164,14 +184,14 @@ export class ItemsService {
 
       const payload = buildItemCreatedOutboxPayload({
         itemId: item.id,
-        workspaceId: wsId,
+        workspaceId: canonicalWorkspaceId,
         title: item.title,
         source: context?.source ?? 'manual',
         doi: item.doi,
       });
 
       await helpers.publishOutbox(
-        wsId,
+        canonicalWorkspaceId,
         item.id,
         LIBRARY_EVENT_TYPES.ITEM_CREATED,
         payload,
@@ -195,17 +215,17 @@ export class ItemsService {
     data: UpdateCatalogItemData,
     context?: CatalogTransactionContext,
   ): Promise<any> {
-    const wsId = await this.resolveWorkspaceId(workspaceId);
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     if (context) {
       const updated = await this.catalogRepo.update(
-        wsId,
+        canonicalWorkspaceId,
         id,
         expectedVersion,
         data,
         context.tx,
       );
 
-      await context.helpers.appendChange(wsId, {
+      await context.helpers.appendChange(canonicalWorkspaceId, {
         entityType: 'CatalogItem',
         entityId: id,
         action: 'update',
@@ -214,7 +234,7 @@ export class ItemsService {
       });
 
       await context.helpers.publishOutbox(
-        wsId,
+        canonicalWorkspaceId,
         id,
         LIBRARY_EVENT_TYPES.ITEM_UPDATED,
         updated,
@@ -224,34 +244,66 @@ export class ItemsService {
     }
 
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      return this.updateItem(wsId, id, expectedVersion, data, {
+      return this.updateItem(canonicalWorkspaceId, id, expectedVersion, data, {
         tx,
         helpers,
       });
     });
   }
 
+  private async executePaperRagIndexing(item: any): Promise<void> {
+    await this.catalogRepo.updateRagStatus(item.id, {
+      ragStatus: RagStatus.pending,
+      ragLastAttemptAt: new Date(),
+    });
+    try {
+      const result = await this.ragIndexer.indexPaper(item);
+      await this.catalogRepo.updateRagStatus(item.id, {
+        ragDocId: result.docId,
+        ragStatus: 'indexed',
+        ragIndexedAt: new Date(),
+        ragError: null,
+      });
+      this.logger.log(
+        `Paper ${item.id} successfully indexed into Qdrant (docId: ${result.docId})`,
+      );
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Indexing failed';
+      await this.catalogRepo.updateRagStatus(item.id, {
+        ragStatus: 'failed',
+        ragError: message,
+      });
+      this.logger.error(`Failed to index paper ${item.id}: ${message}`);
+    }
+  }
+
   async reindexItem(workspaceId: string, id: string, userId: string) {
-    const wsId = await this.resolveWorkspaceId(workspaceId);
-    const item = await this.catalogRepo.findById(wsId, id);
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    const item = await this.catalogRepo.findById(canonicalWorkspaceId, id);
     if (!item) {
-      throw new NotFoundException(`Item ${id} not found in workspace ${wsId}`);
+      throw new NotFoundException(`Item ${id} not found in workspace ${canonicalWorkspaceId}`);
     }
 
     await this.libraryTx.executeInTransaction(async (_tx, helpers) => {
-      await helpers.publishOutbox(wsId, id, 'library.item.reindexed', {
+      await helpers.publishOutbox(canonicalWorkspaceId, id, 'library.item.reindexed', {
         itemId: id,
-        workspaceId: wsId,
+        workspaceId: canonicalWorkspaceId,
         userId,
       });
     });
 
+    this.executePaperRagIndexing(item).catch((err) => {
+      this.logger.error(`Failed to index paper ${id}: ${err.message}`);
+    });
+
     return {
       success: true,
-      message: 'Item re-indexed successfully',
+      message: 'Item re-indexing started',
       itemId: id,
     };
   }
+
+
 
   async deleteItem(
     workspaceId: string,
@@ -259,22 +311,22 @@ export class ItemsService {
     expectedVersion?: number,
     context?: CatalogTransactionContext,
   ): Promise<boolean> {
-    const wsId = await this.resolveWorkspaceId(workspaceId);
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     if (context) {
       const deleted = await this.catalogRepo.softDelete(
-        wsId,
+        canonicalWorkspaceId,
         id,
         expectedVersion,
         context.tx,
       );
 
       if (deleted) {
-        await context.helpers.recordTombstone(wsId, {
+        await context.helpers.recordTombstone(canonicalWorkspaceId, {
           entityType: 'CatalogItem',
           entityId: id,
         });
 
-        await context.helpers.publishOutbox(wsId, id, 'library.item.deleted', {
+        await context.helpers.publishOutbox(canonicalWorkspaceId, id, 'library.item.deleted', {
           id,
           deletedAt: new Date(),
         });
@@ -284,22 +336,22 @@ export class ItemsService {
     }
 
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      return this.deleteItem(wsId, id, expectedVersion, { tx, helpers });
+      return this.deleteItem(canonicalWorkspaceId, id, expectedVersion, { tx, helpers });
     });
   }
 
 
   async restoreItem(workspaceId: string, id: string, expectedVersion?: number) {
-    const wsId = await this.resolveWorkspaceId(workspaceId);
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
       const restored = await this.catalogRepo.restore(
-        wsId,
+        canonicalWorkspaceId,
         id,
         expectedVersion,
         tx,
       );
 
-      await helpers.appendChange(wsId, {
+      await helpers.appendChange(canonicalWorkspaceId, {
         entityType: 'CatalogItem',
         entityId: id,
         action: 'update',
@@ -307,7 +359,7 @@ export class ItemsService {
         data: restored,
       });
 
-      await helpers.publishOutbox(wsId, id, 'library.item.restored', {
+      await helpers.publishOutbox(canonicalWorkspaceId, id, 'library.item.restored', {
         id,
         restoredAt: new Date(),
       });
@@ -319,16 +371,16 @@ export class ItemsService {
   }
 
   async purgeItem(workspaceId: string, id: string): Promise<boolean> {
-    const wsId = await this.resolveWorkspaceId(workspaceId);
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const purged = await this.catalogRepo.purge(wsId, id, tx);
+      const purged = await this.catalogRepo.purge(canonicalWorkspaceId, id, tx);
 
-      await helpers.recordTombstone(wsId, {
+      await helpers.recordTombstone(canonicalWorkspaceId, {
         entityType: 'CatalogItem',
         entityId: id,
       });
 
-      await helpers.publishOutbox(wsId, id, 'library.item.purged', {
+      await helpers.publishOutbox(canonicalWorkspaceId, id, 'library.item.purged', {
         id,
         purgedAt: new Date(),
       });
@@ -338,8 +390,8 @@ export class ItemsService {
   }
 
   async getRelatedItems(workspaceId: string, itemId: string) {
-    const wsId = await this.resolveWorkspaceId(workspaceId);
-    const item = await this.catalogRepo.findById(wsId, itemId);
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    const item = await this.catalogRepo.findById(canonicalWorkspaceId, itemId);
     if (!item) {
       throw new NotFoundException(`Item ${itemId} not found`);
     }
@@ -356,13 +408,13 @@ export class ItemsService {
     sourceItemId: string,
     data: { targetItemId: string; relationType?: string; note?: string },
   ) {
-    const wsId = await this.resolveWorkspaceId(workspaceId);
-    const sourceItem = await this.catalogRepo.findById(wsId, sourceItemId);
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    const sourceItem = await this.catalogRepo.findById(canonicalWorkspaceId, sourceItemId);
     if (!sourceItem) {
       throw new NotFoundException(`Source item ${sourceItemId} not found`);
     }
 
-    const targetItem = await this.catalogRepo.findById(wsId, data.targetItemId);
+    const targetItem = await this.catalogRepo.findById(canonicalWorkspaceId, data.targetItemId);
     if (!targetItem) {
       throw new NotFoundException(`Target item ${data.targetItemId} not found`);
     }
@@ -392,8 +444,8 @@ export class ItemsService {
     sourceItemId: string,
     targetItemId: string,
   ) {
-    const wsId = await this.resolveWorkspaceId(workspaceId);
-    const sourceItem = await this.catalogRepo.findById(wsId, sourceItemId);
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    const sourceItem = await this.catalogRepo.findById(canonicalWorkspaceId, sourceItemId);
     if (!sourceItem) {
       throw new NotFoundException(`Source item ${sourceItemId} not found`);
     }
@@ -408,217 +460,71 @@ export class ItemsService {
   }
 
   async getItemSnapshot(workspaceId: string, itemId: string) {
-    const wsId = await this.resolveWorkspaceId(workspaceId);
-    return this.catalogRepo.getItemSnapshot(wsId, itemId);
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    return this.catalogRepo.getItemSnapshot(canonicalWorkspaceId, itemId);
   }
 
   async getItemSnapshots(workspaceId: string, itemIds: string[]) {
-    const wsId = await this.resolveWorkspaceId(workspaceId);
-    return this.catalogRepo.getItemSnapshots(wsId, itemIds);
-  }
-
-
-  /**
-   * Synthesizes and extracts literature notes from PDF highlights and annotations.
-   */
-  async extractNotesFromAnnotations(
-    workspaceId: string,
-    itemId: string,
-    userId: string,
-  ) {
-    const wsId = await this.resolveWorkspaceId(workspaceId);
-    const item = await this.catalogRepo.findById(wsId, itemId);
-    if (!item) {
-      throw new NotFoundException(
-        `Item ${itemId} not found in workspace ${wsId}`,
-      );
-    }
-
-    const attachments = await this.prisma.catalogAttachment.findMany({
-      where: { catalogItemId: itemId },
-      select: { id: true, filename: true },
-    });
-
-    const attachmentIds = attachments.map((a: { id: string }) => a.id);
-    const annotations =
-      attachmentIds.length > 0
-        ? await this.prisma.annotation.findMany({
-            where: { attachmentId: { in: attachmentIds }, deletedAt: null },
-            orderBy: [{ pageIndex: 'asc' }, { createdAt: 'asc' }],
-          })
-        : [];
-
-    if (annotations.length === 0) {
-      return {
-        success: true,
-        totalExtracted: 0,
-        message: 'No annotations found for this item',
-      };
-    }
-
-    const lines: string[] = [
-      `# Literature Notes: ${item.title || 'Untitled'}`,
-      '',
-      `**Authors:** ${Array.isArray(item.contributors) ? item.contributors.map((c: any) => c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim()).join(', ') : 'Unknown'}  `,
-      `**Year:** ${item.year || 'N/A'} | **DOI:** ${item.doi || 'N/A'}`,
-      '',
-      '---',
-      '',
-      '## Extracted Highlights & Annotations',
-      '',
-    ];
-
-    let currentPage = -1;
-    for (const ann of annotations) {
-      if (ann.pageIndex !== currentPage) {
-        currentPage = ann.pageIndex;
-        lines.push(`### Page ${currentPage + 1}`);
-        lines.push('');
-      }
-
-      if (ann.quoteText) {
-        lines.push(`> ${ann.quoteText.trim().replace(/\n+/g, '\n> ')}`);
-        lines.push('');
-      }
-
-      if (ann.comment) {
-        lines.push(`**Note:** ${ann.comment.trim()}`);
-        lines.push('');
-      }
-    }
-
-    const markdown = lines.join('\n');
-
-    const note = await this.notesService.createNote(wsId, {
-      itemId,
-      title: `Literature Notes — ${item.title?.slice(0, 50) || 'Untitled'}`,
-      contentMd: markdown,
-      contentJson: {
-        type: 'doc',
-        content: [{ type: 'paragraph', text: markdown }],
-      },
-      createdById: userId || 'system',
-      tags: ['literature-note', 'highlights'],
-    });
-
-    return {
-      success: true,
-      totalExtracted: annotations.length,
-      literatureNote: note,
-    };
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    return this.catalogRepo.getItemSnapshots(canonicalWorkspaceId, itemIds);
   }
 
   // ── Port Implementations (IItemExistencePort & ICatalogReadPort) ────────────
 
   async exists(workspaceId: string, itemId: string): Promise<boolean> {
-    const wsId = await this.resolveWorkspaceId(workspaceId);
-    const count = await this.prisma.catalogItem.count({
-      where: { id: itemId, workspaceId: wsId, deletedAt: null },
-    });
-    return count > 0;
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    return this.catalogRepo.exists(canonicalWorkspaceId, itemId);
   }
 
   async assertExists(workspaceId: string, itemId: string): Promise<void> {
-    const wsId = await this.resolveWorkspaceId(workspaceId);
-    const isPresent = await this.exists(wsId, itemId);
-    if (!isPresent) {
-      throw new NotFoundException(
-        `Item ${itemId} not found in workspace ${wsId}`,
-      );
-    }
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    return this.catalogRepo.assertExists(canonicalWorkspaceId, itemId);
   }
 
   async existMany(
     workspaceId: string,
     itemIds: string[],
   ): Promise<Map<string, boolean>> {
-    if (itemIds.length === 0) return new Map();
-    const wsId = await this.resolveWorkspaceId(workspaceId);
-    const found = await this.prisma.catalogItem.findMany({
-      where: { id: { in: itemIds }, workspaceId: wsId, deletedAt: null },
-      select: { id: true },
-    });
-    const foundSet = new Set(found.map((it: { id: string }) => it.id));
-    const result = new Map<string, boolean>();
-    for (const id of itemIds) {
-      result.set(id, foundSet.has(id));
-    }
-    return result;
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    return this.catalogRepo.existMany(canonicalWorkspaceId, itemIds);
+  }
+
+  async findById(workspaceId: string, itemId: string) {
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    return this.catalogRepo.findById(canonicalWorkspaceId, itemId) as any;
+  }
+
+  async findByIds(workspaceId: string, itemIds: string[]) {
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    return this.catalogRepo.findByIds(canonicalWorkspaceId, itemIds) as any;
+  }
+
+  async findByDoi(workspaceId: string, doi: string) {
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    return this.catalogRepo.findByDoi(canonicalWorkspaceId, doi) as any;
   }
 
   async findSummaryById(workspaceId: string, itemId: string) {
-    const wsId = await this.resolveWorkspaceId(workspaceId);
-    const item = await this.prisma.catalogItem.findFirst({
-      where: { id: itemId, workspaceId: wsId, deletedAt: null },
-      select: {
-        id: true,
-        workspaceId: true,
-        title: true,
-        itemType: true,
-        year: true,
-        doi: true,
-        contributors: {
-          where: { creatorType: 'author' },
-          select: { fullName: true, firstName: true, lastName: true },
-          orderBy: { orderIndex: 'asc' },
-          take: 3,
-        },
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
-    if (!item) return null;
-    return {
-      id: item.id,
-      workspaceId: item.workspaceId,
-      title: item.title,
-      itemType: item.itemType || undefined,
-      year: item.year,
-      doi: item.doi || null,
-      primaryAuthors: item.contributors.map(
-        (c) => c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
-      ),
-      createdAt: item.createdAt,
-      updatedAt: item.updatedAt,
-    };
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    return this.catalogRepo.findSummaryById(canonicalWorkspaceId, itemId);
   }
 
   async findSummariesByIds(workspaceId: string, itemIds: string[]) {
-    if (itemIds.length === 0) return [];
-    const wsId = await this.resolveWorkspaceId(workspaceId);
-    const items = await this.prisma.catalogItem.findMany({
-      where: { id: { in: itemIds }, workspaceId: wsId, deletedAt: null },
-      select: {
-        id: true,
-        workspaceId: true,
-        title: true,
-        itemType: true,
-        year: true,
-        doi: true,
-        contributors: {
-          where: { creatorType: 'author' },
-          select: { fullName: true, firstName: true, lastName: true },
-          orderBy: { orderIndex: 'asc' },
-          take: 3,
-        },
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    return this.catalogRepo.findSummariesByIds(canonicalWorkspaceId, itemIds);
+  }
 
-    return items.map((item) => ({
-      id: item.id,
-      workspaceId: item.workspaceId,
-      title: item.title,
-      itemType: item.itemType || undefined,
-      year: item.year,
-      doi: item.doi || null,
-      primaryAuthors: item.contributors.map(
-        (c) => c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
-      ),
-      createdAt: item.createdAt,
-      updatedAt: item.updatedAt,
-    }));
+  async findQualityAuditItems(workspaceId: string, limit?: number) {
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    return this.catalogRepo.findQualityAuditItems(canonicalWorkspaceId, limit);
+  }
+
+  async findDuplicateCandidateItems(workspaceId: string, limit?: number) {
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    return this.catalogRepo.findDuplicateCandidateItems(
+      canonicalWorkspaceId,
+      limit,
+    );
   }
 
   /**
@@ -751,52 +657,25 @@ export class ItemsService {
         });
       }
 
-      // Sync collections
+      // Sync collections (Delegated to CollectionsService)
       if (
         command.collectionIds !== undefined ||
         command.collectionId !== undefined
       ) {
-        const rawTargetColIds = [
+        const rawTargetCollectionIds = [
           ...(Array.isArray(command.collectionIds)
             ? command.collectionIds
             : []),
           ...(command.collectionId ? [command.collectionId] : []),
-        ].filter(
-          (id): id is string => typeof id === 'string' && id.trim().length > 0,
+        ];
+        await this.collectionsService.syncCollectionsToItem(
+          tx,
+          command.workspaceId,
+          updated.id,
+          rawTargetCollectionIds,
         );
-        const targetColIds = Array.from(new Set(rawTargetColIds));
-
-        // Delete unlinked collection associations
-        await tx.collectionItem.deleteMany({
-          where: {
-            catalogItemId: updated.id,
-            ...(targetColIds.length > 0
-              ? { collectionId: { notIn: targetColIds } }
-              : {}),
-          },
-        });
-
-        for (let i = 0; i < targetColIds.length; i++) {
-          const colId = targetColIds[i];
-          const collectionExists = await tx.collection.findFirst({
-            where: { id: colId, workspaceId: command.workspaceId },
-          });
-          if (collectionExists) {
-            const existingLink = await tx.collectionItem.findFirst({
-              where: { collectionId: colId, catalogItemId: updated.id },
-            });
-            if (!existingLink) {
-              await tx.collectionItem.create({
-                data: {
-                  collectionId: colId,
-                  catalogItemId: updated.id,
-                  sortOrder: i,
-                },
-              });
-            }
-          }
-        }
       }
+
 
       // Sync identifiers
       const cleanSyncDoi =
@@ -941,36 +820,20 @@ export class ItemsService {
         });
       }
 
-      // Sync collections
-      const rawNewColIds = [
+      // Sync collections (Delegated to CollectionsService)
+      const rawNewCollectionIds = [
         ...(Array.isArray(command.collectionIds) ? command.collectionIds : []),
         ...(command.collectionId ? [command.collectionId] : []),
-      ].filter(
-        (id): id is string => typeof id === 'string' && id.trim().length > 0,
-      );
-      const newColIds = Array.from(new Set(rawNewColIds));
-      if (newColIds.length > 0) {
-        for (let i = 0; i < newColIds.length; i++) {
-          const colId = newColIds[i];
-          const collectionExists = await tx.collection.findFirst({
-            where: { id: colId, workspaceId: command.workspaceId },
-          });
-          if (collectionExists) {
-            const existingLink = await tx.collectionItem.findFirst({
-              where: { collectionId: colId, catalogItemId: created.id },
-            });
-            if (!existingLink) {
-              await tx.collectionItem.create({
-                data: {
-                  collectionId: colId,
-                  catalogItemId: created.id,
-                  sortOrder: i,
-                },
-              });
-            }
-          }
-        }
+      ];
+      if (rawNewCollectionIds.length > 0) {
+        await this.collectionsService.syncCollectionsToItem(
+          tx,
+          command.workspaceId,
+          created.id,
+          rawNewCollectionIds,
+        );
       }
+
 
       // Sync identifiers
       if (cleanCreateDoi) {
@@ -1076,7 +939,314 @@ export class ItemsService {
       (publishOutboxPayload ?? { itemId: entityId, reason }) as any,
     );
   }
+
+  /**
+   * Generates a deterministic preview of item-type conversion without modifying DB state.
+   */
+  previewTypeConversion(
+    rawItem: Record<string, any>,
+    targetType: string,
+    options: { retainUnmappedInExtra?: boolean } = {},
+  ): TypeConversionPreview {
+    const item = ItemsMapper.toDomain(rawItem);
+    const sourceType = item.itemType || item.type || 'journalArticle';
+
+    if (!this.typesService.isValidType(targetType)) {
+      throw new BadRequestException(`Invalid target itemType: ${targetType}`);
+    }
+
+    if (!this.typesService.isBibliographic(sourceType)) {
+      throw new BadRequestException(
+        `Cannot convert non-bibliographic item type: ${sourceType}`,
+      );
+    }
+
+    if (!this.typesService.isBibliographic(targetType)) {
+      throw new BadRequestException(
+        `Cannot convert to special non-bibliographic item type: ${targetType}`,
+      );
+    }
+
+    if (sourceType === targetType) {
+      return {
+        sourceType,
+        targetType,
+        preservedFields: this.typesService
+          .getOrderedFields(sourceType)
+          .map((f) => f.key),
+        mappedFields: [],
+        droppedFields: [],
+        creatorChanges: (item.creators || []).map(
+          (c: Record<string, unknown>) => ({
+            creator: c,
+            fromRole: c.creatorType || 'author',
+            toRole: c.creatorType || 'author',
+            reason: 'preserved' as const,
+          }),
+        ),
+        projectedItem: { ...item },
+        unmappedRetained: {},
+        hasLoss: false,
+      };
+    }
+
+    const sourceFields = this.typesService.getOrderedFields(sourceType);
+    const targetFields = this.typesService.getOrderedFields(targetType);
+    const targetFieldKeys = new Set(targetFields.map((f) => f.key));
+    const sourceLabelMap = new Map(sourceFields.map((f) => [f.key, f.label]));
+
+    const preservedFields: string[] = [];
+    const mappedFields: FieldMappingChange[] = [];
+    const droppedFields: DroppedField[] = [];
+    const unmappedRetained: Record<string, any> = {};
+
+    const projectedItem: Record<string, any> = {
+      ...item,
+      itemType: targetType,
+      type: targetType,
+    };
+
+    const sourceValues: Record<string, any> = {};
+    for (const field of sourceFields) {
+      const val = item[field.key] ?? item.extraFields?.[field.key];
+      if (val !== undefined && val !== null && val !== '') {
+        sourceValues[field.key] = val;
+      }
+    }
+
+    const commonKeys = [
+      'title',
+      'abstract',
+      'abstractNote',
+      'date',
+      'year',
+      'url',
+      'doi',
+      'isbn',
+      'issn',
+      'language',
+      'shortTitle',
+      'rights',
+      'extra',
+    ];
+    for (const k of commonKeys) {
+      if (
+        item[k] !== undefined &&
+        item[k] !== null &&
+        item[k] !== '' &&
+        sourceValues[k] === undefined
+      ) {
+        sourceValues[k] = item[k];
+      }
+    }
+
+    for (const field of sourceFields) {
+      if (
+        !targetFieldKeys.has(field.key) &&
+        field.key !== 'title' &&
+        field.key !== 'abstract' &&
+        field.key !== 'abstractNote' &&
+        field.key !== 'url' &&
+        field.key !== 'doi'
+      ) {
+        delete projectedItem[field.key];
+      }
+    }
+
+    const newExtraFields: Record<string, any> = { ...(item.extraFields || {}) };
+
+    if (sourceType === 'book' && targetType === 'bookSection') {
+      if (sourceValues.title) {
+        projectedItem.bookTitle = sourceValues.title;
+        projectedItem.title = '';
+        mappedFields.push({
+          fromField: 'title',
+          toField: 'bookTitle',
+          value: sourceValues.title,
+          rule: 'special-rule',
+        });
+        delete sourceValues.title;
+      }
+      delete projectedItem.shortTitle;
+      delete sourceValues.shortTitle;
+    } else if (sourceType === 'bookSection' && targetType === 'book') {
+      if (sourceValues.bookTitle) {
+        projectedItem.title = sourceValues.bookTitle;
+        mappedFields.push({
+          fromField: 'bookTitle',
+          toField: 'title',
+          value: sourceValues.bookTitle,
+          rule: 'special-rule',
+        });
+        delete sourceValues.bookTitle;
+      }
+      delete projectedItem.shortTitle;
+      delete sourceValues.shortTitle;
+    }
+
+    for (const [sField, val] of Object.entries(sourceValues)) {
+      if (targetFieldKeys.has(sField)) {
+        projectedItem[sField] = val;
+        preservedFields.push(sField);
+      } else {
+        const resolved = this.typesService.resolveBaseFieldMapping(
+          sourceType,
+          targetType,
+          sField,
+        );
+
+        if (
+          resolved?.targetField &&
+          targetFieldKeys.has(resolved.targetField)
+        ) {
+          projectedItem[resolved.targetField] = val;
+          mappedFields.push({
+            fromField: sField,
+            toField: resolved.targetField,
+            value: val,
+            rule: 'base-semantic',
+          });
+        } else {
+          droppedFields.push({
+            field: sField,
+            label: sourceLabelMap.get(sField) || sField,
+            value: val,
+          });
+          unmappedRetained[sField] = val;
+
+          if (options.retainUnmappedInExtra !== false) {
+            newExtraFields[`__unmapped_${sourceType}_${sField}`] = val;
+          }
+        }
+      }
+    }
+
+    projectedItem.extraFields = newExtraFields;
+
+    const validCreatorRoles = new Set(
+      this.typesService
+        .getValidCreatorTypes(targetType)
+        .map((c) => c.creatorType),
+    );
+    const targetPrimaryCreator =
+      this.typesService.getPrimaryCreatorType(targetType);
+    const creatorChanges: CreatorRoleChange[] = [];
+
+    const projectedCreators = (item.creators || []).map(
+      (c: Record<string, unknown>, index: number) => {
+        const fromRole = (c.creatorType as string) || 'author';
+        let toRole: string = fromRole;
+        let reason: 'preserved' | 'primary-fallback' | 'secondary-fallback' =
+          'preserved';
+
+        if (!validCreatorRoles.has(fromRole)) {
+          if (index === 0 && validCreatorRoles.has(targetPrimaryCreator)) {
+            toRole = targetPrimaryCreator;
+            reason = 'primary-fallback';
+          } else if (validCreatorRoles.has('contributor')) {
+            toRole = 'contributor';
+            reason = 'secondary-fallback';
+          } else {
+            toRole = targetPrimaryCreator;
+            reason = 'primary-fallback';
+          }
+        }
+
+        creatorChanges.push({ creator: c, fromRole, toRole, reason });
+        return { ...c, creatorType: toRole };
+      },
+    );
+
+    projectedItem.creators = projectedCreators;
+
+    const hasLoss =
+      droppedFields.length > 0 ||
+      creatorChanges.some((c) => c.reason !== 'preserved');
+
+    return {
+      sourceType,
+      targetType,
+      preservedFields,
+      mappedFields,
+      droppedFields,
+      creatorChanges,
+      projectedItem,
+      unmappedRetained,
+      hasLoss,
+    };
+  }
+
+  /**
+   * Executes type conversion transactionally in the database.
+   */
+  async convertItemType(
+    workspaceId: string,
+    itemId: string,
+    targetType: string,
+    options: ConvertTypeOptions = {},
+    tx?: Prisma.TransactionClient,
+  ) {
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    const existing = await this.catalogRepo.findById(canonicalWorkspaceId, itemId, tx);
+    if (!existing) {
+      throw new NotFoundException(
+        `Item ${itemId} not found in workspace ${canonicalWorkspaceId}`,
+      );
+    }
+
+    const preview = this.previewTypeConversion(existing, targetType, {
+      retainUnmappedInExtra: options.retainUnmappedInExtra ?? true,
+    });
+
+    const projected = preview.projectedItem;
+
+    const targetFields = this.typesService.getOrderedFields(targetType);
+    const dynamicExtraFields: Record<string, any> = {
+      ...(projected.extraFields || {}),
+    };
+
+    for (const field of targetFields) {
+      const val = projected[field.key];
+      if (
+        val !== undefined &&
+        val !== null &&
+        val !== '' &&
+        !DB_SCALAR_COLUMNS.has(field.key)
+      ) {
+        dynamicExtraFields[field.key] = val;
+      }
+    }
+
+    const updatePayload: Record<string, any> = {
+      itemType: targetType,
+      type: targetType,
+      creators: projected.creators ?? (existing as any).creators,
+      extraFields: dynamicExtraFields,
+    };
+
+    for (const col of DB_SCALAR_COLUMNS) {
+      const val = projected[col] ?? (existing as any)[col];
+      if (val !== undefined) {
+        updatePayload[col] = val;
+      }
+    }
+
+    const updated = await this.catalogRepo.update(
+      canonicalWorkspaceId,
+      itemId,
+      options.expectedVersion,
+      updatePayload,
+      tx,
+    );
+
+    return {
+      success: true,
+      item: ItemsMapper.toDomain(updated),
+      conversionReport: preview,
+    };
+  }
 }
+
 
 export const CatalogService = ItemsService;
 export type CatalogService = ItemsService;

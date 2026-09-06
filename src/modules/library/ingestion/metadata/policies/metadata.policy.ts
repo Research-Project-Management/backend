@@ -11,18 +11,30 @@ export interface RoutingTiers {
 
 const SSRF_BLOCKED_PATTERNS = [
   /^localhost$/i,
-  /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/,
+  /\.localhost$/i,
+  /\.local$/i,
+  /\.internal$/i,
+  /\.cluster\.local$/i,
+  /^metadata\.google\.internal$/i,
   /^0\.0\.0\.0$/,
+  /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/,
   /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/,
   /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/,
   /^192\.168\.\d{1,3}\.\d{1,3}$/,
   /^169\.254\.\d{1,3}\.\d{1,3}$/,
+  /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}$/, // CGNAT RFC 6598
   /^100\.100\.100\.200$/, // Alibaba Cloud metadata
-  /^metadata\.google\.internal$/i,
+  /^169\.254\.169\.254$/, // Cloud metadata (AWS, GCP, Azure)
+  /^22[4-9]\.\d{1,3}\.\d{1,3}\.\d{1,3}$/, // Multicast
+  /^23\d\.\d{1,3}\.\d{1,3}\.\d{1,3}$/,
+  /^24\d\.\d{1,3}\.\d{1,3}\.\d{1,3}$/, // Reserved
+  /^25[0-5]\.\d{1,3}\.\d{1,3}\.\d{1,3}$/,
   /^::1$/, // IPv6 loopback
-  /^fe80:/i, // IPv6 link-local
-  /^fc00:/i, // IPv6 unique local
-  /^fd00:/i, // IPv6 unique local
+  /^::$/,
+  /^fe[89ab]/i, // IPv6 link-local
+  /^fc[0-9a-f]/i, // IPv6 unique local
+  /^fd[0-9a-f]/i, // IPv6 unique local
+  /^ff[0-9a-f]/i, // IPv6 multicast
 ];
 
 export class MetadataRoutingPolicy {
@@ -34,21 +46,21 @@ export class MetadataRoutingPolicy {
         return {
           authoritative: ['CrossRef'],
           enrichment: ['SemanticScholar', 'Unpaywall', 'OpenAlex'],
-          fallback: ['OpenAlex'],
+          fallback: ['OpenAlex', 'SemanticScholar'],
         };
 
       case 'ARXIV':
         return {
           authoritative: ['arXiv'],
           enrichment: ['SemanticScholar', 'OpenAlex'],
-          fallback: ['CrossRef'],
+          fallback: ['CrossRef', 'OpenAlex'],
         };
 
       case 'PMID':
         return {
           authoritative: ['PubMed'],
           enrichment: ['SemanticScholar', 'OpenAlex'],
-          fallback: [],
+          fallback: ['OpenAlex', 'SemanticScholar'],
         };
 
       case 'ISBN':
@@ -70,8 +82,9 @@ export class MetadataRoutingPolicy {
         return {
           authoritative: ['SemanticScholar'],
           enrichment: [],
-          fallback: ['CrossRef', 'OpenAlex'],
+          fallback: ['CrossRef', 'OpenAlex', 'CORE'],
         };
+
     }
   }
 

@@ -15,12 +15,14 @@ import {
 import { NotesService } from './notes.service';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
 import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
+import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
 import { CurrentUser } from '../../../modules/iam/authn/decorators/current-user.decorator';
 
-import { CreateNoteDto, UpdateNoteDto } from './dto/note.dto';
+import { CreateNoteDto, UpdateNoteDto } from './dto/notes.dto';
 
 @Controller([
   'api/v1/workspaces/:workspaceId/library/notes',
+  'api/v1/workspace/:workspaceId/library/notes',
   'workspace/:workspaceId/library/notes',
 ])
 @UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
@@ -28,6 +30,7 @@ export class NotesController {
   constructor(private readonly notesService: NotesService) {}
 
   @Get()
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async listNotes(
     @Param('workspaceId') workspaceId: string,
     @Query('itemId') itemId?: string,
@@ -36,6 +39,7 @@ export class NotesController {
   }
 
   @Get(':id')
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async getNote(
     @Param('workspaceId') workspaceId: string,
     @Param('id') id: string,
@@ -51,6 +55,7 @@ export class NotesController {
   }
 
   @Post()
+  @WorkspaceRoles('owner', 'admin', 'member')
   async createNote(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') currentUserId: string,
@@ -63,6 +68,7 @@ export class NotesController {
   }
 
   @Patch(':id')
+  @WorkspaceRoles('owner', 'admin', 'member')
   async updateNote(
     @Param('workspaceId') workspaceId: string,
     @Param('id') id: string,
@@ -88,6 +94,7 @@ export class NotesController {
   }
 
   @Delete(':id')
+  @WorkspaceRoles('owner', 'admin')
   async deleteNote(
     @Param('workspaceId') workspaceId: string,
     @Param('id') id: string,

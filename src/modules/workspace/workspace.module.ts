@@ -11,10 +11,6 @@ import { WorkspaceInvitationRepository } from './workspace-invitation.repository
     WorkspaceRepository,
     WorkspaceInvitationRepository,
   ],
-  exports: [
-    WorkspaceService,
-    WorkspaceRepository,
-    WorkspaceInvitationRepository,
-  ],
+  exports: [WorkspaceService],
 })
 export class WorkspaceModule {}

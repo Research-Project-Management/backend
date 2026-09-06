@@ -10,19 +10,16 @@ export {
   normalizeCreators,
   normalizeItemType,
   normalizeLibraryItemType,
-} from '../../../items/items.utils';
-
-export {
   decodeHtmlEntities,
   stripXmlAndHtmlTags,
   cleanBibliographicText,
   cleanBannedString,
-} from '../../../items/text-cleaner.util';
+} from '../../../items/utils/items.utils';
 
 export type {
   CreatorInput,
   IdentifierScheme,
-} from '../../../items/items.types';
+} from '../../../items/types/items.types';
 
 export { normalizeTags } from '../../../tags/utils/tags.utils';
-export type { TagInput, TagObjectInput } from '../../../tags/types/tag.types';
+export type { TagInput, TagObjectInput } from '../../../tags/types/tags.types';

@@ -11,13 +11,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { TagsService } from './tags.service';
-import { CreateTagDto } from './dto/create-tag.dto';
+import { CreateTagDto } from './dto/tags.dto';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
 import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
-import { CurrentWorkspace } from '../../../modules/iam/authz/decorators/current-workspace.decorator';
+import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
 
 @Controller([
   'api/v1/workspaces/:workspaceId/library/tags',
+  'api/v1/workspace/:workspaceId/library/tags',
   'workspace/:workspaceId/library/tags',
 ])
 @UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
@@ -25,24 +26,20 @@ export class TagsController {
   constructor(private readonly tagsService: TagsService) {}
 
   @Get()
-  async getTags(
-    @Param('workspaceId') workspaceId: string,
-    @CurrentWorkspace() currentWorkspaceId?: string,
-  ) {
-    const targetWsId = currentWorkspaceId || workspaceId;
-    return this.tagsService.getTags(targetWsId);
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  async getTags(@Param('workspaceId') workspaceId: string) {
+    return this.tagsService.getTags(workspaceId);
   }
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
+  @WorkspaceRoles('owner', 'admin', 'member')
   async createTag(
     @Param('workspaceId') workspaceId: string,
     @Body() body: CreateTagDto,
-    @CurrentWorkspace() currentWorkspaceId?: string,
   ) {
-    const targetWsId = currentWorkspaceId || workspaceId;
     return this.tagsService.createOrGetTag(
-      targetWsId,
+      workspaceId,
       body.name,
       body.color,
       body.type,
@@ -51,42 +48,39 @@ export class TagsController {
 
   @Delete(':tagId')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @WorkspaceRoles('owner', 'admin')
   async deleteTag(
     @Param('workspaceId') workspaceId: string,
     @Param('tagId') tagId: string,
-    @CurrentWorkspace() currentWorkspaceId?: string,
   ) {
-    const targetWsId = currentWorkspaceId || workspaceId;
-    const deleted = await this.tagsService.deleteTag(targetWsId, tagId);
+    const deleted = await this.tagsService.deleteTag(workspaceId, tagId);
     if (!deleted) {
       throw new NotFoundException(
-        `Tag ${tagId} not found in workspace ${targetWsId}`,
+        `Tag ${tagId} not found in workspace ${workspaceId}`,
       );
     }
   }
 
   @Post(':tagId/items/:itemId')
   @HttpCode(HttpStatus.CREATED)
+  @WorkspaceRoles('owner', 'admin', 'member')
   async assignTag(
     @Param('workspaceId') workspaceId: string,
     @Param('tagId') tagId: string,
     @Param('itemId') itemId: string,
-    @CurrentWorkspace() currentWorkspaceId?: string,
   ) {
-    const targetWsId = currentWorkspaceId || workspaceId;
-    await this.tagsService.assignTag(targetWsId, tagId, itemId);
+    await this.tagsService.assignTag(workspaceId, tagId, itemId);
     return { success: true };
   }
 
   @Delete(':tagId/items/:itemId')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @WorkspaceRoles('owner', 'admin', 'member')
   async removeTag(
     @Param('workspaceId') workspaceId: string,
     @Param('tagId') tagId: string,
     @Param('itemId') itemId: string,
-    @CurrentWorkspace() currentWorkspaceId?: string,
   ) {
-    const targetWsId = currentWorkspaceId || workspaceId;
-    await this.tagsService.removeTag(targetWsId, tagId, itemId);
+    await this.tagsService.removeTag(workspaceId, tagId, itemId);
   }
 }

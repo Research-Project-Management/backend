@@ -16,6 +16,7 @@ import { FileRepository } from './file.repository';
 import { R2Service } from '../r2/r2.service';
 import { parseByteRange } from './utils/range.utils';
 import { PrismaService } from '@/core/database/prisma.service';
+import { buildWorkspaceIdentifierWhere, isUuid } from '@/core/utils/tenant.util';
 import { Prisma, EntityType } from '@prisma/client';
 import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
 import { RedisCacheService } from '@/core/cache/redis-cache.service';
@@ -27,6 +28,7 @@ import {
   UpdateFileDto,
   ShareFileDto,
 } from './dto/file.dto';
+import { FileWithAuthor } from './types/storage-repository.interface';
 
 export type FormattedFile<
   T extends {
@@ -175,10 +177,15 @@ export class FileService implements OnModuleInit {
           'Viewers cannot upload files to this workspace',
         );
       }
+      return;
     }
+
+    throw new BadRequestException(
+      'Upload scope (workspaceId, projectId, or pageId) is required',
+    );
   }
 
-  private async assertCanAccessFile(
+  public async assertCanAccessFile(
     userId: string,
     fileId: string,
     required: 'read' | 'write' = 'read',
@@ -279,14 +286,7 @@ export class FileService implements OnModuleInit {
 
   private async resolveWorkspace(workspaceIdOrSlug: string) {
     return this.prisma.workspace.findFirst({
-      where: {
-        OR: [
-          { id: workspaceIdOrSlug },
-          { slug: workspaceIdOrSlug },
-          { url: workspaceIdOrSlug },
-        ],
-        deletedAt: null,
-      },
+      where: buildWorkspaceIdentifierWhere(workspaceIdOrSlug),
       select: { id: true },
     });
   }
@@ -337,11 +337,47 @@ export class FileService implements OnModuleInit {
     };
   }
 
-  async presign(dto: PresignDto) {
-    const cleanName = dto.filename.replace(/[^a-zA-Z0-9.-]/g, '_');
-    const key = `uploads/${Date.now()}-${cleanName}`;
+  async presign(userId: string, dto: PresignDto) {
+    if (!userId) {
+      throw new ForbiddenException('User is not authenticated');
+    }
+
+    // 1. Authorize scope before issuing presigned upload URL
+    await this.assertCanWriteScope(userId, {
+      workspaceId: dto.workspaceId,
+      projectId: dto.projectId,
+      pageId: dto.pageId,
+    });
+
+    // 2. Validate size & mimeType
+    if (dto.size && dto.size > 100 * 1024 * 1024) {
+      throw new BadRequestException('File size exceeds maximum 100MB limit');
+    }
+
     const contentType =
       dto.contentType || dto.mimeType || 'application/octet-stream';
+    const lowerType = contentType.toLowerCase();
+    const disallowedTypes = [
+      'text/html',
+      'application/x-msdownload',
+      'application/x-sh',
+      'application/javascript',
+    ];
+    if (disallowedTypes.includes(lowerType)) {
+      throw new BadRequestException(
+        `Content type ${contentType} is not permitted for upload`,
+      );
+    }
+
+    const cleanName = dto.filename.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const wsId = await this.resolveWorkspaceId({
+      workspaceId: dto.workspaceId,
+      projectId: dto.projectId,
+      pageId: dto.pageId,
+    });
+    const key = wsId
+      ? `workspaces/${wsId}/uploads/${Date.now()}-${cleanName}`
+      : `uploads/${Date.now()}-${cleanName}`;
 
     const presigned = await this.r2Service.getPresignedUploadUrl(
       key,
@@ -397,14 +433,20 @@ export class FileService implements OnModuleInit {
     const projectId = getFieldValue(fields.projectId);
     const pageId = getFieldValue(fields.pageId);
     const source = getFieldValue(fields.source) || getFieldValue(fields.module);
-    const skipFileRecord = getFieldValue(fields.skipFileRecord) === 'true';
+
+    // Pre-authorize scope before performing any upload to R2
+    await this.assertCanWriteScope(authorId, {
+      workspaceId,
+      projectId,
+      pageId,
+    });
 
     return this.uploadR2Buffer(authorId, filename, buffer, mimeType, {
       workspaceId,
       projectId,
       pageId,
       source,
-      skipFileRecord,
+      skipFileRecord: false, // Disallow skipping file record from public API
     });
   }
 
@@ -494,9 +536,11 @@ export class FileService implements OnModuleInit {
         }
       }
     } catch (dbErr) {
-      this.logger.warn(
-        `Failed to create database record for uploaded file: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`,
+      this.logger.error(
+        `Failed to create database record for uploaded file: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}. Cleaning up R2 object ${key}...`,
       );
+      await this.r2Service.deleteObject(key).catch(() => {});
+      throw dbErr;
     }
 
     return {
@@ -587,20 +631,20 @@ export class FileService implements OnModuleInit {
   }
 
   async getFile(fileId: string, userId: string) {
-    const cacheKey = STORAGE_REDIS_KEYS.file(fileId);
-    if (this.cache) {
-      const cached = await this.cache.get<any>(cacheKey);
-      if (cached) return { file: cached };
-    }
-
+    // Defense-in-depth: Authorize access before cache hit to prevent cache poisoning / cross-tenant leaks
     const file = await this.assertCanAccessFile(userId, fileId, 'read');
     const formatted = this.formatFile(file);
 
+    const cacheKey = `${STORAGE_REDIS_KEYS.file(fileId)}:${file.workspaceId || 'global'}`;
     if (this.cache) {
       await this.cache.set(cacheKey, formatted, 1800);
     }
 
     return { file: formatted };
+  }
+
+  async findFileByKey(key: string) {
+    return this.fileRepo.findFileByKey(key);
   }
 
   async getFileContentStream(
@@ -720,7 +764,24 @@ export class FileService implements OnModuleInit {
     };
   }
 
-  async getFolderPath(folderId: string) {
+  async getFolderPath(folderId: string, userId: string) {
+    if (
+      !folderId ||
+      folderId === 'root' ||
+      folderId === 'null' ||
+      folderId === 'undefined' ||
+      !isUuid(folderId)
+    ) {
+      return { path: [] };
+    }
+
+    if (!userId) {
+      throw new ForbiddenException('User is not authenticated');
+    }
+
+    // Enforce read access to the target folder before traversing
+    await this.assertCanAccessFile(userId, folderId, 'read');
+
     const path: { id: string | null; name: string }[] = [];
     let currentId: string | null = folderId;
     let depth = 0;
@@ -760,20 +821,58 @@ export class FileService implements OnModuleInit {
     return { message: 'File moved to trash' };
   }
 
-  async batchDeleteFiles(ids: string[]) {
-    if (!ids || ids.length === 0)
-      return { message: 'No files provided', count: 0 };
-    const safeFiles = await this.fileRepo.findFiles({
-      id: { in: ids },
-      NOT: NON_WORKSPACE_STORAGE_EXCLUSION,
-    });
-    const safeIds = safeFiles.map((f) => f.id);
-    if (safeIds.length === 0) {
-      return { message: 'No valid workspace files to delete', count: 0 };
+  /**
+   * Helper to load all files in a batch, verify they all exist, belong to the same tenant,
+   * and verify the current user has write permission for all of them.
+   * If any file fails verification, the whole batch fails immediately.
+   */
+  private async assertCanWriteFilesBatch(
+    userId: string,
+    ids: string[],
+  ): Promise<FileWithAuthor[]> {
+    if (!userId) {
+      throw new ForbiddenException('User is not authenticated');
     }
-    const res = await this.fileRepo.batchUpdateFiles(safeIds, {
+    if (!ids || ids.length === 0) {
+      throw new BadRequestException('No files provided in batch request');
+    }
+
+    const uniqueIds = Array.from(new Set(ids));
+    const files = await this.fileRepo.findFiles({
+      id: { in: uniqueIds },
+    });
+
+    if (files.length !== uniqueIds.length) {
+      throw new NotFoundException(
+        'One or more files not found. Batch operation aborted.',
+      );
+    }
+
+    const primaryWorkspaceId = files[0].workspaceId;
+    for (const f of files) {
+      if (f.workspaceId !== primaryWorkspaceId) {
+        throw new ForbiddenException(
+          'All files in batch operation must belong to the same workspace',
+        );
+      }
+      await this.assertCanAccessFile(userId, f.id, 'write');
+    }
+
+    return files;
+  }
+
+  async batchDeleteFiles(ids: string[], userId: string) {
+    const files = await this.assertCanWriteFilesBatch(userId, ids);
+    const fileIds = files.map((f) => f.id);
+
+    const res = await this.fileRepo.batchUpdateFiles(fileIds, {
       trashedAt: new Date(),
     });
+
+    for (const f of files) {
+      await this.invalidateStorageCache(f.workspaceId, f.id);
+    }
+
     return { message: 'Files moved to trash', count: res.count };
   }
 
@@ -784,20 +883,18 @@ export class FileService implements OnModuleInit {
     return { message: 'File restored successfully' };
   }
 
-  async batchRestoreFiles(ids: string[]) {
-    if (!ids || ids.length === 0)
-      return { message: 'No files provided', count: 0 };
-    const safeFiles = await this.fileRepo.findFiles({
-      id: { in: ids },
-      NOT: NON_WORKSPACE_STORAGE_EXCLUSION,
-    });
-    const safeIds = safeFiles.map((f) => f.id);
-    if (safeIds.length === 0) {
-      return { message: 'No valid workspace files to restore', count: 0 };
-    }
-    const res = await this.fileRepo.batchUpdateFiles(safeIds, {
+  async batchRestoreFiles(ids: string[], userId: string) {
+    const files = await this.assertCanWriteFilesBatch(userId, ids);
+    const fileIds = files.map((f) => f.id);
+
+    const res = await this.fileRepo.batchUpdateFiles(fileIds, {
       trashedAt: null,
     });
+
+    for (const f of files) {
+      await this.invalidateStorageCache(f.workspaceId, f.id);
+    }
+
     return { message: 'Files restored successfully', count: res.count };
   }
 
@@ -817,26 +914,15 @@ export class FileService implements OnModuleInit {
     return { message: 'File permanently deleted' };
   }
 
-  async batchPermanentlyDeleteFiles(ids: string[]) {
-    if (!ids || ids.length === 0)
-      return { message: 'No files provided', count: 0 };
-    const safeFiles = await this.fileRepo.findFiles({
-      id: { in: ids },
-      NOT: NON_WORKSPACE_STORAGE_EXCLUSION,
-    });
-    const safeIds = safeFiles.map((f) => f.id);
-    if (safeIds.length === 0) {
-      return {
-        message: 'No valid workspace files to permanently delete',
-        count: 0,
-      };
-    }
+  async batchPermanentlyDeleteFiles(ids: string[], userId: string) {
+    const files = await this.assertCanWriteFilesBatch(userId, ids);
+    const fileIds = files.map((f) => f.id);
 
     const deletePromises: Promise<unknown>[] = [
-      this.fileRepo.batchDeleteFiles(safeIds),
+      this.fileRepo.batchDeleteFiles(fileIds),
     ];
 
-    for (const file of safeFiles) {
+    for (const file of files) {
       if (file.url && file.url.includes('/api/files/r2/')) {
         const key = file.url.replace('/api/files/r2/', '');
         deletePromises.push(this.r2Service.deleteObject(key));
@@ -844,7 +930,12 @@ export class FileService implements OnModuleInit {
     }
 
     await Promise.all(deletePromises);
-    return { message: 'Files permanently deleted', count: safeFiles.length };
+
+    for (const f of files) {
+      await this.invalidateStorageCache(f.workspaceId, f.id);
+    }
+
+    return { message: 'Files permanently deleted', count: files.length };
   }
 
   async toggleStar(fileId: string, userId: string) {
@@ -859,20 +950,18 @@ export class FileService implements OnModuleInit {
     return { file: this.formatFile(updated) };
   }
 
-  async batchToggleStar(ids: string[], starred: boolean) {
-    if (!ids || ids.length === 0)
-      return { message: 'No files provided', count: 0 };
-    const safeFiles = await this.fileRepo.findFiles({
-      id: { in: ids },
-      NOT: NON_WORKSPACE_STORAGE_EXCLUSION,
-    });
-    const safeIds = safeFiles.map((f) => f.id);
-    if (safeIds.length === 0) {
-      return { message: 'No valid workspace files to update', count: 0 };
-    }
-    const res = await this.fileRepo.batchUpdateFiles(safeIds, {
+  async batchToggleStar(ids: string[], starred: boolean, userId: string) {
+    const files = await this.assertCanWriteFilesBatch(userId, ids);
+    const fileIds = files.map((f) => f.id);
+
+    const res = await this.fileRepo.batchUpdateFiles(fileIds, {
       starred,
     });
+
+    for (const f of files) {
+      await this.invalidateStorageCache(f.workspaceId, f.id);
+    }
+
     return {
       message: `Files ${starred ? 'starred' : 'unstarred'} successfully`,
       count: res.count,
@@ -920,7 +1009,10 @@ export class FileService implements OnModuleInit {
   async getStorageUsage(workspaceParam: string) {
     const workspaceId =
       (await this.resolveWorkspaceId({ workspaceId: workspaceParam })) ||
-      workspaceParam;
+      (isUuid(workspaceParam) ? workspaceParam : null);
+    if (!workspaceId) {
+      return { totalBytes: 0 };
+    }
     const cacheKey = STORAGE_REDIS_KEYS.quota(workspaceId);
 
     if (this.cache) {
@@ -1001,7 +1093,10 @@ export class FileService implements OnModuleInit {
   async getHomeFiles(workspaceParam: string) {
     const workspaceId =
       (await this.resolveWorkspaceId({ workspaceId: workspaceParam })) ||
-      workspaceParam;
+      (isUuid(workspaceParam) ? workspaceParam : null);
+    if (!workspaceId) {
+      return { files: [] };
+    }
     const files = await this.fileRepo.findFiles(
       {
         workspaceId,
@@ -1023,8 +1118,11 @@ export class FileService implements OnModuleInit {
   ) {
     const workspaceId = workspaceParam
       ? (await this.resolveWorkspaceId({ workspaceId: workspaceParam })) ||
-        workspaceParam
+        (isUuid(workspaceParam) ? workspaceParam : undefined)
       : undefined;
+    if (workspaceParam && !workspaceId && !projectId) {
+      return { files: [] };
+    }
     const files = await this.fileRepo.findFiles(
       {
         authorId: userId,
@@ -1045,8 +1143,11 @@ export class FileService implements OnModuleInit {
   async getStarredFiles(workspaceParam?: string, projectId?: string) {
     const workspaceId = workspaceParam
       ? (await this.resolveWorkspaceId({ workspaceId: workspaceParam })) ||
-        workspaceParam
+        (isUuid(workspaceParam) ? workspaceParam : undefined)
       : undefined;
+    if (workspaceParam && !workspaceId && !projectId) {
+      return { files: [] };
+    }
     const files = await this.fileRepo.findFiles(
       {
         starred: true,
@@ -1071,8 +1172,11 @@ export class FileService implements OnModuleInit {
   ) {
     const workspaceId = workspaceParam
       ? (await this.resolveWorkspaceId({ workspaceId: workspaceParam })) ||
-        workspaceParam
+        (isUuid(workspaceParam) ? workspaceParam : undefined)
       : undefined;
+    if (workspaceParam && !workspaceId && !projectId) {
+      return { files: [] };
+    }
     const shares = await this.fileRepo.findFileShares(userId);
 
     const files = shares
@@ -1105,8 +1209,11 @@ export class FileService implements OnModuleInit {
   async getTrashedFiles(workspaceParam?: string, projectId?: string) {
     const workspaceId = workspaceParam
       ? (await this.resolveWorkspaceId({ workspaceId: workspaceParam })) ||
-        workspaceParam
+        (isUuid(workspaceParam) ? workspaceParam : undefined)
       : undefined;
+    if (workspaceParam && !workspaceId && !projectId) {
+      return { files: [] };
+    }
     const files = await this.fileRepo.findFiles(
       {
         trashedAt: { not: null },
@@ -1121,5 +1228,17 @@ export class FileService implements OnModuleInit {
     );
 
     return { files: files.map((f) => this.formatFile(f)) };
+  }
+
+  async linkFile(input: {
+    fileId: string;
+    linkedToType: string;
+    linkedToId: string;
+  }): Promise<void> {
+    if (!input.fileId) return;
+    await this.fileRepo.updateFile(input.fileId, {
+      linkedToType: input.linkedToType,
+      linkedToId: input.linkedToId,
+    });
   }
 }

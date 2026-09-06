@@ -52,7 +52,6 @@ export type TaskWithRelations = WorkItemWithRelations;
 
 export interface WorkItemResponse {
   id: string;
-  _id: string;
   identifier?: string | null;
   sequenceNumber?: number | null;
   title: string;

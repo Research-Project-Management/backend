@@ -1,9 +1,12 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { RedisCacheService } from '@/core/cache/redis-cache.service';
 import { Permission } from './enums/permissions.enum';
-import { WorkspaceRole } from './enums/workspace-role.enum';
-import { ProjectRole } from './enums/project-role.enum';
+import {
+  WorkspaceRole,
+  WorkspaceRoleHierarchy,
+} from './enums/workspace-role.enum';
+import { ProjectRole, ProjectRoleHierarchy } from './enums/project-role.enum';
 import {
   WORKSPACE_ROLE_PERMISSIONS,
   PROJECT_ROLE_PERMISSIONS,
@@ -127,6 +130,105 @@ export class AuthzService {
   ): Promise<void> {
     const cacheKey = IAM_REDIS_KEYS.projectRole(projectId, userId);
     await this.redis.del(cacheKey);
+  }
+
+  /**
+   * Assert workspace membership and optionally required roles at service layer.
+   */
+  async assertWorkspaceMember(
+    workspaceId: string,
+    userId: string,
+    allowedRoles?: (WorkspaceRole | string)[],
+  ): Promise<{ workspaceId: string; role: WorkspaceRole }> {
+    if (!workspaceId || !userId) {
+      throw new ForbiddenException(
+        'Workspace context and authenticated user are required',
+      );
+    }
+
+    const role = await this.getWorkspaceMemberRole(workspaceId, userId);
+    if (!role) {
+      throw new ForbiddenException('You are not a member of this workspace');
+    }
+
+    if (allowedRoles && allowedRoles.length > 0) {
+      const memberRole = (role as string).toUpperCase() as WorkspaceRole;
+      const memberLevel = WorkspaceRoleHierarchy[memberRole] || 0;
+
+      const isAllowed = allowedRoles.some((reqRole) => {
+        const normalized = (reqRole as string).toUpperCase() as WorkspaceRole;
+        const requiredLevel = WorkspaceRoleHierarchy[normalized] || 0;
+        return memberLevel >= requiredLevel;
+      });
+
+      if (!isAllowed) {
+        throw new ForbiddenException(
+          `Insufficient workspace permissions. Required: ${allowedRoles.join(', ')}`,
+        );
+      }
+    }
+
+    return { workspaceId, role };
+  }
+
+  /**
+   * Assert project membership and optionally required roles at service layer.
+   */
+  async assertProjectMember(
+    projectId: string,
+    userId: string,
+    allowedRoles?: (ProjectRole | string)[],
+  ): Promise<{ projectId: string; role: ProjectRole }> {
+    if (!projectId || !userId) {
+      throw new ForbiddenException(
+        'Project context and authenticated user are required',
+      );
+    }
+
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { id: true, workspaceId: true },
+    });
+    if (!project) {
+      throw new ForbiddenException('Project not found');
+    }
+
+    // Workspace owner / admin superuser access
+    const wsRole = await this.getWorkspaceMemberRole(
+      project.workspaceId,
+      userId,
+    );
+    if (
+      wsRole &&
+      (wsRole.toUpperCase() === WorkspaceRole.OWNER ||
+        wsRole.toUpperCase() === WorkspaceRole.ADMIN)
+    ) {
+      return { projectId, role: ProjectRole.ADMIN };
+    }
+
+    const role = await this.getProjectMemberRole(projectId, userId);
+    if (!role) {
+      throw new ForbiddenException('You are not a member of this project');
+    }
+
+    if (allowedRoles && allowedRoles.length > 0) {
+      const memberRole = (role as string).toUpperCase() as ProjectRole;
+      const memberLevel = ProjectRoleHierarchy[memberRole] || 0;
+
+      const isAllowed = allowedRoles.some((reqRole) => {
+        const normalized = (reqRole as string).toUpperCase() as ProjectRole;
+        const requiredLevel = ProjectRoleHierarchy[normalized] || 0;
+        return memberLevel >= requiredLevel;
+      });
+
+      if (!isAllowed) {
+        throw new ForbiddenException(
+          `Insufficient project permissions. Required: ${allowedRoles.join(', ')}`,
+        );
+      }
+    }
+
+    return { projectId, role };
   }
 
   /**

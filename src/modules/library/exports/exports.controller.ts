@@ -9,15 +9,20 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
 import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
+import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
 import { ExportsService } from './exports.service';
-import { ExportLibraryDto, ExportFormatType } from './dto/export.dto';
+import { ExportLibraryDto, ExportFormatType } from './dto/exports.dto';
 
-@Controller('api/v1/workspaces/:workspaceId/library/exports')
+@Controller([
+  'api/v1/workspaces/:workspaceId/library/exports',
+  'api/v1/workspace/:workspaceId/library/exports',
+])
 @UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
 export class ExportsController {
   constructor(private readonly exportsService: ExportsService) {}
 
   @Get('items/:itemId/annotated-pdf')
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async exportAnnotatedPdf(
     @Param('workspaceId') workspaceId: string,
     @Param('itemId') itemId: string,
@@ -34,6 +39,7 @@ export class ExportsController {
   }
 
   @Post()
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async exportLibrary(
     @Param('workspaceId') workspaceId: string,
     @Body() dto: ExportLibraryDto,
@@ -42,6 +48,7 @@ export class ExportsController {
   }
 
   @Get()
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async exportLibraryGet(
     @Param('workspaceId') workspaceId: string,
     @Param('collectionId') collectionIdParam: string | undefined,
@@ -70,6 +77,7 @@ export class ExportsController {
   }
 
   @Get(':collectionId/export-bundle')
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async getCollectionBundle(
     @Param('workspaceId') workspaceId: string,
     @Param('collectionId') collectionId: string,

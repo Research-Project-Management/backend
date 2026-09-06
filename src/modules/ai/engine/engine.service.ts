@@ -17,15 +17,31 @@ export class EngineService {
 
   async health(): Promise<{ status: string; [key: string]: unknown }> {
     const result = await tryCatch(
-      fetch(`${this.fluxUrl}/health`, { method: 'GET' }),
+      fetch(`${this.fluxUrl}/health`, {
+        method: 'GET',
+        signal: AbortSignal.timeout(3000),
+      }),
     );
 
     if (result.ok && result.value.ok) {
       const jsonResult = await tryCatch(result.value.json());
-      if (jsonResult.ok) return jsonResult.value as { status: string };
+      return {
+        status: 'ok',
+        service: 'flux-ai-engine',
+        upstream: jsonResult.ok ? jsonResult.value : 'healthy',
+        timestamp: new Date().toISOString(),
+      };
     }
 
-    return { status: 'ok', service: 'flux-ai-proxy' };
+    return {
+      status: 'degraded',
+      service: 'flux-ai-engine',
+      upstream: 'unreachable',
+      error: !result.ok
+        ? getErrorMessage(result.error)
+        : `Upstream HTTP ${result.value.status}`,
+      timestamp: new Date().toISOString(),
+    };
   }
 
   async streamChat(
@@ -105,7 +121,20 @@ export class EngineService {
 
     if (result.ok && result.value.ok) {
       const jsonResult = await tryCatch(result.value.json());
-      if (jsonResult.ok) return jsonResult.value as SyncChatResponse;
+      if (jsonResult.ok) {
+        const val = jsonResult.value as any;
+        if (val?.output?.content !== undefined) {
+          return {
+            role: 'assistant',
+            content: val.output.content,
+            sources: val.output.sources || [],
+            widgets: val.output.widgets || [],
+            intent: val.intent,
+            ...val,
+          };
+        }
+        return val as SyncChatResponse;
+      }
     }
 
     return {

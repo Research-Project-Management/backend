@@ -95,7 +95,8 @@ export class UnpaywallProvider implements MetadataProvider {
     const pdfUrl =
       bestOaLocation?.url_for_pdf || bestOaLocation?.url || undefined;
 
-    if (!pdfUrl) return null;
+    const hasMetadata = Boolean(payload?.title || pdfUrl);
+    if (!hasMetadata) return null;
 
     const rawVersion = createHash('md5')
       .update(JSON.stringify(payload))

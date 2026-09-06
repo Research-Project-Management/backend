@@ -5,7 +5,10 @@ import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
 import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
 import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
 
-@Controller('api/v1/workspaces/:workspaceId/library/search')
+@Controller([
+  'api/v1/workspaces/:workspaceId/library/search',
+  'api/v1/workspace/:workspaceId/library/search',
+])
 @UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
 export class SearchController {
   constructor(private readonly searchService: SearchService) {}

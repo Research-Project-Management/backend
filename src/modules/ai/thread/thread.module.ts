@@ -6,6 +6,6 @@ import { ThreadRepository } from './thread.repository';
 @Module({
   controllers: [ThreadController],
   providers: [ThreadService, ThreadRepository],
-  exports: [ThreadService, ThreadRepository],
+  exports: [ThreadService],
 })
 export class ThreadModule {}

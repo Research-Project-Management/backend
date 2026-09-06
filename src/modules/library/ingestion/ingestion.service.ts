@@ -5,7 +5,6 @@ import {
   Optional,
   NotFoundException,
   ConflictException,
-  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { resolveTenantWorkspaceId } from '../../../core/utils/tenant.util';
@@ -27,7 +26,6 @@ import { EnrichStage } from './stages/enrich.stage';
 import { ReconcileStage } from './stages/reconcile.stage';
 import { MatchStage } from './stages/match.stage';
 import { CommitStage } from './stages/commit.stage';
-import { LibraryItemSource } from '../outbox/outbox.events';
 import { TransactionService } from '../outbox/transaction.service';
 import { METADATA_PORT, MetadataPort } from './metadata/types/metadata.types';
 import { STORAGE_PORT, IStoragePort } from '../../storage/storage.port';
@@ -39,11 +37,15 @@ import { IdempotencyRepository } from '../sync/repositories/idempotency.reposito
 import { IngestionStatus, Prisma } from '@prisma/client';
 import { IngestionStrategyRegistry } from './strategies/ingestion-strategy.registry';
 import { IngestionExecutionContext } from './strategies/ingestion-strategy.interface';
+import { IngestionPipelineRunner } from './services/ingestion-pipeline.runner';
+import { UrlCaptureService } from './services/url-capture.service';
 import { createHash, randomUUID } from 'crypto';
 
 @Injectable()
 export class IngestionService implements IngestionPort {
   private readonly logger = new Logger(IngestionService.name);
+  private readonly runner: IngestionPipelineRunner;
+  private readonly urlCapture: UrlCaptureService;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -67,7 +69,32 @@ export class IngestionService implements IngestionPort {
     @Optional() private readonly pdfExtractor?: PdfExtractorProvider,
     @Optional() private readonly notesService?: NotesService,
     @Optional() private readonly idempotencyRepo?: IdempotencyRepository,
-  ) {}
+    @Optional() private readonly pipelineRunner?: IngestionPipelineRunner,
+    @Optional() private readonly urlCaptureService?: UrlCaptureService,
+  ) {
+    this.runner =
+      this.pipelineRunner ??
+      new IngestionPipelineRunner(
+        this.ingestionRepo,
+        this.identifyStage,
+        this.normalizeStage,
+        this.enrichStage,
+        this.reconcileStage,
+        this.matchStage,
+        this.commitStage,
+        this.catalogService,
+        this.notesService,
+      );
+
+    this.urlCapture =
+      this.urlCaptureService ??
+      new UrlCaptureService(
+        this.prisma,
+        this.urlCaptureProvider,
+        this.txService,
+        this.catalogService,
+      );
+  }
 
   /**
    * Primary Fast-Path Submission Entry Point (Async 202 Contract)
@@ -154,393 +181,22 @@ export class IngestionService implements IngestionPort {
 
   /**
    * Executes the multi-stage ingestion pipeline.
+   * Delegated to IngestionPipelineRunner.
    */
   async executePipeline(
     runId: string,
     workspaceId: string,
     envelope: IngestionSubmissionEnvelope,
   ): Promise<void> {
-    if (
-      !this.identifyStage ||
-      !this.normalizeStage ||
-      !this.enrichStage ||
-      !this.reconcileStage ||
-      !this.matchStage ||
-      !this.commitStage
-    ) {
-      throw new Error('Ingestion pipeline stages are not configured');
-    }
-
-    // Stage 1: IDENTIFY & PARSE
-    const identifyStart = Date.now();
-    const identifiedCandidates = await this.identifyStage.execute(
-      runId,
-      envelope.payload,
-      workspaceId,
-    );
-    const initialCandidates = identifiedCandidates.map((candidate) => ({
-      ...candidate,
-      normalizedMetadata: {
-        ...candidate.normalizedMetadata,
-        ...(envelope.overrides || {}),
-      },
-    }));
-    await this.ingestionRepo.createStage(runId, {
-      stageName: 'IDENTIFY',
-      durationMs: Date.now() - identifyStart,
-      success: true,
-      outputSnapshot: {
-        candidateCount: initialCandidates.length,
-      },
-    });
-
-    for (const cand of initialCandidates) {
-      await this.ingestionRepo.createCandidate(runId, {
-        sourceProvider: cand.sourceName,
-        sourceRecordId: cand.sourceRecordId,
-        confidenceScore: cand.confidenceScore,
-        metadataPayload: cand.normalizedMetadata as Prisma.InputJsonValue,
-      });
-    }
-
-    if (initialCandidates.length === 0) {
-      throw new BadRequestException(
-        'No valid bibliographic metadata could be identified from input',
-      );
-    }
-
-    // Stage 2: NORMALIZE
-    const normalizeStart = Date.now();
-    const normalizedCandidates =
-      await this.normalizeStage.execute(initialCandidates);
-    await this.ingestionRepo.createStage(runId, {
-      stageName: 'NORMALIZE',
-      durationMs: Date.now() - normalizeStart,
-      success: true,
-      outputSnapshot: {
-        candidateCount: normalizedCandidates.length,
-      },
-    });
-
-    // Stage 3: ENRICH (Crossref, OpenAlex, PubMed, arXiv)
-    const enrichStart = Date.now();
-    const enrichedCandidates = await this.enrichStage.execute(
-      workspaceId,
-      normalizedCandidates,
-    );
-    await this.ingestionRepo.createStage(runId, {
-      stageName: 'ENRICH',
-      durationMs: Date.now() - enrichStart,
-      success: true,
-      outputSnapshot: {
-        candidateCount: enrichedCandidates.length,
-      },
-    });
-
-    // ── Multi-Record Ingestion Handling (BibTeX / RIS batches) ────────────────
-    if (envelope.payload.kind === 'RECORD' && enrichedCandidates.length > 1) {
-      const createdItemIds: string[] = [];
-      for (const candidate of enrichedCandidates) {
-        const itemDecision = await this.reconcileStage.execute([candidate]);
-        const matchRes = await this.matchStage.execute(
-          workspaceId,
-          itemDecision.proposedItem,
-        );
-        if (matchRes.matchType === 'EXACT' && matchRes.targetItemId) {
-          createdItemIds.push(matchRes.targetItemId);
-          continue;
-        }
-        const created = await this.commitStage.execute(
-          workspaceId,
-          itemDecision.proposedItem,
-          {
-            collectionIds: envelope.collectionIds,
-            tagIds: envelope.tagIds,
-            userId: envelope.userId,
-            source: this.mapPayloadToSource(envelope.payload.kind),
-          },
-        );
-        if (created?.id) {
-          createdItemIds.push(created.id);
-        }
-      }
-
-      await this.ingestionRepo.createStage(runId, {
-        stageName: 'COMMIT',
-        durationMs: Date.now() - identifyStart,
-        success: true,
-        outputSnapshot: {
-          itemIds: createdItemIds,
-          totalProcessed: createdItemIds.length,
-        },
-      });
-
-      await this.ingestionRepo.updateRunStatus(
-        workspaceId,
-        runId,
-        IngestionStatus.READY,
-        {
-          itemId: createdItemIds[0],
-          completedAt: new Date(),
-        },
-      );
-      return;
-    }
-
-    // Stage 4: RECONCILE (Field Provenance & Conflict Detection)
-    const reconcileStart = Date.now();
-    const decision = await this.reconcileStage.execute(enrichedCandidates);
-    await this.ingestionRepo.createStage(runId, {
-      stageName: 'RECONCILE',
-      durationMs: Date.now() - reconcileStart,
-      success: true,
-      outputSnapshot: {
-        conflictCount: decision.conflicts.length,
-        fieldCount: Object.keys(decision.selectedFields).length,
-      },
-    });
-
-    // Stage 5: MATCH (Duplicate Detection)
-    const matchStart = Date.now();
-    const matchResult = await this.matchStage.execute(
-      workspaceId,
-      decision.proposedItem,
-    );
-    await this.ingestionRepo.createStage(runId, {
-      stageName: 'MATCH',
-      durationMs: Date.now() - matchStart,
-      success: true,
-      outputSnapshot: matchResult as unknown as Prisma.InputJsonValue,
-    });
-
-    // ── Decision Branching ─────────────────────────────────────────────────────
-
-    // EXACT DOI match → Additive metadata enrichment of the existing item.
-    // Only fields that are null/empty on the existing item are updated (safe merge).
-    // Fields provided by the user via overrides always win (they are in the reconciled proposal).
-    if (matchResult.matchType === 'EXACT' && matchResult.targetItemId) {
-      const enrichStart = Date.now();
-      let enrichedItem: any = null;
-      const enrichPatch: Record<string, any> = {};
-
-      if (this.catalogService) {
-        // Fetch current state to build a null-safe patch
-        const existing = await this.catalogService.getItem(
-          workspaceId,
-          matchResult.targetItemId,
-        );
-
-        const p = decision.proposedItem;
-
-        // Build patch: only overwrite fields that are currently empty on the existing item
-        const maybeEnrich = (field: string, proposed: any) => {
-          if (proposed == null || proposed === '') return;
-          const current = (existing as any)?.[field];
-          if (
-            current == null ||
-            current === '' ||
-            (Array.isArray(current) && current.length === 0)
-          ) {
-            enrichPatch[field] = proposed;
-          }
-        };
-
-        maybeEnrich('abstract', p.abstract);
-        maybeEnrich('title', p.title);
-        maybeEnrich('journal', p.journal);
-        maybeEnrich('publicationTitle', p.publicationTitle);
-        maybeEnrich('publicationDate', p.publicationDate);
-        maybeEnrich('publisher', p.publisher);
-        maybeEnrich('place', p.place);
-        maybeEnrich('volume', p.volume);
-        maybeEnrich('issue', p.issue);
-        maybeEnrich('pages', p.pages);
-        maybeEnrich('section', p.section);
-        maybeEnrich('partNumber', p.partNumber);
-        maybeEnrich('partTitle', p.partTitle);
-        maybeEnrich('series', p.series);
-        maybeEnrich('seriesTitle', p.seriesTitle);
-        maybeEnrich('seriesText', p.seriesText);
-        maybeEnrich('year', p.year);
-        maybeEnrich('url', p.url);
-        maybeEnrich('arxivId', p.arxivId);
-        maybeEnrich('pmid', p.pmid);
-        maybeEnrich('pmcid', p.pmcid);
-        maybeEnrich('itemType', p.itemType);
-        maybeEnrich('type', p.type);
-        maybeEnrich('citationKey', p.citationKey);
-        maybeEnrich('issn', (p as any).issn);
-        maybeEnrich('isbn', (p as any).isbn);
-        maybeEnrich('language', (p as any).language);
-        maybeEnrich('rights', p.rights);
-        maybeEnrich('license', p.license);
-        maybeEnrich('extra', p.extra);
-        maybeEnrich('libraryCatalog', p.libraryCatalog);
-        maybeEnrich('callNumber', p.callNumber);
-        maybeEnrich('archive', p.archive);
-        maybeEnrich('archiveLocation', p.archiveLocation);
-        maybeEnrich('extraFields', p.extraFields);
-        if (p.authors?.length && !(existing as any)?.authors?.length) {
-          enrichPatch['authors'] = p.authors;
-        }
-        if (p.editors?.length && !(existing as any)?.editors?.length) {
-          enrichPatch['editors'] = p.editors;
-        }
-        if (p.creators?.length && !(existing as any)?.creators?.length) {
-          enrichPatch['creators'] = p.creators;
-        }
-        if (p.keywords?.length && !(existing as any)?.keywords?.length) {
-          enrichPatch['keywords'] = p.keywords;
-          enrichPatch['labels'] = p.keywords;
-        }
-
-        if (Object.keys(enrichPatch).length > 0) {
-          enrichedItem = await this.catalogService.updateItem(
-            workspaceId,
-            matchResult.targetItemId,
-            undefined,
-            enrichPatch,
-          );
-          this.logger.log(
-            `[EXACT_MERGE] Enriched item ${matchResult.targetItemId} with ${Object.keys(enrichPatch).join(', ')}`,
-          );
-        } else {
-          enrichedItem = existing;
-          this.logger.log(
-            `[EXACT_MERGE] Item ${matchResult.targetItemId} already fully populated — no patch needed`,
-          );
-        }
-
-        // Add literature notes from proposed item if not already recorded
-        if (Array.isArray(p.notes) && p.notes.length > 0 && this.notesService) {
-          for (const note of p.notes) {
-            const content =
-              typeof note === 'string' ? note : (note as any)?.content;
-            if (!content || !String(content).trim()) continue;
-            const src =
-              typeof note === 'object' ? (note as any)?.source : undefined;
-            await this.notesService.createLiteratureNote(
-              workspaceId,
-              matchResult.targetItemId,
-              envelope.userId || 'system',
-              String(content).trim(),
-              src,
-            );
-            this.logger.log(
-              `[EXACT_MERGE] Added literature note to item ${matchResult.targetItemId}`,
-            );
-          }
-        }
-      }
-
-      await this.ingestionRepo.createDecision(runId, {
-        decisionType: 'UPDATE',
-        decisionReason:
-          'Exact DOI match — additive enrichment applied to existing item',
-        proposedItem: decision.proposedItem as unknown as Prisma.InputJsonValue,
-        duplicateMatch: matchResult as unknown as Prisma.InputJsonValue,
-      });
-
-      await this.ingestionRepo.createStage(runId, {
-        stageName: 'ENRICH_EXISTING',
-        durationMs: Date.now() - enrichStart,
-        success: true,
-        outputSnapshot: {
-          itemId: matchResult.targetItemId,
-          patchedFields: Object.keys(enrichPatch),
-          patchCount: Object.keys(enrichPatch).length,
-        },
-      });
-
-      await this.ingestionRepo.updateRunStatus(
-        workspaceId,
-        runId,
-        IngestionStatus.READY,
-        {
-          itemId: matchResult.targetItemId,
-          completedAt: new Date(),
-        },
-      );
-      return;
-    }
-
-    // PROBABLE fuzzy match → Queue for human review (unchanged)
-    if (matchResult.matchType === 'PROBABLE' && matchResult.targetItemId) {
-      await this.ingestionRepo.createDecision(runId, {
-        decisionType: 'REVIEW',
-        decisionReason: 'Probable duplicate matched via fuzzy title similarity',
-        proposedItem: decision.proposedItem as unknown as Prisma.InputJsonValue,
-        duplicateMatch: matchResult as unknown as Prisma.InputJsonValue,
-      });
-
-      await this.ingestionRepo.createReviewCase(workspaceId, runId, {
-        targetItemId: matchResult.targetItemId,
-        reason: `Probable match with existing item "${matchResult.targetItemTitle}"`,
-        evidence: {
-          matchReason: matchResult.matchReason,
-          confidence: matchResult.confidence,
-          details: matchResult.evidence,
-        } as unknown as Prisma.InputJsonValue,
-        options: {
-          proposedMetadata: decision.proposedItem,
-        } as unknown as Prisma.InputJsonValue,
-      });
-
-      await this.ingestionRepo.updateRunStatus(
-        workspaceId,
-        runId,
-        IngestionStatus.NEEDS_REVIEW,
-        { completedAt: new Date() },
-      );
-      return;
-    }
-
-    // Stage 6: COMMIT (create new CatalogItem via CommitStage)
-    const commitStart = Date.now();
-    const createdItem = await this.commitStage.execute(
-      workspaceId,
-      decision.proposedItem,
-      {
-        collectionIds: envelope.collectionIds,
-        tagIds: envelope.tagIds,
-        userId: envelope.userId,
-        source: this.mapPayloadToSource(envelope.payload.kind),
-        fileId:
-          envelope.payload.kind === 'FILE'
-            ? envelope.payload.fileId
-            : undefined,
-        filename:
-          envelope.payload.kind === 'FILE'
-            ? envelope.payload.filename
-            : undefined,
-      },
-    );
-
-
-    await this.ingestionRepo.createStage(runId, {
-      stageName: 'COMMIT',
-      durationMs: Date.now() - commitStart,
-      success: true,
-      outputSnapshot: { itemId: createdItem?.id },
-    });
-
-    await this.ingestionRepo.updateRunStatus(
-      workspaceId,
-      runId,
-      IngestionStatus.READY,
-      {
-        itemId: createdItem?.id,
-        completedAt: new Date(),
-      },
-    );
+    return this.runner.executePipeline(runId, workspaceId, envelope);
   }
 
   async getRunStatus(
     workspaceId: string,
     runId: string,
   ): Promise<IngestionRunSnapshot> {
-    const resolvedWsId = await this.resolveWorkspaceId(workspaceId);
-    const run = await this.ingestionRepo.findRunById(resolvedWsId, runId);
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    const run = await this.ingestionRepo.findRunById(canonicalWorkspaceId, runId);
     if (!run) {
       throw new NotFoundException(`Ingestion run '${runId}' not found`);
     }
@@ -548,13 +204,13 @@ export class IngestionService implements IngestionPort {
   }
 
   async retryRun(workspaceId: string, runId: string): Promise<any> {
-    const resolvedWsId = await this.resolveWorkspaceId(workspaceId);
-    const run = await this.ingestionRepo.findRunById(resolvedWsId, runId);
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    const run = await this.ingestionRepo.findRunById(canonicalWorkspaceId, runId);
     if (!run) {
       throw new NotFoundException(`Ingestion run '${runId}' not found`);
     }
     await this.ingestionRepo.updateRunStatus(
-      resolvedWsId,
+      canonicalWorkspaceId,
       runId,
       IngestionStatus.RECEIVED,
     );
@@ -625,11 +281,11 @@ export class IngestionService implements IngestionPort {
       workspaceId,
       runId,
       requestHash,
-      saveIdempotency: (wsId, key, hash, result) =>
-        this.saveIdempotency(wsId, key, hash, result, leaseToken),
-      updateRunStatus: async (wsId, rId, status, meta) => {
+      saveIdempotency: (workspaceId, key, hash, result) =>
+        this.saveIdempotency(workspaceId, key, hash, result, leaseToken),
+      updateRunStatus: async (workspaceId, runId, status, meta) => {
         await this.ingestionRepo
-          .updateRunStatus(wsId, rId, status, meta)
+          .updateRunStatus(workspaceId, runId, status, meta)
           .catch((err) => {
             this.logger.warn(`Failed to update run status: ${err?.message}`);
           });
@@ -688,202 +344,15 @@ export class IngestionService implements IngestionPort {
     url: string,
     contextOrWorkspaceId: string | { workspaceId: string; userId?: string },
   ) {
-    const workspaceId =
-      typeof contextOrWorkspaceId === 'string'
-        ? contextOrWorkspaceId
-        : contextOrWorkspaceId.workspaceId;
-    const userId =
-      typeof contextOrWorkspaceId === 'object'
-        ? contextOrWorkspaceId.userId
-        : undefined;
-
-    let result: any;
-    if (this.urlCaptureProvider?.captureFromUrl) {
-      result = await this.urlCaptureProvider.captureFromUrl(url, {
-        workspaceId,
-        userId,
-      });
-    } else {
-      result = {
-        title: 'Blog Post',
-        url,
-        workspaceId,
-        itemType: 'webpage',
-      };
-    }
-
-    const { previewToken, ...metaWithoutToken } = result;
-    const tokenHash = previewToken
-      ? createHash('sha256').update(previewToken).digest('hex')
-      : createHash('sha256').update(url).digest('hex');
-    const metadataDigest = this.urlCaptureProvider?.calculateMetadataDigest
-      ? this.urlCaptureProvider.calculateMetadataDigest(metaWithoutToken)
-      : '';
-
-    await this.prisma.capturePreview.create({
-      data: {
-        sourceUrl: result.url || url,
-        workspaceId,
-        userId: userId || null,
-        title: result.title || 'Captured Item',
-        canonicalMetadata: metaWithoutToken,
-        metadataDigest,
-        tokenHash,
-        expiresAt: new Date(Date.now() + 15 * 60 * 1000),
-      } as any,
-    });
-
-    return result;
+    return this.urlCapture.captureUrl(url, contextOrWorkspaceId);
   }
 
   async confirmCapturedUrl(workspaceId: string, userId: string, dto: any) {
-    if (!dto?.previewToken) {
-      throw new BadRequestException('previewToken is required');
-    }
-
-    const tokenHash = createHash('sha256')
-      .update(dto.previewToken)
-      .digest('hex');
-
-    const preview = await this.prisma.capturePreview.findUnique({
-      where: { tokenHash },
-    });
-
-    if (!preview) {
-      throw new BadRequestException('Invalid or expired capture preview token');
-    }
-
-    if (preview.consumedAt) {
-      throw new ConflictException('Capture preview has already been confirmed');
-    }
-
-    if (
-      preview.expiresAt &&
-      new Date(preview.expiresAt).getTime() < Date.now()
-    ) {
-      throw new BadRequestException('Capture preview token has expired');
-    }
-
-    if (this.urlCaptureProvider?.verifyPreviewToken) {
-      const verifyRes = this.urlCaptureProvider.verifyPreviewToken(
-        preview.canonicalMetadata as any,
-        dto.previewToken,
-        { workspaceId, userId },
-      );
-      if (!verifyRes.valid) {
-        if (verifyRes.reason === 'token_expired') {
-          throw new BadRequestException('Capture preview token has expired');
-        }
-        throw new BadRequestException(
-          `Token verification failed: ${verifyRes.reason}`,
-        );
-      }
-    }
-
-    const canonical = (preview.canonicalMetadata as any) || {};
-    const title = dto.title || canonical.title || 'Untitled';
-    const itemType = dto.itemType || canonical.itemType || 'webpage';
-
-    let authors = dto.authors || canonical.authors;
-    if (!authors && canonical.creators && Array.isArray(canonical.creators)) {
-      authors = canonical.creators.map((c: any) => {
-        if (c.lastName && c.firstName) return `${c.lastName}, ${c.firstName}`;
-        return c.fullName || c.lastName || c.firstName || 'Unknown';
-      });
-    }
-
-    const itemData: any = {
-      title,
-      itemType,
-      authors,
-      creators: dto.creators || canonical.creators,
-      contributors:
-        dto.contributors || canonical.contributors || canonical.creators,
-      abstract: dto.abstract || canonical.abstract,
-      doi: dto.doi || canonical.doi,
-      url: canonical.url || preview.sourceUrl,
-      year: dto.year || canonical.year,
-      publicationTitle: dto.publicationTitle || canonical.publicationTitle,
-      journal: dto.journal || canonical.journal,
-      publisher: dto.publisher || canonical.publisher,
-      volume: dto.volume || canonical.volume,
-      issue: dto.issue || canonical.issue,
-      pages: dto.pages || canonical.pages,
-      issn: dto.issn || canonical.issn,
-      isbn: dto.isbn || canonical.isbn,
-      language: dto.language || canonical.language,
-      rights: dto.rights || canonical.rights,
-      license: dto.license || canonical.license,
-      extra: dto.extra || canonical.extra,
-      citationKey: dto.citationKey || canonical.citationKey,
-      libraryCatalog: dto.libraryCatalog || canonical.libraryCatalog,
-      callNumber: dto.callNumber || canonical.callNumber,
-      archive: dto.archive || canonical.archive,
-      collectionId: dto.collectionId,
-      labels: dto.tags || canonical.keywords || [],
-      keywords: dto.tags || canonical.keywords || [],
-      uploadedById: userId,
-    };
-
-    if (this.txService?.executeInTransaction) {
-      return this.txService.executeInTransaction(
-        async (tx: Prisma.TransactionClient, helpers: any) => {
-          const updateRes = await tx.capturePreview.updateMany({
-            where: { id: preview.id, consumedAt: null },
-            data: { consumedAt: new Date() },
-          });
-
-          if (!updateRes || updateRes.count === 0) {
-            throw new ConflictException(
-              'Capture preview has already been confirmed or claimed',
-            );
-          }
-
-          if (this.catalogService?.createItem) {
-            return this.catalogService.createItem(workspaceId, itemData, {
-              tx,
-              helpers,
-              source: 'url',
-            });
-          }
-
-          throw new Error(
-            'CatalogService is required to confirm captured URL item',
-          );
-        },
-      );
-    }
-
-    const updateRes = await this.prisma.capturePreview.updateMany({
-      where: { id: preview.id, consumedAt: null },
-      data: { consumedAt: new Date() },
-    });
-
-    if (!updateRes || updateRes.count === 0) {
-      throw new ConflictException(
-        'Capture preview has already been confirmed or claimed',
-      );
-    }
-
-    if (this.catalogService?.createItem) {
-      return this.catalogService.createItem(workspaceId, itemData, {
-        source: 'url',
-      });
-    }
-
-    throw new Error('CatalogService is required to confirm captured URL item');
+    return this.urlCapture.confirmCapturedUrl(workspaceId, userId, dto);
   }
 
   async cleanupExpiredPreviews(retentionDays = 7): Promise<number> {
-    const res = await this.prisma.capturePreview.deleteMany({
-      where: {
-        OR: [
-          { consumedAt: { lte: new Date() } },
-          { expiresAt: { lte: new Date() } },
-        ],
-      },
-    });
-    return res?.count ?? 0;
+    return this.urlCapture.cleanupExpiredPreviews(retentionDays);
   }
 
   private async saveIdempotency(
@@ -952,22 +421,5 @@ export class IngestionService implements IngestionPort {
 
   private resolveWorkspaceId(workspaceId: string): Promise<string> {
     return resolveTenantWorkspaceId(this.prisma, workspaceId);
-  }
-
-  private mapPayloadToSource(kind: string): LibraryItemSource {
-    switch (kind) {
-      case 'IDENTIFIER':
-        return 'doi';
-      case 'RECORD':
-        return 'bibtex'; // covers both BibTeX and RIS records
-      case 'URL':
-        return 'url';
-      case 'FILE':
-        return 'pdf';
-      case 'CONNECTOR':
-        return 'external_sync';
-      default:
-        return 'manual';
-    }
   }
 }

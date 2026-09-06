@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { PrismaService } from '@/core/database/prisma.service';
+import { isUuid } from '@/core/utils/tenant.util';
 import {
   PROJECT_ROLES_KEY,
   ProjectRoleInput,
@@ -34,42 +35,124 @@ export class ProjectRoleGuard implements CanActivate {
 
     const userId = user.sub || user.id;
 
-    // 1. Resolve project identifier
+    // 1. Resolve project identifier from trusted request parts
     let projectId =
       request.params?.projectId ||
       request.headers?.['x-project-id'] ||
-      request.query?.projectId ||
-      request.body?.projectId;
+      request.query?.projectId;
 
-    // Direct /project/:id fallback
-    if (
-      !projectId &&
-      request.params?.id &&
-      !request.params?.workspaceId &&
-      !request.params?.pageId &&
-      !request.params?.taskId &&
-      !request.params?.fileId
-    ) {
-      projectId = request.params.id;
+    // Resolve project from sub-resources if not yet resolved
+    if (!projectId) {
+      if (request.params?.cycleId && this.prisma.cycle?.findUnique) {
+        const cycleId = request.params.cycleId;
+        const cycle = isUuid(cycleId)
+          ? await this.prisma.cycle.findUnique({
+              where: { id: cycleId },
+              select: { projectId: true },
+            }).catch(() => null)
+          : null;
+        if (cycle?.projectId) {
+          projectId = cycle.projectId;
+        }
+      } else if (request.params?.taskId && this.prisma.task?.findUnique) {
+        const taskId = request.params.taskId;
+        const task = isUuid(taskId)
+          ? await this.prisma.task.findUnique({
+              where: { id: taskId },
+              select: { projectId: true },
+            }).catch(() => null)
+          : null;
+        if (task?.projectId) {
+          projectId = task.projectId;
+        }
+      } else if (request.params?.pageId && this.prisma.page?.findUnique) {
+        const pageId = request.params.pageId;
+        const page = isUuid(pageId)
+          ? await this.prisma.page.findUnique({
+              where: { id: pageId },
+              select: { projectId: true },
+            }).catch(() => null)
+          : null;
+        if (page?.projectId) {
+          projectId = page.projectId;
+        }
+      } else if (request.params?.worklogId && this.prisma.worklog?.findUnique) {
+        const worklogId = request.params.worklogId;
+        const wl = isUuid(worklogId)
+          ? await this.prisma.worklog.findUnique({
+              where: { id: worklogId },
+              select: { task: { select: { projectId: true } } },
+            }).catch(() => null)
+          : null;
+        if (wl?.task?.projectId) {
+          projectId = wl.task.projectId;
+        }
+      } else if (request.params?.commentId) {
+        const commentId = request.params.commentId;
+        if (isUuid(commentId)) {
+          // Check task comment first
+          if (this.prisma.taskComment?.findUnique) {
+            const tc = await this.prisma.taskComment.findUnique({
+              where: { id: commentId },
+              select: { task: { select: { projectId: true } } },
+            }).catch(() => null);
+            if (tc?.task?.projectId) {
+              projectId = tc.task.projectId;
+            }
+          }
+          // Check page comment if not found
+          if (!projectId && this.prisma.pageComment?.findUnique) {
+            const pc = await this.prisma.pageComment.findUnique({
+              where: { id: commentId },
+              select: { page: { select: { projectId: true } } },
+            }).catch(() => null);
+            if (pc?.page?.projectId) {
+              projectId = pc.page.projectId;
+            }
+          }
+        }
+      }
     }
 
+    // Fail-closed if project context cannot be resolved
     if (!projectId) {
-      if (requiredRoles && requiredRoles.length > 0) {
-        throw new ForbiddenException(
-          'Project context is required for this operation',
-        );
-      }
-      return true;
+      throw new ForbiddenException(
+        'Project context is required for this operation',
+      );
     }
 
     // 2. Fetch project
-    const project = await this.prisma.project.findUnique({
-      where: { id: projectId },
-      select: { id: true, workspaceId: true },
-    });
+    let project: { id: string; workspaceId: string } | null = null;
+    if (isUuid(projectId)) {
+      project = await this.prisma.project.findUnique({
+        where: { id: projectId },
+        select: { id: true, workspaceId: true },
+      }).catch(() => null);
+    } else {
+      if (this.prisma.project.findFirst) {
+        project = await this.prisma.project.findFirst({
+          where: {
+            identifier: { equals: projectId, mode: 'insensitive' },
+            deletedAt: null,
+          },
+          select: { id: true, workspaceId: true },
+        }).catch(() => null);
+      }
+      if (!project && this.prisma.project.findUnique) {
+        project = await this.prisma.project.findUnique({
+          where: { id: projectId },
+          select: { id: true, workspaceId: true },
+        }).catch(() => null);
+      }
+    }
 
     if (!project) {
       throw new ForbiddenException('Project not found');
+    }
+
+    const canonicalProjectId = project.id;
+    if (request.params) {
+      request.params.projectId = canonicalProjectId;
     }
 
     // 3. Workspace OWNER/ADMIN super-permission bypass
@@ -88,7 +171,7 @@ export class ProjectRoleGuard implements CanActivate {
           WorkspaceRole.ADMIN)
     ) {
       request.project = project;
-      request.projectId = projectId;
+      request.projectId = canonicalProjectId;
       request.workspaceId = project.workspaceId;
       request.projectRole = ProjectRole.ADMIN;
       return true;
@@ -97,7 +180,7 @@ export class ProjectRoleGuard implements CanActivate {
     // 4. Project Membership check
     const projectMember = await this.prisma.projectMember.findFirst({
       where: {
-        projectId,
+        projectId: canonicalProjectId,
         userId,
       },
     });
@@ -107,7 +190,7 @@ export class ProjectRoleGuard implements CanActivate {
     }
 
     request.project = project;
-    request.projectId = projectId;
+    request.projectId = canonicalProjectId;
     request.workspaceId = project.workspaceId;
     request.projectMember = projectMember;
     request.projectRole = projectMember.role;

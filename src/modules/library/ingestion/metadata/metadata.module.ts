@@ -17,6 +17,7 @@ import { OpenLibraryProvider } from './providers/openlibrary.provider';
 import { SemanticScholarProvider } from './providers/semantic-scholar.provider';
 import { OpenAlexProvider } from './providers/openalex.provider';
 import { UnpaywallProvider } from './providers/unpaywall.provider';
+import { CoreProvider } from './providers/core.provider';
 
 @Module({
   imports: [CoreModule],
@@ -24,6 +25,8 @@ import { UnpaywallProvider } from './providers/unpaywall.provider';
     MetadataCache,
     ReconciliationService,
     ProviderExecutor,
+
+    // ── Metadata Providers ──────────────────────────────────────────────────
     CrossRefProvider,
     ArxivProvider,
     PubMedProvider,
@@ -31,6 +34,8 @@ import { UnpaywallProvider } from './providers/unpaywall.provider';
     SemanticScholarProvider,
     OpenAlexProvider,
     UnpaywallProvider,
+    CoreProvider, // CORE API — 40M+ OA full-text papers (requires CORE_API_KEY)
+
     {
       provide: METADATA_PROVIDERS,
       useFactory: (
@@ -41,6 +46,7 @@ import { UnpaywallProvider } from './providers/unpaywall.provider';
         semantic: SemanticScholarProvider,
         openalex: OpenAlexProvider,
         unpaywall: UnpaywallProvider,
+        core: CoreProvider,
       ): MetadataProvider[] => [
         crossref,
         arxiv,
@@ -49,6 +55,7 @@ import { UnpaywallProvider } from './providers/unpaywall.provider';
         semantic,
         openalex,
         unpaywall,
+        core,
       ],
       inject: [
         CrossRefProvider,
@@ -58,6 +65,7 @@ import { UnpaywallProvider } from './providers/unpaywall.provider';
         SemanticScholarProvider,
         OpenAlexProvider,
         UnpaywallProvider,
+        CoreProvider,
       ],
     },
     MetadataService,

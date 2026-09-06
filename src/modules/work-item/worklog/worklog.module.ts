@@ -6,6 +6,6 @@ import { WorklogRepository } from './worklog.repository';
 @Module({
   controllers: [WorklogController],
   providers: [WorklogService, WorklogRepository],
-  exports: [WorklogService, WorklogRepository],
+  exports: [WorklogService],
 })
 export class WorklogModule {}

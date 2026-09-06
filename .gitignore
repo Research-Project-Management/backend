@@ -45,3 +45,7 @@ Thumbs.db
 .windsurf/
 .cleanup_trash/
 skills-lock.json
+
+# Local storage fallback & runtime uploads
+uploads/
+/uploads

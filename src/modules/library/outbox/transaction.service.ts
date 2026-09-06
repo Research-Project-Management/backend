@@ -11,7 +11,7 @@ import {
   ChangeLogRepository,
   AppendChangeEntry,
   RecordTombstoneEntry,
-} from './changelog.repository';
+} from './repositories/changelog.repository';
 
 export interface TransactionHelpers {
   appendChange(

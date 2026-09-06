@@ -60,8 +60,8 @@ async function main() {
   await prisma.cycle.deleteMany();
   await prisma.pageVersion.deleteMany();
   await prisma.page.deleteMany();
-  await prisma.paperAttachment.deleteMany();
-  await prisma.paper.deleteMany();
+  await prisma.catalogAttachment.deleteMany();
+  await prisma.catalogItem.deleteMany();
   await prisma.collection.deleteMany();
   await prisma.label.deleteMany();
   await prisma.file.deleteMany();
@@ -142,36 +142,50 @@ async function main() {
       createdById: adminUser.id,
     },
   });
-  const paper1 = await prisma.paper.create({
+  const paper1 = await prisma.catalogItem.create({
     data: {
       title: 'Fourier Neural Operator for Parametric Partial Differential Equations',
       abstract: 'We propose a new framework for learning operators: Fourier Neural Operator (FNO). FNO maps infinite-dimensional function spaces with mesh-independent zero-shot super-resolution.',
-      authors: ['Zongyi Li', 'Nikola Kovachki', 'Kamyar Azizzadenesheli', 'Burigede Liu', 'Anima Anandkumar'],
       year: 2021,
-      journal: 'International Conference on Learning Representations (ICLR)',
+      publicationTitle: 'International Conference on Learning Representations (ICLR)',
       doi: '10.48550/arXiv.2010.08895',
       citationKey: 'li2021fourier',
-      filename: 'fno_2021.pdf',
-      fileUrl: 'https://r2.rpm.local/papers/fno_2021.pdf',
       workspaceId: workspace.id,
-      collectionId: collection.id,
       uploadedById: adminUser.id,
+      contributors: {
+        create: [
+          { creatorType: 'author', fullName: 'Zongyi Li', orderIndex: 0 },
+          { creatorType: 'author', fullName: 'Nikola Kovachki', orderIndex: 1 },
+          { creatorType: 'author', fullName: 'Kamyar Azizzadenesheli', orderIndex: 2 },
+          { creatorType: 'author', fullName: 'Burigede Liu', orderIndex: 3 },
+          { creatorType: 'author', fullName: 'Anima Anandkumar', orderIndex: 4 },
+        ],
+      },
+      collectionItems: {
+        create: [{ collectionId: collection.id }],
+      },
     },
   });
-  const paper2 = await prisma.paper.create({
+  const paper2 = await prisma.catalogItem.create({
     data: {
       title: 'Physics-Informed Neural Networks: A Deep Learning Framework for Solving Forward and Inverse Problems',
       abstract: 'We introduce physics-informed neural networks -- neural networks that are trained to solve supervised learning tasks while respecting physical conservation laws described by general nonlinear PDEs.',
-      authors: ['M. Raissi', 'P. Perdikaris', 'G.E. Karniadakis'],
       year: 2019,
-      journal: 'Journal of Computational Physics',
+      publicationTitle: 'Journal of Computational Physics',
       doi: '10.1016/j.jcp.2018.10.045',
       citationKey: 'raissi2019physics',
-      filename: 'pinn_2019.pdf',
-      fileUrl: 'https://r2.rpm.local/papers/pinn_2019.pdf',
       workspaceId: workspace.id,
-      collectionId: collection.id,
       uploadedById: researcherUser.id,
+      contributors: {
+        create: [
+          { creatorType: 'author', fullName: 'M. Raissi', orderIndex: 0 },
+          { creatorType: 'author', fullName: 'P. Perdikaris', orderIndex: 1 },
+          { creatorType: 'author', fullName: 'G.E. Karniadakis', orderIndex: 2 },
+        ],
+      },
+      collectionItems: {
+        create: [{ collectionId: collection.id }],
+      },
     },
   });
   console.log(`📚 Created papers: "${paper1.title}" and "${paper2.title}"`);

@@ -1,4 +1,4 @@
-﻿import {
+import {
   Controller,
   Get,
   Post,
@@ -25,13 +25,13 @@ import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorat
 export class PageCommentController {
   constructor(private readonly commentService: PageCommentService) {}
 
-  @Get('pages/:pageId/comments')
+  @Get(['pages/:pageId/comments', 'page/:pageId/comments'])
   @ApiOperation({ summary: 'Get all comments for a manuscript page' })
   async getPageComments(@Param('pageId') pageId: string) {
     return this.commentService.getPageComments(pageId);
   }
 
-  @Post('pages/:pageId/comments')
+  @Post(['pages/:pageId/comments', 'page/:pageId/comments'])
   @ApiOperation({ summary: 'Add a comment to a manuscript page' })
   async createPageComment(
     @Param('pageId') pageId: string,
@@ -45,15 +45,19 @@ export class PageCommentController {
   @ApiOperation({ summary: 'Update a page comment' })
   async updatePageComment(
     @Param('commentId') commentId: string,
+    @CurrentUser('id') userId: string,
     @Body() dto: UpdateCommentDto,
   ) {
-    return this.commentService.updatePageComment(commentId, dto);
+    return this.commentService.updatePageComment(commentId, userId, dto);
   }
 
   @Delete(['pages/:pageId/comments/:commentId', 'pages/comments/:commentId'])
   @ApiOperation({ summary: 'Delete a page comment' })
-  async deletePageComment(@Param('commentId') commentId: string) {
-    return this.commentService.deletePageComment(commentId);
+  async deletePageComment(
+    @Param('commentId') commentId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.commentService.deletePageComment(commentId, userId);
   }
 
   @Post([
@@ -77,7 +81,8 @@ export class PageCommentController {
   async deletePageReply(
     @Param('commentId') commentId: string,
     @Param('replyId') replyId: string,
+    @CurrentUser('id') userId: string,
   ) {
-    return this.commentService.deletePageReply(commentId, replyId);
+    return this.commentService.deletePageReply(commentId, replyId, userId);
   }
 }

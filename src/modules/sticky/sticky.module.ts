@@ -6,6 +6,6 @@ import { StickyRepository } from './sticky.repository';
 @Module({
   controllers: [StickyController],
   providers: [StickyService, StickyRepository],
-  exports: [StickyService, StickyRepository],
+  exports: [StickyService],
 })
 export class StickyModule {}

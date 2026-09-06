@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
+import { buildWorkspaceIdentifierWhere, isUuid } from '@/core/utils/tenant.util';
 import {
   Prisma,
   Project,
@@ -20,14 +21,7 @@ export class ProjectRepository implements IProjectRepository {
     workspaceIdOrSlug: string,
   ): Promise<{ id: string } | null> {
     return this.prisma.workspace.findFirst({
-      where: {
-        OR: [
-          { id: workspaceIdOrSlug },
-          { slug: workspaceIdOrSlug },
-          { url: workspaceIdOrSlug },
-        ],
-        deletedAt: null,
-      },
+      where: buildWorkspaceIdentifierWhere(workspaceIdOrSlug),
       select: { id: true },
     });
   }
@@ -36,22 +30,49 @@ export class ProjectRepository implements IProjectRepository {
     workspaceId: string,
   ): Promise<ProjectWithMembers[]> {
     const ws = await this.resolveWorkspace(workspaceId);
-    const targetId = ws?.id || workspaceId;
+    const canonicalWorkspaceId =
+      ws?.id || (isUuid(workspaceId) ? workspaceId : null);
+    if (!canonicalWorkspaceId) return [];
+
     return this.prisma.project.findMany({
-      where: { workspaceId: targetId, isActive: true, deletedAt: null },
+      where: { workspaceId: canonicalWorkspaceId, isActive: true, deletedAt: null },
       include: {
         members: {
+          take: 20,
           include: {
             user: { select: USER_SELECT },
           },
         },
         lead: { select: USER_SELECT },
+        _count: {
+          select: { members: true },
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
   }
 
   async findProjectById(projectId: string): Promise<ProjectWithMembers | null> {
+    if (!isUuid(projectId)) {
+      return this.prisma.project.findFirst({
+        where: {
+          identifier: { equals: projectId, mode: 'insensitive' },
+          deletedAt: null,
+        },
+        include: {
+          members: {
+            include: {
+              user: { select: USER_SELECT },
+            },
+          },
+          lead: { select: USER_SELECT },
+          workspace: {
+            select: { id: true, name: true, url: true },
+          },
+        },
+      });
+    }
+
     return this.prisma.project.findFirst({
       where: { id: projectId, deletedAt: null },
       include: {
@@ -72,8 +93,13 @@ export class ProjectRepository implements IProjectRepository {
     workspaceId: string,
     identifier: string,
   ): Promise<ProjectWithMembers | null> {
+    const ws = await this.resolveWorkspace(workspaceId);
+    const canonicalWorkspaceId =
+      ws?.id || (isUuid(workspaceId) ? workspaceId : null);
+    if (!canonicalWorkspaceId) return null;
+
     return this.prisma.project.findFirst({
-      where: { workspaceId, identifier, deletedAt: null },
+      where: { workspaceId: canonicalWorkspaceId, identifier, deletedAt: null },
       include: {
         members: {
           include: {
@@ -174,28 +200,36 @@ export class ProjectRepository implements IProjectRepository {
     const project = await this.findProjectById(projectId);
     if (!project) return null;
 
-    const [files, tasks] = await Promise.all([
-      this.prisma.file.findMany({
-        where: { workspaceId: project.workspaceId, trashedAt: null },
-        select: { id: true, filename: true, size: true, updatedAt: true },
-        orderBy: { updatedAt: 'desc' },
-        take: 10,
-      }),
-      this.prisma.task.findMany({
-        where: { projectId },
-        select: { id: true, completed: true, columnId: true },
-      }),
-    ]);
+    const [files, taskTotal, completedTasks, inProgressTasks] =
+      await Promise.all([
+        this.prisma.file.findMany({
+          where: { workspaceId: project.workspaceId, trashedAt: null },
+          select: { id: true, filename: true, size: true, updatedAt: true },
+          orderBy: { updatedAt: 'desc' },
+          take: 10,
+        }),
+        this.prisma.task.count({
+          where: { projectId, deletedAt: null },
+        }),
+        this.prisma.task.count({
+          where: { projectId, completed: true, deletedAt: null },
+        }),
+        this.prisma.task.count({
+          where: {
+            projectId,
+            completed: false,
+            columnId: { in: ['doing', 'in_progress'] },
+            deletedAt: null,
+          },
+        }),
+      ]);
 
     const fileCount = files.length;
     const totalSize = files.reduce((acc, f) => acc + (f.size || 0), 0);
-
-    const taskCount = tasks.length;
-    const completedTasks = tasks.filter((t) => t.completed).length;
-    const inProgressTasks = tasks.filter(
-      (t) => t.columnId === 'doing' || t.columnId === 'in_progress',
-    ).length;
-    const pendingTasks = taskCount - completedTasks - inProgressTasks;
+    const pendingTasks = Math.max(
+      0,
+      taskTotal - completedTasks - inProgressTasks,
+    );
 
     return {
       project,
@@ -206,7 +240,7 @@ export class ProjectRepository implements IProjectRepository {
           recent: files.slice(0, 5),
         },
         tasks: {
-          total: taskCount,
+          total: taskTotal,
           completed: completedTasks,
           pending: pendingTasks,
           inProgress: inProgressTasks,
@@ -217,6 +251,7 @@ export class ProjectRepository implements IProjectRepository {
   }
 
   async findProjectMembers(projectId: string): Promise<ProjectMember[]> {
+    if (!isUuid(projectId)) return [];
     return this.prisma.projectMember.findMany({
       where: { projectId },
       include: {
@@ -229,6 +264,7 @@ export class ProjectRepository implements IProjectRepository {
     projectId: string,
     userId: string,
   ): Promise<ProjectMember | null> {
+    if (!isUuid(projectId) || !isUuid(userId)) return null;
     return this.prisma.projectMember.findUnique({
       where: {
         projectId_userId: {
@@ -290,11 +326,24 @@ export class ProjectRepository implements IProjectRepository {
   }
 
   async countAdmins(projectId: string): Promise<number> {
+    if (!isUuid(projectId)) return 0;
     return this.prisma.projectMember.count({
       where: {
         projectId,
         role: ProjectMemberRole.admin,
       },
     });
+  }
+
+  async findWorkspaceMemberRole(
+    workspaceId: string,
+    userId: string,
+  ): Promise<string | null> {
+    if (!isUuid(workspaceId) || !isUuid(userId)) return null;
+    const member = await this.prisma.workspaceMember.findFirst({
+      where: { workspaceId, userId },
+      select: { role: true },
+    });
+    return member?.role || null;
   }
 }

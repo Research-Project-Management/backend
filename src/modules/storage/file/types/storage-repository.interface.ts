@@ -4,7 +4,7 @@
  * Implements Hexagonal / DDD-Lite Architecture decoupling Prisma models from services.
  */
 
-import { File, FileShare, Label, Prisma } from '@prisma/client';
+import { File, FileShare, Prisma } from '@prisma/client';
 
 export const USER_MINIMAL_SELECT = {
   id: true,
@@ -34,6 +34,7 @@ export interface IFileRepository {
   ): Promise<FileWithAuthor[]>;
   findFolderTree(workspaceId: string): Promise<File[]>;
   findFileById(fileId: string): Promise<FileWithAuthor | null>;
+  findFileByKey?(key: string): Promise<FileWithAuthor | null>;
   createFile(
     data: Prisma.FileCreateInput | Prisma.FileUncheckedCreateInput,
   ): Promise<FileWithAuthor>;
@@ -55,17 +56,4 @@ export interface IFileRepository {
     permission: string,
   ): Promise<FileShare>;
   unshareFile(fileId: string, userId: string): Promise<FileShare>;
-}
-
-export interface ILabelRepository {
-  findWorkspaceLabels(workspaceId: string): Promise<Label[]>;
-  findLabelById(labelId: string): Promise<Label | null>;
-  createLabel(
-    data: Prisma.LabelCreateInput | Prisma.LabelUncheckedCreateInput,
-  ): Promise<Label>;
-  updateLabel(
-    labelId: string,
-    data: Prisma.LabelUpdateInput | Prisma.LabelUncheckedUpdateInput,
-  ): Promise<Label>;
-  deleteLabel(labelId: string): Promise<Label>;
 }

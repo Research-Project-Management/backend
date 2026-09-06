@@ -1,8 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { CatalogService } from '../../items/items.service';
+import { ItemsService } from '../../items/items.service';
 import { ItemMetadata } from '../metadata/types/metadata.types';
-import { CreateCatalogItemData } from '../../items/items.repository';
+import { CreateCatalogItemData } from '../../items/types/items.types';
 import { LibraryItemSource } from '../../outbox/outbox.events';
+import { splitAuthorString } from '../../items/utils/items.utils';
+
 
 export interface CommitStageOptions {
   collectionIds?: string[];
@@ -23,51 +25,19 @@ function normalizeAccessedAt(
   return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 }
 
-function splitAuthorNameString(input: unknown): string[] {
-  if (!input) return [];
-  let str = '';
-  if (typeof input === 'string') {
-    str = input;
-  } else if (typeof input === 'object' && input !== null) {
+function extractAuthorString(input: unknown): string {
+  if (!input) return '';
+  if (typeof input === 'string') return input;
+  if (typeof input === 'object' && input !== null) {
     const obj = input as any;
-    str =
+    return (
       obj.fullName ||
       obj.name ||
       [obj.firstName, obj.lastName].filter(Boolean).join(' ') ||
-      '';
-  } else {
-    str = String(input);
+      ''
+    );
   }
-  if (!str.trim()) return [];
-  const trimmed = str.trim();
-  const lines = trimmed.split(/\r?\n+/).map((s) => s.trim()).filter(Boolean);
-  const result: string[] = [];
-
-  for (const line of lines) {
-    if (line.includes(';')) {
-      result.push(...line.split(';').map((s) => s.trim()).filter(Boolean));
-    } else if (/\s+and\s+/i.test(line)) {
-      result.push(...line.split(/\s+and\s+/i).map((s) => s.trim()).filter(Boolean));
-    } else if (/\s+&\s+/.test(line)) {
-      result.push(...line.split(/\s+&\s+/).map((s) => s.trim()).filter(Boolean));
-    } else if (line.includes(',')) {
-      const parts = line.split(',').map((s) => s.trim()).filter(Boolean);
-      const partsWithSpaces = parts.filter((p) => p.includes(' '));
-      if (parts.length > 2 && partsWithSpaces.length >= Math.floor(parts.length / 2)) {
-        result.push(...parts);
-      } else if (parts.length > 2 && parts.length % 2 === 0) {
-        for (let i = 0; i < parts.length; i += 2) {
-          result.push(`${parts[i]}, ${parts[i + 1]}`);
-        }
-      } else {
-        result.push(line);
-      }
-    } else {
-      result.push(line);
-    }
-  }
-
-  return result;
+  return String(input);
 }
 
 function mergeCreators(metadata: ItemMetadata) {
@@ -86,25 +56,22 @@ function mergeCreators(metadata: ItemMetadata) {
 
   for (const c of initialCreators) {
     const creatorType = c.creatorType || 'author';
-    const rawName =
-      c.fullName ||
-      c.name ||
-      [c.firstName, c.lastName].filter(Boolean).join(' ');
+    const rawName = extractAuthorString(c);
     if (rawName) {
-      for (const p of splitAuthorNameString(rawName)) {
+      for (const p of splitAuthorString(rawName)) {
         append(p, creatorType);
       }
     }
   }
 
   for (const rawAuthor of metadata.authors || []) {
-    for (const author of splitAuthorNameString(rawAuthor)) {
+    for (const author of splitAuthorString(extractAuthorString(rawAuthor))) {
       append(author, 'author');
     }
   }
 
   for (const rawEditor of metadata.editors || []) {
-    for (const editor of splitAuthorNameString(rawEditor)) {
+    for (const editor of splitAuthorString(extractAuthorString(rawEditor))) {
       append(editor, 'editor');
     }
   }
@@ -119,7 +86,7 @@ export function toCatalogItemData(
   options?: CommitStageOptions,
 ): CreateCatalogItemData {
   const rawTags = metadata.tags || metadata.keywords || metadata.labels || [];
-  const extraFields = {
+  const extraFields: Record<string, unknown> = {
     ...(metadata.extraFields || {}),
     ...(metadata.abstractNote !== undefined
       ? { abstractNote: metadata.abstractNote }
@@ -196,7 +163,35 @@ export function toCatalogItemData(
     accessedAt: normalizeAccessedAt(metadata.accessedAt),
     extra: metadata.extra,
     extraFields,
-    notes: metadata.notes,
+    notes: (() => {
+      const consolidatedNotes: Array<Record<string, unknown> | string> =
+        Array.isArray(metadata.notes) ? [...metadata.notes] : [];
+      const potentialComment =
+        typeof extraFields.comment === 'string'
+          ? extraFields.comment.trim()
+          : '';
+      if (potentialComment) {
+        const hasExistingCommentNote = consolidatedNotes.some((singleNote) => {
+          if (typeof singleNote === 'string') {
+            return singleNote.includes(potentialComment);
+          }
+          if (typeof singleNote === 'object' && singleNote !== null) {
+            return String(
+              (singleNote as Record<string, unknown>).content || '',
+            ).includes(potentialComment);
+          }
+          return false;
+        });
+
+        if (!hasExistingCommentNote) {
+          consolidatedNotes.push({
+            content: `Comment: ${potentialComment}`,
+            source: 'arXiv',
+          });
+        }
+      }
+      return consolidatedNotes;
+    })(),
     collectionId: options?.collectionIds?.[0] || null,
     collectionIds: options?.collectionIds,
     uploadedById: options?.userId || 'system',
@@ -205,7 +200,7 @@ export function toCatalogItemData(
 
 @Injectable()
 export class CommitStage {
-  constructor(private readonly catalogService: CatalogService) {}
+  constructor(private readonly itemsService: ItemsService) {}
 
   /**
    * Executes canonical Catalog commit for a reconciled item proposal.
@@ -218,7 +213,7 @@ export class CommitStage {
   ): Promise<any> {
     const createData = toCatalogItemData(metadata, options);
 
-    const createdItem = await this.catalogService.createItem(
+    const createdItem = await this.itemsService.createItem(
       workspaceId,
       createData,
       {

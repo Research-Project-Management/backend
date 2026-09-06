@@ -3,11 +3,14 @@ import { PrismaService } from '@/core/database/prisma.service';
 import { Prisma, User } from '@prisma/client';
 import { IUserRepository } from '../types/iam-repository.interface';
 
+import { isUuid } from '@/core/utils/tenant.util';
+
 @Injectable()
 export class UserRepository implements IUserRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async findById(id: string): Promise<User | null> {
+    if (!id || !isUuid(id)) return null;
     return this.prisma.user.findUnique({
       where: { id },
     });

@@ -1,0 +1,269 @@
+// ── 1. Identity Context ─────────────────────────────────────────────────────
+
+model User {
+  id         String     @id @default(uuid()) @db.Uuid
+  email      String?    @unique
+  password   String?
+  name       String     @default("User")
+  avatar     String?
+  isVerified Boolean    @default(false) @map("is_verified")
+  status     UserStatus @default(active)
+  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt  DateTime?  @map("deleted_at") @db.Timestamptz(6)
+
+  // Backward compatibility OAuth fields
+  googleId String? @unique @map("google_id")
+  githubId String? @unique @map("github_id")
+
+  // IAM Relations
+  federatedIdentities FederatedIdentity[]
+  refreshTokens       RefreshToken[]
+  workspaceMembers    WorkspaceMember[]
+  projectMembers      ProjectMember[]
+  sentInvitations     WorkspaceInvitation[] @relation("InvitationSender")
+  securityAuditLogs   SecurityAuditLog[]    @relation("AuditActor")
+
+  // Domain Relations
+  createdWorkspaces    Workspace[]        @relation("WorkspaceCreator")
+  createdProjects      Project[]          @relation("ProjectCreator")
+  ledProjects          Project[]          @relation("ProjectLead")
+  authoredFiles        File[]             @relation("FileAuthor")
+  sharedFiles          FileShare[]
+  createdLabels        Label[]
+  uploadedCatalogItems CatalogItem[]      @relation("CatalogItemUploader")
+  createdCollections   Collection[]
+  authoredPages        Page[]             @relation("PageAuthor")
+  authoredTasks        Task[]             @relation("TaskAuthor")
+  assignedTasks        Task[]             @relation("TaskAssignee")
+  authoredCycles       Cycle[]
+  stickies             Sticky[]
+  pageComments         PageComment[]
+  taskComments         TaskComment[]
+  aiChats              AiChat[]
+  activityEvents       ActivityEvent[]
+  authoredNotes        Note[]
+  authoredAnnotations  Annotation[]
+  userItemStates       UserItemState[]
+  savedSearches        SavedSearch[]
+  worklogs             Worklog[]          @relation("UserWorklogs")
+  zoteroConnections    ZoteroConnection[]
+  capturePreviews      CapturePreview[]
+
+  @@index([email])
+  @@index([status, deletedAt])
+  @@index([googleId])
+  @@index([githubId])
+  @@map("users")
+}
+
+model FederatedIdentity {
+  id                String       @id @default(uuid()) @db.Uuid
+  userId            String       @map("user_id") @db.Uuid
+  user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider          AuthProvider
+  providerSubjectId String       @map("provider_subject_id")
+  email             String?
+  profileData       Json?        @map("profile_data")
+  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([provider, providerSubjectId])
+  @@unique([userId, provider])
+  @@index([userId])
+  @@index([email])
+  @@map("federated_identities")
+}
+
+model RefreshToken {
+  id         String         @id @default(uuid()) @db.Uuid
+  userId     String         @map("user_id") @db.Uuid
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token      String         @unique
+  tokenHash  String         @unique @default("") @map("token_hash")
+  familyId   String         @default(uuid()) @map("family_id") @db.Uuid
+  parentId   String?        @map("parent_id") @db.Uuid
+  parent     RefreshToken?  @relation("TokenLineage", fields: [parentId], references: [id], onDelete: SetNull)
+  children   RefreshToken[] @relation("TokenLineage")
+  isRevoked  Boolean        @default(false) @map("is_revoked")
+  revokedAt  DateTime?      @map("revoked_at") @db.Timestamptz(6)
+  expiresAt  DateTime       @map("expires_at") @db.Timestamptz(6)
+  userAgent  String?        @map("user_agent")
+  ipAddress  String?        @map("ip_address")
+  deviceType String?        @map("device_type")
+  lastUsedAt DateTime       @default(now()) @map("last_used_at") @db.Timestamptz(6)
+  createdAt  DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([userId])
+  @@index([userId, isRevoked, expiresAt])
+  @@index([userId, revokedAt, expiresAt])
+  @@index([familyId])
+  @@index([tokenHash])
+  @@map("refresh_tokens")
+}
+
+model WorkspaceInvitation {
+  id          String              @id @default(uuid()) @db.Uuid
+  workspaceId String              @map("workspace_id") @db.Uuid
+  workspace   Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  email       String
+  role        WorkspaceMemberRole @default(member)
+  token       String              @unique
+  status      InvitationStatus    @default(pending)
+  invitedById String              @map("invited_by_id") @db.Uuid
+  invitedBy   User                @relation("InvitationSender", fields: [invitedById], references: [id], onDelete: Cascade)
+  expiresAt   DateTime            @map("expires_at") @db.Timestamptz(6)
+  acceptedAt  DateTime?           @map("accepted_at") @db.Timestamptz(6)
+  createdAt   DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, status])
+  @@index([email, status])
+  @@index([token])
+  @@map("workspace_invitations")
+}
+
+model SecurityAuditLog {
+  id         String            @id @default(uuid()) @db.Uuid
+  actorId    String?           @map("actor_id") @db.Uuid
+  actor      User?             @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  eventType  SecurityEventType @map("event_type")
+  targetType String?           @map("target_type")
+  targetId   String?           @map("target_id")
+  ipAddress  String?           @map("ip_address")
+  userAgent  String?           @map("user_agent")
+  metadata   Json?             @default("{}")
+  createdAt  DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([actorId, createdAt])
+  @@index([eventType, createdAt])
+  @@index([targetType, targetId])
+  @@map("security_audit_logs")
+}
+
+// ── 2. Organization Context ─────────────────────────────────────────────────
+
+model Workspace {
+  id          String    @id @default(uuid()) @db.Uuid
+  name        String
+  url         String    @unique
+  slug        String?   @unique @map("slug")
+  avatar      String?
+  companySize String?    @map("company_size")
+  plan        String    @default("free")
+  inviteCode  String?   @unique @map("invite_code")
+  settings    Json?     @default("{}")
+  createdById String?   @map("created_by_id") @db.Uuid
+  createdBy   User?     @relation("WorkspaceCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  // Relations
+  members            WorkspaceMember[]
+  invitations        WorkspaceInvitation[]
+  projects           Project[]
+  files              File[]
+  labels             Label[]
+  catalogItems       CatalogItem[]
+  catalogTags        CatalogTag[]
+  collections        Collection[]
+  pages              Page[]
+  stickies           Sticky[]
+  activityEvents     ActivityEvent[]
+  notes              Note[]
+  itemRelations      ItemRelation[]
+  ingestionRuns      IngestionRun[]
+  libraryChanges     LibraryChange[]
+  tombstones         Tombstone[]
+  syncSequence       SyncSequence?
+  savedSearches      SavedSearch[]
+  duplicateClusters  DuplicateCluster[]
+  zoteroConnections  ZoteroConnection[]
+  zoteroBindings     ZoteroBinding[]
+  zoteroItemBindings ZoteroItemBinding[]
+  zoteroSyncRuns     ZoteroSyncRun[]
+  zoteroSyncFailures ZoteroSyncFailure[]
+  capturePreviews    CapturePreview[]
+  libraryDedupClaims LibraryDedupClaim[]
+  ingestionReviewCases IngestionReviewCase[]
+  mergeLineages      CatalogMergeLineage[]
+
+  @@index([createdById])
+  @@index([url])
+  @@index([slug])
+  @@index([inviteCode])
+  @@index([deletedAt])
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  id          String              @id @default(uuid()) @db.Uuid
+  workspaceId String              @map("workspace_id") @db.Uuid
+  workspace   Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId      String              @map("user_id") @db.Uuid
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        WorkspaceMemberRole @default(member)
+  joinedAt    DateTime            @default(now()) @map("joined_at") @db.Timestamptz(6)
+  updatedAt   DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+  @@index([workspaceId, role])
+  @@map("workspace_members")
+}
+
+model Project {
+  id           String    @id @default(uuid()) @db.Uuid
+  name         String
+  identifier   String?   @map("identifier")
+  avatar       String?
+  coverImage   String?    @map("cover_image")
+  description  String?
+  isActive     Boolean   @default(true) @map("is_active")
+  modules      String[]  @default(["overview", "tasks", "cycles", "pages", "storage", "stickies", "collection"])
+  taskColumns  Json?     @default("[{\"id\":\"backlog\",\"title\":\"Backlog\",\"isDefault\":true,\"accentColor\":\"#6366F1\"},{\"id\":\"todo\",\"title\":\"To Do\",\"isDefault\":true,\"accentColor\":\"#0EA5E9\"},{\"id\":\"doing\",\"title\":\"Doing\",\"isDefault\":true,\"accentColor\":\"#F59E0B\"},{\"id\":\"review\",\"title\":\"Review\",\"isDefault\":true,\"accentColor\":\"#eab308\"},{\"id\":\"done\",\"title\":\"Done\",\"isDefault\":true,\"accentColor\":\"#22c55e\"}]") @map("task_columns")
+  taskSequence Int       @default(0) @map("task_sequence")
+  settings     Json?     @default("{}")
+  workspaceId  String    @map("workspace_id") @db.Uuid
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdById  String    @map("created_by_id") @db.Uuid
+  createdBy    User      @relation("ProjectCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  leadId       String?   @map("lead_id") @db.Uuid
+  lead         User?     @relation("ProjectLead", fields: [leadId], references: [id], onDelete: SetNull)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt    DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  // Relations
+  members        ProjectMember[]
+  pages          Page[]
+  tasks          Task[]
+  cycles         Cycle[]
+  stickies       Sticky[]
+  activityEvents ActivityEvent[]
+  worklogs       Worklog[]
+
+  @@unique([workspaceId, identifier])
+  @@index([workspaceId, isActive, deletedAt])
+  @@index([createdById])
+  @@index([leadId])
+  @@index([deletedAt])
+  @@map("projects")
+}
+
+model ProjectMember {
+  id        String            @id @default(uuid()) @db.Uuid
+  projectId String            @map("project_id") @db.Uuid
+  project   Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId    String            @map("user_id") @db.Uuid
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      ProjectMemberRole @default(viewer)
+  joinedAt  DateTime          @default(now()) @map("joined_at") @db.Timestamptz(6)
+  updatedAt DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([projectId, userId])
+  @@index([userId])
+  @@index([projectId, role])
+  @@map("project_members")
+}

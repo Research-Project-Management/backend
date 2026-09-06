@@ -112,4 +112,18 @@ export class CycleRepository implements ICycleRepository {
       },
     });
   }
+
+  async addTaskToCycle(taskId: string, cycleId: string) {
+    return this.prisma.task.update({
+      where: { id: taskId },
+      data: { cycleId },
+    });
+  }
+
+  async removeTaskFromCycle(taskId: string) {
+    return this.prisma.task.update({
+      where: { id: taskId },
+      data: { cycleId: null },
+    });
+  }
 }
