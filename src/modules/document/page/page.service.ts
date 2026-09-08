@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
   Optional,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -49,22 +50,12 @@ export class PageService {
       throw new BadRequestException('A page cannot be its own parent');
     }
 
-    let currentParentId: string | null = targetParentId;
-    const visited = new Set<string>();
+    // Lean traversal — only id + parentPageId fetched per hop (no content bloat)
+    const chain = await this.pageRepo.findPageAncestorChain(targetParentId);
+    const chainIds = new Set(chain.map((p) => p.id));
 
-    while (currentParentId) {
-      if (currentParentId === pageId) {
-        throw new BadRequestException(
-          'Circular parent page reference detected',
-        );
-      }
-      if (visited.has(currentParentId)) {
-        break;
-      }
-      visited.add(currentParentId);
-
-      const parentPage = await this.pageRepo.findPageById(currentParentId);
-      currentParentId = parentPage?.parentPageId || null;
+    if (chainIds.has(pageId)) {
+      throw new BadRequestException('Circular parent page reference detected');
     }
   }
 
@@ -128,10 +119,12 @@ export class PageService {
       if (this.cache) {
         await this.cache.set(cacheKey, page, 1800);
       }
-    }
 
-    // Increment page view asynchronously without blocking cache read
-    void this.pageRepo.incrementPageView(pageId).catch(() => {});
+      // Increment page view asynchronously ONLY on cache miss to eliminate DB write amplification
+      void Promise.resolve(this.pageRepo.incrementPageView(pageId)).catch(
+        () => {},
+      );
+    }
 
     return { page };
   }
@@ -142,21 +135,62 @@ export class PageService {
     userId: string,
     dto: CreatePageDto,
   ) {
-    const targetProjectId = projectId || dto.projectId;
-    let targetWorkspaceId = workspaceId || dto.workspaceId;
+    const resolvedProjectId = projectId || dto.projectId;
+    let resolvedWorkspaceId = workspaceId || dto.workspaceId;
 
-    if (!targetWorkspaceId && targetProjectId) {
-      targetWorkspaceId =
-        (await this.pageRepo.findProjectWorkspaceId(targetProjectId)) || '';
-    }
-
-    if (!targetWorkspaceId) {
+    if (!resolvedProjectId) {
       throw new BadRequestException(
-        'Workspace context is required to create a page',
+        'Project context is required to create a page',
       );
     }
 
+    const project = await this.pageRepo.findProjectContext(resolvedProjectId);
+    if (!project) {
+      throw new NotFoundException('Project not found');
+    }
+
+    if (resolvedWorkspaceId && project.workspaceId !== resolvedWorkspaceId) {
+      throw new BadRequestException(
+        'Project does not belong to the specified workspace',
+      );
+    }
+    resolvedWorkspaceId = project.workspaceId;
+
+    const wsMember = await this.pageRepo.findWorkspaceMember(
+      resolvedWorkspaceId,
+      userId,
+    );
+    if (!wsMember) {
+      throw new ForbiddenException('User is not a member of this workspace');
+    }
+
+    if (wsMember.role !== 'owner' && wsMember.role !== 'admin') {
+      const projMember = await this.pageRepo.findProjectMember(
+        resolvedProjectId,
+        userId,
+      );
+      if (
+        !projMember ||
+        (projMember.role !== 'admin' && projMember.role !== 'contributor')
+      ) {
+        throw new ForbiddenException(
+          'You need contributor or admin role in the project to create pages',
+        );
+      }
+    }
+
     const parentPageId = dto.parentPageId ?? dto.parentPage ?? null;
+    if (parentPageId) {
+      const parent = await this.pageRepo.findPageById(parentPageId);
+      if (!parent || parent.deletedAt) {
+        throw new NotFoundException('Parent page not found');
+      }
+      if (parent.projectId !== resolvedProjectId) {
+        throw new BadRequestException(
+          'Parent page belongs to a different project',
+        );
+      }
+    }
 
     const page = await this.pageRepo.createPage({
       title: dto.title,
@@ -168,15 +202,15 @@ export class PageService {
       isPublished: dto.isPublished ?? false,
       content: dto.content !== undefined ? dto.content : Prisma.JsonNull,
       status: dto.status || PageStatus.draft,
-      workspace: { connect: { id: targetWorkspaceId } },
-      project: { connect: { id: targetProjectId } },
+      workspace: { connect: { id: resolvedWorkspaceId } },
+      project: { connect: { id: resolvedProjectId } },
       author: { connect: { id: userId } },
       ...(parentPageId
         ? { parentPage: { connect: { id: parentPageId } } }
         : {}),
     });
 
-    await this.invalidatePageCache(targetProjectId || '', page.id);
+    await this.invalidatePageCache(resolvedProjectId || '', page.id);
 
     this.eventEmitter?.emit(
       'page.created',
@@ -201,6 +235,15 @@ export class PageService {
 
     const parentPageId = dto.parentPageId ?? dto.parentPage;
     if (parentPageId) {
+      const parent = await this.pageRepo.findPageById(parentPageId);
+      if (!parent || parent.deletedAt) {
+        throw new NotFoundException('Parent page not found');
+      }
+      if (parent.projectId !== existing.projectId) {
+        throw new BadRequestException(
+          'Parent page belongs to a different project',
+        );
+      }
       await this.validateNoCircularParent(pageId, parentPageId);
     }
 
@@ -352,5 +395,13 @@ export class PageService {
     });
     await this.invalidatePageCache(page.projectId, pageId);
     return { page: this.formatPage(page) };
+  }
+
+  async findPageWithVersions(pageId: string) {
+    return this.pageRepo.findPageWithVersions(pageId);
+  }
+
+  async findPageById(pageId: string) {
+    return this.pageRepo.findPageById(pageId);
   }
 }

@@ -39,8 +39,14 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
       this.redisClient = new Redis(redisUrl, {
         maxRetriesPerRequest: 1,
         retryStrategy: (times) => {
-          // Bounded exponential backoff: retry periodically without giving up permanently
-          return Math.min(times * 500, 3000);
+          // Bounded backoff: stop retrying after 3 attempts to prevent infinite reconnect loop
+          if (times > 3) {
+            this.logger.warn(
+              'Redis connection could not be established after 3 attempts. Operating in memory-cache fallback mode.',
+            );
+            return null;
+          }
+          return Math.min(times * 500, 2000);
         },
         lazyConnect: true,
         enableOfflineQueue: false,
@@ -61,6 +67,20 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
 
       this.redisClient.on('error', (err: Error) => {
         this.isConnected = false;
+        if (
+          err.message.includes('WRONGPASS') ||
+          err.message.includes('NOAUTH')
+        ) {
+          this.logger.warn(
+            `Redis authentication failed (${err.message}). Bypassing Redis and falling back to memory cache.`,
+          );
+          try {
+            this.redisClient?.disconnect(false);
+          } catch {
+            // Ignore disconnect error
+          }
+          return;
+        }
         // Non-blocking warning: Cache falls back to database gracefully
         this.logger.warn(`Redis Cache unavailable (bypassed): ${err.message}`);
       });
@@ -259,6 +279,21 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
       (s) => s !== undefined && s !== null && s !== '',
     );
     return [domain, ...validSegments].join(':');
+  }
+
+  /**
+   * Helper to build standardized tenant-isolated cache keys (Redis Core convention)
+   * Format: tenant:{workspaceId}:{domain}:{segments...}
+   */
+  buildTenantKey(
+    workspaceId: string,
+    domain: string,
+    ...segments: (string | number | undefined)[]
+  ): string {
+    const validSegments = segments.filter(
+      (s) => s !== undefined && s !== null && s !== '',
+    );
+    return ['tenant', workspaceId, domain, ...validSegments].join(':');
   }
 
   /**

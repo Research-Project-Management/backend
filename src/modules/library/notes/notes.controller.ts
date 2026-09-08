@@ -15,12 +15,14 @@ import {
 import { NotesService } from './notes.service';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
 import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
+import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
 import { CurrentUser } from '../../../modules/iam/authn/decorators/current-user.decorator';
 
-import { CreateNoteDto, UpdateNoteDto } from './dto/note.dto';
+import { CreateNoteDto, UpdateNoteDto } from './dto/notes.dto';
 
 @Controller([
   'api/v1/workspaces/:workspaceId/library/notes',
+  'api/v1/workspace/:workspaceId/library/notes',
   'workspace/:workspaceId/library/notes',
 ])
 @UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
@@ -28,18 +30,16 @@ export class NotesController {
   constructor(private readonly notesService: NotesService) {}
 
   @Get()
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async listNotes(
     @Param('workspaceId') workspaceId: string,
     @Query('itemId') itemId?: string,
   ) {
-    const notes = await this.notesService.listNotes(workspaceId, itemId);
-    return {
-      success: true,
-      data: notes,
-    };
+    return this.notesService.listNotes(workspaceId, itemId);
   }
 
   @Get(':id')
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async getNote(
     @Param('workspaceId') workspaceId: string,
     @Param('id') id: string,
@@ -51,30 +51,24 @@ export class NotesController {
       );
     }
 
-    return {
-      success: true,
-      data: note,
-    };
+    return note;
   }
 
   @Post()
+  @WorkspaceRoles('owner', 'admin', 'member')
   async createNote(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') currentUserId: string,
     @Body() body: CreateNoteDto,
   ) {
-    const note = await this.notesService.createNote(workspaceId, {
+    return this.notesService.createNote(workspaceId, {
       ...body,
       createdById: currentUserId || 'system',
     });
-
-    return {
-      success: true,
-      data: note,
-    };
   }
 
   @Patch(':id')
+  @WorkspaceRoles('owner', 'admin', 'member')
   async updateNote(
     @Param('workspaceId') workspaceId: string,
     @Param('id') id: string,
@@ -91,28 +85,28 @@ export class NotesController {
     }
 
     const { expectedVersion: _, ...updateData } = body;
-    const updated = await this.notesService.updateNote(
+    return this.notesService.updateNote(
       workspaceId,
       id,
       expectedVersion,
       updateData,
     );
-
-    return {
-      success: true,
-      data: updated,
-    };
   }
 
   @Delete(':id')
+  @WorkspaceRoles('owner', 'admin')
   async deleteNote(
     @Param('workspaceId') workspaceId: string,
     @Param('id') id: string,
+    @Query('expectedVersion') expectedVersionQuery?: string,
     @Headers('if-match') ifMatch?: string,
   ) {
-    const expectedVersion = ifMatch
-      ? parseInt(ifMatch.replace(/["']/g, ''), 10)
-      : undefined;
+    const expectedVersion =
+      expectedVersionQuery !== undefined
+        ? parseInt(expectedVersionQuery, 10)
+        : ifMatch
+          ? parseInt(ifMatch.replace(/["']/g, ''), 10)
+          : undefined;
     const deleted = await this.notesService.deleteNote(
       workspaceId,
       id,
@@ -124,9 +118,6 @@ export class NotesController {
       );
     }
 
-    return {
-      success: true,
-      data: { deleted },
-    };
+    return { deleted, id };
   }
 }

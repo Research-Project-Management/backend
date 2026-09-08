@@ -143,6 +143,81 @@ export class ProviderFetchError extends Error {
   }
 }
 
+export type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+
+export interface CircuitBreakerOptions {
+  failureThreshold?: number;
+  cooldownMs?: number;
+}
+
+export class ProviderCircuitBreaker {
+  private state: CircuitState = 'CLOSED';
+  private consecutiveFailures = 0;
+  private lastFailureTime = 0;
+  private halfOpenInProgress = false;
+
+  private readonly failureThreshold: number;
+  private readonly cooldownMs: number;
+
+  constructor(options: CircuitBreakerOptions = {}) {
+    this.failureThreshold = options.failureThreshold ?? 5;
+    this.cooldownMs = options.cooldownMs ?? 30000;
+  }
+
+  getState(): CircuitState {
+    if (this.state === 'OPEN') {
+      const now = Date.now();
+      if (now - this.lastFailureTime >= this.cooldownMs) {
+        this.state = 'HALF_OPEN';
+        this.halfOpenInProgress = false;
+      }
+    }
+    return this.state;
+  }
+
+  canExecute(): boolean {
+    const currentState = this.getState();
+    if (currentState === 'CLOSED') {
+      return true;
+    }
+    if (currentState === 'HALF_OPEN') {
+      if (!this.halfOpenInProgress) {
+        this.halfOpenInProgress = true;
+        return true;
+      }
+      return false;
+    }
+    return false;
+  }
+
+  recordSuccess(): void {
+    this.state = 'CLOSED';
+    this.consecutiveFailures = 0;
+    this.halfOpenInProgress = false;
+  }
+
+  recordFailure(isOutage = true): void {
+    if (!isOutage) return;
+    this.consecutiveFailures++;
+    this.lastFailureTime = Date.now();
+    this.halfOpenInProgress = false;
+
+    if (
+      this.consecutiveFailures >= this.failureThreshold ||
+      this.state === 'HALF_OPEN'
+    ) {
+      this.state = 'OPEN';
+    }
+  }
+
+  reset(): void {
+    this.state = 'CLOSED';
+    this.consecutiveFailures = 0;
+    this.lastFailureTime = 0;
+    this.halfOpenInProgress = false;
+  }
+}
+
 @Injectable()
 export class ProviderExecutor {
   public static readonly MAX_RETRY_AFTER_MS = 5000;
@@ -150,6 +225,19 @@ export class ProviderExecutor {
   private readonly logger = new Logger(ProviderExecutor.name);
   private readonly globalSemaphore = new Semaphore(10);
   private readonly providerSemaphores = new Map<ProviderName, Semaphore>();
+  private readonly circuitBreakers = new Map<
+    ProviderName,
+    ProviderCircuitBreaker
+  >();
+
+  public getCircuitBreaker(providerName: ProviderName): ProviderCircuitBreaker {
+    let cb = this.circuitBreakers.get(providerName);
+    if (!cb) {
+      cb = new ProviderCircuitBreaker();
+      this.circuitBreakers.set(providerName, cb);
+    }
+    return cb;
+  }
 
   private getProviderSemaphore(provider: MetadataProvider): Semaphore {
     let sem = this.providerSemaphores.get(provider.id);
@@ -175,6 +263,19 @@ export class ProviderExecutor {
     request: MetadataRequest,
     callerSignal?: AbortSignal,
   ): Promise<ProviderExecutionResult> {
+    const circuitBreaker = this.getCircuitBreaker(provider.id);
+    if (!circuitBreaker.canExecute()) {
+      this.logger.warn(
+        `[CircuitBreaker] Short-circuiting call to provider ${provider.id} (State: ${circuitBreaker.getState()})`,
+      );
+      return {
+        provider: provider.id,
+        status: 'unavailable',
+        error: `Provider ${provider.id} circuit breaker is OPEN due to repeated outages`,
+        durationMs: 0,
+      };
+    }
+
     const timeoutMs = provider.capabilities.timeoutMs || 8000;
     const providerSem = this.getProviderSemaphore(provider);
     const maxRetries = 2;
@@ -277,7 +378,12 @@ export class ProviderExecutor {
             retryDelay =
               retryAfterMs && retryAfterMs > 0
                 ? Math.min(retryAfterMs, ProviderExecutor.MAX_RETRY_AFTER_MS)
-                : Math.min(200 * Math.pow(2, attempt), 2000);
+                : status === 'rate_limited'
+                  ? Math.min(
+                      1200 * Math.pow(1.5, attempt),
+                      ProviderExecutor.MAX_RETRY_AFTER_MS,
+                    )
+                  : Math.min(200 * Math.pow(2, attempt), 2000);
           } else {
             this.logger.warn(
               JSON.stringify({
@@ -333,6 +439,17 @@ export class ProviderExecutor {
       }
 
       if (execResult) {
+        if (
+          execResult.status === 'found' ||
+          execResult.status === 'not_found'
+        ) {
+          circuitBreaker.recordSuccess();
+        } else if (
+          execResult.status === 'unavailable' ||
+          execResult.status === 'timeout'
+        ) {
+          circuitBreaker.recordFailure(true);
+        }
         return execResult;
       }
 
@@ -362,6 +479,7 @@ export class ProviderExecutor {
       }
     }
 
+    circuitBreaker.recordFailure(true);
     return {
       provider: provider.id,
       status: 'unavailable',

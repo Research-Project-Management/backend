@@ -45,7 +45,12 @@ export class WorkItemController {
     private readonly activityService: ActivityService,
   ) {}
 
-  @Get(['workspaces/:workspaceId/work-items', 'workspace/:workspaceId/tasks'])
+  @Get([
+    'workspaces/:workspaceId/work-items',
+    'workspace/:workspaceId/work-items',
+    'workspaces/:workspaceId/tasks',
+    'workspace/:workspaceId/tasks',
+  ])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({
@@ -58,8 +63,9 @@ export class WorkItemController {
 
   @Get([
     'projects/:projectId/work-items',
-    'project/:projectId/tasks',
+    'project/:projectId/work-items',
     'projects/:projectId/tasks',
+    'project/:projectId/tasks',
   ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
@@ -80,8 +86,9 @@ export class WorkItemController {
 
   @Post([
     'projects/:projectId/work-items',
-    'project/:projectId/tasks',
+    'project/:projectId/work-items',
     'projects/:projectId/tasks',
+    'project/:projectId/tasks',
   ])
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
@@ -98,6 +105,8 @@ export class WorkItemController {
 
   @Put([
     'projects/:projectId/work-items/reorder',
+    'project/:projectId/work-items/reorder',
+    'projects/:projectId/tasks/reorder',
     'project/:projectId/tasks/reorder',
     'work-items/:taskId/reorder',
     'tasks/:taskId/reorder',
@@ -116,6 +125,8 @@ export class WorkItemController {
 
   @Put([
     'projects/:projectId/work-items/bulk',
+    'project/:projectId/work-items/bulk',
+    'projects/:projectId/tasks/bulk',
     'project/:projectId/tasks/bulk',
     'work-items/bulk',
     'tasks/bulk',
@@ -129,10 +140,11 @@ export class WorkItemController {
   })
   async bulkUpdateTasks(
     @Param('projectId') paramProjectId: string | undefined,
+    @Query('projectId') queryProjectId: string | undefined,
     @Body() dto: BulkUpdateWorkItemDto,
     @CurrentUser('id') userId: string,
   ) {
-    const projectId = paramProjectId || '';
+    const projectId = paramProjectId || queryProjectId || '';
     return this.workItemService.bulkUpdate(projectId, dto, userId);
   }
 
@@ -140,6 +152,8 @@ export class WorkItemController {
     'work-items/:taskId',
     'tasks/:taskId',
     'projects/:projectId/work-items/:taskId',
+    'project/:projectId/work-items/:taskId',
+    'projects/:projectId/tasks/:taskId',
     'project/:projectId/tasks/:taskId',
   ])
   @UseGuards(ProjectRoleGuard)
@@ -154,6 +168,8 @@ export class WorkItemController {
     'work-items/:taskId',
     'tasks/:taskId',
     'projects/:projectId/work-items/:taskId',
+    'project/:projectId/work-items/:taskId',
+    'projects/:projectId/tasks/:taskId',
     'project/:projectId/tasks/:taskId',
   ])
   @UseGuards(ProjectRoleGuard)
@@ -172,6 +188,8 @@ export class WorkItemController {
     'work-items/:taskId',
     'tasks/:taskId',
     'projects/:projectId/work-items/:taskId',
+    'project/:projectId/work-items/:taskId',
+    'projects/:projectId/tasks/:taskId',
     'project/:projectId/tasks/:taskId',
   ])
   @UseGuards(ProjectRoleGuard)
@@ -189,6 +207,8 @@ export class WorkItemController {
     'work-items/:taskId/restore',
     'tasks/:taskId/restore',
     'projects/:projectId/work-items/:taskId/restore',
+    'project/:projectId/work-items/:taskId/restore',
+    'projects/:projectId/tasks/:taskId/restore',
     'project/:projectId/tasks/:taskId/restore',
   ])
   @UseGuards(ProjectRoleGuard)
@@ -206,6 +226,8 @@ export class WorkItemController {
     'work-items/:taskId/assign',
     'tasks/:taskId/assign',
     'projects/:projectId/work-items/:taskId/assign',
+    'project/:projectId/work-items/:taskId/assign',
+    'projects/:projectId/tasks/:taskId/assign',
     'project/:projectId/tasks/:taskId/assign',
   ])
   @UseGuards(ProjectRoleGuard)
@@ -252,6 +274,8 @@ export class WorkItemController {
     'work-items/:taskId/duplicate',
     'tasks/:taskId/duplicate',
     'projects/:projectId/work-items/:taskId/duplicate',
+    'project/:projectId/work-items/:taskId/duplicate',
+    'projects/:projectId/tasks/:taskId/duplicate',
     'project/:projectId/tasks/:taskId/duplicate',
   ])
   @HttpCode(HttpStatus.CREATED)
@@ -270,6 +294,8 @@ export class WorkItemController {
     'work-items/:taskId/attachments',
     'tasks/:taskId/attachments',
     'projects/:projectId/work-items/:taskId/attachments',
+    'project/:projectId/work-items/:taskId/attachments',
+    'projects/:projectId/tasks/:taskId/attachments',
     'project/:projectId/tasks/:taskId/attachments',
   ])
   @HttpCode(HttpStatus.CREATED)
@@ -288,6 +314,8 @@ export class WorkItemController {
     'work-items/:taskId/attachments/:attachmentId',
     'tasks/:taskId/attachments/:attachmentId',
     'projects/:projectId/work-items/:taskId/attachments/:attachmentId',
+    'project/:projectId/work-items/:taskId/attachments/:attachmentId',
+    'projects/:projectId/tasks/:taskId/attachments/:attachmentId',
     'project/:projectId/tasks/:taskId/attachments/:attachmentId',
   ])
   @UseGuards(ProjectRoleGuard)

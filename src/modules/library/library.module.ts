@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { CoreModule } from '../../core/core.module';
-import { CatalogModule } from './catalog/catalog.module';
+import { ItemsModule } from './items/items.module';
+import { TypesModule } from './types/types.module';
+import { CurationModule } from './curation/curation.module';
 import { CollectionsModule } from './collections/collections.module';
 import { TagsModule } from './tags/tags.module';
 import { AttachmentsModule } from './attachments/attachments.module';
@@ -13,23 +15,27 @@ import { SearchModule } from './search/search.module';
 import { CitationModule } from './citation/citation.module';
 import { IngestionModule } from './ingestion/ingestion.module';
 import { ExportsModule } from './exports/exports.module';
+import { OutboxModule } from './outbox/outbox.module';
 
 /**
  * Pure Composition Root for the Library Module.
- * Wires canonical 12 business feature modules.
+ * Wires canonical 15 single-word business feature modules.
  */
 @Module({
   imports: [
     ConfigModule,
     CoreModule,
 
-    CatalogModule,
+    ItemsModule,
+    TypesModule,
+    CurationModule,
     CollectionsModule,
     TagsModule,
     AttachmentsModule,
     AnnotationsModule,
     NotesModule,
     ReadingModule,
+    OutboxModule,
     SyncModule,
     SearchModule,
     CitationModule,
@@ -37,13 +43,16 @@ import { ExportsModule } from './exports/exports.module';
     ExportsModule,
   ],
   exports: [
-    CatalogModule,
+    ItemsModule,
+    TypesModule,
+    CurationModule,
     CollectionsModule,
     TagsModule,
     AttachmentsModule,
     AnnotationsModule,
     NotesModule,
     ReadingModule,
+    OutboxModule,
     SyncModule,
     SearchModule,
     CitationModule,

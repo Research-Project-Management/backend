@@ -5,12 +5,15 @@ import {
   Body,
   Param,
   Query,
+  Req,
+  Res,
   Redirect,
   HttpCode,
   HttpStatus,
   BadRequestException,
   UseGuards,
 } from '@nestjs/common';
+import { FastifyRequest, FastifyReply } from 'fastify';
 import {
   ApiTags,
   ApiOperation,
@@ -36,8 +39,29 @@ import { CurrentUser } from './decorators/current-user.decorator';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { BypassEnvelope } from '@/core/decorators/bypass-envelope.decorator';
 
+function extractRefreshTokenFromCookie(cookieHeader?: string): string | null {
+  if (!cookieHeader) return null;
+  const match = cookieHeader.match(/(?:^|;\s*)refresh_token=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function buildRefreshTokenCookie(
+  token: string,
+  maxAgeSeconds = 7 * 24 * 60 * 60,
+): string {
+  const isProd = process.env.NODE_ENV === 'production';
+  const secure = isProd ? '; Secure' : '';
+  return `refresh_token=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax${secure}; Max-Age=${maxAgeSeconds}`;
+}
+
+function buildClearRefreshTokenCookie(): string {
+  const isProd = process.env.NODE_ENV === 'production';
+  const secure = isProd ? '; Secure' : '';
+  return `refresh_token=; Path=/; HttpOnly; SameSite=Lax${secure}; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+}
+
 @ApiTags('Identity')
-@Controller('auth')
+@Controller(['auth', 'api/auth'])
 @UseGuards(JwtAuthGuard)
 export class AuthnController {
   constructor(private readonly authnService: AuthnService) {}
@@ -54,8 +78,15 @@ export class AuthnController {
   @ApiBadRequestResponse({
     description: 'Email already exists or invalid data',
   })
-  async register(@Body() dto: RegisterDto): Promise<AuthnResponseDto> {
-    return this.authnService.registerUser(dto);
+  async register(
+    @Body() dto: RegisterDto,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<AuthnResponseDto> {
+    const result = await this.authnService.registerUser(dto);
+    if (result?.refreshToken) {
+      reply.header('Set-Cookie', buildRefreshTokenCookie(result.refreshToken));
+    }
+    return result;
   }
 
   @Public()
@@ -68,8 +99,15 @@ export class AuthnController {
     type: AuthnResponseDto,
   })
   @ApiUnauthorizedResponse({ description: 'Invalid email or password' })
-  async login(@Body() dto: LoginDto): Promise<AuthnResponseDto> {
-    return this.authnService.login(dto);
+  async login(
+    @Body() dto: LoginDto,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<AuthnResponseDto> {
+    const result = await this.authnService.login(dto);
+    if (result?.refreshToken) {
+      reply.header('Set-Cookie', buildRefreshTokenCookie(result.refreshToken));
+    }
+    return result;
   }
 
   @Public()
@@ -143,11 +181,16 @@ export class AuthnController {
   @ApiUnauthorizedResponse({ description: 'Invalid or expired ticket' })
   async exchangeOAuthCode(
     @Body() body: OAuthExchangeDto,
+    @Res({ passthrough: true }) reply: FastifyReply,
   ): Promise<AuthnResponseDto> {
     if (!body?.code) {
       throw new BadRequestException('Exchange code is required');
     }
-    return this.authnService.exchangeOAuthTicket(body.code);
+    const result = await this.authnService.exchangeOAuthTicket(body.code);
+    if (result?.refreshToken) {
+      reply.header('Set-Cookie', buildRefreshTokenCookie(result.refreshToken));
+    }
+    return result;
   }
 
   @Public()
@@ -163,9 +206,20 @@ export class AuthnController {
   })
   @ApiUnauthorizedResponse({ description: 'Invalid or expired refresh token' })
   async refresh(
-    @Body() dto: RefreshTokenDto,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Body() dto?: RefreshTokenDto,
   ): Promise<TokenRefreshResponseDto> {
-    return this.authnService.refresh(dto.refreshToken);
+    const tokenFromCookie = extractRefreshTokenFromCookie(req.headers.cookie);
+    const token = dto?.refreshToken || tokenFromCookie;
+    if (!token) {
+      throw new BadRequestException('Refresh token is required');
+    }
+    const result = await this.authnService.refresh(token);
+    if (result?.refreshToken) {
+      reply.header('Set-Cookie', buildRefreshTokenCookie(result.refreshToken));
+    }
+    return result;
   }
 
   @Public()
@@ -177,8 +231,15 @@ export class AuthnController {
     description: 'Logged out successfully',
     type: MessageResponseDto,
   })
-  async logout(@Body() dto?: RefreshTokenDto): Promise<MessageResponseDto> {
-    return this.authnService.logout(dto?.refreshToken);
+  async logout(
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Body() dto?: RefreshTokenDto,
+  ): Promise<MessageResponseDto> {
+    const tokenFromCookie = extractRefreshTokenFromCookie(req.headers.cookie);
+    const token = dto?.refreshToken || tokenFromCookie;
+    reply.header('Set-Cookie', buildClearRefreshTokenCookie());
+    return this.authnService.logout(token || undefined);
   }
 
   @Public()

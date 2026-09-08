@@ -1,25 +1,14 @@
 import { Module } from '@nestjs/common';
 import { EngineModule } from './engine/engine.module';
 import { ThreadModule } from './thread/thread.module';
-import { ProjectAgentModule } from './project-agent/project-agent.module';
-import { RagAgentModule } from './rag-agent/rag-agent.module';
-import { WritingAgentModule } from './writing-agent/writing-agent.module';
+import { ItemsModule } from '../library/items/items.module';
+import { AiController } from './ai.controller';
+import { AiService } from './ai.service';
 
 @Module({
-  imports: [
-    EngineModule,
-    ThreadModule,
-    ProjectAgentModule,
-    RagAgentModule,
-    WritingAgentModule,
-  ],
-  controllers: [],
-  exports: [
-    EngineModule,
-    ThreadModule,
-    ProjectAgentModule,
-    RagAgentModule,
-    WritingAgentModule,
-  ],
+  imports: [EngineModule, ThreadModule, ItemsModule],
+  controllers: [AiController],
+  providers: [AiService],
+  exports: [AiService, EngineModule, ThreadModule],
 })
 export class AiModule {}

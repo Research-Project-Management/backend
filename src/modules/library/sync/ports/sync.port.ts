@@ -1,8 +1,5 @@
 export const SYNC_PORT = Symbol('SYNC_PORT');
 
-export type SyncEntityType =
-  'CatalogItem' | 'Collection' | 'CatalogAttachment' | 'Note' | 'Annotation';
-
 export interface SyncItemSnapshot {
   id: string;
   workspaceId: string;
@@ -39,79 +36,16 @@ export interface GetSyncItemSnapshotsQuery {
   itemIds: string[];
 }
 
-export interface UpsertSyncCollectionCommand {
-  workspaceId: string;
-  userId: string;
-  existingId?: string;
-  name: string;
-  description?: string;
-  parentCollectionId?: string;
-}
-
-export interface UpsertSyncCatalogItemCommand {
-  workspaceId: string;
-  userId: string;
-  existingId?: string;
-  title: string;
-  abstract?: string;
-  year?: number;
-  doi?: string;
-  citationKey?: string;
-  publicationTitle?: string;
-  volume?: string;
-  issue?: string;
-  pages?: string;
-  issn?: string;
-  isbn?: string;
-  url?: string;
-  itemType?: string;
-  filename?: string;
-  fileUrl?: string;
-  tags?: string[];
-}
-
-export interface UpsertSyncAttachmentCommand {
-  workspaceId: string;
-  existingId?: string;
-  catalogItemId?: string;
-  filename: string;
-  url: string;
-  mimeType: string;
-  fileHash?: string;
-  attachmentType?: string;
-  size?: number;
-}
-
-export interface UpsertSyncNoteCommand {
-  workspaceId: string;
-  userId: string;
-  existingId?: string;
-  catalogItemId?: string;
-  title: string;
-  contentMd: string;
-  tags?: string[];
-}
-
-export interface UpsertSyncAnnotationCommand {
-  workspaceId: string;
-  userId: string;
-  existingId?: string;
-  attachmentId?: string;
-  pageIndex: number;
-  quoteText?: string;
-  comment?: string;
-  color?: string;
-  type?: string;
-}
-
-export interface DeleteSyncEntityCommand {
-  workspaceId: string;
-  entityType: SyncEntityType;
-  entityId: string;
-  reason?: string;
-  publishOutboxEventType?: string;
-  publishOutboxPayload?: Record<string, unknown>;
-}
+export * from '../../common/types/sync.types';
+import type {
+  UpsertSyncCollectionCommand,
+  UpsertSyncCatalogItemCommand,
+  UpsertSyncAttachmentCommand,
+  UpsertSyncNoteCommand,
+  UpsertSyncAnnotationCommand,
+  DeleteSyncEntityCommand,
+  UpsertSyncEntityResult,
+} from '../../common/types/sync.types';
 
 export interface PublishIntegrationEventCommand<T = Record<string, unknown>> {
   workspaceId: string;
@@ -119,12 +53,6 @@ export interface PublishIntegrationEventCommand<T = Record<string, unknown>> {
   eventType: string;
   dedupeKey?: string;
   payload: T;
-}
-
-export interface UpsertSyncEntityResult {
-  id: string;
-  isNew: boolean;
-  version: number;
 }
 
 export interface BaseExternalSyncOperation {
@@ -220,6 +148,7 @@ export interface SyncPort {
 
   applyExternalSyncBatch(
     command: ApplyExternalSyncBatchCommand,
+    userId?: string,
   ): Promise<ExternalSyncBatchResult>;
 
   publishIntegrationEvent(

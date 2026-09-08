@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { CoreModule } from '../../../core/core.module';
-import { SyncModule } from '../sync/sync.module';
-import { CatalogModule } from '../catalog/catalog.module';
+import { OutboxModule } from '../outbox/outbox.module';
+import { ItemsModule } from '../items/items.module';
 import { AttachmentsModule } from '../attachments/attachments.module';
 import { SearchModule } from '../search/search.module';
 import { MetadataModule } from './metadata/metadata.module';
@@ -9,6 +9,7 @@ import { StorageModule } from '../../storage/storage.module';
 import { IngestionService } from './ingestion.service';
 import { IngestionController } from './ingestion.controller';
 import { IngestionRepository } from './ingestion.repository';
+import { IdempotencyRepository } from '../sync/repositories/idempotency.repository';
 import { DoiParser } from './parsers/doi.parser';
 import { BibtexParser } from './parsers/bibtex.parser';
 import { RisParser } from './parsers/ris.parser';
@@ -23,17 +24,25 @@ import { MatchStage } from './stages/match.stage';
 import { CommitStage } from './stages/commit.stage';
 import { UrlCaptureProvider } from './providers/url-capture.provider';
 import { INGESTION_PORT } from './types/ingestion.types';
-import { IdempotencyRepository } from '../sync/repositories/idempotency.repository';
+import { IngestionWatchdogService } from './services/ingestion-watchdog.service';
+import { UrlCaptureService } from './services/url-capture.service';
+import { IngestionPipelineRunner } from './services/ingestion-pipeline.runner';
+import { IngestionQueueService } from './services/ingestion-queue.service';
+import { ZoteroTranslatorClient } from '../../../infra/zotero/zotero-translator.client';
+
+import { SsrfGuardService } from '../common/services/ssrf-guard.service';
+import { NotesModule } from '../notes/notes.module';
 
 @Module({
   imports: [
     CoreModule,
-    SyncModule,
-    CatalogModule,
+    OutboxModule,
+    ItemsModule,
     AttachmentsModule,
     SearchModule,
     MetadataModule,
     StorageModule,
+    NotesModule,
   ],
   controllers: [IngestionController],
   providers: [
@@ -60,7 +69,13 @@ import { IdempotencyRepository } from '../sync/repositories/idempotency.reposito
     CommitStage,
 
     // Service & Adapters
+    SsrfGuardService,
+    ZoteroTranslatorClient, // OSS: Zotero Translation Server client (700+ publisher translators)
+    UrlCaptureService,
+    IngestionPipelineRunner,
+    IngestionQueueService,
     IngestionService,
+    IngestionWatchdogService,
     {
       provide: INGESTION_PORT,
       useExisting: IngestionService,
@@ -70,8 +85,11 @@ import { IdempotencyRepository } from '../sync/repositories/idempotency.reposito
   exports: [
     INGESTION_PORT,
     IngestionService,
-    IngestionRepository,
-    UrlCaptureProvider,
+    IngestionPipelineRunner,
+    IngestionQueueService,
+    UrlCaptureService,
+    IngestionWatchdogService,
+    SsrfGuardService,
     DoiParser,
     BibtexParser,
     RisParser,

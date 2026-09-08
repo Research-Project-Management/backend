@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { Prisma, LabelType, Label } from '@prisma/client';
-import { ILabelRepository } from '@/modules/storage/file/types/storage-repository.interface';
+import { ILabelRepository } from './types/label-repository.interface';
 
 @Injectable()
 export class LabelRepository implements ILabelRepository {

@@ -1,33 +1,87 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  ForbiddenException,
+  Inject,
+  Optional,
+} from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import {
   NotesRepository,
   CreateNoteData,
   UpdateNoteData,
 } from './notes.repository';
-import { TransactionService } from '../sync/services/transaction.service';
+import {
+  TransactionService,
+  TransactionHelpers,
+} from '../outbox/transaction.service';
+import { normalizeTags } from '../tags/utils/tags.utils';
+import { PrismaService } from '../../../core/database/prisma.service';
+import { resolveTenantWorkspaceId } from '../../../core/utils/tenant.util';
+import type {
+  UpsertSyncNoteCommand,
+  DeleteSyncEntityCommand,
+  UpsertSyncEntityResult,
+} from '../common/types/sync.types';
+import {
+  ITEM_READ_PORT,
+  IItemReadPort,
+  ITEM_EXISTENCE_PORT,
+  IItemExistencePort,
+  IItemNotesExtractorPort,
+} from '../items/ports/items.ports';
 
 @Injectable()
-export class NotesService {
+export class NotesService implements IItemNotesExtractorPort {
   private readonly logger = new Logger(NotesService.name);
 
   constructor(
     private readonly notesRepo: NotesRepository,
     private readonly libraryTx: TransactionService,
+    private readonly prisma: PrismaService,
+    @Inject(ITEM_READ_PORT) private readonly itemReadPort: IItemReadPort,
+    @Optional()
+    @Inject(ITEM_EXISTENCE_PORT)
+    private readonly itemExistencePort?: IItemExistencePort,
   ) {}
 
+  private resolveWorkspaceId(workspaceId: string): Promise<string> {
+    return resolveTenantWorkspaceId(this.prisma, workspaceId);
+  }
+
   async listNotes(workspaceId: string, itemId?: string) {
-    return this.notesRepo.findMany(workspaceId, itemId);
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    return this.notesRepo.findMany(canonicalWorkspaceId, itemId);
   }
 
   async getNote(workspaceId: string, id: string) {
-    return this.notesRepo.findById(workspaceId, id);
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    return this.notesRepo.findById(canonicalWorkspaceId, id);
   }
 
   async createNote(workspaceId: string, data: CreateNoteData) {
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    if (data.itemId) {
+      if (this.itemExistencePort) {
+        await this.itemExistencePort.assertExists(
+          canonicalWorkspaceId,
+          data.itemId,
+        );
+      } else {
+        const item = await this.itemReadPort.findById(
+          canonicalWorkspaceId,
+          data.itemId,
+        );
+        if (!item) {
+          throw new NotFoundException(`Catalog item not found in workspace`);
+        }
+      }
+    }
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const note = await this.notesRepo.create(workspaceId, data, tx);
+      const note = await this.notesRepo.create(canonicalWorkspaceId, data, tx);
 
-      await helpers.appendChange(workspaceId, {
+      await helpers.appendChange(canonicalWorkspaceId, {
         entityType: 'Note',
         entityId: note.id,
         action: 'create',
@@ -36,7 +90,7 @@ export class NotesService {
       });
 
       await helpers.publishOutbox(
-        workspaceId,
+        canonicalWorkspaceId,
         note.id,
         'library.note.created',
         note,
@@ -52,16 +106,17 @@ export class NotesService {
     expectedVersion: number,
     data: UpdateNoteData,
   ) {
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
       const updated = await this.notesRepo.update(
-        workspaceId,
+        canonicalWorkspaceId,
         id,
         expectedVersion,
         data,
         tx,
       );
 
-      await helpers.appendChange(workspaceId, {
+      await helpers.appendChange(canonicalWorkspaceId, {
         entityType: 'Note',
         entityId: updated.id,
         action: 'update',
@@ -70,7 +125,7 @@ export class NotesService {
       });
 
       await helpers.publishOutbox(
-        workspaceId,
+        canonicalWorkspaceId,
         updated.id,
         'library.note.updated',
         updated,
@@ -85,27 +140,300 @@ export class NotesService {
     id: string,
     expectedVersion?: number,
   ): Promise<boolean> {
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
       const deleted = await this.notesRepo.softDelete(
-        workspaceId,
+        canonicalWorkspaceId,
         id,
         expectedVersion,
         tx,
       );
 
       if (deleted) {
-        await helpers.recordTombstone(workspaceId, {
+        await helpers.recordTombstone(canonicalWorkspaceId, {
           entityType: 'Note',
           entityId: id,
         });
 
-        await helpers.publishOutbox(workspaceId, id, 'library.note.deleted', {
+        await helpers.publishOutbox(
+          canonicalWorkspaceId,
           id,
-          deletedAt: new Date(),
-        });
+          'library.note.deleted',
+          {
+            id,
+            deletedAt: new Date(),
+          },
+        );
       }
 
       return deleted;
     });
+  }
+
+  /**
+   * Sync protocol adapter: transactional upsert for a Note from an external sync batch.
+   */
+  async upsertFromSync(
+    command: UpsertSyncNoteCommand,
+    tx: Prisma.TransactionClient,
+    helpers: TransactionHelpers,
+  ): Promise<UpsertSyncEntityResult> {
+    if (command.existingId) {
+      const existing = await tx.note.findUnique({
+        where: { id: command.existingId },
+      });
+
+      if (!existing) {
+        throw new NotFoundException(
+          `Note ${command.existingId} not found in workspace ${command.workspaceId}`,
+        );
+      }
+
+      if (existing.workspaceId !== command.workspaceId) {
+        throw new ForbiddenException(
+          `Note ${command.existingId} does not belong to workspace ${command.workspaceId}`,
+        );
+      }
+
+      const mergedNoteTags =
+        command.tags !== undefined
+          ? normalizeTags([...(existing.tags || []), ...command.tags])
+          : existing.tags;
+
+      const updated = await tx.note.update({
+        where: { id: command.existingId },
+        data: {
+          contentMd: command.contentMd,
+          title: command.title,
+          tags: mergedNoteTags,
+          version: { increment: 1 },
+        },
+      });
+
+      await helpers.appendChange(command.workspaceId, {
+        entityType: 'Note',
+        entityId: updated.id,
+        action: 'update',
+        version: updated.version,
+      });
+
+      return { id: updated.id, isNew: false, version: updated.version };
+    } else {
+      const created = await tx.note.create({
+        data: {
+          workspaceId: command.workspaceId,
+          createdById: command.userId,
+          itemId: command.catalogItemId,
+          contentMd: command.contentMd,
+          title: command.title || 'Note',
+          tags: command.tags ? normalizeTags(command.tags) : [],
+          version: 1,
+        },
+      });
+
+      await helpers.appendChange(command.workspaceId, {
+        entityType: 'Note',
+        entityId: created.id,
+        action: 'create',
+        version: 1,
+      });
+
+      await helpers.publishOutbox(
+        command.workspaceId,
+        created.id,
+        'library.note.created',
+        { noteId: created.id },
+      );
+
+      return { id: created.id, isNew: true, version: 1 };
+    }
+  }
+
+  /**
+   * Sync protocol adapter: transactional soft-delete for a Note from an external sync batch.
+   */
+  async deleteFromSync(
+    command: DeleteSyncEntityCommand,
+    tx: Prisma.TransactionClient,
+    helpers: TransactionHelpers,
+  ): Promise<void> {
+    const { workspaceId, entityId } = command;
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    const existing = await tx.note.findFirst({
+      where: {
+        id: entityId,
+        workspaceId: canonicalWorkspaceId,
+        deletedAt: null,
+      },
+    });
+    if (!existing) return;
+
+    await tx.note.updateMany({
+      where: { id: entityId, workspaceId: canonicalWorkspaceId },
+      data: { deletedAt: new Date() },
+    });
+    await helpers.appendChange(canonicalWorkspaceId, {
+      entityType: 'Note',
+      entityId,
+      action: 'delete',
+      version: existing.version + 1,
+    });
+  }
+
+  /**
+   * Domain merge helper: reassigns all notes from source duplicate items to target item.
+   */
+  async reassignToItem(
+    sourceItemIds: string[],
+    targetItemId: string,
+    tx: Prisma.TransactionClient,
+  ): Promise<void> {
+    if (sourceItemIds.length === 0) return;
+    await tx.note.updateMany({
+      where: { itemId: { in: sourceItemIds } },
+      data: { itemId: targetItemId },
+    });
+  }
+
+  /**
+   * Ingestion helper: creates literature notes from ingestion pipelines (avoids bypass).
+   */
+  async createLiteratureNote(
+    workspaceId: string,
+    itemId: string,
+    userId: string,
+    content: string,
+    source?: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    const trimmed = content.trim();
+    if (!trimmed) return;
+
+    const createFn = async (client: Prisma.TransactionClient) => {
+      const existing = await client.note.findFirst({
+        where: {
+          workspaceId,
+          itemId,
+          contentMd: trimmed,
+          deletedAt: null,
+        },
+      });
+      if (existing) return;
+
+      await client.note.create({
+        data: {
+          workspaceId,
+          itemId,
+          title: source ? `Imported Note (${source})` : 'Imported Note',
+          contentMd: trimmed,
+          contentJson: {
+            type: 'doc',
+            content: [{ type: 'paragraph', text: trimmed }],
+          },
+          createdById: userId || 'system',
+          tags: ['imported', ...(source ? [source] : [])],
+          version: 1,
+        },
+      });
+    };
+
+    if (tx) {
+      await createFn(tx);
+    } else {
+      await this.libraryTx.executeInTransaction(async (t) => {
+        await createFn(t);
+      });
+    }
+  }
+
+  async extractNotesFromAnnotations(
+    workspaceId: string,
+    itemId: string,
+    userId: string,
+  ) {
+    const canonicalWorkspaceId = await resolveTenantWorkspaceId(
+      this.prisma,
+      workspaceId,
+    );
+
+    const item = await this.itemReadPort.findById(canonicalWorkspaceId, itemId);
+    if (!item) {
+      throw new NotFoundException(
+        `Item ${itemId} not found in workspace ${canonicalWorkspaceId}`,
+      );
+    }
+
+    const attachments = await this.prisma.catalogAttachment.findMany({
+      where: { catalogItemId: itemId },
+      select: { id: true, filename: true },
+    });
+
+    const attachmentIds = attachments.map((a: { id: string }) => a.id);
+    const annotations =
+      attachmentIds.length > 0
+        ? await this.prisma.annotation.findMany({
+            where: { attachmentId: { in: attachmentIds }, deletedAt: null },
+            orderBy: [{ pageIndex: 'asc' }, { createdAt: 'asc' }],
+          })
+        : [];
+
+    if (annotations.length === 0) {
+      return {
+        success: true,
+        totalExtracted: 0,
+        message: 'No annotations found for this item',
+      };
+    }
+
+    const lines: string[] = [
+      `# Literature Notes: ${item.title || 'Untitled'}`,
+      '',
+      `**Authors:** ${Array.isArray(item.creators) && item.creators.length > 0 ? item.creators.map((c: any) => c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim()).join(', ') : Array.isArray((item as any).contributors) ? (item as any).contributors.map((c: any) => c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim()).join(', ') : 'Unknown'}  `,
+      `**Year:** ${item.year || 'N/A'} | **DOI:** ${(item as any).doi || item.identifiers?.find((id: any) => id.type === 'doi')?.value || 'N/A'}`,
+      '',
+      '---',
+      '',
+      '## Extracted Highlights & Annotations',
+      '',
+    ];
+
+    let currentPage = -1;
+    for (const ann of annotations) {
+      if (ann.pageIndex !== currentPage) {
+        currentPage = ann.pageIndex;
+        lines.push(`### Page ${currentPage + 1}`);
+        lines.push('');
+      }
+
+      if (ann.quoteText) {
+        lines.push(`> ${ann.quoteText.trim().replace(/\\n+/g, '\n> ')}`);
+        lines.push('');
+      }
+
+      if (ann.comment) {
+        lines.push(`**Note:** ${ann.comment.trim()}`);
+        lines.push('');
+      }
+    }
+
+    const markdown = lines.join('\n');
+
+    const note = await this.createNote(canonicalWorkspaceId, {
+      itemId,
+      title: `Literature Notes — ${item.title?.slice(0, 50) || 'Untitled'}`,
+      contentMd: markdown,
+      contentJson: {
+        type: 'doc',
+        content: [{ type: 'paragraph', text: markdown }],
+      },
+      createdById: userId || 'system',
+      tags: ['literature-note', 'highlights'],
+    });
+
+    return {
+      success: true,
+      totalExtracted: annotations.length,
+      literatureNote: note,
+    };
   }
 }

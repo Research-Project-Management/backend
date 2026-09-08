@@ -1,5 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
+import {
+  buildWorkspaceIdentifierWhere,
+  isUuid,
+} from '@/core/utils/tenant.util';
 import { Prisma, WorkspaceMemberRole, Workspace } from '@prisma/client';
 import {
   IWorkspaceRepository,
@@ -17,8 +21,20 @@ const USER_SELECT = {
 export class WorkspaceRepository implements IWorkspaceRepository {
   constructor(private readonly prisma: PrismaService) {}
 
+  private async getCanonicalWorkspaceId(
+    workspaceId: string,
+  ): Promise<string | null> {
+    if (!workspaceId) return null;
+    if (isUuid(workspaceId)) return workspaceId;
+    const ws = await this.prisma.workspace.findFirst({
+      where: buildWorkspaceIdentifierWhere(workspaceId),
+      select: { id: true },
+    });
+    return ws?.id ?? null;
+  }
+
   async findUserWorkspaces(userId: string): Promise<WorkspaceWithMembers[]> {
-    const members = await this.prisma.workspaceMember.findMany({
+    const memberships = await this.prisma.workspaceMember.findMany({
       where: {
         userId,
         workspace: {
@@ -29,24 +45,38 @@ export class WorkspaceRepository implements IWorkspaceRepository {
         workspace: {
           include: {
             members: {
+              take: 50,
               include: {
                 user: { select: USER_SELECT },
               },
+              orderBy: { joinedAt: 'asc' },
+            },
+            _count: {
+              select: { members: true },
             },
           },
         },
       },
+      orderBy: { joinedAt: 'desc' },
     });
 
-    return members.map((m) => m.workspace);
+    return memberships.map((m) => {
+      const ws = m.workspace;
+      const hasSelf = ws.members.some((mem) => mem.userId === userId);
+      const members = hasSelf
+        ? ws.members
+        : [{ ...m, user: undefined }, ...ws.members];
+
+      return {
+        ...ws,
+        members,
+      } as unknown as WorkspaceWithMembers;
+    });
   }
 
   async findById(id: string): Promise<WorkspaceWithMembers | null> {
     return this.prisma.workspace.findFirst({
-      where: {
-        id,
-        deletedAt: null,
-      },
+      where: buildWorkspaceIdentifierWhere(id),
       include: {
         members: {
           include: {
@@ -75,10 +105,7 @@ export class WorkspaceRepository implements IWorkspaceRepository {
 
   async findByIdOrSlug(idOrSlug: string): Promise<WorkspaceWithMembers | null> {
     return this.prisma.workspace.findFirst({
-      where: {
-        OR: [{ id: idOrSlug }, { slug: idOrSlug }, { url: idOrSlug }],
-        deletedAt: null,
-      },
+      where: buildWorkspaceIdentifierWhere(idOrSlug),
       include: {
         members: {
           include: {
@@ -89,12 +116,6 @@ export class WorkspaceRepository implements IWorkspaceRepository {
     });
   }
 
-  async findWorkspaceByIdOrUrl(
-    workspaceIdOrUrl: string,
-  ): Promise<WorkspaceWithMembers | null> {
-    return this.findByIdOrSlug(workspaceIdOrUrl);
-  }
-
   async findWorkspaceByUrl(url: string) {
     return this.prisma.workspace.findFirst({
       where: {
@@ -102,10 +123,6 @@ export class WorkspaceRepository implements IWorkspaceRepository {
         deletedAt: null,
       },
     });
-  }
-
-  async findWorkspaceByInviteCode(inviteCode: string) {
-    return this.findByInviteCode(inviteCode);
   }
 
   async findByInviteCode(inviteCode: string): Promise<Workspace | null> {
@@ -167,13 +184,11 @@ export class WorkspaceRepository implements IWorkspaceRepository {
     });
   }
 
-  async deleteWorkspace(id: string) {
-    return this.softDeleteWorkspace(id);
-  }
-
   async findMembers(workspaceId: string) {
+    const canonicalId = await this.getCanonicalWorkspaceId(workspaceId);
+    if (!canonicalId) return [];
     return this.prisma.workspaceMember.findMany({
-      where: { workspaceId },
+      where: { workspaceId: canonicalId },
       include: {
         user: { select: USER_SELECT },
       },
@@ -182,10 +197,12 @@ export class WorkspaceRepository implements IWorkspaceRepository {
   }
 
   async findMember(workspaceId: string, userId: string) {
+    const canonicalId = await this.getCanonicalWorkspaceId(workspaceId);
+    if (!canonicalId) return null;
     return this.prisma.workspaceMember.findUnique({
       where: {
         workspaceId_userId: {
-          workspaceId,
+          workspaceId: canonicalId,
           userId,
         },
       },
@@ -196,8 +213,10 @@ export class WorkspaceRepository implements IWorkspaceRepository {
   }
 
   async countOwners(workspaceId: string): Promise<number> {
+    const canonicalId = await this.getCanonicalWorkspaceId(workspaceId);
+    if (!canonicalId) return 0;
     return this.prisma.workspaceMember.count({
-      where: { workspaceId, role: WorkspaceMemberRole.owner },
+      where: { workspaceId: canonicalId, role: WorkspaceMemberRole.owner },
     });
   }
 
@@ -206,9 +225,11 @@ export class WorkspaceRepository implements IWorkspaceRepository {
     userId: string,
     role: WorkspaceMemberRole = WorkspaceMemberRole.member,
   ) {
+    const canonicalId =
+      (await this.getCanonicalWorkspaceId(workspaceId)) || workspaceId;
     return this.prisma.workspaceMember.create({
       data: {
-        workspaceId,
+        workspaceId: canonicalId,
         userId,
         role,
       },
@@ -223,10 +244,12 @@ export class WorkspaceRepository implements IWorkspaceRepository {
     userId: string,
     role: WorkspaceMemberRole,
   ) {
+    const canonicalId =
+      (await this.getCanonicalWorkspaceId(workspaceId)) || workspaceId;
     return this.prisma.workspaceMember.update({
       where: {
         workspaceId_userId: {
-          workspaceId,
+          workspaceId: canonicalId,
           userId,
         },
       },
@@ -238,10 +261,12 @@ export class WorkspaceRepository implements IWorkspaceRepository {
   }
 
   async deleteMember(workspaceId: string, userId: string): Promise<void> {
+    const canonicalId =
+      (await this.getCanonicalWorkspaceId(workspaceId)) || workspaceId;
     await this.prisma.workspaceMember.delete({
       where: {
         workspaceId_userId: {
-          workspaceId,
+          workspaceId: canonicalId,
           userId,
         },
       },
@@ -256,9 +281,11 @@ export class WorkspaceRepository implements IWorkspaceRepository {
   }
 
   async searchProjects(workspaceId: string, query: string) {
+    const canonicalId = await this.getCanonicalWorkspaceId(workspaceId);
+    if (!canonicalId) return [];
     return this.prisma.project.findMany({
       where: {
-        workspaceId,
+        workspaceId: canonicalId,
         name: { contains: query, mode: 'insensitive' },
         isActive: true,
         deletedAt: null,
@@ -269,9 +296,11 @@ export class WorkspaceRepository implements IWorkspaceRepository {
   }
 
   async searchTasks(workspaceId: string, query: string) {
+    const canonicalId = await this.getCanonicalWorkspaceId(workspaceId);
+    if (!canonicalId) return [];
     return this.prisma.task.findMany({
       where: {
-        project: { workspaceId, deletedAt: null },
+        project: { workspaceId: canonicalId, deletedAt: null },
         deletedAt: null,
         OR: [
           { title: { contains: query, mode: 'insensitive' } },
@@ -291,14 +320,20 @@ export class WorkspaceRepository implements IWorkspaceRepository {
   }
 
   async searchPapers(workspaceId: string, query: string) {
+    const canonicalId = await this.getCanonicalWorkspaceId(workspaceId);
+    if (!canonicalId) return [];
     return this.prisma.catalogItem.findMany({
       where: {
-        workspaceId,
+        workspaceId: canonicalId,
         deletedAt: null,
         OR: [
           { title: { contains: query, mode: 'insensitive' } },
           { abstract: { contains: query, mode: 'insensitive' } },
-          { authors: { has: query } },
+          {
+            contributors: {
+              some: { fullName: { contains: query, mode: 'insensitive' } },
+            },
+          },
         ],
       },
       select: {
@@ -311,12 +346,17 @@ export class WorkspaceRepository implements IWorkspaceRepository {
   }
 
   async searchPages(workspaceId: string, query: string) {
+    const canonicalId = await this.getCanonicalWorkspaceId(workspaceId);
+    if (!canonicalId) return [];
     return this.prisma.page.findMany({
       where: {
         OR: [
-          { workspaceId, title: { contains: query, mode: 'insensitive' } },
           {
-            project: { workspaceId },
+            workspaceId: canonicalId,
+            title: { contains: query, mode: 'insensitive' },
+          },
+          {
+            project: { workspaceId: canonicalId, deletedAt: null },
             title: { contains: query, mode: 'insensitive' },
           },
         ],
@@ -334,9 +374,11 @@ export class WorkspaceRepository implements IWorkspaceRepository {
   }
 
   async searchFiles(workspaceId: string, query: string) {
+    const canonicalId = await this.getCanonicalWorkspaceId(workspaceId);
+    if (!canonicalId) return [];
     return this.prisma.file.findMany({
       where: {
-        workspaceId,
+        workspaceId: canonicalId,
         filename: { contains: query, mode: 'insensitive' },
         trashedAt: null,
       },
@@ -353,9 +395,11 @@ export class WorkspaceRepository implements IWorkspaceRepository {
   }
 
   async searchStickies(workspaceId: string, query: string) {
+    const canonicalId = await this.getCanonicalWorkspaceId(workspaceId);
+    if (!canonicalId) return [];
     return this.prisma.sticky.findMany({
       where: {
-        workspaceId,
+        workspaceId: canonicalId,
         OR: [
           { title: { contains: query, mode: 'insensitive' } },
           { content: { contains: query, mode: 'insensitive' } },

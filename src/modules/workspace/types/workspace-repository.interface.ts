@@ -48,7 +48,6 @@ export interface IWorkspaceRepository {
 
   softDeleteWorkspace(id: string): Promise<Workspace>;
   restoreWorkspace(id: string): Promise<Workspace>;
-  deleteWorkspace(id: string): Promise<Workspace>;
 
   // Membership operations
   findMembers(

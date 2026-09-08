@@ -32,9 +32,17 @@ export class CreateStickyDto {
   @IsString()
   @IsOptional()
   projectId?: string;
+
+  @IsString()
+  @IsOptional()
+  workspaceId?: string;
 }
 
 export class UpdateStickyDto {
+  @IsString()
+  @IsOptional()
+  id?: string;
+
   @IsString()
   @IsOptional()
   title?: string;
@@ -58,6 +66,18 @@ export class UpdateStickyDto {
   @IsString()
   @IsOptional()
   projectId?: string;
+
+  @IsString()
+  @IsOptional()
+  workspaceId?: string;
+
+  @IsString()
+  @IsOptional()
+  createdAt?: string;
+
+  @IsString()
+  @IsOptional()
+  updatedAt?: string;
 }
 
 export class ReorderStickiesDto {

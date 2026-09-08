@@ -1,4 +1,4 @@
-import { Module, OnModuleInit, Inject } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
 import { AttachmentsController } from './attachments.controller';
 import { AttachmentsService } from './attachments.service';
 import { PdfExtractorProvider } from './providers/pdf-extractor.provider';
@@ -7,32 +7,47 @@ import {
   EXTRACTION_EVENT_TYPES,
 } from './handlers/attachment-extraction.handler';
 import { CoreModule } from '../../../core/core.module';
-import { SyncModule } from '../sync/sync.module';
+import { OutboxModule } from '../outbox/outbox.module';
+import { OutboxWorker } from '../outbox/outbox.worker';
 import { SearchModule } from '../search/search.module';
-import { SYNC_PORT, SyncPort } from '../sync/ports/sync.port';
 import { StorageModule } from '../../storage/storage.module';
+import { ItemsModule } from '../items/items.module';
+import { GrobidClient } from '../../../infra/grobid/grobid.client';
+
+import { AttachmentsRepository } from './attachments.repository';
+import { WebSnapshotService } from './services/web-snapshot.service';
+import { SsrfGuardService } from '../common/services/ssrf-guard.service';
 
 @Module({
-  imports: [CoreModule, SyncModule, SearchModule, StorageModule],
+  imports: [CoreModule, OutboxModule, SearchModule, StorageModule, ItemsModule],
   controllers: [AttachmentsController],
   providers: [
+    AttachmentsRepository,
     AttachmentsService,
+    WebSnapshotService,
+    SsrfGuardService,
+    GrobidClient, // OSS: GROBID client for structured PDF header extraction (Apache 2.0)
     PdfExtractorProvider,
     AttachmentExtractionHandler,
   ],
-  exports: [AttachmentsService, PdfExtractorProvider],
+  exports: [
+    AttachmentsService,
+    WebSnapshotService,
+    SsrfGuardService,
+    PdfExtractorProvider,
+    GrobidClient,
+  ],
 })
 export class AttachmentsModule implements OnModuleInit {
   constructor(
-    @Inject(SYNC_PORT)
-    private readonly syncPort: SyncPort,
+    private readonly outboxWorker: OutboxWorker,
     private readonly extractionHandler: AttachmentExtractionHandler,
   ) {}
 
   onModuleInit() {
-    this.syncPort.registerIntegrationEventHandler(
+    this.outboxWorker.registerHandler(
       EXTRACTION_EVENT_TYPES.EXTRACTION_REQUESTED,
-      (evt) => this.extractionHandler.handle(evt as any),
+      this.extractionHandler,
     );
   }
 }

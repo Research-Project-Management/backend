@@ -14,22 +14,34 @@ import { HistoryService } from './history.service';
 import { CreateVersionDto } from './dto/history.dto';
 import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
 import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
+import { ProjectRoleGuard } from '@/modules/iam/authz/guards/project-role.guard';
+import { ProjectRoles } from '@/modules/iam/authz/decorators/project-roles.decorator';
 
 @ApiTags('Document - History & Versions')
 @ApiBearerAuth('JWT-auth')
 @Controller('api')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class HistoryController {
   constructor(private readonly historyService: HistoryService) {}
 
-  @Get(['project/:projectId/pages/:pageId/versions', 'pages/:pageId/versions'])
+  @Get([
+    'projects/:projectId/pages/:pageId/versions',
+    'project/:projectId/pages/:pageId/versions',
+    'pages/:pageId/versions',
+  ])
+  @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'List all versions of a page' })
   async getVersions(@Param('pageId') pageId: string) {
     return this.historyService.getVersions(pageId);
   }
 
-  @Post(['project/:projectId/pages/:pageId/versions', 'pages/:pageId/versions'])
+  @Post([
+    'projects/:projectId/pages/:pageId/versions',
+    'project/:projectId/pages/:pageId/versions',
+    'pages/:pageId/versions',
+  ])
   @HttpCode(HttpStatus.CREATED)
+  @ProjectRoles('admin', 'contributor')
   @ApiOperation({ summary: 'Save a new version snapshot of a page' })
   async createVersion(
     @Param('pageId') pageId: string,
@@ -40,10 +52,12 @@ export class HistoryController {
   }
 
   @Post([
+    'projects/:projectId/pages/:pageId/versions/:versionId/restore',
     'project/:projectId/pages/:pageId/versions/:versionId/restore',
     'pages/:pageId/versions/:versionId/restore',
   ])
   @HttpCode(HttpStatus.OK)
+  @ProjectRoles('admin', 'contributor')
   @ApiOperation({ summary: 'Restore page content to a specific version' })
   async restoreVersion(
     @Param('pageId') pageId: string,
@@ -53,25 +67,36 @@ export class HistoryController {
   }
 
   @Delete([
+    'projects/:projectId/pages/:pageId/versions/:versionId',
     'project/:projectId/pages/:pageId/versions/:versionId',
     'pages/:pageId/versions/:versionId',
   ])
-  @ApiOperation({ summary: 'Delete a specific version snapshot' })
-  async deleteVersion(@Param('versionId') versionId: string) {
-    return this.historyService.deleteVersion(versionId);
+  @ProjectRoles('admin')
+  async deleteVersion(
+    @Param('versionId') versionId: string,
+    @Param('pageId') pageId?: string,
+  ) {
+    return this.historyService.deleteVersion(versionId, pageId);
   }
 
-  @Get(['project/:projectId/pages/:pageId/history', 'pages/:pageId/history'])
+  @Get([
+    'projects/:projectId/pages/:pageId/history',
+    'project/:projectId/pages/:pageId/history',
+    'pages/:pageId/history',
+  ])
+  @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get change history (activity log) for a page' })
   async getHistory(@Param('pageId') pageId: string) {
     return this.historyService.getHistory(pageId);
   }
 
   @Post([
+    'projects/:projectId/pages/:pageId/history/:eventId/restore',
     'project/:projectId/pages/:pageId/history/:eventId/restore',
     'pages/:pageId/history/:eventId/restore',
   ])
   @HttpCode(HttpStatus.OK)
+  @ProjectRoles('admin', 'contributor')
   @ApiOperation({ summary: 'Restore page to a specific history event state' })
   async restoreHistory(
     @Param('pageId') pageId: string,

@@ -3,7 +3,7 @@ import { LabelRepository } from './label.repository';
 import { CreateLabelDto, UpdateLabelDto } from './dto/label.dto';
 import { LabelType } from '@prisma/client';
 import { RedisCacheService } from '@/core/cache/redis-cache.service';
-import { STORAGE_REDIS_KEYS } from '@/modules/storage/file/constants/redis-keys.constant';
+import { WORK_ITEM_REDIS_KEYS } from '../constants/redis-keys.constant';
 import { PrismaService } from '@/core/database/prisma.service';
 import { resolveTenantWorkspaceId } from '@/core/utils/tenant.util';
 
@@ -17,12 +17,12 @@ export class LabelService {
 
   private async invalidateLabelCache(workspaceId: string) {
     if (!this.cache) return;
-    await this.cache.del(STORAGE_REDIS_KEYS.labels(workspaceId));
+    await this.cache.del(WORK_ITEM_REDIS_KEYS.labels(workspaceId));
   }
 
   async getLabels(workspaceIdOrSlug: string, type?: LabelType) {
     const workspaceId = await resolveTenantWorkspaceId(this.prisma, workspaceIdOrSlug);
-    const cacheKey = STORAGE_REDIS_KEYS.labels(workspaceId);
+    const cacheKey = WORK_ITEM_REDIS_KEYS.labels(workspaceId);
 
     if (this.cache && !type) {
       const cached = await this.cache.get<any>(cacheKey);

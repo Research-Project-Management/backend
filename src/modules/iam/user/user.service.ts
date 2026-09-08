@@ -7,11 +7,29 @@ import { UserRepository } from './user.repository';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import * as bcrypt from 'bcrypt';
-import { User } from '@prisma/client';
+import { AuthProvider, User } from '@prisma/client';
+import { FederatedIdentityRepository } from './federated-identity.repository';
 
 @Injectable()
 export class UserService {
-  constructor(private readonly userRepo: UserRepository) {}
+  constructor(
+    private readonly userRepo: UserRepository,
+    private readonly federatedRepo: FederatedIdentityRepository,
+  ) {}
+
+  async findFederatedIdentity(provider: AuthProvider, subjectId: string) {
+    return this.federatedRepo.findByProviderSubject(provider, subjectId);
+  }
+
+  async linkFederatedIdentity(data: {
+    userId: string;
+    provider: AuthProvider;
+    providerSubjectId: string;
+    email?: string;
+    profileData?: Record<string, unknown>;
+  }) {
+    return this.federatedRepo.linkIdentity(data);
+  }
 
   private formatUser(user: User | null | undefined) {
     if (!user) return null;
@@ -57,8 +75,16 @@ export class UserService {
     return { message: 'Password updated successfully' };
   }
 
-  async searchUsers(query: string, currentUserId?: string) {
-    const users = await this.userRepo.searchUsers(query, currentUserId);
+  async searchUsers(
+    query: string,
+    currentUserId?: string,
+    workspaceId?: string,
+  ) {
+    const users = await this.userRepo.searchUsers(
+      query,
+      currentUserId,
+      workspaceId,
+    );
     return { users };
   }
 

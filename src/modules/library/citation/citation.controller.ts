@@ -5,83 +5,112 @@ import {
   Body,
   Param,
   Query,
-  Req,
   UseGuards,
+  NotFoundException,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
 import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
+import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
 import { CitationService } from './citation.service';
 import { FormatCitationDto, FormatBatchCitationDto } from './dto/citation.dto';
 
 @Controller([
   'api/v1/workspaces/:workspaceId/library/citation',
-  'api/library/references',
-  'api/library/cite',
+  'api/v1/workspace/:workspaceId/library/citation',
+  'api/v1/library/citation',
 ])
 @UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
 export class CitationController {
   constructor(private readonly citationService: CitationService) {}
 
   @Get('styles')
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   getStyles() {
-    return {
-      success: true,
-      data: this.citationService.getAvailableStyles(),
-    };
+    return this.citationService.getAvailableStyles();
   }
 
+  /**
+   * Format a raw item object (not persisted) into a citation string.
+   * Use GET /citation/items/:itemId/citation for persisted items.
+   */
   @Post('format')
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   format(@Body() dto: FormatCitationDto) {
-    const result = this.citationService.formatItem(
+    return this.citationService.formatItem(
       dto.item,
       dto.styleId || 'apa-7th',
       dto.index || 1,
     );
-    return {
-      success: true,
-      data: result,
-    };
   }
 
   @Post('batch')
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   formatBatch(@Body() dto: FormatBatchCitationDto) {
-    const result = this.citationService.formatBatch(
+    return this.citationService.formatBatch(
       dto.items || [],
       dto.styleId || 'apa-7th',
     );
+  }
+
+  /**
+   * Resolve a DOI, arXiv ID, or title/query to academic metadata.
+   * Gracefully returns { found: false, ... } without throwing 404 HTTP errors on misses.
+   */
+  @Post('resolve')
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  async resolve(
+    @Body('doi') doi?: string,
+    @Body('query') query?: string,
+    @Param('workspaceId') workspaceId?: string,
+  ) {
+    const input = (query || doi || '').trim();
+    const result = await this.citationService.resolveAcademicQuery(
+      input,
+      doi,
+      workspaceId,
+    );
     return {
-      success: true,
-      data: result,
+      found: result.found,
+      work: result.work,
+      data: result.work,
+      metadata: result.work,
+      queryType: result.queryType,
+      provider: result.provider,
+      ...(result.work || {}),
     };
   }
 
-  @Post('resolve-doi')
-  async resolveDoiPost(@Body('doi') doi: string) {
-    const work = await this.citationService.resolveDoi(doi);
+  /**
+   * GET /citation/doi/:doi — for encoded DOIs (use encodeURIComponent on client).
+   * Wildcard alias doi/* removed: client must encode slashes in DOI as %2F.
+   */
+  @Get('doi/:doi')
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  async getDoiReference(
+    @Param('doi') doi: string,
+    @Param('workspaceId') workspaceId?: string,
+  ) {
+    const cleanDoi = decodeURIComponent(doi);
+    const result = await this.citationService.resolveAcademicQuery(
+      cleanDoi,
+      cleanDoi,
+      workspaceId,
+    );
+    if (!result.found || !result.work) {
+      throw new NotFoundException(`DOI not found on CrossRef (404)`);
+    }
     return {
-      success: true,
-      data: work,
-      work,
-    };
-  }
-
-  @Get(['doi/:doi', 'doi/*'])
-  async getDoiReference(@Param('doi') paramDoi: string, @Req() req: any) {
-    const rawUrl = req.raw?.url || req.url || '';
-    const prefix = '/doi/';
-    const idx = rawUrl.indexOf(prefix);
-    const rawKey =
-      idx !== -1 ? rawUrl.slice(idx + prefix.length).split('?')[0] : paramDoi;
-    const cleanDoi = decodeURIComponent(rawKey || paramDoi);
-    const work = await this.citationService.resolveDoi(cleanDoi);
-    return {
-      success: true,
-      data: work,
-      work,
+      found: true,
+      work: result.work,
+      data: result.work,
+      metadata: result.work,
+      provider: result.provider,
+      ...result.work,
     };
   }
 
   @Get('crossref/search')
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async searchCrossRef(
     @Query('query') query: string,
     @Query('rows') rows?: string,
@@ -90,47 +119,51 @@ export class CitationController {
     return this.citationService.searchCrossRef(query, numRows);
   }
 
-  @Post('resolve')
-  async resolveAcademicQuery(@Body('query') query: string) {
-    const work = await this.citationService.resolveDoi(query);
-    return {
-      query,
-      queryType: 'DOI',
-      provider: 'crossref',
-      metadata: work,
-    };
-  }
-
-  @Get(':workspaceId/papers/:paperId/citation')
-  async getPaperCitation(
+  /**
+   * Format citation for a persisted item by ID.
+   * Route: GET /citation/items/:itemId/citation
+   */
+  @Get('items/:itemId/citation')
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  async getItemCitation(
+    @Param('itemId') itemId: string,
     @Param('workspaceId') workspaceId: string,
-    @Param('paperId') paperId: string,
     @Query('style') style?: string,
     @Query('index') index?: string,
   ) {
     const styleId = (style as any) || 'apa-7th';
     const numIndex = index ? parseInt(index, 10) : 1;
-    const citation = await this.citationService.formatPaperById(
+    const res = await this.citationService.formatItemById(
       workspaceId,
-      paperId,
+      itemId,
       styleId,
       numIndex,
     );
     return {
-      success: true,
-      data: citation,
-      ...citation,
+      ...res,
+      style: res.styleId,
+      html: res.bibliographyHtml,
     };
   }
 
-  @Post(':workspaceId/citations/batch')
-  async getPaperBatchCitations(
+  /**
+   * Batch format citations for multiple item IDs.
+   * Route: POST /citation/batch
+   */
+  @Post('batch-items')
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  async getBatchCitations(
     @Param('workspaceId') workspaceId: string,
-    @Body('paperIds') paperIds: string[],
+    @Body('itemIds') itemIds?: string[],
+    @Body('paperIds') paperIds?: string[],
     @Body('style') style?: string,
   ) {
     const styleId = (style as any) || 'apa-7th';
-    const ids = Array.isArray(paperIds) ? paperIds : [];
-    return this.citationService.formatPaperBatch(workspaceId, ids, styleId);
+    const ids = Array.isArray(itemIds)
+      ? itemIds
+      : Array.isArray(paperIds)
+        ? paperIds
+        : [];
+    return this.citationService.formatItemBatch(workspaceId, ids, styleId);
   }
 }

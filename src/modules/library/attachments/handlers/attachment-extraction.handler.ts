@@ -4,7 +4,7 @@ import { PdfExtractorProvider } from '../providers/pdf-extractor.provider';
 import { SearchService } from '../../search/search.service';
 import { STORAGE_PORT, IStoragePort } from '../../../storage/storage.port';
 import { OutboxEvent } from '@prisma/client';
-import { OutboxDispatchHandler } from '../../sync/workers/outbox.worker';
+import { OutboxDispatchHandler } from '../../outbox/outbox.types';
 import { AttachmentStorageException } from '../errors/attachments.errors';
 
 export const EXTRACTION_EVENT_TYPES = {
@@ -161,7 +161,83 @@ export class AttachmentExtractionHandler implements OutboxDispatchHandler {
         await this.searchService.indexAttachmentPages(attachment.id, doc.pages);
       }
 
-      // 5. Update status to READY on completion
+      // 5. Store authoritative GROBID ML extraction provenance & full-text tree
+      if (
+        doc.metadata?.rawTei ||
+        (doc.references && doc.references.length > 0) ||
+        (doc.sections && doc.sections.length > 0)
+      ) {
+        try {
+          // Store full-text structured tree (sections, figures, tables, formulas)
+          await this.prisma.metadataSourceRecord.create({
+            data: {
+              catalogItemId: attachment.catalogItemId,
+              sourceProvider: 'grobid_fulltext',
+              confidenceScore: 1.0,
+              rawPayload: {
+                title: doc.metadata.title,
+                abstract: doc.metadata.abstract,
+                creators: doc.metadata.creators,
+                doi: doc.metadata.doi,
+                arxivId: doc.metadata.arxivId,
+                year: doc.metadata.year,
+                keywords: doc.metadata.keywords,
+                sections: doc.sections ?? [],
+                figures: doc.figures ?? [],
+                tables: doc.tables ?? [],
+                formulas: doc.formulas ?? [],
+                references: doc.references ?? [],
+                sectionCount: doc.sections?.length ?? 0,
+                figureCount: doc.figures?.length ?? 0,
+                tableCount: doc.tables?.length ?? 0,
+                formulaCount: doc.formulas?.length ?? 0,
+                referenceCount: doc.references?.length ?? 0,
+              } as any,
+            },
+          });
+
+          // Also keep grobid metadata provenance record for backward compatibility
+          await this.prisma.metadataSourceRecord.create({
+            data: {
+              catalogItemId: attachment.catalogItemId,
+              sourceProvider: 'grobid',
+              confidenceScore: 1.0,
+              rawPayload: {
+                title: doc.metadata.title,
+                abstract: doc.metadata.abstract,
+                creators: doc.metadata.creators,
+                doi: doc.metadata.doi,
+                arxivId: doc.metadata.arxivId,
+                year: doc.metadata.year,
+                keywords: doc.metadata.keywords,
+                referenceCount: doc.references?.length ?? 0,
+                references: doc.references ?? [],
+              } as any,
+            },
+          });
+        } catch (provenanceErr: any) {
+          this.logger.debug(
+            `Could not store GROBID provenance: ${provenanceErr?.message}`,
+          );
+        }
+      }
+
+      // 6. Build in-library citation graph (match references against papers in same workspace)
+      if (doc.references && doc.references.length > 0) {
+        try {
+          await this.linkInLibraryCitations(
+            workspaceId,
+            attachment.catalogItemId,
+            doc.references,
+          );
+        } catch (linkErr: any) {
+          this.logger.warn(
+            `In-library citation linking warning: ${linkErr?.message}`,
+          );
+        }
+      }
+
+      // 7. Update status to READY on completion
       await this.prisma.catalogAttachment.update({
         where: { id: attachment.id },
         data: {
@@ -177,6 +253,7 @@ export class AttachmentExtractionHandler implements OutboxDispatchHandler {
           attachmentId,
           catalogItemId: attachment.catalogItemId,
           pageCount: doc.pages.length,
+          referenceCount: doc.references?.length ?? 0,
           hasMetadata: Boolean(doc.metadata.doi || doc.metadata.title),
         }),
       );
@@ -215,6 +292,85 @@ export class AttachmentExtractionHandler implements OutboxDispatchHandler {
       );
 
       throw err; // Re-throw to allow outbox worker to manage retry / dead-lettering
+    }
+  }
+
+  /**
+   * Matches extracted bibliographic references against other papers in the same workspace.
+   * Automatically establishes in-library citation edges ('cites') in item_relations.
+   */
+  private async linkInLibraryCitations(
+    workspaceId: string,
+    sourceItemId: string,
+    references: Array<{ title?: string; doi?: string; arxivId?: string }>,
+  ): Promise<void> {
+    const workspacePapers = await this.prisma.catalogItem.findMany({
+      where: {
+        workspaceId,
+        id: { not: sourceItemId },
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        title: true,
+        doi: true,
+      },
+    });
+
+    if (workspacePapers.length === 0) return;
+
+    const doiMap = new Map<string, string>();
+    const titleMap = new Map<string, string>();
+
+    const normalizeTitle = (t: string) =>
+      t
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '')
+        .trim();
+
+    for (const p of workspacePapers) {
+      if (p.doi) {
+        doiMap.set(p.doi.toLowerCase().trim(), p.id);
+      }
+      if (p.title && p.title.length > 10) {
+        titleMap.set(normalizeTitle(p.title), p.id);
+      }
+    }
+
+    for (const ref of references) {
+      let targetItemId: string | undefined;
+
+      if (ref.doi) {
+        targetItemId = doiMap.get(ref.doi.toLowerCase().trim());
+      }
+
+      if (!targetItemId && ref.title && ref.title.length > 10) {
+        targetItemId = titleMap.get(normalizeTitle(ref.title));
+      }
+
+      if (targetItemId && targetItemId !== sourceItemId) {
+        try {
+          await this.prisma.itemRelation.upsert({
+            where: {
+              sourceItemId_targetItemId_relationType: {
+                sourceItemId,
+                targetItemId,
+                relationType: 'cites',
+              },
+            },
+            update: {},
+            create: {
+              workspaceId,
+              sourceItemId,
+              targetItemId,
+              relationType: 'cites',
+              description: ref.title || 'Cited in document bibliography',
+            },
+          });
+        } catch {
+          // Ignore unique conflicts or transient race conditions
+        }
+      }
     }
   }
 }

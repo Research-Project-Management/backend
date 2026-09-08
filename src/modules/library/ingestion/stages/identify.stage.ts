@@ -1,10 +1,12 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { SubmissionPayload } from '../types/ingestion-submission.types';
 import { MetadataCandidate } from '../types/metadata-candidate.types';
 import { DoiParser } from '../parsers/doi.parser';
 import { BibtexParser } from '../parsers/bibtex.parser';
 import { RisParser } from '../parsers/ris.parser';
 import { NormalizationPolicy } from '../policies/normalization.policy';
+import { IStoragePort, STORAGE_PORT } from '../../../storage/storage.port';
+import { PdfExtractorProvider } from '../../attachments/providers/pdf-extractor.provider';
 import { randomUUID } from 'crypto';
 
 @Injectable()
@@ -16,14 +18,19 @@ export class IdentifyStage {
     private readonly bibtexParser: BibtexParser,
     private readonly risParser: RisParser,
     private readonly normalizer: NormalizationPolicy,
+    @Optional()
+    @Inject(STORAGE_PORT)
+    private readonly storagePort?: IStoragePort,
+    @Optional() private readonly pdfExtractor?: PdfExtractorProvider,
   ) {}
 
   /**
    * Executes identification and initial format translation.
    */
-  execute(
+  async execute(
     runId: string,
     payload: SubmissionPayload,
+    workspaceId?: string,
   ): Promise<MetadataCandidate[]> {
     const candidates: MetadataCandidate[] = [];
 
@@ -110,17 +117,34 @@ export class IdentifyStage {
               title: item.title,
               itemType: item.itemType,
               authors: item.authors,
+              editors: item.editors,
               year: item.year,
               publicationTitle: item.journal || item.publisher,
+              journal: item.journal,
+              publisher: item.publisher,
+              place: item.place,
               volume: item.volume,
               issue: item.issue,
               pages: item.pages,
+              series: item.series,
+              edition: item.edition,
+              arxivId: item.arxivId,
               doi: item.doi,
               isbn: item.isbn,
               issn: item.issn,
               url: item.url,
               abstract: item.abstract,
               citationKey: item.citationKey,
+              tags: item.keywords,
+              keywords: item.keywords,
+              notes: item.notes?.map((noteContent) => ({
+                content: noteContent,
+                source: 'bibtex',
+              })),
+              language: item.language,
+              rights: item.rights,
+              fileUrl: item.fileUrl,
+              extra: item.extra,
             };
             const normalized = this.normalizer.normalize(rawMetadata);
             candidates.push({
@@ -185,6 +209,89 @@ export class IdentifyStage {
       }
 
       case 'FILE': {
+        let extractedMetadata: any = {};
+        let fileBuffer: Buffer | undefined;
+        if (
+          this.storagePort?.readOwnedFile &&
+          this.pdfExtractor?.extractDocumentFromBuffer &&
+          payload.fileId &&
+          workspaceId
+        ) {
+          try {
+            const fileRecord = await this.storagePort.readOwnedFile({
+              workspaceId,
+              fileId: payload.fileId,
+            });
+            if (fileRecord?.buffer) {
+              fileBuffer = fileRecord.buffer;
+              const extractedDocument =
+                await this.pdfExtractor.extractDocumentFromBuffer(fileBuffer);
+              extractedMetadata =
+                extractedDocument?.metadata || extractedDocument || {};
+
+              // Some PDF adapters can read the document header even when the
+              // full document parser fails. Preserve that partial metadata.
+              if (
+                Object.keys(extractedMetadata).length === 0 &&
+                this.pdfExtractor.extractMetadataFromBuffer
+              ) {
+                extractedMetadata =
+                  this.pdfExtractor.extractMetadataFromBuffer(
+                    fileRecord.buffer,
+                  ) || {};
+              }
+            }
+          } catch (caughtError: unknown) {
+            const errorMessage =
+              caughtError instanceof Error
+                ? caughtError.message
+                : String(caughtError);
+            this.logger.warn(
+              `PDF metadata extraction failed for file ${payload.fileId}: ${errorMessage}`,
+            );
+            // A damaged or encrypted PDF may still expose its document-info
+            // header. Keep that lightweight fallback so a DOI can be enriched
+            // rather than reducing the entire import to a filename.
+            try {
+              extractedMetadata =
+                fileBuffer && this.pdfExtractor.extractMetadataFromBuffer
+                  ? this.pdfExtractor.extractMetadataFromBuffer(fileBuffer)
+                  : {};
+            } catch {
+              extractedMetadata = {};
+            }
+          }
+        }
+
+        // Keep the complete extractor result at the ingestion boundary.  This
+        // is deliberately a projection rather than a hand-maintained list:
+        // adding a field to the PDF extractor must not silently discard it
+        // before normalization and reconciliation can use it.
+        const {
+          rawText: _rawText,
+          creationDate: _creationDate,
+          ...extractedItemMetadata
+        } = extractedMetadata;
+
+        const filenameDoi = payload.filename
+          ?.match(/10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/)?.[0]
+          ?.replace(/[.,;:)\]]+$/, '');
+        const filenameArxivId = payload.filename?.match(
+          /(?:arxiv[:_.-]*)?(\d{4}\.\d{4,5}(?:v\d+)?)/i,
+        )?.[1];
+
+        const rawFileMetadata = {
+          ...extractedItemMetadata,
+          doi: extractedMetadata.doi || filenameDoi,
+          arxivId: extractedMetadata.arxivId || filenameArxivId,
+          title:
+            extractedMetadata.title || payload.filename || 'Uploaded Document',
+          tags: extractedMetadata.tags || extractedMetadata.keywords,
+          fileId: payload.fileId,
+          filename: payload.filename,
+        };
+        const normalized = this.normalizer.normalize(rawFileMetadata);
+
         candidates.push({
           candidateId: randomUUID(),
           sourceKind: 'FILE',
@@ -192,11 +299,13 @@ export class IdentifyStage {
           sourceRecordId: payload.fileId,
           retrievedAt: new Date().toISOString(),
           schemaVersion: '1.0.0',
-          fields: {},
-          normalizedMetadata: {
-            title: payload.filename || 'Uploaded Document',
-          },
-          confidenceScore: 0.7,
+          fields: this.buildEvidenceFields(
+            rawFileMetadata,
+            normalized,
+            'StagedPdf',
+          ),
+          normalizedMetadata: normalized,
+          confidenceScore: extractedMetadata.doi ? 0.95 : 0.7,
         });
         break;
       }
@@ -206,17 +315,20 @@ export class IdentifyStage {
   }
 
   private buildEvidenceFields(
-    raw: Record<string, any>,
-    normalized: Record<string, any>,
+    rawMetadata: Record<string, any>,
+    normalizedMetadata: Record<string, any>,
     sourceName: string,
   ): Record<string, any> {
     const fields: Record<string, any> = {};
-    for (const key of Object.keys(normalized)) {
-      if (normalized[key] !== undefined && normalized[key] !== null) {
-        fields[key] = {
-          path: key,
-          value: raw[key],
-          normalizedValue: normalized[key],
+    for (const fieldName of Object.keys(normalizedMetadata)) {
+      if (
+        normalizedMetadata[fieldName] !== undefined &&
+        normalizedMetadata[fieldName] !== null
+      ) {
+        fields[fieldName] = {
+          path: fieldName,
+          value: rawMetadata[fieldName],
+          normalizedValue: normalizedMetadata[fieldName],
           confidence: 0.95,
           sourceProvider: sourceName,
           retrievedAt: new Date().toISOString(),

@@ -9,7 +9,7 @@ import {
   normalizeIssn,
   formatCanonicalId,
   extractFamilyName,
-} from '../src/modules/library/catalog/utils/item.utils';
+} from '../src/modules/library/items/items.utils';
 
 
 type CanonicalIdentifierType = 'doi' | 'arxiv' | 'pmid' | 'pmcid' | 'isbn' | 'issn';

@@ -2,13 +2,10 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
-  Inject,
-  forwardRef,
   Optional,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CycleRepository } from './cycle.repository';
-import { WorkItemService } from '../work-item.service';
 import {
   CreateCycleDto,
   UpdateCycleDto,
@@ -27,8 +24,6 @@ export { CycleStats };
 export class CycleService {
   constructor(
     private readonly cycleRepo: CycleRepository,
-    @Inject(forwardRef(() => WorkItemService))
-    private readonly workItemService: WorkItemService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
@@ -195,17 +190,15 @@ export class CycleService {
   }
 
   async addTask(cycleId: string, taskId: string) {
-    const updated = await this.workItemService.updateTask(taskId, { cycleId });
-    return { message: 'Task added to cycle', task: updated.task };
+    const updated = await this.cycleRepo.addTaskToCycle(taskId, cycleId);
+    return { message: 'Task added to cycle', task: updated };
   }
 
   async removeTask(cycleId: string, taskId: string) {
-    const updated = await this.workItemService.updateTask(taskId, {
-      cycleId: null,
-    });
+    const updated = await this.cycleRepo.removeTaskFromCycle(taskId);
     return {
       message: 'Task removed from cycle',
-      task: updated.task,
+      task: updated,
     };
   }
 

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { normalizeDoi } from '../../library/items/utils/items.utils';
 
 export interface MappedCatalogItem {
   remoteKey: string;
@@ -10,12 +11,27 @@ export interface MappedCatalogItem {
   doi?: string;
   citationKey?: string;
   publicationTitle?: string;
+  publicationDate?: string;
+  journalAbbreviation?: string;
+  publisher?: string;
+  place?: string;
   volume?: string;
   issue?: string;
   pages?: string;
+  series?: string;
+  seriesTitle?: string;
+  seriesText?: string;
+  seriesNumber?: string;
   issn?: string;
   isbn?: string;
   url?: string;
+  language?: string;
+  rights?: string;
+  archive?: string;
+  archiveLocation?: string;
+  libraryCatalog?: string;
+  callNumber?: string;
+  extra?: string;
   creators: Array<{
     creatorType: string;
     firstName?: string;
@@ -84,14 +100,29 @@ export class ZoteroMapper {
     'creators',
     'abstractNote',
     'publicationTitle',
+    'journalAbbreviation',
+    'publisher',
+    'place',
     'volume',
     'issue',
     'pages',
+    'series',
+    'seriesTitle',
+    'seriesText',
+    'seriesNumber',
+    'citationKey',
     'date',
     'DOI',
+    'doi',
     'ISSN',
     'ISBN',
     'url',
+    'language',
+    'rights',
+    'archive',
+    'archiveLocation',
+    'libraryCatalog',
+    'callNumber',
     'extra',
     'tags',
     'collections',
@@ -117,9 +148,14 @@ export class ZoteroMapper {
       }
     }
 
+    const doi = this.extractDoi(data);
+
     // Extract citation key from extra if available
     let citationKey: string | undefined;
-    if (data.extra) {
+    if (data.citationKey) {
+      citationKey = String(data.citationKey).trim() || undefined;
+    }
+    if (!citationKey && data.extra) {
       const match = String(data.extra).match(/Citation Key:\s*([^\s\n\r]+)/i);
       if (match) {
         citationKey = match[1];
@@ -155,7 +191,7 @@ export class ZoteroMapper {
       : [];
 
     // Extract unknown / extra properties for 100% roundtrip preservation
-    const extraFields: Record<string, any> = {};
+    const extraFields: Record<string, any> = this.parseExtra(data.extra);
     for (const [key, value] of Object.entries(data)) {
       if (!this.knownItemFields.has(key)) {
         extraFields[key] = value;
@@ -169,21 +205,93 @@ export class ZoteroMapper {
       itemType: data.itemType || 'journalArticle',
       abstract: data.abstractNote,
       year,
-      doi: data.DOI,
+      doi,
       citationKey,
       publicationTitle: data.publicationTitle || data.proceedingsTitle,
+      publicationDate: data.date,
+      journalAbbreviation: data.journalAbbreviation,
+      publisher: data.publisher,
+      place: data.place,
       volume: data.volume,
       issue: data.issue,
       pages: data.pages,
+      series: data.series,
+      seriesTitle: data.seriesTitle,
+      seriesText: data.seriesText,
+      seriesNumber: data.seriesNumber,
       issn: data.ISSN,
       isbn: data.ISBN,
       url: data.url,
+      language: data.language,
+      rights: data.rights,
+      archive: data.archive,
+      archiveLocation: data.archiveLocation,
+      libraryCatalog: data.libraryCatalog,
+      callNumber: data.callNumber,
+      extra: typeof data.extra === 'string' ? data.extra : undefined,
       creators,
       tags,
       collectionKeys,
       rawPayload: data,
       extraFields,
     };
+  }
+
+  private extractDoi(data: Record<string, any>): string | undefined {
+    const candidates = [
+      data.DOI,
+      data.doi,
+      data.url,
+      ...(typeof data.extra === 'string' ? [data.extra] : []),
+    ];
+
+    for (const candidate of candidates) {
+      if (typeof candidate !== 'string') continue;
+      const match = candidate.match(/10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/);
+      const normalized = normalizeDoi(match?.[0] || candidate);
+      if (normalized) return normalized;
+    }
+
+    return undefined;
+  }
+
+  private parseExtra(extra: unknown): Record<string, any> {
+    if (typeof extra !== 'string' || !extra.trim()) return {};
+
+    const fields: Record<string, any> = {};
+    for (const line of extra.split(/\r?\n/)) {
+      const match = line.match(/^\s*([^:]+):\s*(.+?)\s*$/);
+      if (!match) continue;
+      const key = match[1].trim();
+      const value = match[2].trim();
+      if (!key || !value) continue;
+      const normalizedKey = key.replace(/\s+/g, '').toLowerCase();
+      if (normalizedKey === 'citationkey') fields.citationKey = value;
+      else if (normalizedKey === 'doi')
+        fields.doi = normalizeDoi(value) || value;
+      else if (normalizedKey === 'pmid') fields.pmid = value;
+      else if (normalizedKey === 'pmcid') fields.pmcid = value;
+      else if (normalizedKey === 'arxiv' || normalizedKey === 'arxivid') {
+        fields.arxivId = value.split(/\s+/)[0].replace(/^arxiv:/i, '');
+      } else {
+        fields[key] = value;
+      }
+    }
+
+    const arxivMatch = extra.match(
+      /arXiv:\s*([\d.]+v?\d*)\s*(?:\[([^\]]+)\])?/i,
+    );
+    if (arxivMatch) {
+      fields.arxivId ||= arxivMatch[1];
+      if (arxivMatch[2]) {
+        fields.arxivCategories = arxivMatch[2]
+          .split(/[,\s]+/)
+          .map((value) => value.trim())
+          .filter(Boolean);
+      }
+    }
+
+    return fields;
   }
 
   /**
@@ -314,6 +422,41 @@ export class ZoteroMapper {
         tag: typeof t === 'string' ? t : t.name || t.tag,
         type: 0,
       }));
+    }
+
+    // In Zotero, the Extra field contains raw content without artificial labels/titles injected.
+    // Preserve the clean content of item.extra directly (excluding internal PDF URLs, empty lines, or duplicate title lines).
+    let cleanExtra: string | undefined;
+    if (typeof item.extra === 'string' && item.extra.trim()) {
+      const paperTitle =
+        typeof item.title === 'string'
+          ? item.title.trim().toLowerCase()
+          : undefined;
+      const filtered = item.extra
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => {
+          if (!l) return false;
+          if (/^open\s*access:?/i.test(l)) return false;
+          if (/^https?:\/\//i.test(l)) return false;
+          const titleMatch = l.match(/^title:\s*(.+)$/i);
+          if (
+            titleMatch &&
+            (!paperTitle || titleMatch[1].trim().toLowerCase() === paperTitle)
+          ) {
+            return false;
+          }
+          return true;
+        });
+      if (filtered.length > 0) {
+        cleanExtra = filtered.join('\n');
+      }
+    }
+
+    if (cleanExtra) {
+      payload.extra = cleanExtra;
+    } else if (basePayload.extra) {
+      payload.extra = basePayload.extra;
     }
 
     return payload;

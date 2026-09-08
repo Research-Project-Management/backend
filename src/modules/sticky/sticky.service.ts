@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
   Optional,
   Logger,
 } from '@nestjs/common';
@@ -215,10 +216,50 @@ export class StickyService {
     return { message: 'Sticky deleted successfully', success: true };
   }
 
-  async reorderStickies(stickyIds: string[], userId?: string) {
+  async reorderStickies(
+    stickyIds: string[],
+    userId?: string,
+    scopeContext?: {
+      workspaceId?: string;
+      projectId?: string;
+      scope?: StickyScope;
+    },
+  ) {
     if (!stickyIds || stickyIds.length <= 1) {
       return { success: true };
     }
+
+    if (userId) {
+      const existingStickies =
+        await this.stickyRepo.findStickiesByIds(stickyIds);
+      if (existingStickies.length !== stickyIds.length) {
+        throw new NotFoundException('One or more stickies not found');
+      }
+
+      for (const sticky of existingStickies) {
+        if (sticky.userId !== userId) {
+          throw new ForbiddenException(
+            'Cannot reorder sticky notes belonging to another user',
+          );
+        }
+        if (scopeContext?.scope && sticky.scope !== scopeContext.scope) {
+          throw new BadRequestException('Sticky scope mismatch');
+        }
+        if (
+          scopeContext?.workspaceId &&
+          sticky.workspaceId !== scopeContext.workspaceId
+        ) {
+          throw new BadRequestException('Sticky workspace mismatch');
+        }
+        if (
+          scopeContext?.projectId &&
+          sticky.projectId !== scopeContext.projectId
+        ) {
+          throw new BadRequestException('Sticky project mismatch');
+        }
+      }
+    }
+
     const stickies = await this.stickyRepo.reorderStickies(stickyIds);
 
     if (userId && stickies.length > 0) {

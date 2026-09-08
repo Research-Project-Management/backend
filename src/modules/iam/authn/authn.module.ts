@@ -1,4 +1,4 @@
-import { Module, forwardRef } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthnService } from './authn.service';
@@ -12,7 +12,7 @@ import { AuditModule } from '../audit/audit.module';
 @Module({
   imports: [
     CacheModule,
-    forwardRef(() => UserModule),
+    UserModule,
     AuditModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
@@ -27,7 +27,7 @@ import { AuditModule } from '../audit/audit.module';
           secret,
           signOptions: {
             expiresIn:
-              (configService.get<string>('JWT_EXPIRES_IN') as any) || '15m',
+              (configService.get<string>('JWT_EXPIRES_IN') as any) || '7d',
           },
         };
       },
@@ -35,7 +35,7 @@ import { AuditModule } from '../audit/audit.module';
   ],
   controllers: [AuthnController],
   providers: [AuthnService, AuthnRepository, JwtAuthGuard],
-  exports: [AuthnService, AuthnRepository, JwtModule, JwtAuthGuard],
+  exports: [AuthnService, JwtModule, JwtAuthGuard],
 })
 export class AuthnModule {}
 

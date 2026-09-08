@@ -3,11 +3,14 @@ import { PrismaService } from '@/core/database/prisma.service';
 import { Prisma, User } from '@prisma/client';
 import { IUserRepository } from '../types/iam-repository.interface';
 
+import { isUuid } from '@/core/utils/tenant.util';
+
 @Injectable()
 export class UserRepository implements IUserRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async findById(id: string): Promise<User | null> {
+    if (!id || !isUuid(id)) return null;
     return this.prisma.user.findUnique({
       where: { id },
     });
@@ -82,10 +85,41 @@ export class UserRepository implements IUserRepository {
     return result.count;
   }
 
-  async searchUsers(query: string, excludeUserId?: string) {
+  async searchUsers(
+    query: string,
+    excludeUserId?: string,
+    workspaceId?: string,
+  ) {
+    let workspaceScopeCondition: Prisma.UserWhereInput = {};
+
+    if (workspaceId) {
+      workspaceScopeCondition = {
+        workspaceMembers: {
+          some: { workspaceId },
+        },
+      };
+    } else if (excludeUserId) {
+      // Find all workspaces the current user belongs to
+      const userMemberships = await this.prisma.workspaceMember.findMany({
+        where: { userId: excludeUserId },
+        select: { workspaceId: true },
+      });
+      const sharedWorkspaceIds = userMemberships.map((m) => m.workspaceId);
+      if (sharedWorkspaceIds.length > 0) {
+        workspaceScopeCondition = {
+          workspaceMembers: {
+            some: { workspaceId: { in: sharedWorkspaceIds } },
+          },
+        };
+      } else {
+        return [];
+      }
+    }
+
     return this.prisma.user.findMany({
       where: {
         deletedAt: null,
+        ...workspaceScopeCondition,
         AND: [
           excludeUserId ? { id: { not: excludeUserId } } : {},
           {

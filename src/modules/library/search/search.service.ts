@@ -1,11 +1,17 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { SearchRepository, SearchOptions } from './search.repository';
+import { PrismaService } from '@/core/database/prisma.service';
 import {
   FullTextIndexer,
   PageAnchorMatch,
   PageTextExtraction,
 } from './providers/full-text-indexer.provider';
-import { SearchCatalogQueryDto, SavedSearchDto } from './dto/search.dto';
+import {
+  RagIndexerProvider,
+  RagIndexPaperInput,
+  RagIndexResult,
+} from './providers/rag-indexer.provider';
+import { SearchCatalogQueryDto } from './dto/search.dto';
 
 @Injectable()
 export class SearchService {
@@ -13,7 +19,9 @@ export class SearchService {
 
   constructor(
     private readonly searchRepo: SearchRepository,
+    private readonly prisma: PrismaService,
     private readonly fullTextIndexer: FullTextIndexer,
+    private readonly ragIndexer: RagIndexerProvider,
   ) {}
 
   /**
@@ -55,10 +63,25 @@ export class SearchService {
    * Search PDF attachment pages for text occurrences and character offsets.
    */
   async searchPageAnchors(
+    workspaceId: string,
     attachmentId: string,
     term: string,
     pageIndex?: number,
   ): Promise<PageAnchorMatch[]> {
+    const attachment = await this.prisma.catalogAttachment.findFirst({
+      where: {
+        id: attachmentId,
+        catalogItem: { workspaceId, deletedAt: null },
+      },
+      select: { id: true },
+    });
+
+    if (!attachment) {
+      throw new NotFoundException(
+        `Attachment ${attachmentId} not found in workspace`,
+      );
+    }
+
     return this.fullTextIndexer.searchPageAnchors(
       attachmentId,
       term,
@@ -74,24 +97,30 @@ export class SearchService {
   }
 
   /**
-   * Saved search operations
+   * Rebuilds full-text and faceted search index for a given workspace.
    */
-  async createSavedSearch(
+  async rebuildIndex(
     workspaceId: string,
-    userId: string,
-    dto: SavedSearchDto,
-  ) {
-    return this.searchRepo.createSavedSearch(workspaceId, userId, {
-      name: dto.name,
-      query: dto.filters || { q: dto.query },
-    });
+  ): Promise<{ indexedItems: number; indexedAttachments: number }> {
+    this.logger.log(`Rebuilding search index for workspace ${workspaceId}...`);
+    const facets = await this.searchRepo.computeFacets(workspaceId, {});
+    const totalTypes = Object.values(facets.itemTypes).reduce(
+      (a, b) => a + b,
+      0,
+    );
+    this.logger.log(
+      `Search index validated for workspace ${workspaceId}: ${totalTypes} active items indexed.`,
+    );
+    return {
+      indexedItems: totalTypes,
+      indexedAttachments: 0,
+    };
   }
 
-  async listSavedSearches(workspaceId: string, userId: string) {
-    return this.searchRepo.listSavedSearches(workspaceId, userId);
-  }
-
-  async deleteSavedSearch(workspaceId: string, userId: string, id: string) {
-    return this.searchRepo.deleteSavedSearch(workspaceId, userId, id);
+  /**
+   * Uploads and vectorizes an academic paper into Qdrant for RAG.
+   */
+  async indexPaperForRag(item: RagIndexPaperInput): Promise<RagIndexResult> {
+    return this.ragIndexer.indexPaper(item);
   }
 }

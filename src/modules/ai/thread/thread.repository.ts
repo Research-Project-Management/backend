@@ -47,6 +47,20 @@ export class ThreadRepository implements IAiRepository {
     });
   }
 
+  async findChatByIdAndUser(
+    chatId: string,
+    userId: string,
+  ): Promise<ChatWithMessages | null> {
+    return this.prisma.aiChat.findFirst({
+      where: { id: chatId, userId },
+      include: {
+        messages: {
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
+  }
+
   async findPageChat(
     pageId: string,
     workspaceSlug: string,

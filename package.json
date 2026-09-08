@@ -21,7 +21,12 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "test:db-suites": "jest --testPathPatterns=\"test/integration\" --runInBand --forceExit",
     "seed": "ts-node -r tsconfig-paths/register prisma/seed.ts",
-    "codebase:sync": "node ../.agents/scripts/sync-codebase.mjs backend"
+    "codebase:sync": "node ../.agents/scripts/sync-codebase.mjs backend",
+    "typecheck": "tsc --noEmit",
+    "audit:dry": "npx --yes jscpd --threshold 5 src",
+    "audit:circular": "npx --yes madge --circular --extensions ts src",
+    "audit:security": "pnpm audit",
+    "audit:quality": "pnpm typecheck && pnpm audit:circular && pnpm audit:dry"
   },
   "prisma": {
     "seed": "ts-node -r tsconfig-paths/register prisma/seed.ts"
@@ -29,11 +34,16 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1111.0",
     "@aws-sdk/s3-request-presigner": "^3.1111.0",
+    "@citation-js/core": "^0.7.17",
+    "@citation-js/plugin-bibtex": "^0.7.17",
+    "@citation-js/plugin-csl": "^0.7.17",
+    "@citation-js/plugin-ris": "^0.7.17",
     "@fastify/helmet": "^13.1.0",
     "@fastify/multipart": "^10.1.1",
     "@fastify/rate-limit": "^11.2.0",
     "@fastify/swagger": "^9.8.1",
     "@fastify/swagger-ui": "^6.1.1",
+    "@mozilla/readability": "^0.6.0",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.0.1",
@@ -48,16 +58,22 @@
     "bcrypt": "^6.0.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
+    "dompurify": "^3.4.15",
     "dotenv": "^16.4.7",
-    "fastify": "^5.2.1",
+    "fastify": "^5.12.1",
     "ioredis": "^5.4.2",
+    "jsdom": "^30.0.1",
     "nodemailer": "^6.9.16",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
+    "pdf-lib": "^1.17.1",
     "pg": "^8.23.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "unpdf": "^1.8.1"
+    "tsconfig-paths": "^4.2.0",
+    "unpdf": "^1.8.1",
+    "prisma": "^7.9.1",
+    "dotenv": "^16.4.7"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
@@ -66,7 +82,10 @@
     "@nestjs/schematics": "^11.0.0",
     "@nestjs/testing": "^11.0.1",
     "@types/bcrypt": "^6.0.0",
+    "@types/dompurify": "^3.2.0",
+    "@types/ioredis": "^5.0.0",
     "@types/jest": "^30.0.0",
+    "@types/jsdom": "^30.0.0",
     "@types/node": "^24.0.0",
     "@types/nodemailer": "^6.4.17",
     "@types/passport-jwt": "^4.0.1",
@@ -78,7 +97,6 @@
     "globals": "^17.0.0",
     "jest": "^30.0.0",
     "prettier": "^3.4.2",
-    "prisma": "^7.9.1",
     "source-map-support": "^0.5.21",
     "supertest": "^7.0.0",
     "ts-jest": "^29.2.5",
@@ -96,7 +114,7 @@
       "ts"
     ],
     "rootDir": ".",
-    "testRegex": "test/(unit|integration)/.*\\.(spec|interface-spec)\\.ts$",
+    "testRegex": "test/(unit|integration|architecture|contracts)/.*\\.(spec|interface-spec)\\.ts$",
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
     },
@@ -109,5 +127,15 @@
       "^@/(.*)$": "<rootDir>/src/$1"
     },
     "testTimeout": 60000
+  },
+  "pnpm": {
+    "overrides": {
+      "fastify": "^5.12.1",
+      "qs": "^6.16.0",
+      "mysql2": "^3.23.1",
+      "fast-uri": ">=4.1.3",
+      "js-yaml": ">=5.2.2",
+      "deepmerge-ts": ">=8.0.0"
+    }
   }
 }

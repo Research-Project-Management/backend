@@ -1,5 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
+import {
+  buildWorkspaceIdentifierWhere,
+  isUuid,
+} from '@/core/utils/tenant.util';
 import { Prisma, StickyScope, Sticky } from '@prisma/client';
 import {
   IStickyRepository,
@@ -17,19 +21,13 @@ export class StickyRepository implements IStickyRepository {
     workspaceIdOrSlug: string,
   ): Promise<{ id: string } | null> {
     return this.prisma.workspace.findFirst({
-      where: {
-        OR: [
-          { id: workspaceIdOrSlug },
-          { slug: workspaceIdOrSlug },
-          { url: workspaceIdOrSlug },
-        ],
-        deletedAt: null,
-      },
+      where: buildWorkspaceIdentifierWhere(workspaceIdOrSlug),
       select: { id: true },
     });
   }
 
   async findStickyById(stickyId: string): Promise<StickyWithUser | null> {
+    if (!isUuid(stickyId)) return null;
     return this.prisma.sticky.findUnique({
       where: { id: stickyId },
       include: {
@@ -43,10 +41,13 @@ export class StickyRepository implements IStickyRepository {
     userId: string,
   ): Promise<StickyWithUser[]> {
     const ws = await this.resolveWorkspace(workspaceId);
-    const targetId = ws?.id || workspaceId;
+    const canonicalWorkspaceId =
+      ws?.id || (isUuid(workspaceId) ? workspaceId : null);
+    if (!canonicalWorkspaceId || !isUuid(userId)) return [];
+
     return this.prisma.sticky.findMany({
       where: {
-        workspaceId: targetId,
+        workspaceId: canonicalWorkspaceId,
         userId,
         scope: StickyScope.workspace,
       },
@@ -61,6 +62,7 @@ export class StickyRepository implements IStickyRepository {
     projectId: string,
     userId: string,
   ): Promise<StickyWithUser[]> {
+    if (!isUuid(projectId) || !isUuid(userId)) return [];
     return this.prisma.sticky.findMany({
       where: {
         projectId,
@@ -79,10 +81,13 @@ export class StickyRepository implements IStickyRepository {
     userId: string,
   ): Promise<number> {
     const ws = await this.resolveWorkspace(workspaceId);
-    const targetId = ws?.id || workspaceId;
+    const canonicalWorkspaceId =
+      ws?.id || (isUuid(workspaceId) ? workspaceId : null);
+    if (!canonicalWorkspaceId || !isUuid(userId)) return 0;
+
     return this.prisma.sticky.count({
       where: {
-        workspaceId: targetId,
+        workspaceId: canonicalWorkspaceId,
         userId,
         scope: StickyScope.workspace,
       },
@@ -93,6 +98,7 @@ export class StickyRepository implements IStickyRepository {
     projectId: string,
     userId: string,
   ): Promise<number> {
+    if (!isUuid(projectId) || !isUuid(userId)) return 0;
     return this.prisma.sticky.count({
       where: {
         projectId,
@@ -132,8 +138,18 @@ export class StickyRepository implements IStickyRepository {
     });
   }
 
+  async findStickiesByIds(stickyIds: string[]): Promise<Sticky[]> {
+    const validIds = stickyIds.filter(isUuid);
+    if (validIds.length === 0) return [];
+    return this.prisma.sticky.findMany({
+      where: { id: { in: validIds } },
+    });
+  }
+
   async reorderStickies(stickyIds: string[]): Promise<Sticky[]> {
-    const updates = stickyIds.map((id, index) =>
+    const validIds = stickyIds.filter(isUuid);
+    if (validIds.length === 0) return [];
+    const updates = validIds.map((id, index) =>
       this.prisma.sticky.update({
         where: { id },
         data: { order: index },
@@ -143,6 +159,18 @@ export class StickyRepository implements IStickyRepository {
   }
 
   async findProjectWorkspaceId(projectId: string): Promise<string | null> {
+    if (!isUuid(projectId)) {
+      const project = await this.prisma.project
+        .findFirst({
+          where: {
+            identifier: { equals: projectId, mode: 'insensitive' },
+            deletedAt: null,
+          },
+          select: { workspaceId: true },
+        })
+        .catch(() => null);
+      return project?.workspaceId || null;
+    }
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
       select: { workspaceId: true },

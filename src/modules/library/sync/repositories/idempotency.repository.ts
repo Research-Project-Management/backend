@@ -120,10 +120,6 @@ export class IdempotencyRepository {
     const leaseToken = expiresAt.toISOString();
     const keyFingerprint = IdempotencyRepository.getFingerprint(idempotencyKey);
 
-    if (!this.prisma?.idempotencyRecord?.create) {
-      return { status: 'acquired', leaseToken };
-    }
-
     try {
       await this.prisma.idempotencyRecord.create({
         data: {
@@ -199,39 +195,36 @@ export class IdempotencyRepository {
   }
 
   async markSucceededInTx(
-    tx: any,
+    tx: Prisma.TransactionClient,
     workspaceId: string,
     idempotencyKey: string,
     statusCode: number,
     responseBody: any,
     leaseToken?: string,
   ): Promise<boolean> {
-    if (tx?.idempotencyRecord?.updateMany) {
-      const where: any = {
-        workspaceId,
-        idempotencyKey,
-        status: 'in_progress',
-      };
-      if (leaseToken) {
-        where.expiresAt = new Date(leaseToken);
-      }
-      const res = await tx.idempotencyRecord.updateMany({
-        where,
-        data: {
-          status: 'succeeded',
-          statusCode,
-          responseBody: responseBody ?? null,
-        },
-      });
-      if (res.count === 0 && leaseToken) {
-        this.logger.warn(
-          `Lost idempotency lease on markSucceededInTx for workspace ${workspaceId} (key fp: ${IdempotencyRepository.getFingerprint(idempotencyKey)})`,
-        );
-        return false;
-      }
-      return res.count > 0;
+    const where: Prisma.IdempotencyRecordWhereInput = {
+      workspaceId,
+      idempotencyKey,
+      status: 'in_progress',
+    };
+    if (leaseToken) {
+      where.expiresAt = new Date(leaseToken);
     }
-    return true;
+    const res = await tx.idempotencyRecord.updateMany({
+      where,
+      data: {
+        status: 'succeeded',
+        statusCode,
+        responseBody: responseBody ?? null,
+      },
+    });
+    if (res.count === 0 && leaseToken) {
+      this.logger.warn(
+        `Lost idempotency lease on markSucceededInTx for workspace ${workspaceId} (key fp: ${IdempotencyRepository.getFingerprint(idempotencyKey)})`,
+      );
+      return false;
+    }
+    return res.count > 0;
   }
 
   async markSucceeded(

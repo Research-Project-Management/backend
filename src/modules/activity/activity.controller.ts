@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ActivityService } from './activity.service';
 import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
@@ -11,12 +11,12 @@ import { EntityType } from '@prisma/client';
 
 @ApiTags('Activity')
 @ApiBearerAuth('JWT-auth')
-@Controller('api/activity')
+@Controller(['api/activity', 'activity'])
 @UseGuards(JwtAuthGuard)
 export class ActivityController {
   constructor(private readonly activityService: ActivityService) {}
 
-  @Get('workspaces/:workspaceId/feed')
+  @Get(['workspaces/:workspaceId/feed', 'workspace/:workspaceId/feed'])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'Get workspace collaboration activity feed' })
@@ -33,7 +33,7 @@ export class ActivityController {
     });
   }
 
-  @Get('workspaces/:workspaceId/recent')
+  @Get(['workspaces/:workspaceId/recent', 'workspace/:workspaceId/recent'])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'Get user recent interacted items' })
@@ -49,17 +49,20 @@ export class ActivityController {
     );
   }
 
-  @Get('projects/:projectId/feed')
+  @Get(['projects/:projectId/feed', 'project/:projectId/feed'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get project specific activity feed' })
   async getProjectActivityFeed(
     @Param('projectId') projectId: string,
-    @Query('workspaceId') workspaceId: string,
+    @Req() req: any,
+    @Query('workspaceId') workspaceId?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
-    return this.activityService.getActivityFeed(workspaceId, {
+    const resolvedWorkspaceId =
+      workspaceId || req.workspaceId || req.project?.workspaceId;
+    return this.activityService.getActivityFeed(resolvedWorkspaceId, {
       projectId,
       page: page ? parseInt(page, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,

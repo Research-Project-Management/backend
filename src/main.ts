@@ -1,4 +1,9 @@
-import 'tsconfig-paths/register';
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  require('tsconfig-paths/register');
+} catch {
+  // tsconfig-paths is only required during development when paths are not rewritten by tsc-alias
+}
 import { NestFactory } from '@nestjs/core';
 import {
   FastifyAdapter,
@@ -9,6 +14,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import multipart from '@fastify/multipart';
+import { isSensitiveAuthRoute } from './core/utils/rate-limit.util';
 import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './core/filters/global-exception.filter';
 import { AppLogger } from './core/logger/app-logger.service';
@@ -33,9 +39,20 @@ async function bootstrap() {
     logger.error(`[Uncaught Exception]: ${error.stack || error.message}`);
   });
 
+  const maxProxyHops = process.env.TRUST_PROXY_HOPS
+    ? parseInt(process.env.TRUST_PROXY_HOPS, 10)
+    : 1;
+
+  const trustProxyConfig =
+    process.env.TRUST_PROXY === 'false'
+      ? false
+      : process.env.TRUST_PROXY && process.env.TRUST_PROXY !== 'true'
+        ? process.env.TRUST_PROXY
+        : (_address: string, hop: number) => hop <= maxProxyHops;
+
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
-    new FastifyAdapter({ trustProxy: true }),
+    new FastifyAdapter({ trustProxy: trustProxyConfig }),
     {
       logger,
       bufferLogs: true,
@@ -43,23 +60,36 @@ async function bootstrap() {
   );
 
   // Multipart file uploads (Cloudflare R2 / S3 streaming)
-  await app.register(multipart as any, {
+  await app.register(multipart, {
     limits: {
       fileSize: 100 * 1024 * 1024, // 100MB
     },
   });
 
   // Security Headers (Helmet)
-  await app.register(helmet as any, {
+  await app.register(helmet, {
     contentSecurityPolicy: false,
     crossOriginEmbedderPolicy: false,
   });
 
   // Rate Limiting (Throttle & Brute-force protection)
-  await app.register(rateLimit as any, {
-    max: 150,
+  await app.register(rateLimit, {
     timeWindow: '1 minute',
-    allowList: ['127.0.0.1', 'localhost'],
+    max: (req) => {
+      const url = req.raw.url || '';
+      // Strict throttle on sensitive auth / authentication endpoints (10 req/min)
+      if (isSensitiveAuthRoute(url)) {
+        return 10;
+      }
+      return 150;
+    },
+    keyGenerator: (req) => {
+      const url = req.raw.url || '';
+      if (isSensitiveAuthRoute(url)) {
+        return `auth:${req.ip}`;
+      }
+      return req.ip;
+    },
     errorResponseBuilder: () => ({
       statusCode: 429,
       error: 'Too Many Requests',
@@ -86,7 +116,7 @@ async function bootstrap() {
     new ValidationPipe({
       whitelist: true,
       transform: true,
-      forbidNonWhitelisted: true,
+      forbidNonWhitelisted: false,
       transformOptions: {
         enableImplicitConversion: true,
       },
@@ -95,22 +125,63 @@ async function bootstrap() {
 
   app.useGlobalFilters(new GlobalExceptionFilter());
 
-  // CORS Policy
+  // CORS Policy: Support local environments, custom domains, and Vercel deployments
+  const rawOrigins = [
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://localhost:3002',
+    'http://localhost:5173',
+    'http://localhost:2915',
+    'http://localhost:2916',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:3001',
+    'http://127.0.0.1:2915',
+    ...(process.env.CLIENT_URL ? [process.env.CLIENT_URL.trim()] : []),
+    ...(process.env.ORIGINS
+      ? process.env.ORIGINS.split(',').map((o) => o.trim())
+      : []),
+  ];
+
+  const allowedOrigins = new Set<string>();
+  rawOrigins.forEach((origin) => {
+    if (origin) {
+      allowedOrigins.add(origin.replace(/\/+$/, ''));
+    }
+  });
+
   app.enableCors({
-    origin: [
-      'http://localhost:3000',
-      'http://localhost:3001',
-      'http://localhost:3002',
-      'http://localhost:5173',
-      'http://localhost:2915',
-      'http://localhost:2916',
-      'http://127.0.0.1:3000',
-      'http://127.0.0.1:3001',
-      'http://127.0.0.1:2915',
-      ...(process.env.ORIGINS
-        ? process.env.ORIGINS.split(',').map((o) => o.trim())
-        : []),
-    ],
+    origin: (origin, callback) => {
+      // Allow non-browser requests (Postman, curl, server-to-server)
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      const normalizedOrigin = origin.replace(/\/+$/, '');
+
+      // 1. Exact match with allowed list
+      if (allowedOrigins.has(normalizedOrigin)) {
+        return callback(null, true);
+      }
+
+      // 2. Dynamic match for Vercel preview / production deployments (*.vercel.app)
+      const isVercelOrigin =
+        /^https:\/\/[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*\.vercel\.app$/.test(
+          normalizedOrigin,
+        );
+      const isVercelConfigured =
+        process.env.CLIENT_URL?.includes('.vercel.app') ||
+        process.env.ALLOW_VERCEL_PREVIEW === 'true' ||
+        process.env.NODE_ENV !== 'production';
+
+      if (isVercelOrigin && isVercelConfigured) {
+        return callback(null, true);
+      }
+
+      return callback(
+        new Error(`CORS blocked for unauthorized origin: ${origin}`),
+        false,
+      );
+    },
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
     allowedHeaders: [
       'Content-Type',

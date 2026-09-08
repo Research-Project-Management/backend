@@ -9,8 +9,10 @@ import {
   IStoragePort,
   ReadOwnedFileInput,
   ReadOwnedFileOutput,
+  getFileContentPath,
 } from './storage.port';
 import { PrismaService } from '@/core/database/prisma.service';
+import { buildWorkspaceIdentifierWhere } from '@/core/utils/tenant.util';
 import { R2Service } from './r2/r2.service';
 import { Readable } from 'stream';
 
@@ -42,14 +44,7 @@ export class StorageAdapter implements IStoragePort {
       let matches = file.workspaceId === workspaceId;
       if (!matches && workspaceId) {
         const ws = await this.prisma.workspace.findFirst({
-          where: {
-            OR: [
-              { id: workspaceId },
-              { slug: workspaceId },
-              { url: workspaceId },
-            ],
-            deletedAt: null,
-          },
+          where: buildWorkspaceIdentifierWhere(workspaceId),
           select: { id: true },
         });
         if (ws?.id === file.workspaceId) {
@@ -67,14 +62,22 @@ export class StorageAdapter implements IStoragePort {
       throw new NotFoundException(`File ${fileId} is in trash`);
     }
 
+    let storageKey = '';
     const R2_PREFIX = '/api/files/r2/';
-    if (!file.url || !file.url.startsWith(R2_PREFIX)) {
-      throw new NotFoundException(
-        `Invalid storage URL for file ${fileId}: missing expected prefix ${R2_PREFIX}`,
-      );
+    if (file.url && file.url.startsWith(R2_PREFIX)) {
+      storageKey = file.url.slice(R2_PREFIX.length).trim();
+    } else if (
+      file.url &&
+      !file.url.startsWith('http') &&
+      !file.url.startsWith('/api/files/')
+    ) {
+      storageKey = file.url.trim();
+    } else if ((file.metaData as any)?.storageKey) {
+      storageKey = (file.metaData as any).storageKey;
+    } else if (file.url) {
+      storageKey = file.url.replace(/^\/+/, '');
     }
 
-    const storageKey = file.url.slice(R2_PREFIX.length).trim();
     if (!storageKey) {
       throw new NotFoundException(
         `Empty storage object key for file ${fileId}`,
@@ -95,6 +98,7 @@ export class StorageAdapter implements IStoragePort {
         chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
       }
       const buffer = Buffer.concat(chunks);
+      const contentUrl = getFileContentPath(file.id);
 
       return {
         fileId: file.id,
@@ -102,6 +106,7 @@ export class StorageAdapter implements IStoragePort {
         mimeType: file.mimeType || 'application/pdf',
         size: file.size ?? buffer.length,
         storageKey,
+        contentUrl,
         buffer,
       };
     } catch (err: any) {

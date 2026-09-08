@@ -6,6 +6,6 @@ import { PageRepository } from './page.repository';
 @Module({
   controllers: [PageController],
   providers: [PageService, PageRepository],
-  exports: [PageService, PageRepository],
+  exports: [PageService],
 })
 export class PageModule {}

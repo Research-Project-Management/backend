@@ -40,7 +40,7 @@ export class FullTextIndexer {
           data: pages.map((p) => ({
             attachmentId,
             pageIndex: p.pageIndex,
-            textContent: p.textContent,
+            textContent: (p.textContent || '').replace(/\0/g, ''),
             charOffset: p.charOffset ?? 0,
           })),
         });

@@ -9,6 +9,6 @@ import { CacheModule } from '@/core/cache/cache.module';
   imports: [ActivityModule, CacheModule],
   controllers: [AnalyticsController],
   providers: [AnalyticsService, AnalyticsRepository],
-  exports: [AnalyticsService, AnalyticsRepository],
+  exports: [AnalyticsService],
 })
 export class AnalyticsModule {}

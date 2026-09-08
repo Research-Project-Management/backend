@@ -20,6 +20,7 @@ import {
 import { SearchResultItem } from './dto/search-result.dto';
 import { WorkspaceMemberRole } from '@prisma/client';
 import * as crypto from 'crypto';
+import { generateWorkspaceSlug } from './utils/workspace.utils';
 
 @Injectable()
 export class WorkspaceService {
@@ -63,13 +64,7 @@ export class WorkspaceService {
   }
 
   async createWorkspace(userId: string, dto: CreateWorkspaceDto) {
-    const targetSlug =
-      dto.slug ||
-      dto.url ||
-      dto.name
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/(^-|-$)/g, '');
+    const targetSlug = generateWorkspaceSlug(dto.name, dto.slug, dto.url);
 
     if (!targetSlug) {
       throw new BadRequestException('Valid workspace URL/slug is required');
@@ -138,21 +133,31 @@ export class WorkspaceService {
       throw new NotFoundException('Workspace not found');
     }
 
+    const members = await this.workspaceRepo.findMembers(workspaceId);
+
     await this.workspaceRepo.softDeleteWorkspace(workspaceId);
-    await this.invalidateWorkspaceCache(
-      workspaceId,
-      workspace.slug || workspace.url,
-    );
+    await Promise.all([
+      this.invalidateWorkspaceCache(
+        workspaceId,
+        workspace.slug || workspace.url,
+      ),
+      ...members.map((m) => this.invalidateUserWorkspacesCache(m.userId)),
+    ]);
 
     return { message: 'Workspace deleted successfully' };
   }
 
   async restoreWorkspace(workspaceId: string) {
     const workspace = await this.workspaceRepo.restoreWorkspace(workspaceId);
-    await this.invalidateWorkspaceCache(
-      workspaceId,
-      workspace.slug || workspace.url,
-    );
+    const members = await this.workspaceRepo.findMembers(workspaceId);
+
+    await Promise.all([
+      this.invalidateWorkspaceCache(
+        workspaceId,
+        workspace.slug || workspace.url,
+      ),
+      ...members.map((m) => this.invalidateUserWorkspacesCache(m.userId)),
+    ]);
 
     return { message: 'Workspace restored successfully', workspace };
   }
@@ -449,24 +454,34 @@ export class WorkspaceService {
       throw new BadRequestException('Invitation has expired');
     }
 
-    const existingMember = await this.workspaceRepo.findMember(
-      invitation.workspaceId,
-      userId,
-    );
+    await this.workspaceRepo.withTransaction(async (tx) => {
+      const existingMember = await tx.workspaceMember.findUnique({
+        where: {
+          workspaceId_userId: {
+            workspaceId: invitation.workspaceId,
+            userId,
+          },
+        },
+      });
 
-    if (!existingMember) {
-      await this.workspaceRepo.createMember(
-        invitation.workspaceId,
-        userId,
-        invitation.role,
-      );
-    }
+      if (!existingMember) {
+        await tx.workspaceMember.create({
+          data: {
+            workspaceId: invitation.workspaceId,
+            userId,
+            role: invitation.role,
+          },
+        });
+      }
 
-    await this.invitationRepo.updateStatus(
-      invitation.id,
-      'accepted',
-      new Date(),
-    );
+      await tx.workspaceInvitation.update({
+        where: { id: invitation.id },
+        data: {
+          status: 'accepted',
+          acceptedAt: new Date(),
+        },
+      });
+    });
 
     await Promise.all([
       this.invalidateUserWorkspacesCache(userId),
@@ -505,12 +520,15 @@ export class WorkspaceService {
     if (!ws) {
       throw new NotFoundException('Workspace not found');
     }
-    const targetWsId = ws.id;
+    const canonicalWorkspaceId = ws.id;
 
     if (userId) {
       const isMember = ws.members?.some((m) => m.userId === userId);
       if (!isMember) {
-        const member = await this.workspaceRepo.findMember(targetWsId, userId);
+        const member = await this.workspaceRepo.findMember(
+          canonicalWorkspaceId,
+          userId,
+        );
         if (!member) {
           throw new ForbiddenException(
             'You are not a member of this workspace',
@@ -523,66 +541,67 @@ export class WorkspaceService {
 
     const [projects, tasks, papers, pages, files, stickies] = await Promise.all(
       [
-        this.workspaceRepo.searchProjects(targetWsId, cleanQuery),
-        this.workspaceRepo.searchTasks(targetWsId, cleanQuery),
-        this.workspaceRepo.searchPapers(targetWsId, cleanQuery),
-        this.workspaceRepo.searchPages(targetWsId, cleanQuery),
-        this.workspaceRepo.searchFiles(targetWsId, cleanQuery),
-        this.workspaceRepo.searchStickies(targetWsId, cleanQuery),
+        this.workspaceRepo.searchProjects(canonicalWorkspaceId, cleanQuery),
+        this.workspaceRepo.searchTasks(canonicalWorkspaceId, cleanQuery),
+        this.workspaceRepo.searchPapers(canonicalWorkspaceId, cleanQuery),
+        this.workspaceRepo.searchPages(canonicalWorkspaceId, cleanQuery),
+        this.workspaceRepo.searchFiles(canonicalWorkspaceId, cleanQuery),
+        this.workspaceRepo.searchStickies(canonicalWorkspaceId, cleanQuery),
       ],
     );
 
     const results: SearchResultItem[] = [
-      ...projects.map((p) => ({
+      ...projects.map((project) => ({
         type: 'project' as const,
-        id: p.id,
-        name: p.name,
-        icon: p.avatar || null,
-        updatedAt: p.updatedAt,
+        id: project.id,
+        name: project.name,
+        icon: project.avatar || null,
+        updatedAt: project.updatedAt,
       })),
-      ...tasks.map((t) => ({
+      ...tasks.map((task) => ({
         type: 'task' as const,
-        id: t.id,
-        name: t.title,
-        identifier: t.identifier,
-        projectId: t.projectId,
-        projectName: t.project?.name,
-        updatedAt: t.updatedAt,
+        id: task.id,
+        name: task.title,
+        identifier: task.identifier,
+        projectId: task.projectId,
+        projectName: task.project?.name,
+        updatedAt: task.updatedAt,
       })),
-      ...papers.map((p) => ({
+      ...papers.map((paper) => ({
         type: 'paper' as const,
-        id: p.id,
-        name: p.title,
-        updatedAt: p.updatedAt,
+        id: paper.id,
+        name: paper.title,
+        updatedAt: paper.updatedAt,
       })),
-      ...pages.map((p) => ({
+      ...pages.map((page) => ({
         type: 'page' as const,
-        id: p.id,
-        name: p.title,
-        projectId: p.projectId,
-        projectName: p.project?.name,
-        updatedAt: p.updatedAt,
+        id: page.id,
+        name: page.title,
+        projectId: page.projectId,
+        projectName: page.project?.name,
+        updatedAt: page.updatedAt,
       })),
-      ...files.map((f) => ({
-        type: f.isFolder ? ('folder' as const) : ('file' as const),
-        id: f.id,
-        name: f.filename,
-        mimeType: f.mimeType,
-        size: f.size,
-        updatedAt: f.updatedAt,
+      ...files.map((file) => ({
+        type: file.isFolder ? ('folder' as const) : ('file' as const),
+        id: file.id,
+        name: file.filename,
+        mimeType: file.mimeType,
+        size: file.size,
+        updatedAt: file.updatedAt,
       })),
-      ...stickies.map((s) => ({
+      ...stickies.map((sticky) => ({
         type: 'sticky' as const,
-        id: s.id,
-        name: s.title || 'Untitled Sticky',
-        color: s.color,
-        updatedAt: s.updatedAt,
+        id: sticky.id,
+        name: sticky.title || 'Untitled Sticky',
+        color: sticky.color,
+        updatedAt: sticky.updatedAt,
       })),
     ];
 
     return results.sort(
-      (a, b) =>
-        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+      (previousItem, nextItem) =>
+        new Date(nextItem.updatedAt).getTime() -
+        new Date(previousItem.updatedAt).getTime(),
     );
   }
 
@@ -596,19 +615,10 @@ export class WorkspaceService {
       WORKSPACE_REDIS_KEYS.workspace(workspaceId),
       ...(slug ? [WORKSPACE_REDIS_KEYS.slug(slug)] : []),
     ];
-    await Promise.all([
-      ...keys.map((k) => this.cache.del(k)),
-      this.cache.delPattern('flux:ws:user_workspaces:*'),
-      this.cache.delPattern('workspaces:*'),
-      this.cache.delPattern('dashboard:*'),
-    ]);
+    await Promise.all(keys.map((k) => this.cache.del(k)));
   }
 
   private async invalidateUserWorkspacesCache(userId: string) {
-    await Promise.all([
-      this.cache.del(WORKSPACE_REDIS_KEYS.userWorkspaces(userId)),
-      this.cache.delPattern('workspaces:*'),
-      this.cache.delPattern('dashboard:*'),
-    ]);
+    await this.cache.del(WORKSPACE_REDIS_KEYS.userWorkspaces(userId));
   }
 }

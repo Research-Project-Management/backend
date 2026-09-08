@@ -19,7 +19,11 @@ export class EnrichStage {
   ) {}
 
   /**
-   * Executes external enrichment for candidates with valid identifiers (DOI, arXiv, PMID, etc.).
+   * Executes external enrichment for candidates with recognized identifiers.
+   * A PDF whose first page yields a credible title but no identifier is also
+   * eligible for a title lookup. MetadataService validates title similarity
+   * before accepting such a result, so a filename fallback cannot be promoted
+   * into unrelated bibliographic data.
    */
   async execute(
     workspaceId: string,
@@ -38,7 +42,14 @@ export class EnrichStage {
       const doi = candidate.normalizedMetadata.doi;
       const arxivId = candidate.normalizedMetadata.arxivId;
       const pmid = candidate.normalizedMetadata.pmid;
-      const query = doi || arxivId || pmid;
+      const title = candidate.normalizedMetadata.title?.trim();
+      const isCredibleTitle =
+        Boolean(title) &&
+        title!.length >= 12 &&
+        !/\.pdf$/i.test(title!) &&
+        !/^(uploaded document|untitled|document)$/i.test(title!);
+      const query =
+        doi || arxivId || pmid || (isCredibleTitle ? title : undefined);
 
       if (!query) continue;
 
@@ -56,16 +67,20 @@ export class EnrichStage {
 
           const fields: Record<string, FieldEvidence> = {};
 
-          for (const [key, val] of Object.entries(normalized)) {
-            if (val !== undefined && val !== null) {
-              const prov = resolved.provenance[key];
-              fields[key] = {
-                path: key,
-                value: rawMetadata[key as keyof typeof rawMetadata],
-                normalizedValue: val,
-                confidence: prov ? prov.confidence : 0.9,
-                sourceProvider: prov ? prov.provider : 'MetadataResolution',
-                retrievedAt: prov ? prov.fetchedAt : resolved.resolvedAt,
+          for (const [fieldName, propertyValue] of Object.entries(normalized)) {
+            if (propertyValue !== undefined && propertyValue !== null) {
+              const provenance = resolved.provenance[fieldName];
+              fields[fieldName] = {
+                path: fieldName,
+                value: rawMetadata[fieldName as keyof typeof rawMetadata],
+                normalizedValue: propertyValue,
+                confidence: provenance ? provenance.confidence : 0.9,
+                sourceProvider: provenance
+                  ? provenance.provider
+                  : 'MetadataResolution',
+                retrievedAt: provenance
+                  ? provenance.fetchedAt
+                  : resolved.resolvedAt,
               };
             }
           }
@@ -82,9 +97,13 @@ export class EnrichStage {
             confidenceScore: 0.95,
           });
         }
-      } catch (err: any) {
+      } catch (caughtError: unknown) {
+        const errorMessage =
+          caughtError instanceof Error
+            ? caughtError.message
+            : String(caughtError);
         this.logger.warn(
-          `Enrichment lookup failed for query "${query}": ${err?.message || err}`,
+          `Enrichment lookup failed for query "${query}": ${errorMessage}`,
         );
         // Non-blocking: enrichment failure must degrade gracefully without aborting run
       }

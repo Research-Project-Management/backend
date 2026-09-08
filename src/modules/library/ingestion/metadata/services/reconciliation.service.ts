@@ -22,81 +22,85 @@ export class ReconciliationService {
       CrossRef: 0.99,
       PubMed: 0.95,
       OpenAlex: 0.9,
-      SemanticScholar: 0.9,
       Unpaywall: 0.9,
       arXiv: 0.85,
       LocalPDFExtraction: 0.7,
     },
     title: {
       UserOverride: 1.0,
-      CrossRef: 0.95,
-      PubMed: 0.95,
-      arXiv: 0.92,
+      CrossRef: 0.98,
+      PubMed: 0.96,
+      arXiv: 0.95,
       OpenAlex: 0.9,
-      SemanticScholar: 0.9,
       OpenLibrary: 0.85,
-      LocalPDFExtraction: 0.65,
+      LocalPDFExtraction: 0.8,
     },
     authors: {
       UserOverride: 1.0,
-      CrossRef: 0.95,
-      PubMed: 0.95,
-      arXiv: 0.92,
+      CrossRef: 0.98,
+      PubMed: 0.96,
+      arXiv: 0.95,
       OpenAlex: 0.9,
-      SemanticScholar: 0.9,
       OpenLibrary: 0.85,
-      LocalPDFExtraction: 0.6,
+      LocalPDFExtraction: 0.8,
     },
     abstract: {
       UserOverride: 1.0,
+      CrossRef: 0.97,
       arXiv: 0.96,
       PubMed: 0.95,
-      SemanticScholar: 0.92,
-      OpenAlex: 0.9,
-      CrossRef: 0.85,
-      LocalPDFExtraction: 0.7,
+      LocalPDFExtraction: 0.94,
+      OpenAlex: 0.85,
     },
     journal: {
       UserOverride: 1.0,
-      CrossRef: 0.96,
+      CrossRef: 0.98,
       PubMed: 0.95,
       OpenAlex: 0.9,
-      SemanticScholar: 0.85,
-      LocalPDFExtraction: 0.6,
+      LocalPDFExtraction: 0.7,
     },
     publisher: {
       UserOverride: 1.0,
       CrossRef: 0.98,
       OpenLibrary: 0.95,
       OpenAlex: 0.9,
-      SemanticScholar: 0.85,
+    },
+    creators: {
+      UserOverride: 1.0,
+      CrossRef: 0.98,
+      PubMed: 0.96,
+      arXiv: 0.95,
+      OpenAlex: 0.9,
+      OpenLibrary: 0.85,
+      LocalPDFExtraction: 0.8,
+    },
+    extraFields: {
+      UserOverride: 1.0,
+      CrossRef: 0.95,
+      OpenLibrary: 0.9,
+      arXiv: 0.9,
+      PubMed: 0.9,
+      OpenAlex: 0.85,
     },
     year: {
       UserOverride: 1.0,
-      CrossRef: 0.96,
+      CrossRef: 0.98,
       PubMed: 0.95,
       arXiv: 0.95,
       OpenAlex: 0.9,
-      SemanticScholar: 0.9,
       OpenLibrary: 0.85,
-      LocalPDFExtraction: 0.7,
+      LocalPDFExtraction: 0.8,
     },
     openAccessPdfUrl: {
       UserOverride: 1.0,
       Unpaywall: 0.99,
       arXiv: 0.98,
       OpenAlex: 0.92,
-      SemanticScholar: 0.88,
     },
     citationCount: {
       UserOverride: 1.0,
-      OpenAlex: 0.95,
-      SemanticScholar: 0.95,
-      CrossRef: 0.8,
-    },
-    tldr: {
-      UserOverride: 1.0,
-      SemanticScholar: 0.98,
+      CrossRef: 0.98,
+      OpenAlex: 0.96,
     },
   };
 
@@ -113,6 +117,9 @@ export class ReconciliationService {
       const fallbackMetadata: ItemMetadata = {
         title: userOverrides.title || 'Untitled Document',
         authors: userOverrides.authors ? [...userOverrides.authors] : [],
+        creators: userOverrides.creators
+          ? [...userOverrides.creators]
+          : undefined,
         year: userOverrides.year ?? null,
         itemType: userOverrides.itemType || 'journalArticle',
         ...userOverrides,
@@ -145,10 +152,14 @@ export class ReconciliationService {
       'title',
       'shortTitle',
       'authors',
+      'creators',
       'editors',
       'year',
       'publicationDate',
+      'date',
+      'accessedAt',
       'itemType',
+      'type',
       'journal',
       'publicationTitle',
       'journalAbbr',
@@ -157,24 +168,38 @@ export class ReconciliationService {
       'volume',
       'issue',
       'section',
+      'partNumber',
+      'partTitle',
       'pages',
       'series',
       'seriesTitle',
+      'seriesText',
+      'seriesNumber',
       'language',
       'abstract',
-      'tldr',
+      'abstractNote',
       'keywords',
       'citationCount',
       'referenceCount',
-      'influentialCitationCount',
       'openAccessPdfUrl',
+      'pdfUrl',
+      'fileUrl',
+      'fileId',
+      'filename',
+      'storageId',
       'license',
       'rights',
       'archive',
       'archiveLocation',
       'callNumber',
+      'libraryCatalog',
       'extra',
+      'extraFields',
       'citationKey',
+      'explicitCitationKey',
+      'tags',
+      'labels',
+      'notes',
     ];
 
     for (const field of allFields) {
@@ -224,6 +249,71 @@ export class ReconciliationService {
 
       // Sort by highest effective weight
       fieldVariants.sort((a, b) => b.effectiveWeight - a.effectiveWeight);
+
+      if (field === 'extraFields') {
+        const merged = fieldVariants
+          .slice()
+          .reverse()
+          .reduce<Record<string, unknown>>(
+            (accumulator, variant) => ({
+              ...accumulator,
+              ...(variant.val as Record<string, unknown>),
+            }),
+            {},
+          );
+        resolved.extraFields = merged;
+        assertions.push({
+          field,
+          value: this.cloneValue(merged),
+          sourceProvider: fieldVariants[0].candidate.sourceProvider,
+          confidenceScore: Number(fieldVariants[0].effectiveWeight.toFixed(3)),
+          isUserOverride: false,
+          timestamp: new Date().toISOString(),
+        });
+        continue;
+      }
+
+      if (field === 'tags' || field === 'labels' || field === 'keywords') {
+        const values = Array.from(
+          new Set(
+            fieldVariants.flatMap((variant) =>
+              Array.isArray(variant.val) ? variant.val : [],
+            ),
+          ),
+        );
+        resolved[field] = values as any;
+        assertions.push({
+          field,
+          value: [...values],
+          sourceProvider: fieldVariants[0].candidate.sourceProvider,
+          confidenceScore: Number(fieldVariants[0].effectiveWeight.toFixed(3)),
+          isUserOverride: false,
+          timestamp: new Date().toISOString(),
+        });
+        continue;
+      }
+
+      if (field === 'notes') {
+        const values = fieldVariants.flatMap((variant) =>
+          Array.isArray(variant.val) ? variant.val : [],
+        );
+        const unique = Array.from(
+          new Map(
+            values.map((value) => [JSON.stringify(value), value]),
+          ).values(),
+        );
+        resolved.notes = unique as ItemMetadata['notes'];
+        assertions.push({
+          field,
+          value: this.cloneValue(unique),
+          sourceProvider: fieldVariants[0].candidate.sourceProvider,
+          confidenceScore: Number(fieldVariants[0].effectiveWeight.toFixed(3)),
+          isUserOverride: false,
+          timestamp: new Date().toISOString(),
+        });
+        continue;
+      }
+
       const winner = fieldVariants[0];
 
       resolved[field] = this.cloneValue(winner.val) as any;

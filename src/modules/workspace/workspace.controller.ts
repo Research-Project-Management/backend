@@ -60,6 +60,18 @@ export class WorkspaceController {
     return this.workspaceService.joinByCode(userId, dto.inviteCode);
   }
 
+  @Get('search')
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'Global search via workspace query param' })
+  async searchGlobal(
+    @Query('workspaceId') workspaceId: string,
+    @Query('q') query: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.workspaceService.search(workspaceId || '', query || '', userId);
+  }
+
   @Get(':workspaceId')
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
@@ -225,17 +237,5 @@ export class WorkspaceController {
     @CurrentUser('id') userId: string,
   ) {
     return this.workspaceService.search(workspaceId, query || '', userId);
-  }
-
-  @Get('search')
-  @UseGuards(WorkspaceRoleGuard)
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
-  @ApiOperation({ summary: 'Global search via workspace query param' })
-  async searchGlobal(
-    @Query('workspaceId') workspaceId: string,
-    @Query('q') query: string,
-    @CurrentUser('id') userId: string,
-  ) {
-    return this.workspaceService.search(workspaceId || '', query || '', userId);
   }
 }

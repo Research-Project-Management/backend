@@ -89,8 +89,11 @@ export class ThreadController {
 
   @Get(['chats/:chatId', 'ai/chats/:chatId'])
   @ApiOperation({ summary: 'Get details and message history of a chat thread' })
-  async getChat(@Param('chatId') chatId: string) {
-    const chat = await this.threadService.getChat(chatId);
+  async getChat(
+    @Param('chatId') chatId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    const chat = await this.threadService.getChat(chatId, userId);
     return chat;
   }
 
@@ -98,10 +101,11 @@ export class ThreadController {
   @ApiOperation({ summary: 'Get paginated messages of a chat thread' })
   async getChatMessages(
     @Param('chatId') chatId: string,
+    @CurrentUser('id') userId: string,
     @Query('limit') limit?: number,
     @Query('skip') skip?: number,
   ) {
-    const chat = await this.threadService.getChat(chatId);
+    const chat = await this.threadService.getChat(chatId, userId);
     const messages = chat.messages || [];
     const s = Number(skip) || 0;
     const l = Number(limit) || messages.length;
@@ -117,9 +121,10 @@ export class ThreadController {
   @ApiOperation({ summary: 'Append messages to an existing chat thread' })
   async appendMessages(
     @Param('chatId') chatId: string,
+    @CurrentUser('id') userId: string,
     @Body() dto: AppendMessagesDto,
   ) {
-    const chat = await this.threadService.appendMessages(chatId, dto);
+    const chat = await this.threadService.appendMessages(chatId, userId, dto);
     return chat;
   }
 
@@ -132,15 +137,19 @@ export class ThreadController {
   @ApiOperation({ summary: 'Rename an AI chat thread' })
   async renameChat(
     @Param('chatId') chatId: string,
+    @CurrentUser('id') userId: string,
     @Body() dto: RenameThreadDto,
   ) {
-    const chat = await this.threadService.renameChat(chatId, dto);
+    const chat = await this.threadService.renameChat(chatId, userId, dto);
     return chat;
   }
 
   @Delete(['chats/:chatId', 'ai/chats/:chatId'])
   @ApiOperation({ summary: 'Delete an AI chat thread' })
-  async deleteChat(@Param('chatId') chatId: string) {
-    return this.threadService.deleteChat(chatId);
+  async deleteChat(
+    @Param('chatId') chatId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.threadService.deleteChat(chatId, userId);
   }
 }

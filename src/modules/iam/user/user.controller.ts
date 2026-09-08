@@ -81,8 +81,9 @@ export class UserController {
   async searchUsers(
     @Query('query') query: string,
     @CurrentUser('id') userId: string,
+    @Query('workspaceId') workspaceId?: string,
   ) {
-    return this.userService.searchUsers(query, userId);
+    return this.userService.searchUsers(query, userId, workspaceId);
   }
 
   @Delete(['api/users/me', 'auth/me'])

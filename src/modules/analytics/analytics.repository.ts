@@ -1,5 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
+import {
+  buildWorkspaceIdentifierWhere,
+  isUuid,
+} from '@/core/utils/tenant.util';
 
 const USER_SELECT = {
   id: true,
@@ -12,7 +16,32 @@ const USER_SELECT = {
 export class AnalyticsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
+  private async getCanonicalWorkspaceId(
+    workspaceId: string,
+  ): Promise<string | null> {
+    if (!workspaceId) return null;
+    if (isUuid(workspaceId)) return workspaceId;
+    const ws = await this.prisma.workspace.findFirst({
+      where: buildWorkspaceIdentifierWhere(workspaceId),
+      select: { id: true },
+    });
+    return ws?.id ?? null;
+  }
+
   async countWorkspaceStats(workspaceId: string) {
+    const canonicalId = await this.getCanonicalWorkspaceId(workspaceId);
+    if (!canonicalId) {
+      return {
+        members: 0,
+        projects: 0,
+        tasks: 0,
+        papers: 0,
+        pages: 0,
+        files: 0,
+        stickies: 0,
+      };
+    }
+
     const [
       membersCount,
       projectsCount,
@@ -22,26 +51,31 @@ export class AnalyticsRepository {
       filesCount,
       stickiesCount,
     ] = await Promise.all([
-      this.prisma.workspaceMember.count({ where: { workspaceId } }),
+      this.prisma.workspaceMember.count({
+        where: { workspaceId: canonicalId },
+      }),
       this.prisma.project.count({
-        where: { workspaceId, isActive: true },
+        where: { workspaceId: canonicalId, isActive: true },
       }),
       this.prisma.task.count({
-        where: { project: { workspaceId } },
+        where: { project: { workspaceId: canonicalId } },
       }),
       this.prisma.catalogItem.count({
-        where: { workspaceId, deletedAt: null },
+        where: { workspaceId: canonicalId, deletedAt: null },
       }),
       this.prisma.page.count({
         where: {
-          OR: [{ workspaceId }, { project: { workspaceId } }],
+          OR: [
+            { workspaceId: canonicalId },
+            { project: { workspaceId: canonicalId } },
+          ],
           deletedAt: null,
         },
       }),
       this.prisma.file.count({
-        where: { workspaceId, trashedAt: null },
+        where: { workspaceId: canonicalId, trashedAt: null },
       }),
-      this.prisma.sticky.count({ where: { workspaceId } }),
+      this.prisma.sticky.count({ where: { workspaceId: canonicalId } }),
     ]);
 
     return {
@@ -56,8 +90,23 @@ export class AnalyticsRepository {
   }
 
   async findProjectTasksWithAssignees(projectId: string) {
+    let canonicalProjectId = projectId;
+    if (!isUuid(canonicalProjectId)) {
+      const proj = await this.prisma.project
+        .findFirst({
+          where: {
+            identifier: { equals: canonicalProjectId, mode: 'insensitive' },
+            deletedAt: null,
+          },
+          select: { id: true },
+        })
+        .catch(() => null);
+      if (!proj) return [];
+      canonicalProjectId = proj.id;
+    }
+
     return this.prisma.task.findMany({
-      where: { projectId },
+      where: { projectId: canonicalProjectId },
       select: {
         id: true,
         columnId: true,
@@ -70,6 +119,7 @@ export class AnalyticsRepository {
   }
 
   async findCycleTasks(cycleId: string) {
+    if (!isUuid(cycleId)) return [];
     return this.prisma.task.findMany({
       where: { cycleId },
       select: {
@@ -82,9 +132,12 @@ export class AnalyticsRepository {
   }
 
   async findUserWorkspaceTasks(workspaceId: string, userId: string) {
+    const canonicalId = await this.getCanonicalWorkspaceId(workspaceId);
+    if (!canonicalId) return [];
+
     return this.prisma.task.findMany({
       where: {
-        project: { workspaceId },
+        project: { workspaceId: canonicalId },
         OR: [
           { assigneeId: userId },
           { authorId: userId },

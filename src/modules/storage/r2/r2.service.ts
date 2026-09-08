@@ -153,11 +153,12 @@ export class R2Service {
     }
   }
 
-  async getObjectStream(key: string) {
+  async getObjectStream(key: string, range?: string) {
     try {
       const command = new GetObjectCommand({
         Bucket: this.bucket,
         Key: key,
+        Range: range,
       });
       return await this.s3Client.send(command);
     } catch (s3Err) {
@@ -166,12 +167,28 @@ export class R2Service {
       );
       const filePath = this.getLocalFilePath(key);
       if (fs.existsSync(filePath)) {
-        const stream = fs.createReadStream(filePath);
         const stat = fs.statSync(filePath);
+        let start: number | undefined;
+        let end: number | undefined;
+        if (range && range.startsWith('bytes=')) {
+          const parts = range.slice(6).split('-');
+          start = parts[0] ? parseInt(parts[0], 10) : undefined;
+          end = parts[1] ? parseInt(parts[1], 10) : undefined;
+        }
+        const stream = fs.createReadStream(filePath, { start, end });
+        const len =
+          start !== undefined && end !== undefined
+            ? end - start + 1
+            : start !== undefined
+              ? stat.size - start
+              : stat.size;
         return {
           Body: stream as any,
-          ContentLength: stat.size,
+          ContentLength: len,
           ContentType: 'application/octet-stream',
+          ContentRange: range
+            ? `bytes ${start ?? 0}-${end ?? stat.size - 1}/${stat.size}`
+            : undefined,
         };
       }
       throw s3Err;

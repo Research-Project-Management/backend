@@ -1,6 +1,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
 import { RedisCacheService } from '../cache/redis-cache.service';
+import { Prisma } from '@prisma/client';
 import {
   IdempotencyCheckResult,
   SaveIdempotencyResultInput,
@@ -48,15 +49,25 @@ export class IdempotencyService {
       }
     }
 
-    // 2. Check Database Record
-    const record = await (this.prisma as any).idempotencyRecord.findUnique({
-      where: { idempotencyKey },
+    // 2. Check Database Record using compound unique constraint
+    const record = await this.prisma.idempotencyRecord.findUnique({
+      where: {
+        workspaceId_idempotencyKey: {
+          workspaceId,
+          idempotencyKey,
+        },
+      },
     });
 
     if (record) {
       if (record.expiresAt < new Date()) {
-        await (this.prisma as any).idempotencyRecord.delete({
-          where: { idempotencyKey },
+        await this.prisma.idempotencyRecord.delete({
+          where: {
+            workspaceId_idempotencyKey: {
+              workspaceId,
+              idempotencyKey,
+            },
+          },
         });
         return { isDuplicate: false, inProgress: false };
       }
@@ -86,9 +97,14 @@ export class IdempotencyService {
   ): Promise<void> {
     const expiresAt = new Date(Date.now() + this.DEFAULT_TTL_SEC * 1000);
 
-    // Save to DB
-    await (this.prisma as any).idempotencyRecord.upsert({
-      where: { idempotencyKey },
+    // Save to DB using compound unique constraint
+    await this.prisma.idempotencyRecord.upsert({
+      where: {
+        workspaceId_idempotencyKey: {
+          workspaceId,
+          idempotencyKey,
+        },
+      },
       update: {
         status: 'in_progress',
         requestHash,
@@ -121,12 +137,18 @@ export class IdempotencyService {
     const ttl = input.ttlSeconds || this.DEFAULT_TTL_SEC;
     const expiresAt = new Date(Date.now() + ttl * 1000);
 
-    await (this.prisma as any).idempotencyRecord.update({
-      where: { idempotencyKey: input.idempotencyKey },
+    await this.prisma.idempotencyRecord.update({
+      where: {
+        workspaceId_idempotencyKey: {
+          workspaceId: input.workspaceId,
+          idempotencyKey: input.idempotencyKey,
+        },
+      },
       data: {
         status: 'succeeded',
         statusCode: input.statusCode,
-        responseBody: input.responseBody as any,
+        responseBody:
+          (input.responseBody as Prisma.InputJsonValue) ?? Prisma.JsonNull,
         expiresAt,
       },
     });
@@ -154,8 +176,11 @@ export class IdempotencyService {
    */
   async unlockKey(idempotencyKey: string, workspaceId: string): Promise<void> {
     try {
-      await (this.prisma as any).idempotencyRecord.deleteMany({
-        where: { idempotencyKey },
+      await this.prisma.idempotencyRecord.deleteMany({
+        where: {
+          workspaceId,
+          idempotencyKey,
+        },
       });
     } catch {
       // Ignore if record already deleted

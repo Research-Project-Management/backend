@@ -1,0 +1,69 @@
+// ── 8. Intelligence Context (AI & Chat History) ─────────────────────────────
+
+model AiChat {
+  id            String   @id @default(uuid()) @db.Uuid
+  workspaceSlug String   @map("workspace_slug")
+  userId        String   @map("user_id") @db.Uuid
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId     String?  @map("project_id") @db.Uuid
+  pageId        String?  @map("page_id") @db.Uuid
+  title         String   @default("New Chat")
+  summary       String?  @default("")
+  keyFacts      String[] @default([]) @map("key_facts")
+  openQuestions String[] @default([]) @map("open_questions")
+  documentIds   String[] @default([]) @map("document_ids")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  messages AiMessage[]
+
+  @@index([workspaceSlug, userId, updatedAt])
+  @@index([projectId, userId, updatedAt])
+  @@index([pageId, userId])
+  @@index([userId])
+  @@map("ai_chats")
+}
+
+model AiMessage {
+  id               String      @id @default(uuid()) @db.Uuid
+  chatId           String      @map("chat_id") @db.Uuid
+  chat             AiChat      @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  role             MessageRole
+  content          String      @default("")
+  sources          Json?       @default("[]")
+  widgets          Json?       @default("[]")
+  selectionContext Json?       @map("selection_context")
+  createdAt        DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([chatId, createdAt])
+  @@map("ai_messages")
+}
+
+// ── 9. Activity Context (Event Stream & Collaboration Feed) ─────────────────
+
+model ActivityEvent {
+  id            String     @id @default(uuid()) @db.Uuid
+  entityType    EntityType @map("entity_type")
+  entityId      String     @map("entity_id")
+  verb          String // "created" | "updated" | "deleted" | "assigned" | etc.
+  field         String? // specific field changed (e.g. "state", "priority", "assigneeId")
+  oldValue      String?    @map("old_value")
+  newValue      String?    @map("new_value")
+  oldIdentifier String?    @map("old_identifier")
+  newIdentifier String?    @map("new_identifier")
+  actorId       String     @map("actor_id") @db.Uuid
+  actor         User       @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  workspaceId   String     @map("workspace_id") @db.Uuid
+  workspace     Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  projectId     String?    @map("project_id") @db.Uuid
+  project       Project?   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, entityType, createdAt])
+  @@index([projectId, createdAt])
+  @@index([entityType, entityId, createdAt])
+  @@index([actorId, createdAt])
+  @@map("activity_events")
+}

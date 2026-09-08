@@ -9,86 +9,92 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
 import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
+import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
 import { CurrentUser } from '../../../modules/iam/authn/decorators/current-user.decorator';
 import { ReadingService } from './reading.service';
-import { UpdateReadingDto } from './dto/update-reading.dto';
+import { UpdateReadingDto } from './dto/reading.dto';
 
 @Controller([
   'api/v1/workspaces/:workspaceId/library/items/:itemId/state',
-  'api/library/papers/:workspaceId/:itemId/state',
-  'api/library/items/:workspaceId/:itemId/state',
+  'api/v1/workspace/:workspaceId/library/items/:itemId/state',
 ])
 @UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
 export class ReadingController {
   constructor(private readonly readingService: ReadingService) {}
 
   @Get()
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async getState(
     @Param('workspaceId') workspaceId: string,
     @Param('itemId') itemId: string,
     @CurrentUser('id') userId: string,
   ) {
-    const data = await this.readingService.getState(
-      workspaceId,
-      itemId,
-      userId,
-    );
-    return {
-      success: true,
-      data,
-    };
+    return this.readingService.getState(workspaceId, itemId, userId);
   }
 
   @Patch()
+  @WorkspaceRoles('owner', 'admin', 'member')
   async updateState(
     @Param('workspaceId') workspaceId: string,
     @Param('itemId') itemId: string,
     @CurrentUser('id') userId: string,
     @Body() dto: UpdateReadingDto,
   ) {
-    const data = await this.readingService.updateState(
-      workspaceId,
-      itemId,
-      userId,
-      dto,
-    );
-    return {
-      success: true,
-      data,
-    };
+    return this.readingService.updateState(workspaceId, itemId, userId, dto);
   }
 
   @Post('read')
+  @WorkspaceRoles('owner', 'admin', 'member')
   async markAsRead(
     @Param('workspaceId') workspaceId: string,
     @Param('itemId') itemId: string,
     @CurrentUser('id') userId: string,
   ) {
-    const data = await this.readingService.markAsRead(
-      workspaceId,
-      itemId,
-      userId,
-    );
-    return {
-      success: true,
-      data,
-    };
+    return this.readingService.markAsRead(workspaceId, itemId, userId);
   }
 
+  /**
+   * Batch state — POST /items/:itemId/state/batch
+   * Also reachable via the canonical batch controller below.
+   */
   @Post('batch')
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async getBatchStates(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
     @Body() body: { itemIds: string[] },
   ) {
-    const data = await this.readingService.getBatchStates(
+    return this.readingService.getBatchStates(
       workspaceId,
       body.itemIds || [],
       userId,
     );
-    return {
-      success: true,
-      data,
-    };
+  }
+}
+
+/**
+ * Dedicated batch controller — no :itemId in path.
+ * POST /api/v1/workspaces/:workspaceId/library/items/state/batch
+ */
+@Controller([
+  'api/v1/workspaces/:workspaceId/library/items/state',
+  'api/v1/workspace/:workspaceId/library/items/state',
+])
+@UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
+export class ReadingBatchController {
+  constructor(private readonly readingService: ReadingService) {}
+
+  @Post('batch')
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  async getBatchStates(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
+    @Body() body: { itemIds: string[] },
+  ) {
+    return this.readingService.getBatchStates(
+      workspaceId,
+      body.itemIds || [],
+      userId,
+    );
   }
 }

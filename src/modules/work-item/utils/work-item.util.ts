@@ -64,7 +64,6 @@ export const formatWorkItem = (taskRecord: any): WorkItemResponse | null => {
   const assignee = taskRecord.assignee
     ? {
         id: taskRecord.assignee.id,
-        _id: taskRecord.assignee.id,
         name: taskRecord.assignee.name,
         email: taskRecord.assignee.email,
         avatar: taskRecord.assignee.avatar,
@@ -74,7 +73,6 @@ export const formatWorkItem = (taskRecord: any): WorkItemResponse | null => {
   const cycle = taskRecord.cycle
     ? {
         id: taskRecord.cycle.id,
-        _id: taskRecord.cycle.id,
         name: taskRecord.cycle.name,
       }
     : taskRecord.cycleId || null;
@@ -85,7 +83,6 @@ export const formatWorkItem = (taskRecord: any): WorkItemResponse | null => {
     ? taskRecord.subtasks.map((subtaskRecord: any) => ({
         ...subtaskRecord,
         id: subtaskRecord.id,
-        _id: subtaskRecord.id,
         completed:
           subtaskRecord.columnId === 'done' || Boolean(subtaskRecord.completed),
       }))
@@ -99,7 +96,6 @@ export const formatWorkItem = (taskRecord: any): WorkItemResponse | null => {
   return {
     ...taskRecord,
     id: taskRecord.id,
-    _id: taskRecord.id,
     identifier: taskRecord.identifier || null,
     sequenceNumber: taskRecord.sequenceNumber || null,
     description: taskRecord.content || '',

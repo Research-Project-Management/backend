@@ -32,7 +32,7 @@ import { ProjectRoles } from '@/modules/iam/authz/decorators/project-roles.decor
 export class PageController {
   constructor(private readonly pageService: PageService) {}
 
-  @Get('workspace/:workspaceId/pages')
+  @Get(['workspaces/:workspaceId/pages', 'workspace/:workspaceId/pages'])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'List all pages in a workspace' })
@@ -40,7 +40,7 @@ export class PageController {
     return this.pageService.getWorkspacePages(workspaceId);
   }
 
-  @Get('project/:projectId/pages')
+  @Get(['projects/:projectId/pages', 'project/:projectId/pages'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'List all pages in a project' })
@@ -48,7 +48,7 @@ export class PageController {
     return this.pageService.getProjectPages(projectId);
   }
 
-  @Get('project/:projectId/pages/tree')
+  @Get(['projects/:projectId/pages/tree', 'project/:projectId/pages/tree'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   @ApiOperation({
@@ -58,7 +58,13 @@ export class PageController {
     return this.pageService.getProjectPageTree(projectId);
   }
 
-  @Post(['project/:projectId/pages', 'workspace/:workspaceId/pages', 'pages'])
+  @Post([
+    'projects/:projectId/pages',
+    'project/:projectId/pages',
+    'workspaces/:workspaceId/pages',
+    'workspace/:workspaceId/pages',
+    'pages',
+  ])
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create a new page in a project or workspace' })
   async createPage(
@@ -77,7 +83,11 @@ export class PageController {
     );
   }
 
-  @Get(['project/:projectId/pages/:pageId', 'pages/:pageId'])
+  @Get([
+    'projects/:projectId/pages/:pageId',
+    'project/:projectId/pages/:pageId',
+    'pages/:pageId',
+  ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get a single page by ID' })
@@ -85,7 +95,11 @@ export class PageController {
     return this.pageService.getPage(pageId);
   }
 
-  @Put(['project/:projectId/pages/:pageId', 'pages/:pageId'])
+  @Put([
+    'projects/:projectId/pages/:pageId',
+    'project/:projectId/pages/:pageId',
+    'pages/:pageId',
+  ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor')
   @ApiOperation({ summary: 'Update page content or metadata' })
@@ -96,7 +110,11 @@ export class PageController {
     return this.pageService.updatePage(pageId, dto);
   }
 
-  @Delete(['project/:projectId/pages/:pageId', 'pages/:pageId'])
+  @Delete([
+    'projects/:projectId/pages/:pageId',
+    'project/:projectId/pages/:pageId',
+    'pages/:pageId',
+  ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
   @ApiOperation({ summary: 'Soft delete a page' })
@@ -104,7 +122,11 @@ export class PageController {
     return this.pageService.deletePage(pageId);
   }
 
-  @Post(['project/:projectId/pages/:pageId/restore', 'pages/:pageId/restore'])
+  @Post([
+    'projects/:projectId/pages/:pageId/restore',
+    'project/:projectId/pages/:pageId/restore',
+    'pages/:pageId/restore',
+  ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
   @ApiOperation({ summary: 'Restore a soft-deleted page' })
@@ -113,6 +135,7 @@ export class PageController {
   }
 
   @Post([
+    'projects/:projectId/pages/:pageId/duplicate',
     'project/:projectId/pages/:pageId/duplicate',
     'pages/:pageId/duplicate',
   ])
@@ -127,7 +150,11 @@ export class PageController {
     return this.pageService.duplicatePage(pageId, userId);
   }
 
-  @Get(['project/:projectId/pages/:pageId/files', 'pages/:pageId/files'])
+  @Get([
+    'projects/:projectId/pages/:pageId/files',
+    'project/:projectId/pages/:pageId/files',
+    'pages/:pageId/files',
+  ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'List files attached to a page' })
@@ -135,7 +162,11 @@ export class PageController {
     return this.pageService.getPageFiles(pageId);
   }
 
-  @Post(['project/:projectId/pages/:pageId/files', 'pages/:pageId/files'])
+  @Post([
+    'projects/:projectId/pages/:pageId/files',
+    'project/:projectId/pages/:pageId/files',
+    'pages/:pageId/files',
+  ])
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor')
@@ -154,6 +185,7 @@ export class PageController {
   }
 
   @Put([
+    'projects/:projectId/pages/:pageId/main-file',
     'project/:projectId/pages/:pageId/main-file',
     'pages/:pageId/main-file',
   ])
@@ -168,6 +200,7 @@ export class PageController {
   }
 
   @Put([
+    'projects/:projectId/pages/:pageId/thumbnail',
     'project/:projectId/pages/:pageId/thumbnail',
     'pages/:pageId/thumbnail',
   ])

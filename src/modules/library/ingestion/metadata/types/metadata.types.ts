@@ -21,14 +21,13 @@ export interface ClassifiedQuery {
   type: QueryType;
 }
 
-// ── Creator & Provenance Types ────────────────────────────────────────────────
+import {
+  CreatorCreditInput,
+  CreatorType,
+} from '../../../items/types/items.types';
 
-export interface CreatorInput {
-  creatorType?: string;
-  name?: string;
-  firstName?: string;
-  lastName?: string;
-}
+export { CreatorCreditInput, CreatorType };
+export type CreatorInput = CreatorCreditInput;
 
 export interface Provenance {
   provider?: string;
@@ -63,6 +62,7 @@ export interface ItemMetadata {
   year?: number | null;
   publicationDate?: string;
   date?: string;
+  accessedAt?: string | Date | null;
   journal?: string;
   journalAbbr?: string;
   publicationTitle?: string;
@@ -71,23 +71,28 @@ export interface ItemMetadata {
   volume?: string;
   issue?: string;
   section?: string;
+  partNumber?: string;
+  partTitle?: string;
   series?: string;
   seriesTitle?: string;
+  seriesText?: string;
+  seriesNumber?: string;
+  edition?: string;
   pages?: string;
   abstract?: string;
   abstractNote?: string;
-  tldr?: string;
   citationCount?: number;
   referenceCount?: number;
-  influentialCitationCount?: number;
   language?: string;
   url?: string;
   pdfUrl?: string;
   fileUrl?: string;
+  fileId?: string;
   filename?: string;
   storageId?: string;
   openAccessPdfUrl?: string;
   itemType?: string;
+  type?: string;
   citationKey?: string;
   explicitCitationKey?: string;
   extra?: string;
@@ -101,6 +106,7 @@ export interface ItemMetadata {
   archiveLocation?: string;
   callNumber?: string;
   libraryCatalog?: string;
+  extraFields?: Record<string, any>;
 
   provenance?: Provenance;
 }
@@ -160,7 +166,8 @@ export type ProviderName =
   | 'OpenLibrary'
   | 'SemanticScholar'
   | 'OpenAlex'
-  | 'Unpaywall';
+  | 'Unpaywall'
+  | 'CORE';
 
 export interface ProviderCapability {
   queryTypes: QueryType[];
@@ -226,6 +233,7 @@ export interface ResolvedMetadata {
 
 export interface MetadataRequest {
   query: string;
+  queryType?: QueryType;
   workspaceId?: string;
   forceRefresh?: boolean;
   signal?: AbortSignal;

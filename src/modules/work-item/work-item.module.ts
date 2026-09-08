@@ -1,4 +1,4 @@
-import { Module, forwardRef } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { WorkItemController } from './work-item.controller';
 import { WorkItemService } from './work-item.service';
 import { WorkItemRepository } from './work-item.repository';
@@ -10,7 +10,7 @@ import { ActivityModule } from '@/modules/activity/activity.module';
 
 @Module({
   imports: [
-    forwardRef(() => CycleModule),
+    CycleModule,
     WorklogModule,
     LabelModule,
     TaskCommentModule,
@@ -20,7 +20,6 @@ import { ActivityModule } from '@/modules/activity/activity.module';
   providers: [WorkItemService, WorkItemRepository],
   exports: [
     WorkItemService,
-    WorkItemRepository,
     CycleModule,
     WorklogModule,
     LabelModule,

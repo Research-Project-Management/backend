@@ -79,4 +79,8 @@ export interface IProjectRepository {
   ): Promise<ProjectMember>;
   deleteProjectMember(projectId: string, userId: string): Promise<void>;
   countAdmins(projectId: string): Promise<number>;
+  findWorkspaceMemberRole(
+    workspaceId: string,
+    userId: string,
+  ): Promise<string | null>;
 }

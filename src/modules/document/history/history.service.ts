@@ -1,5 +1,11 @@
-import { Injectable, NotFoundException, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  Optional,
+} from '@nestjs/common';
 import { HistoryRepository } from './history.repository';
+import { PageService } from '../page/page.service';
 import { CreateVersionDto } from './dto/history.dto';
 import { VersionEventType, Prisma } from '@prisma/client';
 import { tryCatchSync } from '@/core/utils/error.util';
@@ -10,6 +16,7 @@ import { DOCUMENT_REDIS_KEYS } from '../constants/redis-keys.constant';
 export class HistoryService {
   constructor(
     private readonly historyRepo: HistoryRepository,
+    private readonly pageService: PageService,
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
@@ -19,6 +26,11 @@ export class HistoryService {
       this.cache.del(DOCUMENT_REDIS_KEYS.pageVersions(pageId)),
       this.cache.del(DOCUMENT_REDIS_KEYS.page(pageId)),
     ]);
+  }
+
+  private async invalidatePageTreeCache(projectId: string | null | undefined) {
+    if (!this.cache || !projectId) return;
+    await this.cache.del(DOCUMENT_REDIS_KEYS.projectTree(projectId));
   }
 
   async getVersions(pageId: string) {
@@ -40,7 +52,7 @@ export class HistoryService {
   }
 
   async createVersion(pageId: string, userId: string, dto: CreateVersionDto) {
-    const page = await this.historyRepo.findPageById(pageId);
+    const page = await this.pageService.findPageById(pageId);
 
     if (!page) {
       throw new NotFoundException('Page not found');
@@ -74,6 +86,12 @@ export class HistoryService {
       throw new NotFoundException('Version not found');
     }
 
+    if (version.pageId !== pageId) {
+      throw new BadRequestException(
+        'Version does not belong to the specified page',
+      );
+    }
+
     let parsedContent: Prisma.InputJsonValue | string | null = version.content;
     if (
       typeof version.content === 'string' &&
@@ -87,12 +105,18 @@ export class HistoryService {
       }
     }
 
-    const page = await this.historyRepo.updatePage(pageId, {
-      content: parsedContent !== null ? parsedContent : Prisma.JsonNull,
+    // Route through PageService (correct domain) — ensures cache + event are handled
+    const updateRes = await this.pageService.updatePage(pageId, {
+      content: parsedContent !== null ? parsedContent : undefined,
       title: version.title || undefined,
     });
+    const page = updateRes.page;
 
-    await this.invalidateVersionCache(pageId);
+    // Invalidate both version cache and page/tree cache
+    await Promise.all([
+      this.invalidateVersionCache(pageId),
+      this.invalidatePageTreeCache(page?.projectId),
+    ]);
 
     return {
       message: 'Version restored successfully',
@@ -100,10 +124,16 @@ export class HistoryService {
     };
   }
 
-  async deleteVersion(versionId: string) {
+  async deleteVersion(versionId: string, pageId?: string) {
     const version = await this.historyRepo.findVersionById(versionId);
     if (!version) {
       throw new NotFoundException('Version not found');
+    }
+
+    if (pageId && version.pageId !== pageId) {
+      throw new BadRequestException(
+        'Version does not belong to the specified page',
+      );
     }
 
     await this.historyRepo.deleteVersion(versionId);
@@ -112,8 +142,12 @@ export class HistoryService {
     return { message: 'Version deleted successfully' };
   }
 
+  async findVersionById(versionId: string) {
+    return this.historyRepo.findVersionById(versionId);
+  }
+
   async getHistory(pageId: string) {
-    const history = await this.historyRepo.findPageVersions(pageId);
-    return { history, events: history };
+    const { versions } = await this.getVersions(pageId);
+    return { history: versions, events: versions };
   }
 }

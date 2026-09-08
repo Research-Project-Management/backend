@@ -4,6 +4,7 @@ import {
   IsOptional,
   IsString,
   MinLength,
+  MaxLength,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -17,12 +18,14 @@ export class RegisterDto {
   email!: string;
 
   @ApiProperty({
-    description: 'Account password (minimum 8 characters)',
+    description: 'Account password (minimum 8, maximum 72 characters)',
     example: 'SecretP@ssw0rd!',
     minLength: 8,
+    maxLength: 72,
   })
   @IsString()
   @MinLength(8, { message: 'Password must be at least 8 characters' })
+  @MaxLength(72, { message: 'Password cannot exceed 72 characters' })
   @IsNotEmpty({ message: 'Password is required' })
   password!: string;
 

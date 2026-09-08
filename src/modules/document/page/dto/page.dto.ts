@@ -120,6 +120,10 @@ export class UpdatePageDto {
   @IsString()
   @IsOptional()
   pdfThumbnail?: string;
+
+  @IsString()
+  @IsOptional()
+  _oldTitle?: string;
 }
 
 export class SetMainFileDto {

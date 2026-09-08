@@ -23,7 +23,14 @@ export class UnpaywallProvider implements MetadataProvider {
 
   private readonly logger = new Logger(UnpaywallProvider.name);
   private readonly BASE_URL = 'https://api.unpaywall.org/v2';
-  private readonly EMAIL = 'admin@researchmanagement.local';
+
+  private get email(): string {
+    return (
+      process.env.UNPAYWALL_EMAIL ||
+      process.env.ACADEMIC_EMAIL ||
+      'contact@flux.academic'
+    );
+  }
 
   supports(queryType: QueryType): boolean {
     return this.capabilities.queryTypes.includes(queryType);
@@ -36,12 +43,11 @@ export class UnpaywallProvider implements MetadataProvider {
     const cleanDoi = normalizeDoi(request.query);
     if (!cleanDoi) return null;
 
-    const url = `${this.BASE_URL}/${encodeURIComponent(cleanDoi)}?email=${encodeURIComponent(this.EMAIL)}`;
+    const url = `${this.BASE_URL}/${encodeURIComponent(cleanDoi)}?email=${encodeURIComponent(this.email)}`;
 
     const response = await fetch(url, {
       headers: {
-        'User-Agent':
-          'FluxResearchPlatform/1.0 (academic-research-bot; mailto:admin@researchmanagement.local)',
+        'User-Agent': `FluxResearchPlatform/1.0 (academic-research-bot; mailto:${this.email})`,
         Accept: 'application/json',
       },
       signal,
@@ -61,7 +67,7 @@ export class UnpaywallProvider implements MetadataProvider {
       );
     }
 
-    let json: any;
+    let json: unknown;
     try {
       json = await response.json();
     } catch {
@@ -74,23 +80,37 @@ export class UnpaywallProvider implements MetadataProvider {
       );
     }
 
-    const isOa = Boolean(json?.is_oa);
-    const bestOaLocation = json?.best_oa_location;
+    const payload = json as {
+      is_oa?: boolean;
+      title?: string;
+      journal_name?: string;
+      best_oa_location?: {
+        url_for_pdf?: string;
+        url?: string;
+      };
+    } | null;
+
+    const isOa = Boolean(payload?.is_oa);
+    const bestOaLocation = payload?.best_oa_location;
     const pdfUrl =
       bestOaLocation?.url_for_pdf || bestOaLocation?.url || undefined;
 
-    if (!pdfUrl) return null;
+    const hasMetadata = Boolean(payload?.title || pdfUrl);
+    if (!hasMetadata) return null;
 
     const rawVersion = createHash('md5')
-      .update(JSON.stringify(json))
+      .update(JSON.stringify(payload))
       .digest('hex');
 
     return {
       provider: this.id,
       metadata: {
         doi: cleanDoi,
-        title: json.title,
-        journal: json.journal_name,
+        title: typeof payload?.title === 'string' ? payload.title : undefined,
+        journal:
+          typeof payload?.journal_name === 'string'
+            ? payload.journal_name
+            : undefined,
         openAccessPdfUrl: pdfUrl,
         provenance: {
           originProvider: this.id,

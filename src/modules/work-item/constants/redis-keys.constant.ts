@@ -31,6 +31,11 @@ export const WORK_ITEM_REDIS_KEYS = {
    */
   projectWorklogs: (projectId: string, dateStr: string) =>
     `flux:wi:worklogs:${projectId}:${dateStr}`,
+
+  /**
+   * Workspace labels list (JSON array, TTL 1h)
+   */
+  labels: (workspaceId: string) => `flux:wi:labels:${workspaceId}`,
 } as const;
 
 /**

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ItemMetadata } from '../metadata/types/metadata.types';
 import { DuplicateMatchResult } from '../types/metadata-candidate.types';
+import { normalizeDoi } from '../metadata/utils/metadata.utils';
 
 export interface ExistingCatalogItemSummary {
   id: string;
@@ -20,13 +21,17 @@ export class DuplicatePolicy {
     proposed: ItemMetadata,
     existingItems: ExistingCatalogItemSummary[],
   ): DuplicateMatchResult {
-    const proposedDoi = proposed.doi?.toLowerCase().trim();
+    const cleanProposedDoi =
+      normalizeDoi(proposed.doi) || proposed.doi?.toLowerCase().trim();
 
     // 1. Exact DOI match
-    if (proposedDoi) {
-      const exactDoiMatch = existingItems.find(
-        (it) => it.doi && it.doi.toLowerCase().trim() === proposedDoi,
-      );
+    if (cleanProposedDoi) {
+      const exactDoiMatch = existingItems.find((it) => {
+        if (!it.doi) return false;
+        const cleanExistingDoi =
+          normalizeDoi(it.doi) || it.doi.toLowerCase().trim();
+        return cleanExistingDoi === cleanProposedDoi;
+      });
       if (exactDoiMatch) {
         return {
           matchType: 'EXACT',
@@ -34,7 +39,7 @@ export class DuplicatePolicy {
           targetItemId: exactDoiMatch.id,
           targetItemTitle: exactDoiMatch.title,
           matchReason: 'DOI_EXACT',
-          evidence: { doi: proposedDoi },
+          evidence: { doi: cleanProposedDoi },
         };
       }
     }

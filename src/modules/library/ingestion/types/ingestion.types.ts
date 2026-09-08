@@ -1,5 +1,15 @@
-import { IngestionStatus } from '@prisma/client';
-import { CreatorInput } from '../../catalog/types/item.types';
+import { CreatorCreditInput } from '../../items/types/items.types';
+
+export type IngestionStatus =
+  | 'pending'
+  | 'processing'
+  | 'extracting'
+  | 'normalizing'
+  | 'reconciling'
+  | 'indexing'
+  | 'completed'
+  | 'failed'
+  | 'review_required';
 
 export type IngestionSourceType = 'doi' | 'url' | 'bibtex' | 'pdf';
 
@@ -11,6 +21,7 @@ export type IngestionCommand =
       userId?: string;
       collectionId?: string;
       idempotencyKey?: string;
+      overrides?: Record<string, any>;
     }
   | {
       source: 'url';
@@ -26,7 +37,7 @@ export type IngestionCommand =
         year?: number;
         publicationTitle?: string;
         itemType?: string;
-        creators?: CreatorInput[];
+        creators?: CreatorCreditInput[];
         tags?: string[];
         url?: string;
       };
@@ -72,14 +83,21 @@ export interface IngestionRunSnapshot {
   failedItems: number;
   startedAt: Date;
   completedAt?: Date | null;
+  lastError?: string | null;
+  itemId?: string | null;
+  stages: any[];
+  candidates: any[];
+  decisions: any[];
+  reviews: any[];
+  errors: any[];
 }
 
 export const INGESTION_PORT = Symbol('INGESTION_PORT');
 
 export interface IngestionPort {
   ingest(command: IngestionCommand): Promise<IngestionResult>;
-  getRunStatus(
-    workspaceId: string,
-    runId: string,
-  ): Promise<IngestionRunSnapshot>;
+  getRunStatus(workspaceId: string, runId: string): Promise<any>;
 }
+
+export * from './ingestion-submission.types';
+export * from './metadata-candidate.types';

@@ -63,4 +63,6 @@ export interface ICycleRepository {
     fromCycleId: string,
     targetCycleId: string | null,
   ): Promise<Prisma.BatchPayload>;
+  addTaskToCycle(taskId: string, cycleId: string): Promise<any>;
+  removeTaskFromCycle(taskId: string): Promise<any>;
 }

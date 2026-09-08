@@ -11,13 +11,18 @@ export class PrismaService
 {
   private pool?: Pool;
 
-  constructor(configService: ConfigService) {
+  constructor(private readonly configService: ConfigService) {
     const connectionString =
       configService.get<string>('DATABASE_URL') ||
       process.env.DATABASE_URL ||
       'postgresql://localhost:5432/rpm';
 
-    const pool = new Pool({ connectionString });
+    const pool = new Pool({
+      connectionString,
+      max: 20,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+    });
     pool.on('error', (err) => {
       console.warn('[Prisma pg pool error]:', err.message);
     });
@@ -27,7 +32,10 @@ export class PrismaService
   }
 
   async onModuleInit() {
-    if (process.env.NODE_ENV !== 'test' && process.env.DATABASE_URL) {
+    const dbUrl =
+      this.configService.get<string>('DATABASE_URL') ||
+      process.env.DATABASE_URL;
+    if (process.env.NODE_ENV !== 'test' && dbUrl) {
       await this.$connect().catch((err) => {
         console.warn('[Prisma] Database connection deferred:', err.message);
       });

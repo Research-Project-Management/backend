@@ -18,6 +18,9 @@ import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
 import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
 import { LabelType } from '@prisma/client';
 
+import { WorkspaceRoleGuard } from '@/modules/iam/authz/guards/workspace-role.guard';
+import { WorkspaceRoles } from '@/modules/iam/authz/decorators/workspace-roles.decorator';
+
 @ApiTags('Organization')
 @ApiBearerAuth('JWT-auth')
 @Controller('api')
@@ -25,7 +28,13 @@ import { LabelType } from '@prisma/client';
 export class LabelController {
   constructor(private readonly labelService: LabelService) {}
 
-  @Get(['workspace/:workspaceId/labels', 'labels/:workspaceId'])
+  @Get([
+    'workspaces/:workspaceId/labels',
+    'workspace/:workspaceId/labels',
+    'labels/:workspaceId',
+  ])
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({
     summary: 'List labels in a workspace (optionally filter by type)',
   })
@@ -36,8 +45,14 @@ export class LabelController {
     return this.labelService.getLabels(workspaceId, query?.type);
   }
 
-  @Post(['workspace/:workspaceId/labels', 'labels/:workspaceId'])
+  @Post([
+    'workspaces/:workspaceId/labels',
+    'workspace/:workspaceId/labels',
+    'labels/:workspaceId',
+  ])
   @HttpCode(HttpStatus.CREATED)
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member')
   @ApiOperation({ summary: 'Create a new label in a workspace' })
   async createLabel(
     @Param('workspaceId') workspaceId: string,
@@ -48,6 +63,8 @@ export class LabelController {
   }
 
   @Put('labels/:labelId')
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member')
   @ApiOperation({ summary: 'Update a label name or color' })
   async updateLabel(
     @Param('labelId') labelId: string,
@@ -57,6 +74,8 @@ export class LabelController {
   }
 
   @Delete('labels/:labelId')
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin')
   @ApiOperation({ summary: 'Delete a label' })
   async deleteLabel(@Param('labelId') labelId: string) {
     return this.labelService.deleteLabel(labelId);

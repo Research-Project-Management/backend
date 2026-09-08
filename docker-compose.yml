@@ -1,67 +1,208 @@
-version: '3.8'
+# ==============================================================================
+# Flux Backend - Production Docker Compose Orchestration
+# Standards: Container Orchestration Skill, Resource Limits, Log Rotation, Non-Root
+# Note: Frontend (Next.js) is deployed on Vercel and excluded from this stack.
+# ==============================================================================
 
 services:
-  # PostgreSQL Database
-  postgres:
+  # ----------------------------------------------------------------------------
+  # 1. PostgreSQL Database Service
+  # ----------------------------------------------------------------------------
+  db:
     image: postgres:16-alpine
-    container_name: research_postgres
+    container_name: flux_postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgrespassword}
-      POSTGRES_DB: ${DB_NAME:-research_management}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME:-flux-db}
+      PGDATA: /var/lib/postgresql/data/pgdata
     ports:
-      - "${DB_PORT:-5432}:5432"
+      - "${DB_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-research_management}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-flux-db}"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      flux_network:
+        aliases:
+          - db
+          - postgres
 
-  # Redis Cache & Background Tasks
-  redis:
-    image: redis:7-alpine
-    container_name: research_redis
+  # ----------------------------------------------------------------------------
+  # 2. GROBID Academic Extraction Service (CRF Model)
+  # ----------------------------------------------------------------------------
+  grobid:
+    image: lfoppiano/grobid:latest-crf
+    container_name: flux_grobid
     restart: unless-stopped
     ports:
-      - "${REDIS_PORT:-6379}:6379"
-    volumes:
-      - redis_data:/data
+      - "${GROBID_PORT:-8070}:8070"
+    environment:
+      GROBID_SERVICE_ALLOWED_ORIGINS: "*"
+      JAVA_OPTS: "-Xmx1024m -Xms256m"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
+      test: ["CMD", "curl", "-sf", "http://localhost:8070/api/isalive"]
+      interval: 30s
+      timeout: 10s
       retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 1200M
+        reservations:
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      flux_network:
+        aliases:
+          - grobid
 
-  # NestJS Fastify Application Server
-  backend:
+  # ----------------------------------------------------------------------------
+  # 3. Zotero Translation Server (Metadata, BibTeX, CSL, DOI)
+  # ----------------------------------------------------------------------------
+  translator:
+    image: zotero/translation-server:2.0.4
+    container_name: flux_zotero_ts
+    restart: unless-stopped
+    ports:
+      - "${ZOTERO_TS_PORT:-1969}:1969"
+    environment:
+      USER_AGENT: "FluxResearchPlatform/1.0 (contact@flux.app)"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -o /dev/null http://localhost:1969/ || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 64M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      flux_network:
+        aliases:
+          - translator
+          - zotero-translation-server
+
+  # ----------------------------------------------------------------------------
+  # 4. NestJS Fastify Backend Application Service (Production Target: runner)
+  # ----------------------------------------------------------------------------
+  be:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: research_backend
+      target: runner
+    container_name: flux_backend
     restart: unless-stopped
     ports:
       - "${PORT:-3000}:3000"
+    env_file:
+      - .env
     environment:
       NODE_ENV: production
       PORT: 3000
-      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgrespassword}@postgres:5432/${DB_NAME:-research_management}?schema=public
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      JWT_SECRET: ${JWT_SECRET:-change-this-secret-in-production-12345}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-this-refresh-secret-in-production-67890}
-      JWT_EXPIRATION: 15m
-      JWT_REFRESH_EXPIRATION: 7d
+      HOST: 0.0.0.0
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${DB_USER:-postgres}:${DB_PASSWORD}@db:5432/${DB_NAME:-flux-db}?schema=public}
+      REDIS_URL: ${REDIS_URL}
+      GROBID_URL: http://grobid:8070
+      ZOTERO_TRANSLATOR_URL: http://translator:1969
+      CLIENT_URL: ${CLIENT_URL}
+      ORIGINS: ${ORIGINS}
     depends_on:
-      postgres:
+      db:
         condition: service_healthy
-      redis:
+      grobid:
         condition: service_healthy
+      translator:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+        reservations:
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      flux_network:
+        aliases:
+          - be
+          - backend
+
+  # ----------------------------------------------------------------------------
+  # 5. Optional Local Redis Cache (Profile: local-redis)
+  #    Activate with: docker compose --profile local-redis up -d
+  # ----------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: flux_redis
+    restart: unless-stopped
+    profiles:
+      - local-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+    networks:
+      flux_network:
+        aliases:
+          - redis
 
 volumes:
   postgres_data:
+    name: flux_postgres_data
     driver: local
   redis_data:
+    name: flux_redis_data
     driver: local
+
+networks:
+  flux_network:
+    name: flux_network
+    driver: bridge

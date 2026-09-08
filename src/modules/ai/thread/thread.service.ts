@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
   Optional,
   Logger,
 } from '@nestjs/common';
@@ -14,9 +15,9 @@ import {
 import { MessageRole } from '@prisma/client';
 import { RedisCacheService } from '@/core/cache/redis-cache.service';
 import { AI_REDIS_KEYS } from './constants/redis-keys.constant';
+import { PrismaService } from '@/core/database/prisma.service';
 
 export interface FormattedChatSession {
-  _id: string;
   id: string;
   title: string;
   projectId?: string | null;
@@ -42,7 +43,6 @@ function formatChat(chat: any): FormattedChatSession {
   const lastMsg = msgs.length > 0 ? msgs[msgs.length - 1].content || '' : '';
 
   return {
-    _id: chat.id,
     id: chat.id,
     title: chat.title,
     projectId: chat.projectId,
@@ -70,6 +70,7 @@ export class ThreadService {
 
   constructor(
     private readonly threadRepo: ThreadRepository,
+    private readonly prisma: PrismaService,
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
@@ -86,6 +87,9 @@ export class ThreadService {
     ];
     if (chatId) {
       promises.push(this.cache.del(AI_REDIS_KEYS.chatThread(chatId)));
+      promises.push(
+        this.cache.del(`${AI_REDIS_KEYS.chatThread(chatId)}:${userId}`),
+      );
     }
     await Promise.all(promises).catch((err) => {
       this.logger.warn(`Failed to invalidate AI thread cache: ${err}`);
@@ -99,6 +103,18 @@ export class ThreadService {
   ): Promise<FormattedChatSession[]> {
     if (!workspaceId) {
       throw new BadRequestException('workspaceId is required');
+    }
+
+    const member = await this.prisma.workspaceMember.findFirst({
+      where: {
+        workspace: {
+          OR: [{ id: workspaceId }, { slug: workspaceId }],
+        },
+        userId,
+      },
+    });
+    if (!member) {
+      throw new ForbiddenException('User is not a member of this workspace');
     }
 
     const cacheKey = AI_REDIS_KEYS.userChats(workspaceId, userId, projectId);
@@ -141,14 +157,14 @@ export class ThreadService {
     return { success: true };
   }
 
-  async getChat(chatId: string): Promise<FormattedChatSession> {
-    const cacheKey = AI_REDIS_KEYS.chatThread(chatId);
+  async getChat(chatId: string, userId: string): Promise<FormattedChatSession> {
+    const cacheKey = `${AI_REDIS_KEYS.chatThread(chatId)}:${userId}`;
     if (this.cache) {
       const cached = await this.cache.get<FormattedChatSession>(cacheKey);
       if (cached) return cached;
     }
 
-    const raw = await this.threadRepo.findChatById(chatId);
+    const raw = await this.threadRepo.findChatByIdAndUser(chatId, userId);
     if (!raw) {
       throw new NotFoundException('Chat not found');
     }
@@ -168,6 +184,70 @@ export class ThreadService {
     const workspaceSlug = dto.workspaceSlug || dto.workspaceId;
     if (!workspaceSlug) {
       throw new BadRequestException('workspaceSlug or workspaceId is required');
+    }
+
+    // Verify workspace access
+    const workspace = await this.prisma.workspace.findFirst({
+      where: {
+        OR: [{ id: workspaceSlug }, { slug: workspaceSlug }],
+      },
+    });
+    if (!workspace) {
+      throw new NotFoundException(`Workspace "${workspaceSlug}" not found`);
+    }
+
+    const member = await this.prisma.workspaceMember.findUnique({
+      where: {
+        workspaceId_userId: { workspaceId: workspace.id, userId },
+      },
+    });
+    if (!member) {
+      throw new ForbiddenException('User is not a member of this workspace');
+    }
+
+    // Verify project access if specified
+    if (dto.projectId) {
+      const project = await this.prisma.project.findFirst({
+        where: { id: dto.projectId, workspaceId: workspace.id },
+      });
+      if (!project) {
+        throw new NotFoundException('Project not found in this workspace');
+      }
+      if (member.role !== 'owner' && member.role !== 'admin') {
+        const projMember = await this.prisma.projectMember.findUnique({
+          where: {
+            projectId_userId: { projectId: dto.projectId, userId },
+          },
+        });
+        if (!projMember) {
+          throw new ForbiddenException(
+            'User does not have access to this project',
+          );
+        }
+      }
+    }
+
+    // Verify page access if specified
+    if (dto.pageId) {
+      const page = await this.prisma.page.findFirst({
+        where: { id: dto.pageId },
+        include: { project: true },
+      });
+      if (!page || page.project?.workspaceId !== workspace.id) {
+        throw new NotFoundException('Page not found in this workspace');
+      }
+      if (member.role !== 'owner' && member.role !== 'admin') {
+        const projMember = await this.prisma.projectMember.findUnique({
+          where: {
+            projectId_userId: { projectId: page.projectId, userId },
+          },
+        });
+        if (!projMember) {
+          throw new ForbiddenException(
+            'User does not have access to this page',
+          );
+        }
+      }
     }
 
     const created = await this.threadRepo.createChat({
@@ -214,9 +294,10 @@ export class ThreadService {
 
   async appendMessages(
     chatId: string,
+    userId: string,
     dto: AppendMessagesDto,
   ): Promise<FormattedChatSession> {
-    const chat = await this.threadRepo.findChatById(chatId);
+    const chat = await this.threadRepo.findChatByIdAndUser(chatId, userId);
     if (!chat) {
       throw new NotFoundException('Chat not found');
     }
@@ -248,9 +329,10 @@ export class ThreadService {
 
   async renameChat(
     chatId: string,
+    userId: string,
     dto: RenameThreadDto,
   ): Promise<FormattedChatSession> {
-    const chat = await this.threadRepo.findChatById(chatId);
+    const chat = await this.threadRepo.findChatByIdAndUser(chatId, userId);
     if (!chat) {
       throw new NotFoundException('Chat not found');
     }
@@ -268,18 +350,19 @@ export class ThreadService {
     return result;
   }
 
-  async deleteChat(chatId: string) {
-    const chat = await this.threadRepo.findChatById(chatId);
+  async deleteChat(chatId: string, userId: string) {
+    const chat = await this.threadRepo.findChatByIdAndUser(chatId, userId);
+    if (!chat) {
+      throw new NotFoundException('Chat not found');
+    }
     await this.threadRepo.deleteChat(chatId);
 
-    if (chat) {
-      await this.invalidateThreadCache(
-        chat.userId,
-        chat.workspaceSlug,
-        chatId,
-        chat.projectId,
-      );
-    }
+    await this.invalidateThreadCache(
+      chat.userId,
+      chat.workspaceSlug,
+      chatId,
+      chat.projectId,
+    );
 
     return { success: true };
   }

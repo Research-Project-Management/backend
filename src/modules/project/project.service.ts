@@ -73,6 +73,33 @@ export class ProjectService {
     return { projects };
   }
 
+  private async resolveUserRoleInProject(
+    project: { workspaceId?: string | null; members?: any[] },
+    userId?: string,
+  ): Promise<ProjectMemberRole | (string & {})> {
+    if (!userId) return ProjectMemberRole.viewer;
+
+    const member = project.members?.find(
+      (projectMember: { userId: string; role?: string }) =>
+        projectMember.userId === userId,
+    );
+    if (member?.role) {
+      return member.role;
+    }
+
+    if (project.workspaceId) {
+      const wsRole = await this.projectRepo.findWorkspaceMemberRole(
+        project.workspaceId,
+        userId,
+      );
+      if (wsRole === 'owner' || wsRole === 'admin') {
+        return ProjectMemberRole.admin;
+      }
+    }
+
+    return ProjectMemberRole.viewer;
+  }
+
   async getProject(projectId: string, userId?: string) {
     const cacheKey = PROJECT_REDIS_KEYS.project(projectId);
     let project = this.cache ? await this.cache.get<any>(cacheKey) : null;
@@ -87,16 +114,11 @@ export class ProjectService {
       }
     }
 
-    const member = userId
-      ? project.members?.find(
-          (projectMember: { userId: string }) =>
-            projectMember.userId === userId,
-        )
-      : undefined;
+    const yourRole = await this.resolveUserRoleInProject(project, userId);
 
     return {
       project,
-      yourRole: member?.role || ProjectMemberRole.viewer,
+      yourRole,
     };
   }
 
@@ -115,16 +137,12 @@ export class ProjectService {
       ? await this.cache.wrap(cacheKey, overviewFetch, 900)
       : await overviewFetch();
 
-    const member = userId
-      ? overviewData.project?.members?.find(
-          (projectMember: { userId: string }) =>
-            projectMember.userId === userId,
-        )
-      : undefined;
+    const targetProject = overviewData.project || overviewData;
+    const yourRole = await this.resolveUserRoleInProject(targetProject, userId);
 
     return {
       ...overviewData,
-      yourRole: member?.role || ProjectMemberRole.viewer,
+      yourRole,
     };
   }
 
@@ -133,14 +151,13 @@ export class ProjectService {
     userId: string,
     dto: CreateProjectDto,
   ) {
-    const targetWorkspaceId = workspaceId || dto.workspaceId;
-    if (!targetWorkspaceId) {
+    const inputWorkspaceId = workspaceId || dto.workspaceId;
+    if (!inputWorkspaceId) {
       throw new BadRequestException('Workspace ID is required');
     }
 
-    const workspace =
-      await this.projectRepo.resolveWorkspace(targetWorkspaceId);
-    const resolvedWorkspaceId = workspace?.id || targetWorkspaceId;
+    const workspace = await this.projectRepo.resolveWorkspace(inputWorkspaceId);
+    const resolvedWorkspaceId = workspace?.id || inputWorkspaceId;
 
     const identifier = dto.identifier?.trim().toUpperCase();
     if (identifier) {
@@ -537,7 +554,7 @@ export class ProjectService {
     if (this.cache) {
       await Promise.all([
         this.cache.del(WORK_ITEM_REDIS_KEYS.projectTasks(projectId)),
-        this.cache.del(`flux:proj:overview:${projectId}`),
+        this.cache.del(PROJECT_REDIS_KEYS.overview(projectId)),
       ]);
     }
 

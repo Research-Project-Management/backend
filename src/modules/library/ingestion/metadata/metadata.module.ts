@@ -14,7 +14,6 @@ import { CrossRefProvider } from './providers/crossref.provider';
 import { ArxivProvider } from './providers/arxiv.provider';
 import { PubMedProvider } from './providers/pubmed.provider';
 import { OpenLibraryProvider } from './providers/openlibrary.provider';
-import { SemanticScholarProvider } from './providers/semantic-scholar.provider';
 import { OpenAlexProvider } from './providers/openalex.provider';
 import { UnpaywallProvider } from './providers/unpaywall.provider';
 
@@ -24,13 +23,15 @@ import { UnpaywallProvider } from './providers/unpaywall.provider';
     MetadataCache,
     ReconciliationService,
     ProviderExecutor,
+
+    // ── Metadata Providers ──────────────────────────────────────────────────
     CrossRefProvider,
     ArxivProvider,
     PubMedProvider,
     OpenLibraryProvider,
-    SemanticScholarProvider,
     OpenAlexProvider,
     UnpaywallProvider,
+
     {
       provide: METADATA_PROVIDERS,
       useFactory: (
@@ -38,7 +39,6 @@ import { UnpaywallProvider } from './providers/unpaywall.provider';
         arxiv: ArxivProvider,
         pubmed: PubMedProvider,
         openlibrary: OpenLibraryProvider,
-        semantic: SemanticScholarProvider,
         openalex: OpenAlexProvider,
         unpaywall: UnpaywallProvider,
       ): MetadataProvider[] => [
@@ -46,7 +46,6 @@ import { UnpaywallProvider } from './providers/unpaywall.provider';
         arxiv,
         pubmed,
         openlibrary,
-        semantic,
         openalex,
         unpaywall,
       ],
@@ -55,7 +54,6 @@ import { UnpaywallProvider } from './providers/unpaywall.provider';
         ArxivProvider,
         PubMedProvider,
         OpenLibraryProvider,
-        SemanticScholarProvider,
         OpenAlexProvider,
         UnpaywallProvider,
       ],

@@ -12,6 +12,8 @@ import { EngineService } from './engine.service';
 import { SaveAndSyncDto, CompileDocumentDto } from './dto/engine.dto';
 import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
 import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
+import { ProjectRoleGuard } from '@/modules/iam/authz/guards/project-role.guard';
+import { ProjectRoles } from '@/modules/iam/authz/decorators/project-roles.decorator';
 
 @ApiTags('Document - Engine')
 @ApiBearerAuth('JWT-auth')
@@ -24,6 +26,8 @@ export class EngineController {
     'documents/pages/:pageId/save-and-sync',
     'manuscript/pages/:pageId/save-and-sync',
   ])
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
@@ -38,6 +42,8 @@ export class EngineController {
   }
 
   @Post(['documents/pages/:pageId/build', 'manuscript/pages/:pageId/build'])
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
@@ -54,6 +60,8 @@ export class EngineController {
     'documents/pages/:pageId/rollback/:versionId',
     'manuscript/pages/:pageId/rollback/:versionId',
   ])
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:

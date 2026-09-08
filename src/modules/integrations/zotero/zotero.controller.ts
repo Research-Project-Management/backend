@@ -23,7 +23,10 @@ import {
 import { UpdateZoteroSyncDirectionDto } from './dto/update-zotero-sync-direction.dto';
 import { ResolveZoteroConflictDto } from './dto/resolve-zotero-conflict.dto';
 
-@Controller('api/v1/workspaces/:workspaceId/library/integrations/zotero')
+@Controller([
+  'api/v1/workspaces/:workspaceId/library/integrations/zotero',
+  'api/v1/workspace/:workspaceId/library/integrations/zotero',
+])
 @UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
 export class ZoteroController {
   constructor(private readonly zoteroService: ZoteroService) {}

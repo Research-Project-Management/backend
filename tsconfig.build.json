@@ -1,7 +1,9 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "rootDir": "./src"
+    "rootDir": "./src",
+    "declaration": false,
+    "incremental": true
   },
   "include": [
     "src/**/*"
@@ -13,5 +15,12 @@
     "**/*spec.ts",
     "prisma",
     "prisma.config.ts"
-  ]
+  ],
+  "watchOptions": {
+    "watchFile": "fixedPollingInterval",
+    "watchDirectory": "fixedPollingInterval",
+    "fallbackPolling": "fixedInterval",
+    "synchronousWatchDirectory": false,
+    "excludeDirectories": ["**/node_modules", "dist"]
+  }
 }

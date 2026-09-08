@@ -8,7 +8,13 @@ import {
   ProviderResult,
   QueryType,
 } from '../types/metadata.types';
-import { normalizeArxivId, normalizeDoi } from '../utils/metadata.utils';
+import {
+  normalizeArxivId,
+  normalizeDoi,
+  cleanBibliographicText,
+  decodeHtmlEntities,
+  normalizeTags,
+} from '../utils/metadata.utils';
 import { ProviderFetchError } from '../services/provider.executor';
 
 @Injectable()
@@ -88,7 +94,7 @@ export class ArxivProvider implements MetadataProvider {
     // Title
     const titleMatch = entry.match(/<title>([\s\S]*?)<\/title>/i);
     const title = titleMatch
-      ? titleMatch[1].replace(/\s+/g, ' ').trim()
+      ? cleanBibliographicText(titleMatch[1]) || 'Untitled arXiv Paper'
       : 'Untitled arXiv Paper';
 
     // Authors
@@ -98,7 +104,10 @@ export class ArxivProvider implements MetadataProvider {
     );
     for (const match of authorMatches) {
       if (match[1]) {
-        authors.push(match[1].trim());
+        const cleanName = decodeHtmlEntities(match[1].trim());
+        if (cleanName) {
+          authors.push(cleanName);
+        }
       }
     }
 
@@ -115,14 +124,27 @@ export class ArxivProvider implements MetadataProvider {
     // Abstract / summary
     const summaryMatch = entry.match(/<summary>([\s\S]*?)<\/summary>/i);
     const abstract = summaryMatch
-      ? summaryMatch[1].replace(/\s+/g, ' ').trim()
+      ? cleanBibliographicText(summaryMatch[1])
       : undefined;
 
-    // DOI (if exists in arxiv:doi)
+    const rawCategories = Array.from(
+      entry.matchAll(/<category[^>]*term=["']([^"']+)["'][^>]*>/gi),
+      (match) => decodeHtmlEntities(match[1].trim()),
+    ).filter(Boolean);
+
+    const keywords = normalizeTags(rawCategories);
+
+    // DOI (if exists in arxiv:doi, or fallback to standard DataCite arXiv DOI)
     let doi: string | undefined;
-    const doiMatch = entry.match(/<arxiv:doi[^>]*>([\s\S]*?)<\/arxiv:doi>/i);
-    if (doiMatch) {
-      doi = normalizeDoi(doiMatch[1]);
+    const doiMatchResult = entry.match(
+      /<arxiv:doi[^>]*>([\s\S]*?)<\/arxiv:doi>/i,
+    );
+    if (doiMatchResult) {
+      doi = normalizeDoi(doiMatchResult[1]);
+    }
+    if (!doi && cleanId) {
+      const canonicalArxivIdentifier = cleanId.replace(/v\d+$/i, '');
+      doi = `10.48550/arXiv.${canonicalArxivIdentifier}`;
     }
 
     // Journal ref
@@ -131,7 +153,16 @@ export class ArxivProvider implements MetadataProvider {
       /<arxiv:journal_ref[^>]*>([\s\S]*?)<\/arxiv:journal_ref>/i,
     );
     if (journalMatch) {
-      journal = journalMatch[1].replace(/\s+/g, ' ').trim();
+      journal = cleanBibliographicText(journalMatch[1]);
+    }
+
+    // Comment (e.g. conference publication note like "Published as a conference paper at ICLR 2015")
+    let comment: string | undefined;
+    const commentMatch = entry.match(
+      /<arxiv:comment[^>]*>([\s\S]*?)<\/arxiv:comment>/i,
+    );
+    if (commentMatch) {
+      comment = cleanBibliographicText(commentMatch[1]);
     }
 
     // PDF link
@@ -140,6 +171,12 @@ export class ArxivProvider implements MetadataProvider {
 
     const rawVersion = createHash('md5').update(xml).digest('hex');
 
+    const creators = authors.map((authorName, authorIndex) => ({
+      orderIndex: authorIndex,
+      creatorType: 'author',
+      fullName: authorName,
+    }));
+
     return {
       provider: this.id,
       metadata: {
@@ -147,13 +184,29 @@ export class ArxivProvider implements MetadataProvider {
         doi,
         title,
         authors,
+        creators,
         year,
         publicationDate,
-        journal,
+        journal: journal || 'arXiv preprint',
+        publicationTitle:
+          journal ||
+          (comment ? `arXiv preprint (${comment})` : 'arXiv preprint'),
+        publisher: 'arXiv',
         abstract,
+        language: 'en',
+        archive: 'arXiv',
+        libraryCatalog: 'arXiv.org',
+        callNumber: `arXiv:${cleanId}`,
+        keywords: keywords.length > 0 ? keywords : undefined,
+        tags: keywords.length > 0 ? keywords : undefined,
         itemType: 'preprint',
         url: canonicalUrl,
         openAccessPdfUrl: pdfUrl,
+        extraFields: {
+          repository: 'arXiv',
+          archiveId: cleanId,
+          ...(comment ? { comment } : {}),
+        },
         provenance: {
           originProvider: this.id,
           resolvedAt: new Date().toISOString(),

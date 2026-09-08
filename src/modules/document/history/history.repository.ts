@@ -1,15 +1,27 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
-import { Prisma, PageVersion, Page } from '@prisma/client';
+import { Prisma, PageVersion } from '@prisma/client';
 import { IHistoryRepository } from '../types/document-repository.interface';
 
 @Injectable()
 export class HistoryRepository implements IHistoryRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findPageVersions(pageId: string): Promise<PageVersion[]> {
+  /** Summary list — excludes heavy `content` field for version history list view */
+  async findPageVersions(pageId: string) {
     return this.prisma.pageVersion.findMany({
       where: { pageId },
+      select: {
+        id: true,
+        pageId: true,
+        title: true,
+        label: true,
+        eventType: true,
+        savedById: true,
+        fileName: true,
+        projectPageId: true,
+        createdAt: true,
+      },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -32,22 +44,6 @@ export class HistoryRepository implements IHistoryRepository {
   async deleteVersion(versionId: string): Promise<PageVersion> {
     return this.prisma.pageVersion.delete({
       where: { id: versionId },
-    });
-  }
-
-  async findPageById(pageId: string): Promise<Page | null> {
-    return this.prisma.page.findFirst({
-      where: { id: pageId, deletedAt: null },
-    });
-  }
-
-  async updatePage(
-    pageId: string,
-    data: Prisma.PageUpdateInput | Prisma.PageUncheckedUpdateInput,
-  ): Promise<Page> {
-    return this.prisma.page.update({
-      where: { id: pageId },
-      data: data,
     });
   }
 }

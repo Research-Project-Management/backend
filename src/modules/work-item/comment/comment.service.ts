@@ -1,4 +1,8 @@
-﻿import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { TaskCommentRepository } from './comment.repository';
 import {
   CreateCommentDto,
@@ -13,10 +17,60 @@ import {
   CommentReply,
   CommentAuthor,
 } from './types/comment.types';
+import { PrismaService } from '@/core/database/prisma.service';
 
 @Injectable()
 export class TaskCommentService {
-  constructor(private readonly commentRepo: TaskCommentRepository) {}
+  constructor(
+    private readonly commentRepo: TaskCommentRepository,
+    private readonly prisma: PrismaService,
+  ) {}
+
+  private async assertCanModifyComment(
+    commentId: string,
+    userId: string,
+    action: string,
+  ) {
+    const comment = await this.prisma.taskComment.findUnique({
+      where: { id: commentId },
+      include: {
+        task: {
+          select: {
+            projectId: true,
+            project: { select: { workspaceId: true } },
+          },
+        },
+      },
+    });
+
+    if (!comment) {
+      throw new NotFoundException('Comment not found');
+    }
+
+    if (comment.authorId === userId) {
+      return comment;
+    }
+
+    const wsMember = await this.prisma.workspaceMember.findFirst({
+      where: { workspaceId: comment.task.project.workspaceId, userId },
+    });
+    if (wsMember?.role === 'owner' || wsMember?.role === 'admin') {
+      return comment;
+    }
+
+    const projMember = await this.prisma.projectMember.findUnique({
+      where: {
+        projectId_userId: { projectId: comment.task.projectId, userId },
+      },
+    });
+    if (projMember?.role === 'admin') {
+      return comment;
+    }
+
+    throw new ForbiddenException(
+      `You do not have permission to ${action} this comment`,
+    );
+  }
 
   private buildReply(
     content: string,
@@ -50,7 +104,13 @@ export class TaskCommentService {
     return { comment };
   }
 
-  async updateTaskComment(commentId: string, dto: UpdateCommentDto) {
+  async updateTaskComment(
+    commentId: string,
+    userId: string,
+    dto: UpdateCommentDto,
+  ) {
+    await this.assertCanModifyComment(commentId, userId, 'update');
+
     const comment = await this.commentRepo.updateTaskComment(commentId, {
       content: dto.content,
       isEdited: true,
@@ -59,7 +119,9 @@ export class TaskCommentService {
     return { comment };
   }
 
-  async deleteTaskComment(commentId: string) {
+  async deleteTaskComment(commentId: string, userId: string) {
+    await this.assertCanModifyComment(commentId, userId, 'delete');
+
     await this.commentRepo.deleteTaskComment(commentId);
     return { success: true };
   }
