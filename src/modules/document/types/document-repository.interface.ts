@@ -79,6 +79,17 @@ export interface IPageRepository {
   restorePage(pageId: string): Promise<Page>;
   deletePage(pageId: string): Promise<Page>;
   incrementPageView(pageId: string): Promise<Page>;
+  findProjectContext(
+    projectId: string,
+  ): Promise<{ id: string; workspaceId: string } | null>;
+  findWorkspaceMember(
+    workspaceId: string,
+    userId: string,
+  ): Promise<{ role: string } | null>;
+  findProjectMember(
+    projectId: string,
+    userId: string,
+  ): Promise<{ role: string } | null>;
 }
 
 /** Lean version summary — excludes heavy `content` field for history list UI */

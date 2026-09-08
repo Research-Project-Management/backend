@@ -2,6 +2,7 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
 import { RedisCacheService } from '../cache/redis-cache.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Prisma, OutboxStatus } from '@prisma/client';
 import { EnqueueOutboxInput, OutboxDispatchResult } from './outbox.types';
 
 /**
@@ -25,15 +26,15 @@ export class OutboxService {
    */
   async enqueue(
     input: EnqueueOutboxInput,
-    tx?: Parameters<Parameters<PrismaService['$transaction']>[0]>[0],
+    tx?: Prisma.TransactionClient,
   ) {
     const client = tx || this.prisma;
-    return await (client as any).outboxEvent.create({
+    return client.outboxEvent.create({
       data: {
         aggregateId: input.aggregateId,
         eventType: input.eventType,
-        payload: input.payload as any,
-        status: 'PENDING',
+        payload: input.payload as Prisma.InputJsonValue,
+        status: OutboxStatus.PENDING,
       },
     });
   }
@@ -51,8 +52,8 @@ export class OutboxService {
     let errorCount = 0;
 
     try {
-      const pendingEvents = await (this.prisma as any).outboxEvent.findMany({
-        where: { status: 'PENDING' },
+      const pendingEvents = await this.prisma.outboxEvent.findMany({
+        where: { status: OutboxStatus.PENDING },
         orderBy: { createdAt: 'asc' },
         take: batchSize,
       });
@@ -87,10 +88,10 @@ export class OutboxService {
           }
 
           // 3. Mark event as PUBLISHED
-          await (this.prisma as any).outboxEvent.update({
+          await this.prisma.outboxEvent.update({
             where: { id: event.id },
             data: {
-              status: 'PUBLISHED',
+              status: OutboxStatus.PUBLISHED,
               processedAt: new Date(),
             },
           });
@@ -100,16 +101,16 @@ export class OutboxService {
           const newRetryCount = event.retryCount + 1;
           const isFinalFailure = newRetryCount >= 5;
 
-          await (this.prisma as any).outboxEvent.update({
+          await this.prisma.outboxEvent.update({
             where: { id: event.id },
             data: {
-              status: isFinalFailure ? 'FAILED' : 'PENDING',
+              status: isFinalFailure ? OutboxStatus.FAILED : OutboxStatus.PENDING,
               retryCount: newRetryCount,
-              error: err.message || 'Unknown dispatch error',
+              error: err?.message || 'Unknown dispatch error',
             },
           });
           this.logger.error(
-            `Failed to dispatch Outbox Event ${event.id}: ${err.message}`,
+            `Failed to dispatch Outbox Event ${event.id}: ${err?.message}`,
           );
         }
       }

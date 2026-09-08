@@ -12,7 +12,6 @@ import { PageStatus, Prisma, EntityType } from '@prisma/client';
 import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
 import { RedisCacheService } from '@/core/cache/redis-cache.service';
 import { DOCUMENT_REDIS_KEYS } from '../constants/redis-keys.constant';
-import { PrismaService } from '@/core/database/prisma.service';
 
 export type FormattedPage<
   T extends {
@@ -29,7 +28,6 @@ export type FormattedPage<
 export class PageService {
   constructor(
     private readonly pageRepo: PageRepository,
-    private readonly prisma: PrismaService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
@@ -146,9 +144,7 @@ export class PageService {
       );
     }
 
-    const project = await this.prisma.project.findFirst({
-      where: { id: resolvedProjectId, deletedAt: null },
-    });
+    const project = await this.pageRepo.findProjectContext(resolvedProjectId);
     if (!project) {
       throw new NotFoundException('Project not found');
     }
@@ -160,17 +156,19 @@ export class PageService {
     }
     resolvedWorkspaceId = project.workspaceId;
 
-    const wsMember = await this.prisma.workspaceMember.findFirst({
-      where: { workspaceId: resolvedWorkspaceId, userId },
-    });
+    const wsMember = await this.pageRepo.findWorkspaceMember(
+      resolvedWorkspaceId,
+      userId,
+    );
     if (!wsMember) {
       throw new ForbiddenException('User is not a member of this workspace');
     }
 
     if (wsMember.role !== 'owner' && wsMember.role !== 'admin') {
-      const projMember = await this.prisma.projectMember.findUnique({
-        where: { projectId_userId: { projectId: resolvedProjectId, userId } },
-      });
+      const projMember = await this.pageRepo.findProjectMember(
+        resolvedProjectId,
+        userId,
+      );
       if (
         !projMember ||
         (projMember.role !== 'admin' && projMember.role !== 'contributor')

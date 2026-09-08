@@ -46,12 +46,31 @@ export class FileRepository implements IFileRepository {
   async findFileByKey(key: string): Promise<FileWithAuthor | null> {
     const cleanKey = key.replace(/^\/+/, '');
     const r2Url = `/api/files/r2/${cleanKey}`;
+
+    // Fast-path: Exact equality matches hit B-tree index directly without string scanning
+    const exactMatch = await this.prisma.file.findFirst({
+      where: {
+        OR: [{ url: r2Url }, { url: cleanKey }, { url: `/${cleanKey}` }],
+      },
+      include: {
+        author: { select: USER_MINIMAL_SELECT },
+        sharedWith: {
+          include: {
+            user: { select: USER_MINIMAL_SELECT },
+          },
+        },
+      },
+    });
+
+    if (exactMatch) {
+      return exactMatch;
+    }
+
+    // Slow fallback only executed for legacy or non-standard URLs
     return this.prisma.file.findFirst({
       where: {
         OR: [
-          { url: r2Url },
-          { url: cleanKey },
-          { url: { endsWith: cleanKey } },
+          { url: { contains: cleanKey } },
           { metaData: { path: ['storageKey'], equals: cleanKey } },
         ],
       },

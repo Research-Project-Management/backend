@@ -250,4 +250,46 @@ export class PageRepository implements IPageRepository {
     });
     return project?.workspaceId || null;
   }
+
+  async findProjectContext(
+    projectId: string,
+  ): Promise<{ id: string; workspaceId: string } | null> {
+    if (!isUuid(projectId)) {
+      return this.prisma.project
+        .findFirst({
+          where: {
+            identifier: { equals: projectId, mode: 'insensitive' },
+            deletedAt: null,
+          },
+          select: { id: true, workspaceId: true },
+        })
+        .catch(() => null);
+    }
+    return this.prisma.project.findFirst({
+      where: { id: projectId, deletedAt: null },
+      select: { id: true, workspaceId: true },
+    });
+  }
+
+  async findWorkspaceMember(
+    workspaceId: string,
+    userId: string,
+  ): Promise<{ role: string } | null> {
+    if (!isUuid(workspaceId) || !isUuid(userId)) return null;
+    return this.prisma.workspaceMember.findFirst({
+      where: { workspaceId, userId },
+      select: { role: true },
+    });
+  }
+
+  async findProjectMember(
+    projectId: string,
+    userId: string,
+  ): Promise<{ role: string } | null> {
+    if (!isUuid(projectId) || !isUuid(userId)) return null;
+    return this.prisma.projectMember.findUnique({
+      where: { projectId_userId: { projectId, userId } },
+      select: { role: true },
+    });
+  }
 }
