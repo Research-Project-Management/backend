@@ -85,4 +85,3 @@ export interface ReferenceData {
   provenance?: any;
   [key: string]: any;
 }
-

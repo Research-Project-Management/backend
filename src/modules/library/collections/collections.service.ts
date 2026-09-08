@@ -44,7 +44,9 @@ export class CollectionsService {
 
   private async invalidateCollectionsCache(workspaceId: string): Promise<void> {
     if (this.cache) {
-      await this.cache.delPattern(LIBRARY_REDIS_KEYS.collectionsPattern(workspaceId));
+      await this.cache.delPattern(
+        LIBRARY_REDIS_KEYS.collectionsPattern(workspaceId),
+      );
     }
   }
 

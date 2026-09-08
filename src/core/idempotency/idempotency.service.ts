@@ -147,7 +147,8 @@ export class IdempotencyService {
       data: {
         status: 'succeeded',
         statusCode: input.statusCode,
-        responseBody: (input.responseBody as Prisma.InputJsonValue) ?? Prisma.JsonNull,
+        responseBody:
+          (input.responseBody as Prisma.InputJsonValue) ?? Prisma.JsonNull,
         expiresAt,
       },
     });

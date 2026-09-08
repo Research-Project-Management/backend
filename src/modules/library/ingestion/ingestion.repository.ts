@@ -211,10 +211,7 @@ export class IngestionRepository {
     return client.ingestionRun.findMany({
       where: {
         status: {
-          in: [
-            IngestionStatus.RECEIVED,
-            IngestionStatus.FAILED_RETRYABLE,
-          ],
+          in: [IngestionStatus.RECEIVED, IngestionStatus.FAILED_RETRYABLE],
         },
         startedAt: { gte: since },
         completedAt: null,

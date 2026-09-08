@@ -123,7 +123,8 @@ export class IngestionWatchdogService
 
         // Active recovery: automatically dispatch back to IngestionQueueService
         if (this.queueService && run.inputParams) {
-          const envelope = run.inputParams as unknown as IngestionSubmissionEnvelope;
+          const envelope =
+            run.inputParams as unknown as IngestionSubmissionEnvelope;
           if (envelope && typeof envelope === 'object') {
             this.queueService.enqueue(run.id, run.workspaceId, {
               ...envelope,
@@ -165,14 +166,18 @@ export class IngestionWatchdogService
     try {
       // Look back up to 24 hours for abandoned runs
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-      const pendingRuns = await this.ingestionRepo.findRecoverableRuns(since, 50);
+      const pendingRuns = await this.ingestionRepo.findRecoverableRuns(
+        since,
+        50,
+      );
 
       if (pendingRuns.length === 0) return 0;
 
       let recovered = 0;
       for (const run of pendingRuns) {
         if (!run.inputParams || run.attempts >= run.maxRetries) continue;
-        const envelope = run.inputParams as unknown as IngestionSubmissionEnvelope;
+        const envelope =
+          run.inputParams as unknown as IngestionSubmissionEnvelope;
         if (!envelope || typeof envelope !== 'object') continue;
 
         const enqueued = this.queueService.enqueue(run.id, run.workspaceId, {
@@ -194,9 +199,7 @@ export class IngestionWatchdogService
       }
       return recovered;
     } catch (err: any) {
-      this.logger.error(
-        `Startup recovery scan failed: ${err?.message || err}`,
-      );
+      this.logger.error(`Startup recovery scan failed: ${err?.message || err}`);
       return 0;
     }
   }

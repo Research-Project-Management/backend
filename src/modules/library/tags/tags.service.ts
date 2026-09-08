@@ -37,53 +37,62 @@ export class TagsService {
     color?: string,
     type?: string,
   ) {
-    const result = await this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const tag = await this.tagsRepo.create(
-        workspaceId,
-        name.trim(),
-        color,
-        type,
-        tx,
-      );
+    const result = await this.libraryTx.executeInTransaction(
+      async (tx, helpers) => {
+        const tag = await this.tagsRepo.create(
+          workspaceId,
+          name.trim(),
+          color,
+          type,
+          tx,
+        );
 
-      await helpers.appendChange(workspaceId, {
-        entityType: 'Tag',
-        entityId: tag.id,
-        action: 'create',
-        version: 1,
-        data: tag,
-      });
+        await helpers.appendChange(workspaceId, {
+          entityType: 'Tag',
+          entityId: tag.id,
+          action: 'create',
+          version: 1,
+          data: tag,
+        });
 
-      await helpers.publishOutbox(
-        workspaceId,
-        tag.id,
-        'library.tag.created',
-        tag,
-      );
+        await helpers.publishOutbox(
+          workspaceId,
+          tag.id,
+          'library.tag.created',
+          tag,
+        );
 
-      return tag;
-    });
+        return tag;
+      },
+    );
 
     await this.invalidateTagsCache(workspaceId);
     return result;
   }
 
   async deleteTag(workspaceId: string, tagId: string) {
-    const result = await this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const deleted = await this.tagsRepo.delete(workspaceId, tagId, tx);
-      if (deleted) {
-        await helpers.recordTombstone(workspaceId, {
-          entityType: 'Tag',
-          entityId: tagId,
-        });
+    const result = await this.libraryTx.executeInTransaction(
+      async (tx, helpers) => {
+        const deleted = await this.tagsRepo.delete(workspaceId, tagId, tx);
+        if (deleted) {
+          await helpers.recordTombstone(workspaceId, {
+            entityType: 'Tag',
+            entityId: tagId,
+          });
 
-        await helpers.publishOutbox(workspaceId, tagId, 'library.tag.deleted', {
-          id: tagId,
-          deletedAt: new Date(),
-        });
-      }
-      return deleted;
-    });
+          await helpers.publishOutbox(
+            workspaceId,
+            tagId,
+            'library.tag.deleted',
+            {
+              id: tagId,
+              deletedAt: new Date(),
+            },
+          );
+        }
+        return deleted;
+      },
+    );
 
     await this.invalidateTagsCache(workspaceId);
     return result;

@@ -5,8 +5,10 @@
 export const LIBRARY_REDIS_KEYS = {
   // Collections
   collections: (workspaceId: string) => `library:${workspaceId}:collections`,
-  collectionTree: (workspaceId: string) => `library:${workspaceId}:collections:tree`,
-  collectionsPattern: (workspaceId: string) => `library:${workspaceId}:collections*`,
+  collectionTree: (workspaceId: string) =>
+    `library:${workspaceId}:collections:tree`,
+  collectionsPattern: (workspaceId: string) =>
+    `library:${workspaceId}:collections*`,
 
   // Tags
   tags: (workspaceId: string) => `library:${workspaceId}:tags`,

@@ -24,10 +24,7 @@ export class OutboxService {
   /**
    * Enqueues an outbox event within a Prisma transaction or standard context
    */
-  async enqueue(
-    input: EnqueueOutboxInput,
-    tx?: Prisma.TransactionClient,
-  ) {
+  async enqueue(input: EnqueueOutboxInput, tx?: Prisma.TransactionClient) {
     const client = tx || this.prisma;
     return client.outboxEvent.create({
       data: {
@@ -104,7 +101,9 @@ export class OutboxService {
           await this.prisma.outboxEvent.update({
             where: { id: event.id },
             data: {
-              status: isFinalFailure ? OutboxStatus.FAILED : OutboxStatus.PENDING,
+              status: isFinalFailure
+                ? OutboxStatus.FAILED
+                : OutboxStatus.PENDING,
               retryCount: newRetryCount,
               error: err?.message || 'Unknown dispatch error',
             },
