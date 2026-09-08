@@ -7,15 +7,21 @@ import {
   Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { NotesRepository } from './notes.repository';
 import {
-  NotesRepository,
   CreateNoteData,
   UpdateNoteData,
-} from './notes.repository';
+  ExtractLiteratureNoteResult,
+} from './types/notes.types';
+import {
+  formatLiteratureNoteMarkdown,
+  buildTipTapDocFromText,
+} from './utils/notes.utils';
 import {
   TransactionService,
   TransactionHelpers,
 } from '../outbox/transaction.service';
+
 import { normalizeTags } from '../tags/utils/tags.utils';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { resolveTenantWorkspaceId } from '../../../core/utils/tenant.util';
@@ -385,47 +391,13 @@ export class NotesService implements IItemNotesExtractorPort {
       };
     }
 
-    const lines: string[] = [
-      `# Literature Notes: ${item.title || 'Untitled'}`,
-      '',
-      `**Authors:** ${Array.isArray(item.creators) && item.creators.length > 0 ? item.creators.map((c: any) => c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim()).join(', ') : Array.isArray((item as any).contributors) ? (item as any).contributors.map((c: any) => c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim()).join(', ') : 'Unknown'}  `,
-      `**Year:** ${item.year || 'N/A'} | **DOI:** ${(item as any).doi || item.identifiers?.find((id: any) => id.type === 'doi')?.value || 'N/A'}`,
-      '',
-      '---',
-      '',
-      '## Extracted Highlights & Annotations',
-      '',
-    ];
-
-    let currentPage = -1;
-    for (const ann of annotations) {
-      if (ann.pageIndex !== currentPage) {
-        currentPage = ann.pageIndex;
-        lines.push(`### Page ${currentPage + 1}`);
-        lines.push('');
-      }
-
-      if (ann.quoteText) {
-        lines.push(`> ${ann.quoteText.trim().replace(/\\n+/g, '\n> ')}`);
-        lines.push('');
-      }
-
-      if (ann.comment) {
-        lines.push(`**Note:** ${ann.comment.trim()}`);
-        lines.push('');
-      }
-    }
-
-    const markdown = lines.join('\n');
+    const markdown = formatLiteratureNoteMarkdown(item, annotations);
 
     const note = await this.createNote(canonicalWorkspaceId, {
       itemId,
       title: `Literature Notes — ${item.title?.slice(0, 50) || 'Untitled'}`,
       contentMd: markdown,
-      contentJson: {
-        type: 'doc',
-        content: [{ type: 'paragraph', text: markdown }],
-      },
+      contentJson: buildTipTapDocFromText(markdown),
       createdById: userId || 'system',
       tags: ['literature-note', 'highlights'],
     });
@@ -434,6 +406,6 @@ export class NotesService implements IItemNotesExtractorPort {
       success: true,
       totalExtracted: annotations.length,
       literatureNote: note,
-    };
+    } as ExtractLiteratureNoteResult;
   }
 }

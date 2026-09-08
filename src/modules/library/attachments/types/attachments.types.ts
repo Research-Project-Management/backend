@@ -71,28 +71,6 @@ export class AttachmentInvariantError extends Error {
   }
 }
 
-export function validateAttachmentInvariants(input: {
-  url?: string;
-  filename?: string;
-  size?: number;
-  mimeType?: string;
-  fileHash?: string;
-}): void {
-  if (!input.url || input.url.trim() === '') {
-    throw new AttachmentInvariantError('Attachment URL cannot be empty.');
-  }
-
-  if (input.size !== undefined && input.size < 0) {
-    throw new AttachmentInvariantError('Attachment size cannot be negative.');
-  }
-
-  if (input.filename !== undefined && input.filename.trim() === '') {
-    throw new AttachmentInvariantError(
-      'Attachment filename cannot be empty whitespace.',
-    );
-  }
-}
-
 export class AttachmentTooLargeException extends HttpException {
   constructor(size: number, limit: number) {
     super(

@@ -11,6 +11,7 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { LatexService } from './latex.service';
 import { CompileLatexDto, SyncIncrementalDto } from './dto/latex.dto';
 import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
+import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
 import { ProjectRoleGuard } from '@/modules/iam/authz/guards/project-role.guard';
 import { ProjectRoles } from '@/modules/iam/authz/decorators/project-roles.decorator';
 
@@ -24,8 +25,11 @@ export class LatexController {
   @Post('latex/compile')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Compile LaTeX source to PDF via LaTeX service' })
-  async compile(@Body() dto: CompileLatexDto) {
-    return this.latexService.compile(dto);
+  async compile(
+    @Body() dto: CompileLatexDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.latexService.compile(dto, userId);
   }
 
   @Post(['pages/:pageId/sync-project', 'page/:pageId/sync-project'])

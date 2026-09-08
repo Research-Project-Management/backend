@@ -113,28 +113,91 @@ export class IngestionPipelineRunner {
     // ── Multi-Record Ingestion Handling (BibTeX / RIS batches) ────────────────
     if (envelope.payload.kind === 'RECORD' && enrichedCandidates.length > 1) {
       const createdItemIds: string[] = [];
+      const total = enrichedCandidates.length;
+      let processed = 0;
+      let succeeded = 0;
+      let duplicates = 0;
+      let failed = 0;
+      const progressItems: Array<{
+        title: string;
+        status: 'SUCCEEDED' | 'DUPLICATE' | 'FAILED';
+        itemId?: string;
+        error?: string;
+      }> = [];
+
       for (const candidate of enrichedCandidates) {
-        const itemDecision = await this.reconcileStage.execute([candidate]);
-        const matchRes = await this.matchStage.execute(
-          workspaceId,
-          itemDecision.proposedItem,
-        );
-        if (matchRes.matchType === 'EXACT' && matchRes.targetItemId) {
-          createdItemIds.push(matchRes.targetItemId);
-          continue;
-        }
-        const created = await this.commitStage.execute(
-          workspaceId,
-          itemDecision.proposedItem,
-          {
-            collectionIds: envelope.collectionIds,
-            tagIds: envelope.tagIds,
-            userId: envelope.userId,
-            source: this.mapPayloadToSource(envelope.payload.kind),
-          },
-        );
-        if (created?.id) {
-          createdItemIds.push(created.id);
+        const itemTitle =
+          candidate.normalizedMetadata?.title ||
+          candidate.normalizedMetadata?.shortTitle ||
+          'Untitled Record';
+
+        try {
+          const itemDecision = await this.reconcileStage.execute([candidate]);
+          const matchRes = await this.matchStage.execute(
+            workspaceId,
+            itemDecision.proposedItem,
+          );
+
+          if (matchRes.matchType === 'EXACT' && matchRes.targetItemId) {
+            createdItemIds.push(matchRes.targetItemId);
+            duplicates++;
+            progressItems.push({
+              title: itemTitle,
+              status: 'DUPLICATE',
+              itemId: matchRes.targetItemId,
+            });
+          } else {
+            const created = await this.commitStage.execute(
+              workspaceId,
+              itemDecision.proposedItem,
+              {
+                collectionIds: envelope.collectionIds,
+                tagIds: envelope.tagIds,
+                userId: envelope.userId,
+                source: this.mapPayloadToSource(envelope.payload.kind),
+              },
+            );
+            if (created?.id) {
+              createdItemIds.push(created.id);
+              succeeded++;
+              progressItems.push({
+                title: itemTitle,
+                status: 'SUCCEEDED',
+                itemId: created.id,
+              });
+            } else {
+              failed++;
+              progressItems.push({
+                title: itemTitle,
+                status: 'FAILED',
+                error: 'Commit returned empty record',
+              });
+            }
+          }
+        } catch (itemErr: any) {
+          failed++;
+          progressItems.push({
+            title: itemTitle,
+            status: 'FAILED',
+            error: itemErr?.message || 'Processing failed',
+          });
+        } finally {
+          processed++;
+          try {
+            await this.ingestionRepo.updateRunProgress(workspaceId, runId, {
+              total,
+              processed,
+              succeeded,
+              duplicates,
+              failed,
+              percentage: Math.round((processed / total) * 100),
+              currentTitle: itemTitle,
+              status: 'PROCESSING',
+              items: progressItems.slice(-30),
+            });
+          } catch {
+            // Checkpoint error is non-fatal to the ingestion pipeline
+          }
         }
       }
 
@@ -145,6 +208,9 @@ export class IngestionPipelineRunner {
         outputSnapshot: {
           itemIds: createdItemIds,
           totalProcessed: createdItemIds.length,
+          succeeded,
+          duplicates,
+          failed,
         },
       });
 
@@ -155,6 +221,16 @@ export class IngestionPipelineRunner {
         {
           itemId: createdItemIds[0],
           completedAt: new Date(),
+          executionLog: {
+            total,
+            processed,
+            succeeded,
+            duplicates,
+            failed,
+            percentage: 100,
+            status: 'COMPLETED',
+            items: progressItems.slice(-50),
+          } as unknown as Prisma.InputJsonValue,
         },
       );
       return;
@@ -377,6 +453,23 @@ export class IngestionPipelineRunner {
         {
           itemId: matchResult.targetItemId,
           completedAt: new Date(),
+          executionLog: {
+            total: 1,
+            processed: 1,
+            succeeded: 0,
+            duplicates: 1,
+            failed: 0,
+            percentage: 100,
+            status: 'COMPLETED',
+            currentTitle: decision.proposedItem?.title || 'Document',
+            items: [
+              {
+                title: decision.proposedItem?.title || 'Document',
+                status: 'DUPLICATE',
+                itemId: matchResult.targetItemId,
+              },
+            ],
+          } as unknown as Prisma.InputJsonValue,
         },
       );
       return;
@@ -448,6 +541,23 @@ export class IngestionPipelineRunner {
       {
         itemId: createdItem?.id,
         completedAt: new Date(),
+        executionLog: {
+          total: 1,
+          processed: 1,
+          succeeded: 1,
+          duplicates: 0,
+          failed: 0,
+          percentage: 100,
+          status: 'COMPLETED',
+          currentTitle: createdItem?.title || 'Document',
+          items: [
+            {
+              title: createdItem?.title || 'Document',
+              status: 'SUCCEEDED',
+              itemId: createdItem?.id,
+            },
+          ],
+        } as unknown as Prisma.InputJsonValue,
       },
     );
   }

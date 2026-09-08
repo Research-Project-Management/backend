@@ -9,6 +9,7 @@ import {
   HttpCode,
   HttpStatus,
   BadRequestException,
+  NotFoundException,
 } from '@nestjs/common';
 import { AttachmentsService } from './attachments.service';
 import { WebSnapshotService } from './services/web-snapshot.service';
@@ -123,11 +124,16 @@ export class AttachmentsController {
   ) {
     let targetUrl = body?.url?.trim();
     if (!targetUrl) {
-      const item = await this.prisma.catalogItem.findUnique({
-        where: { id: itemId },
+      const item = await this.prisma.catalogItem.findFirst({
+        where: { id: itemId, workspaceId, deletedAt: null },
         select: { url: true, title: true },
       });
-      if (!item?.url) {
+      if (!item) {
+        throw new NotFoundException(
+          `Item ${itemId} not found in this workspace`,
+        );
+      }
+      if (!item.url) {
         throw new BadRequestException(
           'No URL found on this item to capture a snapshot.',
         );

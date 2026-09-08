@@ -26,7 +26,8 @@
     "audit:dry": "npx --yes jscpd --threshold 5 src",
     "audit:circular": "npx --yes madge --circular --extensions ts src",
     "audit:security": "pnpm audit",
-    "audit:quality": "pnpm typecheck && pnpm audit:circular && pnpm audit:dry"
+    "audit:quality": "pnpm typecheck && pnpm audit:circular && pnpm audit:dry",
+    "sync:zotero-schema": "node scripts/sync-zotero-schema.mjs"
   },
   "prisma": {
     "seed": "ts-node -r tsconfig-paths/register prisma/seed.ts"

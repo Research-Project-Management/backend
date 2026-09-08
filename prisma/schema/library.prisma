@@ -50,8 +50,8 @@ model CatalogItem {
   ragStatus            RagStatus? @map("rag_status")
   workspaceId      String     @map("workspace_id") @db.Uuid
   workspace        Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  uploadedById     String     @map("uploaded_by_id") @db.Uuid
-  uploadedBy       User       @relation("CatalogItemUploader", fields: [uploadedById], references: [id], onDelete: Cascade)
+  uploadedById     String?    @map("uploaded_by_id") @db.Uuid
+  uploadedBy       User?      @relation("CatalogItemUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
   deletedAt        DateTime?  @map("deleted_at") @db.Timestamptz(6)
   version          Int        @default(1)
   createdAt        DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -75,8 +75,10 @@ model CatalogItem {
   @@index([workspaceId, deletedAt, year(sort: Desc), createdAt(sort: Desc)])
   @@index([workspaceId, itemType])
   @@index([workspaceId, ragStatus])
+  @@index([workspaceId, deletedAt, ragStatus])
   @@index([doi])
   @@index([citationKey])
+  @@index([arxivId])
   @@map("papers")
 }
 

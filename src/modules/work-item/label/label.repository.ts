@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { Prisma, LabelType, Label } from '@prisma/client';
 import { ILabelRepository } from './types/label-repository.interface';
@@ -37,14 +37,31 @@ export class LabelRepository implements ILabelRepository {
   async updateLabel(
     labelId: string,
     data: Prisma.LabelUpdateInput | Prisma.LabelUncheckedUpdateInput,
+    workspaceId?: string,
   ): Promise<Label> {
+    if (workspaceId) {
+      const existing = await this.prisma.label.findFirst({
+        where: { id: labelId, workspaceId },
+      });
+      if (!existing) {
+        throw new NotFoundException('Label not found in workspace');
+      }
+    }
     return this.prisma.label.update({
       where: { id: labelId },
       data: data,
     });
   }
 
-  async deleteLabel(labelId: string): Promise<Label> {
+  async deleteLabel(labelId: string, workspaceId?: string): Promise<Label> {
+    if (workspaceId) {
+      const existing = await this.prisma.label.findFirst({
+        where: { id: labelId, workspaceId },
+      });
+      if (!existing) {
+        throw new NotFoundException('Label not found in workspace');
+      }
+    }
     return this.prisma.label.delete({
       where: { id: labelId },
     });

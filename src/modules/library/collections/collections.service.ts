@@ -23,7 +23,12 @@ import {
   CollectionDeleteStrategy,
   CollectionTreeNode,
 } from './types/collections.types';
+import {
+  buildCollectionTree,
+  normalizeParentId,
+} from './utils/collections.utils';
 import { PrismaService } from '../../../core/database/prisma.service';
+
 import { resolveTenantWorkspaceId } from '../../../core/utils/tenant.util';
 import { RedisCacheService } from '../../../core/cache/redis-cache.service';
 import { LIBRARY_REDIS_KEYS } from '../common/constants/redis-keys.constant';
@@ -85,30 +90,7 @@ export class CollectionsService {
       const collections =
         await this.collectionsRepo.findAll(canonicalWorkspaceId);
 
-      const map = new Map<string, CollectionTreeNode>();
-      for (const c of collections) {
-        map.set(c.id, {
-          id: c.id,
-          name: c.name,
-          description: c.description,
-          color: c.color,
-          icon: c.icon,
-          parentId: c.parentId,
-          itemCount: (c as any)._count?.collectionItems || 0,
-          children: [],
-        });
-      }
-
-      const roots: CollectionTreeNode[] = [];
-      for (const node of map.values()) {
-        if (node.parentId && map.has(node.parentId)) {
-          map.get(node.parentId)!.children.push(node);
-        } else {
-          roots.push(node);
-        }
-      }
-
-      return { tree: roots };
+      return { tree: buildCollectionTree(collections) };
     };
 
     if (this.cache) {
@@ -150,9 +132,9 @@ export class CollectionsService {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
 
     // Normalize parentId from parentId or parent, treating 'root' or empty string as null
-    let rawParentId =
-      dto.parentId !== undefined ? dto.parentId : (dto as any).parent;
-    if (rawParentId === 'root' || rawParentId === '') rawParentId = null;
+    const rawParentId = normalizeParentId(
+      dto.parentId !== undefined ? dto.parentId : (dto as any).parent,
+    );
 
     if (rawParentId) {
       const parent = await this.collectionsRepo.findById(
@@ -206,9 +188,9 @@ export class CollectionsService {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
     }
 
-    let rawParentId =
-      dto.parentId !== undefined ? dto.parentId : (dto as any).parent;
-    if (rawParentId === 'root' || rawParentId === '') rawParentId = null;
+    const rawParentId = normalizeParentId(
+      dto.parentId !== undefined ? dto.parentId : (dto as any).parent,
+    );
 
     if (rawParentId) {
       if (rawParentId === collectionId) {

@@ -18,11 +18,3 @@ export const VALID_READING_TRANSITIONS: Record<
   [ReadingStatus.READING]: [ReadingStatus.COMPLETED, ReadingStatus.UNREAD],
   [ReadingStatus.COMPLETED]: [ReadingStatus.READING, ReadingStatus.UNREAD],
 };
-
-export function isValidReadingTransition(
-  current: ReadingStatus,
-  next: ReadingStatus,
-): boolean {
-  if (current === next) return true;
-  return VALID_READING_TRANSITIONS[current]?.includes(next) ?? false;
-}

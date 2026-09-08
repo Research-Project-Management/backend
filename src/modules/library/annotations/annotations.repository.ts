@@ -1,29 +1,15 @@
-import {
-  Injectable,
-  NotFoundException,
-  ForbiddenException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { Prisma, AnnotationType } from '@prisma/client';
 import { VersionMismatchException } from '../common/errors/version-mismatch.exception';
 
-export interface CreateAnnotationData {
-  attachmentId: string;
-  type?: AnnotationType;
-  pageIndex: number;
-  color?: string;
-  quoteText?: string;
-  comment?: string;
-  rectCoords?: any;
-  authorId: string;
-}
+import {
+  AnnotationEntity,
+  CreateAnnotationData,
+  UpdateAnnotationData,
+} from './types/annotations.types';
 
-export interface UpdateAnnotationData {
-  color?: string;
-  quoteText?: string;
-  comment?: string;
-  rectCoords?: any;
-}
+export { AnnotationEntity, CreateAnnotationData, UpdateAnnotationData };
 
 @Injectable()
 export class AnnotationsRepository {
@@ -66,7 +52,10 @@ export class AnnotationsRepository {
         color: data.color ?? '#ffeb3b',
         quoteText: data.quoteText ?? '',
         comment: data.comment ?? '',
-        rectCoords: data.rectCoords ?? null,
+        rectCoords:
+          data.rectCoords !== undefined && data.rectCoords !== null
+            ? (data.rectCoords as Prisma.InputJsonValue)
+            : Prisma.JsonNull,
         authorId: data.authorId,
         version: 1,
       },
@@ -78,18 +67,19 @@ export class AnnotationsRepository {
     expectedVersion: number,
     data: UpdateAnnotationData,
     tx?: Prisma.TransactionClient,
+    existing?: AnnotationEntity,
   ) {
     const client = this.getClient(tx);
-    const existing = await this.findById(id, tx);
-    if (!existing) {
+    const current = existing ?? (await this.findById(id, tx));
+    if (!current) {
       throw new NotFoundException(`Annotation ${id} not found`);
     }
 
-    if (existing.version !== expectedVersion) {
+    if (current.version !== expectedVersion) {
       throw new VersionMismatchException({
         aggregateType: 'Annotation',
         entityId: id,
-        currentVersion: existing.version,
+        currentVersion: current.version,
         providedVersion: expectedVersion,
       });
     }
@@ -97,12 +87,16 @@ export class AnnotationsRepository {
     return client.annotation.update({
       where: { id },
       data: {
-        color: data.color ?? existing.color,
+        color: data.color ?? current.color,
         quoteText:
-          data.quoteText !== undefined ? data.quoteText : existing.quoteText,
-        comment: data.comment !== undefined ? data.comment : existing.comment,
+          data.quoteText !== undefined ? data.quoteText : current.quoteText,
+        comment: data.comment !== undefined ? data.comment : current.comment,
         rectCoords:
-          data.rectCoords !== undefined ? data.rectCoords : existing.rectCoords,
+          data.rectCoords !== undefined
+            ? ((data.rectCoords as Prisma.InputJsonValue) ?? Prisma.JsonNull)
+            : current.rectCoords === null
+              ? Prisma.JsonNull
+              : (current.rectCoords as Prisma.InputJsonValue),
         version: { increment: 1 },
       },
     });
@@ -112,23 +106,21 @@ export class AnnotationsRepository {
     id: string,
     expectedVersion?: number,
     tx?: Prisma.TransactionClient,
+    existing?: AnnotationEntity,
   ): Promise<boolean> {
     const client = this.getClient(tx);
-    if (expectedVersion !== undefined) {
-      const existing = await this.findById(id, tx);
-      if (existing && existing.version !== expectedVersion) {
-        throw new VersionMismatchException({
-          aggregateType: 'Annotation',
-          entityId: id,
-          currentVersion: existing.version,
-          providedVersion: expectedVersion,
-        });
-      }
+    const current = existing ?? (await this.findById(id, tx));
+    if (!current) {
+      return false;
     }
 
-    const existing = await this.findById(id, tx);
-    if (!existing) {
-      return false;
+    if (expectedVersion !== undefined && current.version !== expectedVersion) {
+      throw new VersionMismatchException({
+        aggregateType: 'Annotation',
+        entityId: id,
+        currentVersion: current.version,
+        providedVersion: expectedVersion,
+      });
     }
 
     const result = await client.annotation.updateMany({

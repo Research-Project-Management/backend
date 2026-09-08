@@ -2,6 +2,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ForbiddenException,
   Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -139,7 +140,24 @@ export class LatexService {
     };
   }
 
-  async compile(dto: CompileLatexDto): Promise<CompileResult> {
+  async compile(
+    dto: CompileLatexDto,
+    userId?: string,
+  ): Promise<CompileResult> {
+    const pageOrProjectId =
+      dto.project_id || dto.projectId || dto.page_id || dto.pageId;
+    if (pageOrProjectId && userId) {
+      const page = await this.pageService.findPageById(pageOrProjectId);
+      if (page) {
+        const hasAccess = await this.pageService.checkUserAccess(page.id, userId);
+        if (!hasAccess) {
+          throw new ForbiddenException(
+            'You do not have permission to compile this document',
+          );
+        }
+      }
+    }
+
     const source = dto.source || '';
     const sourceHash = this.hashSource(source);
     const cacheKey = DOCUMENT_REDIS_KEYS.latex(sourceHash);

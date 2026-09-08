@@ -174,6 +174,8 @@ export class ProjectController {
   }
 
   @Post(['project/:projectId/leave', 'projects/:projectId/leave'])
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Leave project (single-admin protected)' })
   async leaveProject(
     @Param('projectId') projectId: string,

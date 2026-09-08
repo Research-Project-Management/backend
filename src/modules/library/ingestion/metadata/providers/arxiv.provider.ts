@@ -132,6 +132,13 @@ export class ArxivProvider implements MetadataProvider {
       (match) => decodeHtmlEntities(match[1].trim()),
     ).filter(Boolean);
 
+    const primaryCatMatch = entry.match(
+      /<arxiv:primary_category[^>]*term=["']([^"']+)["'][^>]*>/i,
+    );
+    const primaryCategory = primaryCatMatch
+      ? decodeHtmlEntities(primaryCatMatch[1].trim())
+      : undefined;
+
     const keywords = normalizeTags(rawCategories);
 
     // DOI (if exists in arxiv:doi, or fallback to standard DataCite arXiv DOI)
@@ -165,6 +172,39 @@ export class ArxivProvider implements MetadataProvider {
       comment = cleanBibliographicText(commentMatch[1]);
     }
 
+    // License / Rights (e.g. CC BY 4.0 or arXiv perpetual non-exclusive license)
+    let rights: string | undefined;
+    const licenseLinkMatch =
+      entry.match(
+        /<link[^>]*title=["']license["'][^>]*href=["']([^"']+)["'][^>]*>/i,
+      ) ||
+      entry.match(
+        /<link[^>]*href=["']([^"']+)["'][^>]*title=["']license["'][^>]*>/i,
+      );
+    if (licenseLinkMatch && licenseLinkMatch[1]) {
+      const rawLicense = licenseLinkMatch[1].trim();
+      if (rawLicense.includes('licenses/by/4.0')) {
+        rights = 'CC BY 4.0';
+      } else if (rawLicense.includes('licenses/by-sa/4.0')) {
+        rights = 'CC BY-SA 4.0';
+      } else if (rawLicense.includes('licenses/by-nc-sa/4.0')) {
+        rights = 'CC BY-NC-SA 4.0';
+      } else if (rawLicense.includes('licenses/by-nc-nd/4.0')) {
+        rights = 'CC BY-NC-ND 4.0';
+      } else if (rawLicense.includes('nonexclusive-distrib')) {
+        rights = 'arXiv.org perpetual non-exclusive license';
+      } else if (rawLicense.includes('publicdomain/zero/1.0')) {
+        rights = 'CC0 1.0';
+      } else {
+        rights = rawLicense;
+      }
+    }
+
+    const canonicalArxivId = cleanId.replace(/v\d+$/i, '');
+
+    // Native Zotero arXiv Extra format: arXiv:<id> [<primary_category>]
+    const extra = `arXiv:${canonicalArxivId}${primaryCategory ? ` [${primaryCategory}]` : ''}`;
+
     // PDF link
     const pdfUrl = `https://arxiv.org/pdf/${cleanId}.pdf`;
     const canonicalUrl = `https://arxiv.org/abs/${cleanId}`;
@@ -195,8 +235,13 @@ export class ArxivProvider implements MetadataProvider {
         abstract,
         language: 'en',
         archive: 'arXiv',
+        repository: 'arXiv',
+        archiveId: `arXiv:${canonicalArxivId}`,
         libraryCatalog: 'arXiv.org',
-        callNumber: `arXiv:${cleanId}`,
+        callNumber: undefined,
+        rights,
+        license: rights,
+        extra,
         keywords: keywords.length > 0 ? keywords : undefined,
         tags: keywords.length > 0 ? keywords : undefined,
         itemType: 'preprint',
@@ -205,7 +250,9 @@ export class ArxivProvider implements MetadataProvider {
         extraFields: {
           repository: 'arXiv',
           archiveId: cleanId,
+          ...(primaryCategory ? { primaryCategory } : {}),
           ...(comment ? { comment } : {}),
+          ...(rights ? { rights } : {}),
         },
         provenance: {
           originProvider: this.id,

@@ -30,9 +30,10 @@ export class WorklogService {
       query.page,
       query.limit,
     );
-
-    const startDate = query.startDate ? new Date(query.startDate) : undefined;
-    const endDate = query.endDate ? new Date(query.endDate) : undefined;
+    const { startDate, endDate } = this.parseFilterDates(
+      query.startDate,
+      query.endDate,
+    );
 
     const { items, total } = await this.worklogRepo.findProjectWorklogs(
       projectId,
@@ -45,16 +46,7 @@ export class WorklogService {
       },
     );
 
-    const totalHours = calculateTotalWorklogHours(items);
-
-    return {
-      items,
-      total,
-      totalHours,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit) || 1,
-    };
+    return this.formatWorklogPageResult(items, total, page, limit);
   }
 
   async getWorkspaceWorklogs(workspaceId: string, query: QueryWorklogDto) {
@@ -62,9 +54,10 @@ export class WorklogService {
       query.page,
       query.limit,
     );
-
-    const startDate = query.startDate ? new Date(query.startDate) : undefined;
-    const endDate = query.endDate ? new Date(query.endDate) : undefined;
+    const { startDate, endDate } = this.parseFilterDates(
+      query.startDate,
+      query.endDate,
+    );
 
     const { items, total } = await this.worklogRepo.findWorkspaceWorklogs(
       workspaceId,
@@ -77,8 +70,23 @@ export class WorklogService {
       },
     );
 
-    const totalHours = calculateTotalWorklogHours(items);
+    return this.formatWorklogPageResult(items, total, page, limit);
+  }
 
+  private parseFilterDates(startDateStr?: string, endDateStr?: string) {
+    return {
+      startDate: startDateStr ? new Date(startDateStr) : undefined,
+      endDate: endDateStr ? new Date(endDateStr) : undefined,
+    };
+  }
+
+  private formatWorklogPageResult<T extends { hours?: number | null }>(
+    items: T[],
+    total: number,
+    page: number,
+    limit: number,
+  ) {
+    const totalHours = calculateTotalWorklogHours(items);
     return {
       items,
       total,

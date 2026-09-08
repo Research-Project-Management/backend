@@ -16,22 +16,11 @@ import { ITEM_READ_PORT, IItemReadPort } from '../items/ports/items.ports';
 
 import { ItemsService } from '../items/items.service';
 import { AnnotationsService } from '../annotations/annotations.service';
-import {
-  PdfBakerService,
-  BurnableAnnotation,
-} from './services/pdf-baker.service';
+import { PdfBakerService } from './services/pdf-baker.service';
+import { ExportResult, BurnableAnnotation } from './types/exports.types';
+import { formatCsvExport } from './utils/exports.utils';
 
-export { BurnableAnnotation };
-
-export interface ExportResult {
-  format: ExportFormatType;
-  filename: string;
-  mimeType: string;
-  content: string;
-  itemCount: number;
-  /** True when the library has more items than the export cap (1000). */
-  truncated: boolean;
-}
+export { BurnableAnnotation, ExportResult };
 
 /** Maximum number of items exported in a single request. */
 const EXPORT_MAX_ITEMS = 1000;
@@ -239,35 +228,21 @@ export class ExportsService {
       }
 
       case 'csv': {
-        const headers = [
-          'id',
-          'title',
-          'authors',
-          'year',
-          'publicationTitle',
-          'doi',
-          'itemType',
-        ];
-        const rows = items.map((it) => [
-          `"${it.id}"`,
-          `"${(it.title || '').replace(/"/g, '""')}"`,
-          `"${CslJsonMapper.getAuthorNames(it).join('; ').replace(/"/g, '""')}"`,
-          it.year || '',
-          `"${(it.publicationTitle || '').replace(/"/g, '""')}"`,
-          `"${it.doi || ''}"`,
-          `"${it.itemType || ''}"`,
-        ]);
-
-        const csvContent = [
-          headers.join(','),
-          ...rows.map((r) => r.join(',')),
-        ].join('\n');
+        const csvItems = items.map((it) => ({
+          id: it.id,
+          title: it.title,
+          authors: CslJsonMapper.getAuthorNames(it),
+          year: it.year,
+          publicationTitle: it.publicationTitle,
+          doi: it.doi,
+          itemType: it.itemType,
+        }));
 
         return {
           format: 'csv',
           filename: `library-export-${timestamp}.csv`,
           mimeType: 'text/csv',
-          content: csvContent,
+          content: formatCsvExport(csvItems),
           itemCount: items.length,
           truncated,
         };

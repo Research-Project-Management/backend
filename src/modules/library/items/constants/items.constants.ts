@@ -5,8 +5,17 @@ import { SCHEMA_V42_DATA } from '../../types/constants/types.constants';
 // the API but silently discarded by the persistence layer.
 export const CATALOG_COLUMN_METADATA_FIELDS = new Set([
   'title',
+  'year',
   'doi',
+  'DOI', // Zotero canonical casing
+  'abstract',
+  'abstractNote', // Zotero alias for abstract
+  'itemType',
+  'type',
   'publicationTitle',
+  'journal', // alias for publicationTitle
+  'publicationDate',
+  'date', // Zotero alias for publicationDate
   'publisher',
   'place',
   'volume',
@@ -18,27 +27,79 @@ export const CATALOG_COLUMN_METADATA_FIELDS = new Set([
   'series',
   'seriesTitle',
   'seriesText',
+  'seriesNumber',
   'issn',
+  'ISSN', // Zotero canonical casing
   'isbn',
+  'ISBN', // Zotero canonical casing
   'pmid',
+  'PMID', // Zotero canonical casing
   'pmcid',
+  'PMCID', // Zotero canonical casing
   'url',
-  'type',
   'language',
   'journalAbbr',
+  'journalAbbreviation', // Zotero alias for journalAbbr
   'shortTitle',
   'rights',
   'license',
   'citationKey',
+  'citeKey',
   'libraryCatalog',
   'archive',
   'archiveLocation',
   'callNumber',
+  'accessedAt',
+  'accessDate', // alias for accessedAt
+  'extra',
+  // Dedicated Academic / Persistent Columns
+  'arxivId',
+  'archiveId', // Zotero alias for arxivId
+  'archiveID', // Zotero v42 canonical casing
+  'citationCount',
+  'referenceCount',
+  'openAccessPdfUrl',
 ]);
 
+export const FIELD_ALIASES: Record<string, string> = {
+  DOI: 'doi',
+  ISBN: 'isbn',
+  ISSN: 'issn',
+  PMID: 'pmid',
+  PMCID: 'pmcid',
+  archiveID: 'arxivId',
+  archiveId: 'arxivId',
+  abstractNote: 'abstract',
+  date: 'publicationDate',
+  journal: 'publicationTitle',
+  journalAbbreviation: 'journalAbbr',
+  accessDate: 'accessedAt',
+  license: 'rights',
+  citeKey: 'citationKey',
+};
+
+export const REVERSE_FIELD_ALIASES: Record<string, string> = {
+  doi: 'DOI',
+  isbn: 'ISBN',
+  issn: 'ISSN',
+  pmid: 'PMID',
+  pmcid: 'PMCID',
+  arxivId: 'archiveId',
+  abstract: 'abstractNote',
+  publicationDate: 'date',
+  publicationTitle: 'journal',
+  journalAbbr: 'journalAbbreviation',
+  accessedAt: 'accessDate',
+  rights: 'license',
+  citationKey: 'citationKey',
+};
+
+export {
+  BASE_FIELD_MAPPINGS,
+  REVERSE_BASE_FIELD_MAPPINGS,
+} from '../../types/constants/types.constants';
+
 export const LEGACY_TYPE_SPECIFIC_EXTRA_FIELDS = [
-  'seriesNumber',
-  'abstractNote',
   'edition',
   'numPages',
   'numberOfVolumes',
@@ -99,9 +160,6 @@ export const LEGACY_TYPE_SPECIFIC_EXTRA_FIELDS = [
 ] as const;
 
 export const ACADEMIC_METRICS_EXTRA_FIELDS = [
-  'citationCount',
-  'referenceCount',
-  'openAccessPdfUrl',
   'storageId',
   'explicitCitationKey',
 ] as const;

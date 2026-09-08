@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger, Optional, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { IngestionSubmissionEnvelope } from '../types/ingestion-submission.types';
 import { IngestionPipelineRunner } from './ingestion-pipeline.runner';
@@ -18,7 +18,7 @@ export interface IngestionQueueStats {
 }
 
 @Injectable()
-export class IngestionQueueService {
+export class IngestionQueueService implements OnModuleInit {
   private readonly logger = new Logger(IngestionQueueService.name);
   private readonly queue: QueuedIngestionTask[] = [];
   private activeCount = 0;
@@ -44,6 +44,36 @@ export class IngestionQueueService {
     this.logger.log(
       `IngestionQueueService initialized with maxConcurrency=${this.maxConcurrency}`,
     );
+  }
+
+  async onModuleInit(): Promise<void> {
+    try {
+      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+      const orphanedRuns = await this.ingestionRepo.findOrphanedRuns(
+        tenMinutesAgo,
+        { limit: 20 },
+      );
+      if (orphanedRuns.length > 0) {
+        this.logger.warn(
+          `Found ${orphanedRuns.length} orphaned ingestion run(s) on startup. Marking as FAILED_RETRYABLE.`,
+        );
+        for (const run of orphanedRuns) {
+          await this.ingestionRepo.updateRunStatus(
+            run.workspaceId,
+            run.id,
+            IngestionStatus.FAILED_RETRYABLE,
+            {
+              lastError:
+                'Pipeline interrupted by server restart. Eligible for retry.',
+            },
+          );
+        }
+      }
+    } catch (err: any) {
+      this.logger.error(
+        `Failed to scan for orphaned ingestion runs on startup: ${err?.message}`,
+      );
+    }
   }
 
   /**

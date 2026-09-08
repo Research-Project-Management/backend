@@ -16,7 +16,7 @@ import {
   CreateWorkspaceInvitationDto,
 } from './dto/workspace.dto';
 import { SearchResultItem } from './dto/search-result.dto';
-import { WorkspaceMemberRole } from '@prisma/client';
+import { WorkspaceMemberRole, Prisma } from '@prisma/client';
 import * as crypto from 'crypto';
 import { generateWorkspaceSlug } from './utils/workspace.utils';
 
@@ -83,7 +83,7 @@ export class WorkspaceService {
       plan: dto.plan || 'free',
       inviteCode,
       createdById: userId,
-      settings: (dto.settings as any) || {},
+      settings: (dto.settings as Prisma.InputJsonValue) ?? {},
       members: {
         create: {
           userId,
@@ -113,7 +113,9 @@ export class WorkspaceService {
       ...(dto.avatar !== undefined && { avatar: dto.avatar }),
       ...(dto.companySize !== undefined && { companySize: dto.companySize }),
       ...(dto.plan !== undefined && { plan: dto.plan }),
-      ...(dto.settings !== undefined && { settings: dto.settings as any }),
+      ...(dto.settings !== undefined && {
+        settings: dto.settings as Prisma.InputJsonValue,
+      }),
     });
 
     await this.invalidateWorkspaceCache(

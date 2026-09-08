@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { Prisma, Worklog } from '@prisma/client';
 import { IWorklogRepository, WorklogQueryOptions } from './types/worklog.types';
@@ -10,17 +10,27 @@ export { WorklogQueryOptions };
 export class WorklogRepository implements IWorklogRepository {
   constructor(private readonly prisma: PrismaService) {}
 
+  private applyDateAndUserFilters(
+    where: Prisma.WorklogWhereInput,
+    options: WorklogQueryOptions,
+  ): void {
+    if (options.startDate || options.endDate) {
+      where.date = {
+        ...(options.startDate ? { gte: options.startDate } : {}),
+        ...(options.endDate ? { lte: options.endDate } : {}),
+      };
+    }
+    if (options.userId) {
+      where.userId = options.userId;
+    }
+  }
+
   async findProjectWorklogs(
     projectId: string,
     options: WorklogQueryOptions,
   ): Promise<{ items: any[]; total: number }> {
     const where: Prisma.WorklogWhereInput = { projectId };
-    if (options.userId) where.userId = options.userId;
-    if (options.startDate || options.endDate) {
-      where.date = {};
-      if (options.startDate) where.date.gte = options.startDate;
-      if (options.endDate) where.date.lte = options.endDate;
-    }
+    this.applyDateAndUserFilters(where, options);
 
     const [items, total] = await Promise.all([
       this.prisma.worklog.findMany({
@@ -46,12 +56,7 @@ export class WorklogRepository implements IWorklogRepository {
     const where: Prisma.WorklogWhereInput = {
       project: { workspaceId, deletedAt: null },
     };
-    if (options.userId) where.userId = options.userId;
-    if (options.startDate || options.endDate) {
-      where.date = {};
-      if (options.startDate) where.date.gte = options.startDate;
-      if (options.endDate) where.date.lte = options.endDate;
-    }
+    this.applyDateAndUserFilters(where, options);
 
     const [items, total] = await Promise.all([
       this.prisma.worklog.findMany({
@@ -84,48 +89,91 @@ export class WorklogRepository implements IWorklogRepository {
   async createWorklog(
     data: Prisma.WorklogCreateInput | Prisma.WorklogUncheckedCreateInput,
   ): Promise<Worklog> {
-    const worklog = await this.prisma.worklog.create({
-      data: data as Prisma.WorklogCreateInput,
-      include: {
-        user: { select: USER_MINIMAL_SELECT },
-      },
-    });
-
-    if (worklog.taskId) {
-      await this.prisma.task.update({
-        where: { id: worklog.taskId },
-        data: { timeSpent: { increment: worklog.hours } },
+    return this.prisma.$transaction(async (tx) => {
+      const worklog = await tx.worklog.create({
+        data: data as Prisma.WorklogCreateInput,
+        include: {
+          user: { select: USER_MINIMAL_SELECT },
+        },
       });
-    }
 
-    return worklog;
+      if (worklog.taskId) {
+        await tx.task.update({
+          where: { id: worklog.taskId },
+          data: { timeSpent: { increment: worklog.hours } },
+        });
+      }
+
+      return worklog;
+    });
   }
 
   async deleteWorklog(id: string): Promise<Worklog> {
-    const worklog = await this.prisma.worklog.delete({
-      where: { id },
-    });
-
-    if (worklog.taskId) {
-      await this.prisma.task.update({
-        where: { id: worklog.taskId },
-        data: { timeSpent: { decrement: worklog.hours } },
+    return this.prisma.$transaction(async (tx) => {
+      const worklog = await tx.worklog.delete({
+        where: { id },
       });
-    }
 
-    return worklog;
+      if (worklog.taskId) {
+        await tx.task.update({
+          where: { id: worklog.taskId },
+          data: { timeSpent: { decrement: worklog.hours } },
+        });
+      }
+
+      return worklog;
+    });
   }
 
   async updateWorklog(
     id: string,
     data: Prisma.WorklogUpdateInput,
   ): Promise<Worklog> {
-    return this.prisma.worklog.update({
-      where: { id },
-      data,
-      include: {
-        user: { select: USER_MINIMAL_SELECT },
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const oldWorklog = await tx.worklog.findUnique({
+        where: { id },
+      });
+      if (!oldWorklog) {
+        throw new NotFoundException('Worklog not found');
+      }
+
+      const updatedWorklog = await tx.worklog.update({
+        where: { id },
+        data,
+        include: {
+          user: { select: USER_MINIMAL_SELECT },
+        },
+      });
+
+      const oldTaskId = oldWorklog.taskId;
+      const newTaskId = updatedWorklog.taskId;
+      const oldHours = oldWorklog.hours;
+      const newHours = updatedWorklog.hours;
+
+      if (oldTaskId === newTaskId) {
+        if (oldTaskId && oldHours !== newHours) {
+          const delta = newHours - oldHours;
+          await tx.task.update({
+            where: { id: oldTaskId },
+            data: { timeSpent: { increment: delta } },
+          });
+        }
+      } else {
+        if (oldTaskId) {
+          await tx.task.update({
+            where: { id: oldTaskId },
+            data: { timeSpent: { decrement: oldHours } },
+          });
+        }
+        if (newTaskId) {
+          await tx.task.update({
+            where: { id: newTaskId },
+            data: { timeSpent: { increment: newHours } },
+          });
+        }
+      }
+
+      return updatedWorklog;
     });
   }
 

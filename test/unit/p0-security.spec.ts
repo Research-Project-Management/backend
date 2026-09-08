@@ -283,4 +283,63 @@ describe('P0 Security Regression Tests', () => {
       expect(mockEngine.streamChat).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe('UserRepository — Multi-Tenant User Search Isolation', () => {
+    let userRepo: any;
+    let mockPrismaForUser: any;
+
+    beforeEach(() => {
+      mockPrismaForUser = {
+        workspaceMember: {
+          findFirst: jest.fn(),
+          findMany: jest.fn(),
+        },
+        user: {
+          findMany: jest.fn(),
+        },
+      };
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { UserRepository } = require('@/modules/iam/user/user.repository');
+      userRepo = new UserRepository(mockPrismaForUser);
+    });
+
+    it('rejects cross-tenant enumeration by returning [] when user is not a member of the requested workspaceId', async () => {
+      mockPrismaForUser.workspaceMember.findFirst.mockResolvedValue(null);
+
+      const result = await userRepo.searchUsers(
+        'alice',
+        'attacker-user-id',
+        'foreign-workspace-id',
+      );
+
+      expect(result).toEqual([]);
+      expect(mockPrismaForUser.workspaceMember.findFirst).toHaveBeenCalledWith({
+        where: {
+          workspaceId: 'foreign-workspace-id',
+          userId: 'attacker-user-id',
+        },
+        select: { id: true },
+      });
+      expect(mockPrismaForUser.user.findMany).not.toHaveBeenCalled();
+    });
+
+    it('allows searching within workspaceId when user is a confirmed member', async () => {
+      mockPrismaForUser.workspaceMember.findFirst.mockResolvedValue({
+        id: 'membership-1',
+      });
+      mockPrismaForUser.user.findMany.mockResolvedValue([
+        { id: 'user-2', name: 'Alice', email: 'alice@example.com' },
+      ]);
+
+      const result = await userRepo.searchUsers(
+        'alice',
+        'member-user-id',
+        'my-workspace-id',
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0].name).toBe('Alice');
+      expect(mockPrismaForUser.user.findMany).toHaveBeenCalled();
+    });
+  });
 });

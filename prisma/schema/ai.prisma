@@ -52,8 +52,8 @@ model ActivityEvent {
   newValue      String?    @map("new_value")
   oldIdentifier String?    @map("old_identifier")
   newIdentifier String?    @map("new_identifier")
-  actorId       String     @map("actor_id") @db.Uuid
-  actor         User       @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  actorId       String?    @map("actor_id") @db.Uuid
+  actor         User?      @relation(fields: [actorId], references: [id], onDelete: SetNull)
   workspaceId   String     @map("workspace_id") @db.Uuid
   workspace     Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   projectId     String?    @map("project_id") @db.Uuid

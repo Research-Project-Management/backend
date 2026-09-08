@@ -1,4 +1,9 @@
-import { Injectable, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  Optional,
+  NotFoundException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { LabelRepository } from './label.repository';
 import { CreateLabelDto, UpdateLabelDto } from './dto/label.dto';
 import { LabelType } from '@prisma/client';
@@ -49,21 +54,31 @@ export class LabelService {
     return { label };
   }
 
-  async updateLabel(labelId: string, dto: UpdateLabelDto) {
-    const label = await this.labelRepo.updateLabel(labelId, {
-      ...(dto.name !== undefined && { name: dto.name }),
-      ...(dto.color !== undefined && { color: dto.color }),
-      ...(dto.type !== undefined && { type: dto.type }),
-    });
+  async updateLabel(labelId: string, dto: UpdateLabelDto, workspaceId?: string) {
+    const label = await this.labelRepo.updateLabel(
+      labelId,
+      {
+        ...(dto.name !== undefined && { name: dto.name }),
+        ...(dto.color !== undefined && { color: dto.color }),
+        ...(dto.type !== undefined && { type: dto.type }),
+      },
+      workspaceId,
+    );
 
     await this.invalidateLabelCache(label.workspaceId);
 
     return { label };
   }
 
-  async deleteLabel(labelId: string) {
+  async deleteLabel(labelId: string, workspaceId?: string) {
     const label = await this.labelRepo.findLabelById(labelId);
-    await this.labelRepo.deleteLabel(labelId);
+    if (!label) {
+      throw new NotFoundException('Label not found');
+    }
+    if (workspaceId && label.workspaceId !== workspaceId) {
+      throw new ForbiddenException('Label does not belong to this workspace');
+    }
+    await this.labelRepo.deleteLabel(labelId, workspaceId);
     if (label?.workspaceId) {
       await this.invalidateLabelCache(label.workspaceId);
     }

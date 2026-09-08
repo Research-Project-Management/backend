@@ -49,43 +49,9 @@ export class CreateWorkspaceDto {
   settings?: Record<string, unknown>;
 }
 
-export class UpdateWorkspaceDto {
-  @IsString()
-  @IsOptional()
-  name?: string;
+import { PartialType } from '@nestjs/swagger';
 
-  @IsString()
-  @IsOptional()
-  url?: string;
-
-  @IsString()
-  @IsOptional()
-  slug?: string;
-
-  @IsString()
-  @IsOptional()
-  avatar?: string;
-
-  @IsString()
-  @IsOptional()
-  companySize?: string;
-
-  @IsString()
-  @IsOptional()
-  size?: string;
-
-  @IsString()
-  @IsOptional()
-  timezone?: string;
-
-  @IsString()
-  @IsOptional()
-  plan?: string;
-
-  @IsObject()
-  @IsOptional()
-  settings?: Record<string, unknown>;
-}
+export class UpdateWorkspaceDto extends PartialType(CreateWorkspaceDto) {}
 
 export class AddWorkspaceMemberDto {
   @IsString()

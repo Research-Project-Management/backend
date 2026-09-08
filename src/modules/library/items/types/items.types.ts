@@ -124,17 +124,24 @@ export interface ItemMetadata {
   section?: string | null;
   series?: string | null;
   seriesTitle?: string | null;
+  seriesText?: string | null;
+  seriesNumber?: string | null;
   abstract?: string | null;
+  abstractNote?: string | null;
   url?: string | null;
   language?: string | null;
   shortTitle?: string | null;
+  journal?: string | null;
   journalAbbr?: string | null;
+  journalAbbreviation?: string | null;
   rights?: string | null;
   license?: string | null;
   citationKey?: string | null;
   libraryCatalog?: string | null;
   archive?: string | null;
   archiveLocation?: string | null;
+  archiveId?: string | null;
+  repository?: string | null;
   callNumber?: string | null;
   doi?: string | null;
   arxivId?: string | null;
@@ -142,10 +149,19 @@ export interface ItemMetadata {
   pmcid?: string | null;
   isbn?: string | null;
   issn?: string | null;
+  citationCount?: number | null;
+  referenceCount?: number | null;
+  openAccessPdfUrl?: string | null;
+  accessedAt?: Date | null;
+  accessDate?: string | null;
   extra?: string | null;
   extraFields?: Record<string, unknown>;
   creators?: CreatorCredit[];
-  contributors?: any[];
+  contributors?: CreatorCredit[];
+  authors?: string[];
+  editors?: string[];
+  keywords?: string[];
+  tags?: string[];
   identifiers?: ItemIdentifier[];
 }
 
@@ -347,7 +363,7 @@ export interface CreateCatalogItemData {
   accessedAt?: Date | null;
   accessDate?: string;
   extra?: string;
-  notes?: any;
+  notes?: unknown[] | string[] | null;
   labels?: string[];
   keywords?: string[];
   tags?: string[];
@@ -359,21 +375,21 @@ export interface CreateCatalogItemData {
   collectionId?: string | null;
   collectionIds?: string[] | null;
   uploadedById: string;
-  contributors?: any;
-  creators?: any[];
-  extraFields?: Record<string, any>;
+  contributors?: CreatorCredit[] | unknown;
+  creators?: CreatorCreditInput[];
+  extraFields?: Record<string, unknown>;
   identifier?: string;
   arxivId?: string;
   citationCount?: number | null;
   referenceCount?: number | null;
-  openAccessPdfUrl?: string;
+  openAccessPdfUrl?: string | null;
 }
 
 export interface UpdateCatalogItemData {
   title?: string;
   authors?: string[];
-  creators?: any[];
-  extraFields?: Record<string, any>;
+  creators?: CreatorCreditInput[];
+  extraFields?: Record<string, unknown>;
   year?: number | null;
   doi?: string;
   arxivId?: string;
@@ -410,7 +426,7 @@ export interface UpdateCatalogItemData {
   citationKey?: string;
   citationCount?: number | null;
   referenceCount?: number | null;
-  openAccessPdfUrl?: string;
+  openAccessPdfUrl?: string | null;
   libraryCatalog?: string;
   archive?: string;
   archiveLocation?: string;
@@ -418,7 +434,7 @@ export interface UpdateCatalogItemData {
   accessedAt?: Date | null;
   accessDate?: string;
   extra?: string;
-  notes?: any;
+  notes?: unknown[] | string[] | null;
   labels?: string[];
   keywords?: string[];
   tags?: string[];

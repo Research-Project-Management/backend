@@ -404,4 +404,28 @@ export class PageService {
   async findPageById(pageId: string) {
     return this.pageRepo.findPageById(pageId);
   }
+
+  async checkUserAccess(pageId: string, userId: string): Promise<boolean> {
+    const page = await this.pageRepo.findPageById(pageId);
+    if (!page) return false;
+
+    if (page.workspaceId) {
+      const wsMember = await this.pageRepo.findWorkspaceMember(
+        page.workspaceId,
+        userId,
+      );
+      if (wsMember) return true;
+    }
+
+    if (page.projectId) {
+      const projMember = await this.pageRepo.findProjectMember(
+        page.projectId,
+        userId,
+      );
+      if (projMember) return true;
+    }
+
+    return false;
+  }
 }
+

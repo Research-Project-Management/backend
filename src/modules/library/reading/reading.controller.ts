@@ -12,7 +12,7 @@ import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-
 import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
 import { CurrentUser } from '../../../modules/iam/authn/decorators/current-user.decorator';
 import { ReadingService } from './reading.service';
-import { UpdateReadingDto } from './dto/reading.dto';
+import { UpdateReadingDto, GetBatchReadingStatesDto } from './dto/reading.dto';
 
 @Controller([
   'api/v1/workspaces/:workspaceId/library/items/:itemId/state',
@@ -62,7 +62,7 @@ export class ReadingController {
   async getBatchStates(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
-    @Body() body: { itemIds: string[] },
+    @Body() body: GetBatchReadingStatesDto,
   ) {
     return this.readingService.getBatchStates(
       workspaceId,
@@ -89,7 +89,7 @@ export class ReadingBatchController {
   async getBatchStates(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
-    @Body() body: { itemIds: string[] },
+    @Body() body: GetBatchReadingStatesDto,
   ) {
     return this.readingService.getBatchStates(
       workspaceId,

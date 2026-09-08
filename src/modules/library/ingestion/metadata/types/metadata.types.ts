@@ -104,6 +104,8 @@ export interface ItemMetadata {
   license?: string;
   archive?: string;
   archiveLocation?: string;
+  archiveId?: string;
+  repository?: string;
   callNumber?: string;
   libraryCatalog?: string;
   extraFields?: Record<string, any>;

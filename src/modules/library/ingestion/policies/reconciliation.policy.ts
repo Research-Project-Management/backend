@@ -9,19 +9,33 @@ import { ItemMetadata } from '../metadata/types/metadata.types';
 
 @Injectable()
 export class ReconciliationPolicy {
+  /**
+   * Global provider priority scores for ingestion-pipeline reconciliation.
+   *
+   * Used in Layer 2 reconciliation (IngestionPolicy) where multiple IngestionCandidates
+   * compete: e.g. a BibTeX file upload vs. the EnrichedProvider result.
+   *
+   * Formula: evidence.confidence × PROVIDER_PRIORITY[provider] → winner takes field.
+   *
+   * NOTE: For fine-grained per-field authority, see ReconciliationService.FIELD_AUTHORITY_WEIGHTS
+   * (Layer 1, used within MetadataService.resolve()).
+   *
+   * policyVersion: 1.1.0
+   */
   private static readonly PROVIDER_PRIORITY: Record<string, number> = {
-    UserOverride: 100,
-    DirectIdentifier: 95,
-    CrossRef: 90,
-    PubMed: 85,
-    OpenAlex: 80,
-    arXiv: 75,
-    SemanticScholar: 70,
-    OpenLibrary: 65,
-    BibTeX: 60,
-    RIS: 60,
-    UrlCapture: 50,
-    StagedPdf: 40,
+    UserOverride: 100, // Always wins — never overwrite user intent
+    DirectIdentifier: 95, // DOI/PMID/arXivId resolved directly from source
+    CrossRef: 90, // Publisher-submitted bibliographic authority
+    PubMed: 88, // NLM curated; authoritative for biomedical domain
+    ZoteroSync: 85, // User's verified Zotero library data
+    OpenAlex: 78, // Aggregator; strong for enrichment, weaker for core fields
+    arXiv: 65, // ⚠️ Lowered: submission year ≠ publication year; preprint-only fields
+    SemanticScholar: 65, // Enrichment provider; strong for CS/ML citation graphs
+    OpenLibrary: 65, // Book metadata only; community-maintained
+    BibTeX: 60, // User-imported file; quality depends on export source
+    RIS: 60, // User-imported file; quality depends on export source
+    UrlCapture: 50, // Web scraping; lowest structural reliability
+    StagedPdf: 40, // GROBID/LocalPDFExtraction; noisy for venue/year fields
   };
 
   /**
@@ -35,7 +49,7 @@ export class ReconciliationPolicy {
         conflicts: [],
         proposedItem: { title: 'Untitled Record' },
         decidedAt: new Date().toISOString(),
-        policyVersion: '1.0.0',
+        policyVersion: '1.1.0',
       };
     }
 
@@ -199,7 +213,7 @@ export class ReconciliationPolicy {
       conflicts,
       proposedItem: proposedItem as ItemMetadata,
       decidedAt: new Date().toISOString(),
-      policyVersion: '1.0.0',
+      policyVersion: '1.1.0',
     };
   }
 }

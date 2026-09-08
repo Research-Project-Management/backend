@@ -1,4 +1,5 @@
 import { getFileContentPath } from '@/modules/storage/storage.port';
+import { CATALOG_COLUMN_METADATA_FIELDS } from '../constants/items.constants';
 
 export class ItemsMapper {
   /**
@@ -116,7 +117,18 @@ export class ItemsMapper {
       typeof it.extra === 'string' &&
       it.extra.trim().startsWith('{')
     ) {
-      it.extra = undefined;
+      const lines: string[] = [];
+      for (const [k, v] of Object.entries(extraFields)) {
+        if (
+          v !== null &&
+          v !== undefined &&
+          v !== '' &&
+          !CATALOG_COLUMN_METADATA_FIELDS.has(k)
+        ) {
+          lines.push(`${k}: ${String(v)}`);
+        }
+      }
+      it.extra = lines.length > 0 ? lines.join('\n') : '';
     }
 
     // Explicit projection of known academic fields from extraFields (legacy fallback for old records
@@ -130,8 +142,62 @@ export class ItemsMapper {
     }
     if (!it.openAccessPdfUrl)
       it.openAccessPdfUrl = extraFields.openAccessPdfUrl ?? null;
-    if (!it.arxivId) it.arxivId = extraFields.arxivId ?? null;
+    if (!it.arxivId)
+      it.arxivId = extraFields.arxivId ?? extraFields.archiveId ?? null;
     if (!it.seriesNumber) it.seriesNumber = extraFields.seriesNumber ?? null;
+    if (!it.rights) {
+      it.rights = it.license ?? extraFields.rights ?? extraFields.license ?? null;
+    }
+    if (!it.license) {
+      it.license = it.rights ?? extraFields.license ?? extraFields.rights ?? null;
+    }
+
+    // Legacy cleanup: If callNumber has arXiv:xxx, clean it and ensure it.arxivId is populated
+    if (
+      it.callNumber &&
+      /^arxiv:\s*\d{4}\.\d{4,5}/i.test(String(it.callNumber))
+    ) {
+      if (!it.arxivId) {
+        it.arxivId = String(it.callNumber).replace(/^arxiv:\s*/i, '').trim();
+      }
+      it.callNumber = null;
+    }
+
+    // Ensure native Zotero Extra format: arXiv:<id> [<primaryCategory>]
+    // And ensure clean archiveId for preprints (arXiv:<id> without category)
+    if (it.arxivId || it.archiveId) {
+      const rawId = String(it.arxivId || it.archiveId);
+      const cleanArxivId = rawId
+        .replace(/^arxiv:\s*/i, '')
+        .replace(/\s*\[.*?\]\s*$/, '')
+        .trim();
+      it.arxivId = cleanArxivId;
+      const canonicalCleanId = cleanArxivId.replace(/v\d+$/i, '');
+      if (it.itemType === 'preprint') {
+        it.archiveId = `arXiv:${canonicalCleanId}`;
+        it.repository = it.repository || 'arXiv';
+      }
+
+      const existingExtra = typeof it.extra === 'string' ? it.extra.trim() : '';
+      if (!existingExtra.toLowerCase().includes('arxiv:')) {
+        const primaryCat =
+          extraFields.primaryCategory ||
+          (Array.isArray(it.tags)
+            ? it.tags.find((t: any) =>
+                /^[a-z\-]+(\.[a-z\-]+)?$/i.test(String(t?.name || t)),
+              )
+            : undefined);
+        const catStr = primaryCat
+          ? typeof primaryCat === 'object'
+            ? primaryCat.name
+            : primaryCat
+          : undefined;
+        const arxivLine = catStr
+          ? `arXiv:${canonicalCleanId} [${catStr}]`
+          : `arXiv:${canonicalCleanId}`;
+        it.extra = existingExtra ? `${arxivLine}\n${existingExtra}` : arxivLine;
+      }
+    }
 
     // Project lastReadAt from userStates if present and not already top-level
     if (
@@ -265,11 +331,22 @@ export class ItemsMapper {
       it.notes = [];
     }
 
-    // 9. Harmonize Publication Venue & Dates
+    // 9. Harmonize Publication Venue, Dates & Field Aliases (Zotero Parity)
     it.journal = it.journal || it.publicationTitle || '';
     it.publicationTitle = it.publicationTitle || it.journal || '';
     it.publicationDate = it.publicationDate || (it.year ? String(it.year) : '');
-    it.date = it.publicationDate || (it.year ? String(it.year) : '');
+    it.date = it.date || it.publicationDate || (it.year ? String(it.year) : '');
+    it.abstractNote = it.abstractNote || it.abstract || '';
+    it.abstract = it.abstract || it.abstractNote || '';
+    it.journalAbbreviation = it.journalAbbreviation || it.journalAbbr || '';
+    it.journalAbbr = it.journalAbbr || it.journalAbbreviation || '';
+    it.archiveId =
+      it.archiveId ||
+      (it.arxivId
+        ? it.itemType === 'preprint'
+          ? `arXiv:${String(it.arxivId).replace(/^arxiv:\s*/i, '').replace(/\s*\[.*?\]\s*$/, '').replace(/v\d+$/i, '')}`
+          : it.arxivId
+        : '');
 
     // 10. Identifier Projections (DOI, arXiv, PMID, PMCID, ISBN, ISSN)
     if (Array.isArray(it.identifiers)) {
@@ -283,12 +360,53 @@ export class ItemsMapper {
         if (type === 'issn' && !it.issn) it.issn = ident.value;
       }
     }
-    if (!it.arxivId && it.extraFields?.arxivId) {
-      it.arxivId = String(it.extraFields.arxivId);
+    if (!it.arxivId && (it.extraFields?.arxivId || it.extraFields?.archiveId || it.extraFields?.archiveID)) {
+      it.arxivId = String(it.extraFields.arxivId || it.extraFields.archiveId || it.extraFields.archiveID);
     }
-    if (!it.doi && it.extraFields?.doi) {
-      it.doi = String(it.extraFields.doi);
+    if (!it.doi && (it.extraFields?.doi || it.extraFields?.DOI)) {
+      it.doi = String(it.extraFields.doi || it.extraFields.DOI);
     }
+    if (!it.isbn && (it.extraFields?.isbn || it.extraFields?.ISBN)) {
+      it.isbn = String(it.extraFields.isbn || it.extraFields.ISBN);
+    }
+    if (!it.issn && (it.extraFields?.issn || it.extraFields?.ISSN)) {
+      it.issn = String(it.extraFields.issn || it.extraFields.ISSN);
+    }
+    if (!it.pmid && (it.extraFields?.pmid || it.extraFields?.PMID)) {
+      it.pmid = String(it.extraFields.pmid || it.extraFields.PMID);
+    }
+    if (!it.pmcid && (it.extraFields?.pmcid || it.extraFields?.PMCID)) {
+      it.pmcid = String(it.extraFields.pmcid || it.extraFields.PMCID);
+    }
+
+    // Bidirectional harmonization for Zotero schema v42 uppercase & Prisma DB columns
+    const canonicalDoi = it.doi || it.DOI || '';
+    it.doi = canonicalDoi;
+    it.DOI = canonicalDoi;
+
+    const canonicalIsbn = it.isbn || it.ISBN || '';
+    it.isbn = canonicalIsbn;
+    it.ISBN = canonicalIsbn;
+
+    const canonicalIssn = it.issn || it.ISSN || '';
+    it.issn = canonicalIssn;
+    it.ISSN = canonicalIssn;
+
+    const canonicalPmid = it.pmid || it.PMID || '';
+    it.pmid = canonicalPmid;
+    it.PMID = canonicalPmid;
+
+    const canonicalPmcid = it.pmcid || it.PMCID || '';
+    it.pmcid = canonicalPmcid;
+    it.PMCID = canonicalPmcid;
+
+    const canonicalArxivId = it.arxivId || it.archiveId || it.archiveID || '';
+    const cleanArxiv = canonicalArxivId
+      ? String(canonicalArxivId).replace(/^arxiv:\s*/i, '').replace(/\s*\[.*?\]\s*$/, '').trim()
+      : '';
+    it.arxivId = cleanArxiv;
+    it.archiveId = cleanArxiv ? (it.itemType === 'preprint' ? `arXiv:${cleanArxiv.replace(/v\d+$/i, '')}` : cleanArxiv) : (it.archiveId || '');
+    it.archiveID = it.archiveID || it.archiveId;
     if (!Array.isArray(it.identifiers) || it.identifiers.length === 0) {
       const generatedIdents: any[] = [];
       if (it.doi) {

@@ -8,7 +8,7 @@ import {
   IsInt,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 
 export class CreateWorklogDto {
   @ApiProperty({ description: 'Number of hours worked (e.g. 2.5)' })
@@ -48,44 +48,7 @@ export class CreateWorklogDto {
   workspaceId?: string;
 }
 
-export class UpdateWorklogDto {
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsNumber()
-  @Min(0.1)
-  @Max(24)
-  hours?: number;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  description?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsDateString()
-  date?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  taskId?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  taskTitle?: string;
-
-  @ApiPropertyOptional({ description: 'Project ID' })
-  @IsOptional()
-  @IsString()
-  projectId?: string;
-
-  @ApiPropertyOptional({ description: 'Workspace ID' })
-  @IsOptional()
-  @IsString()
-  workspaceId?: string;
-}
+export class UpdateWorklogDto extends PartialType(CreateWorklogDto) {}
 
 export class QueryWorklogDto {
   @ApiPropertyOptional({ default: 1 })

@@ -64,38 +64,28 @@ export class StickyService {
       userId,
     );
 
-    if (this.cache) {
-      const cached = await this.cache.get<any>(cacheKey);
-      if (cached) return cached;
-    }
-
-    const stickies = await this.stickyRepo.findWorkspaceStickies(
-      resolvedWorkspaceId,
-      userId,
+    return this.getStickiesWithCache(cacheKey, () =>
+      this.stickyRepo.findWorkspaceStickies(resolvedWorkspaceId, userId),
     );
-    const result = {
-      stickies: stickies.map((sticky) => this.formatSticky(sticky)),
-    };
-
-    if (this.cache) {
-      await this.cache.set(cacheKey, result, 1800);
-    }
-
-    return result;
   }
 
   async getProjectStickies(projectId: string, userId: string) {
     const cacheKey = STICKY_REDIS_KEYS.projectStickies(projectId, userId);
+    return this.getStickiesWithCache(cacheKey, () =>
+      this.stickyRepo.findProjectStickies(projectId, userId),
+    );
+  }
 
+  private async getStickiesWithCache(
+    cacheKey: string,
+    fetcher: () => Promise<any[]>,
+  ) {
     if (this.cache) {
       const cached = await this.cache.get<any>(cacheKey);
       if (cached) return cached;
     }
 
-    const stickies = await this.stickyRepo.findProjectStickies(
-      projectId,
-      userId,
-    );
+    const stickies = await fetcher();
     const result = {
       stickies: stickies.map((sticky) => this.formatSticky(sticky)),
     };

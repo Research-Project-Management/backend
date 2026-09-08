@@ -16,8 +16,8 @@ import {
 import {
   CreateAttachmentInput,
   ReplaceAttachmentFileInput,
-  validateAttachmentInvariants,
 } from './types/attachments.types';
+import { validateAttachmentInvariants } from './utils/attachments.utils';
 
 import { AttachmentsRepository } from './attachments.repository';
 import {
@@ -31,6 +31,8 @@ import type {
   UpsertSyncEntityResult,
 } from '../common/types/sync.types';
 import { Inject } from '@nestjs/common';
+
+import { calculateFileChecksum } from './utils/attachments.utils';
 
 export { CreateAttachmentInput, ReplaceAttachmentFileInput };
 
@@ -50,7 +52,7 @@ export class AttachmentsService {
    * Computes SHA-256 hex digest of a file buffer.
    */
   calculateChecksum(buffer: Buffer): string {
-    return createHash('sha256').update(buffer).digest('hex');
+    return calculateFileChecksum(buffer);
   }
 
   /**

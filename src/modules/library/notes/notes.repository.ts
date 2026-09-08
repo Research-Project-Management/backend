@@ -4,21 +4,9 @@ import { Prisma } from '@prisma/client';
 import { VersionMismatchException } from '../common/errors/version-mismatch.exception';
 import { normalizeTags } from '../tags/utils/tags.utils';
 
-export interface CreateNoteData {
-  itemId?: string | null;
-  title?: string;
-  contentJson?: any;
-  contentMd?: string;
-  tags?: string[];
-  createdById: string;
-}
+import { CreateNoteData, UpdateNoteData } from './types/notes.types';
 
-export interface UpdateNoteData {
-  title?: string;
-  contentJson?: any;
-  contentMd?: string;
-  tags?: string[];
-}
+export { CreateNoteData, UpdateNoteData };
 
 @Injectable()
 export class NotesRepository {

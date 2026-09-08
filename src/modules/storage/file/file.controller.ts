@@ -129,30 +129,7 @@ export class FileController {
     if (output.ContentLength) {
       res.header('Content-Length', output.ContentLength);
     }
-    res.header('X-Content-Type-Options', 'nosniff');
-    res.header('Cache-Control', 'private, no-cache, no-transform');
-
-    const safeInlineTypes = new Set([
-      'application/pdf',
-      'image/jpeg',
-      'image/png',
-      'image/webp',
-      'image/gif',
-    ]);
-    const isInline = safeInlineTypes.has(contentType);
-    const dispositionType = isInline ? 'inline' : 'attachment';
-
-    if (contentType === 'image/svg+xml' || contentType === 'text/html') {
-      res.header('Content-Security-Policy', "default-src 'none'; sandbox");
-    }
-
-    const filename = file.filename || 'file';
-    const sanitizedFilename = filename.replace(/[\r\n\t"]/g, '_');
-    const encodedFilename = encodeURIComponent(sanitizedFilename);
-    res.header(
-      'Content-Disposition',
-      `${dispositionType}; filename="${sanitizedFilename}"; filename*=UTF-8''${encodedFilename}`,
-    );
+    this.setDownloadHeaders(res, contentType, file.filename || 'file');
 
     // Attach stream error safety to prevent uncaught error events if client closes connection early
     const streamBody = output.Body as {
@@ -519,32 +496,7 @@ export class FileController {
         res.header('Content-Range', contentRange);
       }
       res.header('Accept-Ranges', 'bytes');
-      res.header('X-Content-Type-Options', 'nosniff');
-      res.header('Cache-Control', 'private, no-cache, no-transform');
-
-      // Safe inline policy: only PDF and safe image MIME types are permitted to be rendered inline
-      const safeInlineTypes = new Set([
-        'application/pdf',
-        'image/jpeg',
-        'image/png',
-        'image/webp',
-        'image/gif',
-      ]);
-      const isInline = safeInlineTypes.has(contentType);
-      const dispositionType = isInline ? 'inline' : 'attachment';
-
-      if (contentType === 'image/svg+xml' || contentType === 'text/html') {
-        res.header('Content-Security-Policy', "default-src 'none'; sandbox");
-      }
-
-      // Sanitize filename against CRLF / Header injection
-      const sanitizedFilename = (filename || 'file').replace(/[\r\n\t"]/g, '_');
-      const encodedFilename = encodeURIComponent(sanitizedFilename);
-
-      res.header(
-        'Content-Disposition',
-        `${dispositionType}; filename="${sanitizedFilename}"; filename*=UTF-8''${encodedFilename}`,
-      );
+      this.setDownloadHeaders(res, contentType, filename || 'file');
 
       const streamBody = stream as {
         on?: (event: string, listener: (...args: any[]) => void) => void;
@@ -670,5 +622,35 @@ export class FileController {
     @CurrentUser('id') userId: string,
   ) {
     return this.fileService.getShareSettings(fileId, userId);
+  }
+
+  private setDownloadHeaders(
+    res: FastifyReply,
+    contentType: string,
+    filename: string,
+  ): void {
+    res.header('X-Content-Type-Options', 'nosniff');
+    res.header('Cache-Control', 'private, no-cache, no-transform');
+
+    const safeInlineTypes = new Set([
+      'application/pdf',
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'image/gif',
+    ]);
+    const isInline = safeInlineTypes.has(contentType);
+    const dispositionType = isInline ? 'inline' : 'attachment';
+
+    if (contentType === 'image/svg+xml' || contentType === 'text/html') {
+      res.header('Content-Security-Policy', "default-src 'none'; sandbox");
+    }
+
+    const sanitizedFilename = (filename || 'file').replace(/[\r\n\t"]/g, '_');
+    const encodedFilename = encodeURIComponent(sanitizedFilename);
+    res.header(
+      'Content-Disposition',
+      `${dispositionType}; filename="${sanitizedFilename}"; filename*=UTF-8''${encodedFilename}`,
+    );
   }
 }

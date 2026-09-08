@@ -15,6 +15,7 @@ export interface ILabelRepository {
   updateLabel(
     labelId: string,
     data: Prisma.LabelUpdateInput | Prisma.LabelUncheckedUpdateInput,
+    workspaceId?: string,
   ): Promise<Label>;
-  deleteLabel(labelId: string): Promise<Label>;
+  deleteLabel(labelId: string, workspaceId?: string): Promise<Label>;
 }

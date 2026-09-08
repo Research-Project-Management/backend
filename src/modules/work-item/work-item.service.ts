@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
   Optional,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
@@ -465,7 +466,33 @@ export class WorkItemService {
       throw new NotFoundException('Task not found');
     }
 
+    const sourceMemberRole = await this.workItemRepo.findProjectMemberRole(
+      source.projectId,
+      userId,
+    );
+    if (!sourceMemberRole) {
+      throw new ForbiddenException(
+        'Insufficient permissions to access source task',
+      );
+    }
+
     const projectId = destinationProjectId || source.projectId;
+    const isSameProject = projectId === source.projectId;
+    if (!isSameProject) {
+      const destMemberRole = await this.workItemRepo.findProjectMemberRole(
+        projectId,
+        userId,
+      );
+      if (
+        !destMemberRole ||
+        (destMemberRole !== 'admin' && destMemberRole !== 'contributor')
+      ) {
+        throw new ForbiddenException(
+          'Insufficient permissions to duplicate task into destination project',
+        );
+      }
+    }
+
     const { identifier, sequenceNumber } =
       await this.workItemRepo.nextProjectTaskIdentifier(projectId);
 
@@ -494,8 +521,10 @@ export class WorkItemService {
       ...(source.assigneeId
         ? { assignee: { connect: { id: source.assigneeId } } }
         : {}),
-      ...(source.cycleId ? { cycle: { connect: { id: source.cycleId } } } : {}),
-      ...(source.parentTaskId
+      ...(isSameProject && source.cycleId
+        ? { cycle: { connect: { id: source.cycleId } } }
+        : {}),
+      ...(isSameProject && source.parentTaskId
         ? { parentTask: { connect: { id: source.parentTaskId } } }
         : {}),
     });
@@ -533,9 +562,9 @@ export class WorkItemService {
     }
 
     const existingAttachments = Array.isArray(task.attachments)
-      ? (task.attachments as any[])
+      ? (task.attachments as Record<string, unknown>[])
       : [];
-    const newAttachment = {
+    const newAttachment: Record<string, unknown> = {
       id: crypto.randomUUID
         ? crypto.randomUUID()
         : Math.random().toString(36).substring(2, 9),
@@ -548,21 +577,10 @@ export class WorkItemService {
     };
 
     const updatedAttachments = [...existingAttachments, newAttachment];
-    const updated = await this.workItemRepo.updateTask(taskId, {
-      attachments: updatedAttachments,
-    });
-
-    await this.invalidateTaskCache(task.projectId, taskId, task.cycleId);
-
-    this.eventEmitter?.emit(
-      'task.updated',
-      new DomainActivityEvent({
-        entityType: 'task' as unknown as EntityType,
-        entityId: taskId,
-        verb: 'updated',
-        actorId: userId || '',
-        projectId: task.projectId,
-      }),
+    const updated = await this.updateTaskAttachmentsAndEmit(
+      task,
+      updatedAttachments,
+      userId,
     );
 
     return { task: this.formatTask(updated), attachment: newAttachment };
@@ -579,33 +597,47 @@ export class WorkItemService {
     }
 
     const existingAttachments = Array.isArray(task.attachments)
-      ? (task.attachments as any[])
+      ? (task.attachments as Record<string, unknown>[])
       : [];
     const updatedAttachments = existingAttachments.filter(
       (att) => att.id !== attachmentId && att.attachmentId !== attachmentId,
     );
 
-    const updated = await this.workItemRepo.updateTask(taskId, {
-      attachments: updatedAttachments,
-    });
-
-    await this.invalidateTaskCache(task.projectId, taskId, task.cycleId);
-
-    this.eventEmitter?.emit(
-      'task.updated',
-      new DomainActivityEvent({
-        entityType: 'task' as unknown as EntityType,
-        entityId: taskId,
-        verb: 'updated',
-        actorId: userId || '',
-        projectId: task.projectId,
-      }),
+    const updated = await this.updateTaskAttachmentsAndEmit(
+      task,
+      updatedAttachments,
+      userId,
     );
 
     return {
       message: 'Attachment removed successfully',
       task: this.formatTask(updated),
     };
+  }
+
+  private async updateTaskAttachmentsAndEmit(
+    task: { id: string; projectId: string; cycleId: string | null },
+    updatedAttachments: Record<string, unknown>[],
+    userId?: string,
+  ) {
+    const updated = await this.workItemRepo.updateTask(task.id, {
+      attachments: updatedAttachments as unknown as Prisma.InputJsonValue,
+    });
+
+    await this.invalidateTaskCache(task.projectId, task.id, task.cycleId);
+
+    this.eventEmitter?.emit(
+      'task.updated',
+      new DomainActivityEvent({
+        entityType: 'task' as unknown as EntityType,
+        entityId: task.id,
+        verb: 'updated',
+        actorId: userId || '',
+        projectId: task.projectId,
+      }),
+    );
+
+    return updated;
   }
 }
 

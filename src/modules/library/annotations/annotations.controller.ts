@@ -11,6 +11,7 @@ import {
   UseGuards,
   NotFoundException,
   BadRequestException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { AnnotationsService } from './annotations.service';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
@@ -37,8 +38,15 @@ export class AnnotationsController {
     @Param('attachmentId') attachmentId: string,
     @Query('pageIndex') pageIndex?: string,
   ) {
-    const parsedPage =
-      pageIndex !== undefined ? parseInt(pageIndex, 10) : undefined;
+    let parsedPage: number | undefined;
+    if (pageIndex !== undefined) {
+      parsedPage = parseInt(pageIndex, 10);
+      if (isNaN(parsedPage) || parsedPage < 0) {
+        throw new BadRequestException(
+          'pageIndex must be a non-negative integer',
+        );
+      }
+    }
     return this.annotationsService.getAnnotationsByAttachment(
       workspaceId,
       attachmentId,
@@ -54,6 +62,11 @@ export class AnnotationsController {
     @CurrentUser('id') currentUserId: string,
     @Body() body: CreateAnnotationDto,
   ) {
+    if (!currentUserId) {
+      throw new UnauthorizedException(
+        'Authentication required to create annotations',
+      );
+    }
     return this.annotationsService.createAnnotation(workspaceId, {
       attachmentId,
       type: body.type,
@@ -62,7 +75,7 @@ export class AnnotationsController {
       quoteText: body.quoteText,
       comment: body.comment,
       rectCoords: body.rectCoords,
-      authorId: currentUserId || 'system',
+      authorId: currentUserId,
     });
   }
 
@@ -75,12 +88,12 @@ export class AnnotationsController {
     @Headers('if-match') ifMatch: string | undefined,
     @Body() body: UpdateAnnotationDto,
   ) {
-    const expectedVersion =
+    const rawVersion =
       body.expectedVersion ??
       (ifMatch ? parseInt(ifMatch.replace(/["']/g, ''), 10) : undefined);
-    if (!expectedVersion || isNaN(expectedVersion)) {
+    if (rawVersion === undefined || isNaN(rawVersion) || rawVersion < 1) {
       throw new BadRequestException(
-        'Optimistic locking requirement: expectedVersion or If-Match header is required',
+        'Optimistic locking requirement: expectedVersion (>= 1) or If-Match header is required',
       );
     }
 
@@ -88,7 +101,7 @@ export class AnnotationsController {
     return this.annotationsService.updateAnnotation(
       workspaceId,
       id,
-      expectedVersion,
+      rawVersion,
       updateData,
       currentUserId,
     );
@@ -103,12 +116,23 @@ export class AnnotationsController {
     @Query('expectedVersion') expectedVersionQuery?: string,
     @Headers('if-match') ifMatch?: string,
   ) {
-    const expectedVersion =
-      expectedVersionQuery !== undefined
-        ? parseInt(expectedVersionQuery, 10)
-        : ifMatch
-          ? parseInt(ifMatch.replace(/["']/g, ''), 10)
-          : undefined;
+    let expectedVersion: number | undefined;
+    if (expectedVersionQuery !== undefined) {
+      expectedVersion = parseInt(expectedVersionQuery, 10);
+      if (isNaN(expectedVersion) || expectedVersion < 1) {
+        throw new BadRequestException(
+          'expectedVersion must be a positive integer',
+        );
+      }
+    } else if (ifMatch) {
+      expectedVersion = parseInt(ifMatch.replace(/["']/g, ''), 10);
+      if (isNaN(expectedVersion) || expectedVersion < 1) {
+        throw new BadRequestException(
+          'If-Match header must be a positive integer',
+        );
+      }
+    }
+
     const deleted = await this.annotationsService.deleteAnnotation(
       workspaceId,
       id,

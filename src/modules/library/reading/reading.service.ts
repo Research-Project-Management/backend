@@ -16,6 +16,8 @@ import {
 } from '../items/ports/items.ports';
 import { Inject } from '@nestjs/common';
 
+import { toReadingStateResponse } from './utils/reading.utils';
+
 @Injectable()
 export class ReadingService {
   constructor(
@@ -39,11 +41,7 @@ export class ReadingService {
       lastReadAt: Date | null;
     } | null,
   ): ReadingState {
-    return {
-      readStatus: (state?.readStatus as ReadingStatus) ?? ReadingStatus.UNREAD,
-      rating: state?.rating ?? 0,
-      lastReadAt: state?.lastReadAt ? state.lastReadAt.toISOString() : null,
-    };
+    return toReadingStateResponse(state);
   }
 
   async getState(

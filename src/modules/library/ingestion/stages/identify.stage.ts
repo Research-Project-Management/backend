@@ -7,6 +7,7 @@ import { RisParser } from '../parsers/ris.parser';
 import { NormalizationPolicy } from '../policies/normalization.policy';
 import { IStoragePort, STORAGE_PORT } from '../../../storage/storage.port';
 import { PdfExtractorProvider } from '../../attachments/providers/pdf-extractor.provider';
+import { QueryClassifier } from '../metadata/classifiers/query.classifier';
 import { randomUUID } from 'crypto';
 
 @Injectable()
@@ -105,6 +106,32 @@ export class IdentifyStage {
             normalizedMetadata: normalized,
             confidenceScore: 1.0,
           });
+        } else if (payload.identifierType === 'ISBN') {
+          const cleanIsbn = payload.value
+            .replace(/[-\s]/g, '')
+            .replace(/^isbn:?\s*/i, '')
+            .trim();
+          const normalized = this.normalizer.normalize({ isbn: cleanIsbn });
+          candidates.push({
+            candidateId: randomUUID(),
+            sourceKind: 'IDENTIFIER',
+            sourceName: 'DirectIdentifier',
+            sourceRecordId: cleanIsbn,
+            retrievedAt: new Date().toISOString(),
+            schemaVersion: '1.0.0',
+            fields: {
+              isbn: {
+                path: 'isbn',
+                value: payload.value,
+                normalizedValue: cleanIsbn,
+                confidence: 1.0,
+                sourceProvider: 'UserIdentifier',
+                retrievedAt: new Date().toISOString(),
+              },
+            },
+            normalizedMetadata: normalized,
+            confidenceScore: 1.0,
+          });
         }
         break;
       }
@@ -184,7 +211,18 @@ export class IdentifyStage {
       }
 
       case 'URL': {
-        const normalized = this.normalizer.normalize({ url: payload.url });
+        const classified = QueryClassifier.classify(payload.url);
+        const extractedRaw: Record<string, any> = { url: payload.url };
+        if (classified.type === 'DOI') {
+          extractedRaw.doi = classified.clean;
+        } else if (classified.type === 'ARXIV') {
+          extractedRaw.arxivId = classified.clean;
+        } else if (classified.type === 'PMID') {
+          extractedRaw.pmid = classified.clean;
+        } else if (classified.type === 'ISBN') {
+          extractedRaw.isbn = classified.clean;
+        }
+        const normalized = this.normalizer.normalize(extractedRaw);
         candidates.push({
           candidateId: randomUUID(),
           sourceKind: 'URL',
@@ -192,18 +230,14 @@ export class IdentifyStage {
           sourceRecordId: payload.url,
           retrievedAt: new Date().toISOString(),
           schemaVersion: '1.0.0',
-          fields: {
-            url: {
-              path: 'url',
-              value: payload.url,
-              normalizedValue: normalized.url,
-              confidence: 0.8,
-              sourceProvider: 'UrlCapture',
-              retrievedAt: new Date().toISOString(),
-            },
-          },
+          fields: this.buildEvidenceFields(
+            extractedRaw,
+            normalized,
+            'UrlCapture',
+          ),
           normalizedMetadata: normalized,
-          confidenceScore: 0.8,
+          confidenceScore:
+            classified.type !== 'TITLE' && classified.type !== 'URL' ? 0.95 : 0.8,
         });
         break;
       }

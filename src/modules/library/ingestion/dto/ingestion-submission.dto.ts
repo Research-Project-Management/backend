@@ -101,12 +101,20 @@ export class IngestionSubmissionDto {
 
   // Record fields
   @IsOptional()
-  @IsIn(['BIBTEX', 'RIS', 'CSL_JSON'])
+  @IsIn(['BIBTEX', 'RIS', 'CSL_JSON', 'bibtex', 'ris', 'csl_json'])
   format?: RecordFormat;
+
+  @IsOptional()
+  @IsIn(['BIBTEX', 'RIS', 'CSL_JSON', 'bibtex', 'ris', 'csl_json'])
+  recordFormat?: RecordFormat;
 
   @IsOptional()
   @IsString()
   content?: string;
+
+  @IsOptional()
+  @IsString()
+  rawRecord?: string;
 
   // URL fields
   @IsOptional()

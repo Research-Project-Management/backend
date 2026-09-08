@@ -20,6 +20,7 @@ import { LabelType } from '@prisma/client';
 
 import { WorkspaceRoleGuard } from '@/modules/iam/authz/guards/workspace-role.guard';
 import { WorkspaceRoles } from '@/modules/iam/authz/decorators/workspace-roles.decorator';
+import { CurrentWorkspace } from '@/modules/iam/authz/decorators/current-workspace.decorator';
 
 @ApiTags('Organization')
 @ApiBearerAuth('JWT-auth')
@@ -68,16 +69,20 @@ export class LabelController {
   @ApiOperation({ summary: 'Update a label name or color' })
   async updateLabel(
     @Param('labelId') labelId: string,
+    @CurrentWorkspace() workspaceId: string,
     @Body() dto: UpdateLabelDto,
   ) {
-    return this.labelService.updateLabel(labelId, dto);
+    return this.labelService.updateLabel(labelId, dto, workspaceId);
   }
 
   @Delete('labels/:labelId')
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin')
   @ApiOperation({ summary: 'Delete a label' })
-  async deleteLabel(@Param('labelId') labelId: string) {
-    return this.labelService.deleteLabel(labelId);
+  async deleteLabel(
+    @Param('labelId') labelId: string,
+    @CurrentWorkspace() workspaceId: string,
+  ) {
+    return this.labelService.deleteLabel(labelId, workspaceId);
   }
 }

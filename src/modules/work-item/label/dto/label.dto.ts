@@ -37,24 +37,6 @@ export class CreateLabelDto {
   workspaceId?: string;
 }
 
-export class UpdateLabelDto {
-  @IsString()
-  @IsOptional()
-  name?: string;
+import { PartialType } from '@nestjs/swagger';
 
-  @IsString()
-  @IsOptional()
-  color?: string;
-
-  @IsEnum(LabelType)
-  @IsOptional()
-  type?: LabelType;
-
-  @IsString()
-  @IsOptional()
-  projectId?: string;
-
-  @IsString()
-  @IsOptional()
-  workspaceId?: string;
-}
+export class UpdateLabelDto extends PartialType(CreateLabelDto) {}

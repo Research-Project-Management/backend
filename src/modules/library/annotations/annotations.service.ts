@@ -5,11 +5,19 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { AnnotationsRepository } from './annotations.repository';
 import {
-  AnnotationsRepository,
   CreateAnnotationData,
   UpdateAnnotationData,
-} from './annotations.repository';
+} from './types/annotations.types';
+import {
+  normalizeAnnotationColor,
+  normalizeQuoteText,
+  normalizeRectCoords,
+  normalizeComment,
+  parseAnnotationType,
+} from './utils/annotations.utils';
+
 import {
   TransactionService,
   TransactionHelpers,
@@ -62,7 +70,19 @@ export class AnnotationsService {
         workspaceId,
         tx,
       );
-      const annotation = await this.annotationsRepo.create(data, tx);
+      const annotation = await this.annotationsRepo.create(
+        {
+          ...data,
+          color: normalizeAnnotationColor(data.color),
+          quoteText: normalizeQuoteText(data.quoteText),
+          comment: normalizeComment(data.comment),
+          rectCoords:
+            data.rectCoords !== undefined
+              ? normalizeRectCoords(data.rectCoords)
+              : null,
+        },
+        tx,
+      );
 
       await helpers.appendChange(workspaceId, {
         entityType: 'Annotation',
@@ -87,6 +107,7 @@ export class AnnotationsService {
     workspaceId: string,
     annotation: { authorId?: string | null },
     userId?: string,
+    tx?: Prisma.TransactionClient,
   ) {
     if (!userId) {
       throw new ForbiddenException('User is not authenticated');
@@ -96,7 +117,11 @@ export class AnnotationsService {
       return;
     }
     // Otherwise user must have admin or owner role in the workspace
-    const member = await this.prisma.workspaceMember.findUnique({
+    const memberClient =
+      tx && 'workspaceMember' in tx && tx.workspaceMember
+        ? tx.workspaceMember
+        : this.prisma.workspaceMember;
+    const member = await memberClient.findUnique({
       where: {
         workspaceId_userId: { workspaceId, userId },
       },
@@ -128,14 +153,30 @@ export class AnnotationsService {
       );
 
       if (userId) {
-        await this.assertCanModifyAnnotation(workspaceId, existing, userId);
+        await this.assertCanModifyAnnotation(workspaceId, existing, userId, tx);
       }
+
+      const normalizedData: UpdateAnnotationData = {
+        ...(data.color !== undefined
+          ? { color: normalizeAnnotationColor(data.color) }
+          : {}),
+        ...(data.quoteText !== undefined
+          ? { quoteText: normalizeQuoteText(data.quoteText) }
+          : {}),
+        ...(data.comment !== undefined
+          ? { comment: normalizeComment(data.comment) }
+          : {}),
+        ...(data.rectCoords !== undefined
+          ? { rectCoords: normalizeRectCoords(data.rectCoords) }
+          : {}),
+      };
 
       const updated = await this.annotationsRepo.update(
         id,
         expectedVersion,
-        data,
+        normalizedData,
         tx,
+        existing,
       );
 
       await helpers.appendChange(workspaceId, {
@@ -175,13 +216,14 @@ export class AnnotationsService {
       );
 
       if (userId) {
-        await this.assertCanModifyAnnotation(workspaceId, existing, userId);
+        await this.assertCanModifyAnnotation(workspaceId, existing, userId, tx);
       }
 
       const deleted = await this.annotationsRepo.softDelete(
         id,
         expectedVersion,
         tx,
+        existing,
       );
 
       if (deleted) {
@@ -230,9 +272,9 @@ export class AnnotationsService {
       const updated = await tx.annotation.update({
         where: { id: command.existingId },
         data: {
-          quoteText: command.quoteText,
-          comment: command.comment,
-          color: command.color,
+          quoteText: normalizeQuoteText(command.quoteText),
+          comment: normalizeComment(command.comment),
+          color: normalizeAnnotationColor(command.color),
           pageIndex: command.pageIndex,
           version: { increment: 1 },
         },
@@ -264,10 +306,10 @@ export class AnnotationsService {
           attachmentId: command.attachmentId,
           authorId: command.userId,
           pageIndex: command.pageIndex,
-          quoteText: command.quoteText || '',
-          comment: command.comment || '',
-          color: command.color || '#ffd400',
-          type: (command.type as any) || 'highlight',
+          quoteText: normalizeQuoteText(command.quoteText),
+          comment: normalizeComment(command.comment),
+          color: normalizeAnnotationColor(command.color),
+          type: parseAnnotationType(command.type),
           version: 1,
         },
       });

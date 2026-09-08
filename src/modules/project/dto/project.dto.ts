@@ -8,6 +8,7 @@ import {
   MaxLength,
 } from 'class-validator';
 import { ProjectMemberRole } from '@prisma/client';
+import { PartialType } from '@nestjs/swagger';
 
 export class CreateProjectDto {
   @IsString()
@@ -56,47 +57,10 @@ export class CreateProjectDto {
   workspaceId?: string;
 }
 
-export class UpdateProjectDto {
+export class UpdateProjectDto extends PartialType(CreateProjectDto) {
   @IsString()
   @IsOptional()
   projectId?: string;
-
-  @IsString()
-  @IsOptional()
-  workspaceId?: string;
-
-  @IsString()
-  @IsOptional()
-  name?: string;
-
-  @IsString()
-  @IsOptional()
-  @MaxLength(20, { message: 'Identifier cannot exceed 20 characters' })
-  identifier?: string;
-
-  @IsString()
-  @IsOptional()
-  avatar?: string;
-
-  @IsString()
-  @IsOptional()
-  coverImage?: string;
-
-  @IsString()
-  @IsOptional()
-  cover?: string;
-
-  @IsString()
-  @IsOptional()
-  description?: string;
-
-  @IsString()
-  @IsOptional()
-  leadId?: string;
-
-  @IsArray()
-  @IsOptional()
-  modules?: string[];
 
   @IsBoolean()
   @IsOptional()
@@ -109,14 +73,6 @@ export class UpdateProjectDto {
   @IsBoolean()
   @IsOptional()
   isFavorite?: boolean;
-
-  @IsBoolean()
-  @IsOptional()
-  isPrivate?: boolean;
-
-  @IsString()
-  @IsOptional()
-  timezone?: string;
 
   @IsArray()
   @IsOptional()

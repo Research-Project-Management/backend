@@ -136,6 +136,77 @@ export class IngestionService implements IngestionPort {
     return run as unknown as IngestionRunSnapshot;
   }
 
+  async getRunProgress(
+    workspaceId: string,
+    runId: string,
+  ): Promise<{
+    runId: string;
+    workspaceId: string;
+    status: string;
+    total: number;
+    processed: number;
+    percentage: number;
+    succeeded: number;
+    duplicates: number;
+    failed: number;
+    currentTitle?: string;
+    items: Array<{
+      title: string;
+      status: 'SUCCEEDED' | 'DUPLICATE' | 'FAILED';
+      itemId?: string;
+      error?: string;
+    }>;
+    startedAt: string;
+    completedAt?: string;
+  }> {
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    const run = await this.ingestionRepo.findRunById(
+      canonicalWorkspaceId,
+      runId,
+    );
+    if (!run) {
+      throw new NotFoundException(`Ingestion run '${runId}' not found`);
+    }
+
+    const log = (run.executionLog as any) || {};
+    const total = Number(log.total) || 1;
+    const processed =
+      Number(log.processed) ||
+      (run.status === IngestionStatus.READY ? total : 0);
+    const succeeded =
+      Number(log.succeeded) ||
+      (run.status === IngestionStatus.READY && !log.duplicates ? 1 : 0);
+    const duplicates = Number(log.duplicates) || 0;
+    const failed =
+      Number(log.failed) ||
+      (run.status === IngestionStatus.FAILED_FINAL ||
+      run.status === IngestionStatus.FAILED_RETRYABLE
+        ? 1
+        : 0);
+    const percentage =
+      typeof log.percentage === 'number'
+        ? log.percentage
+        : run.status === IngestionStatus.READY
+          ? 100
+          : Math.min(Math.round((processed / total) * 100), 99);
+
+    return {
+      runId: run.id,
+      workspaceId: canonicalWorkspaceId,
+      status: String(run.status),
+      total,
+      processed,
+      percentage,
+      succeeded,
+      duplicates,
+      failed,
+      currentTitle: log.currentTitle || undefined,
+      items: Array.isArray(log.items) ? log.items : [],
+      startedAt: run.startedAt.toISOString(),
+      completedAt: run.completedAt?.toISOString(),
+    };
+  }
+
   async retryRun(workspaceId: string, runId: string): Promise<any> {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     const run = await this.ingestionRepo.findRunById(

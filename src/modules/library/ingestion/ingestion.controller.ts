@@ -58,15 +58,15 @@ export class IngestionController {
       case 'IDENTIFIER':
         payload = {
           kind: 'IDENTIFIER',
-          identifierType: dto.identifierType || 'DOI',
-          value: dto.value || dto.identifierValue || '',
+          identifierType: (dto.identifierType || 'DOI').toUpperCase(),
+          value: (dto.value || dto.identifierValue || '').trim(),
         };
         break;
       case 'RECORD':
         payload = {
           kind: 'RECORD',
-          format: dto.format || 'BIBTEX',
-          content: dto.content || '',
+          format: ((dto.format || dto.recordFormat || 'BIBTEX') as string).toUpperCase(),
+          content: dto.content || dto.rawRecord || '',
         };
         break;
       case 'URL':
@@ -121,6 +121,18 @@ export class IngestionController {
     @Param('runId') runId: string,
   ) {
     return this.ingestionService.getRunStatus(workspaceId, runId);
+  }
+
+  /**
+   * Ingestion Run Real-time Progress Endpoint (Zotero-style progress modal)
+   */
+  @Get('status/:runId/progress')
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  async getProgress(
+    @Param('workspaceId') workspaceId: string,
+    @Param('runId') runId: string,
+  ) {
+    return this.ingestionService.getRunProgress(workspaceId, runId);
   }
 
   /**

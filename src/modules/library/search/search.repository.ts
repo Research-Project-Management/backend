@@ -2,24 +2,10 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { Prisma } from '@prisma/client';
 
-export interface SearchOptions {
-  q?: string;
-  itemType?: string;
-  collectionId?: string;
-  tagId?: string;
-  yearFrom?: number;
-  yearTo?: number;
-  sortBy?: 'relevance' | 'dateAdded' | 'year' | 'title';
-  sortOrder?: 'asc' | 'desc';
-  limit?: number;
-  cursor?: string;
-}
+import { SearchOptions, FacetResult } from './types/search.types';
+import { buildBaseSearchWhere } from './utils/search.utils';
 
-export interface FacetResult {
-  itemTypes: Record<string, number>;
-  years: Record<number, number>;
-  tags: Record<string, number>;
-}
+export { SearchOptions, FacetResult };
 
 @Injectable()
 export class SearchRepository implements OnModuleInit {
@@ -43,33 +29,7 @@ export class SearchRepository implements OnModuleInit {
     workspaceId: string,
     options: SearchOptions,
   ): Prisma.CatalogItemWhereInput {
-    return {
-      workspaceId,
-      deletedAt: null,
-      ...(options.itemType ? { itemType: options.itemType } : {}),
-      ...(options.yearFrom || options.yearTo
-        ? {
-            year: {
-              ...(options.yearFrom ? { gte: options.yearFrom } : {}),
-              ...(options.yearTo ? { lte: options.yearTo } : {}),
-            },
-          }
-        : {}),
-      ...(options.collectionId
-        ? {
-            collectionItems: {
-              some: { collectionId: options.collectionId },
-            },
-          }
-        : {}),
-      ...(options.tagId
-        ? {
-            itemTags: {
-              some: { tagId: options.tagId },
-            },
-          }
-        : {}),
-    };
+    return buildBaseSearchWhere(workspaceId, options);
   }
 
   /**

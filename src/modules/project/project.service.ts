@@ -446,23 +446,10 @@ export class ProjectService {
     };
 
     const updatedColumns = [...columns, newColumn];
-
-    await this.projectRepo.updateProject(projectId, {
-      taskColumns: updatedColumns as unknown as Prisma.InputJsonValue,
-    });
-
-    await this.invalidateProjectCache(projectId, project.workspaceId);
-
-    this.eventEmitter?.emit(
-      'project.updated',
-      new DomainActivityEvent({
-        entityType: 'project' as unknown as EntityType,
-        entityId: projectId,
-        verb: 'updated',
-        actorId: '',
-        workspaceId: project.workspaceId,
-        projectId,
-      }),
+    await this.persistAndPublishColumns(
+      projectId,
+      project.workspaceId,
+      updatedColumns,
     );
 
     return { columns: updatedColumns };
@@ -493,11 +480,25 @@ export class ProjectService {
       return col;
     });
 
+    await this.persistAndPublishColumns(
+      projectId,
+      project.workspaceId,
+      updatedColumns,
+    );
+
+    return { columns: updatedColumns };
+  }
+
+  private async persistAndPublishColumns(
+    projectId: string,
+    workspaceId: string,
+    updatedColumns: TaskColumn[],
+  ): Promise<void> {
     await this.projectRepo.updateProject(projectId, {
       taskColumns: updatedColumns as unknown as Prisma.InputJsonValue,
     });
 
-    await this.invalidateProjectCache(projectId, project.workspaceId);
+    await this.invalidateProjectCache(projectId, workspaceId);
 
     this.eventEmitter?.emit(
       'project.updated',
@@ -506,12 +507,10 @@ export class ProjectService {
         entityId: projectId,
         verb: 'updated',
         actorId: '',
-        workspaceId: project.workspaceId,
+        workspaceId,
         projectId,
       }),
     );
-
-    return { columns: updatedColumns };
   }
 
   async deleteColumn(

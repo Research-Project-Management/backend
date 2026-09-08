@@ -15,6 +15,10 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FileRepository } from './file.repository';
 import { R2Service } from '../r2/r2.service';
 import { parseByteRange } from './utils/range.utils';
+import {
+  assertFileNotTrashed,
+  resolveFileStorageKey,
+} from './utils/storage-key.util';
 import { PrismaService } from '@/core/database/prisma.service';
 import {
   buildWorkspaceIdentifierWhere,
@@ -558,10 +562,10 @@ export class FileService implements OnModuleInit {
     return this.r2Service.getObjectStream(key);
   }
 
-  async upload(
+  private async resolveScopeContext(
     userId: string,
     scope: { workspaceId?: string; projectId?: string; pageId?: string },
-    dto: UploadFileDto,
+    parentIdDto?: string,
   ) {
     await this.assertCanWriteScope(userId, scope);
     const workspaceId = await this.resolveWorkspaceId(scope);
@@ -574,9 +578,20 @@ export class FileService implements OnModuleInit {
           : null;
     const linkedToId = scope.pageId || scope.projectId || workspaceId || null;
     const parentId =
-      dto.parentId === 'null' || dto.parentId === 'undefined' || !dto.parentId
+      parentIdDto === 'null' || parentIdDto === 'undefined' || !parentIdDto
         ? null
-        : dto.parentId;
+        : parentIdDto;
+
+    return { workspaceId, linkedToType, linkedToId, parentId };
+  }
+
+  async upload(
+    userId: string,
+    scope: { workspaceId?: string; projectId?: string; pageId?: string },
+    dto: UploadFileDto,
+  ) {
+    const { workspaceId, linkedToType, linkedToId, parentId } =
+      await this.resolveScopeContext(userId, scope, dto.parentId);
 
     const file = await this.fileRepo.createFile({
       filename: dto.filename,
@@ -603,20 +618,8 @@ export class FileService implements OnModuleInit {
     scope: { workspaceId?: string; projectId?: string; pageId?: string },
     dto: CreateFolderDto,
   ) {
-    await this.assertCanWriteScope(userId, scope);
-    const workspaceId = await this.resolveWorkspaceId(scope);
-    const linkedToType = scope.pageId
-      ? 'Page'
-      : scope.projectId
-        ? 'Project'
-        : workspaceId
-          ? 'Workspace'
-          : null;
-    const linkedToId = scope.pageId || scope.projectId || workspaceId || null;
-    const parentId =
-      dto.parentId === 'null' || dto.parentId === 'undefined' || !dto.parentId
-        ? null
-        : dto.parentId;
+    const { workspaceId, linkedToType, linkedToId, parentId } =
+      await this.resolveScopeContext(userId, scope, dto.parentId);
 
     const folder = await this.fileRepo.createFile({
       filename: dto.filename || dto.name || 'Untitled Folder',
@@ -657,31 +660,8 @@ export class FileService implements OnModuleInit {
   ) {
     const file = await this.assertCanAccessFile(userId, fileId, 'read');
 
-    if (file.trashedAt !== null || (file as any).isTrash) {
-      throw new NotFoundException(`File ${fileId} is in trash`);
-    }
-
-    let storageKey = '';
-    const R2_PREFIX = '/api/files/r2/';
-    if (file.url && file.url.startsWith(R2_PREFIX)) {
-      storageKey = file.url.slice(R2_PREFIX.length).trim();
-    } else if (
-      file.url &&
-      !file.url.startsWith('http') &&
-      !file.url.startsWith('/api/files/')
-    ) {
-      storageKey = file.url.trim();
-    } else if ((file.metaData as any)?.storageKey) {
-      storageKey = (file.metaData as any).storageKey;
-    } else if (file.url) {
-      storageKey = file.url.replace(/^\/+/, '');
-    }
-
-    if (!storageKey) {
-      throw new NotFoundException(
-        `Storage object key not found for file ${fileId}`,
-      );
-    }
+    assertFileNotTrashed(file, fileId);
+    const storageKey = resolveFileStorageKey(file, fileId);
 
     const totalSize = file.size ?? 0;
     let validatedRange: {

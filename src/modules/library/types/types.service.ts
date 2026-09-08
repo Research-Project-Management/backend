@@ -5,7 +5,9 @@ import {
   ItemTypeDefinition,
   SchemaRegistrySnapshot,
 } from './types.types';
+
 import { SCHEMA_V42_DATA } from './constants/types.constants';
+import { normalizeCanonicalItemType } from './utils/types.utils';
 
 @Injectable()
 export class TypesService {
@@ -200,152 +202,7 @@ export class TypesService {
    * Robust item type normalizer without destructive aliasing
    */
   normalizeItemType(rawType: string | undefined | null): string {
-    if (!rawType || typeof rawType !== 'string') {
-      return 'journalArticle';
-    }
-
-    const trimmed = rawType.trim();
-    const lower = trimmed.toLowerCase();
-
-    // Direct case-insensitive match against canonical 40 types
-    const matchedKey = Object.keys(this.snapshot.itemTypes).find(
-      (k) => k.toLowerCase() === lower,
-    );
-    if (matchedKey) {
-      return matchedKey;
-    }
-
-    // Extended mapping for external providers (Crossref, arXiv, OpenAlex, Semantic Scholar, BibTeX)
-    const aliases: Record<string, string> = {
-      // arXiv / preprints
-      preprint: 'preprint',
-      'working-paper': 'preprint',
-      'working paper': 'preprint',
-      eprint: 'preprint',
-      'posted-content': 'preprint',
-      postedcontent: 'preprint',
-
-      // Software / Code
-      software: 'computerProgram',
-      'software-code': 'computerProgram',
-      code: 'computerProgram',
-      program: 'computerProgram',
-      computerprogram: 'computerProgram',
-      algorithm: 'computerProgram',
-
-      // Datasets
-      dataset: 'dataset',
-      data: 'dataset',
-      database: 'dataset',
-      'data-set': 'dataset',
-
-      // Standards & Norms
-      standard: 'standard',
-      norm: 'standard',
-      specification: 'standard',
-      rfc: 'standard',
-
-      // Journal & Articles
-      journalarticle: 'journalArticle',
-      'journal-article': 'journalArticle',
-      article: 'journalArticle',
-      paper: 'journalArticle',
-      peer_review: 'journalArticle',
-
-      // Conferences & Proceedings
-      conferencepaper: 'conferencePaper',
-      'proceedings-article': 'conferencePaper',
-      proceedings: 'conferencePaper',
-      conference: 'conferencePaper',
-      inproceedings: 'conferencePaper',
-      paper_conference: 'conferencePaper',
-
-      // Books & Sections
-      book: 'book',
-      monograph: 'book',
-      'edited-book': 'book',
-      booksection: 'bookSection',
-      'book-section': 'bookSection',
-      'book-chapter': 'bookSection',
-      incollection: 'bookSection',
-      inbook: 'bookSection',
-      chapter: 'bookSection',
-
-      // Theses & Dissertations
-      thesis: 'thesis',
-      dissertation: 'thesis',
-      phdthesis: 'thesis',
-      mastersthesis: 'thesis',
-      'doctoral-thesis': 'thesis',
-
-      // Reports
-      report: 'report',
-      'tech-report': 'report',
-      techreport: 'report',
-      'research-report': 'report',
-      whitepaper: 'report',
-
-      // Patents
-      patent: 'patent',
-      'patent-application': 'patent',
-
-      // Webpage & Online
-      webpage: 'webpage',
-      'web-page': 'webpage',
-      website: 'webpage',
-      online: 'webpage',
-      blogpost: 'blogPost',
-      'blog-post': 'blogPost',
-
-      // Magazines & News
-      magazinearticle: 'magazineArticle',
-      'magazine-article': 'magazineArticle',
-      newspaperarticle: 'newspaperArticle',
-      'newspaper-article': 'newspaperArticle',
-
-      // Presentations
-      presentation: 'presentation',
-      slides: 'presentation',
-      talk: 'presentation',
-      lecture: 'presentation',
-
-      // Media
-      videorecording: 'videoRecording',
-      video: 'videoRecording',
-      audiorecording: 'audioRecording',
-      audio: 'audioRecording',
-      podcast: 'podcast',
-      film: 'film',
-      movie: 'film',
-      artwork: 'artwork',
-      map: 'map',
-
-      // Legal
-      case: 'case',
-      statute: 'statute',
-      bill: 'bill',
-      hearing: 'hearing',
-
-      // Textual
-      manuscript: 'manuscript',
-      document: 'document',
-      doc: 'document',
-      misc: 'document',
-      letter: 'letter',
-      interview: 'interview',
-      dictionaryentry: 'dictionaryEntry',
-      encyclopediaarticle: 'encyclopediaArticle',
-      forumpost: 'forumPost',
-      instantmessage: 'instantMessage',
-      email: 'email',
-    };
-
-    if (aliases[lower]) {
-      return aliases[lower];
-    }
-
-    // Default fallback
-    return 'journalArticle';
+    return normalizeCanonicalItemType(rawType, this.snapshot.itemTypes);
   }
 
   private normalizeTypeKey(key: string): string {

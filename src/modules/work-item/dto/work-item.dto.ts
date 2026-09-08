@@ -8,6 +8,7 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  IsUUID,
   Min,
   Max,
 } from 'class-validator';
@@ -460,3 +461,40 @@ export type BulkUpdateTaskDto = BulkUpdateWorkItemDto;
 
 export const QueryTaskDto = QueryWorkItemDto;
 export type QueryTaskDto = QueryWorkItemDto;
+
+export class DuplicateWorkItemDto {
+  @ApiPropertyOptional({
+    description: 'Target project ID if duplicating to another project',
+    example: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+  })
+  @IsOptional()
+  @IsUUID()
+  projectId?: string;
+}
+export const DuplicateTaskDto = DuplicateWorkItemDto;
+export type DuplicateTaskDto = DuplicateWorkItemDto;
+
+export class AddAttachmentDto {
+  @ApiPropertyOptional({ description: 'Name of the attachment', example: 'report.pdf' })
+  @IsOptional()
+  @IsString()
+  name?: string;
+
+  @ApiPropertyOptional({ description: 'URL of the attachment', example: 'https://...' })
+  @IsOptional()
+  @IsString()
+  url?: string;
+
+  @ApiPropertyOptional({ description: 'File size in bytes', example: 102400 })
+  @IsOptional()
+  @IsNumber()
+  size?: number;
+
+  @ApiPropertyOptional({ description: 'MIME type of the attachment', example: 'application/pdf' })
+  @IsOptional()
+  @IsString()
+  mimeType?: string;
+
+  [key: string]: unknown;
+}
+

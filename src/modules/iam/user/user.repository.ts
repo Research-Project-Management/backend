@@ -93,6 +93,15 @@ export class UserRepository implements IUserRepository {
     let workspaceScopeCondition: Prisma.UserWhereInput = {};
 
     if (workspaceId) {
+      if (excludeUserId) {
+        const isMember = await this.prisma.workspaceMember.findFirst({
+          where: { workspaceId, userId: excludeUserId },
+          select: { id: true },
+        });
+        if (!isMember) {
+          return [];
+        }
+      }
       workspaceScopeCondition = {
         workspaceMembers: {
           some: { workspaceId },

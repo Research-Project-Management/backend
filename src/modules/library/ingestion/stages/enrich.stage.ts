@@ -42,6 +42,8 @@ export class EnrichStage {
       const doi = candidate.normalizedMetadata.doi;
       const arxivId = candidate.normalizedMetadata.arxivId;
       const pmid = candidate.normalizedMetadata.pmid;
+      const isbn = candidate.normalizedMetadata.isbn;
+      const url = candidate.normalizedMetadata.url;
       const title = candidate.normalizedMetadata.title?.trim();
       const isCredibleTitle =
         Boolean(title) &&
@@ -49,9 +51,14 @@ export class EnrichStage {
         !/\.pdf$/i.test(title!) &&
         !/^(uploaded document|untitled|document)$/i.test(title!);
       const query =
-        doi || arxivId || pmid || (isCredibleTitle ? title : undefined);
+        doi || arxivId || pmid || isbn || (isCredibleTitle ? title : undefined) || url;
 
       if (!query) continue;
+
+      // Polite throttling delay to prevent burst 429 Too Many Requests on external providers
+      if (candidates.length > 1) {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
 
       try {
         const resolved = await this.metadataService.resolve({

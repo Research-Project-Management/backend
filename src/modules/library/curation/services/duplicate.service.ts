@@ -19,6 +19,12 @@ import {
   DuplicateClusterResult,
   ALLOWED_MERGE_METADATA_FIELDS,
 } from '../types/curation.types';
+import {
+  normalizeTitleForDedupe,
+  extractFirstAuthorFamily,
+  extractContributorAuthors,
+  generateDedupeBucketKey,
+} from '../utils/curation.utils';
 import { LIBRARY_EVENT_TYPES } from '../../outbox/outbox.events';
 import { ItemsMapper } from '../../items/mappers/items.mapper';
 
@@ -55,17 +61,8 @@ export class DuplicateService {
       2000,
     );
 
-    const getItemAuthors = (item: any): string[] => {
-      const fromContributors = item.contributors
-        ?.map(
-          (c: any) =>
-            c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
-        )
-        .filter(Boolean);
-      if (fromContributors && fromContributors.length > 0)
-        return fromContributors;
-      return [];
-    };
+    const getItemAuthors = (item: any): string[] =>
+      extractContributorAuthors(item);
 
     const clusters: DuplicateClusterResult[] = [];
     const groupedItemIds = new Set<string>();
@@ -104,30 +101,16 @@ export class DuplicateService {
       (item: any) => !groupedItemIds.has(item.id),
     );
 
-    const normalizeTitle = (t: string) =>
-      (t || '')
-        .toLowerCase()
-        .replace(/[^a-z0-9]/g, '')
-        .trim();
-
-    const getFirstAuthorFamily = (authors: string[]) => {
-      if (!authors || authors.length === 0) return '';
-      const first = (authors[0] || '').trim().toLowerCase();
-      if (first.includes(',')) {
-        return first.split(',')[0].trim();
-      }
-      const parts = first.split(/\s+/);
-      return parts[parts.length - 1] || '';
-    };
-
     const fuzzyBuckets = new Map<string, typeof remainingItems>();
 
     for (const item of remainingItems) {
-      const normTitle = normalizeTitle(item.title);
+      const normTitle = normalizeTitleForDedupe(item.title);
       if (normTitle.length < 5) continue;
 
-      const authorFamily = getFirstAuthorFamily(getItemAuthors(item));
-      const bucketKey = `${normTitle.substring(0, 32)}::${authorFamily}`;
+      const bucketKey = generateDedupeBucketKey(
+        item.title,
+        getItemAuthors(item),
+      );
       const bucket = fuzzyBuckets.get(bucketKey) || [];
       bucket.push(item);
       fuzzyBuckets.set(bucketKey, bucket);

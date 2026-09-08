@@ -26,6 +26,8 @@ import {
   ReorderWorkItemDto,
   BulkUpdateWorkItemDto,
   QueryWorkItemDto,
+  DuplicateWorkItemDto,
+  AddAttachmentDto,
 } from './dto/work-item.dto';
 import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
 import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
@@ -285,7 +287,7 @@ export class WorkItemController {
   async duplicateTask(
     @Param('taskId') taskId: string,
     @CurrentUser('id') userId: string,
-    @Body() body?: { projectId?: string },
+    @Body() body?: DuplicateWorkItemDto,
   ) {
     return this.workItemService.duplicateTask(taskId, userId, body?.projectId);
   }
@@ -305,7 +307,7 @@ export class WorkItemController {
   async addAttachment(
     @Param('taskId') taskId: string,
     @CurrentUser('id') userId: string,
-    @Body() body: Record<string, unknown>,
+    @Body() body: AddAttachmentDto,
   ) {
     return this.workItemService.addAttachment(taskId, body, userId);
   }

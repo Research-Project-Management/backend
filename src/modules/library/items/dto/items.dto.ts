@@ -207,6 +207,14 @@ export class CreateCatalogItemDto {
   citationCount?: number | null;
 
   @IsOptional()
+  @IsNumber()
+  referenceCount?: number | null;
+
+  @IsOptional()
+  @IsString()
+  openAccessPdfUrl?: string | null;
+
+  @IsOptional()
   @IsString()
   libraryCatalog?: string;
 
@@ -234,7 +242,7 @@ export class CreateCatalogItemDto {
   extra?: string;
 
   @IsOptional()
-  notes?: any;
+  notes?: unknown[] | string[] | null;
 
   @IsOptional()
   @IsArray()
@@ -549,6 +557,14 @@ export class UpdateCatalogItemDto {
   citationCount?: number | null;
 
   @IsOptional()
+  @IsNumber()
+  referenceCount?: number | null;
+
+  @IsOptional()
+  @IsString()
+  openAccessPdfUrl?: string | null;
+
+  @IsOptional()
   @IsString()
   libraryCatalog?: string;
 
@@ -576,7 +592,7 @@ export class UpdateCatalogItemDto {
   extra?: string;
 
   @IsOptional()
-  notes?: any;
+  notes?: unknown[] | string[] | null;
 
   @IsOptional()
   @IsArray()

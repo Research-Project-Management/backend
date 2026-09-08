@@ -39,18 +39,40 @@ export class WorkspaceRoleGuard implements CanActivate {
 
     const userId = user.sub || user.id;
 
-    // 1. Resolve workspace identifier from trusted request parts
-    let workspaceId =
-      request.params?.workspaceId ||
-      request.headers?.['x-workspace-id'] ||
-      request.query?.workspaceId;
-
-    if (workspaceId === '_' || workspaceId === 'global') {
-      workspaceId = undefined;
+    // 1. Resolve workspace identifier
+    let explicitWorkspaceId = request.params?.workspaceId;
+    if (explicitWorkspaceId === '_' || explicitWorkspaceId === 'global') {
+      explicitWorkspaceId = undefined;
     }
 
+    let claimedHeaderWorkspaceId =
+      request.headers?.['x-workspace-id'] || request.query?.workspaceId;
+    if (
+      claimedHeaderWorkspaceId === '_' ||
+      claimedHeaderWorkspaceId === 'global'
+    ) {
+      claimedHeaderWorkspaceId = undefined;
+    }
+
+    let workspaceId: string | undefined = explicitWorkspaceId;
+
+    // Check if request targets an entity sub-resource
+    const hasEntityParam = Boolean(
+      request.params?.projectId ||
+        request.params?.itemId ||
+        request.params?.attachmentId ||
+        request.params?.collectionId ||
+        request.params?.tagId ||
+        request.params?.labelId ||
+        request.params?.fileId ||
+        request.params?.pageId ||
+        request.params?.taskId,
+    );
+
+    let entityWorkspaceId: string | undefined;
+
     // Resolve workspace from project if projectId is present
-    if (!workspaceId && request.params?.projectId && this.prisma?.project) {
+    if (request.params?.projectId && this.prisma?.project) {
       const projectId = request.params.projectId;
       const project = isUuid(projectId)
         ? await this.prisma.project
@@ -69,12 +91,12 @@ export class WorkspaceRoleGuard implements CanActivate {
             })
             .catch(() => null);
       if (project?.workspaceId) {
-        workspaceId = project.workspaceId;
+        entityWorkspaceId = project.workspaceId;
       }
     }
 
     // Resolve workspace from catalogItem if itemId is present
-    if (!workspaceId && request.params?.itemId && this.prisma?.catalogItem) {
+    if (request.params?.itemId && this.prisma?.catalogItem) {
       const targetItemId = request.params.itemId;
       if (isUuid(targetItemId)) {
         const item = await this.prisma.catalogItem
@@ -84,14 +106,13 @@ export class WorkspaceRoleGuard implements CanActivate {
           })
           .catch(() => null);
         if (item?.workspaceId) {
-          workspaceId = item.workspaceId;
+          entityWorkspaceId = item.workspaceId;
         }
       }
     }
 
     // Resolve workspace from attachment if attachmentId is present
     if (
-      !workspaceId &&
       request.params?.attachmentId &&
       this.prisma?.catalogAttachment &&
       isUuid(request.params.attachmentId)
@@ -103,13 +124,12 @@ export class WorkspaceRoleGuard implements CanActivate {
         })
         .catch(() => null);
       if (attachment?.catalogItem?.workspaceId) {
-        workspaceId = attachment.catalogItem.workspaceId;
+        entityWorkspaceId = attachment.catalogItem.workspaceId;
       }
     }
 
     // Resolve workspace from collection if collectionId is present
     if (
-      !workspaceId &&
       request.params?.collectionId &&
       this.prisma?.collection &&
       isUuid(request.params.collectionId)
@@ -121,13 +141,12 @@ export class WorkspaceRoleGuard implements CanActivate {
         })
         .catch(() => null);
       if (col?.workspaceId) {
-        workspaceId = col.workspaceId;
+        entityWorkspaceId = col.workspaceId;
       }
     }
 
     // Resolve workspace from tag if tagId is present
     if (
-      !workspaceId &&
       request.params?.tagId &&
       this.prisma?.catalogTag &&
       isUuid(request.params.tagId)
@@ -139,13 +158,12 @@ export class WorkspaceRoleGuard implements CanActivate {
         })
         .catch(() => null);
       if (tag?.workspaceId) {
-        workspaceId = tag.workspaceId;
+        entityWorkspaceId = tag.workspaceId;
       }
     }
 
     // Resolve workspace from label if labelId is present
     if (
-      !workspaceId &&
       request.params?.labelId &&
       this.prisma?.label &&
       isUuid(request.params.labelId)
@@ -157,13 +175,12 @@ export class WorkspaceRoleGuard implements CanActivate {
         })
         .catch(() => null);
       if (lbl?.workspaceId) {
-        workspaceId = lbl.workspaceId;
+        entityWorkspaceId = lbl.workspaceId;
       }
     }
 
     // Resolve workspace from file if fileId is present
     if (
-      !workspaceId &&
       request.params?.fileId &&
       this.prisma?.file &&
       isUuid(request.params.fileId)
@@ -175,13 +192,12 @@ export class WorkspaceRoleGuard implements CanActivate {
         })
         .catch(() => null);
       if (file?.workspaceId) {
-        workspaceId = file.workspaceId;
+        entityWorkspaceId = file.workspaceId;
       }
     }
 
     // Resolve workspace from page if pageId is present
     if (
-      !workspaceId &&
       request.params?.pageId &&
       this.prisma?.page &&
       isUuid(request.params.pageId)
@@ -193,13 +209,12 @@ export class WorkspaceRoleGuard implements CanActivate {
         })
         .catch(() => null);
       if (page?.workspaceId) {
-        workspaceId = page.workspaceId;
+        entityWorkspaceId = page.workspaceId;
       }
     }
 
     // Resolve workspace from task if taskId is present
     if (
-      !workspaceId &&
       request.params?.taskId &&
       this.prisma?.task &&
       isUuid(request.params.taskId)
@@ -211,8 +226,31 @@ export class WorkspaceRoleGuard implements CanActivate {
         })
         .catch(() => null);
       if (task?.project?.workspaceId) {
-        workspaceId = task.project.workspaceId;
+        entityWorkspaceId = task.project.workspaceId;
       }
+    }
+
+    if (hasEntityParam) {
+      if (!entityWorkspaceId) {
+        throw new ForbiddenException('Resource not found or access denied');
+      }
+      workspaceId = entityWorkspaceId;
+      // If client also claimed a workspace header, verify consistency
+      if (claimedHeaderWorkspaceId) {
+        const claimedWs = await this.prisma.workspace
+          .findFirst({
+            where: buildWorkspaceIdentifierWhere(claimedHeaderWorkspaceId),
+            select: { id: true },
+          })
+          .catch(() => null);
+        if (claimedWs && claimedWs.id !== entityWorkspaceId) {
+          throw new ForbiddenException(
+            'Workspace context mismatch with requested resource',
+          );
+        }
+      }
+    } else if (!workspaceId) {
+      workspaceId = claimedHeaderWorkspaceId;
     }
 
     // Fallback: If no explicit workspace identifier in route, resolve user's active/primary workspace

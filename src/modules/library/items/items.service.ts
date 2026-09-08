@@ -62,29 +62,77 @@ export interface CatalogTransactionContext {
 
 export type ItemTransactionContext = CatalogTransactionContext;
 
-const DB_SCALAR_COLUMNS = new Set([
-  'title',
-  'abstract',
-  'abstractNote',
-  'date',
-  'year',
-  'url',
-  'doi',
-  'isbn',
-  'issn',
-  'language',
-  'shortTitle',
-  'rights',
-  'extra',
-  'citationKey',
-  'publicationTitle',
-  'publisher',
-  'volume',
-  'issue',
-  'pages',
-  'series',
-  'seriesTitle',
-]);
+import {
+  CATALOG_COLUMN_METADATA_FIELDS,
+  FIELD_ALIASES,
+  REVERSE_FIELD_ALIASES,
+} from './constants/items.constants';
+import { ItemFieldDefinition } from '../types/types.types';
+
+function getItemFieldValue(item: Record<string, any>, key: string): any {
+  if (!item) return undefined;
+  if (item[key] !== undefined && item[key] !== null && item[key] !== '') {
+    return item[key];
+  }
+  if (item.extraFields && typeof item.extraFields === 'object') {
+    if (
+      item.extraFields[key] !== undefined &&
+      item.extraFields[key] !== null &&
+      item.extraFields[key] !== ''
+    ) {
+      return item.extraFields[key];
+    }
+  }
+  const alias = FIELD_ALIASES[key] || REVERSE_FIELD_ALIASES[key];
+  if (alias) {
+    if (item[alias] !== undefined && item[alias] !== null && item[alias] !== '') {
+      return item[alias];
+    }
+    if (item.extraFields && typeof item.extraFields === 'object') {
+      if (
+        item.extraFields[alias] !== undefined &&
+        item.extraFields[alias] !== null &&
+        item.extraFields[alias] !== ''
+      ) {
+        return item.extraFields[alias];
+      }
+    }
+  }
+  const lowerKey = key.toLowerCase();
+  for (const [k, v] of Object.entries(item)) {
+    if (k.toLowerCase() === lowerKey && v !== undefined && v !== null && v !== '') {
+      return v;
+    }
+  }
+  if (item.extraFields && typeof item.extraFields === 'object') {
+    for (const [k, v] of Object.entries(item.extraFields)) {
+      if (k.toLowerCase() === lowerKey && v !== undefined && v !== null && v !== '') {
+        return v;
+      }
+    }
+  }
+  return undefined;
+}
+
+function findMatchingTargetField(
+  sourceKey: string,
+  targetFields: ItemFieldDefinition[],
+): string | undefined {
+  const exact = targetFields.find((f) => f.key === sourceKey);
+  if (exact) return exact.key;
+
+  const targetAlias = FIELD_ALIASES[sourceKey] || REVERSE_FIELD_ALIASES[sourceKey];
+  if (targetAlias) {
+    const matched = targetFields.find((f) => f.key === targetAlias);
+    if (matched) return matched.key;
+  }
+
+  const lowerSource = sourceKey.toLowerCase();
+  const matchedCase = targetFields.find((f) => f.key.toLowerCase() === lowerSource);
+  if (matchedCase) return matchedCase.key;
+
+  return undefined;
+}
 
 @Injectable()
 export class ItemsService implements IItemReadPort, IItemExistencePort {
@@ -1059,46 +1107,62 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
 
     const sourceValues: Record<string, any> = {};
     for (const field of sourceFields) {
-      const val = item[field.key] ?? item.extraFields?.[field.key];
+      const val = getItemFieldValue(item, field.key);
       if (val !== undefined && val !== null && val !== '') {
         sourceValues[field.key] = val;
       }
     }
 
-    const commonKeys = [
+    const persistentAcademicKeys = [
       'title',
       'abstract',
       'abstractNote',
       'date',
       'year',
       'url',
+      'DOI',
       'doi',
+      'ISBN',
       'isbn',
+      'ISSN',
       'issn',
+      'PMID',
+      'pmid',
+      'PMCID',
+      'pmcid',
+      'archiveID',
+      'archiveId',
+      'arxivId',
+      'citationCount',
+      'referenceCount',
+      'openAccessPdfUrl',
       'language',
       'shortTitle',
       'rights',
+      'license',
       'extra',
+      'citationKey',
     ];
-    for (const k of commonKeys) {
-      if (
-        item[k] !== undefined &&
-        item[k] !== null &&
-        item[k] !== '' &&
-        sourceValues[k] === undefined
-      ) {
-        sourceValues[k] = item[k];
+    for (const k of persistentAcademicKeys) {
+      const val = getItemFieldValue(item, k);
+      if (val !== undefined && val !== null && val !== '') {
+        const canonicalKey = FIELD_ALIASES[k] ? k : (REVERSE_FIELD_ALIASES[k] || k);
+        if (sourceValues[canonicalKey] === undefined && sourceValues[k] === undefined) {
+          sourceValues[canonicalKey] = val;
+        }
       }
     }
 
     for (const field of sourceFields) {
+      const matched = findMatchingTargetField(field.key, targetFields);
       if (
-        !targetFieldKeys.has(field.key) &&
+        !matched &&
         field.key !== 'title' &&
         field.key !== 'abstract' &&
         field.key !== 'abstractNote' &&
         field.key !== 'url' &&
-        field.key !== 'doi'
+        field.key !== 'doi' &&
+        field.key !== 'DOI'
       ) {
         delete projectedItem[field.key];
       }
@@ -1136,9 +1200,12 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     }
 
     for (const [sField, val] of Object.entries(sourceValues)) {
-      if (targetFieldKeys.has(sField)) {
-        projectedItem[sField] = val;
-        preservedFields.push(sField);
+      const matchedTargetKey = findMatchingTargetField(sField, targetFields);
+      if (matchedTargetKey) {
+        projectedItem[matchedTargetKey] = val;
+        const dbCol = FIELD_ALIASES[matchedTargetKey];
+        if (dbCol) projectedItem[dbCol] = val;
+        preservedFields.push(matchedTargetKey);
       } else {
         const resolved = this.typesService.resolveBaseFieldMapping(
           sourceType,
@@ -1151,6 +1218,8 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
           targetFieldKeys.has(resolved.targetField)
         ) {
           projectedItem[resolved.targetField] = val;
+          const dbCol = FIELD_ALIASES[resolved.targetField];
+          if (dbCol) projectedItem[dbCol] = val;
           mappedFields.push({
             fromField: sField,
             toField: resolved.targetField,
@@ -1158,15 +1227,43 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
             rule: 'base-semantic',
           });
         } else {
-          droppedFields.push({
-            field: sField,
-            label: sourceLabelMap.get(sField) || sField,
-            value: val,
-          });
-          unmappedRetained[sField] = val;
+          const isPersistentCol =
+            CATALOG_COLUMN_METADATA_FIELDS.has(sField) ||
+            CATALOG_COLUMN_METADATA_FIELDS.has(FIELD_ALIASES[sField]);
 
-          if (options.retainUnmappedInExtra !== false) {
-            newExtraFields[`__unmapped_${sourceType}_${sField}`] = val;
+          if (
+            isPersistentCol &&
+            [
+              'doi',
+              'DOI',
+              'arxivId',
+              'archiveID',
+              'archiveId',
+              'pmid',
+              'PMID',
+              'pmcid',
+              'PMCID',
+              'citationCount',
+              'referenceCount',
+              'openAccessPdfUrl',
+              'url',
+            ].includes(sField)
+          ) {
+            projectedItem[sField] = val;
+            const dbCol = FIELD_ALIASES[sField];
+            if (dbCol) projectedItem[dbCol] = val;
+            preservedFields.push(sField);
+          } else {
+            droppedFields.push({
+              field: sField,
+              label: sourceLabelMap.get(sField) || sField,
+              value: val,
+            });
+            unmappedRetained[sField] = val;
+
+            if (options.retainUnmappedInExtra !== false) {
+              newExtraFields[`__unmapped_${sourceType}_${sField}`] = val;
+            }
           }
         }
       }
@@ -1261,12 +1358,13 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     };
 
     for (const field of targetFields) {
-      const val = projected[field.key];
+      const val = getItemFieldValue(projected, field.key);
       if (
         val !== undefined &&
         val !== null &&
         val !== '' &&
-        !DB_SCALAR_COLUMNS.has(field.key)
+        !CATALOG_COLUMN_METADATA_FIELDS.has(field.key) &&
+        !CATALOG_COLUMN_METADATA_FIELDS.has(FIELD_ALIASES[field.key])
       ) {
         dynamicExtraFields[field.key] = val;
       }
@@ -1279,10 +1377,22 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       extraFields: dynamicExtraFields,
     };
 
-    for (const col of DB_SCALAR_COLUMNS) {
-      const val = projected[col] ?? (existing as any)[col];
-      if (val !== undefined) {
-        updatePayload[col] = val;
+    const droppedSet = new Set(
+      preview.droppedFields.map((d) => d.field.toLowerCase()),
+    );
+
+    for (const col of CATALOG_COLUMN_METADATA_FIELDS) {
+      if (FIELD_ALIASES[col] && FIELD_ALIASES[col] !== col) continue;
+
+      const colLower = col.toLowerCase();
+      if (droppedSet.has(colLower)) {
+        updatePayload[col] = '';
+      } else {
+        const val =
+          getItemFieldValue(projected, col) ?? (existing as any)[col];
+        if (val !== undefined) {
+          updatePayload[col] = val;
+        }
       }
     }
 

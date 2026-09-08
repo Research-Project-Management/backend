@@ -537,6 +537,9 @@ export function normalizeArxivId(
   if (!arxiv || typeof arxiv !== 'string') return undefined;
   let clean = arxiv.trim();
 
+  // Strip accidental category brackets if present, e.g. "1512.03385v1 [cs.CV]" or "1512.03385v1[cs.CV]"
+  clean = clean.replace(/\s*\[[^\]]+\]\s*$/, '').trim();
+
   clean = clean.replace(
     /^(?:https?:\/\/arxiv\.org\/(?:abs|pdf)\/|arxiv:\s*)/i,
     '',

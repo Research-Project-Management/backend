@@ -241,6 +241,7 @@ model Project {
 
   @@unique([workspaceId, identifier])
   @@index([workspaceId, isActive, deletedAt])
+  @@index([workspaceId, deletedAt, name])
   @@index([createdById])
   @@index([leadId])
   @@index([deletedAt])
@@ -259,6 +260,7 @@ model ProjectMember {
 
   @@unique([projectId, userId])
   @@index([userId])
+  @@index([userId, role])
   @@index([projectId, role])
   @@map("project_members")
 }

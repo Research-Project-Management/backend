@@ -171,6 +171,24 @@ export class IngestionRepository {
     });
   }
 
+  async updateRunProgress(
+    workspaceId: string,
+    runId: string,
+    progress: Prisma.InputJsonValue,
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    const client = this.getClient(tx);
+    await client.ingestionRun.update({
+      where: {
+        id: runId,
+        workspaceId,
+      },
+      data: {
+        executionLog: progress,
+      },
+    });
+  }
+
   async findOrphanedRuns(
     olderThan: Date,
     options?: {

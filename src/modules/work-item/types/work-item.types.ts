@@ -131,6 +131,10 @@ export interface IWorkItemRepository {
       completed?: boolean;
     }>,
   ): Promise<Task[]>;
+  findProjectMemberRole(
+    projectId: string,
+    userId: string,
+  ): Promise<string | null>;
 }
 
 export type ITaskRepository = IWorkItemRepository;

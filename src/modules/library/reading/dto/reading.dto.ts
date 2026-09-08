@@ -1,4 +1,4 @@
-import { IsEnum, IsInt, IsOptional, Min, Max } from 'class-validator';
+import { IsArray, IsEnum, IsInt, IsOptional, IsString, Min, Max } from 'class-validator';
 import { ReadingStatus } from '../types/reading.types';
 
 export class UpdateReadingDto {
@@ -14,3 +14,11 @@ export class UpdateReadingDto {
   @Max(5, { message: 'rating must be between 0 and 5' })
   rating?: number;
 }
+
+export class GetBatchReadingStatesDto {
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  itemIds?: string[];
+}
+

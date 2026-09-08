@@ -14,6 +14,10 @@ import {
 import { PrismaService } from '@/core/database/prisma.service';
 import { buildWorkspaceIdentifierWhere } from '@/core/utils/tenant.util';
 import { R2Service } from './r2/r2.service';
+import {
+  assertFileNotTrashed,
+  resolveFileStorageKey,
+} from './file/utils/storage-key.util';
 import { Readable } from 'stream';
 
 @Injectable()
@@ -58,31 +62,8 @@ export class StorageAdapter implements IStoragePort {
       }
     }
 
-    if (file.trashedAt !== null || (file as any).isTrash) {
-      throw new NotFoundException(`File ${fileId} is in trash`);
-    }
-
-    let storageKey = '';
-    const R2_PREFIX = '/api/files/r2/';
-    if (file.url && file.url.startsWith(R2_PREFIX)) {
-      storageKey = file.url.slice(R2_PREFIX.length).trim();
-    } else if (
-      file.url &&
-      !file.url.startsWith('http') &&
-      !file.url.startsWith('/api/files/')
-    ) {
-      storageKey = file.url.trim();
-    } else if ((file.metaData as any)?.storageKey) {
-      storageKey = (file.metaData as any).storageKey;
-    } else if (file.url) {
-      storageKey = file.url.replace(/^\/+/, '');
-    }
-
-    if (!storageKey) {
-      throw new NotFoundException(
-        `Empty storage object key for file ${fileId}`,
-      );
-    }
+    assertFileNotTrashed(file, fileId);
+    const storageKey = resolveFileStorageKey(file, fileId);
 
     try {
       const response = await this.r2Service.getObjectStream(storageKey);

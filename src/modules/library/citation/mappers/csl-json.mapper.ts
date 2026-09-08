@@ -141,8 +141,15 @@ export class CslJsonMapper {
     if (item.doi) csl.DOI = item.doi;
     if (item.isbn) csl.ISBN = item.isbn;
     if (item.issn) csl.ISSN = item.issn;
+    if (item.pmid) csl.PMID = item.pmid;
+    if (item.pmcid) csl.PMCID = item.pmcid;
     if (item.url) csl.URL = item.url;
     if (item.abstract) csl.abstract = item.abstract;
+    if (item.archive) csl.archive = item.archive;
+    if (item.archiveLocation) csl.archive_location = item.archiveLocation;
+    if (item.callNumber) csl['call-number'] = item.callNumber;
+    if (item.language) csl.language = item.language;
+    if (item.extra) csl.note = item.extra;
 
     // Special metadata
     if (rawType === 'preprint') {

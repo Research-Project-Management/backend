@@ -19,6 +19,7 @@ import {
 } from '../utils/items.utils';
 import { getFileContentPath } from '@/modules/storage/storage.port';
 import {
+  CATALOG_COLUMN_METADATA_FIELDS,
   TYPE_SPECIFIC_EXTRA_FIELDS,
   parseAccessDate,
 } from '../constants/items.constants';
@@ -76,29 +77,37 @@ export class ItemCommandRepository {
           })
           .filter((note): note is NonNullable<typeof note> => note !== null)
       : [];
+    const rawDoi = data.doi ?? (data as any).DOI;
+    const rawArxivId =
+      data.arxivId ?? (data as any).archiveID ?? (data as any).archiveId;
+    const rawPmid = data.pmid ?? (data as any).PMID;
+    const rawPmcid = data.pmcid ?? (data as any).PMCID;
+    const rawIsbn = data.isbn ?? (data as any).ISBN;
+    const rawIssn = data.issn ?? (data as any).ISSN;
+
     const cleanDoi =
-      normalizeDoi(cleanBannedString(data.doi)) ||
-      cleanBannedString(data.doi) ||
+      normalizeDoi(cleanBannedString(rawDoi)) ||
+      cleanBannedString(rawDoi) ||
       '';
     const cleanArxivId =
-      normalizeArxivId(cleanBannedString(data.arxivId)) ||
-      cleanBannedString(data.arxivId) ||
+      normalizeArxivId(cleanBannedString(rawArxivId)) ||
+      cleanBannedString(rawArxivId) ||
       '';
     const cleanPmid =
-      normalizePmid(cleanBannedString(data.pmid)) ||
-      cleanBannedString(data.pmid) ||
+      normalizePmid(cleanBannedString(rawPmid)) ||
+      cleanBannedString(rawPmid) ||
       '';
     const cleanPmcid =
-      normalizePmcid(cleanBannedString(data.pmcid)) ||
-      cleanBannedString(data.pmcid) ||
+      normalizePmcid(cleanBannedString(rawPmcid)) ||
+      cleanBannedString(rawPmcid) ||
       '';
     const cleanIsbn =
-      normalizeIsbn(cleanBannedString(data.isbn)) ||
-      cleanBannedString(data.isbn) ||
+      normalizeIsbn(cleanBannedString(rawIsbn)) ||
+      cleanBannedString(rawIsbn) ||
       '';
     const cleanIssn =
-      normalizeIssn(cleanBannedString(data.issn)) ||
-      cleanBannedString(data.issn) ||
+      normalizeIssn(cleanBannedString(rawIssn)) ||
+      cleanBannedString(rawIssn) ||
       '';
 
     // Concurrency-safe tag preparation:
@@ -135,11 +144,11 @@ export class ItemCommandRepository {
       title: data.title,
       year: data.year ?? null,
       doi: cleanDoi,
-      abstract: data.abstract ?? '',
+      abstract: data.abstract ?? (data as any).abstractNote ?? '',
       itemType: data.itemType ?? 'journalArticle',
       publicationTitle: data.publicationTitle ?? data.journal ?? '',
       publicationDate:
-        data.publicationDate ?? (data.year ? String(data.year) : ''),
+        data.publicationDate ?? (data as any).date ?? (data.year ? String(data.year) : ''),
       publisher: data.publisher ?? '',
       place: data.place ?? '',
       volume: data.volume ?? '',
@@ -157,11 +166,11 @@ export class ItemCommandRepository {
       pmcid: cleanPmcid,
       url: data.url ?? '',
       language: data.language ?? '',
-      journalAbbr: data.journalAbbr ?? '',
+      journalAbbr: data.journalAbbr ?? (data as any).journalAbbreviation ?? '',
       shortTitle: data.shortTitle ?? '',
-      rights: data.rights ?? '',
-      license: data.license ?? '',
-      citationKey: data.citationKey ?? '',
+      rights: data.rights ?? (data as any).license ?? '',
+      license: data.license ?? data.rights ?? (data as any).license ?? '',
+      citationKey: data.citationKey ?? (data as any).citeKey ?? '',
       libraryCatalog: data.libraryCatalog ?? '',
       archive: data.archive ?? '',
       archiveLocation: data.archiveLocation ?? '',
@@ -173,50 +182,38 @@ export class ItemCommandRepository {
       openAccessPdfUrl: data.openAccessPdfUrl ?? null,
       seriesNumber: data.seriesNumber ?? null,
       extra: (() => {
-        // Merge extra (raw text/JSON), extraFields, and type-specific fields that have no dedicated DB column
-        let merged: Record<string, any> = {};
-        let rawExtraPreserved = false;
+        // Pure plain-text Extra contract (Zotero parity).
+        // Never JSON.stringify into extra.
+        let text = '';
         if (typeof data.extra === 'string' && data.extra.trim()) {
-          if (data.extra.trim().startsWith('{')) {
+          const trimmed = data.extra.trim();
+          if (trimmed.startsWith('{')) {
             try {
-              merged = JSON.parse(data.extra);
+              const parsed = JSON.parse(trimmed);
+              if (typeof parsed._rawExtra === 'string') {
+                text = parsed._rawExtra.trim();
+              } else if (parsed && typeof parsed === 'object') {
+                const lines: string[] = [];
+                for (const [k, v] of Object.entries(parsed)) {
+                  if (
+                    v !== null &&
+                    v !== undefined &&
+                    v !== '' &&
+                    !CATALOG_COLUMN_METADATA_FIELDS.has(k)
+                  ) {
+                    lines.push(`${k}: ${String(v)}`);
+                  }
+                }
+                text = lines.join('\n');
+              }
             } catch {
-              // Non-JSON extra: preserve as _rawExtra so it is not lost
-              merged._rawExtra = data.extra;
-              rawExtraPreserved = true;
+              text = trimmed;
             }
           } else {
-            // Plain text extra (e.g. Zotero "Citations: 23526") — preserve unconditionally
-            merged._rawExtra = data.extra;
-            rawExtraPreserved = true;
+            text = trimmed;
           }
         }
-        if (
-          data.extraFields &&
-          typeof data.extraFields === 'object' &&
-          Object.keys(data.extraFields).length > 0
-        ) {
-          merged = { ...merged, ...data.extraFields };
-        }
-        // Capture type-specific fields that have no dedicated DB column
-        for (const key of TYPE_SPECIFIC_EXTRA_FIELDS) {
-          const value = (data as unknown as Record<string, unknown>)[key];
-
-          if (value !== undefined && value !== '') {
-            merged[key] = value;
-          }
-        }
-        // If we only have the raw extra and nothing else merged, return raw text as-is
-        const mergedKeys = Object.keys(merged);
-        if (
-          mergedKeys.length === 1 &&
-          rawExtraPreserved &&
-          mergedKeys[0] === '_rawExtra'
-        ) {
-          return data.extra ?? '';
-        }
-        if (mergedKeys.length > 0) return JSON.stringify(merged);
-        return data.extra ?? '';
+        return text;
       })(),
       uploadedById: data.uploadedById || 'system',
       version: 1,
@@ -454,41 +451,47 @@ export class ItemCommandRepository {
       });
     }
 
+    const rawDoi = data.doi !== undefined ? data.doi : (data as any).DOI;
+    const rawArxivId =
+      data.arxivId !== undefined
+        ? data.arxivId
+        : (data as any).archiveID !== undefined
+          ? (data as any).archiveID
+          : (data as any).archiveId;
+    const rawPmid = data.pmid !== undefined ? data.pmid : (data as any).PMID;
+    const rawPmcid = data.pmcid !== undefined ? data.pmcid : (data as any).PMCID;
+    const rawIsbn = data.isbn !== undefined ? data.isbn : (data as any).ISBN;
+    const rawIssn = data.issn !== undefined ? data.issn : (data as any).ISSN;
+    const rawAbstract = data.abstract !== undefined ? data.abstract : (data as any).abstractNote;
+    const rawPubDate = data.publicationDate !== undefined ? data.publicationDate : (data as any).date;
+    const rawPubTitle = data.publicationTitle !== undefined ? data.publicationTitle : (data as any).journal;
+    const rawJournalAbbr = data.journalAbbr !== undefined ? data.journalAbbr : (data as any).journalAbbreviation;
+    const rawRights = data.rights !== undefined ? data.rights : (data as any).license;
+    const rawCitationKey = data.citationKey !== undefined ? data.citationKey : (data as any).citeKey;
+
     const cleanDoi =
-      data.doi !== undefined
-        ? normalizeDoi(cleanBannedString(data.doi)) ||
-          cleanBannedString(data.doi) ||
-          ''
+      rawDoi !== undefined
+        ? (rawDoi ? (normalizeDoi(cleanBannedString(rawDoi)) || cleanBannedString(rawDoi) || '') : '')
         : undefined;
     const cleanArxivId =
-      data.arxivId !== undefined
-        ? normalizeArxivId(cleanBannedString(data.arxivId)) ||
-          cleanBannedString(data.arxivId) ||
-          ''
+      rawArxivId !== undefined
+        ? (rawArxivId ? (normalizeArxivId(cleanBannedString(rawArxivId)) || cleanBannedString(rawArxivId) || '') : '')
         : undefined;
     const cleanPmid =
-      data.pmid !== undefined
-        ? normalizePmid(cleanBannedString(data.pmid)) ||
-          cleanBannedString(data.pmid) ||
-          ''
+      rawPmid !== undefined
+        ? (rawPmid ? (normalizePmid(cleanBannedString(rawPmid)) || cleanBannedString(rawPmid) || '') : '')
         : undefined;
     const cleanPmcid =
-      data.pmcid !== undefined
-        ? normalizePmcid(cleanBannedString(data.pmcid)) ||
-          cleanBannedString(data.pmcid) ||
-          ''
+      rawPmcid !== undefined
+        ? (rawPmcid ? (normalizePmcid(cleanBannedString(rawPmcid)) || cleanBannedString(rawPmcid) || '') : '')
         : undefined;
     const cleanIsbn =
-      data.isbn !== undefined
-        ? normalizeIsbn(cleanBannedString(data.isbn)) ||
-          cleanBannedString(data.isbn) ||
-          ''
+      rawIsbn !== undefined
+        ? (rawIsbn ? (normalizeIsbn(cleanBannedString(rawIsbn)) || cleanBannedString(rawIsbn) || '') : '')
         : undefined;
     const cleanIssn =
-      data.issn !== undefined
-        ? normalizeIssn(cleanBannedString(data.issn)) ||
-          cleanBannedString(data.issn) ||
-          ''
+      rawIssn !== undefined
+        ? (rawIssn ? (normalizeIssn(cleanBannedString(rawIssn)) || cleanBannedString(rawIssn) || '') : '')
         : undefined;
 
     const updated = await client.catalogItem.update({
@@ -497,12 +500,12 @@ export class ItemCommandRepository {
         title: data.title ?? existing.title,
         year: data.year !== undefined ? data.year : existing.year,
         doi: cleanDoi !== undefined ? cleanDoi : existing.doi,
-        abstract: data.abstract ?? existing.abstract,
+        abstract: rawAbstract !== undefined ? rawAbstract : existing.abstract,
         itemType: data.itemType ?? existing.itemType,
         publicationTitle:
-          data.publicationTitle ?? data.journal ?? existing.publicationTitle,
+          rawPubTitle !== undefined ? rawPubTitle : existing.publicationTitle,
 
-        publicationDate: data.publicationDate ?? existing.publicationDate,
+        publicationDate: rawPubDate !== undefined ? rawPubDate : existing.publicationDate,
         publisher: data.publisher ?? existing.publisher,
         place: data.place ?? existing.place,
         volume: data.volume ?? existing.volume,
@@ -520,11 +523,11 @@ export class ItemCommandRepository {
         pmcid: cleanPmcid !== undefined ? cleanPmcid : existing.pmcid,
         url: data.url ?? existing.url,
         language: data.language ?? existing.language,
-        journalAbbr: data.journalAbbr ?? existing.journalAbbr,
+        journalAbbr: rawJournalAbbr !== undefined ? rawJournalAbbr : existing.journalAbbr,
         shortTitle: data.shortTitle ?? existing.shortTitle,
-        rights: data.rights ?? existing.rights,
-        license: data.license ?? existing.license,
-        citationKey: data.citationKey ?? existing.citationKey,
+        rights: rawRights !== undefined ? rawRights : existing.rights,
+        license: rawRights !== undefined ? rawRights : (data.license !== undefined ? data.license : existing.license),
+        citationKey: rawCitationKey !== undefined ? rawCitationKey : existing.citationKey,
         libraryCatalog: data.libraryCatalog ?? existing.libraryCatalog,
         archive: data.archive ?? existing.archive,
         archiveLocation: data.archiveLocation ?? existing.archiveLocation,
@@ -532,7 +535,7 @@ export class ItemCommandRepository {
         accessedAt:
           data.accessedAt !== undefined
             ? data.accessedAt
-            : (parseAccessDate(data.accessDate) ?? existing.accessedAt),
+            : (data.accessDate !== undefined ? (parseAccessDate(data.accessDate) ?? null) : existing.accessedAt),
         arxivId: cleanArxivId !== undefined ? cleanArxivId : existing.arxivId,
         citationCount:
           data.citationCount !== undefined
@@ -551,65 +554,71 @@ export class ItemCommandRepository {
             ? data.seriesNumber
             : existing.seriesNumber,
         extra: (() => {
-          // Build merged extraFields: start from existing, overlay incoming extraFields, then type-specific fields
-          let merged: Record<string, any> = {};
-          let existingIsPlainText = false;
-          if (existing.extra && existing.extra.trim()) {
-            if (existing.extra.trim().startsWith('{')) {
-              try {
-                merged = JSON.parse(existing.extra);
-              } catch {
-                // Existing extra is non-JSON plain text — preserve it
-                merged._rawExtra = existing.extra;
-                existingIsPlainText = true;
+          // Pure plain-text Extra contract (Zotero parity).
+          // Never JSON.stringify into extra.
+          let text: string | undefined = undefined;
+
+          if (data.extra !== undefined) {
+            if (typeof data.extra === 'string') {
+              const trimmed = data.extra.trim();
+              if (trimmed.startsWith('{')) {
+                try {
+                  const parsed = JSON.parse(trimmed);
+                  if (typeof parsed._rawExtra === 'string') {
+                    text = parsed._rawExtra.trim();
+                  } else if (parsed && typeof parsed === 'object') {
+                    const lines: string[] = [];
+                    for (const [k, v] of Object.entries(parsed)) {
+                      if (
+                        v !== null &&
+                        v !== undefined &&
+                        v !== '' &&
+                        !CATALOG_COLUMN_METADATA_FIELDS.has(k)
+                      ) {
+                        lines.push(`${k}: ${String(v)}`);
+                      }
+                    }
+                    text = lines.join('\n');
+                  }
+                } catch {
+                  text = trimmed;
+                }
+              } else {
+                text = trimmed;
               }
             } else {
-              // Plain text (Zotero style) — preserve unconditionally
-              merged._rawExtra = existing.extra;
-              existingIsPlainText = true;
+              text = '';
             }
-          }
-          // Incoming extra (from update payload) may override
-          if (typeof data.extra === 'string' && data.extra.trim()) {
-            if (data.extra.trim().startsWith('{')) {
+          } else if (existing.extra) {
+            const existingTrimmed = existing.extra.trim();
+            if (existingTrimmed.startsWith('{')) {
               try {
-                const incomingParsed = JSON.parse(data.extra);
-                merged = { ...merged, ...incomingParsed };
-                // Incoming is valid JSON — clear plain-text guard if it existed
-                existingIsPlainText = false;
+                const parsed = JSON.parse(existingTrimmed);
+                if (typeof parsed._rawExtra === 'string') {
+                  text = parsed._rawExtra.trim();
+                } else if (parsed && typeof parsed === 'object') {
+                  const lines: string[] = [];
+                  for (const [k, v] of Object.entries(parsed)) {
+                    if (
+                      v !== null &&
+                      v !== undefined &&
+                      v !== '' &&
+                      !CATALOG_COLUMN_METADATA_FIELDS.has(k)
+                    ) {
+                      lines.push(`${k}: ${String(v)}`);
+                    }
+                  }
+                  text = lines.join('\n');
+                }
               } catch {
-                merged._rawExtra = data.extra;
-                existingIsPlainText = true;
+                text = existingTrimmed;
               }
             } else {
-              merged._rawExtra = data.extra;
-              existingIsPlainText = true;
+              text = existingTrimmed;
             }
           }
-          if (data.extraFields && typeof data.extraFields === 'object') {
-            merged = { ...merged, ...data.extraFields };
-            existingIsPlainText = false; // structured extraFields always win
-          }
-          // Merge type-specific fields that have no dedicated DB column
-          for (const key of TYPE_SPECIFIC_EXTRA_FIELDS) {
-            const value = (data as Record<string, unknown>)[key];
-            if (value !== undefined) {
-              merged[key] = value;
-              existingIsPlainText = false;
-            }
-          }
-          // If only _rawExtra key present and no structured data, return plain text
-          const mergedKeys = Object.keys(merged);
-          if (
-            existingIsPlainText &&
-            mergedKeys.length === 1 &&
-            mergedKeys[0] === '_rawExtra'
-          ) {
-            return merged._rawExtra;
-          }
-          return mergedKeys.length > 0
-            ? JSON.stringify(merged)
-            : (data.extra ?? existing.extra ?? '');
+
+          return text !== undefined ? text : (existing.extra ?? '');
         })(),
 
         ...(data.collectionIds !== undefined

@@ -38,38 +38,12 @@ export class CreateStickyDto {
   workspaceId?: string;
 }
 
-export class UpdateStickyDto {
+import { PartialType } from '@nestjs/swagger';
+
+export class UpdateStickyDto extends PartialType(CreateStickyDto) {
   @IsString()
   @IsOptional()
   id?: string;
-
-  @IsString()
-  @IsOptional()
-  title?: string;
-
-  @IsString()
-  @IsOptional()
-  content?: string;
-
-  @IsString()
-  @IsOptional()
-  color?: string;
-
-  @IsEnum(StickyScope)
-  @IsOptional()
-  scope?: StickyScope;
-
-  @IsObject()
-  @IsOptional()
-  position?: { x: number; y: number };
-
-  @IsString()
-  @IsOptional()
-  projectId?: string;
-
-  @IsString()
-  @IsOptional()
-  workspaceId?: string;
 
   @IsString()
   @IsOptional()

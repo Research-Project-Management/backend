@@ -15,7 +15,7 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { AiService } from './ai.service';
-import { AiQueryDto } from './dto/ai.dto';
+import { AiQueryDto, GetDocumentsBulkDto } from './dto/ai.dto';
 import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
 import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
 import { Public } from '@/modules/iam/authn/decorators/public.decorator';
@@ -184,7 +184,7 @@ export class AiController {
   @ApiOperation({ summary: 'Bulk retrieve document details by IDs' })
   async getDocumentsBulk(
     @CurrentUser('id') userId: string,
-    @Body() body: { ids: string[]; workspaceId: string },
+    @Body() body: GetDocumentsBulkDto,
   ) {
     if (!body?.workspaceId) {
       throw new BadRequestException('workspaceId is required');

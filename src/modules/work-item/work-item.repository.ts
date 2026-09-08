@@ -345,6 +345,52 @@ export class WorkItemRepository implements IWorkItemRepository {
       data,
     });
   }
+
+  async findProjectMemberRole(
+    projectId: string,
+    userId: string,
+  ): Promise<string | null> {
+    const project = isUuid(projectId)
+      ? await this.prisma.project.findUnique({
+          where: { id: projectId },
+          select: { id: true, workspaceId: true },
+        })
+      : await this.prisma.project.findFirst({
+          where: {
+            identifier: { equals: projectId, mode: 'insensitive' },
+            deletedAt: null,
+          },
+          select: { id: true, workspaceId: true },
+        });
+
+    if (!project) return null;
+
+    // Check workspace owner/admin super-permission
+    const workspaceMember = await this.prisma.workspaceMember.findFirst({
+      where: {
+        workspaceId: project.workspaceId,
+        userId,
+      },
+      select: { role: true },
+    });
+
+    if (
+      workspaceMember &&
+      (workspaceMember.role === 'owner' || workspaceMember.role === 'admin')
+    ) {
+      return 'admin';
+    }
+
+    const member = await this.prisma.projectMember.findFirst({
+      where: {
+        projectId: project.id,
+        userId,
+      },
+      select: { role: true },
+    });
+
+    return member?.role ?? null;
+  }
 }
 
 // Backward compatibility alias
