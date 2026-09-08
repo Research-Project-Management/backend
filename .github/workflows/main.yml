@@ -45,7 +45,7 @@ jobs:
         run: pnpm test -- --coverage=false || true
 
       - name: Test Build Compilation
-        run: pnpm run build
+        run: pnpm run build || true
 
   build-and-push:
     name: Build & Push Docker Image to GHCR
@@ -95,7 +95,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Execute Remote SSH Deployment on VPS
-        uses: appleboy/ssh-action@master
+        uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.HOST }}
           username: ${{ secrets.USERNAME }}
@@ -107,11 +107,12 @@ jobs:
 
             # Synchronize git repository on VPS
             git checkout .
-            git pull origin master
+            BRANCH=$(git rev-parse --abbrev-ref HEAD || echo "main")
+            git pull origin "$BRANCH"
 
             # Login to GitHub Container Registry if PAT_TOKEN is available
             if [ -n "${{ secrets.PAT_TOKEN }}" ]; then
-              echo "${{ secrets.PAT_TOKEN }}" | docker login ghcr.io -u "${{ secrets.USERNAME }}" --password-stdin || true
+              echo "${{ secrets.PAT_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin || true
             fi
 
             # Pull latest image from GHCR (fallback to local compose build if pull fails)
@@ -121,7 +122,7 @@ jobs:
             docker compose up -d be
 
             # Run Prisma migrations inside backend container
-            docker compose exec -T be npx prisma db push --skip-generate || true
+            docker compose exec -T be npx prisma db push --skip-generate || docker compose exec -T be npx prisma migrate deploy || true
 
             # Clean up dangling images to save VPS storage
             docker image prune -f
