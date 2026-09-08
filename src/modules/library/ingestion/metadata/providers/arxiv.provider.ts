@@ -188,7 +188,9 @@ export class ArxivProvider implements MetadataProvider {
         year,
         publicationDate,
         journal: journal || 'arXiv preprint',
-        publicationTitle: journal || (comment ? `arXiv preprint (${comment})` : 'arXiv preprint'),
+        publicationTitle:
+          journal ||
+          (comment ? `arXiv preprint (${comment})` : 'arXiv preprint'),
         publisher: 'arXiv',
         abstract,
         language: 'en',

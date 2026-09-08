@@ -17,7 +17,10 @@ import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
 import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
 import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
 import { CurrentUser } from '../../../modules/iam/authn/decorators/current-user.decorator';
-import { CreateAnnotationDto, UpdateAnnotationDto } from './dto/annotations.dto';
+import {
+  CreateAnnotationDto,
+  UpdateAnnotationDto,
+} from './dto/annotations.dto';
 
 @Controller([
   'api/v1/workspaces/:workspaceId/library/attachments/:attachmentId/annotations',

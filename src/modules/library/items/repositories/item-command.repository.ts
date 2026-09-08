@@ -27,7 +27,6 @@ import {
   UpdateCatalogItemData,
 } from '../types/items.types';
 
-
 @Injectable()
 export class ItemCommandRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -50,7 +49,9 @@ export class ItemCommandRepository {
       ? data.notes
           .map((note) => {
             const content =
-              typeof note === 'string' ? note : (note as { content?: unknown })?.content;
+              typeof note === 'string'
+                ? note
+                : (note as { content?: unknown })?.content;
             const source =
               typeof note === 'object' && note
                 ? (note as { source?: unknown }).source
@@ -61,7 +62,9 @@ export class ItemCommandRepository {
             return {
               workspaceId,
               createdById: data.uploadedById || 'system',
-              title: sourceName ? `Imported Note (${sourceName})` : 'Imported Note',
+              title: sourceName
+                ? `Imported Note (${sourceName})`
+                : 'Imported Note',
               contentMd,
               contentJson: {
                 type: 'doc',
@@ -521,10 +524,22 @@ export class ItemCommandRepository {
             ? data.accessedAt
             : (parseAccessDate(data.accessDate) ?? existing.accessedAt),
         arxivId: cleanArxivId !== undefined ? cleanArxivId : existing.arxivId,
-        citationCount: data.citationCount !== undefined ? data.citationCount : existing.citationCount,
-        referenceCount: data.referenceCount !== undefined ? data.referenceCount : existing.referenceCount,
-        openAccessPdfUrl: data.openAccessPdfUrl !== undefined ? data.openAccessPdfUrl : existing.openAccessPdfUrl,
-        seriesNumber: data.seriesNumber !== undefined ? data.seriesNumber : existing.seriesNumber,
+        citationCount:
+          data.citationCount !== undefined
+            ? data.citationCount
+            : existing.citationCount,
+        referenceCount:
+          data.referenceCount !== undefined
+            ? data.referenceCount
+            : existing.referenceCount,
+        openAccessPdfUrl:
+          data.openAccessPdfUrl !== undefined
+            ? data.openAccessPdfUrl
+            : existing.openAccessPdfUrl,
+        seriesNumber:
+          data.seriesNumber !== undefined
+            ? data.seriesNumber
+            : existing.seriesNumber,
         extra: (() => {
           // Build merged extraFields: start from existing, overlay incoming extraFields, then type-specific fields
           let merged: Record<string, any> = {};

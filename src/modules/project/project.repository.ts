@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
-import { buildWorkspaceIdentifierWhere, isUuid } from '@/core/utils/tenant.util';
+import {
+  buildWorkspaceIdentifierWhere,
+  isUuid,
+} from '@/core/utils/tenant.util';
 import {
   Prisma,
   Project,
@@ -35,7 +38,11 @@ export class ProjectRepository implements IProjectRepository {
     if (!canonicalWorkspaceId) return [];
 
     return this.prisma.project.findMany({
-      where: { workspaceId: canonicalWorkspaceId, isActive: true, deletedAt: null },
+      where: {
+        workspaceId: canonicalWorkspaceId,
+        isActive: true,
+        deletedAt: null,
+      },
       include: {
         members: {
           take: 20,

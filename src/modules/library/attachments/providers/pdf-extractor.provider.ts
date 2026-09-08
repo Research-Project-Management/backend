@@ -55,7 +55,6 @@ export class PdfExtractorProvider {
     @Optional() private readonly ssrfGuard?: SsrfGuardService,
   ) {}
 
-
   async extractDocumentFromBuffer(
     buffer: Buffer,
   ): Promise<ExtractedPdfDocument> {
@@ -270,7 +269,8 @@ export class PdfExtractorProvider {
           const headerResult =
             await this.grobidClient.processHeaderDocument(buffer);
           if (headerResult) {
-            if (headerResult.abstract) metadata.abstract = headerResult.abstract;
+            if (headerResult.abstract)
+              metadata.abstract = headerResult.abstract;
             if (headerResult.title) metadata.title = headerResult.title;
             if (headerResult.creators && headerResult.creators.length > 0) {
               metadata.creators = headerResult.creators;
@@ -386,7 +386,8 @@ export class PdfExtractorProvider {
 
     const scannedText = text.slice(0, PdfExtractorProvider.TEXT_SCAN_LIMIT);
     const joinedText = scannedText.replace(/(10\.\d{4,9}\/)\s+/g, '$1');
-    const doiMatches = joinedText.match(/10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/g) ?? [];
+    const doiMatches =
+      joinedText.match(/10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/g) ?? [];
 
     for (const match of doiMatches) {
       const doi = match.replace(/[.,;)\]]+$/, '');
@@ -445,7 +446,11 @@ export class PdfExtractorProvider {
       .filter(Boolean);
 
     let abstractIndex = -1;
-    for (let lineIndex = 0; lineIndex < Math.min(lines.length, 60); lineIndex++) {
+    for (
+      let lineIndex = 0;
+      lineIndex < Math.min(lines.length, 60);
+      lineIndex++
+    ) {
       if (/^abstract\b/i.test(lines[lineIndex])) {
         abstractIndex = lineIndex;
         break;
@@ -461,7 +466,8 @@ export class PdfExtractorProvider {
         )
       )
         return false;
-      if (/copyright|all rights reserved|doi:\s*10\./i.test(lineItem)) return false;
+      if (/copyright|all rights reserved|doi:\s*10\./i.test(lineItem))
+        return false;
       return true;
     });
 
@@ -483,7 +489,10 @@ export class PdfExtractorProvider {
         const wordsInLine = currentLine.split(/\s+/);
         const looksLikeMultipleNames =
           wordsInLine.length >= 4 &&
-          wordsInLine.every((wordItem) => /^[A-ZÀ-Ỹ]/.test(wordItem) || /[*†‡§\d]/.test(wordItem));
+          wordsInLine.every(
+            (wordItem) =>
+              /^[A-ZÀ-Ỹ]/.test(wordItem) || /[*†‡§\d]/.test(wordItem),
+          );
 
         if (
           titleLines.length > 0 &&
@@ -507,7 +516,11 @@ export class PdfExtractorProvider {
 
       const parsedAuthors: string[] = [];
       if (authorStartIndex !== -1 && authorStartIndex < cleanLines.length) {
-        for (let lineIndex = authorStartIndex; lineIndex < cleanLines.length; lineIndex++) {
+        for (
+          let lineIndex = authorStartIndex;
+          lineIndex < cleanLines.length;
+          lineIndex++
+        ) {
           const authorLine = cleanLines[lineIndex];
           if (
             /@|univ|institute|department|college|laboratory|school|hospital|center|research|microsoft|google/i.test(
@@ -517,7 +530,9 @@ export class PdfExtractorProvider {
             break;
           }
           if (authorLine.includes(',')) {
-            const rawAuthorNames = authorLine.replace(/[*†‡§\d]/g, '').split(/[,;]|\band\b/i);
+            const rawAuthorNames = authorLine
+              .replace(/[*†‡§\d]/g, '')
+              .split(/[,;]|\band\b/i);
             for (const rawAuthorName of rawAuthorNames) {
               const cleanName = rawAuthorName.replace(/\s+/g, ' ').trim();
               const nameParts = cleanName.split(' ');
@@ -534,8 +549,14 @@ export class PdfExtractorProvider {
               .replace(/[*†‡§\d]/g, '')
               .split(/\s+/)
               .filter((wordItem) => /^[A-ZÀ-Ỹ]/.test(wordItem));
-            for (let wordIndex = 0; wordIndex < nameWords.length - 1; wordIndex += 2) {
-              parsedAuthors.push(`${nameWords[wordIndex]} ${nameWords[wordIndex + 1]}`);
+            for (
+              let wordIndex = 0;
+              wordIndex < nameWords.length - 1;
+              wordIndex += 2
+            ) {
+              parsedAuthors.push(
+                `${nameWords[wordIndex]} ${nameWords[wordIndex + 1]}`,
+              );
             }
           }
         }

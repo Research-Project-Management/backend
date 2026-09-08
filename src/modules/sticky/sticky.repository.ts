@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
-import { buildWorkspaceIdentifierWhere, isUuid } from '@/core/utils/tenant.util';
+import {
+  buildWorkspaceIdentifierWhere,
+  isUuid,
+} from '@/core/utils/tenant.util';
 import { Prisma, StickyScope, Sticky } from '@prisma/client';
 import {
   IStickyRepository,
@@ -159,7 +162,10 @@ export class StickyRepository implements IStickyRepository {
     if (!isUuid(projectId)) {
       const project = await this.prisma.project
         .findFirst({
-          where: { identifier: { equals: projectId, mode: 'insensitive' }, deletedAt: null },
+          where: {
+            identifier: { equals: projectId, mode: 'insensitive' },
+            deletedAt: null,
+          },
           select: { workspaceId: true },
         })
         .catch(() => null);

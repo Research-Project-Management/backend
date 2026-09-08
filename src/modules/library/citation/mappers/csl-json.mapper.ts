@@ -164,7 +164,8 @@ export class CslJsonMapper {
     if (rawContributors && rawContributors.length > 0) {
       const sortedContributors = [...rawContributors].sort(
         (firstContributor, secondContributor) =>
-          (firstContributor.orderIndex ?? 0) - (secondContributor.orderIndex ?? 0),
+          (firstContributor.orderIndex ?? 0) -
+          (secondContributor.orderIndex ?? 0),
       );
 
       for (const contributorItem of sortedContributors) {

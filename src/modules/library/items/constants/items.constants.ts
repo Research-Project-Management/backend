@@ -126,5 +126,3 @@ export type {
   CreateCatalogItemData,
   UpdateCatalogItemData,
 } from '../types/items.types';
-
-

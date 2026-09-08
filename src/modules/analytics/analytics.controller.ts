@@ -48,10 +48,7 @@ export class AnalyticsController {
     return this.analyticsService.getYourWork(workspaceId, userId);
   }
 
-  @Get([
-    'workspaces/:workspaceId/overview',
-    'workspace/:workspaceId/overview',
-  ])
+  @Get(['workspaces/:workspaceId/overview', 'workspace/:workspaceId/overview'])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'Get workspace aggregate metrics overview' })

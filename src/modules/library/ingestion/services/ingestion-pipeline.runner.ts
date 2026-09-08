@@ -291,8 +291,7 @@ export class IngestionPipelineRunner {
           this.attachmentsService
         ) {
           const uploadedFileIdentifier = envelope.payload.fileId;
-          const uploadedFilename =
-            envelope.payload.filename || 'document.pdf';
+          const uploadedFilename = envelope.payload.filename || 'document.pdf';
           try {
             await this.attachmentsService.createAttachment({
               workspaceId,
@@ -329,7 +328,8 @@ export class IngestionPipelineRunner {
             if (!noteContent.trim()) continue;
             const noteSource =
               typeof noteItem === 'object' && noteItem !== null
-                ? typeof (noteItem as Record<string, unknown>).source === 'string'
+                ? typeof (noteItem as Record<string, unknown>).source ===
+                  'string'
                   ? String((noteItem as Record<string, unknown>).source)
                   : undefined
                 : undefined;

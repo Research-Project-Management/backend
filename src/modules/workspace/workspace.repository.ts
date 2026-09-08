@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
-import { buildWorkspaceIdentifierWhere, isUuid } from '@/core/utils/tenant.util';
+import {
+  buildWorkspaceIdentifierWhere,
+  isUuid,
+} from '@/core/utils/tenant.util';
 import { Prisma, WorkspaceMemberRole, Workspace } from '@prisma/client';
 import {
   IWorkspaceRepository,
@@ -222,7 +225,8 @@ export class WorkspaceRepository implements IWorkspaceRepository {
     userId: string,
     role: WorkspaceMemberRole = WorkspaceMemberRole.member,
   ) {
-    const canonicalId = (await this.getCanonicalWorkspaceId(workspaceId)) || workspaceId;
+    const canonicalId =
+      (await this.getCanonicalWorkspaceId(workspaceId)) || workspaceId;
     return this.prisma.workspaceMember.create({
       data: {
         workspaceId: canonicalId,
@@ -240,7 +244,8 @@ export class WorkspaceRepository implements IWorkspaceRepository {
     userId: string,
     role: WorkspaceMemberRole,
   ) {
-    const canonicalId = (await this.getCanonicalWorkspaceId(workspaceId)) || workspaceId;
+    const canonicalId =
+      (await this.getCanonicalWorkspaceId(workspaceId)) || workspaceId;
     return this.prisma.workspaceMember.update({
       where: {
         workspaceId_userId: {
@@ -256,7 +261,8 @@ export class WorkspaceRepository implements IWorkspaceRepository {
   }
 
   async deleteMember(workspaceId: string, userId: string): Promise<void> {
-    const canonicalId = (await this.getCanonicalWorkspaceId(workspaceId)) || workspaceId;
+    const canonicalId =
+      (await this.getCanonicalWorkspaceId(workspaceId)) || workspaceId;
     await this.prisma.workspaceMember.delete({
       where: {
         workspaceId_userId: {
@@ -345,7 +351,10 @@ export class WorkspaceRepository implements IWorkspaceRepository {
     return this.prisma.page.findMany({
       where: {
         OR: [
-          { workspaceId: canonicalId, title: { contains: query, mode: 'insensitive' } },
+          {
+            workspaceId: canonicalId,
+            title: { contains: query, mode: 'insensitive' },
+          },
           {
             project: { workspaceId: canonicalId, deletedAt: null },
             title: { contains: query, mode: 'insensitive' },

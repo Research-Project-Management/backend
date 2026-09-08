@@ -55,14 +55,7 @@ export type CreatorInput = CreatorCreditInput;
 
 // ── Identifier Schemes ───────────────────────────────────────────────────────
 export type IdentifierScheme =
-  | 'doi'
-  | 'arxiv'
-  | 'pmid'
-  | 'pmcid'
-  | 'isbn'
-  | 'issn'
-  | 'uri'
-  | 'custom';
+  'doi' | 'arxiv' | 'pmid' | 'pmcid' | 'isbn' | 'issn' | 'uri' | 'custom';
 
 export interface ItemIdentifier {
   id?: string;
@@ -310,8 +303,6 @@ export interface ConvertTypeOptions {
   expectedVersion?: number;
   retainUnmappedInExtra?: boolean;
 }
-
-
 
 // ── Persistence Layer Data Transfer Shapes ─────────────────────────────────
 export interface CreateCatalogItemData {

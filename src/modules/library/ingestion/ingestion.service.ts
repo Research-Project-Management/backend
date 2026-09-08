@@ -137,7 +137,10 @@ export class IngestionService implements IngestionPort {
     runId: string,
   ): Promise<IngestionRunSnapshot> {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const run = await this.ingestionRepo.findRunById(canonicalWorkspaceId, runId);
+    const run = await this.ingestionRepo.findRunById(
+      canonicalWorkspaceId,
+      runId,
+    );
     if (!run) {
       throw new NotFoundException(`Ingestion run '${runId}' not found`);
     }
@@ -146,7 +149,10 @@ export class IngestionService implements IngestionPort {
 
   async retryRun(workspaceId: string, runId: string): Promise<any> {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const run = await this.ingestionRepo.findRunById(canonicalWorkspaceId, runId);
+    const run = await this.ingestionRepo.findRunById(
+      canonicalWorkspaceId,
+      runId,
+    );
     if (!run) {
       throw new NotFoundException(`Ingestion run '${runId}' not found`);
     }
@@ -230,7 +236,7 @@ export class IngestionService implements IngestionPort {
       attachmentIds: [],
       deduplicated: false,
       item,
-      errorMessage: ((updatedRun as any)?.errorSummary as any)?.lastError ?? undefined,
+      errorMessage: (updatedRun as any)?.errorSummary?.lastError ?? undefined,
     };
   }
 

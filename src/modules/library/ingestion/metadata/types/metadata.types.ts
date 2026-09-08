@@ -26,7 +26,6 @@ import {
   CreatorType,
 } from '../../../items/types/items.types';
 
-
 export { CreatorCreditInput, CreatorType };
 export type CreatorInput = CreatorCreditInput;
 
@@ -169,7 +168,6 @@ export type ProviderName =
   | 'OpenAlex'
   | 'Unpaywall'
   | 'CORE';
-
 
 export interface ProviderCapability {
   queryTypes: QueryType[];

@@ -47,10 +47,7 @@ export class FileController {
   @Post('presign')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Generate presigned URL for direct client upload' })
-  async presign(
-    @CurrentUser('id') userId: string,
-    @Body() dto: PresignDto,
-  ) {
+  async presign(@CurrentUser('id') userId: string, @Body() dto: PresignDto) {
     return this.fileService.presign(userId, dto);
   }
 
@@ -184,11 +181,7 @@ export class FileController {
     @CurrentUser('id') userId: string,
     @Body() dto: UploadFileDto,
   ) {
-    return this.fileService.upload(
-      userId,
-      { workspaceId },
-      dto,
-    );
+    return this.fileService.upload(userId, { workspaceId }, dto);
   }
 
   @Post(['workspaces/:workspaceId/folder', 'workspace/:workspaceId/folder'])
@@ -201,11 +194,7 @@ export class FileController {
     @CurrentUser('id') userId: string,
     @Body() dto: CreateFolderDto,
   ) {
-    return this.fileService.createFolder(
-      userId,
-      { workspaceId },
-      dto,
-    );
+    return this.fileService.createFolder(userId, { workspaceId }, dto);
   }
 
   @Get(['workspaces/:workspaceId/home', 'workspace/:workspaceId/home'])
@@ -457,7 +446,7 @@ export class FileController {
   }
 
   // ── Batch Operations ──────────────────────────────────────────────────────
- 
+
   @Post('batch/delete')
   @HttpCode(HttpStatus.OK)
   async batchDelete(

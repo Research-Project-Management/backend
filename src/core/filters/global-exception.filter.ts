@@ -109,7 +109,11 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         );
         if (!isProduction) {
           message = errorWithCode.message || 'Database query error';
-          details = { code: codeStr, meta: errorWithCode.meta, detail: errorWithCode.detail };
+          details = {
+            code: codeStr,
+            meta: errorWithCode.meta,
+            detail: errorWithCode.detail,
+          };
         }
       }
     } else if (exception instanceof Error) {

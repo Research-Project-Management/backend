@@ -123,7 +123,9 @@ export class PageService {
       }
 
       // Increment page view asynchronously ONLY on cache miss to eliminate DB write amplification
-      void Promise.resolve(this.pageRepo.incrementPageView(pageId)).catch(() => {});
+      void Promise.resolve(this.pageRepo.incrementPageView(pageId)).catch(
+        () => {},
+      );
     }
 
     return { page };
@@ -139,7 +141,9 @@ export class PageService {
     let resolvedWorkspaceId = workspaceId || dto.workspaceId;
 
     if (!resolvedProjectId) {
-      throw new BadRequestException('Project context is required to create a page');
+      throw new BadRequestException(
+        'Project context is required to create a page',
+      );
     }
 
     const project = await this.prisma.project.findFirst({
@@ -184,7 +188,9 @@ export class PageService {
         throw new NotFoundException('Parent page not found');
       }
       if (parent.projectId !== resolvedProjectId) {
-        throw new BadRequestException('Parent page belongs to a different project');
+        throw new BadRequestException(
+          'Parent page belongs to a different project',
+        );
       }
     }
 
@@ -236,7 +242,9 @@ export class PageService {
         throw new NotFoundException('Parent page not found');
       }
       if (parent.projectId !== existing.projectId) {
-        throw new BadRequestException('Parent page belongs to a different project');
+        throw new BadRequestException(
+          'Parent page belongs to a different project',
+        );
       }
       await this.validateNoCircularParent(pageId, parentPageId);
     }

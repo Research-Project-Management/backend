@@ -1,11 +1,4 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Param,
-  Body,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, UseGuards } from '@nestjs/common';
 import { DuplicateService } from './services/duplicate.service';
 import { QualityService } from './services/quality.service';
 import { MergeDuplicatesDto } from './dto/curation.dto';

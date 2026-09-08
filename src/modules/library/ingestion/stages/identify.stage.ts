@@ -273,9 +273,9 @@ export class IdentifyStage {
           ...extractedItemMetadata
         } = extractedMetadata;
 
-        const filenameDoi = payload.filename?.match(
-          /10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/,
-        )?.[0]?.replace(/[.,;:)\]]+$/, '');
+        const filenameDoi = payload.filename
+          ?.match(/10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/)?.[0]
+          ?.replace(/[.,;:)\]]+$/, '');
         const filenameArxivId = payload.filename?.match(
           /(?:arxiv[:_.\-]*)?(\d{4}\.\d{4,5}(?:v\d+)?)/i,
         )?.[1];

@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
-import { buildWorkspaceIdentifierWhere, isUuid } from '@/core/utils/tenant.util';
+import {
+  buildWorkspaceIdentifierWhere,
+  isUuid,
+} from '@/core/utils/tenant.util';
 import { Prisma, Task } from '@prisma/client';
 import {
   IWorkItemRepository,
@@ -77,7 +80,10 @@ export class WorkItemRepository implements IWorkItemRepository {
     if (!isUuid(canonicalProjectId)) {
       const proj = await this.prisma.project
         .findFirst({
-          where: { identifier: { equals: canonicalProjectId, mode: 'insensitive' }, deletedAt: null },
+          where: {
+            identifier: { equals: canonicalProjectId, mode: 'insensitive' },
+            deletedAt: null,
+          },
           select: { id: true },
         })
         .catch(() => null);
@@ -101,7 +107,11 @@ export class WorkItemRepository implements IWorkItemRepository {
       }
     } else if (filter) {
       if (filter.cycleId !== undefined) {
-        if (filter.cycleId === 'none' || filter.cycleId === 'null' || filter.cycleId === 'unassigned') {
+        if (
+          filter.cycleId === 'none' ||
+          filter.cycleId === 'null' ||
+          filter.cycleId === 'unassigned'
+        ) {
           where.cycleId = null;
         } else if (filter.cycleId === null || isUuid(filter.cycleId)) {
           where.cycleId = filter.cycleId;
@@ -110,7 +120,11 @@ export class WorkItemRepository implements IWorkItemRepository {
       if (filter.columnId) where.columnId = filter.columnId;
       if (filter.priority) where.priority = filter.priority;
       if (filter.assigneeId !== undefined) {
-        if (filter.assigneeId === 'unassigned' || filter.assigneeId === 'none' || filter.assigneeId === 'null') {
+        if (
+          filter.assigneeId === 'unassigned' ||
+          filter.assigneeId === 'none' ||
+          filter.assigneeId === 'null'
+        ) {
           where.assigneeId = null;
         } else if (filter.assigneeId === null || isUuid(filter.assigneeId)) {
           where.assigneeId = filter.assigneeId;
@@ -119,7 +133,10 @@ export class WorkItemRepository implements IWorkItemRepository {
       if (filter.parentTaskId !== undefined) {
         if (filter.parentTaskId === 'none' || filter.parentTaskId === 'null') {
           where.parentTaskId = null;
-        } else if (filter.parentTaskId === null || isUuid(filter.parentTaskId)) {
+        } else if (
+          filter.parentTaskId === null ||
+          isUuid(filter.parentTaskId)
+        ) {
           where.parentTaskId = filter.parentTaskId;
         }
       }

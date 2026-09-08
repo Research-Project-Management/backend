@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ItemMetadata, CreatorInput } from '../metadata/types/metadata.types';
 import {
   cleanBibliographicText,
+  cleanAbstractText,
   cleanBannedString,
   normalizeDoi,
   normalizeArxivId,
@@ -12,8 +13,6 @@ import {
   normalizeTags as canonicalNormalizeTags,
 } from '../metadata/utils/metadata.utils';
 import { parseCreatorString } from '../../items/utils/items.utils';
-
-
 
 @Injectable()
 export class NormalizationPolicy {
@@ -168,9 +167,12 @@ export class NormalizationPolicy {
     if (pages) result.pages = pages.replace(/--/g, '-');
 
     // 8. Abstract
-    const abstractText = this.cleanString(raw.abstract || raw.abstractNote);
+    const rawAbs = raw.abstract || raw.abstractNote;
+    const abstractText = cleanAbstractText(rawAbs) || this.cleanString(rawAbs);
     if (abstractText) result.abstract = abstractText;
-    const abstractNote = this.cleanString(raw.abstractNote);
+    const rawAbsNote = raw.abstractNote;
+    const abstractNote =
+      cleanAbstractText(rawAbsNote) || this.cleanString(rawAbsNote);
     if (abstractNote) result.abstractNote = abstractNote;
 
     // 9. URL
@@ -274,10 +276,7 @@ export class NormalizationPolicy {
       if (editors.length > 0) result.editors = editors;
     }
 
-    for (const field of [
-      'citationCount',
-      'referenceCount',
-    ] as const) {
+    for (const field of ['citationCount', 'referenceCount'] as const) {
       const value = raw[field];
       if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
         result[field] = value;
@@ -294,17 +293,64 @@ export class NormalizationPolicy {
     // columns. This prevents a newer metadata provider from losing fields at
     // the normalization boundary before commit.
     const canonicalFields = new Set([
-      'title', 'shortTitle', 'itemType', 'doi', 'arxivId', 'pmid', 'pmcid',
-      'isbn', 'issn', 'year', 'publicationDate', 'date', 'accessedAt',
-      'creators', 'authors', 'editors', 'publicationTitle', 'journal',
-      'publisher', 'volume', 'issue', 'pages', 'abstract', 'abstractNote',
-      'url', 'openAccessPdfUrl', 'tags', 'keywords', 'labels',
-      'notes', 'citationKey', 'explicitCitationKey', 'language', 'rights',
-      'license', 'extra', 'extraFields', 'fileId', 'filename', 'fileUrl',
-      'pdfUrl', 'type', 'place', 'section', 'partNumber', 'partTitle',
-      'series', 'seriesTitle', 'seriesText', 'seriesNumber', 'journalAbbr',
-      'storageId', 'archive', 'archiveLocation', 'libraryCatalog', 'callNumber',
-      'citationCount', 'referenceCount',
+      'title',
+      'shortTitle',
+      'itemType',
+      'doi',
+      'arxivId',
+      'pmid',
+      'pmcid',
+      'isbn',
+      'issn',
+      'year',
+      'publicationDate',
+      'date',
+      'accessedAt',
+      'creators',
+      'authors',
+      'editors',
+      'publicationTitle',
+      'journal',
+      'publisher',
+      'volume',
+      'issue',
+      'pages',
+      'abstract',
+      'abstractNote',
+      'url',
+      'openAccessPdfUrl',
+      'tags',
+      'keywords',
+      'labels',
+      'notes',
+      'citationKey',
+      'explicitCitationKey',
+      'language',
+      'rights',
+      'license',
+      'extra',
+      'extraFields',
+      'fileId',
+      'filename',
+      'fileUrl',
+      'pdfUrl',
+      'type',
+      'place',
+      'section',
+      'partNumber',
+      'partTitle',
+      'series',
+      'seriesTitle',
+      'seriesText',
+      'seriesNumber',
+      'journalAbbr',
+      'storageId',
+      'archive',
+      'archiveLocation',
+      'libraryCatalog',
+      'callNumber',
+      'citationCount',
+      'referenceCount',
     ]);
     const preservedFields = Object.fromEntries(
       Object.entries(raw).filter(
@@ -339,7 +385,9 @@ export class NormalizationPolicy {
     return cleanBannedString(str);
   }
 
-  private cleanExtraFields(fields: Record<string, unknown>): Record<string, unknown> {
+  private cleanExtraFields(
+    fields: Record<string, unknown>,
+  ): Record<string, unknown> {
     const cleaned: Record<string, unknown> = {};
 
     for (const [rawKey, value] of Object.entries(fields)) {

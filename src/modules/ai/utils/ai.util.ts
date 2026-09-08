@@ -22,22 +22,24 @@ export function normalizeMessages(dto: AiQueryDto): AiMessageDto[] {
  * Extracts and unifies document IDs across camelCase and snake_case properties.
  */
 export function extractDocIds(dto: AiQueryDto): string[] {
-  return (
-    dto.document_ids ||
-    dto.documentIds ||
-    dto.selected_files ||
-    []
-  );
+  return dto.document_ids || dto.documentIds || dto.selected_files || [];
 }
 
 /**
  * Assembles a standardized AI Engine payload from user context and DTO.
  */
-export function buildAiPayload(userId: string, dto: AiQueryDto): AiEnginePayload {
+export function buildAiPayload(
+  userId: string,
+  dto: AiQueryDto,
+): AiEnginePayload {
   const messages = normalizeMessages(dto);
   const documentIds = extractDocIds(dto);
   const workspaceId =
-    dto.workspace_id || dto.workspaceId || dto.project_id || dto.projectId || '';
+    dto.workspace_id ||
+    dto.workspaceId ||
+    dto.project_id ||
+    dto.projectId ||
+    '';
   const projectId = dto.project_id || dto.projectId || '';
   const chatId = dto.chat_id || dto.chatId || '';
 
@@ -58,7 +60,8 @@ export function buildAiPayload(userId: string, dto: AiQueryDto): AiEnginePayload
     cursor_line: dto.cursor_line ?? dto.cursorLine ?? 1,
     cursor_column: dto.cursor_column ?? dto.cursorColumn ?? 1,
     selection_start_line: dto.selection_start_line ?? dto.selectionStartLine,
-    selection_start_column: dto.selection_start_column ?? dto.selectionStartColumn,
+    selection_start_column:
+      dto.selection_start_column ?? dto.selectionStartColumn,
     selection_end_line: dto.selection_end_line ?? dto.selectionEndLine,
     selection_end_column: dto.selection_end_column ?? dto.selectionEndColumn,
     document_structure: dto.document_structure || dto.documentStructure || '',

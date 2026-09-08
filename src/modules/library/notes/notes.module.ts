@@ -7,9 +7,6 @@ import { OutboxModule } from '../outbox/outbox.module';
 import { ItemsModule } from '../items/items.module';
 import { ITEM_NOTES_EXTRACTOR_PORT } from '../items/ports/items.ports';
 
-
-
-
 @Module({
   imports: [CoreModule, OutboxModule, ItemsModule],
   controllers: [NotesController],

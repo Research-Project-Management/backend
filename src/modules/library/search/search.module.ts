@@ -20,4 +20,3 @@ import { CoreModule } from '../../../core/core.module';
   exports: [SearchService, RagIndexerProvider],
 })
 export class SearchModule {}
-

@@ -13,6 +13,7 @@ export {
   decodeHtmlEntities,
   stripXmlAndHtmlTags,
   cleanBibliographicText,
+  cleanAbstractText,
   cleanBannedString,
 } from '../../../items/utils/items.utils';
 

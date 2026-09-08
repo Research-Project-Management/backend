@@ -16,7 +16,10 @@ import { FileRepository } from './file.repository';
 import { R2Service } from '../r2/r2.service';
 import { parseByteRange } from './utils/range.utils';
 import { PrismaService } from '@/core/database/prisma.service';
-import { buildWorkspaceIdentifierWhere, isUuid } from '@/core/utils/tenant.util';
+import {
+  buildWorkspaceIdentifierWhere,
+  isUuid,
+} from '@/core/utils/tenant.util';
 import { Prisma, EntityType } from '@prisma/client';
 import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
 import { RedisCacheService } from '@/core/cache/redis-cache.service';

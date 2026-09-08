@@ -32,6 +32,29 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     const request = context.switchToHttp().getRequest();
+
+    // 1. Support Inter-Service Authentication (e.g. FLux-AI orchestrator tools)
+    const internalKey = request.headers?.['x-internal-key'];
+    const configuredInternalKey =
+      this.configService.get<string>('INTERNAL_API_KEY') ||
+      process.env.INTERNAL_API_KEY;
+
+    if (
+      configuredInternalKey &&
+      internalKey &&
+      internalKey === configuredInternalKey
+    ) {
+      const internalUserId =
+        request.headers?.['x-user-id'] ||
+        '00000000-0000-0000-0000-000000000000';
+      request.user = {
+        id: internalUserId,
+        sub: internalUserId,
+        isInternalService: true,
+      };
+      return true;
+    }
+
     const authHeader = request.headers?.authorization;
     const token =
       authHeader && authHeader.startsWith('Bearer ')

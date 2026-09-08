@@ -392,13 +392,9 @@ export class ZoteroPullWorker {
           firstName: c.firstName,
           lastName: c.lastName,
           fullName:
-            c.name ||
-            [c.firstName, c.lastName].filter(Boolean).join(' ') ||
-            '',
+            c.name || [c.firstName, c.lastName].filter(Boolean).join(' ') || '',
           name:
-            c.name ||
-            [c.firstName, c.lastName].filter(Boolean).join(' ') ||
-            '',
+            c.name || [c.firstName, c.lastName].filter(Boolean).join(' ') || '',
           orderIndex: c.sortOrder ?? idx,
         }));
 

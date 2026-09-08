@@ -79,20 +79,91 @@ const ARXIV_CATEGORY_MAP: Record<string, string> = {
 
 // ── 2. Standard Scientific Acronyms (Preserve Full Upper Case) ─────────────────
 const SCIENTIFIC_ACRONYMS = new Set([
-  'AI', 'ML', 'NLP', 'CV', 'CNN', 'RNN', 'LSTM', 'GAN', 'BERT', 'LLM', 'LLMS',
-  'COCO', 'YOLO', 'RESNET', 'VGG', 'SVM', 'RL', 'API', 'APIS', 'GPU', 'GPUS',
-  'CPU', 'CPUS', 'TPU', 'TPUS', 'DNA', 'RNA', 'SGD', 'ADAM', 'RMSPROP', 'FTS',
-  'RAG', 'OCR', 'DOI', 'URL', 'PDF', 'HTTP', 'HTTPS', 'HTML', 'XML', 'JSON',
-  'DB', 'SQL', 'NOSQL', 'HCI', 'IOT', 'FPGA', 'ASIC', 'VAE', 'MCMC', 'ODE',
-  'PDE', 'SOTA', 'BLEU', 'ROUGE', 'TF-IDF', 'GLUE', 'SUPERGLUE',
+  'AI',
+  'ML',
+  'NLP',
+  'CV',
+  'CNN',
+  'RNN',
+  'LSTM',
+  'GAN',
+  'BERT',
+  'LLM',
+  'LLMS',
+  'COCO',
+  'YOLO',
+  'RESNET',
+  'VGG',
+  'SVM',
+  'RL',
+  'API',
+  'APIS',
+  'GPU',
+  'GPUS',
+  'CPU',
+  'CPUS',
+  'TPU',
+  'TPUS',
+  'DNA',
+  'RNA',
+  'SGD',
+  'ADAM',
+  'RMSPROP',
+  'FTS',
+  'RAG',
+  'OCR',
+  'DOI',
+  'URL',
+  'PDF',
+  'HTTP',
+  'HTTPS',
+  'HTML',
+  'XML',
+  'JSON',
+  'DB',
+  'SQL',
+  'NOSQL',
+  'HCI',
+  'IOT',
+  'FPGA',
+  'ASIC',
+  'VAE',
+  'MCMC',
+  'ODE',
+  'PDE',
+  'SOTA',
+  'BLEU',
+  'ROUGE',
+  'TF-IDF',
+  'GLUE',
+  'SUPERGLUE',
 ]);
 
 // ── 3. Structural Document Noise Blacklist (Non-Keywords / Parsing Artifacts) ─
 const NOISE_TAG_WORDS = new Set([
-  'undefined', 'null', 'n/a', 'na', 'none', 'unknown', 'etc', 'various',
-  'introduction', 'conclusion', 'background', 'paper', 'article',
-  'study', 'approach', 'method', 'methods', 'results', 'discussion',
-  'overview', 'experiment', 'experiments', 'analysis',
+  'undefined',
+  'null',
+  'n/a',
+  'na',
+  'none',
+  'unknown',
+  'etc',
+  'various',
+  'introduction',
+  'conclusion',
+  'background',
+  'paper',
+  'article',
+  'study',
+  'approach',
+  'method',
+  'methods',
+  'results',
+  'discussion',
+  'overview',
+  'experiment',
+  'experiments',
+  'analysis',
 ]);
 
 // ── 4. String Sanitizers ───────────────────────────────────────────────────────
@@ -115,7 +186,10 @@ export function stripDisambiguationSuffix(str: string): string {
 /** Strips common prefixes like "Keywords:", "Index Terms—", "#" */
 export function stripTagPrefixes(str: string): string {
   return str
-    .replace(/^(?:keywords?|index terms|categories|subject|topics?)[:—\-\s]+/i, '')
+    .replace(
+      /^(?:keywords?|index terms|categories|subject|topics?)[:—\-\s]+/i,
+      '',
+    )
     .replace(/^#+/, '')
     .replace(/^["'`]+|["'`]+$/g, '')
     .replace(/\.$/, '')
@@ -145,7 +219,11 @@ export function toTitleCaseWithAcronyms(str: string): string {
       }
       // Minor words in lowercase if not first word
       const lower = word.toLowerCase();
-      if (['and', 'or', 'of', 'in', 'on', 'for', 'with', 'at', 'by'].includes(lower)) {
+      if (
+        ['and', 'or', 'of', 'in', 'on', 'for', 'with', 'at', 'by'].includes(
+          lower,
+        )
+      ) {
         return lower;
       }
       return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
@@ -183,7 +261,6 @@ export function cleanSingleTag(rawTag: string): string | null {
   // 4. Strip prefixes
   tag = stripTagPrefixes(tag);
 
-
   // 5. Length & sanity check: 2 - 60 chars, cannot be pure numbers
   if (tag.length < 2 || tag.length > 60) return null;
   if (/^\d+$/.test(tag)) return null;
@@ -208,7 +285,8 @@ export function cleanSingleTag(rawTag: string): string | null {
  * - Deduplication (case-insensitive)
  */
 export function normalizeAcademicTags(
-  rawTags?: (string | { tag?: string; name?: string } | null | undefined)[] | null,
+  rawTags?:
+    (string | { tag?: string; name?: string } | null | undefined)[] | null,
 ): string[] {
   if (!Array.isArray(rawTags) || rawTags.length === 0) return [];
 
@@ -241,7 +319,6 @@ export function normalizeAcademicTags(
   return result;
 }
 
-
 /**
  * Normalizes an array of raw tag strings or tag objects into a unique, trimmed,
  * clean, and standardized list of academic tags.
@@ -249,5 +326,5 @@ export function normalizeAcademicTags(
 export function normalizeTags(
   tags?: (TagInput | null | undefined)[] | null,
 ): string[] {
-  return normalizeAcademicTags(tags as any);
+  return normalizeAcademicTags(tags);
 }

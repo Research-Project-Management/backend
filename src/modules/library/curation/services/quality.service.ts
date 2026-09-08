@@ -156,8 +156,14 @@ export class QualityService {
   }
 
   async getQualityAudit(rawWorkspaceId: string) {
-    const workspaceId = await resolveTenantWorkspaceId(this.prisma, rawWorkspaceId);
-    const items = await this.itemReadPort.findQualityAuditItems(workspaceId, 2000);
+    const workspaceId = await resolveTenantWorkspaceId(
+      this.prisma,
+      rawWorkspaceId,
+    );
+    const items = await this.itemReadPort.findQualityAuditItems(
+      workspaceId,
+      2000,
+    );
 
     let totalScore = 0;
     let missingDoi = 0;

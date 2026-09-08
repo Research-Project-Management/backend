@@ -10,7 +10,6 @@ export class AttachmentsRepository {
     return tx ?? this.prisma;
   }
 
-
   async findUnique(
     id: string,
     includeOptions?: Prisma.CatalogAttachmentInclude,
@@ -35,10 +34,7 @@ export class AttachmentsRepository {
     });
   }
 
-  async findManyByItemId(
-    itemId: string,
-    tx?: Prisma.TransactionClient,
-  ) {
+  async findManyByItemId(itemId: string, tx?: Prisma.TransactionClient) {
     const client = this.getClient(tx);
     return client.catalogAttachment.findMany({
       where: { catalogItemId: itemId },
@@ -48,10 +44,7 @@ export class AttachmentsRepository {
     });
   }
 
-  async findRevisions(
-    attachmentId: string,
-    tx?: Prisma.TransactionClient,
-  ) {
+  async findRevisions(attachmentId: string, tx?: Prisma.TransactionClient) {
     const client = this.getClient(tx);
     return client.attachmentRevision.findMany({
       where: { attachmentId },
@@ -59,10 +52,7 @@ export class AttachmentsRepository {
     });
   }
 
-  async countRevisions(
-    attachmentId: string,
-    tx?: Prisma.TransactionClient,
-  ) {
+  async countRevisions(attachmentId: string, tx?: Prisma.TransactionClient) {
     const client = this.getClient(tx);
     return client.attachmentRevision.count({
       where: { attachmentId },
@@ -96,10 +86,7 @@ export class AttachmentsRepository {
     });
   }
 
-  async delete(
-    id: string,
-    tx?: Prisma.TransactionClient,
-  ) {
+  async delete(id: string, tx?: Prisma.TransactionClient) {
     const client = this.getClient(tx);
     return client.catalogAttachment.delete({
       where: { id },

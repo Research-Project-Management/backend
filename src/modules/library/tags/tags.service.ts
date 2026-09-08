@@ -136,7 +136,9 @@ export class TagsService {
     );
 
     // 2. Create missing tags in one batch preserving original casing
-    const missingNames = dedupedTags.filter((n) => !existingNameSet.has(n.toLowerCase()));
+    const missingNames = dedupedTags.filter(
+      (n) => !existingNameSet.has(n.toLowerCase()),
+    );
     if (missingNames.length > 0) {
       await tx.catalogTag.createMany({
         data: missingNames.map((name) => ({ workspaceId, name })),

@@ -5,7 +5,6 @@ import { isUuid } from '../../../../core/utils/tenant.util';
 import { normalizeTags } from '../../tags/utils/tags.utils';
 import { CatalogItemSummary } from '../types/items.types';
 
-
 @Injectable()
 export class ItemQueryRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -665,4 +664,3 @@ export class ItemQueryRepository {
     return sourceRecord?.rawPayload || null;
   }
 }
-

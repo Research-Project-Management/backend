@@ -161,7 +161,6 @@ export class ExportsService {
 
     const timestamp = new Date().toISOString().split('T')[0];
 
-
     switch (dto.format) {
       case 'bibtex': {
         const entries = items.map((it) => {
@@ -277,7 +276,8 @@ export class ExportsService {
       case 'markdown': {
         const mdLines = [`# Library Export (${timestamp})\n`];
         items.forEach((it, idx) => {
-          const auth = CslJsonMapper.getAuthorNames(it).join(', ') || 'Unknown Authors';
+          const auth =
+            CslJsonMapper.getAuthorNames(it).join(', ') || 'Unknown Authors';
           const yr = it.year ? ` (${it.year})` : '';
           mdLines.push(`${idx + 1}. **${it.title}** — *${auth}*${yr}`);
           if (it.publicationTitle)
@@ -390,11 +390,10 @@ export class ExportsService {
       throw new NotFoundException('Catalog item not found');
     }
 
-    const pdfAttachment =
-      Array.isArray(item.attachments)
-        ? item.attachments.find((a: any) => a.mimeType === 'application/pdf') ||
-          item.attachments[0]
-        : undefined;
+    const pdfAttachment = Array.isArray(item.attachments)
+      ? item.attachments.find((a: any) => a.mimeType === 'application/pdf') ||
+        item.attachments[0]
+      : undefined;
 
     if (!pdfAttachment && !rawPdfBuffer) {
       throw new NotFoundException('No PDF attachment found for this item');
@@ -413,7 +412,6 @@ export class ExportsService {
             },
             orderBy: { pageIndex: 'asc' },
           });
-
 
     // If no buffer passed, create minimal placeholder PDF if empty, or throw
     let bufferToUse = rawPdfBuffer;

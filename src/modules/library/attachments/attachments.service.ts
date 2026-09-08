@@ -19,8 +19,10 @@ import {
 } from './types/attachments.types';
 
 import { AttachmentsRepository } from './attachments.repository';
-import { ITEM_EXISTENCE_PORT, IItemExistencePort } from '../items/ports/items.ports';
-
+import {
+  ITEM_EXISTENCE_PORT,
+  IItemExistencePort,
+} from '../items/ports/items.ports';
 
 import type {
   UpsertSyncAttachmentCommand,
@@ -66,7 +68,6 @@ export class AttachmentsService {
       input.workspaceId,
       input.catalogItemId,
     );
-
 
     const resolvedFileId =
       input.fileId ||
@@ -231,7 +232,6 @@ export class AttachmentsService {
   async getItemAttachments(workspaceId: string, itemId: string) {
     await this.itemExistencePort.assertExists(workspaceId, itemId);
 
-
     const attachments = await this.attachmentsRepo.findManyByItemId(itemId);
 
     return { attachments, total: attachments.length };
@@ -253,12 +253,9 @@ export class AttachmentsService {
       where.catalogItemId = itemId;
     }
 
-    const attachment = await this.attachmentsRepo.findFirst(
-      where,
-      {
-        revisions: { orderBy: { revisionNumber: 'desc' } },
-      },
-    );
+    const attachment = await this.attachmentsRepo.findFirst(where, {
+      revisions: { orderBy: { revisionNumber: 'desc' } },
+    });
 
     if (!attachment) {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
@@ -509,4 +506,3 @@ export class AttachmentsService {
     return attachment;
   }
 }
-

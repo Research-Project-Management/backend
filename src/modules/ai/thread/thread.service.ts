@@ -87,7 +87,9 @@ export class ThreadService {
     ];
     if (chatId) {
       promises.push(this.cache.del(AI_REDIS_KEYS.chatThread(chatId)));
-      promises.push(this.cache.del(`${AI_REDIS_KEYS.chatThread(chatId)}:${userId}`));
+      promises.push(
+        this.cache.del(`${AI_REDIS_KEYS.chatThread(chatId)}:${userId}`),
+      );
     }
     await Promise.all(promises).catch((err) => {
       this.logger.warn(`Failed to invalidate AI thread cache: ${err}`);
@@ -206,7 +208,9 @@ export class ThreadService {
           },
         });
         if (!projMember) {
-          throw new ForbiddenException('User does not have access to this project');
+          throw new ForbiddenException(
+            'User does not have access to this project',
+          );
         }
       }
     }
@@ -227,7 +231,9 @@ export class ThreadService {
           },
         });
         if (!projMember) {
-          throw new ForbiddenException('User does not have access to this page');
+          throw new ForbiddenException(
+            'User does not have access to this page',
+          );
         }
       }
     }

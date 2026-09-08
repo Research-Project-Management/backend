@@ -42,10 +42,7 @@ export class AnnotationsService {
       attachmentId,
       workspaceId,
     );
-    return this.annotationsRepo.findByAttachment(
-      attachmentId,
-      pageIndex,
-    );
+    return this.annotationsRepo.findByAttachment(attachmentId, pageIndex);
   }
 
   async getAnnotation(workspaceId: string, id: string) {
@@ -65,10 +62,7 @@ export class AnnotationsService {
         workspaceId,
         tx,
       );
-      const annotation = await this.annotationsRepo.create(
-        data,
-        tx,
-      );
+      const annotation = await this.annotationsRepo.create(data, tx);
 
       await helpers.appendChange(workspaceId, {
         entityType: 'Annotation',
@@ -328,4 +322,3 @@ export class AnnotationsService {
     });
   }
 }
-

@@ -51,7 +51,6 @@ export interface UpdateCatalogItemCommand {
   expectedVersion?: number;
 }
 
-
 export interface QualityAuditCandidateItem {
   id: string;
   title: string;

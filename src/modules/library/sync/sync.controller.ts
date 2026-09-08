@@ -61,7 +61,7 @@ export class SyncController {
 
     const applied = await this.syncService.pushMutations(
       workspaceId,
-      body.mutations as any,
+      body.mutations,
       userId,
     );
 

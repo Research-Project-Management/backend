@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
-import { buildWorkspaceIdentifierWhere, isUuid } from '@/core/utils/tenant.util';
+import {
+  buildWorkspaceIdentifierWhere,
+  isUuid,
+} from '@/core/utils/tenant.util';
 import { DomainActivityEvent } from './events/activity.events';
 import { EntityType, ActivityEvent } from '@prisma/client';
 import {
@@ -202,7 +205,10 @@ export class ActivityRepository implements IActivityRepository {
           deletedAt: null,
           OR: [
             { workspaceId: canonicalWorkspaceId, authorId: userId },
-            { project: { workspaceId: canonicalWorkspaceId }, authorId: userId },
+            {
+              project: { workspaceId: canonicalWorkspaceId },
+              authorId: userId,
+            },
           ],
         },
         orderBy: { updatedAt: 'desc' },

@@ -84,10 +84,7 @@ export class AuthnController {
   ): Promise<AuthnResponseDto> {
     const result = await this.authnService.registerUser(dto);
     if (result?.refreshToken) {
-      reply.header(
-        'Set-Cookie',
-        buildRefreshTokenCookie(result.refreshToken),
-      );
+      reply.header('Set-Cookie', buildRefreshTokenCookie(result.refreshToken));
     }
     return result;
   }
@@ -108,10 +105,7 @@ export class AuthnController {
   ): Promise<AuthnResponseDto> {
     const result = await this.authnService.login(dto);
     if (result?.refreshToken) {
-      reply.header(
-        'Set-Cookie',
-        buildRefreshTokenCookie(result.refreshToken),
-      );
+      reply.header('Set-Cookie', buildRefreshTokenCookie(result.refreshToken));
     }
     return result;
   }
@@ -194,10 +188,7 @@ export class AuthnController {
     }
     const result = await this.authnService.exchangeOAuthTicket(body.code);
     if (result?.refreshToken) {
-      reply.header(
-        'Set-Cookie',
-        buildRefreshTokenCookie(result.refreshToken),
-      );
+      reply.header('Set-Cookie', buildRefreshTokenCookie(result.refreshToken));
     }
     return result;
   }
@@ -226,10 +217,7 @@ export class AuthnController {
     }
     const result = await this.authnService.refresh(token);
     if (result?.refreshToken) {
-      reply.header(
-        'Set-Cookie',
-        buildRefreshTokenCookie(result.refreshToken),
-      );
+      reply.header('Set-Cookie', buildRefreshTokenCookie(result.refreshToken));
     }
     return result;
   }

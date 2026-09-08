@@ -1,5 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { SearchRepository, SearchOptions } from './search.repository';
+import { PrismaService } from '@/core/database/prisma.service';
 import {
   FullTextIndexer,
   PageAnchorMatch,
@@ -18,10 +19,10 @@ export class SearchService {
 
   constructor(
     private readonly searchRepo: SearchRepository,
+    private readonly prisma: PrismaService,
     private readonly fullTextIndexer: FullTextIndexer,
     private readonly ragIndexer: RagIndexerProvider,
   ) {}
-
 
   /**
    * Faceted search returning items, facets, and cursor pagination metadata.
@@ -62,10 +63,25 @@ export class SearchService {
    * Search PDF attachment pages for text occurrences and character offsets.
    */
   async searchPageAnchors(
+    workspaceId: string,
     attachmentId: string,
     term: string,
     pageIndex?: number,
   ): Promise<PageAnchorMatch[]> {
+    const attachment = await this.prisma.catalogAttachment.findFirst({
+      where: {
+        id: attachmentId,
+        catalogItem: { workspaceId, deletedAt: null },
+      },
+      select: { id: true },
+    });
+
+    if (!attachment) {
+      throw new NotFoundException(
+        `Attachment ${attachmentId} not found in workspace`,
+      );
+    }
+
     return this.fullTextIndexer.searchPageAnchors(
       attachmentId,
       term,
@@ -108,4 +124,3 @@ export class SearchService {
     return this.ragIndexer.indexPaper(item);
   }
 }
-

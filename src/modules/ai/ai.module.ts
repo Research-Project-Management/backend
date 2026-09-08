@@ -6,17 +6,9 @@ import { AiController } from './ai.controller';
 import { AiService } from './ai.service';
 
 @Module({
-  imports: [
-    EngineModule,
-    ThreadModule,
-    ItemsModule,
-  ],
+  imports: [EngineModule, ThreadModule, ItemsModule],
   controllers: [AiController],
   providers: [AiService],
-  exports: [
-    AiService,
-    EngineModule,
-    ThreadModule,
-  ],
+  exports: [AiService, EngineModule, ThreadModule],
 })
 export class AiModule {}

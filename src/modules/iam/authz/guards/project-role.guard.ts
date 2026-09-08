@@ -46,10 +46,12 @@ export class ProjectRoleGuard implements CanActivate {
       if (request.params?.cycleId && this.prisma.cycle?.findUnique) {
         const cycleId = request.params.cycleId;
         const cycle = isUuid(cycleId)
-          ? await this.prisma.cycle.findUnique({
-              where: { id: cycleId },
-              select: { projectId: true },
-            }).catch(() => null)
+          ? await this.prisma.cycle
+              .findUnique({
+                where: { id: cycleId },
+                select: { projectId: true },
+              })
+              .catch(() => null)
           : null;
         if (cycle?.projectId) {
           projectId = cycle.projectId;
@@ -57,10 +59,12 @@ export class ProjectRoleGuard implements CanActivate {
       } else if (request.params?.taskId && this.prisma.task?.findUnique) {
         const taskId = request.params.taskId;
         const task = isUuid(taskId)
-          ? await this.prisma.task.findUnique({
-              where: { id: taskId },
-              select: { projectId: true },
-            }).catch(() => null)
+          ? await this.prisma.task
+              .findUnique({
+                where: { id: taskId },
+                select: { projectId: true },
+              })
+              .catch(() => null)
           : null;
         if (task?.projectId) {
           projectId = task.projectId;
@@ -68,10 +72,12 @@ export class ProjectRoleGuard implements CanActivate {
       } else if (request.params?.pageId && this.prisma.page?.findUnique) {
         const pageId = request.params.pageId;
         const page = isUuid(pageId)
-          ? await this.prisma.page.findUnique({
-              where: { id: pageId },
-              select: { projectId: true },
-            }).catch(() => null)
+          ? await this.prisma.page
+              .findUnique({
+                where: { id: pageId },
+                select: { projectId: true },
+              })
+              .catch(() => null)
           : null;
         if (page?.projectId) {
           projectId = page.projectId;
@@ -79,10 +85,12 @@ export class ProjectRoleGuard implements CanActivate {
       } else if (request.params?.worklogId && this.prisma.worklog?.findUnique) {
         const worklogId = request.params.worklogId;
         const wl = isUuid(worklogId)
-          ? await this.prisma.worklog.findUnique({
-              where: { id: worklogId },
-              select: { task: { select: { projectId: true } } },
-            }).catch(() => null)
+          ? await this.prisma.worklog
+              .findUnique({
+                where: { id: worklogId },
+                select: { task: { select: { projectId: true } } },
+              })
+              .catch(() => null)
           : null;
         if (wl?.task?.projectId) {
           projectId = wl.task.projectId;
@@ -92,20 +100,24 @@ export class ProjectRoleGuard implements CanActivate {
         if (isUuid(commentId)) {
           // Check task comment first
           if (this.prisma.taskComment?.findUnique) {
-            const tc = await this.prisma.taskComment.findUnique({
-              where: { id: commentId },
-              select: { task: { select: { projectId: true } } },
-            }).catch(() => null);
+            const tc = await this.prisma.taskComment
+              .findUnique({
+                where: { id: commentId },
+                select: { task: { select: { projectId: true } } },
+              })
+              .catch(() => null);
             if (tc?.task?.projectId) {
               projectId = tc.task.projectId;
             }
           }
           // Check page comment if not found
           if (!projectId && this.prisma.pageComment?.findUnique) {
-            const pc = await this.prisma.pageComment.findUnique({
-              where: { id: commentId },
-              select: { page: { select: { projectId: true } } },
-            }).catch(() => null);
+            const pc = await this.prisma.pageComment
+              .findUnique({
+                where: { id: commentId },
+                select: { page: { select: { projectId: true } } },
+              })
+              .catch(() => null);
             if (pc?.page?.projectId) {
               projectId = pc.page.projectId;
             }
@@ -124,25 +136,31 @@ export class ProjectRoleGuard implements CanActivate {
     // 2. Fetch project
     let project: { id: string; workspaceId: string } | null = null;
     if (isUuid(projectId)) {
-      project = await this.prisma.project.findUnique({
-        where: { id: projectId },
-        select: { id: true, workspaceId: true },
-      }).catch(() => null);
-    } else {
-      if (this.prisma.project.findFirst) {
-        project = await this.prisma.project.findFirst({
-          where: {
-            identifier: { equals: projectId, mode: 'insensitive' },
-            deletedAt: null,
-          },
-          select: { id: true, workspaceId: true },
-        }).catch(() => null);
-      }
-      if (!project && this.prisma.project.findUnique) {
-        project = await this.prisma.project.findUnique({
+      project = await this.prisma.project
+        .findUnique({
           where: { id: projectId },
           select: { id: true, workspaceId: true },
-        }).catch(() => null);
+        })
+        .catch(() => null);
+    } else {
+      if (this.prisma.project.findFirst) {
+        project = await this.prisma.project
+          .findFirst({
+            where: {
+              identifier: { equals: projectId, mode: 'insensitive' },
+              deletedAt: null,
+            },
+            select: { id: true, workspaceId: true },
+          })
+          .catch(() => null);
+      }
+      if (!project && this.prisma.project.findUnique) {
+        project = await this.prisma.project
+          .findUnique({
+            where: { id: projectId },
+            select: { id: true, workspaceId: true },
+          })
+          .catch(() => null);
       }
     }
 

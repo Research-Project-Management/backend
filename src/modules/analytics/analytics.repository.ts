@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
-import { buildWorkspaceIdentifierWhere, isUuid } from '@/core/utils/tenant.util';
+import {
+  buildWorkspaceIdentifierWhere,
+  isUuid,
+} from '@/core/utils/tenant.util';
 
 const USER_SELECT = {
   id: true,
@@ -48,7 +51,9 @@ export class AnalyticsRepository {
       filesCount,
       stickiesCount,
     ] = await Promise.all([
-      this.prisma.workspaceMember.count({ where: { workspaceId: canonicalId } }),
+      this.prisma.workspaceMember.count({
+        where: { workspaceId: canonicalId },
+      }),
       this.prisma.project.count({
         where: { workspaceId: canonicalId, isActive: true },
       }),
@@ -60,7 +65,10 @@ export class AnalyticsRepository {
       }),
       this.prisma.page.count({
         where: {
-          OR: [{ workspaceId: canonicalId }, { project: { workspaceId: canonicalId } }],
+          OR: [
+            { workspaceId: canonicalId },
+            { project: { workspaceId: canonicalId } },
+          ],
           deletedAt: null,
         },
       }),

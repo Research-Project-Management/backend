@@ -6,7 +6,6 @@ import { LibraryItemSource } from '../../outbox/outbox.events';
 import { splitAuthorString } from '../../items/utils/items.utils';
 import { normalizeTags } from '../../tags/utils/tags.utils';
 
-
 export interface CommitStageOptions {
   collectionIds?: string[];
   tagIds?: string[];
@@ -100,7 +99,19 @@ function generateBibtexCitationKey(metadata: ItemMetadata): string | undefined {
   }
   const yearPart = metadata.year ? String(metadata.year) : '';
   const stopWords = new Set([
-    'a', 'an', 'the', 'on', 'in', 'for', 'of', 'and', 'with', 'via', 'to', 'is', 'are',
+    'a',
+    'an',
+    'the',
+    'on',
+    'in',
+    'for',
+    'of',
+    'and',
+    'with',
+    'via',
+    'to',
+    'is',
+    'are',
   ]);
   let titlePart = 'paper';
   if (metadata.title) {
@@ -127,8 +138,12 @@ export function toCatalogItemData(
   // Only fields with no dedicated DB column go into extraFields
   const extraFields: Record<string, unknown> = {
     ...(metadata.extraFields || {}),
-    ...(metadata.storageId !== undefined ? { storageId: metadata.storageId } : {}),
-    ...(metadata.explicitCitationKey !== undefined ? { explicitCitationKey: metadata.explicitCitationKey } : {}),
+    ...(metadata.storageId !== undefined
+      ? { storageId: metadata.storageId }
+      : {}),
+    ...(metadata.explicitCitationKey !== undefined
+      ? { explicitCitationKey: metadata.explicitCitationKey }
+      : {}),
   };
 
   return {
@@ -197,9 +212,7 @@ export function toCatalogItemData(
             return singleNote.includes(potentialComment);
           }
           if (typeof singleNote === 'object' && singleNote !== null) {
-            return String(
-              (singleNote as Record<string, unknown>).content || '',
-            ).includes(potentialComment);
+            return String(singleNote.content || '').includes(potentialComment);
           }
           return false;
         });

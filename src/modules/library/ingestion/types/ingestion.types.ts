@@ -101,4 +101,3 @@ export interface IngestionPort {
 
 export * from './ingestion-submission.types';
 export * from './metadata-candidate.types';
-

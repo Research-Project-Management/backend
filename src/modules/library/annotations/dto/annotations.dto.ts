@@ -1,10 +1,4 @@
-import {
-  IsEnum,
-  IsInt,
-  IsOptional,
-  IsString,
-  Min,
-} from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, Min } from 'class-validator';
 import { AnnotationType } from '@prisma/client';
 
 export class CreateAnnotationDto {

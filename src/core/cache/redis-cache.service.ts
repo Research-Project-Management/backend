@@ -67,7 +67,10 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
 
       this.redisClient.on('error', (err: Error) => {
         this.isConnected = false;
-        if (err.message.includes('WRONGPASS') || err.message.includes('NOAUTH')) {
+        if (
+          err.message.includes('WRONGPASS') ||
+          err.message.includes('NOAUTH')
+        ) {
           this.logger.warn(
             `Redis authentication failed (${err.message}). Bypassing Redis and falling back to memory cache.`,
           );

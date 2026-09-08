@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { normalizeDoi } from '../../library/items/utils/items.utils';
 
-
 export interface MappedCatalogItem {
   remoteKey: string;
   remoteVersion: bigint;
@@ -268,7 +267,8 @@ export class ZoteroMapper {
       if (!key || !value) continue;
       const normalizedKey = key.replace(/\s+/g, '').toLowerCase();
       if (normalizedKey === 'citationkey') fields.citationKey = value;
-      else if (normalizedKey === 'doi') fields.doi = normalizeDoi(value) || value;
+      else if (normalizedKey === 'doi')
+        fields.doi = normalizeDoi(value) || value;
       else if (normalizedKey === 'pmid') fields.pmid = value;
       else if (normalizedKey === 'pmcid') fields.pmcid = value;
       else if (normalizedKey === 'arxiv' || normalizedKey === 'arxivid') {
@@ -278,7 +278,9 @@ export class ZoteroMapper {
       }
     }
 
-    const arxivMatch = extra.match(/arXiv:\s*([\d.]+v?\d*)\s*(?:\[([^\]]+)\])?/i);
+    const arxivMatch = extra.match(
+      /arXiv:\s*([\d.]+v?\d*)\s*(?:\[([^\]]+)\])?/i,
+    );
     if (arxivMatch) {
       fields.arxivId ||= arxivMatch[1];
       if (arxivMatch[2]) {
@@ -427,7 +429,9 @@ export class ZoteroMapper {
     let cleanExtra: string | undefined;
     if (typeof item.extra === 'string' && item.extra.trim()) {
       const paperTitle =
-        typeof item.title === 'string' ? item.title.trim().toLowerCase() : undefined;
+        typeof item.title === 'string'
+          ? item.title.trim().toLowerCase()
+          : undefined;
       const filtered = item.extra
         .split(/\r?\n/)
         .map((l) => l.trim())

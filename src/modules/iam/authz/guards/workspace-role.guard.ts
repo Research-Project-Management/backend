@@ -6,7 +6,10 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { PrismaService } from '@/core/database/prisma.service';
-import { buildWorkspaceIdentifierWhere, isUuid } from '@/core/utils/tenant.util';
+import {
+  buildWorkspaceIdentifierWhere,
+  isUuid,
+} from '@/core/utils/tenant.util';
 import {
   WORKSPACE_ROLES_KEY,
   WorkspaceRoleInput,
@@ -50,31 +53,36 @@ export class WorkspaceRoleGuard implements CanActivate {
     if (!workspaceId && request.params?.projectId && this.prisma?.project) {
       const projectId = request.params.projectId;
       const project = isUuid(projectId)
-        ? await this.prisma.project.findUnique({
-            where: { id: projectId },
-            select: { workspaceId: true },
-          }).catch(() => null)
-        : await this.prisma.project.findFirst?.({
-            where: { identifier: { equals: projectId, mode: 'insensitive' }, deletedAt: null },
-            select: { workspaceId: true },
-          }).catch(() => null);
+        ? await this.prisma.project
+            .findUnique({
+              where: { id: projectId },
+              select: { workspaceId: true },
+            })
+            .catch(() => null)
+        : await this.prisma.project
+            .findFirst?.({
+              where: {
+                identifier: { equals: projectId, mode: 'insensitive' },
+                deletedAt: null,
+              },
+              select: { workspaceId: true },
+            })
+            .catch(() => null);
       if (project?.workspaceId) {
         workspaceId = project.workspaceId;
       }
     }
 
     // Resolve workspace from catalogItem if itemId is present
-    if (
-      !workspaceId &&
-      request.params?.itemId &&
-      this.prisma?.catalogItem
-    ) {
+    if (!workspaceId && request.params?.itemId && this.prisma?.catalogItem) {
       const targetItemId = request.params.itemId;
       if (isUuid(targetItemId)) {
-        const item = await this.prisma.catalogItem.findUnique({
-          where: { id: targetItemId },
-          select: { workspaceId: true },
-        }).catch(() => null);
+        const item = await this.prisma.catalogItem
+          .findUnique({
+            where: { id: targetItemId },
+            select: { workspaceId: true },
+          })
+          .catch(() => null);
         if (item?.workspaceId) {
           workspaceId = item.workspaceId;
         }
@@ -88,10 +96,12 @@ export class WorkspaceRoleGuard implements CanActivate {
       this.prisma?.catalogAttachment &&
       isUuid(request.params.attachmentId)
     ) {
-      const attachment = await this.prisma.catalogAttachment.findUnique({
-        where: { id: request.params.attachmentId },
-        select: { catalogItem: { select: { workspaceId: true } } },
-      }).catch(() => null);
+      const attachment = await this.prisma.catalogAttachment
+        .findUnique({
+          where: { id: request.params.attachmentId },
+          select: { catalogItem: { select: { workspaceId: true } } },
+        })
+        .catch(() => null);
       if (attachment?.catalogItem?.workspaceId) {
         workspaceId = attachment.catalogItem.workspaceId;
       }
@@ -104,10 +114,12 @@ export class WorkspaceRoleGuard implements CanActivate {
       this.prisma?.collection &&
       isUuid(request.params.collectionId)
     ) {
-      const col = await this.prisma.collection.findUnique({
-        where: { id: request.params.collectionId },
-        select: { workspaceId: true },
-      }).catch(() => null);
+      const col = await this.prisma.collection
+        .findUnique({
+          where: { id: request.params.collectionId },
+          select: { workspaceId: true },
+        })
+        .catch(() => null);
       if (col?.workspaceId) {
         workspaceId = col.workspaceId;
       }
@@ -120,10 +132,12 @@ export class WorkspaceRoleGuard implements CanActivate {
       this.prisma?.catalogTag &&
       isUuid(request.params.tagId)
     ) {
-      const tag = await this.prisma.catalogTag.findUnique({
-        where: { id: request.params.tagId },
-        select: { workspaceId: true },
-      }).catch(() => null);
+      const tag = await this.prisma.catalogTag
+        .findUnique({
+          where: { id: request.params.tagId },
+          select: { workspaceId: true },
+        })
+        .catch(() => null);
       if (tag?.workspaceId) {
         workspaceId = tag.workspaceId;
       }
@@ -136,43 +150,66 @@ export class WorkspaceRoleGuard implements CanActivate {
       this.prisma?.label &&
       isUuid(request.params.labelId)
     ) {
-      const lbl = await this.prisma.label.findUnique({
-        where: { id: request.params.labelId },
-        select: { workspaceId: true },
-      }).catch(() => null);
+      const lbl = await this.prisma.label
+        .findUnique({
+          where: { id: request.params.labelId },
+          select: { workspaceId: true },
+        })
+        .catch(() => null);
       if (lbl?.workspaceId) {
         workspaceId = lbl.workspaceId;
       }
     }
 
     // Resolve workspace from file if fileId is present
-    if (!workspaceId && request.params?.fileId && this.prisma?.file && isUuid(request.params.fileId)) {
-      const file = await this.prisma.file.findUnique({
-        where: { id: request.params.fileId },
-        select: { workspaceId: true },
-      }).catch(() => null);
+    if (
+      !workspaceId &&
+      request.params?.fileId &&
+      this.prisma?.file &&
+      isUuid(request.params.fileId)
+    ) {
+      const file = await this.prisma.file
+        .findUnique({
+          where: { id: request.params.fileId },
+          select: { workspaceId: true },
+        })
+        .catch(() => null);
       if (file?.workspaceId) {
         workspaceId = file.workspaceId;
       }
     }
 
     // Resolve workspace from page if pageId is present
-    if (!workspaceId && request.params?.pageId && this.prisma?.page && isUuid(request.params.pageId)) {
-      const page = await this.prisma.page.findUnique({
-        where: { id: request.params.pageId },
-        select: { workspaceId: true },
-      }).catch(() => null);
+    if (
+      !workspaceId &&
+      request.params?.pageId &&
+      this.prisma?.page &&
+      isUuid(request.params.pageId)
+    ) {
+      const page = await this.prisma.page
+        .findUnique({
+          where: { id: request.params.pageId },
+          select: { workspaceId: true },
+        })
+        .catch(() => null);
       if (page?.workspaceId) {
         workspaceId = page.workspaceId;
       }
     }
 
     // Resolve workspace from task if taskId is present
-    if (!workspaceId && request.params?.taskId && this.prisma?.task && isUuid(request.params.taskId)) {
-      const task = await this.prisma.task.findUnique({
-        where: { id: request.params.taskId },
-        select: { project: { select: { workspaceId: true } } },
-      }).catch(() => null);
+    if (
+      !workspaceId &&
+      request.params?.taskId &&
+      this.prisma?.task &&
+      isUuid(request.params.taskId)
+    ) {
+      const task = await this.prisma.task
+        .findUnique({
+          where: { id: request.params.taskId },
+          select: { project: { select: { workspaceId: true } } },
+        })
+        .catch(() => null);
       if (task?.project?.workspaceId) {
         workspaceId = task.project.workspaceId;
       }
@@ -180,12 +217,13 @@ export class WorkspaceRoleGuard implements CanActivate {
 
     // Fallback: If no explicit workspace identifier in route, resolve user's active/primary workspace
     if (!workspaceId && userId && this.prisma?.workspaceMember) {
-      const activeWorkspaceMembership =
-        await this.prisma.workspaceMember.findFirst({
+      const activeWorkspaceMembership = await this.prisma.workspaceMember
+        .findFirst({
           where: { userId },
           select: { workspaceId: true },
           orderBy: { joinedAt: 'desc' },
-        }).catch(() => null);
+        })
+        .catch(() => null);
       if (activeWorkspaceMembership?.workspaceId) {
         workspaceId = activeWorkspaceMembership.workspaceId;
       }

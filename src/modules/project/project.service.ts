@@ -151,8 +151,7 @@ export class ProjectService {
       throw new BadRequestException('Workspace ID is required');
     }
 
-    const workspace =
-      await this.projectRepo.resolveWorkspace(inputWorkspaceId);
+    const workspace = await this.projectRepo.resolveWorkspace(inputWorkspaceId);
     const resolvedWorkspaceId = workspace?.id || inputWorkspaceId;
 
     const identifier = dto.identifier?.trim().toUpperCase();

@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
-import { buildWorkspaceIdentifierWhere, isUuid } from '@/core/utils/tenant.util';
+import {
+  buildWorkspaceIdentifierWhere,
+  isUuid,
+} from '@/core/utils/tenant.util';
 import { Prisma, Page } from '@prisma/client';
 import {
   IPageRepository,
@@ -44,7 +47,10 @@ export class PageRepository implements IPageRepository {
     if (!isUuid(canonicalProjectId)) {
       const proj = await this.prisma.project
         .findFirst({
-          where: { identifier: { equals: canonicalProjectId, mode: 'insensitive' }, deletedAt: null },
+          where: {
+            identifier: { equals: canonicalProjectId, mode: 'insensitive' },
+            deletedAt: null,
+          },
           select: { id: true },
         })
         .catch(() => null);
@@ -68,7 +74,10 @@ export class PageRepository implements IPageRepository {
     if (!isUuid(canonicalProjectId)) {
       const proj = await this.prisma.project
         .findFirst({
-          where: { identifier: { equals: canonicalProjectId, mode: 'insensitive' }, deletedAt: null },
+          where: {
+            identifier: { equals: canonicalProjectId, mode: 'insensitive' },
+            deletedAt: null,
+          },
           select: { id: true },
         })
         .catch(() => null);
@@ -226,7 +235,10 @@ export class PageRepository implements IPageRepository {
     if (!isUuid(projectId)) {
       const project = await this.prisma.project
         .findFirst({
-          where: { identifier: { equals: projectId, mode: 'insensitive' }, deletedAt: null },
+          where: {
+            identifier: { equals: projectId, mode: 'insensitive' },
+            deletedAt: null,
+          },
           select: { workspaceId: true },
         })
         .catch(() => null);

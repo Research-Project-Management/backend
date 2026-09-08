@@ -223,7 +223,9 @@ export class SearchRepository implements OnModuleInit {
 
     // Restore FTS rank order
     const orderMap = new Map(ids.map((id, idx) => [id, idx]));
-    items.sort((a, b) => (orderMap.get(a.id) ?? 999) - (orderMap.get(b.id) ?? 999));
+    items.sort(
+      (a, b) => (orderMap.get(a.id) ?? 999) - (orderMap.get(b.id) ?? 999),
+    );
 
     return { items, nextCursor, hasNextPage };
   }
@@ -355,7 +357,9 @@ export class SearchRepository implements OnModuleInit {
       `;
       this.ftsColumnExists = Array.isArray(res) && res.length > 0;
       if (this.ftsColumnExists) {
-        this.logger.log('PostgreSQL FTS: search_vector column found — full-text search enabled');
+        this.logger.log(
+          'PostgreSQL FTS: search_vector column found — full-text search enabled',
+        );
       } else {
         this.logger.warn(
           'PostgreSQL FTS: search_vector column not found on table "papers" — run migration "add_catalog_item_fts" to enable. Falling back to ILIKE.',

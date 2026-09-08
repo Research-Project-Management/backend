@@ -112,7 +112,10 @@ export class ItemsMapper {
     if (typeof extraFields._rawExtra === 'string') {
       it.extra = extraFields._rawExtra;
       delete extraFields._rawExtra;
-    } else if (typeof it.extra === 'string' && it.extra.trim().startsWith('{')) {
+    } else if (
+      typeof it.extra === 'string' &&
+      it.extra.trim().startsWith('{')
+    ) {
       it.extra = undefined;
     }
 
@@ -125,7 +128,8 @@ export class ItemsMapper {
     if (it.referenceCount === undefined || it.referenceCount === null) {
       it.referenceCount = extraFields.referenceCount ?? null;
     }
-    if (!it.openAccessPdfUrl) it.openAccessPdfUrl = extraFields.openAccessPdfUrl ?? null;
+    if (!it.openAccessPdfUrl)
+      it.openAccessPdfUrl = extraFields.openAccessPdfUrl ?? null;
     if (!it.arxivId) it.arxivId = extraFields.arxivId ?? null;
     if (!it.seriesNumber) it.seriesNumber = extraFields.seriesNumber ?? null;
 
@@ -381,13 +385,19 @@ export class ItemsMapper {
   static mapFlattenedState<T extends Record<string, any>>(
     item: T | null | undefined,
     userId?: string,
-  ): (T & { readStatus: string; rating: number; lastReadAt: string | null }) | null {
+  ):
+    | (T & { readStatus: string; rating: number; lastReadAt: string | null })
+    | null {
     if (!item) return null;
     const normalized = ItemsMapper.toDomain(item) as any;
     let userState: any = undefined;
-    if (Array.isArray(normalized.userStates) && normalized.userStates.length > 0) {
+    if (
+      Array.isArray(normalized.userStates) &&
+      normalized.userStates.length > 0
+    ) {
       userState = userId
-        ? normalized.userStates.find((u: any) => u.userId === userId) || normalized.userStates[0]
+        ? normalized.userStates.find((u: any) => u.userId === userId) ||
+          normalized.userStates[0]
         : normalized.userStates[0];
     }
     const { userStates: _userStates, ...rest } = normalized;
@@ -396,9 +406,9 @@ export class ItemsMapper {
       readStatus: userState?.readStatus ?? 'unread',
       rating: userState?.rating ?? 0,
       lastReadAt: userState?.lastReadAt
-        ? (userState.lastReadAt instanceof Date
-            ? userState.lastReadAt.toISOString()
-            : String(userState.lastReadAt))
+        ? userState.lastReadAt instanceof Date
+          ? userState.lastReadAt.toISOString()
+          : String(userState.lastReadAt)
         : null,
     };
   }

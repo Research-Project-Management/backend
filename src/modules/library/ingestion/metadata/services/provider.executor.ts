@@ -225,7 +225,10 @@ export class ProviderExecutor {
   private readonly logger = new Logger(ProviderExecutor.name);
   private readonly globalSemaphore = new Semaphore(10);
   private readonly providerSemaphores = new Map<ProviderName, Semaphore>();
-  private readonly circuitBreakers = new Map<ProviderName, ProviderCircuitBreaker>();
+  private readonly circuitBreakers = new Map<
+    ProviderName,
+    ProviderCircuitBreaker
+  >();
 
   public getCircuitBreaker(providerName: ProviderName): ProviderCircuitBreaker {
     let cb = this.circuitBreakers.get(providerName);

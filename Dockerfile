@@ -17,7 +17,7 @@ WORKDIR /app
 FROM base AS dependencies
 WORKDIR /app
 COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN pnpm install
 
 # ------------------------------------------------------------------------------
 # 3. Development Stage: Hot-reload, Prisma sync & 2-way volume mounting

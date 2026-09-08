@@ -156,7 +156,7 @@ export class AuthzService {
       const memberLevel = WorkspaceRoleHierarchy[memberRole] || 0;
 
       const isAllowed = allowedRoles.some((reqRole) => {
-        const normalized = (reqRole as string).toUpperCase() as WorkspaceRole;
+        const normalized = reqRole.toUpperCase() as WorkspaceRole;
         const requiredLevel = WorkspaceRoleHierarchy[normalized] || 0;
         return memberLevel >= requiredLevel;
       });
@@ -216,7 +216,7 @@ export class AuthzService {
       const memberLevel = ProjectRoleHierarchy[memberRole] || 0;
 
       const isAllowed = allowedRoles.some((reqRole) => {
-        const normalized = (reqRole as string).toUpperCase() as ProjectRole;
+        const normalized = reqRole.toUpperCase() as ProjectRole;
         const requiredLevel = ProjectRoleHierarchy[normalized] || 0;
         return memberLevel >= requiredLevel;
       });

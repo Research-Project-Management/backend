@@ -107,9 +107,7 @@ export class HistoryService {
 
     // Route through PageService (correct domain) — ensures cache + event are handled
     const updateRes = await this.pageService.updatePage(pageId, {
-      content: (parsedContent !== null
-        ? parsedContent
-        : undefined) as Prisma.InputJsonValue,
+      content: parsedContent !== null ? parsedContent : undefined,
       title: version.title || undefined,
     });
     const page = updateRes.page;

@@ -37,11 +37,13 @@ export function aggregateProjectDistributions(
   for (const task of tasks) {
     // State / Column distribution
     const taskColumnId = task.columnId || 'unassigned';
-    stateDistribution[taskColumnId] = (stateDistribution[taskColumnId] || 0) + 1;
+    stateDistribution[taskColumnId] =
+      (stateDistribution[taskColumnId] || 0) + 1;
 
     // Priority level distribution
     const priorityLevel = task.priority || 'none';
-    priorityDistribution[priorityLevel] = (priorityDistribution[priorityLevel] || 0) + 1;
+    priorityDistribution[priorityLevel] =
+      (priorityDistribution[priorityLevel] || 0) + 1;
 
     // Assignee workload distribution
     if (task.assigneeId && task.assignee) {
@@ -79,7 +81,10 @@ export function calculateCycleMetrics(
       task.columnId === 'review' ||
       task.columnId === 'in_review',
   ).length;
-  const pendingTasks = Math.max(0, totalTasks - completedTasks - inProgressTasks);
+  const pendingTasks = Math.max(
+    0,
+    totalTasks - completedTasks - inProgressTasks,
+  );
   const completionRate =
     totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
 

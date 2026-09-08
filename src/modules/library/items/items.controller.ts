@@ -43,7 +43,6 @@ export class ItemsController {
     private readonly notesExtractor?: IItemNotesExtractorPort,
   ) {}
 
-
   @Get()
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async listItems(
@@ -280,10 +279,7 @@ export class ItemsController {
     @Param('workspaceId') workspaceId: string,
     @Param('id') id: string,
   ) {
-    const purged = await this.itemsService.purgeItem(
-      workspaceId,
-      id,
-    );
+    const purged = await this.itemsService.purgeItem(workspaceId, id);
     return { success: true, purged, id };
   }
 
@@ -293,10 +289,7 @@ export class ItemsController {
     @Param('workspaceId') workspaceId: string,
     @Param('id') id: string,
   ) {
-    return this.itemsService.getRelatedItems(
-      workspaceId,
-      id,
-    );
+    return this.itemsService.getRelatedItems(workspaceId, id);
   }
 
   @Post([':id/relations', ':id/link'])
@@ -307,11 +300,7 @@ export class ItemsController {
     @Body()
     body: { targetItemId: string; relationType?: string; note?: string },
   ) {
-    return this.itemsService.linkItems(
-      workspaceId,
-      id,
-      body,
-    );
+    return this.itemsService.linkItems(workspaceId, id, body);
   }
 
   @Delete([':id/relations/:targetId', ':id/link/:targetId'])
@@ -321,11 +310,7 @@ export class ItemsController {
     @Param('id') id: string,
     @Param('targetId') targetItemId: string,
   ) {
-    return this.itemsService.unlinkItems(
-      workspaceId,
-      id,
-      targetItemId,
-    );
+    return this.itemsService.unlinkItems(workspaceId, id, targetItemId);
   }
 
   @Post(':id/extract-notes')

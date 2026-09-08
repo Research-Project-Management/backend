@@ -157,7 +157,9 @@ export class RisParser {
             if (l4Match) archive = l4Match[1].trim();
           }
           if (!callNumber) {
-            const cnMatch = currentRawRecord.match(/^(?:CN|CA|C1)\s*-\s*(.+)$/m);
+            const cnMatch = currentRawRecord.match(
+              /^(?:CN|CA|C1)\s*-\s*(.+)$/m,
+            );
             if (cnMatch) callNumber = cnMatch[1].trim();
           }
           if (!series) {
@@ -173,7 +175,9 @@ export class RisParser {
             if (laMatch) language = laMatch[1].trim();
           }
           if (!place) {
-            const placeMatch = currentRawRecord.match(/^(?:CY|AD)\s*-\s*(.+)$/m);
+            const placeMatch = currentRawRecord.match(
+              /^(?:CY|AD)\s*-\s*(.+)$/m,
+            );
             if (placeMatch) place = placeMatch[1].trim();
           }
         }
@@ -441,7 +445,10 @@ export class RisParser {
       itemType: record.itemType || 'journalArticle',
       title: record.title || 'Untitled Reference',
       authors: record.rawAuthors,
-      editors: record.rawEditors && record.rawEditors.length > 0 ? record.rawEditors : undefined,
+      editors:
+        record.rawEditors && record.rawEditors.length > 0
+          ? record.rawEditors
+          : undefined,
       creators,
       year: record.year,
       publicationDate: record.year ? String(record.year) : undefined,

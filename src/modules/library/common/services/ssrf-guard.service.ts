@@ -25,7 +25,10 @@ export class SsrfGuardService {
    * 3. DNS resolution of all A/AAAA records
    * 4. IP blocklist: Loopback, RFC 1918, Link-local, CGNAT, Multicast, Cloud metadata
    */
-  async assertSafeUrl(rawUrl: string, options: SsrfGuardOptions = {}): Promise<URL> {
+  async assertSafeUrl(
+    rawUrl: string,
+    options: SsrfGuardOptions = {},
+  ): Promise<URL> {
     let url: URL;
     try {
       url = new URL(rawUrl);
@@ -51,7 +54,9 @@ export class SsrfGuardService {
 
     // Disallow userinfo (e.g. http://user:pass@domain) which can be used to obfuscate destinations
     if (url.username || url.password) {
-      throw new ForbiddenException('URLs containing user credentials are not allowed.');
+      throw new ForbiddenException(
+        'URLs containing user credentials are not allowed.',
+      );
     }
 
     const rawHostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
@@ -68,7 +73,9 @@ export class SsrfGuardService {
       rawHostname.endsWith('.cluster.local') ||
       rawHostname === 'metadata.google.internal'
     ) {
-      throw new ForbiddenException(`Access to local/internal host '${rawHostname}' is denied.`);
+      throw new ForbiddenException(
+        `Access to local/internal host '${rawHostname}' is denied.`,
+      );
     }
 
     // If direct IP literal
@@ -85,7 +92,9 @@ export class SsrfGuardService {
     try {
       const addresses = await lookup(rawHostname, { all: true });
       if (!addresses || addresses.length === 0) {
-        throw new BadRequestException(`Unable to resolve host '${rawHostname}'.`);
+        throw new BadRequestException(
+          `Unable to resolve host '${rawHostname}'.`,
+        );
       }
 
       for (const record of addresses) {
@@ -99,10 +108,15 @@ export class SsrfGuardService {
         }
       }
     } catch (err: any) {
-      if (err instanceof ForbiddenException || err instanceof BadRequestException) {
+      if (
+        err instanceof ForbiddenException ||
+        err instanceof BadRequestException
+      ) {
         throw err;
       }
-      this.logger.debug(`DNS resolution failed for ${rawHostname}: ${err.message}`);
+      this.logger.debug(
+        `DNS resolution failed for ${rawHostname}: ${err.message}`,
+      );
       throw new BadRequestException(`Unable to resolve host '${rawHostname}'.`);
     }
 
@@ -140,20 +154,29 @@ export class SsrfGuardService {
       ) {
         redirectCount++;
         if (redirectCount > maxRedirects) {
-          throw new ForbiddenException(`SSRF Protection: Maximum redirect limit (${maxRedirects}) exceeded.`);
+          throw new ForbiddenException(
+            `SSRF Protection: Maximum redirect limit (${maxRedirects}) exceeded.`,
+          );
         }
 
         const locationHeader = response.headers.get('location');
         if (!locationHeader) {
-          throw new BadRequestException('Redirect response missing Location header.');
+          throw new BadRequestException(
+            'Redirect response missing Location header.',
+          );
         }
 
         // Resolve relative redirects against current URL
         try {
-          const resolvedRedirect = new URL(locationHeader, validatedUrl).toString();
+          const resolvedRedirect = new URL(
+            locationHeader,
+            validatedUrl,
+          ).toString();
           currentUrl = resolvedRedirect;
         } catch {
-          throw new BadRequestException(`Invalid redirect URL in Location header: ${locationHeader}`);
+          throw new BadRequestException(
+            `Invalid redirect URL in Location header: ${locationHeader}`,
+          );
         }
         continue;
       }
@@ -174,7 +197,10 @@ export class SsrfGuardService {
     // IPv4 Checks
     if (normalized.includes('.')) {
       const parts = normalized.split('.').map((p) => parseInt(p, 10));
-      if (parts.length !== 4 || parts.some((p) => isNaN(p) || p < 0 || p > 255)) {
+      if (
+        parts.length !== 4 ||
+        parts.some((p) => isNaN(p) || p < 0 || p > 255)
+      ) {
         return true;
       }
 
@@ -188,7 +214,13 @@ export class SsrfGuardService {
       if (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) return true;
 
       // 100.100.100.200 (Alibaba Cloud Metadata)
-      if (parts[0] === 100 && parts[1] === 100 && parts[2] === 100 && parts[3] === 200) return true;
+      if (
+        parts[0] === 100 &&
+        parts[1] === 100 &&
+        parts[2] === 100 &&
+        parts[3] === 200
+      )
+        return true;
 
       // 127.0.0.0/8 (Loopback)
       if (parts[0] === 127) return true;

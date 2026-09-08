@@ -10,10 +10,7 @@ import { OutboxModule } from '../outbox/outbox.module';
 import { TagsModule } from '../tags/tags.module';
 import { CollectionsModule } from '../collections/collections.module';
 import { SearchModule } from '../search/search.module';
-import {
-  ITEM_EXISTENCE_PORT,
-  ITEM_READ_PORT,
-} from './ports/items.ports';
+import { ITEM_EXISTENCE_PORT, ITEM_READ_PORT } from './ports/items.ports';
 
 @Module({
   imports: [

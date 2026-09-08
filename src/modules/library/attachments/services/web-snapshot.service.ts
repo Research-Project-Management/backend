@@ -1,4 +1,9 @@
-import { Injectable, Logger, BadRequestException, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  Optional,
+} from '@nestjs/common';
 import { createHash } from 'crypto';
 import { JSDOM } from 'jsdom';
 import { Readability } from '@mozilla/readability';
@@ -48,7 +53,9 @@ export class WebSnapshotService {
     try {
       MetadataRoutingPolicy.validateUrl(canonicalUrl);
     } catch (err: any) {
-      throw new BadRequestException(`SSRF validation failed for URL: ${err?.message || err}`);
+      throw new BadRequestException(
+        `SSRF validation failed for URL: ${err?.message || err}`,
+      );
     }
 
     // 2. Fetch raw HTML content
@@ -75,7 +82,9 @@ export class WebSnapshotService {
       rawHtml = await response.text();
     } catch (fetchErr: any) {
       if (fetchErr.name === 'AbortError') {
-        throw new BadRequestException(`Request timed out while capturing ${canonicalUrl}`);
+        throw new BadRequestException(
+          `Request timed out while capturing ${canonicalUrl}`,
+        );
       }
       throw new BadRequestException(
         `Failed to fetch target URL for snapshot: ${fetchErr?.message || fetchErr}`,
@@ -86,7 +95,7 @@ export class WebSnapshotService {
 
     // 3. Parse with JSDOM and Mozilla Readability
     const dom = new JSDOM(rawHtml, { url: canonicalUrl });
-    const DOMPurify = createDOMPurify(dom.window as any);
+    const DOMPurify = createDOMPurify(dom.window);
     const reader = new Readability(dom.window.document, {
       charThreshold: 20,
     });
@@ -94,17 +103,43 @@ export class WebSnapshotService {
     const parsedArticle = reader.parse();
 
     const title =
-      parsedArticle?.title?.trim() || options?.title?.trim() || dom.window.document.title?.trim() || 'Web Snapshot';
+      parsedArticle?.title?.trim() ||
+      options?.title?.trim() ||
+      dom.window.document.title?.trim() ||
+      'Web Snapshot';
     const byline = parsedArticle?.byline?.trim() || undefined;
     const excerpt = parsedArticle?.excerpt?.trim() || undefined;
-    const siteName = parsedArticle?.siteName?.trim() || new URL(canonicalUrl).hostname;
-    const textContent = parsedArticle?.textContent?.trim() || dom.window.document.body?.textContent?.trim() || '';
+    const siteName =
+      parsedArticle?.siteName?.trim() || new URL(canonicalUrl).hostname;
+    const textContent =
+      parsedArticle?.textContent?.trim() ||
+      dom.window.document.body?.textContent?.trim() ||
+      '';
 
     // 4. Sanitize article body with DOMPurify
-    const rawContent = parsedArticle?.content || dom.window.document.body?.innerHTML || '<p>No content captured</p>';
+    const rawContent =
+      parsedArticle?.content ||
+      dom.window.document.body?.innerHTML ||
+      '<p>No content captured</p>';
     const sanitizedBody = DOMPurify.sanitize(rawContent, {
-      FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'dialog'],
-      FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', 'onblur'],
+      FORBID_TAGS: [
+        'script',
+        'iframe',
+        'object',
+        'embed',
+        'form',
+        'input',
+        'button',
+        'dialog',
+      ],
+      FORBID_ATTR: [
+        'onerror',
+        'onload',
+        'onclick',
+        'onmouseover',
+        'onfocus',
+        'onblur',
+      ],
       ADD_TAGS: ['math', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac'],
     });
 
@@ -322,9 +357,13 @@ export class WebSnapshotService {
     workspaceId: string,
     options?: CaptureAndAttachOptions,
   ): Promise<{ attachment: any; snapshot: SnapshotResult }> {
-    this.logger.log(`Capturing web snapshot for item ${catalogItemId} from ${url}`);
+    this.logger.log(
+      `Capturing web snapshot for item ${catalogItemId} from ${url}`,
+    );
 
-    const snapshot = await this.captureHtmlSnapshot(url, { title: options?.title });
+    const snapshot = await this.captureHtmlSnapshot(url, {
+      title: options?.title,
+    });
 
     // 1. Upload to storage
     const sanitizedTitle = (snapshot.title || options?.title || 'web_page')
@@ -347,7 +386,9 @@ export class WebSnapshotService {
         );
         fileUrl = uploadResult.url;
       } catch (err: any) {
-        this.logger.warn(`Storage upload failed, using fallback URL: ${err?.message}`);
+        this.logger.warn(
+          `Storage upload failed, using fallback URL: ${err?.message}`,
+        );
       }
     }
 

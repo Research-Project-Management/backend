@@ -33,4 +33,3 @@ import { SyncService } from './sync.service';
   exports: [SYNC_PORT, SyncService],
 })
 export class SyncModule {}
-

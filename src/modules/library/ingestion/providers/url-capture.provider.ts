@@ -1,4 +1,9 @@
-import { Injectable, Logger, BadRequestException, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  Optional,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac, createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { MetadataRoutingPolicy } from '../metadata/policies/metadata.policy';
@@ -156,7 +161,9 @@ export class UrlCaptureProvider {
     if (zoteroItems.length > 0) {
       captured = this.mapZoteroItem(zoteroItems[0], canonicalUrl);
     } else {
-      this.logger.debug(`No Zotero translator for URL: ${canonicalUrl} — using minimal fallback`);
+      this.logger.debug(
+        `No Zotero translator for URL: ${canonicalUrl} — using minimal fallback`,
+      );
       captured = {
         title: 'Web Page',
         url: canonicalUrl,
@@ -170,7 +177,10 @@ export class UrlCaptureProvider {
 
   // ─── Zotero CSL-JSON → CapturedItemMetadata ─────────────────────────────────
 
-  private mapZoteroItem(item: ZoteroItem, fallbackUrl: string): CapturedItemMetadata {
+  private mapZoteroItem(
+    item: ZoteroItem,
+    fallbackUrl: string,
+  ): CapturedItemMetadata {
     const creators: CapturedItemMetadata['creators'] = [];
     const authors: string[] = [];
 
@@ -206,7 +216,7 @@ export class UrlCaptureProvider {
     // Extract keywords from Zotero tags
     const keywords = (item.tags ?? [])
       .map((t) => t.tag?.trim())
-      .filter(Boolean) as string[];
+      .filter(Boolean);
 
     // Map itemType
     const itemType = this.mapZoteroItemType(item.itemType);
@@ -215,7 +225,9 @@ export class UrlCaptureProvider {
     let pdfUrl: string | undefined;
     const combinedUrl = (item.url || fallbackUrl).trim();
     const arxivMatch =
-      combinedUrl.match(/(?:arxiv\.org\/(?:abs|html|pdf)\/|arxiv:)(\d{4}\.\d{4,5}(?:v\d+)?)/i) ||
+      combinedUrl.match(
+        /(?:arxiv\.org\/(?:abs|html|pdf)\/|arxiv:)(\d{4}\.\d{4,5}(?:v\d+)?)/i,
+      ) ||
       (item.extra && item.extra.match(/arxiv:\s*(\d{4}\.\d{4,5}(?:v\d+)?)/i));
 
     if (arxivMatch) {
@@ -260,7 +272,9 @@ export class UrlCaptureProvider {
     };
   }
 
-  private mapZoteroItemType(zoteroType: string): CapturedItemMetadata['itemType'] {
+  private mapZoteroItemType(
+    zoteroType: string,
+  ): CapturedItemMetadata['itemType'] {
     const map: Record<string, CapturedItemMetadata['itemType']> = {
       journalArticle: 'journalArticle',
       book: 'book',
@@ -316,7 +330,11 @@ export class UrlCaptureProvider {
       publicationTitle?: string;
       abstract?: string;
       itemType?: string;
-      creators?: Array<{ firstName?: string; lastName: string; creatorType?: string }>;
+      creators?: Array<{
+        firstName?: string;
+        lastName: string;
+        creatorType?: string;
+      }>;
       tags?: string[];
     },
     token?: string,
@@ -353,7 +371,10 @@ export class UrlCaptureProvider {
     const expectedBuf = Buffer.from(expectedSignature, 'hex');
     const receivedBuf = Buffer.from(receivedSignature, 'hex');
 
-    if (expectedBuf.length === receivedBuf.length && timingSafeEqual(expectedBuf, receivedBuf)) {
+    if (
+      expectedBuf.length === receivedBuf.length &&
+      timingSafeEqual(expectedBuf, receivedBuf)
+    ) {
       return { valid: true };
     }
 
@@ -371,11 +392,18 @@ export class UrlCaptureProvider {
     publicationTitle?: string;
     abstract?: string;
     itemType?: string;
-    creators?: Array<{ firstName?: string; lastName: string; creatorType?: string }>;
+    creators?: Array<{
+      firstName?: string;
+      lastName: string;
+      creatorType?: string;
+    }>;
     tags?: string[];
   }): string {
     const normalizedCreators = (meta.creators || [])
-      .map((c) => `${c.creatorType || 'author'}:${c.lastName || ''},${c.firstName || ''}`)
+      .map(
+        (c) =>
+          `${c.creatorType || 'author'}:${c.lastName || ''},${c.firstName || ''}`,
+      )
       .sort()
       .join(';');
     const normalizedTags = (meta.tags || []).slice().sort().join(',');

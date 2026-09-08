@@ -323,7 +323,10 @@ export class AttachmentExtractionHandler implements OutboxDispatchHandler {
     const titleMap = new Map<string, string>();
 
     const normalizeTitle = (t: string) =>
-      t.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
+      t
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '')
+        .trim();
 
     for (const p of workspacePapers) {
       if (p.doi) {

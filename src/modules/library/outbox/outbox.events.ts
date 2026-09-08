@@ -346,6 +346,7 @@ export const LIBRARY_EVENT_CATALOG: Record<string, EventCatalogEntry> = {
     consumer: 'EventDispatcher',
     retryPolicy: 'exponential_backoff',
     idempotency: 'aggregate_version',
-    expectedSideEffect: 'Emits domain event for reading state and sync change log',
+    expectedSideEffect:
+      'Emits domain event for reading state and sync change log',
   },
 };

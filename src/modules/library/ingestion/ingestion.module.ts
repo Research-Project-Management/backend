@@ -32,7 +32,6 @@ import { ZoteroTranslatorClient } from '../../../infra/zotero/zotero-translator.
 import { SsrfGuardService } from '../common/services/ssrf-guard.service';
 import { NotesModule } from '../notes/notes.module';
 
-
 @Module({
   imports: [
     CoreModule,
@@ -80,7 +79,6 @@ import { NotesModule } from '../notes/notes.module';
       useExisting: IngestionService,
     },
     UrlCaptureProvider,
-
   ],
   exports: [
     INGESTION_PORT,

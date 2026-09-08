@@ -55,7 +55,9 @@ export class IngestionWatchdogService
     if (this.timer) return;
     this.timer = setInterval(() => {
       void this.reconcileOrphanedRuns().catch((err: any) => {
-        this.logger.error(`Watchdog reconciliation failed: ${err?.message || err}`);
+        this.logger.error(
+          `Watchdog reconciliation failed: ${err?.message || err}`,
+        );
       });
     }, intervalMs);
     // Prevent the timer from holding the Node.js event loop open in test environments.

@@ -32,7 +32,6 @@ import {
   IItemNotesExtractorPort,
 } from '../items/ports/items.ports';
 
-
 @Injectable()
 export class NotesService implements IItemNotesExtractorPort {
   private readonly logger = new Logger(NotesService.name);
@@ -65,9 +64,15 @@ export class NotesService implements IItemNotesExtractorPort {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     if (data.itemId) {
       if (this.itemExistencePort) {
-        await this.itemExistencePort.assertExists(canonicalWorkspaceId, data.itemId);
+        await this.itemExistencePort.assertExists(
+          canonicalWorkspaceId,
+          data.itemId,
+        );
       } else {
-        const item = await this.itemReadPort.findById(canonicalWorkspaceId, data.itemId);
+        const item = await this.itemReadPort.findById(
+          canonicalWorkspaceId,
+          data.itemId,
+        );
         if (!item) {
           throw new NotFoundException(`Catalog item not found in workspace`);
         }
@@ -350,10 +355,7 @@ export class NotesService implements IItemNotesExtractorPort {
       workspaceId,
     );
 
-    const item = await this.itemReadPort.findById(
-      canonicalWorkspaceId,
-      itemId,
-    );
+    const item = await this.itemReadPort.findById(canonicalWorkspaceId, itemId);
     if (!item) {
       throw new NotFoundException(
         `Item ${itemId} not found in workspace ${canonicalWorkspaceId}`,

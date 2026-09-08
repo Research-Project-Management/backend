@@ -18,13 +18,7 @@ import { AttachmentsRepository } from './attachments.repository';
 import { WebSnapshotService } from './services/web-snapshot.service';
 
 @Module({
-  imports: [
-    CoreModule,
-    OutboxModule,
-    SearchModule,
-    StorageModule,
-    ItemsModule,
-  ],
+  imports: [CoreModule, OutboxModule, SearchModule, StorageModule, ItemsModule],
   controllers: [AttachmentsController],
   providers: [
     AttachmentsRepository,
@@ -34,8 +28,12 @@ import { WebSnapshotService } from './services/web-snapshot.service';
     PdfExtractorProvider,
     AttachmentExtractionHandler,
   ],
-  exports: [AttachmentsService, WebSnapshotService, PdfExtractorProvider, GrobidClient],
-
+  exports: [
+    AttachmentsService,
+    WebSnapshotService,
+    PdfExtractorProvider,
+    GrobidClient,
+  ],
 })
 export class AttachmentsModule implements OnModuleInit {
   constructor(

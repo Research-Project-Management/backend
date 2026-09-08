@@ -451,7 +451,10 @@ export class WorkspaceService {
     if (userId) {
       const isMember = ws.members?.some((m) => m.userId === userId);
       if (!isMember) {
-        const member = await this.workspaceRepo.findMember(canonicalWorkspaceId, userId);
+        const member = await this.workspaceRepo.findMember(
+          canonicalWorkspaceId,
+          userId,
+        );
         if (!member) {
           throw new ForbiddenException(
             'You are not a member of this workspace',
@@ -523,7 +526,8 @@ export class WorkspaceService {
 
     return results.sort(
       (previousItem, nextItem) =>
-        new Date(nextItem.updatedAt).getTime() - new Date(previousItem.updatedAt).getTime(),
+        new Date(nextItem.updatedAt).getTime() -
+        new Date(previousItem.updatedAt).getTime(),
     );
   }
 

@@ -4,7 +4,6 @@ import { Prisma } from '@prisma/client';
 import { VersionMismatchException } from '../common/errors/version-mismatch.exception';
 import { CollectionDeleteStrategy } from './types/collections.types';
 
-
 export interface CreateCollectionInput {
   name: string;
   description?: string;

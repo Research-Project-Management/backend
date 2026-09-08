@@ -308,13 +308,15 @@ export class OutboxWorker
               error: r.error,
               scheduledAt: r.scheduledAt ? new Date(r.scheduledAt) : null,
               claimedAt: r.claimedAt ? new Date(r.claimedAt) : null,
-              leaseExpiresAt: r.leaseExpiresAt ? new Date(r.leaseExpiresAt) : null,
+              leaseExpiresAt: r.leaseExpiresAt
+                ? new Date(r.leaseExpiresAt)
+                : null,
               claimedBy: r.claimedBy,
               dedupeKey: r.dedupeKey,
               createdAt: new Date(r.createdAt),
               updatedAt: new Date(r.updatedAt),
               processedAt: r.processedAt ? new Date(r.processedAt) : null,
-            } as OutboxEvent,
+            },
             isLeaseRecovery:
               r.previousStatus === OutboxStatus.PROCESSING &&
               r.previousLeaseExpiresAt !== null &&
@@ -347,7 +349,8 @@ export class OutboxWorker
       take: batchSize,
     });
 
-    const claimedList: Array<{ event: OutboxEvent; isLeaseRecovery: boolean }> = [];
+    const claimedList: Array<{ event: OutboxEvent; isLeaseRecovery: boolean }> =
+      [];
 
     for (const event of candidates) {
       const isLeaseRecovery =

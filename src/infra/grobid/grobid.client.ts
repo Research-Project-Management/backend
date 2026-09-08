@@ -59,7 +59,13 @@ export interface GrobidSection {
   paragraphs: string[];
   page: number;
   coords?: GrobidBoundingBox;
-  imradCategory: 'introduction' | 'methods' | 'results' | 'discussion' | 'conclusion' | 'other';
+  imradCategory:
+    | 'introduction'
+    | 'methods'
+    | 'results'
+    | 'discussion'
+    | 'conclusion'
+    | 'other';
 }
 
 export interface GrobidFigure {
@@ -113,7 +119,9 @@ export class GrobidClient {
   private readonly logger = new Logger(GrobidClient.name);
 
   private get baseUrl(): string {
-    return process.env.GROBID_URL?.replace(/\/$/, '') ?? 'http://localhost:8070';
+    return (
+      process.env.GROBID_URL?.replace(/\/$/, '') ?? 'http://localhost:8070'
+    );
   }
 
   private get enabled(): boolean {
@@ -131,7 +139,9 @@ export class GrobidClient {
    * Sends to GROBID /api/processHeaderDocument → TEI XML → parsed result.
    * Returns null if GROBID is disabled, down, or returns non-200.
    */
-  async processHeaderDocument(buffer: Buffer): Promise<GrobidHeaderResult | null> {
+  async processHeaderDocument(
+    buffer: Buffer,
+  ): Promise<GrobidHeaderResult | null> {
     if (!this.enabled) return null;
 
     const controller = new AbortController();
@@ -146,11 +156,14 @@ export class GrobidClient {
       );
       formData.append('consolidateHeader', '0'); // No CrossRef consolidation (we have our own)
 
-      const response = await fetch(`${this.baseUrl}/api/processHeaderDocument`, {
-        method: 'POST',
-        body: formData,
-        signal: controller.signal,
-      });
+      const response = await fetch(
+        `${this.baseUrl}/api/processHeaderDocument`,
+        {
+          method: 'POST',
+          body: formData,
+          signal: controller.signal,
+        },
+      );
 
       if (!response.ok) {
         this.logger.warn(
@@ -163,9 +176,13 @@ export class GrobidClient {
       return this.parseTeiHeader(teiXml);
     } catch (err: any) {
       if (err?.name === 'AbortError') {
-        this.logger.warn('GROBID processHeaderDocument timed out — skipping enrichment');
+        this.logger.warn(
+          'GROBID processHeaderDocument timed out — skipping enrichment',
+        );
       } else {
-        this.logger.warn(`GROBID unavailable: ${err?.message} — using unpdf fallback`);
+        this.logger.warn(
+          `GROBID unavailable: ${err?.message} — using unpdf fallback`,
+        );
       }
       return null;
     } finally {
@@ -210,7 +227,9 @@ export class GrobidClient {
       return this.parseTeiReferences(teiXml);
     } catch (err: any) {
       if (err?.name === 'AbortError') {
-        this.logger.warn('GROBID processReferences timed out — skipping references');
+        this.logger.warn(
+          'GROBID processReferences timed out — skipping references',
+        );
       } else {
         this.logger.warn(`GROBID references unavailable: ${err?.message}`);
       }
@@ -226,7 +245,9 @@ export class GrobidClient {
    * Extracts sections (IMRAD), tables (matrix/markdown), figures (captions/bboxes), formulas, and references
    * in a single high-efficiency pass.
    */
-  async processFulltextDocument(buffer: Buffer): Promise<GrobidFulltextResult | null> {
+  async processFulltextDocument(
+    buffer: Buffer,
+  ): Promise<GrobidFulltextResult | null> {
     if (!this.enabled) return null;
 
     const controller = new AbortController();
@@ -248,11 +269,14 @@ export class GrobidClient {
       formData.append('teiCoordinates', 'formula');
       formData.append('teiCoordinates', 'biblStruct');
 
-      const response = await fetch(`${this.baseUrl}/api/processFulltextDocument`, {
-        method: 'POST',
-        body: formData,
-        signal: controller.signal,
-      });
+      const response = await fetch(
+        `${this.baseUrl}/api/processFulltextDocument`,
+        {
+          method: 'POST',
+          body: formData,
+          signal: controller.signal,
+        },
+      );
 
       if (!response.ok) {
         this.logger.warn(
@@ -267,7 +291,9 @@ export class GrobidClient {
       if (err?.name === 'AbortError') {
         this.logger.warn('GROBID processFulltextDocument timed out');
       } else {
-        this.logger.warn(`GROBID processFulltextDocument error: ${err?.message}`);
+        this.logger.warn(
+          `GROBID processFulltextDocument error: ${err?.message}`,
+        );
       }
       return null;
     } finally {
@@ -328,7 +354,9 @@ export class GrobidClient {
     }
 
     // ArXiv ID
-    const arxivMatch = teiXml.match(/<idno[^>]*type="arXiv"[^>]*>([^<]+)<\/idno>/i);
+    const arxivMatch = teiXml.match(
+      /<idno[^>]*type="arXiv"[^>]*>([^<]+)<\/idno>/i,
+    );
     if (arxivMatch?.[1]) {
       result.arxivId = arxivMatch[1].replace(/^arxiv:/i, '').trim();
     }
@@ -344,14 +372,17 @@ export class GrobidClient {
     }
 
     // Journal
-    const journalMatch = teiXml.match(/<title[^>]*level="j"[^>]*>([^<]+)<\/title>/i);
+    const journalMatch = teiXml.match(
+      /<title[^>]*level="j"[^>]*>([^<]+)<\/title>/i,
+    );
     if (journalMatch?.[1]) {
       result.journal = this.cleanText(journalMatch[1]);
     }
 
     // Authors & Creators (Token-level Sequence Labeling with affiliations & emails)
     const creators: GrobidCreator[] = [];
-    const authorRegex = /<author(?:\s+role="([^"]*)")?[^>]*>([\s\S]*?)<\/author>/gi;
+    const authorRegex =
+      /<author(?:\s+role="([^"]*)")?[^>]*>([\s\S]*?)<\/author>/gi;
     let aMatch: RegExpExecArray | null;
 
     while ((aMatch = authorRegex.exec(teiXml)) !== null) {
@@ -359,10 +390,14 @@ export class GrobidClient {
       const block = aMatch[2];
 
       const firstName = this.cleanText(
-        block.match(/<forename[^>]*type="first"[^>]*>([^<]+)<\/forename>/i)?.[1] || '',
+        block.match(
+          /<forename[^>]*type="first"[^>]*>([^<]+)<\/forename>/i,
+        )?.[1] || '',
       );
       const middleName = this.cleanText(
-        block.match(/<forename[^>]*type="middle"[^>]*>([^<]+)<\/forename>/i)?.[1] || '',
+        block.match(
+          /<forename[^>]*type="middle"[^>]*>([^<]+)<\/forename>/i,
+        )?.[1] || '',
       );
       const lastName = this.cleanText(
         block.match(/<surname[^>]*>([^<]+)<\/surname>/i)?.[1] || '',
@@ -372,16 +407,24 @@ export class GrobidClient {
       const fullName =
         fullNameParts.length > 0
           ? fullNameParts.join(' ')
-          : this.cleanText(block.match(/<persName[^>]*>([^<]+)<\/persName>/i)?.[1] || '');
+          : this.cleanText(
+              block.match(/<persName[^>]*>([^<]+)<\/persName>/i)?.[1] || '',
+            );
 
       if (!fullName || fullName.length < 2) continue;
 
-      const email = this.cleanText(block.match(/<email[^>]*>([^<]+)<\/email>/i)?.[1] || '');
+      const email = this.cleanText(
+        block.match(/<email[^>]*>([^<]+)<\/email>/i)?.[1] || '',
+      );
       const institution = this.cleanText(
-        block.match(/<orgName[^>]*type="institution"[^>]*>([^<]+)<\/orgName>/i)?.[1] || '',
+        block.match(
+          /<orgName[^>]*type="institution"[^>]*>([^<]+)<\/orgName>/i,
+        )?.[1] || '',
       );
       const department = this.cleanText(
-        block.match(/<orgName[^>]*type="department"[^>]*>([^<]+)<\/orgName>/i)?.[1] || '',
+        block.match(
+          /<orgName[^>]*type="department"[^>]*>([^<]+)<\/orgName>/i,
+        )?.[1] || '',
       );
       const country = this.cleanText(
         block.match(/<country[^>]*>([^<]+)<\/country>/i)?.[1] || '',
@@ -436,12 +479,16 @@ export class GrobidClient {
    * 3. Strips trailing author contribution / footnote artifacts.
    * 4. De-hyphenates words broken across line breaks.
    */
-  private extractTeiAbstract(teiXml: string): {
-    fullText: string;
-    paragraphs: string[];
-    sections: Array<{ heading?: string; text: string }>;
-  } | undefined {
-    const abstractMatch = teiXml.match(/<abstract[^>]*>([\s\S]*?)<\/abstract>/i);
+  private extractTeiAbstract(teiXml: string):
+    | {
+        fullText: string;
+        paragraphs: string[];
+        sections: Array<{ heading?: string; text: string }>;
+      }
+    | undefined {
+    const abstractMatch = teiXml.match(
+      /<abstract[^>]*>([\s\S]*?)<\/abstract>/i,
+    );
     if (!abstractMatch || !abstractMatch[1]) return undefined;
 
     const rawBlock = abstractMatch[1].trim();
@@ -474,7 +521,9 @@ export class GrobidClient {
 
     let fullText = '';
     if (sections.length > 0) {
-      fullText = sections.map((s) => `**${s.heading}**: ${s.text}`).join('\n\n');
+      fullText = sections
+        .map((s) => `**${s.heading}**: ${s.text}`)
+        .join('\n\n');
     } else if (paragraphs.length > 0) {
       fullText = paragraphs.join('\n\n');
     } else {
@@ -500,17 +549,43 @@ export class GrobidClient {
    */
   private cleanAbstractArtifacts(text: string): string {
     const artifactPattern =
-      /(?:(?:\n\s*|\.\s+|\s+)[*†‡§\d]*\s*(?:Equal contribution|Corresponding author|Correspondence to|Author ordering|Listing order|These authors contributed equally|Work performed while|Supported in part by)[\s\S]*$)/i;
+      /(?:(?:\n\s*|\.\s+|\s+)[*†‡§\d]*\s*(?:Equal contribution|Corresponding author|Correspondence to|Author ordering|Listing order|These authors contributed equally|Work performed while|Supported in part by|This work was supported by)[\s\S]*$)/i;
     let cleaned = text.replace(artifactPattern, '.');
+
+    // Strip leading "Abstract" or "ABSTRACT" headings
+    cleaned = cleaned.replace(
+      /^(?:abstract|summary|résumé)\s*[:.—\-–]?\s+/i,
+      '',
+    );
+    cleaned = cleaned.replace(/^(?:abstract|summary|résumé)\s*\r?\n+/i, '');
+
+    // Strip repeated parenthesized / bracketed year-chain extraction artifacts
+    // e.g. "(2012)(2013)(2014)(2015)(2016)(2017)."
+    cleaned = cleaned.replace(/(?:\((?:19|20)\d{2}\)\s*){2,}\.?/g, '');
+    cleaned = cleaned.replace(/(?:\[(?:19|20)\d{2}\]\s*){2,}\.?/g, '');
+    cleaned = cleaned.replace(/\((?:(?:19|20)\d{2}[,\s;]*){3,}\)\.?/g, '');
 
     // Strip trailing reference format or keywords if duplicated inside abstract
     cleaned = cleaned.replace(
-      /(?:\n\s*|\s+)(?:ACM Reference [Ff]ormat|Index Terms|Keywords)[—:\-\s]+[\s\S]*$/i,
+      /(?:\n\s*|\s+)(?:ACM Reference [Ff]ormat|Index Terms|Keywords|Key words|Additional Key Words and Phrases)[—:\-\s]+[\s\S]*$/i,
+      '',
+    );
+
+    // Strip trailing IEEE/ACM copyright banners
+    cleaned = cleaned.replace(
+      /(?:\n\s*|\.\s+|\s+)(?:Copyright\s*(?:\(c\)|©)?\s*(?:19|20)\d{2}|©\s*(?:19|20)\d{2}\s*IEEE)[\s\S]*$/i,
+      '',
+    );
+    cleaned = cleaned.replace(
+      /(?:\n\s*|\s+)\b\d{4}-\d{3}[\dX]\s*(?:\(c\)|©)?\s*\d{4}\s*IEEE[\s\S]*$/i,
       '',
     );
 
     // Clean trailing punctuation artifacts
-    cleaned = cleaned.replace(/\s+\./g, '.').replace(/\.{2,}/g, '.').trim();
+    cleaned = cleaned
+      .replace(/\s+\./g, '.')
+      .replace(/\.{2,}/g, '.')
+      .trim();
     return cleaned;
   }
 
@@ -536,12 +611,20 @@ export class GrobidClient {
 
       // 1. Title: Analytic (paper title) takes precedence, otherwise Monogr (book/proceedings title)
       const analyticTitleMatch =
-        block.match(/<analytic[^>]*>[\s\S]*?<title[^>]*level="a"[^>]*>([^<]+)<\/title>/i) ??
+        block.match(
+          /<analytic[^>]*>[\s\S]*?<title[^>]*level="a"[^>]*>([^<]+)<\/title>/i,
+        ) ??
         block.match(/<analytic[^>]*>[\s\S]*?<title[^>]*>([^<]+)<\/title>/i);
-      const monogrTitleMatch = block.match(/<monogr[^>]*>[\s\S]*?<title[^>]*>([^<]+)<\/title>/i);
+      const monogrTitleMatch = block.match(
+        /<monogr[^>]*>[\s\S]*?<title[^>]*>([^<]+)<\/title>/i,
+      );
 
-      let title = analyticTitleMatch?.[1] ? this.cleanText(analyticTitleMatch[1]) : undefined;
-      let journal = monogrTitleMatch?.[1] ? this.cleanText(monogrTitleMatch[1]) : undefined;
+      let title = analyticTitleMatch?.[1]
+        ? this.cleanText(analyticTitleMatch[1])
+        : undefined;
+      let journal = monogrTitleMatch?.[1]
+        ? this.cleanText(monogrTitleMatch[1])
+        : undefined;
 
       if (!title && journal) {
         title = journal;
@@ -557,16 +640,22 @@ export class GrobidClient {
       while ((aMatch = authorRegex.exec(block)) !== null) {
         const aBlock = aMatch[1];
         const firstName = this.cleanText(
-          aBlock.match(/<forename[^>]*type="first"[^>]*>([^<]+)<\/forename>/i)?.[1] ||
-          aBlock.match(/<forename[^>]*>([^<]+)<\/forename>/i)?.[1] || '',
+          aBlock.match(
+            /<forename[^>]*type="first"[^>]*>([^<]+)<\/forename>/i,
+          )?.[1] ||
+            aBlock.match(/<forename[^>]*>([^<]+)<\/forename>/i)?.[1] ||
+            '',
         );
         const lastName = this.cleanText(
           aBlock.match(/<surname[^>]*>([^<]+)<\/surname>/i)?.[1] || '',
         );
         const nameParts = [firstName, lastName].filter(Boolean);
-        const name = nameParts.length > 0
-          ? nameParts.join(' ')
-          : this.cleanText(aBlock.match(/<persName[^>]*>([^<]+)<\/persName>/i)?.[1] || '');
+        const name =
+          nameParts.length > 0
+            ? nameParts.join(' ')
+            : this.cleanText(
+                aBlock.match(/<persName[^>]*>([^<]+)<\/persName>/i)?.[1] || '',
+              );
 
         if (name && name.length >= 2) {
           authors.push(name);
@@ -590,7 +679,9 @@ export class GrobidClient {
 
       // 4. DOI
       let doi: string | undefined;
-      const doiMatch = block.match(/<idno[^>]*type="DOI"[^>]*>([^<]+)<\/idno>/i);
+      const doiMatch = block.match(
+        /<idno[^>]*type="DOI"[^>]*>([^<]+)<\/idno>/i,
+      );
       if (doiMatch?.[1]) {
         doi = doiMatch[1].trim();
       } else {
@@ -600,20 +691,32 @@ export class GrobidClient {
 
       // 5. ArXiv ID
       let arxivId: string | undefined;
-      const arxivMatch = block.match(/<idno[^>]*type="arXiv"[^>]*>([^<]+)<\/idno>/i);
+      const arxivMatch = block.match(
+        /<idno[^>]*type="arXiv"[^>]*>([^<]+)<\/idno>/i,
+      );
       if (arxivMatch?.[1]) {
         arxivId = arxivMatch[1].replace(/^arxiv:/i, '').trim();
       }
 
       // 6. Volume, Issue, Pages
-      const volMatch = block.match(/<biblScope[^>]*unit="volume"[^>]*>([^<]+)<\/biblScope>/i);
-      const issueMatch = block.match(/<biblScope[^>]*unit="issue"[^>]*>([^<]+)<\/biblScope>/i);
-      const pageMatch = block.match(/<biblScope[^>]*unit="page"[^>]*>([^<]+)<\/biblScope>/i);
-      const pageFromMatch = block.match(/<biblScope[^>]*unit="page"[^>]*from="([^"]*)"(?:\s+to="([^"]*)")?/i);
+      const volMatch = block.match(
+        /<biblScope[^>]*unit="volume"[^>]*>([^<]+)<\/biblScope>/i,
+      );
+      const issueMatch = block.match(
+        /<biblScope[^>]*unit="issue"[^>]*>([^<]+)<\/biblScope>/i,
+      );
+      const pageMatch = block.match(
+        /<biblScope[^>]*unit="page"[^>]*>([^<]+)<\/biblScope>/i,
+      );
+      const pageFromMatch = block.match(
+        /<biblScope[^>]*unit="page"[^>]*from="([^"]*)"(?:\s+to="([^"]*)")?/i,
+      );
 
       let pages = pageMatch?.[1] ? this.cleanText(pageMatch[1]) : undefined;
       if (!pages && pageFromMatch?.[1]) {
-        pages = pageFromMatch[2] ? `${pageFromMatch[1]}-${pageFromMatch[2]}` : pageFromMatch[1];
+        pages = pageFromMatch[2]
+          ? `${pageFromMatch[1]}-${pageFromMatch[2]}`
+          : pageFromMatch[1];
       }
 
       references.push({
@@ -657,10 +760,18 @@ export class GrobidClient {
    */
   public detectImradCategory(title: string): GrobidSection['imradCategory'] {
     const t = (title || '').toLowerCase();
-    if (/intro|background|overview|motivation|preliminar/i.test(t)) return 'introduction';
-    if (/method|approach|model|architecture|formulat|framework|algorithm|implement/i.test(t)) return 'methods';
-    if (/result|experiment|evaluat|finding|empirical|benchmark/i.test(t)) return 'results';
-    if (/discuss|analysis|limitat|advantage|disadvantage|implicat/i.test(t)) return 'discussion';
+    if (/intro|background|overview|motivation|preliminar/i.test(t))
+      return 'introduction';
+    if (
+      /method|approach|model|architecture|formulat|framework|algorithm|implement/i.test(
+        t,
+      )
+    )
+      return 'methods';
+    if (/result|experiment|evaluat|finding|empirical|benchmark/i.test(t))
+      return 'results';
+    if (/discuss|analysis|limitat|advantage|disadvantage|implicat/i.test(t))
+      return 'discussion';
     if (/conclu|future work|summary/i.test(t)) return 'conclusion';
     return 'other';
   }
@@ -694,7 +805,9 @@ export class GrobidClient {
       if (!title || title.length < 2) continue;
 
       const num = numMatch ? numMatch[1].trim() : '';
-      const coords = this.parseCoordinates(coordsMatch ? coordsMatch[1] : undefined);
+      const coords = this.parseCoordinates(
+        coordsMatch ? coordsMatch[1] : undefined,
+      );
       const page = coords?.page || 1;
 
       const pRegex = /<p(?:\s+[^>]*)?>([\s\S]*?)<\/p>/gi;
@@ -731,9 +844,12 @@ export class GrobidClient {
       const fullTag = figMatch[0];
       const content = figMatch[1];
 
-      const isTable = fullTag.includes('type="table"') || content.includes('<table');
+      const isTable =
+        fullTag.includes('type="table"') || content.includes('<table');
       const coordsMatch = fullTag.match(/coords="([^"]*)"/i);
-      const coords = this.parseCoordinates(coordsMatch ? coordsMatch[1] : undefined);
+      const coords = this.parseCoordinates(
+        coordsMatch ? coordsMatch[1] : undefined,
+      );
       const page = coords?.page || 1;
 
       const labelMatch = content.match(/<label[^>]*>([\s\S]*?)<\/label>/i);
@@ -744,12 +860,17 @@ export class GrobidClient {
         ? this.cleanText(labelMatch[1].replace(/<[^>]+>/g, ''))
         : '';
       const caption = this.cleanText(
-        (descMatch ? descMatch[1] : (headMatch ? headMatch[1] : '')).replace(/<[^>]+>/g, ''),
+        (descMatch ? descMatch[1] : headMatch ? headMatch[1] : '').replace(
+          /<[^>]+>/g,
+          '',
+        ),
       );
 
       if (isTable) {
         tabIndex++;
-        const tableTagMatch = content.match(/<table(?:\s+[^>]*)?>([\s\S]*?)<\/table>/i);
+        const tableTagMatch = content.match(
+          /<table(?:\s+[^>]*)?>([\s\S]*?)<\/table>/i,
+        );
         const headers: string[] = [];
         const rows: string[][] = [];
 
@@ -819,7 +940,9 @@ export class GrobidClient {
       const fullTag = fMatch[0];
       const content = fMatch[1];
       const coordsMatch = fullTag.match(/coords="([^"]*)"/i);
-      const coords = this.parseCoordinates(coordsMatch ? coordsMatch[1] : undefined);
+      const coords = this.parseCoordinates(
+        coordsMatch ? coordsMatch[1] : undefined,
+      );
       const page = coords?.page || 1;
 
       const labelMatch = content.match(/<label[^>]*>([\s\S]*?)<\/label>/i);
@@ -828,7 +951,9 @@ export class GrobidClient {
         : undefined;
 
       const formulaText = this.cleanText(
-        content.replace(/<label[^>]*>[\s\S]*?<\/label>/gi, '').replace(/<[^>]+>/g, ''),
+        content
+          .replace(/<label[^>]*>[\s\S]*?<\/label>/gi, '')
+          .replace(/<[^>]+>/g, ''),
       );
       if (!formulaText || formulaText.length < 2) continue;
 
@@ -857,4 +982,3 @@ export class GrobidClient {
     return raw.replace(/\s+/g, ' ').trim();
   }
 }
-

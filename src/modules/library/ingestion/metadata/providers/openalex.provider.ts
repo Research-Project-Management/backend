@@ -339,8 +339,10 @@ export class OpenAlexProvider implements MetadataProvider {
     if (Array.isArray(topics)) {
       for (const t of topics.slice(0, 3)) {
         if (typeof t?.score === 'number' && t.score < 0.6) continue;
-        if (typeof t?.display_name === 'string') rawKeywords.push(t.display_name);
-        if (typeof t?.subfield?.display_name === 'string') rawKeywords.push(t.subfield.display_name);
+        if (typeof t?.display_name === 'string')
+          rawKeywords.push(t.display_name);
+        if (typeof t?.subfield?.display_name === 'string')
+          rawKeywords.push(t.subfield.display_name);
       }
     }
 
@@ -348,7 +350,8 @@ export class OpenAlexProvider implements MetadataProvider {
     if (Array.isArray(item.keywords)) {
       for (const k of item.keywords) {
         const text = typeof k === 'string' ? k : k?.keyword || k?.display_name;
-        const score = typeof k === 'object' && typeof k?.score === 'number' ? k.score : 1.0;
+        const score =
+          typeof k === 'object' && typeof k?.score === 'number' ? k.score : 1.0;
         if (text && score >= 0.5) {
           rawKeywords.push(text);
         }
@@ -357,7 +360,6 @@ export class OpenAlexProvider implements MetadataProvider {
 
     // OpenAlex topics and author keywords are used; concepts are intentionally excluded to prevent Wikipedia pollution
     const keywords = normalizeTags(rawKeywords);
-
 
     const creators = authors.map((name, idx) => ({
       orderIndex: idx,
@@ -371,7 +373,8 @@ export class OpenAlexProvider implements MetadataProvider {
         : undefined;
 
     const license =
-      typeof (primLoc as any)?.license === 'string' && (primLoc as any).license.trim()
+      typeof (primLoc as any)?.license === 'string' &&
+      (primLoc as any).license.trim()
         ? (primLoc as any).license.trim()
         : typeof (item.primary_location as any)?.license === 'string'
           ? (item.primary_location as any).license.trim()

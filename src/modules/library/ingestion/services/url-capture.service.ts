@@ -220,15 +220,25 @@ export class UrlCaptureService {
       }
 
       if (this.catalogService?.createItem) {
-        createdItem = await this.catalogService.createItem(workspaceId, itemData, {
-          source: 'url',
-        });
+        createdItem = await this.catalogService.createItem(
+          workspaceId,
+          itemData,
+          {
+            source: 'url',
+          },
+        );
       } else {
-        throw new Error('CatalogService is required to confirm captured URL item');
+        throw new Error(
+          'CatalogService is required to confirm captured URL item',
+        );
       }
     }
 
-    if (createdItem?.id && itemData.url && this.webSnapshotService?.captureAndAttach) {
+    if (
+      createdItem?.id &&
+      itemData.url &&
+      this.webSnapshotService?.captureAndAttach
+    ) {
       void this.webSnapshotService
         .captureAndAttach(itemData.url, createdItem.id, workspaceId, {
           title: createdItem.title,

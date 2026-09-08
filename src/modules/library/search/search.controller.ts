@@ -25,12 +25,18 @@ export class SearchController {
   @Get('attachments/:attachmentId/anchors')
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async searchAnchors(
+    @Param('workspaceId') workspaceId: string,
     @Param('attachmentId') attachmentId: string,
     @Query('term') term: string,
     @Query('pageIndex') pageIndex?: string,
   ) {
     const parsedPage =
       pageIndex !== undefined ? parseInt(pageIndex, 10) : undefined;
-    return this.searchService.searchPageAnchors(attachmentId, term, parsedPage);
+    return this.searchService.searchPageAnchors(
+      workspaceId,
+      attachmentId,
+      term,
+      parsedPage,
+    );
   }
 }

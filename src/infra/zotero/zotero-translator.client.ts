@@ -59,7 +59,10 @@ export class ZoteroTranslatorClient {
   private readonly logger = new Logger(ZoteroTranslatorClient.name);
 
   private get baseUrl(): string {
-    return process.env.ZOTERO_TRANSLATOR_URL?.replace(/\/$/, '') ?? 'http://localhost:1969';
+    return (
+      process.env.ZOTERO_TRANSLATOR_URL?.replace(/\/$/, '') ??
+      'http://localhost:1969'
+    );
   }
 
   private get enabled(): boolean {
@@ -98,7 +101,6 @@ export class ZoteroTranslatorClient {
         signal: controller.signal,
       });
 
-
       if (response.status === 300) {
         // Multiple choices — try to pick the first option
         const body = await response.json().catch(() => null);
@@ -116,7 +118,9 @@ export class ZoteroTranslatorClient {
           // No translator found for this URL — not an error
           this.logger.debug(`Zotero: no translator for URL ${url} (501)`);
         } else {
-          this.logger.warn(`Zotero Translation Server returned HTTP ${response.status} for ${url}`);
+          this.logger.warn(
+            `Zotero Translation Server returned HTTP ${response.status} for ${url}`,
+          );
         }
         return [];
       }
@@ -128,7 +132,9 @@ export class ZoteroTranslatorClient {
       if (err?.name === 'AbortError') {
         this.logger.warn(`Zotero Translation Server timed out for URL: ${url}`);
       } else {
-        this.logger.warn(`Zotero Translation Server unavailable: ${err?.message}`);
+        this.logger.warn(
+          `Zotero Translation Server unavailable: ${err?.message}`,
+        );
       }
       return [];
     } finally {
@@ -140,7 +146,10 @@ export class ZoteroTranslatorClient {
    * Handles 300 Multiple Choices response by selecting a specific item.
    * Used when a page has multiple extractable items (e.g. search results page).
    */
-  private async selectItem(url: string, selectedKey: string): Promise<ZoteroItem[]> {
+  private async selectItem(
+    url: string,
+    selectedKey: string,
+  ): Promise<ZoteroItem[]> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
@@ -184,5 +193,4 @@ export class ZoteroTranslatorClient {
       return false;
     }
   }
-
 }

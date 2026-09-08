@@ -63,4 +63,3 @@ export class OutboxDispatcher
 
 export const EventDispatcher = OutboxDispatcher;
 export type EventDispatcher = OutboxDispatcher;
-

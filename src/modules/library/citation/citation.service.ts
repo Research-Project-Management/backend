@@ -268,7 +268,9 @@ export class CitationService {
     }
   }
 
-  private mapItemMetadataToReferenceData(metadata: ItemMetadata): ReferenceData {
+  private mapItemMetadataToReferenceData(
+    metadata: ItemMetadata,
+  ): ReferenceData {
     let authors: string[] = [];
     if (Array.isArray(metadata.authors) && metadata.authors.length > 0) {
       authors = metadata.authors;
@@ -354,14 +356,7 @@ export class CitationService {
     metadata: ReferenceData | null;
     provider: string;
     queryType:
-      | 'doi'
-      | 'arxiv'
-      | 'title'
-      | 'pmid'
-      | 'isbn'
-      | 'url'
-      | 'unknown'
-      | string;
+      'doi' | 'arxiv' | 'title' | 'pmid' | 'isbn' | 'url' | 'unknown' | string;
   }> {
     const input = (rawDoi || rawQuery || '').trim();
     if (!input) {
@@ -444,7 +439,8 @@ export class CitationService {
       // 2b. Direct DOI Content Negotiation (Zotero-style: DataCite/Zenodo/Figshare, mEDRA, JaLC)
       if (this.doiService) {
         try {
-          const cslWork = await this.doiService.resolveMetadata(cleanDoiCandidate);
+          const cslWork =
+            await this.doiService.resolveMetadata(cleanDoiCandidate);
           if (cslWork && cslWork.title && cslWork.title !== 'Untitled') {
             return {
               found: true,
@@ -533,7 +529,7 @@ export class CitationService {
     styleId: CitationStyleId = 'apa-7th',
     index: number = 1,
   ) {
-    let item: any = this.itemsService
+    const item: any = this.itemsService
       ? await this.itemsService.getItem(workspaceId, itemId)
       : await this.prisma?.catalogItem.findFirst({
           where: {

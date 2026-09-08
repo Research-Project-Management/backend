@@ -122,7 +122,7 @@ export class EngineService {
     if (result.ok && result.value.ok) {
       const jsonResult = await tryCatch(result.value.json());
       if (jsonResult.ok) {
-        const val = jsonResult.value as any;
+        const val = jsonResult.value;
         if (val?.output?.content !== undefined) {
           return {
             role: 'assistant',

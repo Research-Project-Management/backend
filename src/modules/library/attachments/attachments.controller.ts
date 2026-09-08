@@ -128,7 +128,9 @@ export class AttachmentsController {
         select: { url: true, title: true },
       });
       if (!item?.url) {
-        throw new BadRequestException('No URL found on this item to capture a snapshot.');
+        throw new BadRequestException(
+          'No URL found on this item to capture a snapshot.',
+        );
       }
       targetUrl = item.url;
     }

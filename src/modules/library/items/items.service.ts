@@ -12,7 +12,10 @@ import {
   CreateCatalogItemData,
   UpdateCatalogItemData,
 } from './types/items.types';
-import { TransactionService, TransactionHelpers } from '../outbox/transaction.service';
+import {
+  TransactionService,
+  TransactionHelpers,
+} from '../outbox/transaction.service';
 import {
   LIBRARY_EVENT_TYPES,
   SYNC_EVENT_TYPES,
@@ -44,7 +47,6 @@ import {
 } from './utils/items.utils';
 import { randomUUID } from 'crypto';
 import { IItemReadPort, IItemExistencePort } from './ports/items.ports';
-
 
 import type {
   UpsertSyncCatalogItemCommand,
@@ -98,7 +100,6 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     private readonly typesService: TypesService,
     private readonly ragIndexer: RagIndexerProvider,
   ) {}
-
 
   private resolveWorkspaceId(workspaceId: string): Promise<string> {
     return resolveTenantWorkspaceId(this.prisma, workspaceId);
@@ -171,7 +172,9 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
   async createItem(
     workspaceId: string,
     data: CreateCatalogItemData,
-    context?: Partial<CatalogTransactionContext> & { source?: LibraryItemSource },
+    context?: Partial<CatalogTransactionContext> & {
+      source?: LibraryItemSource;
+    },
   ): Promise<any> {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
 
@@ -179,7 +182,11 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       tx: Prisma.TransactionClient,
       helpers: TransactionHelpers,
     ) => {
-      const item = await this.commandRepo.create(canonicalWorkspaceId, data, tx);
+      const item = await this.commandRepo.create(
+        canonicalWorkspaceId,
+        data,
+        tx,
+      );
 
       await helpers.appendChange(canonicalWorkspaceId, {
         entityType: 'CatalogItem',
@@ -213,7 +220,6 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
 
     return this.libraryTx.executeInTransaction(execute);
   }
-
 
   async updateItem(
     workspaceId: string,
@@ -288,15 +294,22 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     const item = await this.queryRepo.findById(canonicalWorkspaceId, id);
     if (!item) {
-      throw new NotFoundException(`Item ${id} not found in workspace ${canonicalWorkspaceId}`);
+      throw new NotFoundException(
+        `Item ${id} not found in workspace ${canonicalWorkspaceId}`,
+      );
     }
 
     await this.libraryTx.executeInTransaction(async (_tx, helpers) => {
-      await helpers.publishOutbox(canonicalWorkspaceId, id, 'library.item.reindexed', {
-        itemId: id,
-        workspaceId: canonicalWorkspaceId,
-        userId,
-      });
+      await helpers.publishOutbox(
+        canonicalWorkspaceId,
+        id,
+        'library.item.reindexed',
+        {
+          itemId: id,
+          workspaceId: canonicalWorkspaceId,
+          userId,
+        },
+      );
     });
 
     this.executePaperRagIndexing(item).catch((err) => {
@@ -309,8 +322,6 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       itemId: id,
     };
   }
-
-
 
   async deleteItem(
     workspaceId: string,
@@ -333,20 +344,27 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
           entityId: id,
         });
 
-        await context.helpers.publishOutbox(canonicalWorkspaceId, id, 'library.item.deleted', {
+        await context.helpers.publishOutbox(
+          canonicalWorkspaceId,
           id,
-          deletedAt: new Date(),
-        });
+          'library.item.deleted',
+          {
+            id,
+            deletedAt: new Date(),
+          },
+        );
       }
 
       return deleted;
     }
 
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      return this.deleteItem(canonicalWorkspaceId, id, expectedVersion, { tx, helpers });
+      return this.deleteItem(canonicalWorkspaceId, id, expectedVersion, {
+        tx,
+        helpers,
+      });
     });
   }
-
 
   async restoreItem(workspaceId: string, id: string, expectedVersion?: number) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
@@ -366,10 +384,15 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         data: restored,
       });
 
-      await helpers.publishOutbox(canonicalWorkspaceId, id, 'library.item.restored', {
+      await helpers.publishOutbox(
+        canonicalWorkspaceId,
         id,
-        restoredAt: new Date(),
-      });
+        'library.item.restored',
+        {
+          id,
+          restoredAt: new Date(),
+        },
+      );
 
       // Normalize through mapper so response shape is consistent with
       // getItem / createItem / updateItem (creators, fileUrl, tags, etc.)
@@ -387,10 +410,15 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         entityId: id,
       });
 
-      await helpers.publishOutbox(canonicalWorkspaceId, id, 'library.item.purged', {
+      await helpers.publishOutbox(
+        canonicalWorkspaceId,
         id,
-        purgedAt: new Date(),
-      });
+        'library.item.purged',
+        {
+          id,
+          purgedAt: new Date(),
+        },
+      );
 
       return purged;
     });
@@ -416,12 +444,18 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     data: { targetItemId: string; relationType?: string; note?: string },
   ) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const sourceItem = await this.queryRepo.findById(canonicalWorkspaceId, sourceItemId);
+    const sourceItem = await this.queryRepo.findById(
+      canonicalWorkspaceId,
+      sourceItemId,
+    );
     if (!sourceItem) {
       throw new NotFoundException(`Source item ${sourceItemId} not found`);
     }
 
-    const targetItem = await this.queryRepo.findById(canonicalWorkspaceId, data.targetItemId);
+    const targetItem = await this.queryRepo.findById(
+      canonicalWorkspaceId,
+      data.targetItemId,
+    );
     if (!targetItem) {
       throw new NotFoundException(`Target item ${data.targetItemId} not found`);
     }
@@ -452,7 +486,10 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     targetItemId: string,
   ) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const sourceItem = await this.queryRepo.findById(canonicalWorkspaceId, sourceItemId);
+    const sourceItem = await this.queryRepo.findById(
+      canonicalWorkspaceId,
+      sourceItemId,
+    );
     if (!sourceItem) {
       throw new NotFoundException(`Source item ${sourceItemId} not found`);
     }
@@ -603,7 +640,9 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
             command.extra || command.extraFields || command.seriesNumber
               ? JSON.stringify({
                   ...(command.extra ? { _rawExtra: command.extra } : {}),
-                  ...(command.seriesNumber ? { seriesNumber: command.seriesNumber } : {}),
+                  ...(command.seriesNumber
+                    ? { seriesNumber: command.seriesNumber }
+                    : {}),
                   ...(command.extraFields || {}),
                 })
               : undefined,
@@ -682,7 +721,6 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
           rawTargetCollectionIds,
         );
       }
-
 
       // Sync identifiers
       const cleanSyncDoi =
@@ -785,7 +823,9 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
             command.extra || command.extraFields || command.seriesNumber
               ? JSON.stringify({
                   ...(command.extra ? { _rawExtra: command.extra } : {}),
-                  ...(command.seriesNumber ? { seriesNumber: command.seriesNumber } : {}),
+                  ...(command.seriesNumber
+                    ? { seriesNumber: command.seriesNumber }
+                    : {}),
                   ...(command.extraFields || {}),
                 })
               : undefined,
@@ -793,7 +833,12 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         },
       });
 
-      await this.tagsService.syncTagsToItem(tx, command.workspaceId, created.id, newTags);
+      await this.tagsService.syncTagsToItem(
+        tx,
+        command.workspaceId,
+        created.id,
+        newTags,
+      );
 
       // Sync contributors (authors & creators)
       if (command.creators && command.creators.length > 0) {
@@ -840,7 +885,6 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
           rawNewCollectionIds,
         );
       }
-
 
       // Sync identifiers
       if (cleanCreateDoi) {
@@ -1194,7 +1238,11 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     tx?: Prisma.TransactionClient,
   ) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const existing = await this.queryRepo.findById(canonicalWorkspaceId, itemId, tx);
+    const existing = await this.queryRepo.findById(
+      canonicalWorkspaceId,
+      itemId,
+      tx,
+    );
     if (!existing) {
       throw new NotFoundException(
         `Item ${itemId} not found in workspace ${canonicalWorkspaceId}`,
@@ -1253,7 +1301,6 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     };
   }
 }
-
 
 export const CatalogService = ItemsService;
 export type CatalogService = ItemsService;

@@ -52,7 +52,11 @@ export class EngineService {
             ...(dto.title !== undefined && { title: dto.title }),
             updatedAt: new Date(),
           },
-          include: { author: { select: { id: true, name: true, email: true, avatar: true } } },
+          include: {
+            author: {
+              select: { id: true, name: true, email: true, avatar: true },
+            },
+          },
         });
 
         let version = null;

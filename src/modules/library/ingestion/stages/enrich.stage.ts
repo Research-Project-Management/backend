@@ -48,7 +48,8 @@ export class EnrichStage {
         title!.length >= 12 &&
         !/\.pdf$/i.test(title!) &&
         !/^(uploaded document|untitled|document)$/i.test(title!);
-      const query = doi || arxivId || pmid || (isCredibleTitle ? title : undefined);
+      const query =
+        doi || arxivId || pmid || (isCredibleTitle ? title : undefined);
 
       if (!query) continue;
 
@@ -74,8 +75,12 @@ export class EnrichStage {
                 value: rawMetadata[fieldName as keyof typeof rawMetadata],
                 normalizedValue: propertyValue,
                 confidence: provenance ? provenance.confidence : 0.9,
-                sourceProvider: provenance ? provenance.provider : 'MetadataResolution',
-                retrievedAt: provenance ? provenance.fetchedAt : resolved.resolvedAt,
+                sourceProvider: provenance
+                  ? provenance.provider
+                  : 'MetadataResolution',
+                retrievedAt: provenance
+                  ? provenance.fetchedAt
+                  : resolved.resolvedAt,
               };
             }
           }

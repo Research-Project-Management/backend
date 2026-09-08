@@ -7,7 +7,6 @@ import { PrismaService } from '../../../core/database/prisma.service';
 import { Prisma, AnnotationType } from '@prisma/client';
 import { VersionMismatchException } from '../common/errors/version-mismatch.exception';
 
-
 export interface CreateAnnotationData {
   attachmentId: string;
   type?: AnnotationType;
@@ -50,20 +49,14 @@ export class AnnotationsRepository {
     });
   }
 
-  async findById(
-    id: string,
-    tx?: Prisma.TransactionClient,
-  ) {
+  async findById(id: string, tx?: Prisma.TransactionClient) {
     const client = this.getClient(tx);
     return client.annotation.findFirst({
       where: { id, deletedAt: null },
     });
   }
 
-  async create(
-    data: CreateAnnotationData,
-    tx?: Prisma.TransactionClient,
-  ) {
+  async create(data: CreateAnnotationData, tx?: Prisma.TransactionClient) {
     const client = this.getClient(tx);
     return client.annotation.create({
       data: {
@@ -146,4 +139,3 @@ export class AnnotationsRepository {
     return result.count > 0;
   }
 }
-

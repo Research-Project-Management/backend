@@ -1,4 +1,8 @@
-import { CreatorType, CreatorInput, IdentifierScheme } from '../types/items.types';
+import {
+  CreatorType,
+  CreatorInput,
+  IdentifierScheme,
+} from '../types/items.types';
 
 // ── Creator & Author Parsing ────────────────────────────────────────────────
 
@@ -88,18 +92,32 @@ export function splitAuthorString(input: string): string[] {
 
   for (const line of lines) {
     if (line.includes(';')) {
-      result.push(...line.split(';').map((s) => s.trim()).filter(Boolean));
+      result.push(
+        ...line
+          .split(';')
+          .map((s) => s.trim())
+          .filter(Boolean),
+      );
     } else if (/\s+and\s+/i.test(line)) {
       result.push(
-        ...line.split(/\s+and\s+/i).map((s) => s.trim()).filter(Boolean),
+        ...line
+          .split(/\s+and\s+/i)
+          .map((s) => s.trim())
+          .filter(Boolean),
       );
     } else if (/\s+&\s+/.test(line)) {
       result.push(
-        ...line.split(/\s+&\s+/).map((s) => s.trim()).filter(Boolean),
+        ...line
+          .split(/\s+&\s+/)
+          .map((s) => s.trim())
+          .filter(Boolean),
       );
     } else if ((line.match(/,/g) || []).length >= 2) {
       result.push(
-        ...line.split(',').map((s) => s.trim()).filter(Boolean),
+        ...line
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
       );
     } else {
       result.push(line);
@@ -369,6 +387,91 @@ export function cleanBannedString(val?: string | null): string | undefined {
   return str;
 }
 
+/**
+ * Sanitizes and normalizes an academic paper abstract.
+ * 1. Decodes HTML entities and strips XML/HTML tags.
+ * 2. Strips leading "Abstract", "ABSTRACT", "Summary" prefixes.
+ * 3. Removes repeated year extraction artifacts (e.g. "(2012)(2013)(2014)(2015)(2016)(2017).").
+ * 4. Removes trailing author contribution, copyright, and index terms noise.
+ * 5. Unwraps single hard line-breaks within paragraphs while preserving double-newline paragraph separation.
+ * 6. Fixes hyphenated words broken across line wraps ("stochas- tic" -> "stochastic").
+ */
+export function cleanAbstractText(text?: string | null): string | undefined {
+  if (!text || typeof text !== 'string') return undefined;
+
+  let cleaned = stripXmlAndHtmlTags(text);
+  cleaned = decodeHtmlEntities(cleaned);
+  cleaned = stripLatexBraces(cleaned);
+
+  // 1. Remove leading "Abstract" or "ABSTRACT" headings
+  cleaned = cleaned.replace(
+    /^(?:abstract|summary|résumé)\s*[:.—\-–\u2014\u2013]?\s*/i,
+    '',
+  );
+  cleaned = cleaned.replace(/^(?:abstract|summary|résumé)\s*\r?\n+/i, '');
+
+  // 2. Remove repeated parenthesized / bracketed year-chain extraction artifacts
+  // e.g. "(2012)(2013)(2014)(2015)(2016)(2017)." or "[2012][2013]..."
+  cleaned = cleaned.replace(/(?:\((?:19|20)\d{2}\)\s*){2,}\.?/g, '');
+  cleaned = cleaned.replace(/(?:\[(?:19|20)\d{2}\]\s*){2,}\.?/g, '');
+  cleaned = cleaned.replace(/\((?:(?:19|20)\d{2}[,\s;]*){3,}\)\.?/g, '');
+
+  // 3. Remove trailing author contribution / footnote noise
+  cleaned = cleaned.replace(
+    /(?:(?:\n\s*|\.\s+|\s+)[*†‡§\d]*\s*(?:Equal contribution|Corresponding author|Correspondence to|Author ordering|Listing order|These authors contributed equally|Work performed while|Supported in part by|This work was supported by)[\s\S]*$)/i,
+    '.',
+  );
+
+  // 4. Remove trailing publication metadata or index terms
+  cleaned = cleaned.replace(
+    /(?:\n\s*|\s+)(?:ACM Reference [Ff]ormat|Index Terms|Keywords|Key words|Additional Key Words and Phrases)[—:\-\s]+[\s\S]*$/i,
+    '',
+  );
+
+  // 5. Remove trailing IEEE/ACM copyright banners
+  cleaned = cleaned.replace(
+    /(?:\n\s*|\.\s+|\s+)(?:Copyright\s*(?:\(c\)|©)?\s*(?:19|20)\d{2}|©\s*(?:19|20)\d{2}\s*IEEE)[\s\S]*$/i,
+    '',
+  );
+  cleaned = cleaned.replace(
+    /(?:\n\s*|\s+)\b\d{4}-\d{3}[\dX]\s*(?:\(c\)|©)?\s*\d{4}\s*IEEE[\s\S]*$/i,
+    '',
+  );
+
+  // 6. Normalize paragraphs & unwrap hard line-breaks within each paragraph
+  const rawParagraphs = cleaned.split(/\r?\n\s*\r?\n/);
+  const normalizedParagraphs = rawParagraphs
+    .map((paragraph) => {
+      // Fix hyphenation across breaks (e.g., "stochas- tic" -> "stochastic")
+      let p = paragraph.replace(
+        /([a-zA-Z]{2,})-\s*\r?\n\s*([a-zA-Z]{2,})/g,
+        '$1$2',
+      );
+      // Collapse single newlines into a single space
+      p = p.replace(/\r?\n/g, ' ');
+      // Collapse multiple whitespace
+      p = p.replace(/\s+/g, ' ').trim();
+      // Clean spacing before punctuation
+      p = p.replace(/\s+([.,;:!?])/g, '$1');
+      // Clean duplicate periods (excluding ellipsis)
+      p = p.replace(/\.\s*\.(?!\.)/g, '.');
+      return p;
+    })
+    .filter((p) => p.length > 0);
+
+  cleaned = normalizedParagraphs.join('\n\n').trim();
+
+  if (
+    !cleaned ||
+    cleaned.length < 15 ||
+    BANNED_STRINGS.has(cleaned.toLowerCase())
+  ) {
+    return undefined;
+  }
+
+  return cleaned;
+}
+
 // ── Identifier Normalization ────────────────────────────────────────────────
 
 export function normalizeDoi(doi?: string | null): string | undefined {
@@ -391,7 +494,8 @@ export function normalizeDoi(doi?: string | null): string | undefined {
   const biorxivMatch = clean.match(
     /^https?:\/\/(?:www\.)?(?:biorxiv|medrxiv)\.org\/content\/(10\.\d{4,9}\/[^?#\s]+?)(?:v\d+)?(?:\.full|\.abstract|\.pdf)?(?:[?#].*)?$/i,
   );
-  if (biorxivMatch && biorxivMatch[1]) return biorxivMatch[1].replace(/v\d+$/, '');
+  if (biorxivMatch && biorxivMatch[1])
+    return biorxivMatch[1].replace(/v\d+$/, '');
 
   // PLOS article URL
   const plosMatch = clean.match(

@@ -10,7 +10,10 @@ import {
 import { LIBRARY_EVENT_TYPES } from '../outbox/outbox.events';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { resolveTenantWorkspaceId } from '../../../core/utils/tenant.util';
-import { ITEM_EXISTENCE_PORT, IItemExistencePort } from '../items/ports/items.ports';
+import {
+  ITEM_EXISTENCE_PORT,
+  IItemExistencePort,
+} from '../items/ports/items.ports';
 import { Inject } from '@nestjs/common';
 
 @Injectable()
@@ -212,13 +215,14 @@ export class ReadingService {
         select: { id: true },
       });
       if (!item) {
-        throw new NotFoundException(`Item not found in workspace ${workspaceId}`);
+        throw new NotFoundException(
+          `Item not found in workspace ${workspaceId}`,
+        );
       }
       return;
     }
     throw new NotFoundException(`Item not found in workspace ${workspaceId}`);
   }
-
 
   async getBatchStates(
     rawWorkspaceId: string,

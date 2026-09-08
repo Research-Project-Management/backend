@@ -5,7 +5,6 @@ import {
   cleanBibliographicText,
 } from '../../items/utils/items.utils';
 
-
 export interface DoiCitationResult {
   styleId: string;
   bibliography: string;
@@ -218,7 +217,7 @@ export class DoiContentNegotiationService {
       const contentType = response.headers.get('content-type') || '';
       if (contentType.includes('text/html')) return null;
 
-      const json = (await response.json()) as any;
+      const json = await response.json();
       if (!json || typeof json !== 'object') return null;
 
       const result = this.mapCslJsonToReferenceData(json, doi);

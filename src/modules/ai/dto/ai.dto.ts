@@ -1,9 +1,4 @@
-import {
-  IsArray,
-  IsNumber,
-  IsOptional,
-  IsString,
-} from 'class-validator';
+import { IsArray, IsNumber, IsOptional, IsString } from 'class-validator';
 
 export class AiMessageDto {
   @IsString()

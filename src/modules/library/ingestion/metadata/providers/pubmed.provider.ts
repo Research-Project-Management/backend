@@ -193,8 +193,7 @@ export class PubMedProvider implements MetadataProvider {
   ): ProviderResult {
     const rawTitle =
       typeof data.title === 'string' ? data.title : 'Untitled PubMed Article';
-    const title =
-      cleanBibliographicText(rawTitle) || 'Untitled PubMed Article';
+    const title = cleanBibliographicText(rawTitle) || 'Untitled PubMed Article';
 
     const authors: string[] = [];
     const creators: Array<{

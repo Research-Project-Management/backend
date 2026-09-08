@@ -48,10 +48,7 @@ export class PageController {
     return this.pageService.getProjectPages(projectId);
   }
 
-  @Get([
-    'projects/:projectId/pages/tree',
-    'project/:projectId/pages/tree',
-  ])
+  @Get(['projects/:projectId/pages/tree', 'project/:projectId/pages/tree'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   @ApiOperation({

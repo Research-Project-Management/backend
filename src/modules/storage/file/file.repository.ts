@@ -341,7 +341,10 @@ export class FileRepository implements IFileRepository {
     if (!isUuid(projectId)) {
       const project = await this.prisma.project
         .findFirst({
-          where: { identifier: { equals: projectId, mode: 'insensitive' }, deletedAt: null },
+          where: {
+            identifier: { equals: projectId, mode: 'insensitive' },
+            deletedAt: null,
+          },
           select: { workspaceId: true },
         })
         .catch(() => null);
@@ -373,7 +376,10 @@ export class FileRepository implements IFileRepository {
     if (!isUuid(projectId)) {
       const proj = await this.prisma.project
         .findFirst({
-          where: { identifier: { equals: projectId, mode: 'insensitive' }, deletedAt: null },
+          where: {
+            identifier: { equals: projectId, mode: 'insensitive' },
+            deletedAt: null,
+          },
           select: { id: true },
         })
         .catch(() => null);

@@ -7,10 +7,7 @@
 import { Label, LabelType, Prisma } from '@prisma/client';
 
 export interface ILabelRepository {
-  findWorkspaceLabels(
-    workspaceId: string,
-    type?: LabelType,
-  ): Promise<Label[]>;
+  findWorkspaceLabels(workspaceId: string, type?: LabelType): Promise<Label[]>;
   findLabelById(labelId: string): Promise<Label | null>;
   createLabel(
     data: Prisma.LabelCreateInput | Prisma.LabelUncheckedCreateInput,

@@ -54,7 +54,9 @@ export class AiController {
     'project/chat',
   ])
   @BypassEnvelope()
-  @ApiOperation({ summary: 'Stream unified AI Copilot execution responses via SSE' })
+  @ApiOperation({
+    summary: 'Stream unified AI Copilot execution responses via SSE',
+  })
   async stream(
     @CurrentUser('id') userId: string,
     @Body() dto: AiQueryDto,
@@ -78,10 +80,7 @@ export class AiController {
   ])
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Synchronous AI Copilot query' })
-  async execute(
-    @CurrentUser('id') userId: string,
-    @Body() dto: AiQueryDto,
-  ) {
+  async execute(@CurrentUser('id') userId: string, @Body() dto: AiQueryDto) {
     return this.aiService.execute(userId, dto);
   }
 
@@ -123,7 +122,9 @@ export class AiController {
    * Document upload to Vector Store (Disabled due to lack of multi-tenant isolation in upstream FLux-AI)
    */
   @Post('documents/upload')
-  @ApiOperation({ summary: 'Upload document to AI engine vector store (Disabled)' })
+  @ApiOperation({
+    summary: 'Upload document to AI engine vector store (Disabled)',
+  })
   async uploadDocument() {
     throw new NotImplementedException(
       'Document vector upload is currently disabled due to lack of multi-tenant isolation in upstream AI engine.',
@@ -140,7 +141,9 @@ export class AiController {
   }
 
   @Get('documents')
-  @ApiOperation({ summary: 'List all RAG documents in vector store (Disabled)' })
+  @ApiOperation({
+    summary: 'List all RAG documents in vector store (Disabled)',
+  })
   async getDocuments() {
     throw new NotImplementedException(
       'Document vector listing is currently disabled due to lack of multi-tenant isolation in upstream AI engine.',
@@ -148,7 +151,9 @@ export class AiController {
   }
 
   @Get(['documents/:docId', 'documents/:docId/content'])
-  @ApiOperation({ summary: 'Get document details or text content from AI engine (Disabled)' })
+  @ApiOperation({
+    summary: 'Get document details or text content from AI engine (Disabled)',
+  })
   async getDocument(@Param('docId') _docId: string) {
     throw new NotImplementedException(
       'Document vector retrieval is currently disabled due to lack of multi-tenant isolation in upstream AI engine.',

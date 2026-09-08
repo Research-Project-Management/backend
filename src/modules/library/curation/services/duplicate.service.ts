@@ -22,7 +22,6 @@ import {
 import { LIBRARY_EVENT_TYPES } from '../../outbox/outbox.events';
 import { ItemsMapper } from '../../items/mappers/items.mapper';
 
-
 @Injectable()
 export class DuplicateService {
   private readonly logger = new Logger(DuplicateService.name);
@@ -58,9 +57,13 @@ export class DuplicateService {
 
     const getItemAuthors = (item: any): string[] => {
       const fromContributors = item.contributors
-        ?.map((c: any) => c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim())
+        ?.map(
+          (c: any) =>
+            c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+        )
         .filter(Boolean);
-      if (fromContributors && fromContributors.length > 0) return fromContributors;
+      if (fromContributors && fromContributors.length > 0)
+        return fromContributors;
       return [];
     };
 
@@ -97,7 +100,9 @@ export class DuplicateService {
     });
 
     // ── Tier 2: Fuzzy Title + Year (+/-1) + First Author ─────────────────────────
-    const remainingItems = items.filter((item: any) => !groupedItemIds.has(item.id));
+    const remainingItems = items.filter(
+      (item: any) => !groupedItemIds.has(item.id),
+    );
 
     const normalizeTitle = (t: string) =>
       (t || '')
@@ -224,7 +229,11 @@ export class DuplicateService {
       const now = new Date();
 
       // ── 1. Reassign Attachments to Primary (Delegated to AttachmentsService) ──
-      await this.attachmentsService.reassignToItem(uniqueDupIds, primary.id, tx);
+      await this.attachmentsService.reassignToItem(
+        uniqueDupIds,
+        primary.id,
+        tx,
+      );
 
       // ── 2. Reassign Canonical Notes to Primary (Delegated to NotesService) ────
       await this.notesService.reassignToItem(uniqueDupIds, primary.id, tx);
@@ -233,7 +242,11 @@ export class DuplicateService {
       await this.tagsService.mergeTagsToItem(tx, uniqueDupIds, primary.id);
 
       // ── 4. Consolidate Collection Memberships (Delegated to CollectionsService)
-      await this.collectionsService.transferItemMemberships(uniqueDupIds, primary.id, tx);
+      await this.collectionsService.transferItemMemberships(
+        uniqueDupIds,
+        primary.id,
+        tx,
+      );
 
       // ── 5. Rewire Item Relations ──────────────────────────────────────────────
       // Source rewiring
@@ -272,7 +285,11 @@ export class DuplicateService {
       }
 
       // ── 6. Merge User States (Delegated to ReadingService) ────────────────────
-      await this.readingService.transferUserItemStates(tx, uniqueDupIds, primary.id);
+      await this.readingService.transferUserItemStates(
+        tx,
+        uniqueDupIds,
+        primary.id,
+      );
 
       // ── 7. Provenance & Alias Citation Keys ──────────────────────────────────
       let extraObj: Record<string, any> = {};
@@ -358,11 +375,16 @@ export class DuplicateService {
           data: softDeleted,
         });
 
-        await helpers.publishOutbox(canonicalWorkspaceId, dup.id, 'library.item.merged_into', {
-          duplicateId: dup.id,
-          primaryId: primary.id,
-          workspaceId: canonicalWorkspaceId,
-        });
+        await helpers.publishOutbox(
+          canonicalWorkspaceId,
+          dup.id,
+          'library.item.merged_into',
+          {
+            duplicateId: dup.id,
+            primaryId: primary.id,
+            workspaceId: canonicalWorkspaceId,
+          },
+        );
       }
 
       // Reload primary item with full relations so response is complete & normalized
@@ -379,9 +401,7 @@ export class DuplicateService {
       });
 
       return {
-        primaryItem: ItemsMapper.toDomain(
-          reloadedPrimary ?? updatedPrimary,
-        ),
+        primaryItem: ItemsMapper.toDomain(reloadedPrimary ?? updatedPrimary),
         mergedCount: duplicates.length,
         softDeletedItemIds: uniqueDupIds,
       };

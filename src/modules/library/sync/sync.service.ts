@@ -232,10 +232,7 @@ export class SyncService implements SyncPort {
   async getItemSnapshot(
     query: GetSyncItemSnapshotQuery,
   ): Promise<SyncItemSnapshot | null> {
-    return this.catalogService.getItemSnapshot(
-      query.workspaceId,
-      query.itemId,
-    );
+    return this.catalogService.getItemSnapshot(query.workspaceId, query.itemId);
   }
 
   async getItemSnapshots(
@@ -319,7 +316,6 @@ export class SyncService implements SyncPort {
     // 1. Deterministic, non-mutating request hash
     const requestHash = computeRequestHash(command);
 
-
     // 2. Pre-flight idempotency check (fast-path, outside tx)
     if (command.idempotencyKey) {
       const existing = await this.prisma.idempotencyRecord.findUnique({
@@ -350,7 +346,6 @@ export class SyncService implements SyncPort {
 
     // 3. Topological sort of collection operations
     const sortedOperations = topoSortOperations(command.operations);
-
 
     // 4. Execute all canonical writes in one atomic Library transaction
     return this.txService.executeInTransaction(async (tx, helpers) => {
@@ -539,7 +534,6 @@ export class SyncService implements SyncPort {
     });
   }
 
-
   async publishIntegrationEvent(
     command: PublishIntegrationEventCommand,
   ): Promise<{ id: string }> {
@@ -654,4 +648,3 @@ export class SyncService implements SyncPort {
     }
   }
 }
-

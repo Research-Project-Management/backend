@@ -12,10 +12,7 @@ import { EngineService } from './engine/engine.service';
 import { ThreadService } from './thread/thread.service';
 import { AiQueryDto } from './dto/ai.dto';
 import { CatalogService } from '../library/items/items.service';
-import {
-  buildAiPayload,
-  formatPaperContext,
-} from './utils/ai.util';
+import { buildAiPayload, formatPaperContext } from './utils/ai.util';
 
 import { PrismaService } from '@/core/database/prisma.service';
 
@@ -48,7 +45,9 @@ export class AiService {
         where: { workspaceId: targetWsId, userId },
       });
       if (!member) {
-        throw new ForbiddenException('You do not have access to this workspace');
+        throw new ForbiddenException(
+          'You do not have access to this workspace',
+        );
       }
     }
 
@@ -58,7 +57,9 @@ export class AiService {
         where: { id: targetChatId },
       });
       if (chat && chat.userId !== userId) {
-        throw new ForbiddenException('You do not have access to this chat session');
+        throw new ForbiddenException(
+          'You do not have access to this chat session',
+        );
       }
     }
 
@@ -91,7 +92,9 @@ export class AiService {
         where: { workspaceId: targetWsId, userId },
       });
       if (!member) {
-        throw new ForbiddenException('You do not have access to this workspace');
+        throw new ForbiddenException(
+          'You do not have access to this workspace',
+        );
       }
     }
 
@@ -101,7 +104,9 @@ export class AiService {
         where: { id: targetChatId },
       });
       if (chat && chat.userId !== userId) {
-        throw new ForbiddenException('You do not have access to this chat session');
+        throw new ForbiddenException(
+          'You do not have access to this chat session',
+        );
       }
     }
 
@@ -137,10 +142,14 @@ export class AiService {
 
     // Disallow overriding paper workspace
     if (dto.workspaceId && dto.workspaceId !== paper.workspaceId) {
-      throw new BadRequestException('Workspace ID mismatch with paper workspace');
+      throw new BadRequestException(
+        'Workspace ID mismatch with paper workspace',
+      );
     }
     if (dto.workspace_id && dto.workspace_id !== paper.workspaceId) {
-      throw new BadRequestException('Workspace ID mismatch with paper workspace');
+      throw new BadRequestException(
+        'Workspace ID mismatch with paper workspace',
+      );
     }
     const workspaceId = paper.workspaceId;
 
@@ -151,7 +160,9 @@ export class AiService {
         where: { id: chatId },
       });
       if (existingChat && existingChat.userId !== userId) {
-        throw new ForbiddenException('You do not have access to this chat session');
+        throw new ForbiddenException(
+          'You do not have access to this chat session',
+        );
       }
     } else {
       chatId = `paper-${paperId}-${userId}`;
@@ -206,10 +217,14 @@ export class AiService {
 
     // Disallow overriding paper workspace
     if (dto.workspaceId && dto.workspaceId !== paper.workspaceId) {
-      throw new BadRequestException('Workspace ID mismatch with paper workspace');
+      throw new BadRequestException(
+        'Workspace ID mismatch with paper workspace',
+      );
     }
     if (dto.workspace_id && dto.workspace_id !== paper.workspaceId) {
-      throw new BadRequestException('Workspace ID mismatch with paper workspace');
+      throw new BadRequestException(
+        'Workspace ID mismatch with paper workspace',
+      );
     }
     const workspaceId = paper.workspaceId;
 
@@ -220,7 +235,9 @@ export class AiService {
         where: { id: chatId },
       });
       if (existingChat && existingChat.userId !== userId) {
-        throw new ForbiddenException('You do not have access to this chat session');
+        throw new ForbiddenException(
+          'You do not have access to this chat session',
+        );
       }
     } else {
       chatId = `paper-${paperId}-${userId}`;
