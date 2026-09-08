@@ -140,10 +140,11 @@ export class WorkItemController {
   })
   async bulkUpdateTasks(
     @Param('projectId') paramProjectId: string | undefined,
+    @Query('projectId') queryProjectId: string | undefined,
     @Body() dto: BulkUpdateWorkItemDto,
     @CurrentUser('id') userId: string,
   ) {
-    const projectId = paramProjectId || '';
+    const projectId = paramProjectId || queryProjectId || '';
     return this.workItemService.bulkUpdate(projectId, dto, userId);
   }
 

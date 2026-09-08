@@ -69,9 +69,7 @@ export class ItemQueryRepository {
         itemTags: {
           include: { tag: true },
         },
-        attachments: {
-          include: { revisions: true },
-        },
+        attachments: true,
       },
     });
   }
@@ -166,9 +164,7 @@ export class ItemQueryRepository {
         itemTags: {
           include: { tag: true },
         },
-        attachments: {
-          include: { revisions: true },
-        },
+        attachments: true,
       },
     });
   }
@@ -202,12 +198,7 @@ export class ItemQueryRepository {
       itemTags: {
         include: { tag: true },
       },
-      notesList: {
-        where: { deletedAt: null },
-      },
-      attachments: {
-        include: { revisions: true },
-      },
+      attachments: true,
       userStates: options.userId
         ? {
             where: { userId: options.userId },

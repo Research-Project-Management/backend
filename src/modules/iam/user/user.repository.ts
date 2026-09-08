@@ -85,10 +85,41 @@ export class UserRepository implements IUserRepository {
     return result.count;
   }
 
-  async searchUsers(query: string, excludeUserId?: string) {
+  async searchUsers(
+    query: string,
+    excludeUserId?: string,
+    workspaceId?: string,
+  ) {
+    let workspaceScopeCondition: Prisma.UserWhereInput = {};
+
+    if (workspaceId) {
+      workspaceScopeCondition = {
+        workspaceMembers: {
+          some: { workspaceId },
+        },
+      };
+    } else if (excludeUserId) {
+      // Find all workspaces the current user belongs to
+      const userMemberships = await this.prisma.workspaceMember.findMany({
+        where: { userId: excludeUserId },
+        select: { workspaceId: true },
+      });
+      const sharedWorkspaceIds = userMemberships.map((m) => m.workspaceId);
+      if (sharedWorkspaceIds.length > 0) {
+        workspaceScopeCondition = {
+          workspaceMembers: {
+            some: { workspaceId: { in: sharedWorkspaceIds } },
+          },
+        };
+      } else {
+        return [];
+      }
+    }
+
     return this.prisma.user.findMany({
       where: {
         deletedAt: null,
+        ...workspaceScopeCondition,
         AND: [
           excludeUserId ? { id: { not: excludeUserId } } : {},
           {

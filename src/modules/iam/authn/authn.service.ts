@@ -281,8 +281,15 @@ export class AuthnService {
         }),
       });
 
-      const tokenData = (await tokenRes.json()) as { access_token?: string };
+      const tokenData = (await tokenRes.json()) as {
+        access_token?: string;
+        error?: string;
+        error_description?: string;
+      };
       if (!tokenData.access_token) {
+        this.logger.error(
+          `Google token exchange failed: ${tokenData.error || 'unknown'} - ${tokenData.error_description || JSON.stringify(tokenData)}`,
+        );
         return {
           redirectUrl: `${clientUrl}/login?error=google_token_failed`,
         };

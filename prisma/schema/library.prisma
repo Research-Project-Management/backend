@@ -72,6 +72,8 @@ model CatalogItem {
   sourceRecords   MetadataSourceRecord[]
 
   @@index([workspaceId, deletedAt])
+  @@index([workspaceId, deletedAt, year(sort: Desc), createdAt(sort: Desc)])
+  @@index([workspaceId, itemType])
   @@index([workspaceId, ragStatus])
   @@index([doi])
   @@index([citationKey])

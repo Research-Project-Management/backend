@@ -11,7 +11,7 @@ export class PrismaService
 {
   private pool?: Pool;
 
-  constructor(configService: ConfigService) {
+  constructor(private readonly configService: ConfigService) {
     const connectionString =
       configService.get<string>('DATABASE_URL') ||
       process.env.DATABASE_URL ||
@@ -32,7 +32,8 @@ export class PrismaService
   }
 
   async onModuleInit() {
-    if (process.env.NODE_ENV !== 'test' && process.env.DATABASE_URL) {
+    const dbUrl = this.configService.get<string>('DATABASE_URL') || process.env.DATABASE_URL;
+    if (process.env.NODE_ENV !== 'test' && dbUrl) {
       await this.$connect().catch((err) => {
         console.warn('[Prisma] Database connection deferred:', err.message);
       });

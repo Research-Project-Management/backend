@@ -105,6 +105,18 @@ export class ThreadService {
       throw new BadRequestException('workspaceId is required');
     }
 
+    const member = await this.prisma.workspaceMember.findFirst({
+      where: {
+        workspace: {
+          OR: [{ id: workspaceId }, { slug: workspaceId }],
+        },
+        userId,
+      },
+    });
+    if (!member) {
+      throw new ForbiddenException('User is not a member of this workspace');
+    }
+
     const cacheKey = AI_REDIS_KEYS.userChats(workspaceId, userId, projectId);
     if (this.cache) {
       const cached = await this.cache.get<FormattedChatSession[]>(cacheKey);

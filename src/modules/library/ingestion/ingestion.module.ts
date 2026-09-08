@@ -27,6 +27,7 @@ import { INGESTION_PORT } from './types/ingestion.types';
 import { IngestionWatchdogService } from './services/ingestion-watchdog.service';
 import { UrlCaptureService } from './services/url-capture.service';
 import { IngestionPipelineRunner } from './services/ingestion-pipeline.runner';
+import { IngestionQueueService } from './services/ingestion-queue.service';
 import { ZoteroTranslatorClient } from '../../../infra/zotero/zotero-translator.client';
 
 import { SsrfGuardService } from '../common/services/ssrf-guard.service';
@@ -72,6 +73,7 @@ import { NotesModule } from '../notes/notes.module';
     ZoteroTranslatorClient, // OSS: Zotero Translation Server client (700+ publisher translators)
     UrlCaptureService,
     IngestionPipelineRunner,
+    IngestionQueueService,
     IngestionService,
     IngestionWatchdogService,
     {
@@ -84,6 +86,7 @@ import { NotesModule } from '../notes/notes.module';
     INGESTION_PORT,
     IngestionService,
     IngestionPipelineRunner,
+    IngestionQueueService,
     UrlCaptureService,
     IngestionWatchdogService,
     SsrfGuardService,

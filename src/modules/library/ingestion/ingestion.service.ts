@@ -21,6 +21,7 @@ import {
 import { IngestionRepository } from './ingestion.repository';
 import { IngestionStatus, Prisma } from '@prisma/client';
 import { IngestionPipelineRunner } from './services/ingestion-pipeline.runner';
+import { IngestionQueueService } from './services/ingestion-queue.service';
 import { UrlCaptureService } from './services/url-capture.service';
 import { ItemsService } from '../items/items.service';
 import { createHash, randomUUID } from 'crypto';
@@ -33,6 +34,7 @@ export class IngestionService implements IngestionPort {
     private readonly prisma: PrismaService,
     private readonly ingestionRepo: IngestionRepository,
     private readonly runner: IngestionPipelineRunner,
+    private readonly queueService: IngestionQueueService,
     private readonly urlCapture: UrlCaptureService,
     private readonly itemsService: ItemsService,
   ) {}
@@ -90,22 +92,9 @@ export class IngestionService implements IngestionPort {
     const runId = run?.id || randomUUID();
     const statusUrl = `/api/v1/workspaces/${workspaceId}/library/ingestion/status/${runId}`;
 
-    // 3. Return the durable run immediately. Provider resolution and PDF
-    // extraction can exceed an HTTP request budget, so they must never hold
-    // the caller open after the run is persisted.
-    void this.executePipeline(runId, workspaceId, envelope).catch(
-      async (err: any) => {
-        this.logger.error(
-          `Ingestion pipeline failed for run ${runId}: ${err?.message || err}`,
-        );
-        await this.ingestionRepo.updateRunStatus(
-          workspaceId,
-          runId,
-          IngestionStatus.FAILED_FINAL,
-          { lastError: err?.message || 'Unknown ingestion pipeline failure' },
-        );
-      },
-    );
+    // 3. Return the durable run immediately and dispatch to IngestionQueueService
+    // for bounded concurrency and worker resilience.
+    this.queueService.enqueue(runId, workspaceId, envelope);
 
     return {
       runId,
@@ -156,15 +145,32 @@ export class IngestionService implements IngestionPort {
     if (!run) {
       throw new NotFoundException(`Ingestion run '${runId}' not found`);
     }
+
     await this.ingestionRepo.updateRunStatus(
       canonicalWorkspaceId,
       runId,
       IngestionStatus.RECEIVED,
     );
+
+    const envelope = run.inputParams as unknown as IngestionSubmissionEnvelope;
+    if (envelope && typeof envelope === 'object') {
+      this.queueService.enqueue(runId, canonicalWorkspaceId, {
+        ...envelope,
+        workspaceId: canonicalWorkspaceId,
+      });
+      this.logger.log(
+        `Retry initiated and re-enqueued for run ${runId} in workspace ${canonicalWorkspaceId}`,
+      );
+    } else {
+      this.logger.warn(
+        `Retry requested for run ${runId}, but inputParams is missing or invalid.`,
+      );
+    }
+
     return {
       runId,
       status: IngestionStatus.RECEIVED,
-      message: 'Ingestion run retry initiated',
+      message: 'Ingestion run retry initiated and enqueued',
     };
   }
 

@@ -101,6 +101,35 @@ export class ItemCommandRepository {
       cleanBannedString(data.issn) ||
       '';
 
+    // Concurrency-safe tag preparation:
+    // Avoid Prisma nested connectOrCreate which causes race-condition unique constraint violations in batch inserts
+    const rawTagList = [
+      ...(data.tags || []),
+      ...(data.keywords || []),
+      ...(data.labels || []),
+    ];
+    const normalizedTagNames = normalizeTags(rawTagList).slice(0, 30);
+    let resolvedTagIds: string[] = [];
+
+    if (normalizedTagNames.length > 0) {
+      await client.catalogTag.createMany({
+        data: normalizedTagNames.map((name) => ({
+          workspaceId,
+          name,
+        })),
+        skipDuplicates: true,
+      });
+
+      const existingTags = await client.catalogTag.findMany({
+        where: {
+          workspaceId,
+          name: { in: normalizedTagNames },
+        },
+        select: { id: true },
+      });
+      resolvedTagIds = existingTags.map((t) => t.id);
+    }
+
     const createData: Prisma.CatalogItemUncheckedCreateInput = {
       workspaceId,
       title: data.title,
@@ -316,31 +345,12 @@ export class ItemCommandRepository {
             },
           }
         : {}),
-      ...(data.tags?.length || data.keywords?.length || data.labels?.length
+      ...(resolvedTagIds.length > 0
         ? {
             itemTags: {
-              create: normalizeTags([
-                ...(data.tags || []),
-                ...(data.keywords || []),
-                ...(data.labels || []),
-              ])
-                .slice(0, 30)
-                .map((tagName) => ({
-                  tag: {
-                    connectOrCreate: {
-                      where: {
-                        workspaceId_name: {
-                          workspaceId,
-                          name: tagName,
-                        },
-                      },
-                      create: {
-                        workspaceId,
-                        name: tagName,
-                      },
-                    },
-                  },
-                })),
+              create: resolvedTagIds.map((tagId) => ({
+                tagId,
+              })),
             },
           }
         : {}),

@@ -1,17 +1,33 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { TagsRepository } from './tags.repository';
 import { TransactionService } from '../outbox/transaction.service';
 import { normalizeTags } from './utils/tags.utils';
+import { RedisCacheService } from '../../../core/cache/redis-cache.service';
+import { LIBRARY_REDIS_KEYS } from '../common/constants/redis-keys.constant';
 
 @Injectable()
 export class TagsService {
   constructor(
     private readonly tagsRepo: TagsRepository,
     private readonly libraryTx: TransactionService,
+    @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
+  private async invalidateTagsCache(workspaceId: string): Promise<void> {
+    if (this.cache) {
+      await this.cache.delPattern(LIBRARY_REDIS_KEYS.tagsPattern(workspaceId));
+    }
+  }
+
   async getTags(workspaceId: string) {
+    if (this.cache) {
+      return this.cache.wrap(
+        LIBRARY_REDIS_KEYS.tags(workspaceId),
+        () => this.tagsRepo.findMany(workspaceId),
+        300,
+      );
+    }
     return this.tagsRepo.findMany(workspaceId);
   }
 
@@ -21,7 +37,7 @@ export class TagsService {
     color?: string,
     type?: string,
   ) {
-    return this.libraryTx.executeInTransaction(async (tx, helpers) => {
+    const result = await this.libraryTx.executeInTransaction(async (tx, helpers) => {
       const tag = await this.tagsRepo.create(
         workspaceId,
         name.trim(),
@@ -47,10 +63,13 @@ export class TagsService {
 
       return tag;
     });
+
+    await this.invalidateTagsCache(workspaceId);
+    return result;
   }
 
   async deleteTag(workspaceId: string, tagId: string) {
-    return this.libraryTx.executeInTransaction(async (tx, helpers) => {
+    const result = await this.libraryTx.executeInTransaction(async (tx, helpers) => {
       const deleted = await this.tagsRepo.delete(workspaceId, tagId, tx);
       if (deleted) {
         await helpers.recordTombstone(workspaceId, {
@@ -65,6 +84,9 @@ export class TagsService {
       }
       return deleted;
     });
+
+    await this.invalidateTagsCache(workspaceId);
+    return result;
   }
 
   async assignTag(workspaceId: string, tagId: string, catalogItemId: string) {
@@ -163,6 +185,10 @@ export class TagsService {
       data: allTags.map((tag) => ({ tagId: tag.id, catalogItemId })),
       skipDuplicates: true,
     });
+
+    if (missingNames.length > 0) {
+      await this.invalidateTagsCache(workspaceId);
+    }
   }
 
   /**

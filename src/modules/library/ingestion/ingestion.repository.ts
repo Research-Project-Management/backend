@@ -202,6 +202,28 @@ export class IngestionRepository {
     });
   }
 
+  async findRecoverableRuns(
+    since: Date,
+    limit = 50,
+    tx?: Prisma.TransactionClient,
+  ): Promise<IngestionRun[]> {
+    const client = this.getClient(tx);
+    return client.ingestionRun.findMany({
+      where: {
+        status: {
+          in: [
+            IngestionStatus.RECEIVED,
+            IngestionStatus.FAILED_RETRYABLE,
+          ],
+        },
+        startedAt: { gte: since },
+        completedAt: null,
+      },
+      orderBy: { startedAt: 'asc' },
+      take: limit,
+    });
+  }
+
   async reconcileRun(
     workspaceId: string,
     runId: string,

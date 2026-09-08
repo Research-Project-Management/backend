@@ -4,6 +4,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { TransactionHelpers } from '../outbox/transaction.service';
@@ -24,6 +25,8 @@ import {
 } from './types/collections.types';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { resolveTenantWorkspaceId } from '../../../core/utils/tenant.util';
+import { RedisCacheService } from '../../../core/cache/redis-cache.service';
+import { LIBRARY_REDIS_KEYS } from '../common/constants/redis-keys.constant';
 
 @Injectable()
 export class CollectionsService {
@@ -32,59 +35,88 @@ export class CollectionsService {
   constructor(
     private readonly collectionsRepo: CollectionsRepository,
     private readonly prisma: PrismaService,
+    @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
   private resolveWorkspaceId(workspaceId: string): Promise<string> {
     return resolveTenantWorkspaceId(this.prisma, workspaceId);
   }
 
+  private async invalidateCollectionsCache(workspaceId: string): Promise<void> {
+    if (this.cache) {
+      await this.cache.delPattern(LIBRARY_REDIS_KEYS.collectionsPattern(workspaceId));
+    }
+  }
+
   async getCollections(workspaceId: string) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const rawCollections =
-      await this.collectionsRepo.findAll(canonicalWorkspaceId);
-    const collections = rawCollections.map((c: any) => ({
-      ...c,
-      itemCount: c.itemCount ?? c._count?.collectionItems ?? 0,
-      itemsCount: c.itemsCount ?? c._count?.collectionItems ?? 0,
-      paperCount: c.paperCount ?? c._count?.collectionItems ?? 0,
-    }));
-    return {
-      collections,
-      total: collections.length,
+    const fetchCollections = async () => {
+      const rawCollections =
+        await this.collectionsRepo.findAll(canonicalWorkspaceId);
+      const collections = rawCollections.map((c: any) => ({
+        ...c,
+        itemCount: c.itemCount ?? c._count?.collectionItems ?? 0,
+        itemsCount: c.itemsCount ?? c._count?.collectionItems ?? 0,
+        paperCount: c.paperCount ?? c._count?.collectionItems ?? 0,
+      }));
+      return {
+        collections,
+        total: collections.length,
+      };
     };
+
+    if (this.cache) {
+      return this.cache.wrap(
+        LIBRARY_REDIS_KEYS.collections(canonicalWorkspaceId),
+        fetchCollections,
+        300,
+      );
+    }
+    return fetchCollections();
   }
 
   async getCollectionTree(
     workspaceId: string,
   ): Promise<{ tree: CollectionTreeNode[] }> {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const collections =
-      await this.collectionsRepo.findAll(canonicalWorkspaceId);
+    const fetchTree = async () => {
+      const collections =
+        await this.collectionsRepo.findAll(canonicalWorkspaceId);
 
-    const map = new Map<string, CollectionTreeNode>();
-    for (const c of collections) {
-      map.set(c.id, {
-        id: c.id,
-        name: c.name,
-        description: c.description,
-        color: c.color,
-        icon: c.icon,
-        parentId: c.parentId,
-        itemCount: (c as any)._count?.collectionItems || 0,
-        children: [],
-      });
-    }
-
-    const roots: CollectionTreeNode[] = [];
-    for (const node of map.values()) {
-      if (node.parentId && map.has(node.parentId)) {
-        map.get(node.parentId)!.children.push(node);
-      } else {
-        roots.push(node);
+      const map = new Map<string, CollectionTreeNode>();
+      for (const c of collections) {
+        map.set(c.id, {
+          id: c.id,
+          name: c.name,
+          description: c.description,
+          color: c.color,
+          icon: c.icon,
+          parentId: c.parentId,
+          itemCount: (c as any)._count?.collectionItems || 0,
+          children: [],
+        });
       }
-    }
 
-    return { tree: roots };
+      const roots: CollectionTreeNode[] = [];
+      for (const node of map.values()) {
+        if (node.parentId && map.has(node.parentId)) {
+          map.get(node.parentId)!.children.push(node);
+        } else {
+          roots.push(node);
+        }
+      }
+
+      return { tree: roots };
+    };
+
+    if (this.cache) {
+      return this.cache.wrap(
+        LIBRARY_REDIS_KEYS.collectionTree(canonicalWorkspaceId),
+        fetchTree,
+        300,
+      );
+    }
+    return fetchTree();
   }
 
   async getCollectionById(workspaceId: string, collectionId: string) {
@@ -154,6 +186,7 @@ export class CollectionsService {
       },
     );
 
+    await this.invalidateCollectionsCache(canonicalWorkspaceId);
     return { collection };
   }
 
@@ -198,6 +231,7 @@ export class CollectionsService {
         parentId: rawParentId,
       },
     );
+    await this.invalidateCollectionsCache(canonicalWorkspaceId);
     return { collection };
   }
 
@@ -220,6 +254,7 @@ export class CollectionsService {
       collectionId,
       strategy,
     );
+    await this.invalidateCollectionsCache(canonicalWorkspaceId);
     return { success: true };
   }
 
@@ -247,6 +282,7 @@ export class CollectionsService {
       itemIds,
     );
 
+    await this.invalidateCollectionsCache(canonicalWorkspaceId);
     return {
       message: 'Items moved successfully',
       count: itemIds.length,
@@ -265,6 +301,7 @@ export class CollectionsService {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     await this.collectionsRepo.reorder(canonicalWorkspaceId, collections);
     const updated = await this.collectionsRepo.findAll(canonicalWorkspaceId);
+    await this.invalidateCollectionsCache(canonicalWorkspaceId);
     return { collections: updated };
   }
 
@@ -291,6 +328,7 @@ export class CollectionsService {
       );
     }
 
+    await this.invalidateCollectionsCache(canonicalWorkspaceId);
     return { success: true, count: ids.length };
   }
 
@@ -313,6 +351,7 @@ export class CollectionsService {
       collectionId,
       itemId,
     );
+    await this.invalidateCollectionsCache(canonicalWorkspaceId);
     return { success: true };
   }
 

@@ -152,11 +152,6 @@ export class SearchRepository implements OnModuleInit {
       baseFilters.push(`year <= $${paramIdx++}`);
       params.push(options.yearTo);
     }
-    if (options.cursor) {
-      baseFilters.push(`id > $${paramIdx++}::uuid`);
-      params.push(options.cursor);
-    }
-
     // Collection and tag filters via subquery
     if (options.collectionId) {
       baseFilters.push(
@@ -176,20 +171,36 @@ export class SearchRepository implements OnModuleInit {
     // ORDER BY: relevance when FTS, otherwise dateAdded
     const orderExpr =
       options.sortBy === 'year'
-        ? `year ${options.sortOrder === 'asc' ? 'ASC' : 'DESC'} NULLS LAST`
+        ? `year ${options.sortOrder === 'asc' ? 'ASC' : 'DESC'} NULLS LAST, id DESC`
         : options.sortBy === 'title'
-          ? `title ${options.sortOrder === 'asc' ? 'ASC' : 'DESC'} NULLS LAST`
+          ? `title ${options.sortOrder === 'asc' ? 'ASC' : 'DESC'} NULLS LAST, id DESC`
           : options.sortBy === 'relevance' || !options.sortBy
-            ? `ts_rank(search_vector, plainto_tsquery('english', $2)) DESC, created_at DESC`
-            : `created_at ${options.sortOrder === 'asc' ? 'ASC' : 'DESC'}`;
+            ? `ts_rank(search_vector, plainto_tsquery('english', $2)) DESC, created_at DESC, id DESC`
+            : `created_at ${options.sortOrder === 'asc' ? 'ASC' : 'DESC'}, id DESC`;
+
+    let cursorCte = '';
+    let cursorFilter = '';
+    if (options.cursor) {
+      const cursorParam = paramIdx++;
+      params.push(options.cursor);
+      cursorCte = `, cursor_pos AS (
+        SELECT _row_num FROM search_results WHERE id = $${cursorParam}::uuid
+      )`;
+      cursorFilter = `WHERE _row_num > COALESCE((SELECT _row_num FROM cursor_pos), 0)`;
+    }
 
     params.push(limit + 1);
     const limitParam = paramIdx++;
 
     const rows: any[] = await this.prisma.$queryRawUnsafe(
-      `SELECT id FROM "papers"
-       WHERE ${whereClause}
-       ORDER BY ${orderExpr}
+      `WITH search_results AS (
+         SELECT id, ROW_NUMBER() OVER (ORDER BY ${orderExpr}) AS _row_num
+         FROM "papers"
+         WHERE ${whereClause}
+       )${cursorCte}
+       SELECT id FROM search_results
+       ${cursorFilter}
+       ORDER BY _row_num ASC
        LIMIT $${limitParam}`,
       ...params,
     );

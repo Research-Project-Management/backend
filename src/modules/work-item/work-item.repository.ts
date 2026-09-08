@@ -334,11 +334,13 @@ export class WorkItemRepository implements IWorkItemRepository {
     data: Prisma.TaskUpdateManyMutationInput,
   ) {
     const validIds = taskIds.filter(isUuid);
-    if (validIds.length === 0) return { count: 0 };
+    if (validIds.length === 0 || !projectId || !isUuid(projectId)) {
+      return { count: 0 };
+    }
     return this.prisma.task.updateMany({
       where: {
         id: { in: validIds },
-        ...(projectId && isUuid(projectId) ? { projectId } : {}),
+        projectId,
       },
       data,
     });

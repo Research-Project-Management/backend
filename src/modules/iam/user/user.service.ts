@@ -75,8 +75,16 @@ export class UserService {
     return { message: 'Password updated successfully' };
   }
 
-  async searchUsers(query: string, currentUserId?: string) {
-    const users = await this.userRepo.searchUsers(query, currentUserId);
+  async searchUsers(
+    query: string,
+    currentUserId?: string,
+    workspaceId?: string,
+  ) {
+    const users = await this.userRepo.searchUsers(
+      query,
+      currentUserId,
+      workspaceId,
+    );
     return { users };
   }
 

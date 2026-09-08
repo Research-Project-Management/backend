@@ -21,7 +21,12 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "test:db-suites": "jest --testPathPatterns=\"test/integration\" --runInBand --forceExit",
     "seed": "ts-node -r tsconfig-paths/register prisma/seed.ts",
-    "codebase:sync": "node ../.agents/scripts/sync-codebase.mjs backend"
+    "codebase:sync": "node ../.agents/scripts/sync-codebase.mjs backend",
+    "typecheck": "tsc --noEmit",
+    "audit:dry": "npx --yes jscpd --threshold 5 src",
+    "audit:circular": "npx --yes madge --circular --extensions ts src",
+    "audit:security": "pnpm audit",
+    "audit:quality": "pnpm typecheck && pnpm audit:circular && pnpm audit:dry"
   },
   "prisma": {
     "seed": "ts-node -r tsconfig-paths/register prisma/seed.ts"

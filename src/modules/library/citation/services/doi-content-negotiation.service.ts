@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { ReferenceData } from '../citation.service';
+import type { ReferenceData } from '../types/citation.types';
 import {
   normalizeDoi,
   cleanBibliographicText,

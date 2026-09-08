@@ -3,10 +3,13 @@ import {
   Logger,
   OnApplicationBootstrap,
   OnApplicationShutdown,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { IngestionStatus } from '@prisma/client';
 import { IngestionRepository } from '../ingestion.repository';
+import { IngestionQueueService } from './ingestion-queue.service';
+import { IngestionSubmissionEnvelope } from '../types/ingestion-submission.types';
 
 export interface WatchdogReconciliationResult {
   reconciled: number;
@@ -24,7 +27,8 @@ export class IngestionWatchdogService
 
   constructor(
     private readonly ingestionRepo: IngestionRepository,
-    private readonly configService?: ConfigService,
+    @Optional() private readonly queueService?: IngestionQueueService,
+    @Optional() private readonly configService?: ConfigService,
   ) {}
 
   onApplicationBootstrap() {
@@ -44,6 +48,9 @@ export class IngestionWatchdogService
         `Starting Ingestion Watchdog reconciliation loop (interval=${intervalMs}ms)...`,
       );
       this.startWatchdog(intervalMs);
+
+      // Perform an immediate startup recovery scan for abandoned runs
+      void this.recoverPendingRunsOnStartup();
     }
   }
 
@@ -113,6 +120,20 @@ export class IngestionWatchdogService
         this.logger.log(
           `Reconciled stalled run ${run.id} as FAILED_RETRYABLE (attempt ${nextAttempt}/${run.maxRetries})`,
         );
+
+        // Active recovery: automatically dispatch back to IngestionQueueService
+        if (this.queueService && run.inputParams) {
+          const envelope = run.inputParams as unknown as IngestionSubmissionEnvelope;
+          if (envelope && typeof envelope === 'object') {
+            this.queueService.enqueue(run.id, run.workspaceId, {
+              ...envelope,
+              workspaceId: run.workspaceId,
+            });
+            this.logger.log(
+              `Watchdog auto-retried stalled run ${run.id} into ingestion queue`,
+            );
+          }
+        }
       } else {
         await this.ingestionRepo.reconcileRun(run.workspaceId, run.id, {
           status: IngestionStatus.FAILED_FINAL,
@@ -132,5 +153,51 @@ export class IngestionWatchdogService
       retried,
       deadLettered,
     };
+  }
+
+  /**
+   * Scans for orphaned or stalled runs left behind after an abrupt pod/process restart,
+   * and automatically enqueues them back into IngestionQueueService.
+   */
+  async recoverPendingRunsOnStartup(): Promise<number> {
+    if (!this.queueService) return 0;
+
+    try {
+      // Look back up to 24 hours for abandoned runs
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const pendingRuns = await this.ingestionRepo.findRecoverableRuns(since, 50);
+
+      if (pendingRuns.length === 0) return 0;
+
+      let recovered = 0;
+      for (const run of pendingRuns) {
+        if (!run.inputParams || run.attempts >= run.maxRetries) continue;
+        const envelope = run.inputParams as unknown as IngestionSubmissionEnvelope;
+        if (!envelope || typeof envelope !== 'object') continue;
+
+        const enqueued = this.queueService.enqueue(run.id, run.workspaceId, {
+          ...envelope,
+          workspaceId: run.workspaceId,
+        });
+        if (enqueued) {
+          recovered++;
+          this.logger.log(
+            `Startup recovery: re-enqueued abandoned run ${run.id} (${run.status}) in workspace ${run.workspaceId}`,
+          );
+        }
+      }
+
+      if (recovered > 0) {
+        this.logger.log(
+          `Startup recovery complete: safely re-enqueued ${recovered} orphaned run(s)`,
+        );
+      }
+      return recovered;
+    } catch (err: any) {
+      this.logger.error(
+        `Startup recovery scan failed: ${err?.message || err}`,
+      );
+      return 0;
+    }
   }
 }

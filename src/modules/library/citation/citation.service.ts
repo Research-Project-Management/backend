@@ -12,6 +12,7 @@ import {
   CitationStyleId,
   CitationItemInput,
   FormattedCitationResult,
+  ReferenceData,
 } from './types/citation.types';
 import { ItemsService } from '../items/items.service';
 import { DoiContentNegotiationService } from './services/doi-content-negotiation.service';
@@ -24,41 +25,7 @@ import {
 } from '../ingestion/metadata/types/metadata.types';
 import { normalizeTags } from '../tags/utils/tags.utils';
 
-export interface ReferenceData {
-  doi?: string;
-  title: string;
-  authors?: string[];
-  creators?: Array<{
-    creatorType?: string;
-    name?: string;
-    firstName?: string;
-    lastName?: string;
-  }>;
-  year?: number | string;
-  journal?: string;
-  publicationTitle?: string;
-  publicationDate?: string;
-  publisher?: string;
-  volume?: string;
-  issue?: string;
-  pages?: string;
-  issn?: string;
-  isbn?: string;
-  arxivId?: string;
-  pmid?: string;
-  pmcid?: string;
-  url?: string;
-  openAccessPdfUrl?: string;
-  abstract?: string;
-  citationCount?: number | string | null;
-  keywords?: string[];
-  tags?: string[];
-  type?: string;
-  itemType?: string;
-  score?: number;
-  extraFields?: Record<string, any>;
-  provenance?: any;
-}
+export type { ReferenceData };
 
 @Injectable()
 export class CitationService {
