@@ -26,6 +26,11 @@ export interface LinkFileInput {
 export interface IStoragePort {
   readOwnedFile(input: ReadOwnedFileInput): Promise<ReadOwnedFileOutput>;
   linkFile?(input: LinkFileInput): Promise<void>;
+  uploadBuffer?(
+    key: string,
+    buffer: Buffer,
+    contentType?: string,
+  ): Promise<{ path: string; url: string }>;
 }
 
 export const STORAGE_PORT = 'STORAGE_PORT';

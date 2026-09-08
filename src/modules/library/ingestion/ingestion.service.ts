@@ -1,16 +1,16 @@
 import {
   Injectable,
   Logger,
-  Inject,
-  Optional,
   NotFoundException,
   ConflictException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { resolveTenantWorkspaceId } from '../../../core/utils/tenant.util';
 import {
   IngestionSubmissionEnvelope,
   IngestionAcceptedResult,
+  SubmissionPayload,
 } from './types/ingestion-submission.types';
 import {
   IngestionCommand,
@@ -18,83 +18,24 @@ import {
   IngestionPort,
   IngestionRunSnapshot,
 } from './types/ingestion.types';
-import { IngestionIdempotencyConflictException } from './errors/ingestion.errors';
 import { IngestionRepository } from './ingestion.repository';
-import { IdentifyStage } from './stages/identify.stage';
-import { NormalizeStage } from './stages/normalize.stage';
-import { EnrichStage } from './stages/enrich.stage';
-import { ReconcileStage } from './stages/reconcile.stage';
-import { MatchStage } from './stages/match.stage';
-import { CommitStage } from './stages/commit.stage';
-import { TransactionService } from '../outbox/transaction.service';
-import { METADATA_PORT, MetadataPort } from './metadata/types/metadata.types';
-import { STORAGE_PORT, IStoragePort } from '../../storage/storage.port';
-import { UrlCaptureProvider } from './providers/url-capture.provider';
-import { PdfExtractorProvider } from '../attachments/providers/pdf-extractor.provider';
-import { CatalogService } from '../items/items.service';
-import { NotesService } from '../notes/notes.service';
-import { IdempotencyRepository } from '../sync/repositories/idempotency.repository';
 import { IngestionStatus, Prisma } from '@prisma/client';
-import { IngestionStrategyRegistry } from './strategies/ingestion-strategy.registry';
-import { IngestionExecutionContext } from './strategies/ingestion-strategy.interface';
 import { IngestionPipelineRunner } from './services/ingestion-pipeline.runner';
 import { UrlCaptureService } from './services/url-capture.service';
+import { ItemsService } from '../items/items.service';
 import { createHash, randomUUID } from 'crypto';
 
 @Injectable()
 export class IngestionService implements IngestionPort {
   private readonly logger = new Logger(IngestionService.name);
-  private readonly runner: IngestionPipelineRunner;
-  private readonly urlCapture: UrlCaptureService;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly ingestionRepo: IngestionRepository,
-    @Optional() private readonly identifyStage?: IdentifyStage,
-    @Optional() private readonly normalizeStage?: NormalizeStage,
-    @Optional() private readonly enrichStage?: EnrichStage,
-    @Optional() private readonly reconcileStage?: ReconcileStage,
-    @Optional() private readonly matchStage?: MatchStage,
-    @Optional() private readonly commitStage?: CommitStage,
-    @Optional() private readonly strategyRegistry?: IngestionStrategyRegistry,
-    @Optional() private readonly txService?: TransactionService,
-    @Optional() private readonly catalogService?: CatalogService,
-    @Optional()
-    @Inject(METADATA_PORT)
-    private readonly metadataPort?: MetadataPort,
-    @Optional()
-    @Inject(STORAGE_PORT)
-    private readonly storagePort?: IStoragePort,
-    @Optional() private readonly urlCaptureProvider?: UrlCaptureProvider,
-    @Optional() private readonly pdfExtractor?: PdfExtractorProvider,
-    @Optional() private readonly notesService?: NotesService,
-    @Optional() private readonly idempotencyRepo?: IdempotencyRepository,
-    @Optional() private readonly pipelineRunner?: IngestionPipelineRunner,
-    @Optional() private readonly urlCaptureService?: UrlCaptureService,
-  ) {
-    this.runner =
-      this.pipelineRunner ??
-      new IngestionPipelineRunner(
-        this.ingestionRepo,
-        this.identifyStage,
-        this.normalizeStage,
-        this.enrichStage,
-        this.reconcileStage,
-        this.matchStage,
-        this.commitStage,
-        this.catalogService,
-        this.notesService,
-      );
-
-    this.urlCapture =
-      this.urlCaptureService ??
-      new UrlCaptureService(
-        this.prisma,
-        this.urlCaptureProvider,
-        this.txService,
-        this.catalogService,
-      );
-  }
+    private readonly runner: IngestionPipelineRunner,
+    private readonly urlCapture: UrlCaptureService,
+    private readonly itemsService: ItemsService,
+  ) {}
 
   /**
    * Primary Fast-Path Submission Entry Point (Async 202 Contract)
@@ -223,83 +164,127 @@ export class IngestionService implements IngestionPort {
 
   /**
    * Unified synchronous/direct ingestion entry point.
-   * Delegates to specialized strategy via IngestionStrategyRegistry.
+   * Delegates to modern IngestionPipelineRunner via mapped envelope.
    */
   async ingest(command: IngestionCommand): Promise<IngestionResult> {
     const workspaceId = await this.resolveWorkspaceId(command.workspaceId);
-    const requestHash = createHash('sha256')
-      .update(
-        JSON.stringify({
-          workspaceId,
-          source: command.source,
-          payload: command,
-        }),
-      )
-      .digest('hex');
+    const envelope = this.mapCommandToEnvelope(workspaceId, command);
 
-    // 1. Idempotency Check & Atomic Claim
-    let leaseToken: string | undefined;
-    if (command.idempotencyKey && this.idempotencyRepo?.claim) {
-      const claimRes = await this.idempotencyRepo.claim(
-        workspaceId,
-        command.idempotencyKey,
-        requestHash,
+    const submissionRes = await this.submit(envelope);
+    const runId = submissionRes.runId;
+
+    if (submissionRes.deduplicated && submissionRes.existingItemId) {
+      const item = this.itemsService
+        ? await this.itemsService
+            .getItem(workspaceId, submissionRes.existingItemId)
+            .catch(() => undefined)
+        : undefined;
+
+      return {
+        runId,
+        status: 'completed',
+        itemId: submissionRes.existingItemId,
+        attachmentIds: [],
+        deduplicated: true,
+        item,
+      };
+    }
+
+    try {
+      await this.runner.executePipeline(runId, workspaceId, envelope);
+    } catch (err: any) {
+      this.logger.error(
+        `Ingestion pipeline failed for run ${runId}: ${err?.message || err}`,
       );
+      await this.ingestionRepo
+        .updateRunStatus(workspaceId, runId, IngestionStatus.FAILED_FINAL, {
+          lastError: err?.message || 'Unknown failure',
+        })
+        .catch(() => {});
 
-      if (claimRes.status === 'cached' && claimRes.record?.responseBody) {
-        return claimRes.record.responseBody as unknown as IngestionResult;
-      }
-
-      if (claimRes.status === 'mismatch') {
-        throw new IngestionIdempotencyConflictException(
-          `Idempotency key "${command.idempotencyKey}" was already used with a different request payload`,
-        );
-      }
-
-      if (claimRes.status === 'acquired') {
-        leaseToken = claimRes.leaseToken;
-      }
+      return {
+        runId,
+        status: 'failed',
+        attachmentIds: [],
+        deduplicated: false,
+        errorMessage: err?.message || 'Pipeline execution failed',
+      };
     }
 
-    const run = await this.ingestionRepo
-      .createRun(workspaceId, {
-        requesterId: command.userId || 'system',
-        inputParams: command as unknown as Prisma.InputJsonValue,
-        inputHash: requestHash,
-        idempotencyKey: command.idempotencyKey,
-      })
-      .catch((err) => {
-        this.logger.warn(
-          `Failed to create ingestion run record: ${err?.message}`,
-        );
-        return null;
-      });
+    const updatedRun = await this.ingestionRepo.findRunById(workspaceId, runId);
+    const itemId = updatedRun?.itemId ?? undefined;
+    const item =
+      itemId && this.itemsService
+        ? await this.itemsService
+            .getItem(workspaceId, itemId)
+            .catch(() => undefined)
+        : undefined;
 
-    const runId = run?.id || randomUUID();
-
-    const context: IngestionExecutionContext = {
-      workspaceId,
+    return {
       runId,
-      requestHash,
-      saveIdempotency: (workspaceId, key, hash, result) =>
-        this.saveIdempotency(workspaceId, key, hash, result, leaseToken),
-      updateRunStatus: async (workspaceId, runId, status, meta) => {
-        await this.ingestionRepo
-          .updateRunStatus(workspaceId, runId, status, meta)
-          .catch((err) => {
-            this.logger.warn(`Failed to update run status: ${err?.message}`);
-          });
-      },
-      withKeyLock: <T>(key: string, fn: () => Promise<T>) =>
-        this.withKeyLock(key, fn),
+      status:
+        updatedRun?.status === IngestionStatus.FAILED_FINAL
+          ? 'failed'
+          : 'completed',
+      itemId,
+      attachmentIds: [],
+      deduplicated: false,
+      item,
+      errorMessage: ((updatedRun as any)?.errorSummary as any)?.lastError ?? undefined,
     };
+  }
 
-    if (!this.strategyRegistry) {
-      throw new Error('IngestionStrategyRegistry is not configured');
+  private mapCommandToEnvelope(
+    workspaceId: string,
+    command: IngestionCommand,
+  ): IngestionSubmissionEnvelope {
+    let payload: SubmissionPayload;
+    switch (command.source) {
+      case 'doi':
+        payload = {
+          kind: 'IDENTIFIER',
+          identifierType: 'DOI',
+          value: command.doi,
+        };
+        break;
+      case 'url':
+        payload = {
+          kind: 'URL',
+          url: command.url,
+          previewToken: command.previewToken,
+        };
+        break;
+      case 'bibtex':
+        payload = {
+          kind: 'RECORD',
+          format: 'BIBTEX',
+          content: command.content,
+        };
+        break;
+      case 'pdf':
+        payload = {
+          kind: 'FILE',
+          fileId: command.fileId,
+          filename: command.filename,
+        };
+        break;
+      default:
+        throw new BadRequestException(
+          `Unsupported ingestion source: ${(command as any).source}`,
+        );
     }
 
-    const strategy = this.strategyRegistry.getStrategy(command.source);
-    return await strategy.execute(command, context);
+    return {
+      workspaceId,
+      userId: command.userId,
+      idempotencyKey: command.idempotencyKey,
+      payload,
+      collectionIds: command.collectionId ? [command.collectionId] : undefined,
+      overrides:
+        'overrides' in command
+          ? (command.overrides as Record<string, unknown>)
+          : undefined,
+    };
   }
 
   // ── Backward Compatibility Convenience Methods ────────────────────────────
@@ -353,70 +338,6 @@ export class IngestionService implements IngestionPort {
 
   async cleanupExpiredPreviews(retentionDays = 7): Promise<number> {
     return this.urlCapture.cleanupExpiredPreviews(retentionDays);
-  }
-
-  private async saveIdempotency(
-    workspaceId: string,
-    idempotencyKey: string | undefined,
-    requestHash: string,
-    result: IngestionResult,
-    leaseToken?: string,
-  ): Promise<void> {
-    const idempotencyRepo = this.idempotencyRepo;
-    if (!idempotencyKey || !idempotencyRepo) return;
-
-    try {
-      if (
-        this.txService?.executeInTransaction &&
-        typeof idempotencyRepo.markSucceededInTx === 'function'
-      ) {
-        await this.txService.executeInTransaction(
-          async (tx: Prisma.TransactionClient) => {
-            await idempotencyRepo.markSucceededInTx(
-              tx,
-              workspaceId,
-              idempotencyKey,
-              200,
-              result,
-              leaseToken,
-            );
-          },
-        );
-      } else if (typeof idempotencyRepo.markSucceeded === 'function') {
-        await idempotencyRepo.markSucceeded(
-          workspaceId,
-          idempotencyKey,
-          200,
-          result,
-          leaseToken,
-        );
-      }
-    } catch (err: any) {
-      this.logger.warn(
-        `Failed to persist idempotency key "${idempotencyKey}": ${err?.message}`,
-      );
-    }
-  }
-
-  private readonly locks = new Map<string, Promise<any>>();
-
-  private async withKeyLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
-    const currentLock = this.locks.get(key) ?? Promise.resolve();
-    let release!: () => void;
-    const nextLock = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    this.locks.set(key, nextLock);
-
-    await currentLock.catch(() => {});
-    try {
-      return await fn();
-    } finally {
-      release();
-      if (this.locks.get(key) === nextLock) {
-        this.locks.delete(key);
-      }
-    }
   }
 
   private resolveWorkspaceId(workspaceId: string): Promise<string> {

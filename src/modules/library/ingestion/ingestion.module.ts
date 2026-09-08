@@ -24,11 +24,6 @@ import { MatchStage } from './stages/match.stage';
 import { CommitStage } from './stages/commit.stage';
 import { UrlCaptureProvider } from './providers/url-capture.provider';
 import { INGESTION_PORT } from './types/ingestion.types';
-import { DoiIngestionStrategy } from './strategies/doi-ingestion.strategy';
-import { UrlIngestionStrategy } from './strategies/url-ingestion.strategy';
-import { PdfIngestionStrategy } from './strategies/pdf-ingestion.strategy';
-import { BibtexIngestionStrategy } from './strategies/bibtex-ingestion.strategy';
-import { IngestionStrategyRegistry } from './strategies/ingestion-strategy.registry';
 import { IngestionWatchdogService } from './services/ingestion-watchdog.service';
 import { UrlCaptureService } from './services/url-capture.service';
 import { IngestionPipelineRunner } from './services/ingestion-pipeline.runner';
@@ -73,13 +68,6 @@ import { NotesModule } from '../notes/notes.module';
     MatchStage,
     CommitStage,
 
-    // Strategies
-    DoiIngestionStrategy,
-    UrlIngestionStrategy,
-    PdfIngestionStrategy,
-    BibtexIngestionStrategy,
-    IngestionStrategyRegistry,
-
     // Service & Adapters
     SsrfGuardService,
     ZoteroTranslatorClient, // OSS: Zotero Translation Server client (700+ publisher translators)
@@ -100,7 +88,6 @@ import { NotesModule } from '../notes/notes.module';
     IngestionPipelineRunner,
     UrlCaptureService,
     IngestionWatchdogService,
-    IngestionStrategyRegistry,
     SsrfGuardService,
     DoiParser,
     BibtexParser,

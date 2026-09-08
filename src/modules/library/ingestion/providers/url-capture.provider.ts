@@ -211,6 +211,22 @@ export class UrlCaptureProvider {
     // Map itemType
     const itemType = this.mapZoteroItemType(item.itemType);
 
+    // Derive accessible PDF URL (e.g. arXiv, open access, or direct .pdf links)
+    let pdfUrl: string | undefined;
+    const combinedUrl = (item.url || fallbackUrl).trim();
+    const arxivMatch =
+      combinedUrl.match(/(?:arxiv\.org\/(?:abs|html|pdf)\/|arxiv:)(\d{4}\.\d{4,5}(?:v\d+)?)/i) ||
+      (item.extra && item.extra.match(/arxiv:\s*(\d{4}\.\d{4,5}(?:v\d+)?)/i));
+
+    if (arxivMatch) {
+      pdfUrl = `https://arxiv.org/pdf/${arxivMatch[1]}.pdf`;
+    } else if (
+      combinedUrl.toLowerCase().endsWith('.pdf') ||
+      combinedUrl.toLowerCase().includes('.pdf?')
+    ) {
+      pdfUrl = combinedUrl;
+    }
+
     return {
       title: item.title?.trim() || 'Untitled',
       abstract: item.abstractNote?.trim() || undefined,
@@ -238,6 +254,8 @@ export class UrlCaptureProvider {
       extra: item.extra?.trim() || undefined,
       keywords: keywords.length > 0 ? keywords : undefined,
       itemType,
+      pdfUrl,
+      openAccessPdfUrl: pdfUrl,
       rawMetadata: item as Record<string, any>,
     };
   }

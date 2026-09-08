@@ -117,11 +117,18 @@ export class IdentifyStage {
               title: item.title,
               itemType: item.itemType,
               authors: item.authors,
+              editors: item.editors,
               year: item.year,
               publicationTitle: item.journal || item.publisher,
+              journal: item.journal,
+              publisher: item.publisher,
+              place: item.place,
               volume: item.volume,
               issue: item.issue,
               pages: item.pages,
+              series: item.series,
+              edition: item.edition,
+              arxivId: item.arxivId,
               doi: item.doi,
               isbn: item.isbn,
               issn: item.issn,
@@ -130,7 +137,10 @@ export class IdentifyStage {
               citationKey: item.citationKey,
               tags: item.keywords,
               keywords: item.keywords,
-              notes: item.notes?.map((n) => ({ content: n, source: 'bibtex' })),
+              notes: item.notes?.map((noteContent) => ({
+                content: noteContent,
+                source: 'bibtex',
+              })),
               language: item.language,
               rights: item.rights,
               fileUrl: item.fileUrl,
@@ -214,10 +224,10 @@ export class IdentifyStage {
             });
             if (fileRecord?.buffer) {
               fileBuffer = fileRecord.buffer;
-              const doc = await this.pdfExtractor.extractDocumentFromBuffer(
-                fileBuffer,
-              );
-              extractedMetadata = doc?.metadata || doc || {};
+              const extractedDocument =
+                await this.pdfExtractor.extractDocumentFromBuffer(fileBuffer);
+              extractedMetadata =
+                extractedDocument?.metadata || extractedDocument || {};
 
               // Some PDF adapters can read the document header even when the
               // full document parser fails. Preserve that partial metadata.
@@ -231,9 +241,13 @@ export class IdentifyStage {
                   ) || {};
               }
             }
-          } catch (err: any) {
+          } catch (caughtError: unknown) {
+            const errorMessage =
+              caughtError instanceof Error
+                ? caughtError.message
+                : String(caughtError);
             this.logger.warn(
-              `PDF metadata extraction failed for file ${payload.fileId}: ${err?.message}`,
+              `PDF metadata extraction failed for file ${payload.fileId}: ${errorMessage}`,
             );
             // A damaged or encrypted PDF may still expose its document-info
             // header. Keep that lightweight fallback so a DOI can be enriched
@@ -266,7 +280,7 @@ export class IdentifyStage {
           /(?:arxiv[:_.\-]*)?(\d{4}\.\d{4,5}(?:v\d+)?)/i,
         )?.[1];
 
-        const rawFileMeta = {
+        const rawFileMetadata = {
           ...extractedItemMetadata,
           doi: extractedMetadata.doi || filenameDoi,
           arxivId: extractedMetadata.arxivId || filenameArxivId,
@@ -276,7 +290,7 @@ export class IdentifyStage {
           fileId: payload.fileId,
           filename: payload.filename,
         };
-        const normalized = this.normalizer.normalize(rawFileMeta);
+        const normalized = this.normalizer.normalize(rawFileMetadata);
 
         candidates.push({
           candidateId: randomUUID(),
@@ -286,7 +300,7 @@ export class IdentifyStage {
           retrievedAt: new Date().toISOString(),
           schemaVersion: '1.0.0',
           fields: this.buildEvidenceFields(
-            rawFileMeta,
+            rawFileMetadata,
             normalized,
             'StagedPdf',
           ),
@@ -301,17 +315,20 @@ export class IdentifyStage {
   }
 
   private buildEvidenceFields(
-    raw: Record<string, any>,
-    normalized: Record<string, any>,
+    rawMetadata: Record<string, any>,
+    normalizedMetadata: Record<string, any>,
     sourceName: string,
   ): Record<string, any> {
     const fields: Record<string, any> = {};
-    for (const key of Object.keys(normalized)) {
-      if (normalized[key] !== undefined && normalized[key] !== null) {
-        fields[key] = {
-          path: key,
-          value: raw[key],
-          normalizedValue: normalized[key],
+    for (const fieldName of Object.keys(normalizedMetadata)) {
+      if (
+        normalizedMetadata[fieldName] !== undefined &&
+        normalizedMetadata[fieldName] !== null
+      ) {
+        fields[fieldName] = {
+          path: fieldName,
+          value: rawMetadata[fieldName],
+          normalizedValue: normalizedMetadata[fieldName],
           confidence: 0.95,
           sourceProvider: sourceName,
           retrievedAt: new Date().toISOString(),

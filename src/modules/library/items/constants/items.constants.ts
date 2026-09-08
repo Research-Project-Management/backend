@@ -98,9 +98,18 @@ export const LEGACY_TYPE_SPECIFIC_EXTRA_FIELDS = [
   'standardNumber',
 ] as const;
 
+export const ACADEMIC_METRICS_EXTRA_FIELDS = [
+  'citationCount',
+  'referenceCount',
+  'openAccessPdfUrl',
+  'storageId',
+  'explicitCitationKey',
+] as const;
+
 export const TYPE_SPECIFIC_EXTRA_FIELDS = [
   ...new Set([
     ...LEGACY_TYPE_SPECIFIC_EXTRA_FIELDS,
+    ...ACADEMIC_METRICS_EXTRA_FIELDS,
     ...Object.values(SCHEMA_V42_DATA.itemTypes)
       .flatMap((itemType) => itemType.fields.map((field) => field.key))
       .filter((field) => !CATALOG_COLUMN_METADATA_FIELDS.has(field)),

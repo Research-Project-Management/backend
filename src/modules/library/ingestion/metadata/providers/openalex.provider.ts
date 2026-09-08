@@ -12,6 +12,7 @@ import {
   normalizeDoi,
   normalizeArxivId,
   normalizePmid,
+  normalizeTags,
 } from '../utils/metadata.utils';
 import { ProviderFetchError } from '../services/provider.executor';
 
@@ -321,20 +322,42 @@ export class OpenAlexProvider implements MetadataProvider {
 
     const itemIdStr = typeof item.id === 'string' ? item.id : title;
 
-    const keywords: string[] = [];
-    if (Array.isArray(item.concepts)) {
-      for (const c of item.concepts) {
-        if (typeof c?.display_name === 'string' && c.display_name.trim()) {
-          keywords.push(c.display_name.trim());
-        }
+    const rawKeywords: string[] = [];
+
+    // 1. Primary Topic & Curated Topics (OpenAlex v2 - Leiden CWTS taxonomy)
+    const primaryTopic = (item as any).primary_topic;
+    if (primaryTopic && typeof primaryTopic === 'object') {
+      if (typeof primaryTopic.display_name === 'string') {
+        rawKeywords.push(primaryTopic.display_name);
       }
-    } else if (Array.isArray(item.keywords)) {
+      if (typeof primaryTopic.subfield?.display_name === 'string') {
+        rawKeywords.push(primaryTopic.subfield.display_name);
+      }
+    }
+
+    const topics = (item as any).topics;
+    if (Array.isArray(topics)) {
+      for (const t of topics.slice(0, 3)) {
+        if (typeof t?.score === 'number' && t.score < 0.6) continue;
+        if (typeof t?.display_name === 'string') rawKeywords.push(t.display_name);
+        if (typeof t?.subfield?.display_name === 'string') rawKeywords.push(t.subfield.display_name);
+      }
+    }
+
+    // 2. Author / Extracted Keywords
+    if (Array.isArray(item.keywords)) {
       for (const k of item.keywords) {
-        if (typeof k?.keyword === 'string' && k.keyword.trim()) {
-          keywords.push(k.keyword.trim());
+        const text = typeof k === 'string' ? k : k?.keyword || k?.display_name;
+        const score = typeof k === 'object' && typeof k?.score === 'number' ? k.score : 1.0;
+        if (text && score >= 0.5) {
+          rawKeywords.push(text);
         }
       }
     }
+
+    // OpenAlex topics and author keywords are used; concepts are intentionally excluded to prevent Wikipedia pollution
+    const keywords = normalizeTags(rawKeywords);
+
 
     const creators = authors.map((name, idx) => ({
       orderIndex: idx,

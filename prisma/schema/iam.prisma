@@ -45,7 +45,6 @@ model User {
   authoredNotes        Note[]
   authoredAnnotations  Annotation[]
   userItemStates       UserItemState[]
-  savedSearches        SavedSearch[]
   worklogs             Worklog[]          @relation("UserWorklogs")
   zoteroConnections    ZoteroConnection[]
   capturePreviews      CapturePreview[]
@@ -177,17 +176,13 @@ model Workspace {
   libraryChanges     LibraryChange[]
   tombstones         Tombstone[]
   syncSequence       SyncSequence?
-  savedSearches      SavedSearch[]
-  duplicateClusters  DuplicateCluster[]
   zoteroConnections  ZoteroConnection[]
   zoteroBindings     ZoteroBinding[]
   zoteroItemBindings ZoteroItemBinding[]
   zoteroSyncRuns     ZoteroSyncRun[]
   zoteroSyncFailures ZoteroSyncFailure[]
   capturePreviews    CapturePreview[]
-  libraryDedupClaims LibraryDedupClaim[]
   ingestionReviewCases IngestionReviewCase[]
-  mergeLineages      CatalogMergeLineage[]
 
   @@index([createdById])
   @@index([url])

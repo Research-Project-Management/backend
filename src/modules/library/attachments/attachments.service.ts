@@ -123,6 +123,19 @@ export class AttachmentsService {
         attachment,
       );
 
+      if (attachment.mimeType === 'application/pdf') {
+        await helpers.publishOutbox(
+          input.workspaceId,
+          attachment.id,
+          'library.attachment.extraction_requested',
+          {
+            attachmentId: attachment.id,
+            catalogItemId: attachment.catalogItemId,
+            workspaceId: input.workspaceId,
+          },
+        );
+      }
+
       return attachment;
     });
   }
@@ -413,6 +426,22 @@ export class AttachmentsService {
         'library.attachment.created',
         { attachmentId: created.id },
       );
+
+      if (
+        command.mimeType === 'application/pdf' ||
+        command.filename?.toLowerCase().endsWith('.pdf')
+      ) {
+        await helpers.publishOutbox(
+          command.workspaceId,
+          created.id,
+          'library.attachment.extraction_requested',
+          {
+            attachmentId: created.id,
+            catalogItemId: command.catalogItemId,
+            workspaceId: command.workspaceId,
+          },
+        );
+      }
 
       return { id: created.id, isNew: true, version: 1 };
     }

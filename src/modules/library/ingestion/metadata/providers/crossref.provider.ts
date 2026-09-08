@@ -390,6 +390,14 @@ export class CrossRefProvider implements MetadataProvider {
         : undefined;
     const shortTitle = cleanBibliographicText(rawShortTitle);
 
+    const rawRefByCount = message['is-referenced-by-count'];
+    const citationCount =
+      typeof rawRefByCount === 'number'
+        ? rawRefByCount
+        : typeof rawRefByCount === 'string' && !isNaN(Number(rawRefByCount))
+          ? Number(rawRefByCount)
+          : undefined;
+
     return {
       provider: this.id,
       metadata: {
@@ -410,6 +418,7 @@ export class CrossRefProvider implements MetadataProvider {
         isbn,
         url: rawUrl,
         abstract,
+        citationCount,
         language,
         license,
         rights: license,

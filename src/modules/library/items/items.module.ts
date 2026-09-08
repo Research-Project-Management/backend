@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ItemsController } from './items.controller';
 import { ItemsService, CatalogService } from './items.service';
-import { ItemsRepository } from './items.repository';
 import { ItemQueryRepository } from './repositories/item-query.repository';
 import { ItemCommandRepository } from './repositories/item-command.repository';
 import { ItemsMapper } from './mappers/items.mapper';
@@ -12,11 +11,8 @@ import { TagsModule } from '../tags/tags.module';
 import { CollectionsModule } from '../collections/collections.module';
 import { SearchModule } from '../search/search.module';
 import {
-  CATALOG_READ_PORT,
-  CATALOG_COMMIT_PORT,
   ITEM_EXISTENCE_PORT,
   ITEM_READ_PORT,
-  ITEM_COMMIT_PORT,
 } from './ports/items.ports';
 
 @Module({
@@ -32,17 +28,8 @@ import {
   providers: [
     ItemQueryRepository,
     ItemCommandRepository,
-    ItemsRepository,
     ItemsService,
     ItemsMapper,
-    {
-      provide: CATALOG_READ_PORT,
-      useExisting: ItemsService,
-    },
-    {
-      provide: CATALOG_COMMIT_PORT,
-      useExisting: ItemsService,
-    },
     {
       provide: ITEM_EXISTENCE_PORT,
       useExisting: ItemsService,
@@ -51,20 +38,15 @@ import {
       provide: ITEM_READ_PORT,
       useExisting: ItemsService,
     },
-    {
-      provide: ITEM_COMMIT_PORT,
-      useExisting: ItemsService,
-    },
   ],
   exports: [
     ItemsService,
     CatalogService,
+    ItemQueryRepository,
+    ItemCommandRepository,
     ItemsMapper,
-    CATALOG_READ_PORT,
-    CATALOG_COMMIT_PORT,
     ITEM_EXISTENCE_PORT,
     ITEM_READ_PORT,
-    ITEM_COMMIT_PORT,
   ],
 })
 export class ItemsModule {}

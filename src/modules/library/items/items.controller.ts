@@ -88,6 +88,21 @@ export class ItemsController {
     return item;
   }
 
+  @Get(':id/fulltext')
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  async getFulltext(
+    @Param('workspaceId') workspaceId: string,
+    @Param('id') id: string,
+  ) {
+    const fulltext = await this.itemsService.getFulltext(workspaceId, id);
+    if (!fulltext) {
+      throw new NotFoundException(
+        `Full-text structured extraction not found for item ${id}`,
+      );
+    }
+    return fulltext;
+  }
+
   @Post()
   @WorkspaceRoles('owner', 'admin', 'member')
   async createItem(

@@ -154,15 +154,22 @@ export class CslJsonMapper {
     }
 
     // Contributors (Authors, Editors, Translators, etc.)
-    const contributors = item.contributors || [];
-    if (contributors.length > 0) {
-      const sorted = [...contributors].sort(
-        (a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0),
+    const rawContributors =
+      Array.isArray(item.contributors) && item.contributors.length > 0
+        ? item.contributors
+        : Array.isArray(item.creators) && item.creators.length > 0
+          ? item.creators
+          : null;
+
+    if (rawContributors && rawContributors.length > 0) {
+      const sortedContributors = [...rawContributors].sort(
+        (firstContributor, secondContributor) =>
+          (firstContributor.orderIndex ?? 0) - (secondContributor.orderIndex ?? 0),
       );
 
-      for (const contrib of sorted) {
-        const role = (contrib.creatorType || 'author').toLowerCase();
-        const cslName = this.formatCslName(contrib);
+      for (const contributorItem of sortedContributors) {
+        const role = (contributorItem.creatorType || 'author').toLowerCase();
+        const cslName = this.formatCslName(contributorItem);
 
         if (role === 'author') {
           if (!csl.author) csl.author = [];
@@ -184,10 +191,9 @@ export class CslJsonMapper {
       }
     } else if (Array.isArray(item.authors) && item.authors.length > 0) {
       // Fallback for raw string author arrays
-      csl.author = item.authors.map((a: string) => this.parseStringName(a));
-    } else if (Array.isArray(item.creators) && item.creators.length > 0) {
-      // Fallback for creator DTOs
-      csl.author = item.creators.map((c: any) => this.formatCslName(c));
+      csl.author = item.authors.map((authorName: string) =>
+        this.parseStringName(authorName),
+      );
     }
 
     return csl;

@@ -4,7 +4,7 @@ import {
   CreatorTypeDefinition,
   ItemTypeDefinition,
   SchemaRegistrySnapshot,
-} from './types/types.types';
+} from './types.types';
 import {
   SCHEMA_V42_DATA,
   LIBRARY_SCHEMA_VERSION,

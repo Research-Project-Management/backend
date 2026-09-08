@@ -14,22 +14,20 @@
 --   - Index size: ~20–30% of text content size in bytes
 
 -- Step 1: Add generated tsvector column (requires brief table lock)
-ALTER TABLE "CatalogItem"
+ALTER TABLE "papers"
   ADD COLUMN IF NOT EXISTS search_vector tsvector
   GENERATED ALWAYS AS (
     to_tsvector(
       'english',
       coalesce(title, '') || ' ' ||
       coalesce(abstract, '') || ' ' ||
-      coalesce("publicationTitle", '') || ' ' ||
+      coalesce(publication_title, '') || ' ' ||
       coalesce(doi, '') || ' ' ||
-      coalesce("citationKey", '')
+      coalesce(citation_key, '')
     )
   ) STORED;
 
--- Step 2: Create GIN index (CONCURRENTLY — no table lock, safe on live production)
--- Note: CONCURRENTLY cannot run inside a transaction block.
--- Run this separately if applying to production with active traffic:
---   CREATE INDEX CONCURRENTLY idx_catalog_item_fts ON "CatalogItem" USING GIN(search_vector);
-CREATE INDEX IF NOT EXISTS idx_catalog_item_fts
-  ON "CatalogItem" USING GIN(search_vector);
+-- Step 2: Create GIN index
+CREATE INDEX IF NOT EXISTS idx_papers_fts
+  ON "papers" USING GIN(search_vector);
+

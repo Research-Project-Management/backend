@@ -3,7 +3,7 @@
  * Owned by Flux Library domain. Not a dependency of any external reference manager.
  * This registry defines canonical item types for the Flux Library.
  */
-import { SchemaRegistrySnapshot } from '../types/types.types';
+import { SchemaRegistrySnapshot } from '../types.types';
 
 export const LIBRARY_SCHEMA_VERSION = 42;
 export const SCHEMA_SOURCE = 'flux-library-v42';

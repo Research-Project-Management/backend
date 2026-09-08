@@ -22,6 +22,7 @@ import {
   MetadataPort,
   ItemMetadata,
 } from '../ingestion/metadata/types/metadata.types';
+import { normalizeTags } from '../tags/utils/tags.utils';
 
 export interface ReferenceData {
   doi?: string;
@@ -49,9 +50,7 @@ export interface ReferenceData {
   url?: string;
   openAccessPdfUrl?: string;
   abstract?: string;
-  tldr?: string;
   citationCount?: number | string | null;
-  influentialCitationCount?: number | string | null;
   keywords?: string[];
   tags?: string[];
   type?: string;
@@ -323,12 +322,16 @@ export class CitationService {
         metadata.openAccessPdfUrl ||
         (metadata.doi ? `https://doi.org/${metadata.doi}` : undefined),
       openAccessPdfUrl: metadata.openAccessPdfUrl || metadata.pdfUrl,
-      abstract: metadata.abstract || metadata.abstractNote || metadata.tldr,
-      tldr: metadata.tldr,
+      abstract: metadata.abstract || metadata.abstractNote,
       citationCount: metadata.citationCount,
-      influentialCitationCount: metadata.influentialCitationCount,
-      keywords: metadata.keywords || metadata.tags,
-      tags: metadata.tags || metadata.keywords,
+      keywords: normalizeTags([
+        ...(metadata.keywords || []),
+        ...(metadata.tags || []),
+      ]),
+      tags: normalizeTags([
+        ...(metadata.tags || []),
+        ...(metadata.keywords || []),
+      ]),
       type: metadata.type || metadata.itemType || 'journal-article',
       itemType: metadata.itemType || metadata.type || 'journalArticle',
       extraFields: metadata.extraFields,

@@ -14,10 +14,8 @@ import { CrossRefProvider } from './providers/crossref.provider';
 import { ArxivProvider } from './providers/arxiv.provider';
 import { PubMedProvider } from './providers/pubmed.provider';
 import { OpenLibraryProvider } from './providers/openlibrary.provider';
-import { SemanticScholarProvider } from './providers/semantic-scholar.provider';
 import { OpenAlexProvider } from './providers/openalex.provider';
 import { UnpaywallProvider } from './providers/unpaywall.provider';
-import { CoreProvider } from './providers/core.provider';
 
 @Module({
   imports: [CoreModule],
@@ -31,10 +29,8 @@ import { CoreProvider } from './providers/core.provider';
     ArxivProvider,
     PubMedProvider,
     OpenLibraryProvider,
-    SemanticScholarProvider,
     OpenAlexProvider,
     UnpaywallProvider,
-    CoreProvider, // CORE API — 40M+ OA full-text papers (requires CORE_API_KEY)
 
     {
       provide: METADATA_PROVIDERS,
@@ -43,29 +39,23 @@ import { CoreProvider } from './providers/core.provider';
         arxiv: ArxivProvider,
         pubmed: PubMedProvider,
         openlibrary: OpenLibraryProvider,
-        semantic: SemanticScholarProvider,
         openalex: OpenAlexProvider,
         unpaywall: UnpaywallProvider,
-        core: CoreProvider,
       ): MetadataProvider[] => [
         crossref,
         arxiv,
         pubmed,
         openlibrary,
-        semantic,
         openalex,
         unpaywall,
-        core,
       ],
       inject: [
         CrossRefProvider,
         ArxivProvider,
         PubMedProvider,
         OpenLibraryProvider,
-        SemanticScholarProvider,
         OpenAlexProvider,
         UnpaywallProvider,
-        CoreProvider,
       ],
     },
     MetadataService,

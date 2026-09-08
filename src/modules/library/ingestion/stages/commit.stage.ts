@@ -4,6 +4,7 @@ import { ItemMetadata } from '../metadata/types/metadata.types';
 import { CreateCatalogItemData } from '../../items/types/items.types';
 import { LibraryItemSource } from '../../outbox/outbox.events';
 import { splitAuthorString } from '../../items/utils/items.utils';
+import { normalizeTags } from '../../tags/utils/tags.utils';
 
 
 export interface CommitStageOptions {
@@ -79,37 +80,55 @@ function mergeCreators(metadata: ItemMetadata) {
   return creators.length > 0 ? creators : undefined;
 }
 
+function generateBibtexCitationKey(metadata: ItemMetadata): string | undefined {
+  if (metadata.citationKey && metadata.citationKey.trim()) {
+    return metadata.citationKey.trim().replace(/\s+/g, '');
+  }
+  const firstAuthor =
+    metadata.authors?.[0] ||
+    metadata.creators?.[0]?.lastName ||
+    metadata.creators?.[0]?.fullName;
+  if (!firstAuthor && !metadata.title) {
+    return undefined;
+  }
+  let authorPart = 'ref';
+  if (firstAuthor) {
+    const authorTokens = firstAuthor.trim().split(/\s+/);
+    authorPart = (authorTokens[authorTokens.length - 1] || firstAuthor)
+      .toLowerCase()
+      .replace(/[^a-z0-9]/gi, '');
+  }
+  const yearPart = metadata.year ? String(metadata.year) : '';
+  const stopWords = new Set([
+    'a', 'an', 'the', 'on', 'in', 'for', 'of', 'and', 'with', 'via', 'to', 'is', 'are',
+  ]);
+  let titlePart = 'paper';
+  if (metadata.title) {
+    for (const wordItem of metadata.title.trim().split(/\s+/)) {
+      const cleanWord = wordItem.replace(/[^a-z0-9]/gi, '').toLowerCase();
+      if (cleanWord && !stopWords.has(cleanWord)) {
+        titlePart = cleanWord;
+        break;
+      }
+    }
+  }
+  return `${authorPart || 'ref'}${yearPart}${titlePart || 'paper'}`;
+}
+
 /** Converts reconciled provider metadata to the Catalog persistence contract.
  * This is the sole conversion used by the asynchronous ingestion path. */
 export function toCatalogItemData(
   metadata: ItemMetadata,
   options?: CommitStageOptions,
 ): CreateCatalogItemData {
-  const rawTags = metadata.tags || metadata.keywords || metadata.labels || [];
+  const rawTags = normalizeTags(
+    metadata.tags || metadata.keywords || metadata.labels || [],
+  );
+  // Only fields with no dedicated DB column go into extraFields
   const extraFields: Record<string, unknown> = {
     ...(metadata.extraFields || {}),
-    ...(metadata.abstractNote !== undefined
-      ? { abstractNote: metadata.abstractNote }
-      : {}),
-    ...(metadata.tldr !== undefined ? { tldr: metadata.tldr } : {}),
-    ...(metadata.citationCount !== undefined
-      ? { citationCount: metadata.citationCount }
-      : {}),
-    ...(metadata.referenceCount !== undefined
-      ? { referenceCount: metadata.referenceCount }
-      : {}),
-    ...(metadata.influentialCitationCount !== undefined
-      ? { influentialCitationCount: metadata.influentialCitationCount }
-      : {}),
-    ...(metadata.openAccessPdfUrl !== undefined
-      ? { openAccessPdfUrl: metadata.openAccessPdfUrl }
-      : {}),
-    ...(metadata.storageId !== undefined
-      ? { storageId: metadata.storageId }
-      : {}),
-    ...(metadata.explicitCitationKey !== undefined
-      ? { explicitCitationKey: metadata.explicitCitationKey }
-      : {}),
+    ...(metadata.storageId !== undefined ? { storageId: metadata.storageId } : {}),
+    ...(metadata.explicitCitationKey !== undefined ? { explicitCitationKey: metadata.explicitCitationKey } : {}),
   };
 
   return {
@@ -141,7 +160,7 @@ export function toCatalogItemData(
     seriesNumber: metadata.seriesNumber,
     abstract: metadata.abstract ?? metadata.abstractNote,
     url: metadata.url,
-    citationKey: metadata.citationKey,
+    citationKey: metadata.citationKey || generateBibtexCitationKey(metadata),
     shortTitle: metadata.shortTitle,
     creators: mergeCreators(metadata),
     labels: rawTags,
@@ -161,6 +180,8 @@ export function toCatalogItemData(
     libraryCatalog: metadata.libraryCatalog,
     callNumber: metadata.callNumber,
     accessedAt: normalizeAccessedAt(metadata.accessedAt),
+    citationCount: metadata.citationCount ?? null,
+    referenceCount: metadata.referenceCount ?? null,
     extra: metadata.extra,
     extraFields,
     notes: (() => {

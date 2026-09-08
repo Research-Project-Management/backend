@@ -187,6 +187,9 @@ export interface CreateCatalogItemInput {
   rights?: string;
   license?: string;
   citationKey?: string;
+  citationCount?: number | null;
+  referenceCount?: number | null;
+  openAccessPdfUrl?: string;
   libraryCatalog?: string;
   archive?: string;
   archiveLocation?: string;
@@ -236,6 +239,9 @@ export interface UpdateCatalogItemInput {
   rights?: string;
   license?: string;
   citationKey?: string;
+  citationCount?: number | null;
+  referenceCount?: number | null;
+  openAccessPdfUrl?: string;
   libraryCatalog?: string;
   archive?: string;
   archiveLocation?: string;
@@ -353,6 +359,7 @@ export interface CreateCatalogItemData {
   notes?: any;
   labels?: string[];
   keywords?: string[];
+  tags?: string[];
   fileUrl?: string;
   fileId?: string;
   filename?: string;
@@ -365,10 +372,10 @@ export interface CreateCatalogItemData {
   creators?: any[];
   extraFields?: Record<string, any>;
   identifier?: string;
-  organization?: string;
   arxivId?: string;
   citationCount?: number | null;
-  influentialCitationCount?: number | null;
+  referenceCount?: number | null;
+  openAccessPdfUrl?: string;
 }
 
 export interface UpdateCatalogItemData {
@@ -411,7 +418,8 @@ export interface UpdateCatalogItemData {
   license?: string;
   citationKey?: string;
   citationCount?: number | null;
-  influentialCitationCount?: number | null;
+  referenceCount?: number | null;
+  openAccessPdfUrl?: string;
   libraryCatalog?: string;
   archive?: string;
   archiveLocation?: string;

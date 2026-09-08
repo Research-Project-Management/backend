@@ -8,8 +8,11 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  BadRequestException,
 } from '@nestjs/common';
 import { AttachmentsService } from './attachments.service';
+import { WebSnapshotService } from './services/web-snapshot.service';
+import { PrismaService } from '../../../core/database/prisma.service';
 import {
   CreateAttachmentDto,
   ReplaceAttachmentFileDto,
@@ -26,7 +29,11 @@ import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-
 ])
 @UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
 export class AttachmentsController {
-  constructor(private readonly attachmentsService: AttachmentsService) {}
+  constructor(
+    private readonly attachmentsService: AttachmentsService,
+    private readonly webSnapshotService: WebSnapshotService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   @Get()
   @UseGuards(WorkspaceRoleGuard)
@@ -103,5 +110,34 @@ export class AttachmentsController {
     @Param('attachmentId') attachmentId: string,
   ) {
     return this.attachmentsService.deleteAttachment(workspaceId, attachmentId);
+  }
+
+  @Post('snapshot')
+  @HttpCode(HttpStatus.CREATED)
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member')
+  async captureSnapshot(
+    @Param('workspaceId') workspaceId: string,
+    @Param('itemId') itemId: string,
+    @Body() body?: { url?: string; title?: string },
+  ) {
+    let targetUrl = body?.url?.trim();
+    if (!targetUrl) {
+      const item = await this.prisma.catalogItem.findUnique({
+        where: { id: itemId },
+        select: { url: true, title: true },
+      });
+      if (!item?.url) {
+        throw new BadRequestException('No URL found on this item to capture a snapshot.');
+      }
+      targetUrl = item.url;
+    }
+
+    return this.webSnapshotService.captureAndAttach(
+      targetUrl,
+      itemId,
+      workspaceId,
+      { title: body?.title },
+    );
   }
 }

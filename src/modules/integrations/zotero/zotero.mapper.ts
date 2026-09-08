@@ -422,6 +422,39 @@ export class ZoteroMapper {
       }));
     }
 
+    // In Zotero, the Extra field contains raw content without artificial labels/titles injected.
+    // Preserve the clean content of item.extra directly (excluding internal PDF URLs, empty lines, or duplicate title lines).
+    let cleanExtra: string | undefined;
+    if (typeof item.extra === 'string' && item.extra.trim()) {
+      const paperTitle =
+        typeof item.title === 'string' ? item.title.trim().toLowerCase() : undefined;
+      const filtered = item.extra
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => {
+          if (!l) return false;
+          if (/^open\s*access:?/i.test(l)) return false;
+          if (/^https?:\/\//i.test(l)) return false;
+          const titleMatch = l.match(/^title:\s*(.+)$/i);
+          if (
+            titleMatch &&
+            (!paperTitle || titleMatch[1].trim().toLowerCase() === paperTitle)
+          ) {
+            return false;
+          }
+          return true;
+        });
+      if (filtered.length > 0) {
+        cleanExtra = filtered.join('\n');
+      }
+    }
+
+    if (cleanExtra) {
+      payload.extra = cleanExtra;
+    } else if (basePayload.extra) {
+      payload.extra = basePayload.extra;
+    }
+
     return payload;
   }
 }

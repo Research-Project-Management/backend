@@ -1,7 +1,7 @@
 import { ConflictException } from '@nestjs/common';
 import { ProviderName, QueryType } from '../types/metadata.types';
 
-export const METADATA_POLICY_VERSION = 1;
+export const METADATA_POLICY_VERSION = 2;
 
 export interface RoutingTiers {
   authoritative: ProviderName[];
@@ -45,46 +45,45 @@ export class MetadataRoutingPolicy {
       case 'DOI':
         return {
           authoritative: ['CrossRef'],
-          enrichment: ['SemanticScholar', 'Unpaywall', 'OpenAlex'],
-          fallback: ['OpenAlex', 'SemanticScholar'],
+          enrichment: ['Unpaywall', 'OpenAlex'],
+          fallback: ['OpenAlex'],
         };
 
       case 'ARXIV':
         return {
           authoritative: ['arXiv'],
-          enrichment: ['SemanticScholar', 'OpenAlex'],
+          enrichment: ['OpenAlex'],
           fallback: ['CrossRef', 'OpenAlex'],
         };
 
       case 'PMID':
         return {
           authoritative: ['PubMed'],
-          enrichment: ['SemanticScholar', 'OpenAlex'],
-          fallback: ['OpenAlex', 'SemanticScholar'],
+          enrichment: ['OpenAlex'],
+          fallback: ['OpenAlex'],
         };
 
       case 'ISBN':
         return {
           authoritative: ['OpenLibrary'],
           enrichment: ['OpenAlex'],
-          fallback: ['SemanticScholar'],
+          fallback: ['OpenAlex'],
         };
 
       case 'URL':
         return {
-          authoritative: ['SemanticScholar'],
+          authoritative: ['OpenAlex'],
           enrichment: [],
-          fallback: ['OpenAlex'],
+          fallback: ['CrossRef'],
         };
 
       case 'TITLE':
       default:
         return {
-          authoritative: ['SemanticScholar'],
-          enrichment: [],
-          fallback: ['CrossRef', 'OpenAlex', 'CORE'],
+          authoritative: ['CrossRef'],
+          enrichment: ['OpenAlex'],
+          fallback: ['OpenAlex'],
         };
-
     }
   }
 

@@ -51,17 +51,6 @@ export interface UpdateCatalogItemCommand {
   expectedVersion?: number;
 }
 
-export interface ICatalogCommitPort {
-  createItem(command: CreateCatalogItemCommand): Promise<CatalogItemDetail>;
-  updateItem(command: UpdateCatalogItemCommand): Promise<CatalogItemDetail>;
-  softDeleteItem(workspaceId: string, itemId: string): Promise<void>;
-  restoreItem(workspaceId: string, itemId: string): Promise<CatalogItemDetail>;
-  purgeItem(workspaceId: string, itemId: string): Promise<void>;
-}
-
-export const CATALOG_COMMIT_PORT = Symbol('CATALOG_COMMIT_PORT');
-export const ITEM_COMMIT_PORT = CATALOG_COMMIT_PORT;
-export type IItemCommitPort = ICatalogCommitPort;
 
 export interface QualityAuditCandidateItem {
   id: string;
@@ -129,8 +118,8 @@ export interface ICatalogReadPort {
   ): Promise<DuplicateCandidateItem[]>;
 }
 
-export const CATALOG_READ_PORT = Symbol('CATALOG_READ_PORT');
-export const ITEM_READ_PORT = CATALOG_READ_PORT;
+export const ITEM_READ_PORT = Symbol('ITEM_READ_PORT');
+export const CATALOG_READ_PORT = ITEM_READ_PORT;
 export type IItemReadPort = ICatalogReadPort;
 
 export interface IItemExistencePort {

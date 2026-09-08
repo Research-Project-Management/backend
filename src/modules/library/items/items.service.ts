@@ -6,11 +6,12 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { Prisma, RagStatus } from '@prisma/client';
+import { ItemQueryRepository } from './repositories/item-query.repository';
+import { ItemCommandRepository } from './repositories/item-command.repository';
 import {
-  ItemsRepository,
   CreateCatalogItemData,
   UpdateCatalogItemData,
-} from './items.repository';
+} from './types/items.types';
 import { TransactionService, TransactionHelpers } from '../outbox/transaction.service';
 import {
   LIBRARY_EVENT_TYPES,
@@ -88,7 +89,8 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
   private readonly logger = new Logger(ItemsService.name);
 
   constructor(
-    private readonly catalogRepo: ItemsRepository,
+    private readonly queryRepo: ItemQueryRepository,
+    private readonly commandRepo: ItemCommandRepository,
     private readonly libraryTx: TransactionService,
     private readonly prisma: PrismaService,
     private readonly tagsService: TagsService,
@@ -111,9 +113,14 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
 
   async getItem(workspaceId: string, id: string, userId?: string) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const item = await this.catalogRepo.findById(canonicalWorkspaceId, id);
+    const item = await this.queryRepo.findById(canonicalWorkspaceId, id);
     if (!item) return null;
     return this.mapFlattenedState(item, userId);
+  }
+
+  async getFulltext(workspaceId: string, id: string) {
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    return this.queryRepo.getFulltext(canonicalWorkspaceId, id);
   }
 
   async listItems(
@@ -131,8 +138,8 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     const limit = Math.min(options.limit ?? 50, 100);
     const [totalCount, rawItems] = await Promise.all([
-      this.catalogRepo.count(canonicalWorkspaceId, options),
-      this.catalogRepo.findMany(canonicalWorkspaceId, {
+      this.queryRepo.count(canonicalWorkspaceId, options),
+      this.queryRepo.findMany(canonicalWorkspaceId, {
         ...options,
         limit,
       }),
@@ -172,7 +179,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       tx: Prisma.TransactionClient,
       helpers: TransactionHelpers,
     ) => {
-      const item = await this.catalogRepo.create(canonicalWorkspaceId, data, tx);
+      const item = await this.commandRepo.create(canonicalWorkspaceId, data, tx);
 
       await helpers.appendChange(canonicalWorkspaceId, {
         entityType: 'CatalogItem',
@@ -217,7 +224,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
   ): Promise<any> {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     if (context) {
-      const updated = await this.catalogRepo.update(
+      const updated = await this.commandRepo.update(
         canonicalWorkspaceId,
         id,
         expectedVersion,
@@ -252,13 +259,13 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
   }
 
   private async executePaperRagIndexing(item: any): Promise<void> {
-    await this.catalogRepo.updateRagStatus(item.id, {
+    await this.commandRepo.updateRagStatus(item.id, {
       ragStatus: RagStatus.pending,
       ragLastAttemptAt: new Date(),
     });
     try {
       const result = await this.ragIndexer.indexPaper(item);
-      await this.catalogRepo.updateRagStatus(item.id, {
+      await this.commandRepo.updateRagStatus(item.id, {
         ragDocId: result.docId,
         ragStatus: 'indexed',
         ragIndexedAt: new Date(),
@@ -269,7 +276,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       );
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Indexing failed';
-      await this.catalogRepo.updateRagStatus(item.id, {
+      await this.commandRepo.updateRagStatus(item.id, {
         ragStatus: 'failed',
         ragError: message,
       });
@@ -279,7 +286,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
 
   async reindexItem(workspaceId: string, id: string, userId: string) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const item = await this.catalogRepo.findById(canonicalWorkspaceId, id);
+    const item = await this.queryRepo.findById(canonicalWorkspaceId, id);
     if (!item) {
       throw new NotFoundException(`Item ${id} not found in workspace ${canonicalWorkspaceId}`);
     }
@@ -313,7 +320,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
   ): Promise<boolean> {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     if (context) {
-      const deleted = await this.catalogRepo.softDelete(
+      const deleted = await this.commandRepo.softDelete(
         canonicalWorkspaceId,
         id,
         expectedVersion,
@@ -344,7 +351,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
   async restoreItem(workspaceId: string, id: string, expectedVersion?: number) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const restored = await this.catalogRepo.restore(
+      const restored = await this.commandRepo.restore(
         canonicalWorkspaceId,
         id,
         expectedVersion,
@@ -373,7 +380,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
   async purgeItem(workspaceId: string, id: string): Promise<boolean> {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const purged = await this.catalogRepo.purge(canonicalWorkspaceId, id, tx);
+      const purged = await this.commandRepo.purge(canonicalWorkspaceId, id, tx);
 
       await helpers.recordTombstone(canonicalWorkspaceId, {
         entityType: 'CatalogItem',
@@ -391,12 +398,12 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
 
   async getRelatedItems(workspaceId: string, itemId: string) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const item = await this.catalogRepo.findById(canonicalWorkspaceId, itemId);
+    const item = await this.queryRepo.findById(canonicalWorkspaceId, itemId);
     if (!item) {
       throw new NotFoundException(`Item ${itemId} not found`);
     }
 
-    const relations = await this.catalogRepo.getRelations(itemId);
+    const relations = await this.queryRepo.getRelations(itemId);
     return {
       relatedItems: relations,
       total: relations.length,
@@ -409,12 +416,12 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     data: { targetItemId: string; relationType?: string; note?: string },
   ) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const sourceItem = await this.catalogRepo.findById(canonicalWorkspaceId, sourceItemId);
+    const sourceItem = await this.queryRepo.findById(canonicalWorkspaceId, sourceItemId);
     if (!sourceItem) {
       throw new NotFoundException(`Source item ${sourceItemId} not found`);
     }
 
-    const targetItem = await this.catalogRepo.findById(canonicalWorkspaceId, data.targetItemId);
+    const targetItem = await this.queryRepo.findById(canonicalWorkspaceId, data.targetItemId);
     if (!targetItem) {
       throw new NotFoundException(`Target item ${data.targetItemId} not found`);
     }
@@ -430,7 +437,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       linkedAt: now,
     };
 
-    await this.catalogRepo.putRelation(sourceItemId, relation);
+    await this.commandRepo.putRelation(sourceItemId, relation);
 
     return {
       success: true,
@@ -445,12 +452,12 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     targetItemId: string,
   ) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const sourceItem = await this.catalogRepo.findById(canonicalWorkspaceId, sourceItemId);
+    const sourceItem = await this.queryRepo.findById(canonicalWorkspaceId, sourceItemId);
     if (!sourceItem) {
       throw new NotFoundException(`Source item ${sourceItemId} not found`);
     }
 
-    await this.catalogRepo.removeRelation(sourceItemId, targetItemId);
+    await this.commandRepo.removeRelation(sourceItemId, targetItemId);
 
     return {
       success: true,
@@ -461,24 +468,24 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
 
   async getItemSnapshot(workspaceId: string, itemId: string) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.catalogRepo.getItemSnapshot(canonicalWorkspaceId, itemId);
+    return this.queryRepo.getItemSnapshot(canonicalWorkspaceId, itemId);
   }
 
   async getItemSnapshots(workspaceId: string, itemIds: string[]) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.catalogRepo.getItemSnapshots(canonicalWorkspaceId, itemIds);
+    return this.queryRepo.getItemSnapshots(canonicalWorkspaceId, itemIds);
   }
 
   // ── Port Implementations (IItemExistencePort & ICatalogReadPort) ────────────
 
   async exists(workspaceId: string, itemId: string): Promise<boolean> {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.catalogRepo.exists(canonicalWorkspaceId, itemId);
+    return this.queryRepo.exists(canonicalWorkspaceId, itemId);
   }
 
   async assertExists(workspaceId: string, itemId: string): Promise<void> {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.catalogRepo.assertExists(canonicalWorkspaceId, itemId);
+    return this.queryRepo.assertExists(canonicalWorkspaceId, itemId);
   }
 
   async existMany(
@@ -486,42 +493,42 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     itemIds: string[],
   ): Promise<Map<string, boolean>> {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.catalogRepo.existMany(canonicalWorkspaceId, itemIds);
+    return this.queryRepo.existMany(canonicalWorkspaceId, itemIds);
   }
 
   async findById(workspaceId: string, itemId: string) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.catalogRepo.findById(canonicalWorkspaceId, itemId) as any;
+    return this.queryRepo.findById(canonicalWorkspaceId, itemId) as any;
   }
 
   async findByIds(workspaceId: string, itemIds: string[]) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.catalogRepo.findByIds(canonicalWorkspaceId, itemIds) as any;
+    return this.queryRepo.findByIds(canonicalWorkspaceId, itemIds) as any;
   }
 
   async findByDoi(workspaceId: string, doi: string) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.catalogRepo.findByDoi(canonicalWorkspaceId, doi) as any;
+    return this.queryRepo.findByDoi(canonicalWorkspaceId, doi) as any;
   }
 
   async findSummaryById(workspaceId: string, itemId: string) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.catalogRepo.findSummaryById(canonicalWorkspaceId, itemId);
+    return this.queryRepo.findSummaryById(canonicalWorkspaceId, itemId);
   }
 
   async findSummariesByIds(workspaceId: string, itemIds: string[]) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.catalogRepo.findSummariesByIds(canonicalWorkspaceId, itemIds);
+    return this.queryRepo.findSummariesByIds(canonicalWorkspaceId, itemIds);
   }
 
   async findQualityAuditItems(workspaceId: string, limit?: number) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.catalogRepo.findQualityAuditItems(canonicalWorkspaceId, limit);
+    return this.queryRepo.findQualityAuditItems(canonicalWorkspaceId, limit);
   }
 
   async findDuplicateCandidateItems(workspaceId: string, limit?: number) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.catalogRepo.findDuplicateCandidateItems(
+    return this.queryRepo.findDuplicateCandidateItems(
       canonicalWorkspaceId,
       limit,
     );
@@ -1187,7 +1194,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     tx?: Prisma.TransactionClient,
   ) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const existing = await this.catalogRepo.findById(canonicalWorkspaceId, itemId, tx);
+    const existing = await this.queryRepo.findById(canonicalWorkspaceId, itemId, tx);
     if (!existing) {
       throw new NotFoundException(
         `Item ${itemId} not found in workspace ${canonicalWorkspaceId}`,
@@ -1231,7 +1238,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       }
     }
 
-    const updated = await this.catalogRepo.update(
+    const updated = await this.commandRepo.update(
       canonicalWorkspaceId,
       itemId,
       options.expectedVersion,

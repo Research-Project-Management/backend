@@ -111,15 +111,23 @@ export class ItemsMapper {
     // Restore it.extra to the original plain text so consumers (export, FE) can access it.
     if (typeof extraFields._rawExtra === 'string') {
       it.extra = extraFields._rawExtra;
+      delete extraFields._rawExtra;
+    } else if (typeof it.extra === 'string' && it.extra.trim().startsWith('{')) {
+      it.extra = undefined;
     }
 
-    // Project extra fields to top-level if not already set
-    for (const [k, v] of Object.entries(extraFields)) {
-      if (k === '_rawExtra') continue; // Do not pollute top-level with internal key
-      if (it[k] === undefined || it[k] === null || it[k] === '') {
-        it[k] = v;
-      }
+    // Explicit projection of known academic fields from extraFields (legacy fallback for old records
+    // that were stored before dedicated DB columns existed).
+    // New records will have these as proper DB columns — these fallbacks handle pre-migration data.
+    if (it.citationCount === undefined || it.citationCount === null) {
+      it.citationCount = extraFields.citationCount ?? null;
     }
+    if (it.referenceCount === undefined || it.referenceCount === null) {
+      it.referenceCount = extraFields.referenceCount ?? null;
+    }
+    if (!it.openAccessPdfUrl) it.openAccessPdfUrl = extraFields.openAccessPdfUrl ?? null;
+    if (!it.arxivId) it.arxivId = extraFields.arxivId ?? null;
+    if (!it.seriesNumber) it.seriesNumber = extraFields.seriesNumber ?? null;
 
     // Project lastReadAt from userStates if present and not already top-level
     if (

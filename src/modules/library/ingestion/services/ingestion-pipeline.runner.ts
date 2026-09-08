@@ -13,8 +13,10 @@ import { ReconcileStage } from '../stages/reconcile.stage';
 import { MatchStage } from '../stages/match.stage';
 import { CommitStage } from '../stages/commit.stage';
 import { LibraryItemSource } from '../../outbox/outbox.events';
-import { CatalogService } from '../../items/items.service';
+import { ItemsService } from '../../items/items.service';
 import { NotesService } from '../../notes/notes.service';
+import { AttachmentsService } from '../../attachments/attachments.service';
+import { getFileContentPath } from '../../../storage/storage.port';
 import { IngestionStatus, Prisma } from '@prisma/client';
 
 @Injectable()
@@ -23,14 +25,15 @@ export class IngestionPipelineRunner {
 
   constructor(
     private readonly ingestionRepo: IngestionRepository,
-    @Optional() private readonly identifyStage?: IdentifyStage,
-    @Optional() private readonly normalizeStage?: NormalizeStage,
-    @Optional() private readonly enrichStage?: EnrichStage,
-    @Optional() private readonly reconcileStage?: ReconcileStage,
-    @Optional() private readonly matchStage?: MatchStage,
-    @Optional() private readonly commitStage?: CommitStage,
-    @Optional() private readonly catalogService?: CatalogService,
-    @Optional() private readonly notesService?: NotesService,
+    private readonly identifyStage: IdentifyStage,
+    private readonly normalizeStage: NormalizeStage,
+    private readonly enrichStage: EnrichStage,
+    private readonly reconcileStage: ReconcileStage,
+    private readonly matchStage: MatchStage,
+    private readonly commitStage: CommitStage,
+    private readonly itemsService: ItemsService,
+    private readonly notesService: NotesService,
+    private readonly attachmentsService: AttachmentsService,
   ) {}
 
   /**
@@ -41,17 +44,6 @@ export class IngestionPipelineRunner {
     workspaceId: string,
     envelope: IngestionSubmissionEnvelope,
   ): Promise<void> {
-    if (
-      !this.identifyStage ||
-      !this.normalizeStage ||
-      !this.enrichStage ||
-      !this.reconcileStage ||
-      !this.matchStage ||
-      !this.commitStage
-    ) {
-      throw new Error('Ingestion pipeline stages are not configured');
-    }
-
     // Stage 1: IDENTIFY & PARSE
     const identifyStart = Date.now();
     const identifiedCandidates = await this.identifyStage.execute(
@@ -204,9 +196,9 @@ export class IngestionPipelineRunner {
       let enrichedItem: any = null;
       const enrichPatch: Record<string, any> = {};
 
-      if (this.catalogService) {
+      if (this.itemsService) {
         // Fetch current state to build a null-safe patch
-        const existing = await this.catalogService.getItem(
+        const existing = await this.itemsService.getItem(
           workspaceId,
           matchResult.targetItemId,
         );
@@ -250,9 +242,9 @@ export class IngestionPipelineRunner {
         maybeEnrich('itemType', p.itemType);
         maybeEnrich('type', p.type);
         maybeEnrich('citationKey', p.citationKey);
-        maybeEnrich('issn', (p as any).issn);
-        maybeEnrich('isbn', (p as any).isbn);
-        maybeEnrich('language', (p as any).language);
+        maybeEnrich('issn', p.issn);
+        maybeEnrich('isbn', p.isbn);
+        maybeEnrich('language', p.language);
         maybeEnrich('rights', p.rights);
         maybeEnrich('license', p.license);
         maybeEnrich('extra', p.extra);
@@ -261,22 +253,22 @@ export class IngestionPipelineRunner {
         maybeEnrich('archive', p.archive);
         maybeEnrich('archiveLocation', p.archiveLocation);
         maybeEnrich('extraFields', p.extraFields);
-        if (p.authors?.length && !(existing as any)?.authors?.length) {
+        if (p.authors?.length && !existing?.authors?.length) {
           enrichPatch['authors'] = p.authors;
         }
-        if (p.editors?.length && !(existing as any)?.editors?.length) {
+        if (p.editors?.length && !existing?.editors?.length) {
           enrichPatch['editors'] = p.editors;
         }
-        if (p.creators?.length && !(existing as any)?.creators?.length) {
+        if (p.creators?.length && !existing?.creators?.length) {
           enrichPatch['creators'] = p.creators;
         }
-        if (p.keywords?.length && !(existing as any)?.keywords?.length) {
+        if (p.keywords?.length && !existing?.keywords?.length) {
           enrichPatch['keywords'] = p.keywords;
           enrichPatch['labels'] = p.keywords;
         }
 
         if (Object.keys(enrichPatch).length > 0) {
-          enrichedItem = await this.catalogService.updateItem(
+          enrichedItem = await this.itemsService.updateItem(
             workspaceId,
             matchResult.targetItemId,
             undefined,
@@ -292,20 +284,61 @@ export class IngestionPipelineRunner {
           );
         }
 
+        // Attach uploaded file to existing item if a file was provided and not yet attached
+        if (
+          envelope.payload.kind === 'FILE' &&
+          envelope.payload.fileId &&
+          this.attachmentsService
+        ) {
+          const uploadedFileIdentifier = envelope.payload.fileId;
+          const uploadedFilename =
+            envelope.payload.filename || 'document.pdf';
+          try {
+            await this.attachmentsService.createAttachment({
+              workspaceId,
+              catalogItemId: matchResult.targetItemId,
+              fileId: uploadedFileIdentifier,
+              filename: uploadedFilename,
+              url: getFileContentPath(uploadedFileIdentifier),
+              mimeType: 'application/pdf',
+              size: 0,
+            });
+            this.logger.log(
+              `[EXACT_MERGE] Attached uploaded file ${uploadedFileIdentifier} to item ${matchResult.targetItemId}`,
+            );
+          } catch (attachmentError: unknown) {
+            const errorMessage =
+              attachmentError instanceof Error
+                ? attachmentError.message
+                : String(attachmentError);
+            this.logger.warn(
+              `[EXACT_MERGE] Failed to attach file ${uploadedFileIdentifier} to item ${matchResult.targetItemId}: ${errorMessage}`,
+            );
+          }
+        }
+
         // Add literature notes from proposed item if not already recorded
         if (Array.isArray(p.notes) && p.notes.length > 0 && this.notesService) {
-          for (const note of p.notes) {
-            const content =
-              typeof note === 'string' ? note : (note as any)?.content;
-            if (!content || !String(content).trim()) continue;
-            const src =
-              typeof note === 'object' ? (note as any)?.source : undefined;
+          for (const noteItem of p.notes) {
+            const noteContent =
+              typeof noteItem === 'string'
+                ? noteItem
+                : typeof noteItem === 'object' && noteItem !== null
+                  ? String((noteItem as Record<string, unknown>).content || '')
+                  : '';
+            if (!noteContent.trim()) continue;
+            const noteSource =
+              typeof noteItem === 'object' && noteItem !== null
+                ? typeof (noteItem as Record<string, unknown>).source === 'string'
+                  ? String((noteItem as Record<string, unknown>).source)
+                  : undefined
+                : undefined;
             await this.notesService.createLiteratureNote(
               workspaceId,
               matchResult.targetItemId,
               envelope.userId || 'system',
-              String(content).trim(),
-              src,
+              noteContent.trim(),
+              noteSource,
             );
             this.logger.log(
               `[EXACT_MERGE] Added literature note to item ${matchResult.targetItemId}`,

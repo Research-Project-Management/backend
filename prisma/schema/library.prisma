@@ -36,13 +36,18 @@ model CatalogItem {
   archiveLocation  String?     @map("archive_location")
   callNumber       String?     @map("call_number")
   accessedAt       DateTime?  @map("accessed_at") @db.Timestamptz(6)
-  extra            String?    @default("")
-  ragDocId         String?    @map("rag_doc_id")
-  ragIndexedAt     DateTime?  @map("rag_indexed_at") @db.Timestamptz(6)
-  ragLastAttemptAt DateTime?  @map("rag_last_attempt_at") @db.Timestamptz(6)
-  ragAttempts      Int        @default(0) @map("rag_attempts")
-  ragError         String?     @map("rag_error")
-  ragStatus        RagStatus? @map("rag_status")
+  extra                String?    @default("")
+  arxivId              String?    @map("arxiv_id")
+  citationCount        Int?       @map("citation_count")
+  referenceCount       Int?       @map("reference_count")
+  openAccessPdfUrl     String?    @map("open_access_pdf_url")
+  seriesNumber         String?    @map("series_number")
+  ragDocId             String?    @map("rag_doc_id")
+  ragIndexedAt         DateTime?  @map("rag_indexed_at") @db.Timestamptz(6)
+  ragLastAttemptAt     DateTime?  @map("rag_last_attempt_at") @db.Timestamptz(6)
+  ragAttempts          Int        @default(0) @map("rag_attempts")
+  ragError             String?    @map("rag_error")
+  ragStatus            RagStatus? @map("rag_status")
   workspaceId      String     @map("workspace_id") @db.Uuid
   workspace        Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   uploadedById     String     @map("uploaded_by_id") @db.Uuid
@@ -58,16 +63,13 @@ model CatalogItem {
   identifiers     CatalogIdentifier[]
   collectionItems CollectionItem[]
   itemTags        CatalogItemTag[]
-  sourceRecords   MetadataSourceRecord[]
-  assertions      MetadataAssertion[]
   revisions       CatalogItemRevision[]
   notesList       Note[]
   outgoingRel     ItemRelation[]        @relation("SourceCatalogItem")
   incomingRel     ItemRelation[]        @relation("TargetCatalogItem")
   userStates      UserItemState[]
   ingestionRuns   IngestionRun[]
-  dedupClaims     LibraryDedupClaim[]
-  mergeLineages   CatalogMergeLineage[] @relation("TargetItemLineage")
+  sourceRecords   MetadataSourceRecord[]
 
   @@index([workspaceId, deletedAt])
   @@index([workspaceId, ragStatus])
@@ -151,36 +153,6 @@ model CatalogItemTag {
   @@map("catalog_item_tags")
 }
 
-model MetadataSourceRecord {
-  id              String      @id @default(uuid()) @db.Uuid
-  catalogItemId   String      @map("catalog_item_id") @db.Uuid
-  catalogItem     CatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
-  sourceProvider  String      @map("source_provider")
-  rawPayload      Json?       @map("raw_payload")
-  snapshotHash    String?     @map("snapshot_hash")
-  confidenceScore Float       @default(1.0) @map("confidence_score")
-  fetchedAt       DateTime    @default(now()) @map("fetched_at") @db.Timestamptz(6)
-
-  @@index([catalogItemId, sourceProvider])
-  @@index([snapshotHash])
-  @@map("metadata_source_records")
-}
-
-model MetadataAssertion {
-  id              String      @id @default(uuid()) @db.Uuid
-  catalogItemId   String      @map("catalog_item_id") @db.Uuid
-  catalogItem     CatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
-  field           String
-  value           String
-  sourceProvider  String      @map("source_provider")
-  confidenceScore Float       @default(1.0) @map("confidence_score")
-  isUserOverride  Boolean     @default(false) @map("is_user_override")
-  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  @@index([catalogItemId, field])
-  @@index([isUserOverride])
-  @@map("metadata_assertions")
-}
 
 model CatalogItemRevision {
   id              String      @id @default(uuid()) @db.Uuid
@@ -195,22 +167,20 @@ model CatalogItemRevision {
   @@map("catalog_item_revisions")
 }
 
-model CatalogMergeLineage {
-  id           String      @id @default(uuid()) @db.Uuid
-  workspaceId  String      @map("workspace_id") @db.Uuid
-  workspace    Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  sourceItemId String      @map("source_item_id") @db.Uuid
-  targetItemId String      @map("target_item_id") @db.Uuid
-  targetItem   CatalogItem @relation("TargetItemLineage", fields: [targetItemId], references: [id], onDelete: Cascade)
-  mergeReason  String?     @default("manual") @map("merge_reason")
-  mergedFields Json?       @map("merged_fields")
-  mergedById   String?     @map("merged_by_id") @db.Uuid
-  mergedAt     DateTime    @default(now()) @map("merged_at") @db.Timestamptz(6)
+model MetadataSourceRecord {
+  id              String      @id @default(uuid()) @db.Uuid
+  catalogItemId   String      @map("catalog_item_id") @db.Uuid
+  catalogItem     CatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+  sourceProvider  String      @map("source_provider")
+  sourceRecordId  String?     @map("source_record_id")
+  rawPayload      Json        @map("raw_payload")
+  confidenceScore Float       @default(1.0) @map("confidence_score")
+  fetchedAt       DateTime    @default(now()) @map("fetched_at") @db.Timestamptz(6)
 
-  @@index([workspaceId, sourceItemId])
-  @@index([targetItemId])
-  @@map("catalog_merge_lineage")
+  @@index([catalogItemId, sourceProvider])
+  @@map("metadata_source_records")
 }
+
 
 model CatalogAttachment {
   id             String         @id @default(uuid()) @db.Uuid
@@ -526,38 +496,6 @@ model IdempotencyRecord {
   @@map("idempotency_records")
 }
 
-model LibraryDedupClaim {
-  id            String      @id @default(uuid()) @db.Uuid
-  workspaceId   String      @map("workspace_id") @db.Uuid
-  workspace     Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  claimType     String      @map("claim_type") // 'doi', 'pdf_sha256'
-  claimValue    String      @map("claim_value") // normalized DOI or lowercase sha256
-  catalogItemId String      @map("catalog_item_id") @db.Uuid
-  catalogItem   CatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
-  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  @@unique([workspaceId, claimType, claimValue])
-  @@index([workspaceId, claimType, claimValue])
-  @@index([catalogItemId])
-  @@map("library_dedup_claims")
-}
-
-model SavedSearch {
-  id          String    @id @default(uuid()) @db.Uuid
-  workspaceId String    @map("workspace_id") @db.Uuid
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  userId      String    @map("user_id") @db.Uuid
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name        String
-  query       Json // Filter criteria (q, itemType, tags, collections, year range, etc.)
-  color       String?   @default("#3370ff")
-  icon        String?   @default("search")
-  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  @@index([workspaceId, userId])
-  @@map("saved_searches")
-}
 
 model FullTextIndex {
   id           String            @id @default(uuid()) @db.Uuid
@@ -573,20 +511,6 @@ model FullTextIndex {
   @@map("full_text_indexes")
 }
 
-model DuplicateCluster {
-  id          String    @id @default(uuid()) @db.Uuid
-  workspaceId String    @map("workspace_id") @db.Uuid
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  itemIds     String[]  @map("item_ids")
-  confidence  Float     @default(1.0)
-  matchReason String    @map("match_reason") // DOI_EXACT, TITLE_FUZZY, CITATION_KEY
-  status      String    @default("pending") // pending, resolved, dismissed
-  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  @@index([workspaceId, status])
-  @@map("duplicate_clusters")
-}
 
 model Collection {
   id          String       @id @default(uuid()) @db.Uuid

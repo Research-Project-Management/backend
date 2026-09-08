@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { Prisma } from '@prisma/client';
 
@@ -22,10 +22,14 @@ export interface FacetResult {
 }
 
 @Injectable()
-export class SearchRepository {
+export class SearchRepository implements OnModuleInit {
   private readonly logger = new Logger(SearchRepository.name);
 
   constructor(private readonly prisma: PrismaService) {}
+
+  async onModuleInit(): Promise<void> {
+    await this.checkFtsColumnExists();
+  }
 
   private getClient(tx?: Prisma.TransactionClient) {
     return tx || this.prisma;
@@ -129,15 +133,15 @@ export class SearchRepository {
   ) {
     // Build structured filters as SQL fragment
     const baseFilters: string[] = [
-      `"workspaceId" = $1`,
-      `"deletedAt" IS NULL`,
+      `workspace_id = $1::uuid`,
+      `deleted_at IS NULL`,
       `search_vector @@ plainto_tsquery('english', $2)`,
     ];
     const params: any[] = [workspaceId, q];
     let paramIdx = 3;
 
     if (options.itemType) {
-      baseFilters.push(`"itemType" = $${paramIdx++}`);
+      baseFilters.push(`item_type = $${paramIdx++}`);
       params.push(options.itemType);
     }
     if (options.yearFrom) {
@@ -149,20 +153,20 @@ export class SearchRepository {
       params.push(options.yearTo);
     }
     if (options.cursor) {
-      baseFilters.push(`id > $${paramIdx++}`);
+      baseFilters.push(`id > $${paramIdx++}::uuid`);
       params.push(options.cursor);
     }
 
     // Collection and tag filters via subquery
     if (options.collectionId) {
       baseFilters.push(
-        `EXISTS (SELECT 1 FROM "CollectionItem" ci WHERE ci."itemId" = "CatalogItem".id AND ci."collectionId" = $${paramIdx++})`,
+        `EXISTS (SELECT 1 FROM "collection_items" ci WHERE ci.catalog_item_id = "papers".id AND ci.collection_id = $${paramIdx++}::uuid)`,
       );
       params.push(options.collectionId);
     }
     if (options.tagId) {
       baseFilters.push(
-        `EXISTS (SELECT 1 FROM "ItemTag" it WHERE it."itemId" = "CatalogItem".id AND it."tagId" = $${paramIdx++})`,
+        `EXISTS (SELECT 1 FROM "catalog_item_tags" it WHERE it.catalog_item_id = "papers".id AND it.tag_id = $${paramIdx++}::uuid)`,
       );
       params.push(options.tagId);
     }
@@ -176,14 +180,14 @@ export class SearchRepository {
         : options.sortBy === 'title'
           ? `title ${options.sortOrder === 'asc' ? 'ASC' : 'DESC'} NULLS LAST`
           : options.sortBy === 'relevance' || !options.sortBy
-            ? `ts_rank(search_vector, plainto_tsquery('english', $2)) DESC, "createdAt" DESC`
-            : `"createdAt" ${options.sortOrder === 'asc' ? 'ASC' : 'DESC'}`;
+            ? `ts_rank(search_vector, plainto_tsquery('english', $2)) DESC, created_at DESC`
+            : `created_at ${options.sortOrder === 'asc' ? 'ASC' : 'DESC'}`;
 
     params.push(limit + 1);
     const limitParam = paramIdx++;
 
     const rows: any[] = await this.prisma.$queryRawUnsafe(
-      `SELECT id FROM "CatalogItem"
+      `SELECT id FROM "papers"
        WHERE ${whereClause}
        ORDER BY ${orderExpr}
        LIMIT $${limitParam}`,
@@ -341,20 +345,26 @@ export class SearchRepository {
    */
   async checkFtsColumnExists(): Promise<void> {
     try {
-      await this.prisma.$queryRaw`
+      const res: any[] = await this.prisma.$queryRaw`
         SELECT 1 FROM pg_attribute a
         JOIN pg_class c ON c.oid = a.attrelid
-        WHERE c.relname = 'CatalogItem'
+        WHERE c.relname = 'papers'
           AND a.attname = 'search_vector'
           AND NOT a.attisdropped
         LIMIT 1
       `;
-      this.ftsColumnExists = true;
-      this.logger.log('PostgreSQL FTS: search_vector column found — full-text search enabled');
-    } catch {
+      this.ftsColumnExists = Array.isArray(res) && res.length > 0;
+      if (this.ftsColumnExists) {
+        this.logger.log('PostgreSQL FTS: search_vector column found — full-text search enabled');
+      } else {
+        this.logger.warn(
+          'PostgreSQL FTS: search_vector column not found on table "papers" — run migration "add_catalog_item_fts" to enable. Falling back to ILIKE.',
+        );
+      }
+    } catch (err: any) {
       this.ftsColumnExists = false;
       this.logger.warn(
-        'PostgreSQL FTS: search_vector column not found — run migration "add_catalog_item_fts" to enable. Falling back to ILIKE.',
+        `PostgreSQL FTS: search_vector column check failed (${err?.message}) — falling back to ILIKE.`,
       );
     }
   }

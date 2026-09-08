@@ -13,6 +13,7 @@ import {
   normalizeDoi,
   cleanBibliographicText,
   decodeHtmlEntities,
+  normalizeTags,
 } from '../utils/metadata.utils';
 import { ProviderFetchError } from '../services/provider.executor';
 
@@ -126,16 +127,24 @@ export class ArxivProvider implements MetadataProvider {
       ? cleanBibliographicText(summaryMatch[1])
       : undefined;
 
-    const keywords = Array.from(
+    const rawCategories = Array.from(
       entry.matchAll(/<category[^>]*term=["']([^"']+)["'][^>]*>/gi),
       (match) => decodeHtmlEntities(match[1].trim()),
     ).filter(Boolean);
 
-    // DOI (if exists in arxiv:doi)
+    const keywords = normalizeTags(rawCategories);
+
+    // DOI (if exists in arxiv:doi, or fallback to standard DataCite arXiv DOI)
     let doi: string | undefined;
-    const doiMatch = entry.match(/<arxiv:doi[^>]*>([\s\S]*?)<\/arxiv:doi>/i);
-    if (doiMatch) {
-      doi = normalizeDoi(doiMatch[1]);
+    const doiMatchResult = entry.match(
+      /<arxiv:doi[^>]*>([\s\S]*?)<\/arxiv:doi>/i,
+    );
+    if (doiMatchResult) {
+      doi = normalizeDoi(doiMatchResult[1]);
+    }
+    if (!doi && cleanId) {
+      const canonicalArxivIdentifier = cleanId.replace(/v\d+$/i, '');
+      doi = `10.48550/arXiv.${canonicalArxivIdentifier}`;
     }
 
     // Journal ref
@@ -162,10 +171,10 @@ export class ArxivProvider implements MetadataProvider {
 
     const rawVersion = createHash('md5').update(xml).digest('hex');
 
-    const creators = authors.map((name, idx) => ({
-      orderIndex: idx,
+    const creators = authors.map((authorName, authorIndex) => ({
+      orderIndex: authorIndex,
       creatorType: 'author',
-      fullName: name,
+      fullName: authorName,
     }));
 
     return {

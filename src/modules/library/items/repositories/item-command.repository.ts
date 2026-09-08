@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { Prisma, RagStatus } from '@prisma/client';
 import { PrismaService } from '../../../../core/database/prisma.service';
-import { VersionMismatchException } from '../errors/items.errors';
+import { VersionMismatchException } from '../../common/errors/version-mismatch.exception';
 import { normalizeTags } from '../../tags/utils/tags.utils';
 import {
   parseCreatorString,
@@ -105,7 +105,7 @@ export class ItemCommandRepository {
       doi: cleanDoi,
       abstract: data.abstract ?? '',
       itemType: data.itemType ?? 'journalArticle',
-      publicationTitle: data.publicationTitle ?? (data as any).journal ?? '',
+      publicationTitle: data.publicationTitle ?? data.journal ?? '',
       publicationDate:
         data.publicationDate ?? (data.year ? String(data.year) : ''),
       publisher: data.publisher ?? '',
@@ -135,6 +135,11 @@ export class ItemCommandRepository {
       archiveLocation: data.archiveLocation ?? '',
       callNumber: data.callNumber ?? '',
       accessedAt: data.accessedAt ?? parseAccessDate(data.accessDate) ?? null,
+      arxivId: cleanArxivId || undefined,
+      citationCount: data.citationCount ?? null,
+      referenceCount: data.referenceCount ?? null,
+      openAccessPdfUrl: data.openAccessPdfUrl ?? null,
+      seriesNumber: data.seriesNumber ?? null,
       extra: (() => {
         // Merge extra (raw text/JSON), extraFields, and type-specific fields that have no dedicated DB column
         let merged: Record<string, any> = {};
@@ -308,29 +313,27 @@ export class ItemCommandRepository {
             },
           }
         : {}),
-      ...((data as any).labels?.length ||
-      (data as any).keywords?.length ||
-      (data as any).tags?.length
+      ...(data.tags?.length || data.keywords?.length || data.labels?.length
         ? {
             itemTags: {
               create: normalizeTags([
-                ...((data as any).labels || []),
-                ...((data as any).keywords || []),
-                ...((data as any).tags || []),
+                ...(data.tags || []),
+                ...(data.keywords || []),
+                ...(data.labels || []),
               ])
                 .slice(0, 30)
-                .map((name) => ({
+                .map((tagName) => ({
                   tag: {
                     connectOrCreate: {
                       where: {
                         workspaceId_name: {
                           workspaceId,
-                          name,
+                          name: tagName,
                         },
                       },
                       create: {
                         workspaceId,
-                        name,
+                        name: tagName,
                       },
                     },
                   },
@@ -405,61 +408,6 @@ export class ItemCommandRepository {
         },
       });
     }
-
-    const rawTags = (data as any).tags || data.keywords || data.labels || [];
-    const normalizedTagsList = normalizeTags(rawTags);
-    if (normalizedTagsList.length > 0) {
-      for (const tagName of normalizedTagsList) {
-        const tag = await client.catalogTag.upsert({
-          where: {
-            workspaceId_name: {
-              workspaceId,
-              name: tagName,
-            },
-          },
-          create: {
-            workspaceId,
-            name: tagName,
-          },
-          update: {},
-        });
-        await client.catalogItemTag.upsert({
-          where: {
-            tagId_catalogItemId: {
-              tagId: tag.id,
-              catalogItemId: item.id,
-            },
-          },
-          create: {
-            tagId: tag.id,
-            catalogItemId: item.id,
-          },
-          update: {},
-        });
-      }
-
-      const reloaded = await client.catalogItem.findUnique({
-        where: { id: item.id },
-        include: {
-          collectionItems: {
-            include: { collection: true },
-          },
-          itemTags: {
-            include: { tag: true },
-          },
-          contributors: {
-            orderBy: { orderIndex: 'asc' },
-          },
-          identifiers: true,
-          attachments: {
-            include: { revisions: true },
-          },
-        },
-      });
-
-      return reloaded || item;
-    }
-
     return item;
   }
 
@@ -473,6 +421,9 @@ export class ItemCommandRepository {
     const client = this.getClient(tx);
     const existing = await client.catalogItem.findFirst({
       where: { id, workspaceId, deletedAt: null },
+      include: {
+        identifiers: true,
+      },
     });
 
     if (!existing) {
@@ -569,6 +520,11 @@ export class ItemCommandRepository {
           data.accessedAt !== undefined
             ? data.accessedAt
             : (parseAccessDate(data.accessDate) ?? existing.accessedAt),
+        arxivId: cleanArxivId !== undefined ? cleanArxivId : existing.arxivId,
+        citationCount: data.citationCount !== undefined ? data.citationCount : existing.citationCount,
+        referenceCount: data.referenceCount !== undefined ? data.referenceCount : existing.referenceCount,
+        openAccessPdfUrl: data.openAccessPdfUrl !== undefined ? data.openAccessPdfUrl : existing.openAccessPdfUrl,
+        seriesNumber: data.seriesNumber !== undefined ? data.seriesNumber : existing.seriesNumber,
         extra: (() => {
           // Build merged extraFields: start from existing, overlay incoming extraFields, then type-specific fields
           let merged: Record<string, any> = {};
@@ -747,9 +703,12 @@ export class ItemCommandRepository {
         canonicalUri: cleanDoi ? `https://doi.org/${cleanDoi}` : '',
       });
     }
+    const existingArxivIdentifier = existing.identifiers?.find(
+      (identifierItem) => identifierItem.type === 'arxiv',
+    )?.value;
     if (
       cleanArxivId !== undefined &&
-      cleanArxivId !== (existing as any).arxivId
+      cleanArxivId !== existingArxivIdentifier
     ) {
       identifierChanges.push({
         type: 'arxiv',

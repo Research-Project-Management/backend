@@ -172,8 +172,6 @@ export class NormalizationPolicy {
     if (abstractText) result.abstract = abstractText;
     const abstractNote = this.cleanString(raw.abstractNote);
     if (abstractNote) result.abstractNote = abstractNote;
-    const tldr = this.cleanString(raw.tldr);
-    if (tldr) result.tldr = tldr;
 
     // 9. URL
     if (raw.url) {
@@ -279,7 +277,6 @@ export class NormalizationPolicy {
     for (const field of [
       'citationCount',
       'referenceCount',
-      'influentialCitationCount',
     ] as const) {
       const value = raw[field];
       if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
@@ -301,13 +298,13 @@ export class NormalizationPolicy {
       'isbn', 'issn', 'year', 'publicationDate', 'date', 'accessedAt',
       'creators', 'authors', 'editors', 'publicationTitle', 'journal',
       'publisher', 'volume', 'issue', 'pages', 'abstract', 'abstractNote',
-      'tldr', 'url', 'openAccessPdfUrl', 'tags', 'keywords', 'labels',
+      'url', 'openAccessPdfUrl', 'tags', 'keywords', 'labels',
       'notes', 'citationKey', 'explicitCitationKey', 'language', 'rights',
       'license', 'extra', 'extraFields', 'fileId', 'filename', 'fileUrl',
       'pdfUrl', 'type', 'place', 'section', 'partNumber', 'partTitle',
       'series', 'seriesTitle', 'seriesText', 'seriesNumber', 'journalAbbr',
       'storageId', 'archive', 'archiveLocation', 'libraryCatalog', 'callNumber',
-      'citationCount', 'referenceCount', 'influentialCitationCount',
+      'citationCount', 'referenceCount',
     ]);
     const preservedFields = Object.fromEntries(
       Object.entries(raw).filter(
@@ -436,15 +433,6 @@ export class NormalizationPolicy {
   }
 
   private normalizeTags(tags: string[]): string[] {
-    const set = new Set<string>();
-    for (const t of tags) {
-      const clean = this.cleanString(t);
-      if (!clean) continue;
-      const stripped = clean.replace(/^#+/, '').trim().toLowerCase();
-      if (stripped && !NormalizationPolicy.BANNED_STRINGS.has(stripped)) {
-        set.add(stripped);
-      }
-    }
-    return Array.from(set);
+    return canonicalNormalizeTags(tags);
   }
 }

@@ -15,8 +15,7 @@ import { ItemsModule } from '../items/items.module';
 import { GrobidClient } from '../../../infra/grobid/grobid.client';
 
 import { AttachmentsRepository } from './attachments.repository';
-
-
+import { WebSnapshotService } from './services/web-snapshot.service';
 
 @Module({
   imports: [
@@ -30,11 +29,12 @@ import { AttachmentsRepository } from './attachments.repository';
   providers: [
     AttachmentsRepository,
     AttachmentsService,
+    WebSnapshotService,
     GrobidClient, // OSS: GROBID client for structured PDF header extraction (Apache 2.0)
     PdfExtractorProvider,
     AttachmentExtractionHandler,
   ],
-  exports: [AttachmentsService, PdfExtractorProvider, GrobidClient],
+  exports: [AttachmentsService, WebSnapshotService, PdfExtractorProvider, GrobidClient],
 
 })
 export class AttachmentsModule implements OnModuleInit {

@@ -66,16 +66,16 @@ export class EnrichStage {
 
           const fields: Record<string, FieldEvidence> = {};
 
-          for (const [key, val] of Object.entries(normalized)) {
-            if (val !== undefined && val !== null) {
-              const prov = resolved.provenance[key];
-              fields[key] = {
-                path: key,
-                value: rawMetadata[key as keyof typeof rawMetadata],
-                normalizedValue: val,
-                confidence: prov ? prov.confidence : 0.9,
-                sourceProvider: prov ? prov.provider : 'MetadataResolution',
-                retrievedAt: prov ? prov.fetchedAt : resolved.resolvedAt,
+          for (const [fieldName, propertyValue] of Object.entries(normalized)) {
+            if (propertyValue !== undefined && propertyValue !== null) {
+              const provenance = resolved.provenance[fieldName];
+              fields[fieldName] = {
+                path: fieldName,
+                value: rawMetadata[fieldName as keyof typeof rawMetadata],
+                normalizedValue: propertyValue,
+                confidence: provenance ? provenance.confidence : 0.9,
+                sourceProvider: provenance ? provenance.provider : 'MetadataResolution',
+                retrievedAt: provenance ? provenance.fetchedAt : resolved.resolvedAt,
               };
             }
           }
@@ -92,9 +92,13 @@ export class EnrichStage {
             confidenceScore: 0.95,
           });
         }
-      } catch (err: any) {
+      } catch (caughtError: unknown) {
+        const errorMessage =
+          caughtError instanceof Error
+            ? caughtError.message
+            : String(caughtError);
         this.logger.warn(
-          `Enrichment lookup failed for query "${query}": ${err?.message || err}`,
+          `Enrichment lookup failed for query "${query}": ${errorMessage}`,
         );
         // Non-blocking: enrichment failure must degrade gracefully without aborting run
       }

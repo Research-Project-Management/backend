@@ -31,6 +31,7 @@ export interface ParsedBibtexEntry {
   rights?: string;
   fileUrl?: string;
   extra?: string;
+  arxivId?: string;
 }
 
 @Injectable()
@@ -124,6 +125,13 @@ export class BibtexParser {
           notes: notes && notes.length > 0 ? notes : undefined,
           language: csl.language ? String(csl.language).trim() : undefined,
           rights: csl.rights ? String(csl.rights).trim() : undefined,
+          arxivId:
+            csl.arXiv ||
+            csl.arxiv ||
+            (typeof csl.id === 'string' &&
+            csl.id.match(/^(\d{4}\.\d{4,5}(?:v\d+)?)$/)?.[1]
+              ? csl.id
+              : undefined),
         };
       });
     } catch (err: any) {
@@ -241,6 +249,7 @@ export class BibtexParser {
         language: fields.language || undefined,
         rights: fields.rights || fields.license || undefined,
         fileUrl,
+        arxivId: fields.eprint || fields.arxiv || fields.arxivid || undefined,
       });
     }
 

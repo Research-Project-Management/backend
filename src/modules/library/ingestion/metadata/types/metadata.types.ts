@@ -82,10 +82,8 @@ export interface ItemMetadata {
   pages?: string;
   abstract?: string;
   abstractNote?: string;
-  tldr?: string;
   citationCount?: number;
   referenceCount?: number;
-  influentialCitationCount?: number;
   language?: string;
   url?: string;
   pdfUrl?: string;

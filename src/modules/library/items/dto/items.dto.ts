@@ -207,10 +207,6 @@ export class CreateCatalogItemDto {
   citationCount?: number | null;
 
   @IsOptional()
-  @IsNumber()
-  influentialCitationCount?: number | null;
-
-  @IsOptional()
   @IsString()
   libraryCatalog?: string;
 
@@ -551,10 +547,6 @@ export class UpdateCatalogItemDto {
   @IsOptional()
   @IsNumber()
   citationCount?: number | null;
-
-  @IsOptional()
-  @IsNumber()
-  influentialCitationCount?: number | null;
 
   @IsOptional()
   @IsString()

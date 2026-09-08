@@ -67,7 +67,9 @@ export class ZoteroTranslatorClient {
     return val !== 'false' && val !== '0';
   }
 
-  private readonly timeoutMs = 12_000;
+  private get timeoutMs(): number {
+    return parseInt(process.env.ZOTERO_TRANSLATOR_TIMEOUT_MS || '30000', 10);
+  }
   private readonly userAgent = 'FluxResearchPlatform/1.0 (contact@flux.app)';
 
   /**

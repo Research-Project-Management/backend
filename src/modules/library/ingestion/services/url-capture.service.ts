@@ -13,6 +13,8 @@ import { CatalogService } from '../../items/items.service';
 import { Prisma } from '@prisma/client';
 import { createHash } from 'crypto';
 
+import { WebSnapshotService } from '../../attachments/services/web-snapshot.service';
+
 @Injectable()
 export class UrlCaptureService {
   private readonly logger = new Logger(UrlCaptureService.name);
@@ -22,6 +24,7 @@ export class UrlCaptureService {
     @Optional() private readonly urlCaptureProvider?: UrlCaptureProvider,
     @Optional() private readonly txService?: TransactionService,
     @Optional() private readonly catalogService?: CatalogService,
+    @Optional() private readonly webSnapshotService?: WebSnapshotService,
   ) {}
 
   /**
@@ -176,8 +179,9 @@ export class UrlCaptureService {
       uploadedById: userId,
     };
 
+    let createdItem: any = null;
     if (this.txService?.executeInTransaction) {
-      return this.txService.executeInTransaction(
+      createdItem = await this.txService.executeInTransaction(
         async (tx: Prisma.TransactionClient, helpers: any) => {
           const updateRes = await tx.capturePreview.updateMany({
             where: { id: preview.id, consumedAt: null },
@@ -203,26 +207,41 @@ export class UrlCaptureService {
           );
         },
       );
-    }
-
-    const updateRes = await this.prisma.capturePreview.updateMany({
-      where: { id: preview.id, consumedAt: null },
-      data: { consumedAt: new Date() },
-    });
-
-    if (!updateRes || updateRes.count === 0) {
-      throw new ConflictException(
-        'Capture preview has already been confirmed or claimed',
-      );
-    }
-
-    if (this.catalogService?.createItem) {
-      return this.catalogService.createItem(workspaceId, itemData, {
-        source: 'url',
+    } else {
+      const updateRes = await this.prisma.capturePreview.updateMany({
+        where: { id: preview.id, consumedAt: null },
+        data: { consumedAt: new Date() },
       });
+
+      if (!updateRes || updateRes.count === 0) {
+        throw new ConflictException(
+          'Capture preview has already been confirmed or claimed',
+        );
+      }
+
+      if (this.catalogService?.createItem) {
+        createdItem = await this.catalogService.createItem(workspaceId, itemData, {
+          source: 'url',
+        });
+      } else {
+        throw new Error('CatalogService is required to confirm captured URL item');
+      }
     }
 
-    throw new Error('CatalogService is required to confirm captured URL item');
+    if (createdItem?.id && itemData.url && this.webSnapshotService?.captureAndAttach) {
+      void this.webSnapshotService
+        .captureAndAttach(itemData.url, createdItem.id, workspaceId, {
+          title: createdItem.title,
+          uploadedById: userId,
+        })
+        .catch((err: any) => {
+          this.logger.warn(
+            `Background snapshot capture failed for confirmed URL item ${createdItem.id}: ${err?.message}`,
+          );
+        });
+    }
+
+    return createdItem;
   }
 
   /**

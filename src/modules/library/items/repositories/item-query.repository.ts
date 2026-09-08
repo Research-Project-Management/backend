@@ -40,7 +40,6 @@ export class ItemQueryRepository {
         attachments: {
           include: { revisions: true },
         },
-        mergeLineages: true,
       },
     });
   }
@@ -640,6 +639,30 @@ export class ItemQueryRepository {
       take: limit,
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  async getFulltext(
+    workspaceId: string,
+    itemId: string,
+    tx?: Prisma.TransactionClient,
+  ) {
+    if (!isUuid(itemId) || !isUuid(workspaceId)) return null;
+    const client = this.getClient(tx);
+    const item = await client.catalogItem.findFirst({
+      where: { id: itemId, workspaceId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!item) return null;
+
+    const sourceRecord = await client.metadataSourceRecord.findFirst({
+      where: {
+        catalogItemId: itemId,
+        sourceProvider: 'grobid_fulltext',
+      },
+      orderBy: { fetchedAt: 'desc' },
+    });
+
+    return sourceRecord?.rawPayload || null;
   }
 }
 

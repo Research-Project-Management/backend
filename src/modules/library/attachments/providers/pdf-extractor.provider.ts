@@ -1,7 +1,15 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { extractText, getDocumentProxy, getMeta } from 'unpdf';
 import { isIP } from 'node:net';
-import { GrobidClient } from '../../../../infra/grobid/grobid.client';
+import {
+  GrobidClient,
+  GrobidCreator,
+  GrobidReference,
+  GrobidSection,
+  GrobidFigure,
+  GrobidTable,
+  GrobidFormula,
+} from '../../../../infra/grobid/grobid.client';
 import { SsrfGuardService } from '../../common/services/ssrf-guard.service';
 
 export interface ExtractedPdfMetadata {
@@ -10,12 +18,17 @@ export interface ExtractedPdfMetadata {
   pmid?: string;
   title?: string;
   authors?: string[];
+  creators?: GrobidCreator[];
   year?: number;
+  publicationDate?: string;
   abstract?: string;
-  keywords?: string[]
+  abstractParagraphs?: string[];
+  abstractSections?: Array<{ heading?: string; text: string }>;
+  keywords?: string[];
   journal?: string;
   creationDate?: string;
   rawText?: string;
+  rawTei?: string;
 }
 
 export interface ExtractedPdfDocument {
@@ -25,6 +38,11 @@ export interface ExtractedPdfDocument {
     textContent: string;
     charOffset: number;
   }>;
+  references?: GrobidReference[];
+  sections?: GrobidSection[];
+  figures?: GrobidFigure[];
+  tables?: GrobidTable[];
+  formulas?: GrobidFormula[];
 }
 
 @Injectable()
@@ -48,56 +66,63 @@ export class PdfExtractorProvider {
     }> = [];
 
     let combinedText = '';
-    const unpdfMeta: ExtractedPdfMetadata = {};
+    const unpdfExtractedMetadata: ExtractedPdfMetadata = {};
 
+    // 1. Extract metadata from header stream first using safe regex before any parsing
+    const headerExtractedMetadata = this.extractMetadataFromBuffer(buffer);
+
+    // 2. Parse PDF via unpdf with an independent cloned Uint8Array to prevent buffer detachment
     try {
-      const binaryDataArray = new Uint8Array(
-        buffer.buffer,
-        buffer.byteOffset,
-        buffer.byteLength,
-      );
-      const document = await getDocumentProxy(binaryDataArray);
+      const clonedBinaryDataArray = new Uint8Array(buffer.byteLength);
+      clonedBinaryDataArray.set(buffer);
+
+      const document = await getDocumentProxy(clonedBinaryDataArray);
 
       try {
-        const docInfo = await getMeta(document);
-        if (docInfo?.info) {
-          const info = docInfo.info;
-          if (typeof info.Title === 'string') {
-            const cleanTitle = info.Title.trim();
+        const documentInformation = await getMeta(document);
+        if (documentInformation?.info) {
+          const informationRecord = documentInformation.info;
+          if (typeof informationRecord.Title === 'string') {
+            const cleanTitle = informationRecord.Title.trim();
             if (
               cleanTitle.length > 5 &&
               !cleanTitle.toLowerCase().endsWith('.pdf') &&
               !/^(untitled|document|microsoft word)/i.test(cleanTitle)
             ) {
-              unpdfMeta.title = cleanTitle;
+              unpdfExtractedMetadata.title = cleanTitle;
             }
           }
-          if (typeof info.Author === 'string') {
-            const cleanAuthor = info.Author.trim();
+          if (typeof informationRecord.Author === 'string') {
+            const cleanAuthor = informationRecord.Author.trim();
             if (
               cleanAuthor.length > 2 &&
               !/^(administrator|user|owner|unknown)$/i.test(cleanAuthor)
             ) {
-              const list = cleanAuthor
+              const authorList = cleanAuthor
                 .split(/[,;\n]|\band\b/i)
-                .map((a: string) => a.trim())
-                .filter((a: string) => a.length > 1 && !/^\d+$/.test(a));
-              if (list.length > 0) {
-                unpdfMeta.authors = list;
+                .map((authorItem: string) => authorItem.trim())
+                .filter(
+                  (authorItem: string) =>
+                    authorItem.length > 1 && !/^\d+$/.test(authorItem),
+                );
+              if (authorList.length > 0) {
+                unpdfExtractedMetadata.authors = authorList;
               }
             }
           }
-          if (typeof info.CreationDate === 'string') {
-            const yearMatch = info.CreationDate.match(/D:(\d{4})/);
+          if (typeof informationRecord.CreationDate === 'string') {
+            const yearMatch = informationRecord.CreationDate.match(/D:(\d{4})/);
             if (yearMatch?.[1]) {
-              unpdfMeta.year = parseInt(yearMatch[1], 10);
+              unpdfExtractedMetadata.year = parseInt(yearMatch[1], 10);
             }
           }
-          if (typeof info.Keywords === 'string') {
-            const kw = info.Keywords.split(/[,;]/)
-              .map((k: string) => k.trim())
+          if (typeof informationRecord.Keywords === 'string') {
+            const keywordList = informationRecord.Keywords.split(/[,;]/)
+              .map((keywordItem: string) => keywordItem.trim())
               .filter(Boolean);
-            if (kw.length > 0) unpdfMeta.keywords = kw;
+            if (keywordList.length > 0) {
+              unpdfExtractedMetadata.keywords = keywordList;
+            }
           }
         }
       } catch {
@@ -112,107 +137,171 @@ export class PdfExtractorProvider {
           : [];
 
       let currentOffset = 0;
-      for (let i = 0; i < rawPages.length; i++) {
-        const pageText = rawPages[i] || '';
+      for (let pageIndex = 0; pageIndex < rawPages.length; pageIndex++) {
+        const pageText = rawPages[pageIndex] || '';
         pages.push({
-          pageIndex: i,
+          pageIndex: pageIndex,
           textContent: pageText,
           charOffset: currentOffset,
         });
         currentOffset += pageText.length + 1;
         combinedText += (combinedText ? '\n' : '') + pageText;
       }
-    } catch (err: any) {
+    } catch (caughtError: unknown) {
+      const errorMessage =
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError);
       this.logger.warn(
-        `PDF unpdf parse failed (encrypted or corrupted): ${err.message}`,
+        `PDF unpdf parse failed (encrypted or corrupted): ${errorMessage}`,
       );
     }
 
-    // Extract metadata from header stream and text
-    const headerMeta = this.extractMetadataFromBuffer(buffer);
-    const textMeta = combinedText
+    // 3. Extract metadata from combined text
+    const textExtractedMetadata = combinedText
       ? this.extractMetadataFromText(combinedText)
       : {};
 
     const metadata: ExtractedPdfMetadata = {
-      doi: textMeta.doi || unpdfMeta.doi || headerMeta.doi,
-      arxivId: textMeta.arxivId || unpdfMeta.arxivId || headerMeta.arxivId,
+      doi:
+        textExtractedMetadata.doi ||
+        unpdfExtractedMetadata.doi ||
+        headerExtractedMetadata.doi,
+      arxivId:
+        textExtractedMetadata.arxivId ||
+        unpdfExtractedMetadata.arxivId ||
+        headerExtractedMetadata.arxivId,
       title:
-        textMeta.title ||
-        unpdfMeta.title ||
-        (headerMeta.title &&
-        !headerMeta.title.toLowerCase().endsWith('.pdf') &&
-        !/^\d{4}\.\d{4,5}/.test(headerMeta.title) &&
-        headerMeta.title.length > 5
-          ? headerMeta.title
+        textExtractedMetadata.title ||
+        unpdfExtractedMetadata.title ||
+        (headerExtractedMetadata.title &&
+        !headerExtractedMetadata.title.toLowerCase().endsWith('.pdf') &&
+        !/^\d{4}\.\d{4,5}/.test(headerExtractedMetadata.title) &&
+        headerExtractedMetadata.title.length > 5
+          ? headerExtractedMetadata.title
           : undefined),
       authors:
-        textMeta.authors && textMeta.authors.length > 0
-          ? textMeta.authors
-          : unpdfMeta.authors && unpdfMeta.authors.length > 0
-            ? unpdfMeta.authors
-            : headerMeta.authors,
-      year: textMeta.year || unpdfMeta.year || headerMeta.year,
-      abstract: textMeta.abstract || headerMeta.abstract,
+        textExtractedMetadata.authors &&
+        textExtractedMetadata.authors.length > 0
+          ? textExtractedMetadata.authors
+          : unpdfExtractedMetadata.authors &&
+              unpdfExtractedMetadata.authors.length > 0
+            ? unpdfExtractedMetadata.authors
+            : headerExtractedMetadata.authors,
+      year:
+        textExtractedMetadata.year ||
+        unpdfExtractedMetadata.year ||
+        headerExtractedMetadata.year,
+      abstract:
+        textExtractedMetadata.abstract || headerExtractedMetadata.abstract,
       keywords:
-        textMeta.keywords && textMeta.keywords.length > 0
-          ? textMeta.keywords
-          : unpdfMeta.keywords && unpdfMeta.keywords.length > 0
-            ? unpdfMeta.keywords
-            : headerMeta.keywords,
+        textExtractedMetadata.keywords &&
+        textExtractedMetadata.keywords.length > 0
+          ? textExtractedMetadata.keywords
+          : unpdfExtractedMetadata.keywords &&
+              unpdfExtractedMetadata.keywords.length > 0
+            ? unpdfExtractedMetadata.keywords
+            : headerExtractedMetadata.keywords,
       rawText: combinedText.slice(0, PdfExtractorProvider.TEXT_SCAN_LIMIT),
     };
 
-    // ── GROBID enrichment (optional, structured ML header extraction) ────────
-    // GROBID fills in missing fields that unpdf/regex heuristics miss.
-    // Requires GROBID Docker sidecar (lfoppiano/grobid:0.8.2-crf, Apache 2.0).
-    // Gracefully skipped if grobidClient is not injected or GROBID_ENABLED=false.
-    if (this.grobidClient) {
-      const needsEnrichment =
-        !metadata.title || !metadata.doi || !metadata.authors?.length;
+    // ── GROBID: Authoritative ML Document Layout & Full-Text Zoning ──────────
+    // GROBID uses 2D spatial coordinates and CRF sequence labelling to segment
+    // the header, sections, tables, figures, formulas, and bibliographic citations.
+    let references: GrobidReference[] = [];
+    let sections: GrobidSection[] = [];
+    let figures: GrobidFigure[] = [];
+    let tables: GrobidTable[] = [];
+    let formulas: GrobidFormula[] = [];
 
-      if (needsEnrichment) {
-        try {
-          const grobidResult = await this.grobidClient.processHeaderDocument(buffer);
-          if (grobidResult) {
-            if (!metadata.title && grobidResult.title) {
-              metadata.title = grobidResult.title;
-            }
-            if (!metadata.doi && grobidResult.doi) {
-              metadata.doi = grobidResult.doi;
-            }
-            if (!metadata.arxivId && grobidResult.arxivId) {
-              metadata.arxivId = grobidResult.arxivId;
-            }
-            if ((!metadata.authors || metadata.authors.length === 0) && grobidResult.authors?.length) {
-              metadata.authors = grobidResult.authors;
-            }
-            if (!metadata.abstract && grobidResult.abstract) {
-              metadata.abstract = grobidResult.abstract;
-            }
-            if ((!metadata.keywords || metadata.keywords.length === 0) && grobidResult.keywords?.length) {
-              metadata.keywords = grobidResult.keywords;
-            }
-            if (!metadata.year && grobidResult.year) {
-              metadata.year = grobidResult.year;
-            }
-            if (!metadata.journal && grobidResult.journal) {
-              metadata.journal = grobidResult.journal;
-            }
-            this.logger.debug('GROBID enrichment applied to PDF metadata');
+    if (this.grobidClient) {
+      try {
+        const fulltextResult =
+          await this.grobidClient.processFulltextDocument(buffer);
+        if (fulltextResult) {
+          const header = fulltextResult.header;
+          if (header.abstract) {
+            metadata.abstract = header.abstract;
+            metadata.abstractParagraphs = header.abstractParagraphs;
+            metadata.abstractSections = header.abstractSections;
           }
-        } catch (err: any) {
-          this.logger.warn(`GROBID enrichment failed (non-critical): ${err?.message}`);
+          if (header.title) {
+            metadata.title = header.title;
+          }
+          if (header.creators && header.creators.length > 0) {
+            metadata.creators = header.creators;
+            metadata.authors = header.creators.map((c) => c.fullName);
+          } else if (header.authors && header.authors.length > 0) {
+            metadata.authors = header.authors;
+          }
+          if (header.doi) {
+            metadata.doi = header.doi;
+          }
+          if (header.arxivId) {
+            metadata.arxivId = header.arxivId;
+          }
+          if (header.keywords && header.keywords.length > 0) {
+            metadata.keywords = header.keywords;
+          }
+          if (header.year) {
+            metadata.year = header.year;
+          }
+          if (header.publicationDate) {
+            metadata.publicationDate = header.publicationDate;
+          }
+          if (header.journal) {
+            metadata.journal = header.journal;
+          }
+          if (header.rawTei) {
+            metadata.rawTei = header.rawTei;
+          }
+
+          sections = fulltextResult.sections || [];
+          figures = fulltextResult.figures || [];
+          tables = fulltextResult.tables || [];
+          formulas = fulltextResult.formulas || [];
+          references = fulltextResult.references || [];
+
+          this.logger.debug(
+            `GROBID fulltext parsed: ${sections.length} sections, ${figures.length} figures, ${tables.length} tables, ${formulas.length} formulas, ${references.length} references`,
+          );
+        } else {
+          // Fallback to header + references if fulltext returned null
+          const headerResult =
+            await this.grobidClient.processHeaderDocument(buffer);
+          if (headerResult) {
+            if (headerResult.abstract) metadata.abstract = headerResult.abstract;
+            if (headerResult.title) metadata.title = headerResult.title;
+            if (headerResult.creators && headerResult.creators.length > 0) {
+              metadata.creators = headerResult.creators;
+              metadata.authors = headerResult.creators.map((c) => c.fullName);
+            }
+            if (headerResult.doi) metadata.doi = headerResult.doi;
+            if (headerResult.arxivId) metadata.arxivId = headerResult.arxivId;
+            if (headerResult.rawTei) metadata.rawTei = headerResult.rawTei;
+          }
+          references = await this.grobidClient.processReferences(buffer);
         }
+      } catch (caughtError: unknown) {
+        const errorMessage =
+          caughtError instanceof Error
+            ? caughtError.message
+            : String(caughtError);
+        this.logger.warn(
+          `GROBID extraction failed (falling back to unpdf heuristics): ${errorMessage}`,
+        );
       }
     }
-    // ────────────────────────────────────────────────────────────────────────
 
     return {
       metadata,
       pages,
+      references,
+      sections,
+      figures,
+      tables,
+      formulas,
     };
-
   }
 
   async extractMetadataFromUrl(fileUrl: string): Promise<ExtractedPdfMetadata> {
@@ -231,52 +320,73 @@ export class PdfExtractorProvider {
       const arrayBuffer = await response.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
 
-      const doc = await this.extractDocumentFromBuffer(buffer);
-      return doc.metadata;
-    } catch (err: any) {
-      this.logger.warn(`Remote PDF extraction failed: ${err.message}`);
+      const extractedDocument = await this.extractDocumentFromBuffer(buffer);
+      return extractedDocument.metadata;
+    } catch (caughtError: unknown) {
+      const errorMessage =
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError);
+      this.logger.warn(`Remote PDF extraction failed: ${errorMessage}`);
       return {};
     }
   }
 
   extractMetadataFromBuffer(buffer: Buffer): ExtractedPdfMetadata {
-    const rawHead = buffer.subarray(0, 32768).toString('latin1');
-    const result: ExtractedPdfMetadata = {};
-
-    const doiMatch = rawHead.match(/10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/);
-    if (doiMatch) {
-      result.doi = doiMatch[0].replace(/[.,;)\]]+$/, '');
+    if (!buffer || buffer.length === 0) {
+      return {};
     }
 
-    const arxivMatch = rawHead.match(/arXiv:\s*(\d{4}\.\d{4,5}(?:v\d+)?)/i);
-    if (arxivMatch) {
-      result.arxivId = arxivMatch[1];
-    }
+    try {
+      const rawHeaderStream = buffer.subarray(0, 32768).toString('latin1');
+      const extractedMetadataResult: ExtractedPdfMetadata = {};
 
-    const titleMatch = rawHead.match(/\/Title\s*\(([^)]+)\)/);
-    if (titleMatch && titleMatch[1]) {
-      result.title = titleMatch[1].trim();
-    }
+      const doiMatchResult = rawHeaderStream.match(
+        /10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/,
+      );
+      if (doiMatchResult) {
+        extractedMetadataResult.doi = doiMatchResult[0].replace(
+          /[.,;)\]]+$/,
+          '',
+        );
+      }
 
-    const authorMatch = rawHead.match(/\/Author\s*\(([^)]+)\)/);
-    if (authorMatch && authorMatch[1]) {
-      result.authors = [authorMatch[1].trim()];
-    }
+      const arxivMatchResult = rawHeaderStream.match(
+        /arXiv:\s*(\d{4}\.\d{4,5}(?:v\d+)?)/i,
+      );
+      if (arxivMatchResult) {
+        extractedMetadataResult.arxivId = arxivMatchResult[1];
+      }
 
-    const dateMatch = rawHead.match(/\/CreationDate\s*\(D:(\d{4})/);
-    if (dateMatch && dateMatch[1]) {
-      result.year = parseInt(dateMatch[1], 10);
-    }
+      const titleMatchResult = rawHeaderStream.match(/\/Title\s*\(([^)]+)\)/);
+      if (titleMatchResult && titleMatchResult[1]) {
+        extractedMetadataResult.title = titleMatchResult[1].trim();
+      }
 
-    return result;
+      const authorMatchResult = rawHeaderStream.match(/\/Author\s*\(([^)]+)\)/);
+      if (authorMatchResult && authorMatchResult[1]) {
+        extractedMetadataResult.authors = [authorMatchResult[1].trim()];
+      }
+
+      const dateMatchResult = rawHeaderStream.match(
+        /\/CreationDate\s*\(D:(\d{4})/,
+      );
+      if (dateMatchResult && dateMatchResult[1]) {
+        extractedMetadataResult.year = parseInt(dateMatchResult[1], 10);
+      }
+
+      return extractedMetadataResult;
+    } catch {
+      return {};
+    }
   }
 
   extractFromText(text: string): string | null {
     if (!text) return null;
 
-    const scan = text.slice(0, PdfExtractorProvider.TEXT_SCAN_LIMIT);
-    const joined = scan.replace(/(10\.\d{4,9}\/)\s+/g, '$1');
-    const doiMatches = joined.match(/10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/g) ?? [];
+    const scannedText = text.slice(0, PdfExtractorProvider.TEXT_SCAN_LIMIT);
+    const joinedText = scannedText.replace(/(10\.\d{4,9}\/)\s+/g, '$1');
+    const doiMatches = joinedText.match(/10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/g) ?? [];
 
     for (const match of doiMatches) {
       const doi = match.replace(/[.,;)\]]+$/, '');
@@ -284,31 +394,31 @@ export class PdfExtractorProvider {
       return doi;
     }
 
-    const arxivMatch = scan.match(/arxiv:\s*(\d{4}\.\d{4,5}(?:v\d+)?)/i);
+    const arxivMatch = scannedText.match(/arxiv:\s*(\d{4}\.\d{4,5}(?:v\d+)?)/i);
     return arxivMatch?.[1] ? `10.48550/arXiv.${arxivMatch[1]}` : null;
   }
 
   extractMetadataFromText(text: string): ExtractedPdfMetadata {
-    const scan = text.slice(0, PdfExtractorProvider.TEXT_SCAN_LIMIT);
+    const scannedText = text.slice(0, PdfExtractorProvider.TEXT_SCAN_LIMIT);
     const metadata: ExtractedPdfMetadata = {};
     const doi = this.extractFromText(
-      scan.replace(/(10\.\d{4,9}\/)\s*\n\s*/g, '$1'),
+      scannedText.replace(/(10\.\d{4,9}\/)\s*\n\s*/g, '$1'),
     );
     if (doi) metadata.doi = doi;
 
-    const arxivMatch = scan.match(
+    const arxivMatch = scannedText.match(
       /(?:arxiv[:\s._\/-]+)(\d{4}\.\d{4,5}(?:v\d+)?)/i,
     );
     if (arxivMatch?.[1]) {
       metadata.arxivId = arxivMatch[1];
     } else {
-      const standalone = scan
+      const standalone = scannedText
         .slice(0, 1500)
         .match(/\b(1[0-9]{3}\.[0-9]{4,5}(?:v[0-9]+)?)\b/);
       if (standalone?.[1]) metadata.arxivId = standalone[1];
     }
 
-    const abstractMatch = scan.match(
+    const abstractMatch = scannedText.match(
       /Abstract[—:\-\s]+([\s\S]*?)(?=(?:\n\s*(?:Index Terms|Keywords|1\.|I\. INTRODUCTION|INTRODUCTION)\b)|$)/i,
     );
     if (abstractMatch?.[1]) {
@@ -318,7 +428,7 @@ export class PdfExtractorProvider {
       }
     }
 
-    const keywordsMatch = scan.match(
+    const keywordsMatch = scannedText.match(
       /(?:Index Terms|Keywords)[—:\-\s]+([^\n.]+)/i,
     );
     if (keywordsMatch?.[1]) {
@@ -329,29 +439,29 @@ export class PdfExtractorProvider {
     }
 
     // Extract Title and Authors from first page header lines
-    const lines = scan
+    const lines = scannedText
       .split('\n')
-      .map((l) => l.trim())
+      .map((lineItem) => lineItem.trim())
       .filter(Boolean);
 
     let abstractIndex = -1;
-    for (let i = 0; i < Math.min(lines.length, 60); i++) {
-      if (/^abstract\b/i.test(lines[i])) {
-        abstractIndex = i;
+    for (let lineIndex = 0; lineIndex < Math.min(lines.length, 60); lineIndex++) {
+      if (/^abstract\b/i.test(lines[lineIndex])) {
+        abstractIndex = lineIndex;
         break;
       }
     }
 
     const headerLines =
       abstractIndex !== -1 ? lines.slice(0, abstractIndex) : lines.slice(0, 25);
-    const cleanLines = headerLines.filter((l) => {
+    const cleanLines = headerLines.filter((lineItem) => {
       if (
         /^(arxiv[:\s._\/-]*\d|https?:\/\/|\d+$|submitted to|accepted (as|at)|proceedings of|ieee|acm|springer|elsevier)/i.test(
-          l,
+          lineItem,
         )
       )
         return false;
-      if (/copyright|all rights reserved|doi:\s*10\./i.test(l)) return false;
+      if (/copyright|all rights reserved|doi:\s*10\./i.test(lineItem)) return false;
       return true;
     });
 
@@ -359,33 +469,33 @@ export class PdfExtractorProvider {
       const titleLines: string[] = [];
       let authorStartIndex = -1;
 
-      for (let i = 0; i < cleanLines.length; i++) {
-        const l = cleanLines[i];
+      for (let lineIndex = 0; lineIndex < cleanLines.length; lineIndex++) {
+        const currentLine = cleanLines[lineIndex];
         if (
           /@|univ|institute|department|college|laboratory|school|hospital|center/i.test(
-            l,
+            currentLine,
           )
         ) {
-          if (authorStartIndex === -1) authorStartIndex = i;
+          if (authorStartIndex === -1) authorStartIndex = lineIndex;
           break;
         }
-        const hasCommaOrAnd = /(?:,|\band\b)/i.test(l);
-        const words = l.split(/\s+/);
+        const hasCommaOrAnd = /(?:,|\band\b)/i.test(currentLine);
+        const wordsInLine = currentLine.split(/\s+/);
         const looksLikeMultipleNames =
-          words.length >= 4 &&
-          words.every((w) => /^[A-ZÀ-Ỹ]/.test(w) || /[*†‡§\d]/.test(w));
+          wordsInLine.length >= 4 &&
+          wordsInLine.every((wordItem) => /^[A-ZÀ-Ỹ]/.test(wordItem) || /[*†‡§\d]/.test(wordItem));
 
         if (
           titleLines.length > 0 &&
           (hasCommaOrAnd || looksLikeMultipleNames)
         ) {
-          authorStartIndex = i;
+          authorStartIndex = lineIndex;
           break;
         }
 
-        titleLines.push(l);
-        if (l.length >= 25 || titleLines.length >= 2) {
-          authorStartIndex = i + 1;
+        titleLines.push(currentLine);
+        if (currentLine.length >= 25 || titleLines.length >= 2) {
+          authorStartIndex = lineIndex + 1;
           break;
         }
       }
@@ -397,35 +507,35 @@ export class PdfExtractorProvider {
 
       const parsedAuthors: string[] = [];
       if (authorStartIndex !== -1 && authorStartIndex < cleanLines.length) {
-        for (let i = authorStartIndex; i < cleanLines.length; i++) {
-          const l = cleanLines[i];
+        for (let lineIndex = authorStartIndex; lineIndex < cleanLines.length; lineIndex++) {
+          const authorLine = cleanLines[lineIndex];
           if (
             /@|univ|institute|department|college|laboratory|school|hospital|center|research|microsoft|google/i.test(
-              l,
+              authorLine,
             )
           ) {
             break;
           }
-          if (l.includes(',')) {
-            const rawNames = l.replace(/[*†‡§\d]/g, '').split(/[,;]|\band\b/i);
-            for (const raw of rawNames) {
-              const cleanName = raw.replace(/\s+/g, ' ').trim();
-              const parts = cleanName.split(' ');
+          if (authorLine.includes(',')) {
+            const rawAuthorNames = authorLine.replace(/[*†‡§\d]/g, '').split(/[,;]|\band\b/i);
+            for (const rawAuthorName of rawAuthorNames) {
+              const cleanName = rawAuthorName.replace(/\s+/g, ' ').trim();
+              const nameParts = cleanName.split(' ');
               if (
-                parts.length >= 2 &&
-                parts.length <= 4 &&
-                parts.every((p) => /^[A-ZÀ-Ỹ]/.test(p))
+                nameParts.length >= 2 &&
+                nameParts.length <= 4 &&
+                nameParts.every((partItem) => /^[A-ZÀ-Ỹ]/.test(partItem))
               ) {
                 parsedAuthors.push(cleanName);
               }
             }
           } else {
-            const words = l
+            const nameWords = authorLine
               .replace(/[*†‡§\d]/g, '')
               .split(/\s+/)
-              .filter((w) => /^[A-ZÀ-Ỹ]/.test(w));
-            for (let j = 0; j < words.length - 1; j += 2) {
-              parsedAuthors.push(`${words[j]} ${words[j + 1]}`);
+              .filter((wordItem) => /^[A-ZÀ-Ỹ]/.test(wordItem));
+            for (let wordIndex = 0; wordIndex < nameWords.length - 1; wordIndex += 2) {
+              parsedAuthors.push(`${nameWords[wordIndex]} ${nameWords[wordIndex + 1]}`);
             }
           }
         }
@@ -441,10 +551,14 @@ export class PdfExtractorProvider {
 
   async extractFromBuffer(buffer: Buffer): Promise<string | null> {
     try {
-      const doc = await this.extractDocumentFromBuffer(buffer);
-      if (doc.metadata.doi) return doc.metadata.doi;
-    } catch (err: any) {
-      this.logger.warn(`extractFromBuffer failed: ${err.message}`);
+      const extractedDocument = await this.extractDocumentFromBuffer(buffer);
+      if (extractedDocument.metadata.doi) return extractedDocument.metadata.doi;
+    } catch (caughtError: unknown) {
+      const errorMessage =
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError);
+      this.logger.warn(`extractFromBuffer failed: ${errorMessage}`);
     }
 
     return this.extractFromText(
