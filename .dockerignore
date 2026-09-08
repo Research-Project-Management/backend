@@ -11,6 +11,8 @@ coverage
 *.log
 *.tsbuildinfo
 tests
+test
+scratch
 scripts
 docs
 *.md

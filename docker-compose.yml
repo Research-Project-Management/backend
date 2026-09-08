@@ -18,7 +18,7 @@ services:
       POSTGRES_DB: ${DB_NAME:-flux-db}
       PGDATA: /var/lib/postgresql/data/pgdata
     ports:
-      - "${DB_PORT:-5433}:5432"
+      - "127.0.0.1:${DB_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -52,7 +52,7 @@ services:
     container_name: flux_grobid
     restart: unless-stopped
     ports:
-      - "${GROBID_PORT:-8070}:8070"
+      - "127.0.0.1:${GROBID_PORT:-8070}:8070"
     environment:
       GROBID_SERVICE_ALLOWED_ORIGINS: "*"
       JAVA_OPTS: "-Xmx1024m -Xms256m"
@@ -86,7 +86,7 @@ services:
     container_name: flux_zotero_ts
     restart: unless-stopped
     ports:
-      - "${ZOTERO_TS_PORT:-1969}:1969"
+      - "127.0.0.1:${ZOTERO_TS_PORT:-1969}:1969"
     environment:
       USER_AGENT: "FluxResearchPlatform/1.0 (contact@flux.app)"
     healthcheck:
