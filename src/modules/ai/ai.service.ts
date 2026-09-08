@@ -31,6 +31,58 @@ export class AiService {
     return this.engineService.health();
   }
 
+  private async validateAccess(
+    userId: string,
+    workspaceId?: string,
+    projectId?: string,
+    chatId?: string,
+  ): Promise<void> {
+    if (workspaceId) {
+      const member = await this.prisma.workspaceMember.findFirst({
+        where: { workspaceId, userId },
+      });
+      if (!member) {
+        throw new ForbiddenException(
+          'You do not have access to this workspace',
+        );
+      }
+    }
+
+    if (projectId) {
+      const project = await this.prisma.project.findFirst({
+        where: {
+          id: projectId,
+          workspace: {
+            members: {
+              some: { userId },
+            },
+          },
+        },
+      });
+      if (!project) {
+        throw new ForbiddenException(
+          'You do not have access to this project or its workspace',
+        );
+      }
+      if (workspaceId && project.workspaceId !== workspaceId) {
+        throw new BadRequestException(
+          'Project does not belong to the specified workspace',
+        );
+      }
+    }
+
+    if (chatId) {
+      const chat = await this.prisma.aiChat.findFirst({
+        where: { id: chatId },
+      });
+      if (chat && chat.userId !== userId) {
+        throw new ForbiddenException(
+          'You do not have access to this chat session',
+        );
+      }
+    }
+  }
+
   /**
    * Main unified SSE streaming AI execution handler
    */
@@ -40,28 +92,10 @@ export class AiService {
     reply: FastifyReply,
   ): Promise<void> {
     const targetWsId = dto.workspaceId || dto.workspace_id;
-    if (targetWsId) {
-      const member = await this.prisma.workspaceMember.findFirst({
-        where: { workspaceId: targetWsId, userId },
-      });
-      if (!member) {
-        throw new ForbiddenException(
-          'You do not have access to this workspace',
-        );
-      }
-    }
-
+    const targetProjectId = dto.projectId || dto.project_id;
     const targetChatId = dto.chatId || dto.chat_id;
-    if (targetChatId) {
-      const chat = await this.prisma.aiChat.findFirst({
-        where: { id: targetChatId },
-      });
-      if (chat && chat.userId !== userId) {
-        throw new ForbiddenException(
-          'You do not have access to this chat session',
-        );
-      }
-    }
+
+    await this.validateAccess(userId, targetWsId, targetProjectId, targetChatId);
 
     const payload = buildAiPayload(userId, dto);
 
@@ -87,28 +121,10 @@ export class AiService {
    */
   async execute(userId: string, dto: AiQueryDto) {
     const targetWsId = dto.workspaceId || dto.workspace_id;
-    if (targetWsId) {
-      const member = await this.prisma.workspaceMember.findFirst({
-        where: { workspaceId: targetWsId, userId },
-      });
-      if (!member) {
-        throw new ForbiddenException(
-          'You do not have access to this workspace',
-        );
-      }
-    }
-
+    const targetProjectId = dto.projectId || dto.project_id;
     const targetChatId = dto.chatId || dto.chat_id;
-    if (targetChatId) {
-      const chat = await this.prisma.aiChat.findFirst({
-        where: { id: targetChatId },
-      });
-      if (chat && chat.userId !== userId) {
-        throw new ForbiddenException(
-          'You do not have access to this chat session',
-        );
-      }
-    }
+
+    await this.validateAccess(userId, targetWsId, targetProjectId, targetChatId);
 
     const payload = buildAiPayload(userId, dto);
     return this.engineService.syncChat(payload);
@@ -268,28 +284,65 @@ export class AiService {
     return this.engineService.syncChat(payload);
   }
 
-  // ── Document Vector Management (Disabled due to lack of tenant isolation in FLux-AI) ──
-  async uploadDocument(_fileBuffer: Buffer, _contentType: string) {
-    throw new NotImplementedException(
-      'Document vector operations are disabled because upstream FLux-AI lacks multi-tenant isolation.',
+  // ── Document Vector Management with Strict Multi-Tenant Isolation ──
+  async uploadDocument(
+    userId: string,
+    workspaceId: string,
+    fileBuffer: Buffer,
+    contentType: string,
+    filename: string,
+    options?: {
+      projectId?: string;
+      chatId?: string;
+      title?: string;
+      tags?: string;
+    },
+  ) {
+    if (!workspaceId) {
+      throw new BadRequestException('workspaceId is required');
+    }
+    await this.validateAccess(
+      userId,
+      workspaceId,
+      options?.projectId,
+      options?.chatId,
+    );
+    return this.engineService.uploadDocument(
+      fileBuffer,
+      contentType,
+      filename,
+      {
+        userId,
+        workspaceId,
+        projectId: options?.projectId,
+        chatId: options?.chatId,
+        title: options?.title,
+        tags: options?.tags,
+      },
     );
   }
 
-  async getDocumentsBulk(_ids: string[]) {
-    throw new NotImplementedException(
-      'Document vector operations are disabled because upstream FLux-AI lacks multi-tenant isolation.',
-    );
+  async getDocumentsBulk(userId: string, workspaceId: string, ids: string[]) {
+    if (!workspaceId) {
+      throw new BadRequestException('workspaceId is required');
+    }
+    await this.validateAccess(userId, workspaceId);
+    return this.engineService.getDocumentsBulk(ids, { userId, workspaceId });
   }
 
-  async getDocument(_docId: string) {
-    throw new NotImplementedException(
-      'Document vector operations are disabled because upstream FLux-AI lacks multi-tenant isolation.',
-    );
+  async getDocument(userId: string, workspaceId: string, docId: string) {
+    if (!workspaceId) {
+      throw new BadRequestException('workspaceId is required');
+    }
+    await this.validateAccess(userId, workspaceId);
+    return this.engineService.getDocument(docId, { userId, workspaceId });
   }
 
-  async getDocuments() {
-    throw new NotImplementedException(
-      'Document vector operations are disabled because upstream FLux-AI lacks multi-tenant isolation.',
-    );
+  async getDocuments(userId: string, workspaceId: string) {
+    if (!workspaceId) {
+      throw new BadRequestException('workspaceId is required');
+    }
+    await this.validateAccess(userId, workspaceId);
+    return this.engineService.getDocuments({ userId, workspaceId });
   }
 }
