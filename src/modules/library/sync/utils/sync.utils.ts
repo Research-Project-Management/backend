@@ -1,4 +1,5 @@
-﻿import { ConflictException } from '@nestjs/common';
+import { ConflictException } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { ApplyExternalSyncBatchCommand } from '../ports/sync.port';
 
 /**
@@ -82,6 +83,5 @@ export function topoSortOperations(
  * Used for idempotency checks so duplicate batch submissions are detected.
  */
 export function computeRequestHash(input: object): string {
-  const { createHash } = require('crypto');
   return createHash('sha256').update(JSON.stringify(input)).digest('hex');
 }

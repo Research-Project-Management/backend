@@ -261,12 +261,33 @@ export class SsrfGuardService {
     // IPv6 Checks
     if (normalized === '::1' || normalized === '::') return true;
 
-    // IPv4-mapped IPv6 (::ffff:x.x.x.x)
+    // IPv4-mapped IPv6 (::ffff:x.x.x.x or ::ffff:hhhh:hhhh in hex)
     if (normalized.startsWith('::ffff:')) {
-      const v4Part = normalized.substring(7);
-      if (isIP(v4Part) === 4) {
-        return this.isPrivateOrReservedIp(v4Part);
+      const remainder = normalized.substring(7);
+      if (isIP(remainder) === 4) {
+        return this.isPrivateOrReservedIp(remainder);
       }
+      // Hex representation e.g. ::ffff:7f00:1 or ::ffff:7f00:0001
+      const hexParts = remainder.split(':');
+      if (hexParts.length === 2) {
+        const h1 = parseInt(hexParts[0], 16);
+        const h2 = parseInt(hexParts[1], 16);
+        if (
+          !isNaN(h1) &&
+          !isNaN(h2) &&
+          h1 >= 0 &&
+          h1 <= 0xffff &&
+          h2 >= 0 &&
+          h2 <= 0xffff
+        ) {
+          const b1 = (h1 >> 8) & 0xff;
+          const b2 = h1 & 0xff;
+          const b3 = (h2 >> 8) & 0xff;
+          const b4 = h2 & 0xff;
+          return this.isPrivateOrReservedIp(`${b1}.${b2}.${b3}.${b4}`);
+        }
+      }
+      return true; // Fail closed for any other ::ffff: pattern
     }
 
     // Link-local (fe80::/10)

@@ -84,7 +84,7 @@ export class FileService implements OnModuleInit {
       }
     } catch (err) {
       this.logger.debug?.(
-        `[Remediation] Legacy library file isolation check bypassed: ${err}`,
+        `[Remediation] Legacy library file isolation check bypassed: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }

@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../core/database/prisma.service';
+import { resolveTenantWorkspaceId } from '../../../core/utils/tenant.util';
 import { createHash } from 'crypto';
 import {
   TransactionService,
@@ -453,20 +454,21 @@ export class AttachmentsService {
     helpers: TransactionHelpers,
   ): Promise<void> {
     const { workspaceId, entityId } = command;
-    const existing = await tx.catalogAttachment.findUnique({
-      where: { id: entityId },
+    const canonicalWorkspaceId = await resolveTenantWorkspaceId(
+      this.prisma,
+      workspaceId,
+    );
+    const existing = await tx.catalogAttachment.findFirst({
+      where: {
+        id: entityId,
+        catalogItem: { workspaceId: canonicalWorkspaceId },
+      },
       include: { catalogItem: true },
     });
     if (!existing) return;
 
-    if (existing.catalogItem.workspaceId !== workspaceId) {
-      throw new ForbiddenException(
-        `Attachment ${entityId} does not belong to workspace ${workspaceId}`,
-      );
-    }
-
     await tx.catalogAttachment.delete({ where: { id: entityId } });
-    await helpers.appendChange(workspaceId, {
+    await helpers.appendChange(canonicalWorkspaceId, {
       entityType: 'CatalogAttachment',
       entityId,
       action: 'delete',

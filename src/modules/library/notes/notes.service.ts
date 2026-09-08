@@ -258,20 +258,21 @@ export class NotesService implements IItemNotesExtractorPort {
     helpers: TransactionHelpers,
   ): Promise<void> {
     const { workspaceId, entityId } = command;
-    const existing = await tx.note.findUnique({ where: { id: entityId } });
+    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    const existing = await tx.note.findFirst({
+      where: {
+        id: entityId,
+        workspaceId: canonicalWorkspaceId,
+        deletedAt: null,
+      },
+    });
     if (!existing) return;
 
-    if (existing.workspaceId !== workspaceId) {
-      throw new ForbiddenException(
-        `Note ${entityId} does not belong to workspace ${workspaceId}`,
-      );
-    }
-
-    await tx.note.update({
-      where: { id: entityId },
+    await tx.note.updateMany({
+      where: { id: entityId, workspaceId: canonicalWorkspaceId },
       data: { deletedAt: new Date() },
     });
-    await helpers.appendChange(workspaceId, {
+    await helpers.appendChange(canonicalWorkspaceId, {
       entityType: 'Note',
       entityId,
       action: 'delete',

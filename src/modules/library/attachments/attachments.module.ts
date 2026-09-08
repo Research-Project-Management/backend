@@ -16,6 +16,7 @@ import { GrobidClient } from '../../../infra/grobid/grobid.client';
 
 import { AttachmentsRepository } from './attachments.repository';
 import { WebSnapshotService } from './services/web-snapshot.service';
+import { SsrfGuardService } from '../common/services/ssrf-guard.service';
 
 @Module({
   imports: [CoreModule, OutboxModule, SearchModule, StorageModule, ItemsModule],
@@ -24,6 +25,7 @@ import { WebSnapshotService } from './services/web-snapshot.service';
     AttachmentsRepository,
     AttachmentsService,
     WebSnapshotService,
+    SsrfGuardService,
     GrobidClient, // OSS: GROBID client for structured PDF header extraction (Apache 2.0)
     PdfExtractorProvider,
     AttachmentExtractionHandler,
@@ -31,6 +33,7 @@ import { WebSnapshotService } from './services/web-snapshot.service';
   exports: [
     AttachmentsService,
     WebSnapshotService,
+    SsrfGuardService,
     PdfExtractorProvider,
     GrobidClient,
   ],

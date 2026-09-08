@@ -151,8 +151,8 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
 
     if (rawItems.length > limit) {
       hasNextPage = true;
-      const popped = rawItems.pop();
-      nextCursor = popped?.id;
+      rawItems.pop();
+      nextCursor = rawItems[rawItems.length - 1]?.id;
     }
 
     const items = rawItems.map((it) =>

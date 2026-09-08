@@ -319,11 +319,15 @@ export class IngestionPipelineRunner {
         // Add literature notes from proposed item if not already recorded
         if (Array.isArray(p.notes) && p.notes.length > 0 && this.notesService) {
           for (const noteItem of p.notes) {
+            const rawContent =
+              typeof noteItem === 'object' && noteItem !== null
+                ? (noteItem as Record<string, unknown>).content
+                : undefined;
             const noteContent =
               typeof noteItem === 'string'
                 ? noteItem
-                : typeof noteItem === 'object' && noteItem !== null
-                  ? String((noteItem as Record<string, unknown>).content || '')
+                : typeof rawContent === 'string'
+                  ? rawContent
                   : '';
             if (!noteContent.trim()) continue;
             const noteSource =

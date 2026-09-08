@@ -408,7 +408,7 @@ export class PdfExtractorProvider {
     if (doi) metadata.doi = doi;
 
     const arxivMatch = scannedText.match(
-      /(?:arxiv[:\s._\/-]+)(\d{4}\.\d{4,5}(?:v\d+)?)/i,
+      /(?:arxiv[:\s._/-]+)(\d{4}\.\d{4,5}(?:v\d+)?)/i,
     );
     if (arxivMatch?.[1]) {
       metadata.arxivId = arxivMatch[1];
@@ -461,7 +461,7 @@ export class PdfExtractorProvider {
       abstractIndex !== -1 ? lines.slice(0, abstractIndex) : lines.slice(0, 25);
     const cleanLines = headerLines.filter((lineItem) => {
       if (
-        /^(arxiv[:\s._\/-]*\d|https?:\/\/|\d+$|submitted to|accepted (as|at)|proceedings of|ieee|acm|springer|elsevier)/i.test(
+        /^(arxiv[:\s._/-]*\d|https?:\/\/|\d+$|submitted to|accepted (as|at)|proceedings of|ieee|acm|springer|elsevier)/i.test(
           lineItem,
         )
       )

@@ -11,6 +11,7 @@ import createDOMPurify from 'dompurify';
 import { MetadataRoutingPolicy } from '../../ingestion/metadata/policies/metadata.policy';
 import { AttachmentsService } from '../attachments.service';
 import { R2Service } from '../../../storage/r2/r2.service';
+import { SsrfGuardService } from '../../common/services/ssrf-guard.service';
 
 export interface SnapshotResult {
   title: string;
@@ -33,11 +34,15 @@ export class WebSnapshotService {
   private readonly logger = new Logger(WebSnapshotService.name);
   private readonly userAgent =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 FluxResearchBot/1.0';
+  private readonly ssrfGuard: SsrfGuardService;
 
   constructor(
     private readonly attachmentsService: AttachmentsService,
     @Optional() private readonly r2Service?: R2Service,
-  ) {}
+    @Optional() ssrfGuard?: SsrfGuardService,
+  ) {
+    this.ssrfGuard = ssrfGuard || new SsrfGuardService();
+  }
 
   /**
    * Captures and cleans a web page using @mozilla/readability and DOMPurify.
@@ -49,42 +54,78 @@ export class WebSnapshotService {
   ): Promise<SnapshotResult> {
     const canonicalUrl = url.trim();
 
-    // 1. Validate URL against SSRF attack vectors
-    try {
-      MetadataRoutingPolicy.validateUrl(canonicalUrl);
-    } catch (err: any) {
-      throw new BadRequestException(
-        `SSRF validation failed for URL: ${err?.message || err}`,
-      );
-    }
+    // 1. Validate URL against SSRF attack vectors via SsrfGuardService
+    await this.ssrfGuard.assertSafeUrl(canonicalUrl, { maxRedirects: 5 });
 
-    // 2. Fetch raw HTML content
+    // 2. Fetch raw HTML content safely with redirect validation and 10MB streaming size limit
     const timeoutMs = options?.timeoutMs ?? 15000;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
+    const MAX_SNAPSHOT_SIZE = 10 * 1024 * 1024; // 10MB max limit
     let rawHtml = '';
     try {
-      const response = await fetch(canonicalUrl, {
-        headers: {
-          'User-Agent': this.userAgent,
-          Accept:
-            'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9',
+      const response = await this.ssrfGuard.safeFetch(
+        canonicalUrl,
+        {
+          headers: {
+            'User-Agent': this.userAgent,
+            Accept:
+              'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+          },
+          signal: controller.signal,
         },
-        signal: controller.signal,
-      });
+        { maxRedirects: 5 },
+      );
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status} ${response.statusText}`);
       }
 
-      rawHtml = await response.text();
+      const contentLength = response.headers.get('content-length');
+      if (contentLength && parseInt(contentLength, 10) > MAX_SNAPSHOT_SIZE) {
+        throw new BadRequestException(
+          `Target document size exceeds 10MB limit (${contentLength} bytes)`,
+        );
+      }
+
+      const bodyStream = response.body;
+      if (bodyStream) {
+        const reader = bodyStream.getReader();
+        const chunks: Uint8Array[] = [];
+        let bytesRead = 0;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) {
+            bytesRead += value.length;
+            if (bytesRead > MAX_SNAPSHOT_SIZE) {
+              await reader.cancel();
+              throw new BadRequestException(
+                'Target document size exceeds 10MB limit',
+              );
+            }
+            chunks.push(value);
+          }
+        }
+        rawHtml = Buffer.concat(chunks).toString('utf-8');
+      } else {
+        rawHtml = await response.text();
+      }
     } catch (fetchErr: any) {
       if (fetchErr.name === 'AbortError') {
         throw new BadRequestException(
           `Request timed out while capturing ${canonicalUrl}`,
         );
+      }
+      if (
+        fetchErr instanceof BadRequestException ||
+        fetchErr?.name === 'ForbiddenException' ||
+        fetchErr?.status === 400 ||
+        fetchErr?.status === 403
+      ) {
+        throw fetchErr;
       }
       throw new BadRequestException(
         `Failed to fetch target URL for snapshot: ${fetchErr?.message || fetchErr}`,

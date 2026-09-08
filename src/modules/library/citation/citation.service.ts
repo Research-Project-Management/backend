@@ -323,7 +323,14 @@ export class CitationService {
     metadata: ReferenceData | null;
     provider: string;
     queryType:
-      'doi' | 'arxiv' | 'title' | 'pmid' | 'isbn' | 'url' | 'unknown' | string;
+      | 'doi'
+      | 'arxiv'
+      | 'title'
+      | 'pmid'
+      | 'isbn'
+      | 'url'
+      | 'unknown'
+      | (string & {});
   }> {
     const input = (rawDoi || rawQuery || '').trim();
     if (!input) {
@@ -437,7 +444,7 @@ export class CitationService {
 
     // 3. Detect arXiv pattern: e.g. arXiv:2104.12345 or 2104.12345 or 2104.12345v1
     const arxivMatch = input.match(
-      /^(?:arxiv:\s*)?(\d{4}\.\d{4,5}(?:v\d+)?|[a-z\-]+(?:\.[A-Z]{2})?\/\d{7})$/i,
+      /^(?:arxiv:\s*)?(\d{4}\.\d{4,5}(?:v\d+)?|[a-z-]+(?:\.[A-Z]{2})?\/\d{7})$/i,
     );
     if (arxivMatch) {
       const arxivId = arxivMatch[1].replace(/v\d+$/i, '');

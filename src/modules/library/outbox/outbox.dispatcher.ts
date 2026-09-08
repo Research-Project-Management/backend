@@ -32,7 +32,7 @@ export class OutboxDispatcher
     );
 
     if (this.eventEmitter) {
-      this.eventEmitter.emit(envelope.eventType, envelope);
+      await this.eventEmitter.emitAsync(envelope.eventType, envelope);
     }
 
     this.metricsService?.incrementCounter('outbox_dispatched_total');

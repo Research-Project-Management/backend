@@ -14,6 +14,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import multipart from '@fastify/multipart';
+import { isSensitiveAuthRoute } from './core/utils/rate-limit.util';
 import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './core/filters/global-exception.filter';
 import { AppLogger } from './core/logger/app-logger.service';
@@ -77,26 +78,14 @@ async function bootstrap() {
     max: (req) => {
       const url = req.raw.url || '';
       // Strict throttle on sensitive auth / authentication endpoints (10 req/min)
-      if (
-        url.startsWith('/auth/login') ||
-        url.startsWith('/auth/refresh') ||
-        url.startsWith('/auth/forgot-password') ||
-        url.startsWith('/auth/reset-password') ||
-        url.startsWith('/auth/oauth/exchange')
-      ) {
+      if (isSensitiveAuthRoute(url)) {
         return 10;
       }
       return 150;
     },
     keyGenerator: (req) => {
       const url = req.raw.url || '';
-      if (
-        url.startsWith('/auth/login') ||
-        url.startsWith('/auth/refresh') ||
-        url.startsWith('/auth/forgot-password') ||
-        url.startsWith('/auth/reset-password') ||
-        url.startsWith('/auth/oauth/exchange')
-      ) {
+      if (isSensitiveAuthRoute(url)) {
         return `auth:${req.ip}`;
       }
       return req.ip;

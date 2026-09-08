@@ -37,7 +37,10 @@ function extractAuthorString(input: unknown): string {
       ''
     );
   }
-  return String(input);
+  if (typeof input === 'number' || typeof input === 'boolean') {
+    return String(input);
+  }
+  return '';
 }
 
 function mergeCreators(metadata: ItemMetadata) {
@@ -212,7 +215,10 @@ export function toCatalogItemData(
             return singleNote.includes(potentialComment);
           }
           if (typeof singleNote === 'object' && singleNote !== null) {
-            return String(singleNote.content || '').includes(potentialComment);
+            const noteObj = singleNote;
+            const content =
+              typeof noteObj.content === 'string' ? noteObj.content : '';
+            return content.includes(potentialComment);
           }
           return false;
         });

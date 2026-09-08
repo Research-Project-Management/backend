@@ -305,10 +305,11 @@ export class RisParser {
           currentRecord.rawEditors.push(value);
           break;
         case 'PY':
-        case 'Y1':
+        case 'Y1': {
           const yearMatch = value.match(/\b(19|20)\d{2}\b/);
           if (yearMatch) currentRecord.year = parseInt(yearMatch[0], 10);
           break;
+        }
         case 'JO':
         case 'JF':
         case 'T2':

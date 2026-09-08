@@ -211,8 +211,8 @@ export class SearchRepository implements OnModuleInit {
 
     if (ids.length > limit) {
       hasNextPage = true;
-      const poppedId = ids.pop();
-      nextCursor = poppedId;
+      ids.pop();
+      nextCursor = ids[ids.length - 1];
     }
 
     if (ids.length === 0) {
@@ -281,8 +281,8 @@ export class SearchRepository implements OnModuleInit {
 
     if (items.length > limit) {
       hasNextPage = true;
-      const popped = items.pop();
-      nextCursor = popped?.id;
+      items.pop();
+      nextCursor = items[items.length - 1]?.id;
     }
 
     return { items, nextCursor, hasNextPage };

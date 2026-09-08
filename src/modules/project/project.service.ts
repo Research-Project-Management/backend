@@ -71,7 +71,7 @@ export class ProjectService {
   private async resolveUserRoleInProject(
     project: { workspaceId?: string | null; members?: any[] },
     userId?: string,
-  ): Promise<ProjectMemberRole | string> {
+  ): Promise<ProjectMemberRole | (string & {})> {
     if (!userId) return ProjectMemberRole.viewer;
 
     const member = project.members?.find(

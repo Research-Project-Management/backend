@@ -5,12 +5,7 @@ import {
   ItemTypeDefinition,
   SchemaRegistrySnapshot,
 } from './types.types';
-import {
-  SCHEMA_V42_DATA,
-  LIBRARY_SCHEMA_VERSION,
-  SCHEMA_SOURCE,
-  ALL_CREATOR_ROLES,
-} from './constants/types.constants';
+import { SCHEMA_V42_DATA } from './constants/types.constants';
 
 @Injectable()
 export class TypesService {

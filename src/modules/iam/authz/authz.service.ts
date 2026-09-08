@@ -198,10 +198,10 @@ export class AuthzService {
       project.workspaceId,
       userId,
     );
+    const normalizedWsRole = wsRole?.toUpperCase() as WorkspaceRole | undefined;
     if (
-      wsRole &&
-      (wsRole.toUpperCase() === WorkspaceRole.OWNER ||
-        wsRole.toUpperCase() === WorkspaceRole.ADMIN)
+      normalizedWsRole === WorkspaceRole.OWNER ||
+      normalizedWsRole === WorkspaceRole.ADMIN
     ) {
       return { projectId, role: ProjectRole.ADMIN };
     }

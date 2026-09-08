@@ -21,8 +21,8 @@ export class EngineService {
 
   private async createDelegationToken(
     userId: string,
-    workspaceId?: string,
-    projectId?: string,
+    workspaceId?: string | null,
+    projectId?: string | null,
   ): Promise<string> {
     const secret =
       this.configService.get<string>('JWT_SECRET') || process.env.JWT_SECRET;

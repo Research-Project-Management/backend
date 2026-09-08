@@ -643,7 +643,7 @@ export class SyncService implements SyncPort {
         return this.annotationsService.deleteFromSync(command, tx, helpers);
       default:
         this.logger.warn(
-          `executeDeleteEntity: unknown entityType "${command.entityType}" for ${command.entityId} in workspace ${command.workspaceId}`,
+          `executeDeleteEntity: unknown entityType "${String(command.entityType)}" for ${command.entityId} in workspace ${command.workspaceId}`,
         );
     }
   }

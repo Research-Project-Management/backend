@@ -119,44 +119,113 @@ export class AiController {
   }
 
   /**
-   * Document upload to Vector Store (Disabled due to lack of multi-tenant isolation in upstream FLux-AI)
+   * Document upload to Vector Store with multi-tenant isolation
    */
   @Post('documents/upload')
   @ApiOperation({
-    summary: 'Upload document to AI engine vector store (Disabled)',
+    summary:
+      'Upload document to AI engine vector store with multi-tenant isolation',
   })
-  async uploadDocument() {
-    throw new NotImplementedException(
-      'Document vector upload is currently disabled due to lack of multi-tenant isolation in upstream AI engine.',
+  async uploadDocument(
+    @CurrentUser('id') userId: string,
+    @Req() req: FastifyRequest,
+  ) {
+    if (!req.isMultipart()) {
+      throw new BadRequestException('Content-Type must be multipart/form-data');
+    }
+
+    const parts = req.parts();
+    let buffer: Buffer | null = null;
+    let filename = 'document';
+    let mimeType = 'application/octet-stream';
+    const fields: Record<string, any> = {};
+
+    for await (const part of parts) {
+      if (part.type === 'file') {
+        filename = part.filename;
+        mimeType = part.mimetype;
+        buffer = await part.toBuffer();
+      } else {
+        fields[part.fieldname] = part.value;
+      }
+    }
+
+    if (!buffer) {
+      throw new BadRequestException('File is required');
+    }
+
+    const workspaceId = fields.workspaceId || fields.workspace_id;
+    if (!workspaceId) {
+      throw new BadRequestException('workspaceId is required');
+    }
+
+    const projectId = fields.projectId || fields.project_id;
+    const title = fields.title;
+    const tags = fields.tags;
+    const chatId = fields.chatId || fields.chat_id;
+
+    return this.aiService.uploadDocument(
+      userId,
+      String(workspaceId),
+      buffer,
+      mimeType,
+      filename,
+      {
+        projectId: projectId ? String(projectId) : undefined,
+        chatId: chatId ? String(chatId) : undefined,
+        title: title ? String(title) : undefined,
+        tags: tags ? String(tags) : undefined,
+      },
     );
   }
 
   @Post('documents/bulk')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Bulk retrieve document details by IDs (Disabled)' })
-  async getDocumentsBulk() {
-    throw new NotImplementedException(
-      'Document vector bulk retrieval is currently disabled due to lack of multi-tenant isolation in upstream AI engine.',
+  @ApiOperation({ summary: 'Bulk retrieve document details by IDs' })
+  async getDocumentsBulk(
+    @CurrentUser('id') userId: string,
+    @Body() body: { ids: string[]; workspaceId: string },
+  ) {
+    if (!body?.workspaceId) {
+      throw new BadRequestException('workspaceId is required');
+    }
+    return this.aiService.getDocumentsBulk(
+      userId,
+      body.workspaceId,
+      body.ids || [],
     );
   }
 
   @Get('documents')
   @ApiOperation({
-    summary: 'List all RAG documents in vector store (Disabled)',
+    summary: 'List all RAG documents in workspace vector store',
   })
-  async getDocuments() {
-    throw new NotImplementedException(
-      'Document vector listing is currently disabled due to lack of multi-tenant isolation in upstream AI engine.',
-    );
+  async getDocuments(
+    @CurrentUser('id') userId: string,
+    @Req() req: FastifyRequest,
+  ) {
+    const query = req.query as Record<string, string>;
+    const workspaceId = query?.workspaceId || query?.workspace_id;
+    if (!workspaceId) {
+      throw new BadRequestException('workspaceId query parameter is required');
+    }
+    return this.aiService.getDocuments(userId, workspaceId);
   }
 
   @Get(['documents/:docId', 'documents/:docId/content'])
   @ApiOperation({
-    summary: 'Get document details or text content from AI engine (Disabled)',
+    summary: 'Get document details from workspace vector store',
   })
-  async getDocument(@Param('docId') _docId: string) {
-    throw new NotImplementedException(
-      'Document vector retrieval is currently disabled due to lack of multi-tenant isolation in upstream AI engine.',
-    );
+  async getDocument(
+    @CurrentUser('id') userId: string,
+    @Param('docId') docId: string,
+    @Req() req: FastifyRequest,
+  ) {
+    const query = req.query as Record<string, string>;
+    const workspaceId = query?.workspaceId || query?.workspace_id;
+    if (!workspaceId) {
+      throw new BadRequestException('workspaceId query parameter is required');
+    }
+    return this.aiService.getDocument(userId, workspaceId, docId);
   }
 }

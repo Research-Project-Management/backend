@@ -95,7 +95,12 @@ export class AiService {
     const targetProjectId = dto.projectId || dto.project_id;
     const targetChatId = dto.chatId || dto.chat_id;
 
-    await this.validateAccess(userId, targetWsId, targetProjectId, targetChatId);
+    await this.validateAccess(
+      userId,
+      targetWsId,
+      targetProjectId,
+      targetChatId,
+    );
 
     const payload = buildAiPayload(userId, dto);
 
@@ -108,7 +113,9 @@ export class AiService {
             messages: [{ role: 'user', content: lastMsg.content }],
           });
         } catch (err) {
-          this.logger.warn(`Could not persist user message to thread: ${err}`);
+          this.logger.warn(
+            `Could not persist user message to thread: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       }
     }
@@ -124,7 +131,12 @@ export class AiService {
     const targetProjectId = dto.projectId || dto.project_id;
     const targetChatId = dto.chatId || dto.chat_id;
 
-    await this.validateAccess(userId, targetWsId, targetProjectId, targetChatId);
+    await this.validateAccess(
+      userId,
+      targetWsId,
+      targetProjectId,
+      targetChatId,
+    );
 
     const payload = buildAiPayload(userId, dto);
     return this.engineService.syncChat(payload);
