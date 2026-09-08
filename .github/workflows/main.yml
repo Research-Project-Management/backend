@@ -55,6 +55,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+    continue-on-error: true
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -64,7 +65,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Extract Docker metadata
         id: meta
@@ -90,8 +91,8 @@ jobs:
 
   deploy-to-vps:
     name: Deploy to VPS Server
-    needs: build-and-push
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    needs: [test, build-and-push]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && needs.test.result == 'success' && !cancelled()
     runs-on: ubuntu-latest
     steps:
       - name: Execute Remote SSH Deployment on VPS
