@@ -19,7 +19,8 @@
     },
     "types": [
       "node",
-      "jest"
+      "jest",
+      "@fastify/multipart"
     ],
     "incremental": false,
     "skipLibCheck": true,
