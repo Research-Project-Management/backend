@@ -17,7 +17,7 @@ import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-
 import { CurrentUser } from '../../../modules/iam/authn/decorators/current-user.decorator';
 import { IngestionPort, INGESTION_PORT } from './types/ingestion.types';
 import { IngestionService } from './ingestion.service';
-import { IngestionSubmissionDto } from './dto/ingestion-submission.dto';
+import { IngestionSubmissionDto } from './dto/submission.dto';
 import {
   StartIngestionDto,
   IngestDoiDto,

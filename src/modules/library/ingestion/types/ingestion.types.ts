@@ -99,5 +99,5 @@ export interface IngestionPort {
   getRunStatus(workspaceId: string, runId: string): Promise<any>;
 }
 
-export * from './ingestion-submission.types';
+export * from './submission.types';
 export * from './metadata-candidate.types';
