@@ -427,5 +427,28 @@ export class PageService {
 
     return false;
   }
-}
 
+  async checkProjectAccess(
+    projectId: string,
+    userId: string,
+  ): Promise<boolean> {
+    const project = await this.pageRepo.findProjectContext(projectId);
+    if (!project) return false;
+
+    if (project.workspaceId) {
+      const wsMember = await this.pageRepo.findWorkspaceMember(
+        project.workspaceId,
+        userId,
+      );
+      if (wsMember) return true;
+    }
+
+    const projMember = await this.pageRepo.findProjectMember(
+      project.id,
+      userId,
+    );
+    if (projMember) return true;
+
+    return false;
+  }
+}

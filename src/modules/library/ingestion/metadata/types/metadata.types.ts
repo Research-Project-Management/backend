@@ -166,7 +166,6 @@ export type ProviderName =
   | 'arXiv'
   | 'PubMed'
   | 'OpenLibrary'
-  | 'SemanticScholar'
   | 'OpenAlex'
   | 'Unpaywall'
   | 'CORE';

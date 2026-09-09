@@ -25,6 +25,7 @@ import {
   UpsertSyncNoteCommand,
   UpsertSyncAnnotationCommand,
   DeleteSyncEntityCommand,
+  SyncEntityType,
   ApplyExternalSyncBatchCommand,
   ExternalSyncBatchResult,
   ExternalSyncBatchOperationResult,
@@ -136,7 +137,7 @@ export class SyncService implements SyncPort {
           }
           await this.executeDeleteEntity(tx, helpers, {
             workspaceId,
-            entityType: mutation.entityType as any,
+            entityType: mutation.entityType as SyncEntityType,
             entityId: mutation.entityId,
           });
           const tombstone = await helpers.recordTombstone(workspaceId, {
@@ -551,7 +552,11 @@ export class SyncService implements SyncPort {
       });
       return { id: event.id };
     } catch (err: unknown) {
-      if (err instanceof Error && (err as any).code === 'P2002' && dedupeKey) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002' &&
+        dedupeKey
+      ) {
         this.logger.debug(
           `Outbox event with dedupeKey ${dedupeKey} already exists. Skipping duplicate insert.`,
         );

@@ -6,8 +6,8 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { Prisma, RagStatus } from '@prisma/client';
-import { ItemQueryRepository } from './repositories/item-query.repository';
-import { ItemCommandRepository } from './repositories/item-command.repository';
+import { QueryRepository } from './repositories/query.repository';
+import { CommandRepository } from './repositories/command.repository';
 import {
   CreateCatalogItemData,
   UpdateCatalogItemData,
@@ -29,24 +29,19 @@ import { normalizeTags } from '../tags/utils/tags.utils';
 import { TagsService } from '../tags/tags.service';
 import { CollectionsService } from '../collections/collections.service';
 import { TypesService } from '../types/types.service';
-import { RagIndexerProvider } from '../search/providers/rag-indexer.provider';
+import { RagProvider } from '../search/providers/rag.provider';
 import { ItemsMapper } from './mappers/items.mapper';
 import {
-  FieldMappingChange,
-  DroppedField,
-  CreatorRoleChange,
   TypeConversionPreview,
   ConvertTypeOptions,
 } from './types/items.types';
-import {
-  parseCreatorString,
-  normalizeDoi,
-  normalizeIsbn,
-  normalizeIssn,
-  cleanBannedString,
-} from './utils/items.utils';
+import { ItemTransformer } from './transformers/item.transformer';
 import { randomUUID } from 'crypto';
-import { IItemReadPort, IItemExistencePort } from './ports/items.ports';
+import {
+  IItemReadPort,
+  IItemExistencePort,
+  CatalogItemDetail,
+} from './ports/items.ports';
 
 import type {
   UpsertSyncCatalogItemCommand,
@@ -65,88 +60,22 @@ export type ItemTransactionContext = CatalogTransactionContext;
 import {
   CATALOG_COLUMN_METADATA_FIELDS,
   FIELD_ALIASES,
-  REVERSE_FIELD_ALIASES,
 } from './constants/items.constants';
-import { ItemFieldDefinition } from '../types/types.types';
-
-function getItemFieldValue(item: Record<string, any>, key: string): any {
-  if (!item) return undefined;
-  if (item[key] !== undefined && item[key] !== null && item[key] !== '') {
-    return item[key];
-  }
-  if (item.extraFields && typeof item.extraFields === 'object') {
-    if (
-      item.extraFields[key] !== undefined &&
-      item.extraFields[key] !== null &&
-      item.extraFields[key] !== ''
-    ) {
-      return item.extraFields[key];
-    }
-  }
-  const alias = FIELD_ALIASES[key] || REVERSE_FIELD_ALIASES[key];
-  if (alias) {
-    if (item[alias] !== undefined && item[alias] !== null && item[alias] !== '') {
-      return item[alias];
-    }
-    if (item.extraFields && typeof item.extraFields === 'object') {
-      if (
-        item.extraFields[alias] !== undefined &&
-        item.extraFields[alias] !== null &&
-        item.extraFields[alias] !== ''
-      ) {
-        return item.extraFields[alias];
-      }
-    }
-  }
-  const lowerKey = key.toLowerCase();
-  for (const [k, v] of Object.entries(item)) {
-    if (k.toLowerCase() === lowerKey && v !== undefined && v !== null && v !== '') {
-      return v;
-    }
-  }
-  if (item.extraFields && typeof item.extraFields === 'object') {
-    for (const [k, v] of Object.entries(item.extraFields)) {
-      if (k.toLowerCase() === lowerKey && v !== undefined && v !== null && v !== '') {
-        return v;
-      }
-    }
-  }
-  return undefined;
-}
-
-function findMatchingTargetField(
-  sourceKey: string,
-  targetFields: ItemFieldDefinition[],
-): string | undefined {
-  const exact = targetFields.find((f) => f.key === sourceKey);
-  if (exact) return exact.key;
-
-  const targetAlias = FIELD_ALIASES[sourceKey] || REVERSE_FIELD_ALIASES[sourceKey];
-  if (targetAlias) {
-    const matched = targetFields.find((f) => f.key === targetAlias);
-    if (matched) return matched.key;
-  }
-
-  const lowerSource = sourceKey.toLowerCase();
-  const matchedCase = targetFields.find((f) => f.key.toLowerCase() === lowerSource);
-  if (matchedCase) return matchedCase.key;
-
-  return undefined;
-}
 
 @Injectable()
 export class ItemsService implements IItemReadPort, IItemExistencePort {
   private readonly logger = new Logger(ItemsService.name);
 
   constructor(
-    private readonly queryRepo: ItemQueryRepository,
-    private readonly commandRepo: ItemCommandRepository,
+    private readonly queryRepo: QueryRepository,
+    private readonly commandRepo: CommandRepository,
     private readonly libraryTx: TransactionService,
     private readonly prisma: PrismaService,
     private readonly tagsService: TagsService,
     private readonly collectionsService: CollectionsService,
     private readonly typesService: TypesService,
-    private readonly ragIndexer: RagIndexerProvider,
+    private readonly rag: RagProvider,
+    private readonly itemTransformer: ItemTransformer,
   ) {}
 
   private resolveWorkspaceId(workspaceId: string): Promise<string> {
@@ -318,7 +247,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       ragLastAttemptAt: new Date(),
     });
     try {
-      const result = await this.ragIndexer.indexPaper(item);
+      const result = await this.rag.indexPaper(item);
       await this.commandRepo.updateRagStatus(item.id, {
         ragDocId: result.docId,
         ragStatus: 'indexed',
@@ -583,17 +512,17 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
 
   async findById(workspaceId: string, itemId: string) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.queryRepo.findById(canonicalWorkspaceId, itemId) as any;
+    return this.queryRepo.findById(canonicalWorkspaceId, itemId);
   }
 
   async findByIds(workspaceId: string, itemIds: string[]) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.queryRepo.findByIds(canonicalWorkspaceId, itemIds) as any;
+    return this.queryRepo.findByIds(canonicalWorkspaceId, itemIds);
   }
 
   async findByDoi(workspaceId: string, doi: string) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.queryRepo.findByDoi(canonicalWorkspaceId, doi) as any;
+    return this.queryRepo.findByDoi(canonicalWorkspaceId, doi);
   }
 
   async findSummaryById(workspaceId: string, itemId: string) {
@@ -630,6 +559,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     if (command.existingId) {
       const existing = await tx.catalogItem.findUnique({
         where: { id: command.existingId },
+        include: { itemTags: { include: { tag: true } } },
       });
 
       if (!existing) {
@@ -644,59 +574,25 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         );
       }
 
-      const existingItemTags = await tx.catalogItemTag.findMany({
-        where: { catalogItemId: command.existingId },
-        include: { tag: true },
-      });
-      const existingTagNames = existingItemTags.map((it) => it.tag.name);
+      const existingTagNames = (existing.itemTags || []).map(
+        (it) => it.tag.name,
+      );
       const mergedTags = normalizeTags([
         ...existingTagNames,
         ...(command.tags || []),
       ]);
 
-      const updated = await tx.catalogItem.update({
-        where: { id: command.existingId },
-        data: {
-          title: command.title,
-          abstract: command.abstract,
-          year: command.year,
-          doi: command.doi,
-          citationKey: command.citationKey,
-          publicationTitle: command.publicationTitle,
-          volume: command.volume,
-          issue: command.issue,
-          pages: command.pages,
-          issn: command.issn,
-          isbn: command.isbn,
-          url: command.url,
-          itemType: command.itemType,
-          publicationDate: command.publicationDate,
-          journalAbbr: command.journalAbbr,
-          publisher: command.publisher,
-          place: command.place,
-          series: command.series,
-          seriesTitle: command.seriesTitle,
-          seriesText: command.seriesText,
-          rights: command.rights,
-          license: command.license,
-          archive: command.archive,
-          archiveLocation: command.archiveLocation,
-          libraryCatalog: command.libraryCatalog,
-          callNumber: command.callNumber,
-          language: command.language,
-          extra:
-            command.extra || command.extraFields || command.seriesNumber
-              ? JSON.stringify({
-                  ...(command.extra ? { _rawExtra: command.extra } : {}),
-                  ...(command.seriesNumber
-                    ? { seriesNumber: command.seriesNumber }
-                    : {}),
-                  ...(command.extraFields || {}),
-                })
-              : undefined,
-          version: { increment: 1 },
+      const updated = await this.commandRepo.update(
+        command.workspaceId,
+        command.existingId,
+        undefined,
+        {
+          ...command,
+          tags: mergedTags,
+          userId: command.userId,
         },
-      });
+        tx,
+      );
 
       await helpers.appendChange(command.workspaceId, {
         entityType: 'CatalogItem',
@@ -706,265 +602,16 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         data: { title: command.title },
       });
 
-      await this.tagsService.syncTagsToItem(
-        tx,
-        command.workspaceId,
-        updated.id,
-        mergedTags,
-      );
-
-      // Sync contributors (authors & creators)
-      if (command.creators && command.creators.length > 0) {
-        await tx.catalogContributor.deleteMany({
-          where: { catalogItemId: updated.id },
-        });
-        await tx.catalogContributor.createMany({
-          data: command.creators.map((c: any, index: number) => ({
-            catalogItemId: updated.id,
-            creatorType: c.creatorType || 'author',
-            firstName: c.firstName || '',
-            lastName: c.lastName || '',
-            fullName:
-              c.fullName ||
-              c.name ||
-              [c.firstName, c.lastName].filter(Boolean).join(' ') ||
-              '',
-            orderIndex: c.orderIndex !== undefined ? c.orderIndex : index,
-          })),
-        });
-      } else if (command.authors && command.authors.length > 0) {
-        await tx.catalogContributor.deleteMany({
-          where: { catalogItemId: updated.id },
-        });
-        await tx.catalogContributor.createMany({
-          data: command.authors.map((authorName: string, index: number) => {
-            const parsed = parseCreatorString(authorName, index);
-            return {
-              catalogItemId: updated.id,
-              creatorType: parsed.creatorType,
-              firstName: parsed.firstName,
-              lastName: parsed.lastName,
-              fullName: parsed.fullName,
-              orderIndex: parsed.orderIndex,
-            };
-          }),
-        });
-      }
-
-      // Sync collections (Delegated to CollectionsService)
-      if (
-        command.collectionIds !== undefined ||
-        command.collectionId !== undefined
-      ) {
-        const rawTargetCollectionIds = [
-          ...(Array.isArray(command.collectionIds)
-            ? command.collectionIds
-            : []),
-          ...(command.collectionId ? [command.collectionId] : []),
-        ];
-        await this.collectionsService.syncCollectionsToItem(
-          tx,
-          command.workspaceId,
-          updated.id,
-          rawTargetCollectionIds,
-        );
-      }
-
-      // Sync identifiers
-      const cleanSyncDoi =
-        normalizeDoi(cleanBannedString(command.doi)) ||
-        cleanBannedString(command.doi);
-      if (cleanSyncDoi) {
-        await tx.catalogIdentifier.deleteMany({
-          where: { catalogItemId: updated.id, type: 'doi' },
-        });
-        await tx.catalogIdentifier.create({
-          data: {
-            catalogItemId: updated.id,
-            type: 'doi',
-            value: cleanSyncDoi,
-            canonicalUri: `https://doi.org/${cleanSyncDoi}`,
-          },
-        });
-      }
-      const cleanSyncIsbn =
-        normalizeIsbn(cleanBannedString(command.isbn)) ||
-        cleanBannedString(command.isbn);
-      if (cleanSyncIsbn) {
-        await tx.catalogIdentifier.deleteMany({
-          where: { catalogItemId: updated.id, type: 'isbn' },
-        });
-        await tx.catalogIdentifier.create({
-          data: {
-            catalogItemId: updated.id,
-            type: 'isbn',
-            value: cleanSyncIsbn,
-            canonicalUri: `urn:isbn:${cleanSyncIsbn}`,
-          },
-        });
-      }
-      const cleanSyncIssn =
-        normalizeIssn(cleanBannedString(command.issn)) ||
-        cleanBannedString(command.issn);
-      if (cleanSyncIssn) {
-        await tx.catalogIdentifier.deleteMany({
-          where: { catalogItemId: updated.id, type: 'issn' },
-        });
-        await tx.catalogIdentifier.create({
-          data: {
-            catalogItemId: updated.id,
-            type: 'issn',
-            value: cleanSyncIssn,
-            canonicalUri: `urn:issn:${cleanSyncIssn}`,
-          },
-        });
-      }
-
       return { id: updated.id, isNew: false, version: updated.version };
     } else {
-      const newTags = command.tags ? normalizeTags(command.tags) : [];
-      const cleanCreateDoi =
-        normalizeDoi(cleanBannedString(command.doi)) ||
-        cleanBannedString(command.doi) ||
-        '';
-      const cleanCreateIsbn =
-        normalizeIsbn(cleanBannedString(command.isbn)) ||
-        cleanBannedString(command.isbn) ||
-        '';
-      const cleanCreateIssn =
-        normalizeIssn(cleanBannedString(command.issn)) ||
-        cleanBannedString(command.issn) ||
-        '';
-
-      const created = await tx.catalogItem.create({
-        data: {
-          workspaceId: command.workspaceId,
-          uploadedById: command.userId,
-          title: command.title,
-          abstract: command.abstract,
-          year: command.year,
-          doi: cleanCreateDoi,
-          citationKey: command.citationKey,
-          publicationTitle: command.publicationTitle,
-          volume: command.volume,
-          issue: command.issue,
-          pages: command.pages,
-          issn: cleanCreateIssn,
-          isbn: cleanCreateIsbn,
-          url: command.url,
-          itemType: command.itemType,
-          publicationDate: command.publicationDate,
-          journalAbbr: command.journalAbbr,
-          publisher: command.publisher,
-          place: command.place,
-          series: command.series,
-          seriesTitle: command.seriesTitle,
-          seriesText: command.seriesText,
-          rights: command.rights,
-          license: command.license,
-          archive: command.archive,
-          archiveLocation: command.archiveLocation,
-          libraryCatalog: command.libraryCatalog,
-          callNumber: command.callNumber,
-          language: command.language,
-          extra:
-            command.extra || command.extraFields || command.seriesNumber
-              ? JSON.stringify({
-                  ...(command.extra ? { _rawExtra: command.extra } : {}),
-                  ...(command.seriesNumber
-                    ? { seriesNumber: command.seriesNumber }
-                    : {}),
-                  ...(command.extraFields || {}),
-                })
-              : undefined,
-          version: 1,
-        },
-      });
-
-      await this.tagsService.syncTagsToItem(
-        tx,
+      const created = await this.commandRepo.create(
         command.workspaceId,
-        created.id,
-        newTags,
+        {
+          ...command,
+          uploadedById: command.userId,
+        },
+        tx,
       );
-
-      // Sync contributors (authors & creators)
-      if (command.creators && command.creators.length > 0) {
-        await tx.catalogContributor.createMany({
-          data: command.creators.map((c: any, index: number) => ({
-            catalogItemId: created.id,
-            creatorType: c.creatorType || 'author',
-            firstName: c.firstName || '',
-            lastName: c.lastName || '',
-            fullName:
-              c.fullName ||
-              c.name ||
-              [c.firstName, c.lastName].filter(Boolean).join(' ') ||
-              '',
-            orderIndex: c.orderIndex !== undefined ? c.orderIndex : index,
-          })),
-        });
-      } else if (command.authors && command.authors.length > 0) {
-        await tx.catalogContributor.createMany({
-          data: command.authors.map((authorName: string, index: number) => {
-            const parsed = parseCreatorString(authorName, index);
-            return {
-              catalogItemId: created.id,
-              creatorType: parsed.creatorType,
-              firstName: parsed.firstName,
-              lastName: parsed.lastName,
-              fullName: parsed.fullName,
-              orderIndex: parsed.orderIndex,
-            };
-          }),
-        });
-      }
-
-      // Sync collections (Delegated to CollectionsService)
-      const rawNewCollectionIds = [
-        ...(Array.isArray(command.collectionIds) ? command.collectionIds : []),
-        ...(command.collectionId ? [command.collectionId] : []),
-      ];
-      if (rawNewCollectionIds.length > 0) {
-        await this.collectionsService.syncCollectionsToItem(
-          tx,
-          command.workspaceId,
-          created.id,
-          rawNewCollectionIds,
-        );
-      }
-
-      // Sync identifiers
-      if (cleanCreateDoi) {
-        await tx.catalogIdentifier.create({
-          data: {
-            catalogItemId: created.id,
-            type: 'doi',
-            value: cleanCreateDoi,
-            canonicalUri: `https://doi.org/${cleanCreateDoi}`,
-          },
-        });
-      }
-      if (cleanCreateIsbn) {
-        await tx.catalogIdentifier.create({
-          data: {
-            catalogItemId: created.id,
-            type: 'isbn',
-            value: cleanCreateIsbn,
-            canonicalUri: `urn:isbn:${cleanCreateIsbn}`,
-          },
-        });
-      }
-      if (cleanCreateIssn) {
-        await tx.catalogIdentifier.create({
-          data: {
-            catalogItemId: created.id,
-            type: 'issn',
-            value: cleanCreateIssn,
-            canonicalUri: `urn:issn:${cleanCreateIssn}`,
-          },
-        });
-      }
 
       await helpers.appendChange(command.workspaceId, {
         entityType: 'CatalogItem',
@@ -1035,7 +682,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       workspaceId,
       entityId,
       publishOutboxEventType ?? 'library.item.deleted',
-      (publishOutboxPayload ?? { itemId: entityId, reason }) as any,
+      publishOutboxPayload ?? { itemId: entityId, reason },
     );
   }
 
@@ -1047,281 +694,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     targetType: string,
     options: { retainUnmappedInExtra?: boolean } = {},
   ): TypeConversionPreview {
-    const item = ItemsMapper.toDomain(rawItem);
-    const sourceType = item.itemType || item.type || 'journalArticle';
-
-    if (!this.typesService.isValidType(targetType)) {
-      throw new BadRequestException(`Invalid target itemType: ${targetType}`);
-    }
-
-    if (!this.typesService.isBibliographic(sourceType)) {
-      throw new BadRequestException(
-        `Cannot convert non-bibliographic item type: ${sourceType}`,
-      );
-    }
-
-    if (!this.typesService.isBibliographic(targetType)) {
-      throw new BadRequestException(
-        `Cannot convert to special non-bibliographic item type: ${targetType}`,
-      );
-    }
-
-    if (sourceType === targetType) {
-      return {
-        sourceType,
-        targetType,
-        preservedFields: this.typesService
-          .getOrderedFields(sourceType)
-          .map((f) => f.key),
-        mappedFields: [],
-        droppedFields: [],
-        creatorChanges: (item.creators || []).map(
-          (c: Record<string, unknown>) => ({
-            creator: c,
-            fromRole: c.creatorType || 'author',
-            toRole: c.creatorType || 'author',
-            reason: 'preserved' as const,
-          }),
-        ),
-        projectedItem: { ...item },
-        unmappedRetained: {},
-        hasLoss: false,
-      };
-    }
-
-    const sourceFields = this.typesService.getOrderedFields(sourceType);
-    const targetFields = this.typesService.getOrderedFields(targetType);
-    const targetFieldKeys = new Set(targetFields.map((f) => f.key));
-    const sourceLabelMap = new Map(sourceFields.map((f) => [f.key, f.label]));
-
-    const preservedFields: string[] = [];
-    const mappedFields: FieldMappingChange[] = [];
-    const droppedFields: DroppedField[] = [];
-    const unmappedRetained: Record<string, any> = {};
-
-    const projectedItem: Record<string, any> = {
-      ...item,
-      itemType: targetType,
-      type: targetType,
-    };
-
-    const sourceValues: Record<string, any> = {};
-    for (const field of sourceFields) {
-      const val = getItemFieldValue(item, field.key);
-      if (val !== undefined && val !== null && val !== '') {
-        sourceValues[field.key] = val;
-      }
-    }
-
-    const persistentAcademicKeys = [
-      'title',
-      'abstract',
-      'abstractNote',
-      'date',
-      'year',
-      'url',
-      'DOI',
-      'doi',
-      'ISBN',
-      'isbn',
-      'ISSN',
-      'issn',
-      'PMID',
-      'pmid',
-      'PMCID',
-      'pmcid',
-      'archiveID',
-      'archiveId',
-      'arxivId',
-      'citationCount',
-      'referenceCount',
-      'openAccessPdfUrl',
-      'language',
-      'shortTitle',
-      'rights',
-      'license',
-      'extra',
-      'citationKey',
-    ];
-    for (const k of persistentAcademicKeys) {
-      const val = getItemFieldValue(item, k);
-      if (val !== undefined && val !== null && val !== '') {
-        const canonicalKey = FIELD_ALIASES[k] ? k : (REVERSE_FIELD_ALIASES[k] || k);
-        if (sourceValues[canonicalKey] === undefined && sourceValues[k] === undefined) {
-          sourceValues[canonicalKey] = val;
-        }
-      }
-    }
-
-    for (const field of sourceFields) {
-      const matched = findMatchingTargetField(field.key, targetFields);
-      if (
-        !matched &&
-        field.key !== 'title' &&
-        field.key !== 'abstract' &&
-        field.key !== 'abstractNote' &&
-        field.key !== 'url' &&
-        field.key !== 'doi' &&
-        field.key !== 'DOI'
-      ) {
-        delete projectedItem[field.key];
-      }
-    }
-
-    const newExtraFields: Record<string, any> = { ...(item.extraFields || {}) };
-
-    if (sourceType === 'book' && targetType === 'bookSection') {
-      if (sourceValues.title) {
-        projectedItem.bookTitle = sourceValues.title;
-        projectedItem.title = '';
-        mappedFields.push({
-          fromField: 'title',
-          toField: 'bookTitle',
-          value: sourceValues.title,
-          rule: 'special-rule',
-        });
-        delete sourceValues.title;
-      }
-      delete projectedItem.shortTitle;
-      delete sourceValues.shortTitle;
-    } else if (sourceType === 'bookSection' && targetType === 'book') {
-      if (sourceValues.bookTitle) {
-        projectedItem.title = sourceValues.bookTitle;
-        mappedFields.push({
-          fromField: 'bookTitle',
-          toField: 'title',
-          value: sourceValues.bookTitle,
-          rule: 'special-rule',
-        });
-        delete sourceValues.bookTitle;
-      }
-      delete projectedItem.shortTitle;
-      delete sourceValues.shortTitle;
-    }
-
-    for (const [sField, val] of Object.entries(sourceValues)) {
-      const matchedTargetKey = findMatchingTargetField(sField, targetFields);
-      if (matchedTargetKey) {
-        projectedItem[matchedTargetKey] = val;
-        const dbCol = FIELD_ALIASES[matchedTargetKey];
-        if (dbCol) projectedItem[dbCol] = val;
-        preservedFields.push(matchedTargetKey);
-      } else {
-        const resolved = this.typesService.resolveBaseFieldMapping(
-          sourceType,
-          targetType,
-          sField,
-        );
-
-        if (
-          resolved?.targetField &&
-          targetFieldKeys.has(resolved.targetField)
-        ) {
-          projectedItem[resolved.targetField] = val;
-          const dbCol = FIELD_ALIASES[resolved.targetField];
-          if (dbCol) projectedItem[dbCol] = val;
-          mappedFields.push({
-            fromField: sField,
-            toField: resolved.targetField,
-            value: val,
-            rule: 'base-semantic',
-          });
-        } else {
-          const isPersistentCol =
-            CATALOG_COLUMN_METADATA_FIELDS.has(sField) ||
-            CATALOG_COLUMN_METADATA_FIELDS.has(FIELD_ALIASES[sField]);
-
-          if (
-            isPersistentCol &&
-            [
-              'doi',
-              'DOI',
-              'arxivId',
-              'archiveID',
-              'archiveId',
-              'pmid',
-              'PMID',
-              'pmcid',
-              'PMCID',
-              'citationCount',
-              'referenceCount',
-              'openAccessPdfUrl',
-              'url',
-            ].includes(sField)
-          ) {
-            projectedItem[sField] = val;
-            const dbCol = FIELD_ALIASES[sField];
-            if (dbCol) projectedItem[dbCol] = val;
-            preservedFields.push(sField);
-          } else {
-            droppedFields.push({
-              field: sField,
-              label: sourceLabelMap.get(sField) || sField,
-              value: val,
-            });
-            unmappedRetained[sField] = val;
-
-            if (options.retainUnmappedInExtra !== false) {
-              newExtraFields[`__unmapped_${sourceType}_${sField}`] = val;
-            }
-          }
-        }
-      }
-    }
-
-    projectedItem.extraFields = newExtraFields;
-
-    const validCreatorRoles = new Set(
-      this.typesService
-        .getValidCreatorTypes(targetType)
-        .map((c) => c.creatorType),
-    );
-    const targetPrimaryCreator =
-      this.typesService.getPrimaryCreatorType(targetType);
-    const creatorChanges: CreatorRoleChange[] = [];
-
-    const projectedCreators = (item.creators || []).map(
-      (c: Record<string, unknown>, index: number) => {
-        const fromRole = (c.creatorType as string) || 'author';
-        let toRole: string = fromRole;
-        let reason: 'preserved' | 'primary-fallback' | 'secondary-fallback' =
-          'preserved';
-
-        if (!validCreatorRoles.has(fromRole)) {
-          if (index === 0 && validCreatorRoles.has(targetPrimaryCreator)) {
-            toRole = targetPrimaryCreator;
-            reason = 'primary-fallback';
-          } else if (validCreatorRoles.has('contributor')) {
-            toRole = 'contributor';
-            reason = 'secondary-fallback';
-          } else {
-            toRole = targetPrimaryCreator;
-            reason = 'primary-fallback';
-          }
-        }
-
-        creatorChanges.push({ creator: c, fromRole, toRole, reason });
-        return { ...c, creatorType: toRole };
-      },
-    );
-
-    projectedItem.creators = projectedCreators;
-
-    const hasLoss =
-      droppedFields.length > 0 ||
-      creatorChanges.some((c) => c.reason !== 'preserved');
-
-    return {
-      sourceType,
-      targetType,
-      preservedFields,
-      mappedFields,
-      droppedFields,
-      creatorChanges,
-      projectedItem,
-      unmappedRetained,
-      hasLoss,
-    };
+    return this.itemTransformer.previewConversion(rawItem, targetType, options);
   }
 
   /**
@@ -1335,16 +708,17 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     tx?: Prisma.TransactionClient,
   ) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const existing = await this.queryRepo.findById(
+    const rawExisting = await this.queryRepo.findById(
       canonicalWorkspaceId,
       itemId,
       tx,
     );
-    if (!existing) {
+    if (!rawExisting) {
       throw new NotFoundException(
         `Item ${itemId} not found in workspace ${canonicalWorkspaceId}`,
       );
     }
+    const existing = ItemsMapper.toDomain<CatalogItemDetail>(rawExisting);
 
     const preview = this.previewTypeConversion(existing, targetType, {
       retainUnmappedInExtra: options.retainUnmappedInExtra ?? true,
@@ -1358,7 +732,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     };
 
     for (const field of targetFields) {
-      const val = getItemFieldValue(projected, field.key);
+      const val = this.itemTransformer.getItemFieldValue(projected, field.key);
       if (
         val !== undefined &&
         val !== null &&
@@ -1373,7 +747,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     const updatePayload: Record<string, any> = {
       itemType: targetType,
       type: targetType,
-      creators: projected.creators ?? (existing as any).creators,
+      creators: projected.creators ?? existing.creators,
       extraFields: dynamicExtraFields,
     };
 
@@ -1389,7 +763,8 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         updatePayload[col] = '';
       } else {
         const val =
-          getItemFieldValue(projected, col) ?? (existing as any)[col];
+          this.itemTransformer.getItemFieldValue(projected, col) ??
+          (existing as unknown as Record<string, unknown>)[col];
         if (val !== undefined) {
           updatePayload[col] = val;
         }

@@ -4,6 +4,12 @@ import {
   AnnotationType,
 } from '@prisma/client';
 
+export type {
+  AnnotationId,
+  AttachmentId,
+  WorkspaceId,
+} from '../../../../core/types/brand.type';
+
 export type AnnotationEntity = PrismaAnnotation;
 export { AnnotationType };
 

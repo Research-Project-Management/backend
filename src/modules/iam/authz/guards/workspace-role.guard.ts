@@ -59,14 +59,14 @@ export class WorkspaceRoleGuard implements CanActivate {
     // Check if request targets an entity sub-resource
     const hasEntityParam = Boolean(
       request.params?.projectId ||
-        request.params?.itemId ||
-        request.params?.attachmentId ||
-        request.params?.collectionId ||
-        request.params?.tagId ||
-        request.params?.labelId ||
-        request.params?.fileId ||
-        request.params?.pageId ||
-        request.params?.taskId,
+      request.params?.itemId ||
+      request.params?.attachmentId ||
+      request.params?.collectionId ||
+      request.params?.tagId ||
+      request.params?.labelId ||
+      request.params?.fileId ||
+      request.params?.pageId ||
+      request.params?.taskId,
     );
 
     let entityWorkspaceId: string | undefined;

@@ -1,10 +1,10 @@
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '../../../../core/database/prisma.service';
-import { PdfExtractorProvider } from '../providers/pdf-extractor.provider';
+import { PdfProvider } from '../providers/pdf.provider';
 import { SearchService } from '../../search/search.service';
 import { STORAGE_PORT, IStoragePort } from '../../../storage/storage.port';
 import { OutboxEvent } from '@prisma/client';
-import { OutboxDispatchHandler } from '../../outbox/outbox.types';
+import { OutboxDispatchHandler } from '../../outbox/types/outbox.types';
 import { AttachmentStorageException } from '../errors/attachments.errors';
 
 export const EXTRACTION_EVENT_TYPES = {
@@ -15,14 +15,14 @@ export const ATTACHMENT_EXTRACTION_STALE_THRESHOLD =
   'ATTACHMENT_EXTRACTION_STALE_THRESHOLD';
 
 @Injectable()
-export class AttachmentExtractionHandler implements OutboxDispatchHandler {
-  private readonly logger = new Logger(AttachmentExtractionHandler.name);
+export class ExtractionHandler implements OutboxDispatchHandler {
+  private readonly logger = new Logger(ExtractionHandler.name);
   private readonly maxAttempts = 3;
   private readonly staleThresholdMs: number;
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly extractorService: PdfExtractorProvider,
+    private readonly pdf: PdfProvider,
     private readonly searchService: SearchService,
     @Inject(STORAGE_PORT) private readonly storagePort: IStoragePort,
     @Optional()
@@ -154,7 +154,7 @@ export class AttachmentExtractionHandler implements OutboxDispatchHandler {
       }
 
       // 3. Extract text and per-page structures
-      const doc = await this.extractorService.extractDocumentFromBuffer(buffer);
+      const doc = await this.pdf.extractDocumentFromBuffer(buffer);
 
       // 4. Atomically index pages idempotently
       if (doc.pages.length > 0) {
@@ -374,3 +374,5 @@ export class AttachmentExtractionHandler implements OutboxDispatchHandler {
     }
   }
 }
+
+export { ExtractionHandler as AttachmentExtractionHandler };

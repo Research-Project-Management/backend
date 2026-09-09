@@ -2,11 +2,13 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { Prisma, RagStatus } from '@prisma/client';
 import { PrismaService } from '../../../../core/database/prisma.service';
 import { VersionMismatchException } from '../../common/errors/version-mismatch.exception';
 import { normalizeTags } from '../../tags/utils/tags.utils';
+import { TagInput } from '../../tags/types/tags.types';
 import {
   parseCreatorString,
   normalizeDoi,
@@ -16,6 +18,7 @@ import {
   normalizeIsbn,
   normalizeIssn,
   cleanBannedString,
+  cleanAbstractText,
 } from '../utils/items.utils';
 import { getFileContentPath } from '@/modules/storage/storage.port';
 import {
@@ -28,8 +31,243 @@ import {
   UpdateCatalogItemData,
 } from '../types/items.types';
 
+function formatExtraMetadataEntries(parsed: Record<string, unknown>): string {
+  const lines: string[] = [];
+  for (const [k, v] of Object.entries(parsed)) {
+    if (
+      v !== null &&
+      v !== undefined &&
+      v !== '' &&
+      !CATALOG_COLUMN_METADATA_FIELDS.has(k)
+    ) {
+      let formatted: string;
+      if (typeof v === 'string') {
+        formatted = v;
+      } else if (typeof v === 'number' || typeof v === 'boolean') {
+        formatted = String(v);
+      } else {
+        formatted = JSON.stringify(v);
+      }
+      lines.push(`${k}: ${formatted}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+function cleanSingleIdentifier(
+  raw: string | null | undefined,
+  normalizer: (val?: any) => string | undefined,
+): string | undefined {
+  if (raw === undefined) return undefined;
+  if (!raw) return '';
+  const cleaned = cleanBannedString(raw);
+  return normalizer(cleaned) || cleaned || '';
+}
+
+export function normalizeItemIdentifiers(data: {
+  doi?: string | null;
+  DOI?: string | null;
+  arxivId?: string | null;
+  archiveID?: string | null;
+  archiveId?: string | null;
+  pmid?: string | null;
+  PMID?: string | null;
+  pmcid?: string | null;
+  PMCID?: string | null;
+  isbn?: string | null;
+  ISBN?: string | null;
+  issn?: string | null;
+  ISSN?: string | null;
+}) {
+  const rawDoi = data.doi !== undefined ? data.doi : data.DOI;
+  const rawArxivId =
+    data.arxivId !== undefined
+      ? data.arxivId
+      : data.archiveID !== undefined
+        ? data.archiveID
+        : data.archiveId;
+  const rawPmid = data.pmid !== undefined ? data.pmid : data.PMID;
+  const rawPmcid = data.pmcid !== undefined ? data.pmcid : data.PMCID;
+  const rawIsbn = data.isbn !== undefined ? data.isbn : data.ISBN;
+  const rawIssn = data.issn !== undefined ? data.issn : data.ISSN;
+
+  return {
+    doi: cleanSingleIdentifier(rawDoi, normalizeDoi),
+    arxivId: cleanSingleIdentifier(rawArxivId, normalizeArxivId),
+    pmid: cleanSingleIdentifier(rawPmid, normalizePmid),
+    pmcid: cleanSingleIdentifier(rawPmcid, normalizePmcid),
+    isbn: cleanSingleIdentifier(rawIsbn, normalizeIsbn),
+    issn: cleanSingleIdentifier(rawIssn, normalizeIssn),
+  };
+}
+
+export function resolveExtraPlainText(
+  extraInput?: string | null,
+  existingExtra?: string | null,
+): string | undefined {
+  const parseCandidate = (raw: string): string => {
+    const trimmed = raw.trim();
+    if (trimmed.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (typeof parsed._rawExtra === 'string') {
+          return parsed._rawExtra.trim();
+        }
+        if (parsed && typeof parsed === 'object') {
+          return formatExtraMetadataEntries(parsed as Record<string, unknown>);
+        }
+      } catch {
+        return trimmed;
+      }
+    }
+    return trimmed;
+  };
+
+  if (extraInput !== undefined) {
+    if (typeof extraInput === 'string' && extraInput.trim()) {
+      return parseCandidate(extraInput);
+    }
+    return '';
+  }
+
+  if (existingExtra !== undefined && existingExtra !== null) {
+    return parseCandidate(existingExtra);
+  }
+
+  return undefined;
+}
+
+export function prepareNotesToCreate(
+  notes: unknown,
+  workspaceId: string,
+  userId: string,
+  existingNotesList?: Array<{ contentMd: string }>,
+) {
+  if (!Array.isArray(notes)) return [];
+
+  const seen = new Set(
+    (existingNotesList || []).map((n) => n.contentMd.trim()),
+  );
+
+  return notes
+    .map((note) => {
+      const content =
+        typeof note === 'string'
+          ? note
+          : (note as { content?: unknown })?.content;
+      const source =
+        typeof note === 'object' && note
+          ? (note as { source?: unknown }).source
+          : undefined;
+      const contentMd = typeof content === 'string' ? content.trim() : '';
+      if (!contentMd || seen.has(contentMd)) return null;
+      seen.add(contentMd);
+
+      const sourceName = typeof source === 'string' ? source.trim() : '';
+      return {
+        workspaceId,
+        createdById: userId || 'system',
+        title: sourceName ? `Imported Note (${sourceName})` : 'Imported Note',
+        contentMd,
+        contentJson: {
+          type: 'doc',
+          content: [
+            {
+              type: 'paragraph',
+              content: [{ type: 'text', text: contentMd }],
+            },
+          ],
+        },
+        tags: ['imported', ...(sourceName ? [sourceName] : [])],
+        version: 1,
+      };
+    })
+    .filter((n): n is NonNullable<typeof n> => n !== null);
+}
+
+async function resolveOrCreateTags(
+  client: Prisma.TransactionClient | PrismaService,
+  workspaceId: string,
+  rawTagList: (TagInput | null | undefined)[],
+): Promise<string[]> {
+  const normalizedTagNames = normalizeTags(rawTagList).slice(0, 30);
+  if (normalizedTagNames.length === 0) return [];
+
+  await client.catalogTag.createMany({
+    data: normalizedTagNames.map((name) => ({
+      workspaceId,
+      name,
+    })),
+    skipDuplicates: true,
+  });
+
+  const existingTags = await client.catalogTag.findMany({
+    where: {
+      workspaceId,
+      name: { in: normalizedTagNames },
+    },
+    select: { id: true },
+  });
+  return existingTags.map((t) => t.id);
+}
+
+async function syncTagsForCatalogItem(
+  client: Prisma.TransactionClient | PrismaService,
+  workspaceId: string,
+  catalogItemId: string,
+  rawTags: (TagInput | null | undefined)[],
+): Promise<void> {
+  const normalizedTagsList = normalizeTags(rawTags);
+  if (normalizedTagsList.length === 0) {
+    await client.catalogItemTag.deleteMany({
+      where: { catalogItemId },
+    });
+    return;
+  }
+
+  await client.catalogItemTag.deleteMany({
+    where: {
+      catalogItemId,
+      tag: {
+        name: { notIn: normalizedTagsList },
+      },
+    },
+  });
+
+  for (const tagName of normalizedTagsList) {
+    const tag = await client.catalogTag.upsert({
+      where: {
+        workspaceId_name: {
+          workspaceId,
+          name: tagName,
+        },
+      },
+      create: {
+        workspaceId,
+        name: tagName,
+      },
+      update: {},
+    });
+    await client.catalogItemTag.upsert({
+      where: {
+        tagId_catalogItemId: {
+          tagId: tag.id,
+          catalogItemId,
+        },
+      },
+      create: {
+        tagId: tag.id,
+        catalogItemId,
+      },
+      update: {},
+    });
+  }
+}
+
 @Injectable()
-export class ItemCommandRepository {
+export class CommandRepository {
+  private readonly logger = new Logger(CommandRepository.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   private getClient(tx?: Prisma.TransactionClient) {
@@ -46,109 +284,45 @@ export class ItemCommandRepository {
       data.fileId ||
       data.fileUrl?.match(/\/api\/files\/([a-zA-Z0-9-]+)\/content/)?.[1] ||
       null;
-    const notes = Array.isArray(data.notes)
-      ? data.notes
-          .map((note) => {
-            const content =
-              typeof note === 'string'
-                ? note
-                : (note as { content?: unknown })?.content;
-            const source =
-              typeof note === 'object' && note
-                ? (note as { source?: unknown }).source
-                : undefined;
-            const contentMd = typeof content === 'string' ? content.trim() : '';
-            if (!contentMd) return null;
-            const sourceName = typeof source === 'string' ? source.trim() : '';
-            return {
-              workspaceId,
-              createdById: data.uploadedById || 'system',
-              title: sourceName
-                ? `Imported Note (${sourceName})`
-                : 'Imported Note',
-              contentMd,
-              contentJson: {
-                type: 'doc',
-                content: [{ type: 'paragraph', text: contentMd }],
-              },
-              tags: ['imported', ...(sourceName ? [sourceName] : [])],
-              version: 1,
-            };
-          })
-          .filter((note): note is NonNullable<typeof note> => note !== null)
-      : [];
-    const rawDoi = data.doi ?? (data as any).DOI;
-    const rawArxivId =
-      data.arxivId ?? (data as any).archiveID ?? (data as any).archiveId;
-    const rawPmid = data.pmid ?? (data as any).PMID;
-    const rawPmcid = data.pmcid ?? (data as any).PMCID;
-    const rawIsbn = data.isbn ?? (data as any).ISBN;
-    const rawIssn = data.issn ?? (data as any).ISSN;
 
-    const cleanDoi =
-      normalizeDoi(cleanBannedString(rawDoi)) ||
-      cleanBannedString(rawDoi) ||
-      '';
-    const cleanArxivId =
-      normalizeArxivId(cleanBannedString(rawArxivId)) ||
-      cleanBannedString(rawArxivId) ||
-      '';
-    const cleanPmid =
-      normalizePmid(cleanBannedString(rawPmid)) ||
-      cleanBannedString(rawPmid) ||
-      '';
-    const cleanPmcid =
-      normalizePmcid(cleanBannedString(rawPmcid)) ||
-      cleanBannedString(rawPmcid) ||
-      '';
-    const cleanIsbn =
-      normalizeIsbn(cleanBannedString(rawIsbn)) ||
-      cleanBannedString(rawIsbn) ||
-      '';
-    const cleanIssn =
-      normalizeIssn(cleanBannedString(rawIssn)) ||
-      cleanBannedString(rawIssn) ||
-      '';
+    const notes = prepareNotesToCreate(
+      data.notes,
+      workspaceId,
+      data.uploadedById || 'system',
+    );
 
-    // Concurrency-safe tag preparation:
-    // Avoid Prisma nested connectOrCreate which causes race-condition unique constraint violations in batch inserts
+    const ids = normalizeItemIdentifiers(data);
+    const cleanDoi = ids.doi ?? '';
+    const cleanArxivId = ids.arxivId ?? '';
+    const cleanPmid = ids.pmid ?? '';
+    const cleanPmcid = ids.pmcid ?? '';
+    const cleanIsbn = ids.isbn ?? '';
+    const cleanIssn = ids.issn ?? '';
+
+    // Concurrency-safe tag preparation
     const rawTagList = [
       ...(data.tags || []),
       ...(data.keywords || []),
       ...(data.labels || []),
     ];
-    const normalizedTagNames = normalizeTags(rawTagList).slice(0, 30);
-    let resolvedTagIds: string[] = [];
-
-    if (normalizedTagNames.length > 0) {
-      await client.catalogTag.createMany({
-        data: normalizedTagNames.map((name) => ({
-          workspaceId,
-          name,
-        })),
-        skipDuplicates: true,
-      });
-
-      const existingTags = await client.catalogTag.findMany({
-        where: {
-          workspaceId,
-          name: { in: normalizedTagNames },
-        },
-        select: { id: true },
-      });
-      resolvedTagIds = existingTags.map((t) => t.id);
-    }
+    const resolvedTagIds = await resolveOrCreateTags(
+      client,
+      workspaceId,
+      rawTagList,
+    );
 
     const createData: Prisma.CatalogItemUncheckedCreateInput = {
       workspaceId,
       title: data.title,
       year: data.year ?? null,
       doi: cleanDoi,
-      abstract: data.abstract ?? (data as any).abstractNote ?? '',
+      abstract: data.abstract ?? data.abstractNote ?? '',
       itemType: data.itemType ?? 'journalArticle',
       publicationTitle: data.publicationTitle ?? data.journal ?? '',
       publicationDate:
-        data.publicationDate ?? (data as any).date ?? (data.year ? String(data.year) : ''),
+        data.publicationDate ??
+        data.date ??
+        (data.year ? String(data.year) : ''),
       publisher: data.publisher ?? '',
       place: data.place ?? '',
       volume: data.volume ?? '',
@@ -166,11 +340,11 @@ export class ItemCommandRepository {
       pmcid: cleanPmcid,
       url: data.url ?? '',
       language: data.language ?? '',
-      journalAbbr: data.journalAbbr ?? (data as any).journalAbbreviation ?? '',
+      journalAbbr: data.journalAbbr ?? data.journalAbbreviation ?? '',
       shortTitle: data.shortTitle ?? '',
-      rights: data.rights ?? (data as any).license ?? '',
-      license: data.license ?? data.rights ?? (data as any).license ?? '',
-      citationKey: data.citationKey ?? (data as any).citeKey ?? '',
+      rights: data.rights ?? data.license ?? '',
+      license: data.license ?? data.rights ?? '',
+      citationKey: data.citationKey ?? data.citeKey ?? '',
       libraryCatalog: data.libraryCatalog ?? '',
       archive: data.archive ?? '',
       archiveLocation: data.archiveLocation ?? '',
@@ -181,40 +355,7 @@ export class ItemCommandRepository {
       referenceCount: data.referenceCount ?? null,
       openAccessPdfUrl: data.openAccessPdfUrl ?? null,
       seriesNumber: data.seriesNumber ?? null,
-      extra: (() => {
-        // Pure plain-text Extra contract (Zotero parity).
-        // Never JSON.stringify into extra.
-        let text = '';
-        if (typeof data.extra === 'string' && data.extra.trim()) {
-          const trimmed = data.extra.trim();
-          if (trimmed.startsWith('{')) {
-            try {
-              const parsed = JSON.parse(trimmed);
-              if (typeof parsed._rawExtra === 'string') {
-                text = parsed._rawExtra.trim();
-              } else if (parsed && typeof parsed === 'object') {
-                const lines: string[] = [];
-                for (const [k, v] of Object.entries(parsed)) {
-                  if (
-                    v !== null &&
-                    v !== undefined &&
-                    v !== '' &&
-                    !CATALOG_COLUMN_METADATA_FIELDS.has(k)
-                  ) {
-                    lines.push(`${k}: ${String(v)}`);
-                  }
-                }
-                text = lines.join('\n');
-              }
-            } catch {
-              text = trimmed;
-            }
-          } else {
-            text = trimmed;
-          }
-        }
-        return text;
-      })(),
+      extra: resolveExtraPlainText(data.extra) ?? '',
       uploadedById: data.uploadedById || 'system',
       version: 1,
       ...(() => {
@@ -237,9 +378,21 @@ export class ItemCommandRepository {
         }
         return {};
       })(),
-      ...(data.contributors
+      ...(data.contributors && data.contributors.length > 0
         ? {
-            contributors: data.contributors,
+            contributors: {
+              create: data.contributors.map((c: any, index: number) => ({
+                creatorType: c.creatorType || 'author',
+                firstName: c.firstName || '',
+                lastName: c.lastName || '',
+                fullName:
+                  c.fullName ||
+                  [c.firstName, c.lastName].filter(Boolean).join(' ') ||
+                  c.name ||
+                  '',
+                orderIndex: c.orderIndex !== undefined ? c.orderIndex : index,
+              })),
+            },
           }
         : data.creators && data.creators.length > 0
           ? {
@@ -433,6 +586,7 @@ export class ItemCommandRepository {
       where: { id, workspaceId, deletedAt: null },
       include: {
         identifiers: true,
+        notesList: { where: { deletedAt: null } },
       },
     });
 
@@ -451,48 +605,40 @@ export class ItemCommandRepository {
       });
     }
 
-    const rawDoi = data.doi !== undefined ? data.doi : (data as any).DOI;
-    const rawArxivId =
-      data.arxivId !== undefined
-        ? data.arxivId
-        : (data as any).archiveID !== undefined
-          ? (data as any).archiveID
-          : (data as any).archiveId;
-    const rawPmid = data.pmid !== undefined ? data.pmid : (data as any).PMID;
-    const rawPmcid = data.pmcid !== undefined ? data.pmcid : (data as any).PMCID;
-    const rawIsbn = data.isbn !== undefined ? data.isbn : (data as any).ISBN;
-    const rawIssn = data.issn !== undefined ? data.issn : (data as any).ISSN;
-    const rawAbstract = data.abstract !== undefined ? data.abstract : (data as any).abstractNote;
-    const rawPubDate = data.publicationDate !== undefined ? data.publicationDate : (data as any).date;
-    const rawPubTitle = data.publicationTitle !== undefined ? data.publicationTitle : (data as any).journal;
-    const rawJournalAbbr = data.journalAbbr !== undefined ? data.journalAbbr : (data as any).journalAbbreviation;
-    const rawRights = data.rights !== undefined ? data.rights : (data as any).license;
-    const rawCitationKey = data.citationKey !== undefined ? data.citationKey : (data as any).citeKey;
+    const ids = normalizeItemIdentifiers(data);
+    const cleanDoi = ids.doi;
+    const cleanArxivId = ids.arxivId;
+    const cleanPmid = ids.pmid;
+    const cleanPmcid = ids.pmcid;
+    const cleanIsbn = ids.isbn;
+    const cleanIssn = ids.issn;
 
-    const cleanDoi =
-      rawDoi !== undefined
-        ? (rawDoi ? (normalizeDoi(cleanBannedString(rawDoi)) || cleanBannedString(rawDoi) || '') : '')
-        : undefined;
-    const cleanArxivId =
-      rawArxivId !== undefined
-        ? (rawArxivId ? (normalizeArxivId(cleanBannedString(rawArxivId)) || cleanBannedString(rawArxivId) || '') : '')
-        : undefined;
-    const cleanPmid =
-      rawPmid !== undefined
-        ? (rawPmid ? (normalizePmid(cleanBannedString(rawPmid)) || cleanBannedString(rawPmid) || '') : '')
-        : undefined;
-    const cleanPmcid =
-      rawPmcid !== undefined
-        ? (rawPmcid ? (normalizePmcid(cleanBannedString(rawPmcid)) || cleanBannedString(rawPmcid) || '') : '')
-        : undefined;
-    const cleanIsbn =
-      rawIsbn !== undefined
-        ? (rawIsbn ? (normalizeIsbn(cleanBannedString(rawIsbn)) || cleanBannedString(rawIsbn) || '') : '')
-        : undefined;
-    const cleanIssn =
-      rawIssn !== undefined
-        ? (rawIssn ? (normalizeIssn(cleanBannedString(rawIssn)) || cleanBannedString(rawIssn) || '') : '')
-        : undefined;
+    const rawAbstract =
+      data.abstract !== undefined ? data.abstract : data.abstractNote;
+    const cleanAbstract =
+      rawAbstract !== undefined
+        ? (cleanAbstractText(rawAbstract) ?? rawAbstract)
+        : existing.abstract;
+    const rawPubDate =
+      data.publicationDate !== undefined ? data.publicationDate : data.date;
+    const rawPubTitle =
+      data.publicationTitle !== undefined
+        ? data.publicationTitle
+        : data.journal;
+    const rawJournalAbbr =
+      data.journalAbbr !== undefined
+        ? data.journalAbbr
+        : data.journalAbbreviation;
+    const rawRights = data.rights !== undefined ? data.rights : data.license;
+    const rawCitationKey =
+      data.citationKey !== undefined ? data.citationKey : data.citeKey;
+
+    const newNotesToCreate = prepareNotesToCreate(
+      data.notes,
+      workspaceId,
+      data.userId || existing.uploadedById || 'system',
+      existing.notesList,
+    );
 
     const updated = await client.catalogItem.update({
       where: { id },
@@ -500,12 +646,13 @@ export class ItemCommandRepository {
         title: data.title ?? existing.title,
         year: data.year !== undefined ? data.year : existing.year,
         doi: cleanDoi !== undefined ? cleanDoi : existing.doi,
-        abstract: rawAbstract !== undefined ? rawAbstract : existing.abstract,
+        abstract: cleanAbstract,
         itemType: data.itemType ?? existing.itemType,
         publicationTitle:
           rawPubTitle !== undefined ? rawPubTitle : existing.publicationTitle,
 
-        publicationDate: rawPubDate !== undefined ? rawPubDate : existing.publicationDate,
+        publicationDate:
+          rawPubDate !== undefined ? rawPubDate : existing.publicationDate,
         publisher: data.publisher ?? existing.publisher,
         place: data.place ?? existing.place,
         volume: data.volume ?? existing.volume,
@@ -523,11 +670,18 @@ export class ItemCommandRepository {
         pmcid: cleanPmcid !== undefined ? cleanPmcid : existing.pmcid,
         url: data.url ?? existing.url,
         language: data.language ?? existing.language,
-        journalAbbr: rawJournalAbbr !== undefined ? rawJournalAbbr : existing.journalAbbr,
+        journalAbbr:
+          rawJournalAbbr !== undefined ? rawJournalAbbr : existing.journalAbbr,
         shortTitle: data.shortTitle ?? existing.shortTitle,
         rights: rawRights !== undefined ? rawRights : existing.rights,
-        license: rawRights !== undefined ? rawRights : (data.license !== undefined ? data.license : existing.license),
-        citationKey: rawCitationKey !== undefined ? rawCitationKey : existing.citationKey,
+        license:
+          rawRights !== undefined
+            ? rawRights
+            : data.license !== undefined
+              ? data.license
+              : existing.license,
+        citationKey:
+          rawCitationKey !== undefined ? rawCitationKey : existing.citationKey,
         libraryCatalog: data.libraryCatalog ?? existing.libraryCatalog,
         archive: data.archive ?? existing.archive,
         archiveLocation: data.archiveLocation ?? existing.archiveLocation,
@@ -535,7 +689,9 @@ export class ItemCommandRepository {
         accessedAt:
           data.accessedAt !== undefined
             ? data.accessedAt
-            : (data.accessDate !== undefined ? (parseAccessDate(data.accessDate) ?? null) : existing.accessedAt),
+            : data.accessDate !== undefined
+              ? (parseAccessDate(data.accessDate) ?? null)
+              : existing.accessedAt,
         arxivId: cleanArxivId !== undefined ? cleanArxivId : existing.arxivId,
         citationCount:
           data.citationCount !== undefined
@@ -553,73 +709,9 @@ export class ItemCommandRepository {
           data.seriesNumber !== undefined
             ? data.seriesNumber
             : existing.seriesNumber,
-        extra: (() => {
-          // Pure plain-text Extra contract (Zotero parity).
-          // Never JSON.stringify into extra.
-          let text: string | undefined = undefined;
-
-          if (data.extra !== undefined) {
-            if (typeof data.extra === 'string') {
-              const trimmed = data.extra.trim();
-              if (trimmed.startsWith('{')) {
-                try {
-                  const parsed = JSON.parse(trimmed);
-                  if (typeof parsed._rawExtra === 'string') {
-                    text = parsed._rawExtra.trim();
-                  } else if (parsed && typeof parsed === 'object') {
-                    const lines: string[] = [];
-                    for (const [k, v] of Object.entries(parsed)) {
-                      if (
-                        v !== null &&
-                        v !== undefined &&
-                        v !== '' &&
-                        !CATALOG_COLUMN_METADATA_FIELDS.has(k)
-                      ) {
-                        lines.push(`${k}: ${String(v)}`);
-                      }
-                    }
-                    text = lines.join('\n');
-                  }
-                } catch {
-                  text = trimmed;
-                }
-              } else {
-                text = trimmed;
-              }
-            } else {
-              text = '';
-            }
-          } else if (existing.extra) {
-            const existingTrimmed = existing.extra.trim();
-            if (existingTrimmed.startsWith('{')) {
-              try {
-                const parsed = JSON.parse(existingTrimmed);
-                if (typeof parsed._rawExtra === 'string') {
-                  text = parsed._rawExtra.trim();
-                } else if (parsed && typeof parsed === 'object') {
-                  const lines: string[] = [];
-                  for (const [k, v] of Object.entries(parsed)) {
-                    if (
-                      v !== null &&
-                      v !== undefined &&
-                      v !== '' &&
-                      !CATALOG_COLUMN_METADATA_FIELDS.has(k)
-                    ) {
-                      lines.push(`${k}: ${String(v)}`);
-                    }
-                  }
-                  text = lines.join('\n');
-                }
-              } catch {
-                text = existingTrimmed;
-              }
-            } else {
-              text = existingTrimmed;
-            }
-          }
-
-          return text !== undefined ? text : (existing.extra ?? '');
-        })(),
+        extra:
+          resolveExtraPlainText(data.extra, existing.extra) ??
+          (existing.extra ?? ''),
 
         ...(data.collectionIds !== undefined
           ? {
@@ -702,6 +794,13 @@ export class ItemCommandRepository {
                 },
               }
             : {}),
+        ...(newNotesToCreate.length > 0
+          ? {
+              notesList: {
+                create: newNotesToCreate,
+              },
+            }
+          : {}),
         version: { increment: 1 },
       },
       include: {
@@ -802,49 +901,7 @@ export class ItemCommandRepository {
 
     const rawTags = data.tags || data.keywords || data.labels;
     if (rawTags && Array.isArray(rawTags)) {
-      const normalizedTagsList = normalizeTags(rawTags);
-      if (normalizedTagsList.length === 0) {
-        await client.catalogItemTag.deleteMany({
-          where: { catalogItemId: updated.id },
-        });
-      } else {
-        await client.catalogItemTag.deleteMany({
-          where: {
-            catalogItemId: updated.id,
-            tag: {
-              name: { notIn: normalizedTagsList },
-            },
-          },
-        });
-        for (const tagName of normalizedTagsList) {
-          const tag = await client.catalogTag.upsert({
-            where: {
-              workspaceId_name: {
-                workspaceId,
-                name: tagName,
-              },
-            },
-            create: {
-              workspaceId,
-              name: tagName,
-            },
-            update: {},
-          });
-          await client.catalogItemTag.upsert({
-            where: {
-              tagId_catalogItemId: {
-                tagId: tag.id,
-                catalogItemId: updated.id,
-              },
-            },
-            create: {
-              tagId: tag.id,
-              catalogItemId: updated.id,
-            },
-            update: {},
-          });
-        }
-      }
+      await syncTagsForCatalogItem(client, workspaceId, updated.id, rawTags);
 
       const reloaded = await client.catalogItem.findUnique({
         where: { id: updated.id },
@@ -1051,8 +1108,10 @@ export class ItemCommandRepository {
             data: { extra: JSON.stringify(extraObj) },
           });
         }
-      } catch (_err) {
-        // ignore malformed JSON extra
+      } catch (err: unknown) {
+        this.logger.warn(
+          `Failed to parse or sanitize extra JSON for item ${itemId}: ${(err as Error)?.message}`,
+        );
       }
     }
   }
@@ -1075,3 +1134,5 @@ export class ItemCommandRepository {
     });
   }
 }
+
+export { CommandRepository as ItemCommandRepository };

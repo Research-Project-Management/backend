@@ -52,24 +52,6 @@ export class ReadingController {
   ) {
     return this.readingService.markAsRead(workspaceId, itemId, userId);
   }
-
-  /**
-   * Batch state — POST /items/:itemId/state/batch
-   * Also reachable via the canonical batch controller below.
-   */
-  @Post('batch')
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
-  async getBatchStates(
-    @Param('workspaceId') workspaceId: string,
-    @CurrentUser('id') userId: string,
-    @Body() body: GetBatchReadingStatesDto,
-  ) {
-    return this.readingService.getBatchStates(
-      workspaceId,
-      body.itemIds || [],
-      userId,
-    );
-  }
 }
 
 /**

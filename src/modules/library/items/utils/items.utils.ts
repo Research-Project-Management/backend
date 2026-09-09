@@ -389,56 +389,111 @@ export function cleanBannedString(val?: string | null): string | undefined {
 
 /**
  * Sanitizes and normalizes an academic paper abstract.
- * 1. Decodes HTML entities and strips XML/HTML tags.
- * 2. Strips leading "Abstract", "ABSTRACT", "Summary" prefixes.
- * 3. Removes repeated year extraction artifacts (e.g. "(2012)(2013)(2014)(2015)(2016)(2017).").
- * 4. Removes trailing author contribution, copyright, and index terms noise.
- * 5. Unwraps single hard line-breaks within paragraphs while preserving double-newline paragraph separation.
- * 6. Fixes hyphenated words broken across line wraps ("stochas- tic" -> "stochastic").
+ * 1. Pre-processes JATS XML (<jats:...>), PubMed (<AbstractText>), and HTML tags before stripping.
+ * 2. Decodes HTML entities and strips remaining XML/HTML tags and LaTeX braces.
+ * 3. Strips leading "Abstract", "ABSTRACT", "Summary", "Graphical Abstract" prefixes.
+ * 4. Removes repeated year extraction artifacts (e.g. "(2012)(2013)(2014)(2015)(2016)(2017).").
+ * 5. Removes trailing author contribution, publisher copyright banners (Elsevier, Springer, Wiley, MDPI, IEEE, ACM), and index terms noise.
+ * 6. Unwraps single hard line-breaks within paragraphs while preserving double-newline paragraph separation.
+ * 7. Normalizes punctuation spacing and fixes hyphenated words broken across line wraps ("stochas- tic" -> "stochastic").
  */
 export function cleanAbstractText(text?: string | null): string | undefined {
   if (!text || typeof text !== 'string') return undefined;
 
-  let cleaned = stripXmlAndHtmlTags(text);
+  // 0. Fix hyphenated words broken across line wraps before tag/whitespace stripping
+  let cleaned = text.replace(
+    /([a-zA-Z]{2,})-\s*\r?\n\s*([a-zA-Z]{2,})/g,
+    '$1$2',
+  );
+
+  // 1. Structured JATS / PubMed / HTML Pre-Processing
+  // Remove abstract headings inside JATS/HTML tags
+  cleaned = cleaned.replace(
+    /<(?:jats:)?title[^>]*>\s*(?:Abstract|Summary|Résumé|Overview)\s*<\/(?:jats:)?title>/gi,
+    '',
+  );
+  // Convert structured section titles into formatted headings (e.g. "Background:", "Methods:")
+  cleaned = cleaned.replace(
+    /<(?:jats:)?title[^>]*>(.*?)<\/(?:jats:)?title>/gi,
+    '\n\n$1: ',
+  );
+  // PubMed structured abstract tags: <AbstractText Label="BACKGROUND">...</AbstractText>
+  cleaned = cleaned.replace(
+    /<AbstractText\s+[^>]*Label=["']([^"']+)["'][^>]*>([\s\S]*?)<\/AbstractText>/gi,
+    '\n\n$1: $2',
+  );
+  // Convert paragraph break tags to newlines
+  cleaned = cleaned.replace(/<\/(?:jats:)?p>/gi, '\n\n');
+  cleaned = cleaned.replace(/<(?:jats:)?p[^>]*>/gi, '');
+  cleaned = cleaned.replace(/<br\s*\/?>/gi, '\n');
+  cleaned = cleaned.replace(/<\/(?:jats:)?sec>/gi, '\n\n');
+
+  // Strip remaining XML/HTML tags, decode entities, and strip LaTeX braces
+  cleaned = stripXmlAndHtmlTags(cleaned);
   cleaned = decodeHtmlEntities(cleaned);
   cleaned = stripLatexBraces(cleaned);
 
-  // 1. Remove leading "Abstract" or "ABSTRACT" headings
+  // 2. Remove leading "Abstract" or "ABSTRACT" headings and prefixes
   cleaned = cleaned.replace(
-    /^(?:abstract|summary|résumé)\s*[:.—\-–\u2014\u2013]?\s*/i,
+    /^(?:abstract|summary|résumé|synopsis|overview)\s*[:.—\-–\u2014\u2013]?\s*/i,
     '',
   );
-  cleaned = cleaned.replace(/^(?:abstract|summary|résumé)\s*\r?\n+/i, '');
+  cleaned = cleaned.replace(
+    /^(?:graphical\s+abstract|highlights?)\s*[:.—\-–\u2014\u2013]?\s*/i,
+    '',
+  );
+  cleaned = cleaned.replace(
+    /^(?:abstract|summary|résumé|synopsis|overview)\s*\r?\n+/i,
+    '',
+  );
 
-  // 2. Remove repeated parenthesized / bracketed year-chain extraction artifacts
-  // e.g. "(2012)(2013)(2014)(2015)(2016)(2017)." or "[2012][2013]..."
+  // 3. Remove repeated parenthesized / bracketed year-chain extraction artifacts
   cleaned = cleaned.replace(/(?:\((?:19|20)\d{2}\)\s*){2,}\.?/g, '');
   cleaned = cleaned.replace(/(?:\[(?:19|20)\d{2}\]\s*){2,}\.?/g, '');
   cleaned = cleaned.replace(/\((?:(?:19|20)\d{2}[,\s;]*){3,}\)\.?/g, '');
 
-  // 3. Remove trailing author contribution / footnote noise
+  // 4. Remove trailing author contribution / footnote / correspondence noise
   cleaned = cleaned.replace(
-    /(?:(?:\n\s*|\.\s+|\s+)[*†‡§\d]*\s*(?:Equal contribution|Corresponding author|Correspondence to|Author ordering|Listing order|These authors contributed equally|Work performed while|Supported in part by|This work was supported by)[\s\S]*$)/i,
+    /(?:(?:\n\s*|\.\s+|\s+)[*†‡§\d]*\s*(?:Equal contribution|Corresponding author|Correspondence to|Author ordering|Listing order|These authors contributed equally|Work performed while|Supported in part by|This work was supported by|Electronic address:[\s\S]*$|Email:[\s\S]*$)[\s\S]*$)/i,
     '.',
   );
 
-  // 4. Remove trailing publication metadata or index terms
+  // 5. Remove trailing publication metadata, index terms, PACS numbers, keywords
   cleaned = cleaned.replace(
-    /(?:\n\s*|\s+)(?:ACM Reference [Ff]ormat|Index Terms|Keywords|Key words|Additional Key Words and Phrases)[—:\-\s]+[\s\S]*$/i,
+    /(?:\n\s*|\s+)(?:ACM Reference [Ff]ormat|Index Terms|Keywords|Key\s*words|Additional Key Words and Phrases|PACS numbers?|Subject classification|MSC classes?)[—:\-\s]+[\s\S]*$/i,
     '',
   );
 
-  // 5. Remove trailing IEEE/ACM copyright banners
-  cleaned = cleaned.replace(
-    /(?:\n\s*|\.\s+|\s+)(?:Copyright\s*(?:\(c\)|©)?\s*(?:19|20)\d{2}|©\s*(?:19|20)\d{2}\s*IEEE)[\s\S]*$/i,
-    '',
-  );
-  cleaned = cleaned.replace(
-    /(?:\n\s*|\s+)\b\d{4}-\d{3}[\dX]\s*(?:\(c\)|©)?\s*\d{4}\s*IEEE[\s\S]*$/i,
-    '',
-  );
+  // 6. Remove publisher copyright notices and banners
+  const COPYRIGHT_PATTERNS = [
+    // Elsevier / Academic Press
+    /(?:(?:Copyright\s*)?(?:\(c\)|©)\s*(?:19|20)\d{2}\s*(?:Elsevier|Academic Press)|Published by Elsevier|All rights reserved\b)[\s\S]*$/i,
+    // Springer Nature / BioMed Central
+    /(?:(?:Copyright\s*)?(?:\(c\)|©)\s*(?:The Author\(s\)|(?:19|20)\d{2}\s*(?:Springer|Nature|BioMed Central)))[\s\S]*$/i,
+    // Wiley
+    /(?:(?:Copyright\s*)?(?:\(c\)|©)\s*(?:19|20)\d{2}\s*John Wiley & Sons|Copyright\s*(?:\(c\)|©)\s*(?:19|20)\d{2}\s*Wiley)[\s\S]*$/i,
+    // MDPI
+    /(?:(?:Copyright\s*)?(?:\(c\)|©)\s*(?:19|20)\d{2}\s*by the authors?\. Licensee MDPI[\s\S]*$)/i,
+    // Oxford / Cambridge / Taylor & Francis
+    /(?:(?:Copyright\s*)?(?:\(c\)|©)\s*(?:19|20)\d{2}\s*(?:Oxford University Press|Cambridge University Press|Informa UK|Taylor & Francis))[\s\S]*$/i,
+    // Creative Commons licenses
+    /(?:This article is distributed under the terms of the Creative Commons|Licensed under a Creative Commons)[\s\S]*$/i,
+    // IEEE / ACM
+    /(?:Copyright\s*(?:\(c\)|©)?\s*(?:19|20)\d{2}|©\s*(?:19|20)\d{2}\s*(?:IEEE|ACM))[\s\S]*$/i,
+    /\b\d{4}-\d{3}[\dX]\s*(?:\(c\)|©)?\s*\d{4}\s*IEEE[\s\S]*$/i,
+  ];
 
-  // 6. Normalize paragraphs & unwrap hard line-breaks within each paragraph
+  for (const pattern of COPYRIGHT_PATTERNS) {
+    const dotRegex = new RegExp(`\\.\\s*${pattern.source}`, pattern.flags);
+    cleaned = cleaned.replace(dotRegex, '.');
+    const wsRegex = new RegExp(
+      `(?:\\n\\s*|\\s+)${pattern.source}`,
+      pattern.flags,
+    );
+    cleaned = cleaned.replace(wsRegex, '');
+  }
+
+  // 7. Normalize paragraphs & unwrap hard line-breaks within each paragraph
   const rawParagraphs = cleaned.split(/\r?\n\s*\r?\n/);
   const normalizedParagraphs = rawParagraphs
     .map((paragraph) => {
@@ -451,8 +506,10 @@ export function cleanAbstractText(text?: string | null): string | undefined {
       p = p.replace(/\r?\n/g, ' ');
       // Collapse multiple whitespace
       p = p.replace(/\s+/g, ' ').trim();
-      // Clean spacing before punctuation
-      p = p.replace(/\s+([.,;:!?])/g, '$1');
+      // Clean spacing before punctuation: "word ." -> "word."
+      p = p.replace(/\s+([.,;:!?%)\]}’'”])/g, '$1');
+      // Clean spacing after opening punctuation: "( word" -> "(word"
+      p = p.replace(/([([{‘'“])\s+/g, '$1');
       // Clean duplicate periods (excluding ellipsis)
       p = p.replace(/\.\s*\.(?!\.)/g, '.');
       return p;

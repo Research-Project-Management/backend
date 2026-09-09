@@ -1,9 +1,9 @@
 import { ItemsService } from '../../src/modules/library/items/items.service';
-import { ItemQueryRepository } from '../../src/modules/library/items/repositories/item-query.repository';
+import { QueryRepository } from '../../src/modules/library/items/repositories/query.repository';
 
 describe('P1 Cursor Pagination Correctness', () => {
   let itemsService: ItemsService;
-  let mockQueryRepo: Partial<ItemQueryRepository>;
+  let mockQueryRepo: Partial<QueryRepository>;
 
   const workspaceId = '00000000-0000-0000-0000-000000000001';
 
@@ -27,7 +27,8 @@ describe('P1 Cursor Pagination Correctness', () => {
       {} as any, // tagsService
       {} as any, // collectionsService
       {} as any, // typesService
-      {} as any, // ragIndexer
+      {} as any, // rag
+      {} as any, // itemTransformer
     );
   });
 

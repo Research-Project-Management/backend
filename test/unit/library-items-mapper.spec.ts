@@ -93,7 +93,8 @@ describe('Library Canonical Reconstruction Suite (Batch 11)', () => {
 
   describe('ItemsMapper.toDomain - Pure Plain-Text Extra Contract', () => {
     it('should preserve plain text extra unconditionally', () => {
-      const plainText = 'arXiv:1406.2661 [stat.ML]\nPMID: 25013171\nMR: 3241234';
+      const plainText =
+        'arXiv:1406.2661 [stat.ML]\nPMID: 25013171\nMR: 3241234';
       const result: Record<string, any> = ItemsMapper.toDomain({
         id: 'test-1',
         title: 'Generative Adversarial Nets',

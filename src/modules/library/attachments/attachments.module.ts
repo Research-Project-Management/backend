@@ -1,11 +1,11 @@
 import { Module, OnModuleInit } from '@nestjs/common';
 import { AttachmentsController } from './attachments.controller';
 import { AttachmentsService } from './attachments.service';
-import { PdfExtractorProvider } from './providers/pdf-extractor.provider';
+import { PdfProvider } from './providers/pdf.provider';
 import {
-  AttachmentExtractionHandler,
+  ExtractionHandler,
   EXTRACTION_EVENT_TYPES,
-} from './handlers/attachment-extraction.handler';
+} from './handlers/extraction.handler';
 import { CoreModule } from '../../../core/core.module';
 import { OutboxModule } from '../outbox/outbox.module';
 import { OutboxWorker } from '../outbox/outbox.worker';
@@ -27,21 +27,21 @@ import { SsrfGuardService } from '../common/services/ssrf-guard.service';
     WebSnapshotService,
     SsrfGuardService,
     GrobidClient, // OSS: GROBID client for structured PDF header extraction (Apache 2.0)
-    PdfExtractorProvider,
-    AttachmentExtractionHandler,
+    PdfProvider,
+    ExtractionHandler,
   ],
   exports: [
     AttachmentsService,
     WebSnapshotService,
     SsrfGuardService,
-    PdfExtractorProvider,
+    PdfProvider,
     GrobidClient,
   ],
 })
 export class AttachmentsModule implements OnModuleInit {
   constructor(
     private readonly outboxWorker: OutboxWorker,
-    private readonly extractionHandler: AttachmentExtractionHandler,
+    private readonly extractionHandler: ExtractionHandler,
   ) {}
 
   onModuleInit() {

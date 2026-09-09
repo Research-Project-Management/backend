@@ -1,4 +1,10 @@
-import { IsArray, IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
+import {
+  IsArray,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+} from 'class-validator';
 
 export class AiMessageDto {
   @IsString()
@@ -182,4 +188,3 @@ export class GetDocumentsBulkDto {
   @IsNotEmpty({ message: 'workspaceId is required' })
   workspaceId!: string;
 }
-

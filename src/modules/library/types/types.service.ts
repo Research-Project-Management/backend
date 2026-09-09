@@ -4,7 +4,7 @@ import {
   CreatorTypeDefinition,
   ItemTypeDefinition,
   SchemaRegistrySnapshot,
-} from './types.types';
+} from './types/types.types';
 
 import { SCHEMA_V42_DATA } from './constants/types.constants';
 import { normalizeCanonicalItemType } from './utils/types.utils';

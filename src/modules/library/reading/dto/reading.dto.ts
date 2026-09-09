@@ -1,4 +1,12 @@
-import { IsArray, IsEnum, IsInt, IsOptional, IsString, Min, Max } from 'class-validator';
+import {
+  IsArray,
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsString,
+  Min,
+  Max,
+} from 'class-validator';
 import { ReadingStatus } from '../types/reading.types';
 
 export class UpdateReadingDto {
@@ -21,4 +29,3 @@ export class GetBatchReadingStatesDto {
   @IsOptional()
   itemIds?: string[];
 }
-

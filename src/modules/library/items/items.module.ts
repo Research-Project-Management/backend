@@ -1,9 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ItemsController } from './items.controller';
 import { ItemsService, CatalogService } from './items.service';
-import { ItemQueryRepository } from './repositories/item-query.repository';
-import { ItemCommandRepository } from './repositories/item-command.repository';
+import { QueryRepository } from './repositories/query.repository';
+import { CommandRepository } from './repositories/command.repository';
 import { ItemsMapper } from './mappers/items.mapper';
+import { ItemTransformer } from './transformers/item.transformer';
 import { CoreModule } from '../../../core/core.module';
 import { TypesModule } from '../types/types.module';
 import { OutboxModule } from '../outbox/outbox.module';
@@ -23,10 +24,11 @@ import { ITEM_EXISTENCE_PORT, ITEM_READ_PORT } from './ports/items.ports';
   ],
   controllers: [ItemsController],
   providers: [
-    ItemQueryRepository,
-    ItemCommandRepository,
+    QueryRepository,
+    CommandRepository,
     ItemsService,
     ItemsMapper,
+    ItemTransformer,
     {
       provide: ITEM_EXISTENCE_PORT,
       useExisting: ItemsService,
@@ -39,9 +41,10 @@ import { ITEM_EXISTENCE_PORT, ITEM_READ_PORT } from './ports/items.ports';
   exports: [
     ItemsService,
     CatalogService,
-    ItemQueryRepository,
-    ItemCommandRepository,
+    QueryRepository,
+    CommandRepository,
     ItemsMapper,
+    ItemTransformer,
     ITEM_EXISTENCE_PORT,
     ITEM_READ_PORT,
   ],

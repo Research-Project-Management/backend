@@ -11,6 +11,8 @@ import { CompileLatexDto, SyncIncrementalDto } from './dto/latex.dto';
 import { getErrorMessage, tryCatch } from '@/core/utils/error.util';
 import { RedisCacheService } from '@/core/cache/redis-cache.service';
 import { DOCUMENT_REDIS_KEYS } from '../constants/redis-keys.constant';
+import { ExportsService } from '../../library/exports/exports.service';
+import { PrismaService } from '@/core/database/prisma.service';
 import * as crypto from 'crypto';
 
 export type CompileResult =
@@ -29,6 +31,28 @@ export type CompileResult =
       synctex?: string;
     };
 
+const LATEX_CITE_REGEX =
+  /\\(?:auto|paren|text|foot|no)?cite(?:p|t|alt|alp|author|year|date|num)?\*?(?:\[[^\]]*\])?(?:\[[^\]]*\])?\{([^}]+)\}/gi;
+
+function extractCitationKeys(text: string): string[] {
+  if (!text) return [];
+  const foundKeys = new Set<string>();
+  let match: RegExpExecArray | null;
+  LATEX_CITE_REGEX.lastIndex = 0;
+  while ((match = LATEX_CITE_REGEX.exec(text)) !== null) {
+    const rawKeys = match[1];
+    if (rawKeys) {
+      for (const rawKey of rawKeys.split(',')) {
+        const clean = rawKey.trim();
+        if (clean && /^[a-zA-Z0-9_:-]+$/.test(clean)) {
+          foundKeys.add(clean);
+        }
+      }
+    }
+  }
+  return Array.from(foundKeys);
+}
+
 @Injectable()
 export class LatexService {
   private readonly latexUrl: string;
@@ -38,6 +62,8 @@ export class LatexService {
     private readonly configService: ConfigService,
     private readonly pageService: PageService,
     @Optional() private readonly cache?: RedisCacheService,
+    @Optional() private readonly exportsService?: ExportsService,
+    @Optional() private readonly prisma?: PrismaService,
   ) {
     this.latexUrl =
       this.configService.get<string>('LATEX_URL') || 'http://localhost:2918';
@@ -140,19 +166,29 @@ export class LatexService {
     };
   }
 
-  async compile(
-    dto: CompileLatexDto,
-    userId?: string,
-  ): Promise<CompileResult> {
-    const pageOrProjectId =
-      dto.project_id || dto.projectId || dto.page_id || dto.pageId;
-    if (pageOrProjectId && userId) {
-      const page = await this.pageService.findPageById(pageOrProjectId);
-      if (page) {
-        const hasAccess = await this.pageService.checkUserAccess(page.id, userId);
+  async compile(dto: CompileLatexDto, userId?: string): Promise<CompileResult> {
+    const pageId = dto.page_id || dto.pageId;
+    const projectId = dto.project_id || dto.projectId;
+
+    if (userId) {
+      if (pageId) {
+        const hasAccess = await this.pageService.checkUserAccess(
+          pageId,
+          userId,
+        );
         if (!hasAccess) {
           throw new ForbiddenException(
             'You do not have permission to compile this document',
+          );
+        }
+      } else if (projectId) {
+        const hasAccess = await this.pageService.checkProjectAccess(
+          projectId,
+          userId,
+        );
+        if (!hasAccess) {
+          throw new ForbiddenException(
+            'You do not have permission to compile this project document',
           );
         }
       }
@@ -169,6 +205,48 @@ export class LatexService {
       }
     }
 
+    // Extract citekeys from LaTeX source and generate references.bib
+    let bibContent: string | null = null;
+    const citeKeys = extractCitationKeys(source);
+    if (citeKeys.length > 0 && this.exportsService) {
+      let workspaceId = dto.workspaceId;
+      if (!workspaceId && pageId && this.prisma) {
+        const page = await this.prisma.page.findUnique({
+          where: { id: pageId },
+          select: { workspaceId: true },
+        });
+        workspaceId = page?.workspaceId;
+      }
+      if (!workspaceId && projectId && this.prisma) {
+        const project = await this.prisma.project.findUnique({
+          where: { id: projectId },
+          select: { workspaceId: true },
+        });
+        workspaceId = project?.workspaceId;
+      }
+
+      if (workspaceId) {
+        try {
+          const exportRes = await this.exportsService.exportByCitationKeys(
+            workspaceId,
+            citeKeys,
+          );
+          if (exportRes && exportRes.content) {
+            bibContent = exportRes.content;
+          }
+        } catch (err) {
+          this.logger.warn(
+            `Failed to auto-sync references.bib: ${getErrorMessage(err)}`,
+          );
+        }
+      }
+    }
+
+    const files: Record<string, string> = {};
+    if (bibContent) {
+      files['references.bib'] = bibContent;
+    }
+
     const payload = {
       project_id: dto.project_id || dto.page_id,
       main_file: dto.main_file,
@@ -176,6 +254,8 @@ export class LatexService {
       draft: dto.draft ?? false,
       use_cache: dto.use_cache ?? true,
       source,
+      ...(Object.keys(files).length > 0 ? { files } : {}),
+      ...(bibContent ? { bib_content: bibContent } : {}),
     };
 
     const fetchRes = await this.executeFetch(payload);

@@ -3,7 +3,10 @@ import { ItemsService } from '../../items/items.service';
 import { ItemMetadata } from '../metadata/types/metadata.types';
 import { CreateCatalogItemData } from '../../items/types/items.types';
 import { LibraryItemSource } from '../../outbox/outbox.events';
-import { splitAuthorString } from '../../items/utils/items.utils';
+import {
+  splitAuthorString,
+  cleanAbstractText,
+} from '../../items/utils/items.utils';
 import { normalizeTags } from '../../tags/utils/tags.utils';
 
 export interface CommitStageOptions {
@@ -176,7 +179,9 @@ export function toCatalogItemData(
     seriesTitle: metadata.seriesTitle,
     seriesText: metadata.seriesText,
     seriesNumber: metadata.seriesNumber,
-    abstract: metadata.abstract ?? metadata.abstractNote,
+    abstract:
+      cleanAbstractText(metadata.abstract ?? metadata.abstractNote) ??
+      undefined,
     url: metadata.url,
     citationKey: metadata.citationKey || generateBibtexCitationKey(metadata),
     shortTitle: metadata.shortTitle,
@@ -190,6 +195,7 @@ export function toCatalogItemData(
       metadata.pdfUrl ||
       metadata.openAccessPdfUrl ||
       undefined,
+    openAccessPdfUrl: metadata.openAccessPdfUrl || undefined,
     language: metadata.language,
     rights: metadata.rights,
     license: metadata.license,

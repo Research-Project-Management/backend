@@ -5,7 +5,7 @@ import {
   BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, AttachmentType } from '@prisma/client';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { resolveTenantWorkspaceId } from '../../../core/utils/tenant.util';
 import { createHash } from 'crypto';
@@ -214,13 +214,10 @@ export class AttachmentsService {
    * Retrieves revision history for an attachment.
    */
   async getRevisions(workspaceId: string, attachmentId: string) {
-    const attachment = await this.attachmentsRepo.findFirst(
-      {
-        id: attachmentId,
-        catalogItem: { workspaceId, deletedAt: null },
-      },
-      { id: true } as any,
-    );
+    const attachment = await this.attachmentsRepo.findFirst({
+      id: attachmentId,
+      catalogItem: { workspaceId, deletedAt: null },
+    });
 
     if (!attachment) {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
@@ -397,7 +394,9 @@ export class AttachmentsService {
           url: command.url,
           mimeType: command.mimeType,
           fileHash: command.fileHash,
-          attachmentType: (command.attachmentType as any) || 'primary_pdf',
+          attachmentType: command.attachmentType
+            ? (command.attachmentType as AttachmentType)
+            : AttachmentType.primary_pdf,
           size: command.size || 0,
         },
       });

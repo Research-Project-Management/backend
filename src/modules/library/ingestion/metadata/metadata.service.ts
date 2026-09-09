@@ -25,7 +25,7 @@ import {
 } from './policies/metadata.policy';
 import { MetadataCache } from './cache/metadata.cache';
 import { ReconciliationService } from './services/reconciliation.service';
-import { ProviderExecutor } from './services/provider.executor';
+import { ExecutorService } from './services/executor.service';
 import { validateMetadata } from './validators/metadata.validator';
 
 @Injectable()
@@ -38,7 +38,7 @@ export class MetadataService implements MetadataPort {
     private readonly providers: MetadataProvider[],
     private readonly cache: MetadataCache,
     private readonly reconciler: ReconciliationService,
-    private readonly executor: ProviderExecutor,
+    private readonly executor: ExecutorService,
   ) {
     for (const provider of providers) {
       this.providerMap.set(provider.id, provider);

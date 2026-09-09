@@ -13,8 +13,9 @@ import {
   normalizeIsbn,
   normalizeIssn,
   cleanBibliographicText,
+  cleanAbstractText,
 } from '../utils/metadata.utils';
-import { ProviderFetchError } from '../services/provider.executor';
+import { ProviderFetchError } from '../services/executor.service';
 
 @Injectable()
 export class CrossRefProvider implements MetadataProvider {
@@ -349,7 +350,7 @@ export class CrossRefProvider implements MetadataProvider {
           ? `https://doi.org/${doi}`
           : undefined;
 
-    const abstract = cleanBibliographicText(
+    const abstract = cleanAbstractText(
       typeof message.abstract === 'string' ? message.abstract : undefined,
     );
 

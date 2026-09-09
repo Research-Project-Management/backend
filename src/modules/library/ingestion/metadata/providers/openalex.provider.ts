@@ -13,8 +13,9 @@ import {
   normalizeArxivId,
   normalizePmid,
   normalizeTags,
+  cleanAbstractText,
 } from '../utils/metadata.utils';
-import { ProviderFetchError } from '../services/provider.executor';
+import { ProviderFetchError } from '../services/executor.service';
 
 @Injectable()
 export class OpenAlexProvider implements MetadataProvider {
@@ -448,9 +449,18 @@ export class OpenAlexProvider implements MetadataProvider {
     }
 
     wordPositions.sort((a, b) => a.pos - b.pos);
-    return wordPositions
+    let joined = wordPositions
       .map((wp) => wp.word)
       .join(' ')
       .trim();
+
+    // Clean space before closing punctuation and symbols
+    joined = joined.replace(/\s+([.,;:!?%)\]}’'”])/g, '$1');
+    // Clean space after opening punctuation
+    joined = joined.replace(/([([{‘'“])\s+/g, '$1');
+    // Clean space around slashes and hyphens
+    joined = joined.replace(/\s*([/-])\s*/g, '$1');
+
+    return cleanAbstractText(joined) || joined;
   }
 }

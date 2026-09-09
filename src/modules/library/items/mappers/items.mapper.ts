@@ -1,5 +1,6 @@
 import { getFileContentPath } from '@/modules/storage/storage.port';
 import { CATALOG_COLUMN_METADATA_FIELDS } from '../constants/items.constants';
+import { cleanAbstractText } from '../utils/items.utils';
 
 export class ItemsMapper {
   /**
@@ -49,6 +50,16 @@ export class ItemsMapper {
         );
     }
 
+    // Populate openAccessPdfUrl from fileUrl if fileUrl is an external link
+    if (
+      !it.openAccessPdfUrl &&
+      it.fileUrl &&
+      typeof it.fileUrl === 'string' &&
+      /^https?:\/\//i.test(it.fileUrl)
+    ) {
+      it.openAccessPdfUrl = it.fileUrl;
+    }
+
     if (primaryPdfAttachment?.fileId) {
       it.fileUrl = getFileContentPath(primaryPdfAttachment.fileId);
     } else if (
@@ -69,10 +80,16 @@ export class ItemsMapper {
       !it.fileUrl.endsWith('/content') &&
       !it.fileUrl.startsWith('/api/files/')
     ) {
-      // If fileUrl is pointing to external URL or landing page, clear it so it doesn't break PDF viewer
-      it.fileUrl = null;
+      // If fileUrl is pointing to an external PDF or OpenAccess PDF, keep it; otherwise clear landing page
+      const isPdfLink =
+        /\.pdf(?:[?#]|$)/i.test(it.fileUrl) ||
+        /\/pdf\//i.test(it.fileUrl) ||
+        (it.openAccessPdfUrl && it.fileUrl === it.openAccessPdfUrl);
+      if (!isPdfLink) {
+        it.fileUrl = it.openAccessPdfUrl || null;
+      }
     } else if (!it.fileUrl) {
-      it.fileUrl = null;
+      it.fileUrl = it.openAccessPdfUrl || null;
     }
 
     // 2. Canonical ItemType projection
@@ -146,10 +163,18 @@ export class ItemsMapper {
       it.arxivId = extraFields.arxivId ?? extraFields.archiveId ?? null;
     if (!it.seriesNumber) it.seriesNumber = extraFields.seriesNumber ?? null;
     if (!it.rights) {
-      it.rights = it.license ?? extraFields.rights ?? extraFields.license ?? null;
+      it.rights =
+        it.license ?? extraFields.rights ?? extraFields.license ?? null;
     }
     if (!it.license) {
-      it.license = it.rights ?? extraFields.license ?? extraFields.rights ?? null;
+      it.license =
+        it.rights ?? extraFields.license ?? extraFields.rights ?? null;
+    }
+
+    if (it.abstract || extraFields.abstract || extraFields.abstractNote) {
+      const rawAbstract =
+        it.abstract || extraFields.abstract || extraFields.abstractNote;
+      it.abstract = cleanAbstractText(rawAbstract) ?? (it.abstract || null);
     }
 
     // Legacy cleanup: If callNumber has arXiv:xxx, clean it and ensure it.arxivId is populated
@@ -158,7 +183,9 @@ export class ItemsMapper {
       /^arxiv:\s*\d{4}\.\d{4,5}/i.test(String(it.callNumber))
     ) {
       if (!it.arxivId) {
-        it.arxivId = String(it.callNumber).replace(/^arxiv:\s*/i, '').trim();
+        it.arxivId = String(it.callNumber)
+          .replace(/^arxiv:\s*/i, '')
+          .trim();
       }
       it.callNumber = null;
     }
@@ -184,7 +211,7 @@ export class ItemsMapper {
           extraFields.primaryCategory ||
           (Array.isArray(it.tags)
             ? it.tags.find((t: any) =>
-                /^[a-z\-]+(\.[a-z\-]+)?$/i.test(String(t?.name || t)),
+                /^[a-z-]+(\.[a-z-]+)?$/i.test(String(t?.name || t)),
               )
             : undefined);
         const catStr = primaryCat
@@ -344,7 +371,10 @@ export class ItemsMapper {
       it.archiveId ||
       (it.arxivId
         ? it.itemType === 'preprint'
-          ? `arXiv:${String(it.arxivId).replace(/^arxiv:\s*/i, '').replace(/\s*\[.*?\]\s*$/, '').replace(/v\d+$/i, '')}`
+          ? `arXiv:${String(it.arxivId)
+              .replace(/^arxiv:\s*/i, '')
+              .replace(/\s*\[.*?\]\s*$/, '')
+              .replace(/v\d+$/i, '')}`
           : it.arxivId
         : '');
 
@@ -360,8 +390,17 @@ export class ItemsMapper {
         if (type === 'issn' && !it.issn) it.issn = ident.value;
       }
     }
-    if (!it.arxivId && (it.extraFields?.arxivId || it.extraFields?.archiveId || it.extraFields?.archiveID)) {
-      it.arxivId = String(it.extraFields.arxivId || it.extraFields.archiveId || it.extraFields.archiveID);
+    if (
+      !it.arxivId &&
+      (it.extraFields?.arxivId ||
+        it.extraFields?.archiveId ||
+        it.extraFields?.archiveID)
+    ) {
+      it.arxivId = String(
+        it.extraFields.arxivId ||
+          it.extraFields.archiveId ||
+          it.extraFields.archiveID,
+      );
     }
     if (!it.doi && (it.extraFields?.doi || it.extraFields?.DOI)) {
       it.doi = String(it.extraFields.doi || it.extraFields.DOI);
@@ -402,10 +441,17 @@ export class ItemsMapper {
 
     const canonicalArxivId = it.arxivId || it.archiveId || it.archiveID || '';
     const cleanArxiv = canonicalArxivId
-      ? String(canonicalArxivId).replace(/^arxiv:\s*/i, '').replace(/\s*\[.*?\]\s*$/, '').trim()
+      ? String(canonicalArxivId)
+          .replace(/^arxiv:\s*/i, '')
+          .replace(/\s*\[.*?\]\s*$/, '')
+          .trim()
       : '';
     it.arxivId = cleanArxiv;
-    it.archiveId = cleanArxiv ? (it.itemType === 'preprint' ? `arXiv:${cleanArxiv.replace(/v\d+$/i, '')}` : cleanArxiv) : (it.archiveId || '');
+    it.archiveId = cleanArxiv
+      ? it.itemType === 'preprint'
+        ? `arXiv:${cleanArxiv.replace(/v\d+$/i, '')}`
+        : cleanArxiv
+      : it.archiveId || '';
     it.archiveID = it.archiveID || it.archiveId;
     if (!Array.isArray(it.identifiers) || it.identifiers.length === 0) {
       const generatedIdents: any[] = [];

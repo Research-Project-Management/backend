@@ -34,19 +34,19 @@ export type CreatorType =
   | (string & {});
 
 export interface CreatorCredit {
-  id?: string;
+  id?: string | null;
   orderIndex: number;
   creatorType: CreatorType;
-  firstName?: string;
-  lastName?: string;
+  firstName?: string | null;
+  lastName?: string | null;
   fullName: string;
 }
 
 export interface CreatorCreditInput {
-  name?: string;
-  fullName?: string;
-  firstName?: string;
-  lastName?: string;
+  name?: string | null;
+  fullName?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
   creatorType?: CreatorType;
   orderIndex?: number;
 }
@@ -55,19 +55,27 @@ export type CreatorInput = CreatorCreditInput;
 
 // ── Identifier Schemes ───────────────────────────────────────────────────────
 export type IdentifierScheme =
-  'doi' | 'arxiv' | 'pmid' | 'pmcid' | 'isbn' | 'issn' | 'uri' | 'custom';
+  | 'doi'
+  | 'arxiv'
+  | 'pmid'
+  | 'pmcid'
+  | 'isbn'
+  | 'issn'
+  | 'uri'
+  | 'custom'
+  | (string & {});
 
 export interface ItemIdentifier {
   id?: string;
   type: IdentifierScheme;
   value: string;
-  canonicalUri?: string;
+  canonicalUri?: string | null;
 }
 
 export interface ItemIdentifierInput {
   type: IdentifierScheme;
   value: string;
-  canonicalUri?: string;
+  canonicalUri?: string | null;
 }
 
 // ── Item Relations ──────────────────────────────────────────────────────────
@@ -112,7 +120,7 @@ export interface CatalogItemSummary {
 
 export interface ItemMetadata {
   title: string;
-  itemType?: string;
+  itemType?: string | null;
   year?: number | null;
   publicationDate?: string | null;
   publicationTitle?: string | null;
@@ -375,7 +383,7 @@ export interface CreateCatalogItemData {
   collectionId?: string | null;
   collectionIds?: string[] | null;
   uploadedById: string;
-  contributors?: CreatorCredit[] | unknown;
+  contributors?: CreatorCredit[];
   creators?: CreatorCreditInput[];
   extraFields?: Record<string, unknown>;
   identifier?: string;
@@ -383,9 +391,34 @@ export interface CreateCatalogItemData {
   citationCount?: number | null;
   referenceCount?: number | null;
   openAccessPdfUrl?: string | null;
+  // Canonical Zotero v42 Schema Aliases
+  DOI?: string;
+  archiveId?: string;
+  archiveID?: string;
+  ISBN?: string;
+  ISSN?: string;
+  PMID?: string;
+  PMCID?: string;
+  abstractNote?: string;
+  date?: string;
+  journalAbbreviation?: string;
+  citeKey?: string;
+  userId?: string;
 }
 
 export interface UpdateCatalogItemData {
+  // Canonical Zotero v42 Schema Aliases
+  DOI?: string;
+  archiveId?: string;
+  archiveID?: string;
+  ISBN?: string;
+  ISSN?: string;
+  PMID?: string;
+  PMCID?: string;
+  date?: string;
+  journalAbbreviation?: string;
+  citeKey?: string;
+  userId?: string;
   title?: string;
   authors?: string[];
   creators?: CreatorCreditInput[];

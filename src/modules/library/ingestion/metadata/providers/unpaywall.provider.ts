@@ -9,7 +9,7 @@ import {
   QueryType,
 } from '../types/metadata.types';
 import { normalizeDoi } from '../utils/metadata.utils';
-import { ProviderFetchError } from '../services/provider.executor';
+import { ProviderFetchError } from '../services/executor.service';
 
 @Injectable()
 export class UnpaywallProvider implements MetadataProvider {

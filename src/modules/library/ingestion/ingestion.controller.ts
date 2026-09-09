@@ -65,7 +65,9 @@ export class IngestionController {
       case 'RECORD':
         payload = {
           kind: 'RECORD',
-          format: ((dto.format || dto.recordFormat || 'BIBTEX') as string).toUpperCase(),
+          format: (
+            (dto.format || dto.recordFormat || 'BIBTEX') as string
+          ).toUpperCase(),
           content: dto.content || dto.rawRecord || '',
         };
         break;

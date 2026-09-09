@@ -13,8 +13,9 @@ import {
   normalizePmcid,
   normalizePmid,
   cleanBibliographicText,
+  cleanAbstractText,
 } from '../utils/metadata.utils';
-import { ProviderFetchError } from '../services/provider.executor';
+import { ProviderFetchError } from '../services/executor.service';
 
 @Injectable()
 export class PubMedProvider implements MetadataProvider {
@@ -270,6 +271,18 @@ export class PubMedProvider implements MetadataProvider {
     const pages = typeof data.page === 'string' ? data.page : undefined;
     const issn = typeof data.ISSN === 'string' ? data.ISSN : undefined;
 
+    const rawAbstract =
+      typeof data.abstract === 'string'
+        ? data.abstract
+        : typeof data.Abstract === 'string'
+          ? data.Abstract
+          : undefined;
+    const abstract = cleanAbstractText(rawAbstract);
+
+    const openAccessPdfUrl = resolvedPmcid
+      ? `https://www.ncbi.nlm.nih.gov/pmc/articles/${resolvedPmcid}/pdf/`
+      : undefined;
+
     const rawVersion = createHash('md5')
       .update(JSON.stringify(data))
       .digest('hex');
@@ -294,6 +307,8 @@ export class PubMedProvider implements MetadataProvider {
         issue,
         pages,
         issn,
+        abstract,
+        openAccessPdfUrl,
         itemType: 'journalArticle',
         url: canonicalUrl,
         provenance: {
@@ -306,6 +321,7 @@ export class PubMedProvider implements MetadataProvider {
           confidenceScore: 0.98,
           rawSnapshotHash: rawVersion,
           isOpenAccess: Boolean(resolvedPmcid),
+          openAccessPdfUrl,
         },
       },
       confidence: 0.98,
@@ -382,6 +398,18 @@ export class PubMedProvider implements MetadataProvider {
       fullName: name,
     }));
 
+    const rawAbstract =
+      typeof item.abstract === 'string'
+        ? item.abstract
+        : typeof (item as any).abstractText === 'string'
+          ? (item as any).abstractText
+          : undefined;
+    const abstract = cleanAbstractText(rawAbstract);
+
+    const openAccessPdfUrl = pmcid
+      ? `https://www.ncbi.nlm.nih.gov/pmc/articles/${pmcid}/pdf/`
+      : undefined;
+
     return {
       provider: this.id,
       metadata: {
@@ -398,6 +426,8 @@ export class PubMedProvider implements MetadataProvider {
         issue: issueStr || undefined,
         pages: pagesStr || undefined,
         issn: issnStr || undefined,
+        abstract,
+        openAccessPdfUrl,
         itemType: 'journalArticle',
         url: canonicalUrl,
         provenance: {
@@ -408,6 +438,7 @@ export class PubMedProvider implements MetadataProvider {
           confidenceScore: 0.97,
           rawSnapshotHash: rawVersion,
           isOpenAccess: Boolean(pmcid),
+          openAccessPdfUrl,
         },
       },
       confidence: 0.97,

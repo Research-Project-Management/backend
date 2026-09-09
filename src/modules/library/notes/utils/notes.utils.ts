@@ -11,14 +11,14 @@ export interface NoteAnnotationSource {
 export interface NoteItemSource {
   title?: string | null;
   creators?: Array<{
-    firstName?: string;
-    lastName?: string;
-    fullName?: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    fullName?: string | null;
   }>;
   contributors?: Array<{
-    firstName?: string;
-    lastName?: string;
-    fullName?: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    fullName?: string | null;
   }>;
   year?: number | null;
   doi?: string | null;

@@ -1,4 +1,4 @@
-import { Injectable, Optional } from '@nestjs/common';
+import { Injectable, Optional, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { TagsRepository } from './tags.repository';
 import { TransactionService } from '../outbox/transaction.service';
@@ -100,6 +100,26 @@ export class TagsService {
 
   async assignTag(workspaceId: string, tagId: string, catalogItemId: string) {
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
+      // 1. Verify tag belongs to workspace (prevent IDOR / BOLA)
+      const tag = await tx.catalogTag.findFirst({
+        where: { id: tagId, workspaceId },
+        select: { id: true },
+      });
+      if (!tag) {
+        throw new NotFoundException(`Tag ${tagId} not found in workspace`);
+      }
+
+      // 2. Verify catalogItem belongs to workspace (prevent IDOR / BOLA)
+      const item = await tx.catalogItem.findFirst({
+        where: { id: catalogItemId, workspaceId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!item) {
+        throw new NotFoundException(
+          `Item ${catalogItemId} not found in workspace`,
+        );
+      }
+
       await this.tagsRepo.assignToItem(tagId, catalogItemId, tx);
 
       await helpers.appendChange(workspaceId, {
@@ -121,6 +141,26 @@ export class TagsService {
 
   async removeTag(workspaceId: string, tagId: string, catalogItemId: string) {
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
+      // 1. Verify tag belongs to workspace (prevent IDOR / BOLA)
+      const tag = await tx.catalogTag.findFirst({
+        where: { id: tagId, workspaceId },
+        select: { id: true },
+      });
+      if (!tag) {
+        throw new NotFoundException(`Tag ${tagId} not found in workspace`);
+      }
+
+      // 2. Verify catalogItem belongs to workspace (prevent IDOR / BOLA)
+      const item = await tx.catalogItem.findFirst({
+        where: { id: catalogItemId, workspaceId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!item) {
+        throw new NotFoundException(
+          `Item ${catalogItemId} not found in workspace`,
+        );
+      }
+
       await this.tagsRepo.removeFromItem(tagId, catalogItemId, tx);
 
       await helpers.recordTombstone(workspaceId, {

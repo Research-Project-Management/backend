@@ -13,9 +13,10 @@ export type CitationStyleId =
   | 'ris';
 
 export interface CitationCreator {
-  firstName?: string;
-  lastName?: string;
-  name?: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  name?: string | null;
+  creatorType?: string | null;
 }
 
 export interface CitationItemInput {

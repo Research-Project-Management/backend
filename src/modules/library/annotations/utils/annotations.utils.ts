@@ -68,4 +68,3 @@ export const normalizeCoords = normalizeRectCoords;
 export const normalizeQuote = normalizeQuoteText;
 export const parseType = parseAnnotationType;
 export const DEFAULT_COLOR = DEFAULT_ANNOTATION_COLOR;
-

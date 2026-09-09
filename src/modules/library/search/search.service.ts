@@ -2,15 +2,15 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { SearchRepository, SearchOptions } from './search.repository';
 import { PrismaService } from '@/core/database/prisma.service';
 import {
-  FullTextIndexer,
+  FullTextProvider,
   PageAnchorMatch,
   PageTextExtraction,
-} from './providers/full-text-indexer.provider';
+} from './providers/full-text.provider';
 import {
-  RagIndexerProvider,
+  RagProvider,
   RagIndexPaperInput,
   RagIndexResult,
-} from './providers/rag-indexer.provider';
+} from './providers/rag.provider';
 import { SearchCatalogQueryDto } from './dto/search.dto';
 
 @Injectable()
@@ -20,8 +20,8 @@ export class SearchService {
   constructor(
     private readonly searchRepo: SearchRepository,
     private readonly prisma: PrismaService,
-    private readonly fullTextIndexer: FullTextIndexer,
-    private readonly ragIndexer: RagIndexerProvider,
+    private readonly fullText: FullTextProvider,
+    private readonly rag: RagProvider,
   ) {}
 
   /**
@@ -82,7 +82,7 @@ export class SearchService {
       );
     }
 
-    return this.fullTextIndexer.searchPageAnchors(
+    return this.fullText.searchPageAnchors(
       attachmentId,
       term,
       pageIndex,
@@ -93,7 +93,7 @@ export class SearchService {
     attachmentId: string,
     pages: PageTextExtraction[],
   ): Promise<void> {
-    await this.fullTextIndexer.indexAttachmentPages(attachmentId, pages);
+    await this.fullText.indexAttachmentPages(attachmentId, pages);
   }
 
   /**
@@ -121,6 +121,6 @@ export class SearchService {
    * Uploads and vectorizes an academic paper into Qdrant for RAG.
    */
   async indexPaperForRag(item: RagIndexPaperInput): Promise<RagIndexResult> {
-    return this.ragIndexer.indexPaper(item);
+    return this.rag.indexPaper(item);
   }
 }

@@ -6,7 +6,7 @@ import { normalizeTags } from '../../tags/utils/tags.utils';
 import { CatalogItemSummary } from '../types/items.types';
 
 @Injectable()
-export class ItemQueryRepository {
+export class QueryRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   private getClient(tx?: Prisma.TransactionClient) {
@@ -68,6 +68,9 @@ export class ItemQueryRepository {
         },
         itemTags: {
           include: { tag: true },
+        },
+        notesList: {
+          where: { deletedAt: null },
         },
         attachments: true,
       },
@@ -199,6 +202,9 @@ export class ItemQueryRepository {
         include: { tag: true },
       },
       attachments: true,
+      notesList: {
+        where: { deletedAt: null },
+      },
       userStates: options.userId
         ? {
             where: { userId: options.userId },
@@ -655,3 +661,5 @@ export class ItemQueryRepository {
     return sourceRecord?.rawPayload || null;
   }
 }
+
+export { QueryRepository as ItemQueryRepository };

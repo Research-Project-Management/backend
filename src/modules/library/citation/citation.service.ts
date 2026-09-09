@@ -270,8 +270,8 @@ export class CitationService {
         creatorType: c.creatorType || 'author',
         name:
           c.name || [c.firstName, c.lastName].filter(Boolean).join(' ').trim(),
-        firstName: c.firstName,
-        lastName: c.lastName,
+        firstName: c.firstName ?? undefined,
+        lastName: c.lastName ?? undefined,
       })),
       year,
       journal: metadata.journal || metadata.publicationTitle,
@@ -379,7 +379,7 @@ export class CitationService {
       }
     }
 
-    // 2. Detect DOI pattern: e.g. 10.1000/182, https://doi.org/10..., or doi:10...
+    // 2. DOI Fallback
     const cleanDoiCandidate = this.doiService
       ? this.doiService.cleanDoi(input) || input
       : input
@@ -393,7 +393,6 @@ export class CitationService {
       : /^10\.\d{4,9}\/[-._;()/:A-Za-z0-9<>+=[\]~]+$/i.test(cleanDoiCandidate);
 
     if (isDoi) {
-      // 2a. Direct CrossRef lookup
       try {
         const work = await this.resolveDoi(cleanDoiCandidate);
         return {
@@ -404,31 +403,26 @@ export class CitationService {
           provider: 'CrossRef',
           queryType: 'doi',
         };
-      } catch (err: any) {
-        this.logger.debug(
-          `DOI lookup miss on CrossRef for "${cleanDoiCandidate}": ${err?.message || err}. Attempting DOI Content Negotiation.`,
-        );
-      }
-
-      // 2b. Direct DOI Content Negotiation (Zotero-style: DataCite/Zenodo/Figshare, mEDRA, JaLC)
-      if (this.doiService) {
-        try {
-          const cslWork =
-            await this.doiService.resolveMetadata(cleanDoiCandidate);
-          if (cslWork && cslWork.title && cslWork.title !== 'Untitled') {
-            return {
-              found: true,
-              work: cslWork,
-              data: cslWork,
-              metadata: cslWork,
-              provider: 'doi.org/DataCite',
-              queryType: 'doi',
-            };
+      } catch {
+        if (this.doiService) {
+          try {
+            const cslWork =
+              await this.doiService.resolveMetadata(cleanDoiCandidate);
+            if (cslWork && cslWork.title && cslWork.title !== 'Untitled') {
+              return {
+                found: true,
+                work: cslWork,
+                data: cslWork,
+                metadata: cslWork,
+                provider: 'doi.org/DataCite',
+                queryType: 'doi',
+              };
+            }
+          } catch (err: any) {
+            this.logger.debug(
+              `DOI Content Negotiation failed for "${cleanDoiCandidate}": ${err?.message || err}`,
+            );
           }
-        } catch (err: any) {
-          this.logger.debug(
-            `DOI Content Negotiation failed for "${cleanDoiCandidate}": ${err?.message || err}`,
-          );
         }
       }
 
@@ -442,29 +436,7 @@ export class CitationService {
       };
     }
 
-    // 3. Detect arXiv pattern: e.g. arXiv:2104.12345 or 2104.12345 or 2104.12345v1
-    const arxivMatch = input.match(
-      /^(?:arxiv:\s*)?(\d{4}\.\d{4,5}(?:v\d+)?|[a-z-]+(?:\.[A-Z]{2})?\/\d{7})$/i,
-    );
-    if (arxivMatch) {
-      const arxivId = arxivMatch[1].replace(/v\d+$/i, '');
-      const arxivDoi = `10.48550/arXiv.${arxivId}`;
-      try {
-        const work = await this.resolveDoi(arxivDoi);
-        return {
-          found: true,
-          work,
-          data: work,
-          metadata: work,
-          provider: 'CrossRef/arXiv',
-          queryType: 'arxiv',
-        };
-      } catch {
-        // Fallback to search if arXiv DOI is not in CrossRef
-      }
-    }
-
-    // 4. Title / Keyword Search via CrossRef
+    // 3. Title / Keyword Search via CrossRef
     try {
       const searchRes = await this.searchCrossRef(input, 1);
       if (searchRes.works && searchRes.works.length > 0) {

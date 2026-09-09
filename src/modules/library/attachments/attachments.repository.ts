@@ -122,8 +122,8 @@ export class AttachmentsRepository {
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    if (fileId && (client as any).file?.updateMany) {
-      await (client as any).file.updateMany({
+    if (fileId) {
+      await client.file.updateMany({
         where: { id: fileId },
         data: {
           linkedToType: 'Paper',

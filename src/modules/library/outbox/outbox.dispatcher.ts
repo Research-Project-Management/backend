@@ -1,7 +1,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OutboxEvent } from '@prisma/client';
-import { OutboxDispatchHandler } from './outbox.types';
+import { OutboxDispatchHandler } from './types/outbox.types';
 import {
   IEventPublisherPort,
   DomainEventEnvelope,

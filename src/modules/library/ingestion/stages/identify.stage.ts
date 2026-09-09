@@ -1,12 +1,12 @@
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
-import { SubmissionPayload } from '../types/ingestion-submission.types';
+import { SubmissionPayload } from '../types/submission.types';
 import { MetadataCandidate } from '../types/metadata-candidate.types';
 import { DoiParser } from '../parsers/doi.parser';
 import { BibtexParser } from '../parsers/bibtex.parser';
 import { RisParser } from '../parsers/ris.parser';
 import { NormalizationPolicy } from '../policies/normalization.policy';
 import { IStoragePort, STORAGE_PORT } from '../../../storage/storage.port';
-import { PdfExtractorProvider } from '../../attachments/providers/pdf-extractor.provider';
+import { PdfProvider } from '../../attachments/providers/pdf.provider';
 import { QueryClassifier } from '../metadata/classifiers/query.classifier';
 import { randomUUID } from 'crypto';
 
@@ -22,7 +22,7 @@ export class IdentifyStage {
     @Optional()
     @Inject(STORAGE_PORT)
     private readonly storagePort?: IStoragePort,
-    @Optional() private readonly pdfExtractor?: PdfExtractorProvider,
+    @Optional() private readonly pdf?: PdfProvider,
   ) {}
 
   /**
@@ -237,7 +237,9 @@ export class IdentifyStage {
           ),
           normalizedMetadata: normalized,
           confidenceScore:
-            classified.type !== 'TITLE' && classified.type !== 'URL' ? 0.95 : 0.8,
+            classified.type !== 'TITLE' && classified.type !== 'URL'
+              ? 0.95
+              : 0.8,
         });
         break;
       }
@@ -247,7 +249,7 @@ export class IdentifyStage {
         let fileBuffer: Buffer | undefined;
         if (
           this.storagePort?.readOwnedFile &&
-          this.pdfExtractor?.extractDocumentFromBuffer &&
+          this.pdf?.extractDocumentFromBuffer &&
           payload.fileId &&
           workspaceId
         ) {
@@ -259,7 +261,7 @@ export class IdentifyStage {
             if (fileRecord?.buffer) {
               fileBuffer = fileRecord.buffer;
               const extractedDocument =
-                await this.pdfExtractor.extractDocumentFromBuffer(fileBuffer);
+                await this.pdf.extractDocumentFromBuffer(fileBuffer);
               extractedMetadata =
                 extractedDocument?.metadata || extractedDocument || {};
 
@@ -267,10 +269,10 @@ export class IdentifyStage {
               // full document parser fails. Preserve that partial metadata.
               if (
                 Object.keys(extractedMetadata).length === 0 &&
-                this.pdfExtractor.extractMetadataFromBuffer
+                this.pdf.extractMetadataFromBuffer
               ) {
                 extractedMetadata =
-                  this.pdfExtractor.extractMetadataFromBuffer(
+                  this.pdf.extractMetadataFromBuffer(
                     fileRecord.buffer,
                   ) || {};
               }

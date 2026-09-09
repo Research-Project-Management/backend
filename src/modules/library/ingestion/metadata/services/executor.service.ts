@@ -219,10 +219,10 @@ export class ProviderCircuitBreaker {
 }
 
 @Injectable()
-export class ProviderExecutor {
+export class ExecutorService {
   public static readonly MAX_RETRY_AFTER_MS = 5000;
 
-  private readonly logger = new Logger(ProviderExecutor.name);
+  private readonly logger = new Logger(ExecutorService.name);
   private readonly globalSemaphore = new Semaphore(10);
   private readonly providerSemaphores = new Map<ProviderName, Semaphore>();
   private readonly circuitBreakers = new Map<
@@ -377,11 +377,11 @@ export class ProviderExecutor {
             retryStatus = status;
             retryDelay =
               retryAfterMs && retryAfterMs > 0
-                ? Math.min(retryAfterMs, ProviderExecutor.MAX_RETRY_AFTER_MS)
+                ? Math.min(retryAfterMs, ExecutorService.MAX_RETRY_AFTER_MS)
                 : status === 'rate_limited'
                   ? Math.min(
                       1200 * Math.pow(1.5, attempt),
-                      ProviderExecutor.MAX_RETRY_AFTER_MS,
+                      ExecutorService.MAX_RETRY_AFTER_MS,
                     )
                   : Math.min(200 * Math.pow(2, attempt), 2000);
           } else {
@@ -555,3 +555,5 @@ export class ProviderExecutor {
     });
   }
 }
+
+export { ExecutorService as ProviderExecutor };

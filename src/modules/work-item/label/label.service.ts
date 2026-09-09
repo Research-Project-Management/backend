@@ -54,7 +54,11 @@ export class LabelService {
     return { label };
   }
 
-  async updateLabel(labelId: string, dto: UpdateLabelDto, workspaceId?: string) {
+  async updateLabel(
+    labelId: string,
+    dto: UpdateLabelDto,
+    workspaceId?: string,
+  ) {
     const label = await this.labelRepo.updateLabel(
       labelId,
       {

@@ -51,7 +51,12 @@ export class EnrichStage {
         !/\.pdf$/i.test(title!) &&
         !/^(uploaded document|untitled|document)$/i.test(title!);
       const query =
-        doi || arxivId || pmid || isbn || (isCredibleTitle ? title : undefined) || url;
+        doi ||
+        arxivId ||
+        pmid ||
+        isbn ||
+        (isCredibleTitle ? title : undefined) ||
+        url;
 
       if (!query) continue;
 

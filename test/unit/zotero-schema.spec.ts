@@ -81,10 +81,14 @@ describe('Official Zotero Schema (v42) Ground Truth Verification', () => {
     expect(journalArticle.label).toBe('Journal Article');
     expect(journalArticle.fields).toHaveLength(31);
 
-    const publicationField = journalArticle.fields.find((f) => f.key === 'publicationTitle');
+    const publicationField = journalArticle.fields.find(
+      (f) => f.key === 'publicationTitle',
+    );
     expect(publicationField?.label).toBe('Publication');
 
-    const journalAbbrField = journalArticle.fields.find((f) => f.key === 'journalAbbreviation');
+    const journalAbbrField = journalArticle.fields.find(
+      (f) => f.key === 'journalAbbreviation',
+    );
     expect(journalAbbrField?.label).toBe('Journal Abbr');
   });
 

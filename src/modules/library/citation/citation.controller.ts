@@ -13,6 +13,7 @@ import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-
 import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
 import { CitationService } from './citation.service';
 import { FormatCitationDto, FormatBatchCitationDto } from './dto/citation.dto';
+import { normalizeCitationStyleId } from './utils/citation.utils';
 
 @Controller([
   'api/v1/workspaces/:workspaceId/library/citation',
@@ -131,7 +132,7 @@ export class CitationController {
     @Query('style') style?: string,
     @Query('index') index?: string,
   ) {
-    const styleId = (style as any) || 'apa-7th';
+    const styleId = normalizeCitationStyleId(style);
     const numIndex = index ? parseInt(index, 10) : 1;
     const res = await this.citationService.formatItemById(
       workspaceId,
@@ -158,7 +159,7 @@ export class CitationController {
     @Body('paperIds') paperIds?: string[],
     @Body('style') style?: string,
   ) {
-    const styleId = (style as any) || 'apa-7th';
+    const styleId = normalizeCitationStyleId(style);
     const ids = Array.isArray(itemIds)
       ? itemIds
       : Array.isArray(paperIds)

@@ -413,6 +413,77 @@ export class ExportsService {
       buffer: burned,
     };
   }
+
+  /**
+   * Export BibTeX bibliography strictly for a specific list of citation keys.
+   * Used for on-demand BibTeX sync and automatic \bibliography injection during LaTeX compilation.
+   */
+  async exportByCitationKeys(
+    rawWorkspaceId: string,
+    keys: string[],
+  ): Promise<{
+    content: string;
+    count: number;
+    foundKeys: string[];
+    missingKeys: string[];
+  }> {
+    if (!keys || keys.length === 0) {
+      return { content: '', count: 0, foundKeys: [], missingKeys: [] };
+    }
+
+    const workspaceId = await this.resolveWorkspaceId(rawWorkspaceId);
+    const normalizedKeys = keys
+      .map((k) => k.trim().toLowerCase())
+      .filter(Boolean);
+
+    const items = await this.prisma.catalogItem.findMany({
+      where: {
+        workspaceId,
+        deletedAt: null,
+      },
+      include: {
+        contributors: { orderBy: { orderIndex: 'asc' } },
+      },
+    });
+
+    const keySet = new Set(normalizedKeys);
+    const matchedItems = items.filter((it) => {
+      const citeKey = (it.citationKey || '').toLowerCase();
+      return keySet.has(citeKey);
+    });
+
+    const foundKeys = matchedItems.map((it) => it.citationKey || it.id);
+    const foundKeySet = new Set(foundKeys.map((k) => k.toLowerCase()));
+    const missingKeys = keys.filter((k) => !foundKeySet.has(k.toLowerCase()));
+
+    const entries = matchedItems.map((it) => {
+      const authors = CslJsonMapper.getAuthorNames(it);
+      const res = this.citationService.formatItem(
+        {
+          id: it.id,
+          itemType: it.itemType ?? 'journalArticle',
+          title: it.title,
+          authors,
+          publicationTitle: it.publicationTitle ?? undefined,
+          year: it.year ?? undefined,
+          volume: it.volume ?? undefined,
+          pages: it.pages ?? undefined,
+          doi: it.doi ?? undefined,
+          url: it.url ?? undefined,
+          citationKey: it.citationKey ?? undefined,
+        },
+        'bibtex',
+      );
+      return res.bibliography;
+    });
+
+    return {
+      content: entries.join('\n\n'),
+      count: matchedItems.length,
+      foundKeys,
+      missingKeys,
+    };
+  }
 }
 
 export const PdfExportService = ExportsService;

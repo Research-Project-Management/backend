@@ -16,12 +16,9 @@ lerna-debug.log*
 .DS_Store
 Thumbs.db
 
-# Tests
+# Tests & Coverage
 /coverage
 /.nyc_output
-/test-results*
-/playwright-report
-/blob-report
 
 # IDEs and editors
 /.idea
@@ -49,4 +46,3 @@ skills-lock.json
 
 # Local storage fallback & runtime uploads
 uploads/
-/uploads

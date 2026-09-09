@@ -27,6 +27,7 @@ import {
   buildCollectionTree,
   normalizeParentId,
 } from './utils/collections.utils';
+import { TreeEngine } from './engines/tree.engine';
 import { PrismaService } from '../../../core/database/prisma.service';
 
 import { resolveTenantWorkspaceId } from '../../../core/utils/tenant.util';
@@ -40,6 +41,8 @@ export class CollectionsService {
   constructor(
     private readonly collectionsRepo: CollectionsRepository,
     private readonly prisma: PrismaService,
+    @Optional()
+    private readonly tree: TreeEngine = new TreeEngine(),
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
@@ -90,7 +93,7 @@ export class CollectionsService {
       const collections =
         await this.collectionsRepo.findAll(canonicalWorkspaceId);
 
-      return { tree: buildCollectionTree(collections) };
+      return { tree: this.tree.buildTree(collections) };
     };
 
     if (this.cache) {
@@ -112,14 +115,16 @@ export class CollectionsService {
     if (!raw) {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
     }
+    const count =
+      (raw as { _count?: { collectionItems?: number } })._count
+        ?.collectionItems ??
+      (raw as { itemCount?: number }).itemCount ??
+      0;
     const collection = {
       ...raw,
-      itemCount:
-        (raw as any).itemCount ?? (raw as any)._count?.collectionItems ?? 0,
-      itemsCount:
-        (raw as any).itemsCount ?? (raw as any)._count?.collectionItems ?? 0,
-      paperCount:
-        (raw as any).paperCount ?? (raw as any)._count?.collectionItems ?? 0,
+      itemCount: count,
+      itemsCount: count,
+      paperCount: count,
     };
     return { collection };
   }
@@ -133,7 +138,7 @@ export class CollectionsService {
 
     // Normalize parentId from parentId or parent, treating 'root' or empty string as null
     const rawParentId = normalizeParentId(
-      dto.parentId !== undefined ? dto.parentId : (dto as any).parent,
+      dto.parentId !== undefined ? dto.parentId : dto.parent,
     );
 
     if (rawParentId) {
@@ -189,7 +194,7 @@ export class CollectionsService {
     }
 
     const rawParentId = normalizeParentId(
-      dto.parentId !== undefined ? dto.parentId : (dto as any).parent,
+      dto.parentId !== undefined ? dto.parentId : dto.parent,
     );
 
     if (rawParentId) {
@@ -205,6 +210,11 @@ export class CollectionsService {
           `Parent collection not found: ${rawParentId}`,
         );
       }
+
+      // Assert no indirect or direct circular loops in collection hierarchy
+      const allCollections =
+        await this.collectionsRepo.findAll(canonicalWorkspaceId);
+      this.tree.assertNoCycle(allCollections, collectionId, rawParentId);
     }
 
     const collection = await this.collectionsRepo.update(
@@ -304,13 +314,34 @@ export class CollectionsService {
     }
 
     const ids = dto.itemIds || [];
-    for (const itemId of ids) {
-      await this.collectionsRepo.addItem(
-        canonicalWorkspaceId,
-        collectionId,
-        itemId,
+    if (ids.length === 0) {
+      return { success: true, count: 0 };
+    }
+
+    // 1. Verify all itemIds belong to this workspace (prevent IDOR / BOLA)
+    const validItems = await this.prisma.catalogItem.findMany({
+      where: {
+        id: { in: ids },
+        workspaceId: canonicalWorkspaceId,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+
+    const validIdSet = new Set(validItems.map((it) => it.id));
+    const invalidIds = ids.filter((id) => !validIdSet.has(id));
+    if (invalidIds.length > 0) {
+      throw new BadRequestException(
+        `One or more items do not belong to workspace ${canonicalWorkspaceId}: ${invalidIds.join(', ')}`,
       );
     }
+
+    // 2. Batch add items to collection using createMany (eliminates N+1 roundtrips)
+    await this.collectionsRepo.addItems(
+      canonicalWorkspaceId,
+      collectionId,
+      ids,
+    );
 
     await this.invalidateCollectionsCache(canonicalWorkspaceId);
     return { success: true, count: ids.length };
@@ -328,6 +359,19 @@ export class CollectionsService {
     );
     if (!collection) {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
+    }
+
+    // Assert item belongs to workspace
+    const item = await this.prisma.catalogItem.findFirst({
+      where: {
+        id: itemId,
+        workspaceId: canonicalWorkspaceId,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    if (!item) {
+      throw new NotFoundException(`Item not found in workspace: ${itemId}`);
     }
 
     await this.collectionsRepo.removeItem(
@@ -519,25 +563,32 @@ export class CollectionsService {
       },
     });
 
-    for (let i = 0; i < uniqueIds.length; i++) {
-      const collectionId = uniqueIds[i];
-      const collectionExists = await tx.collection.findFirst({
-        where: { id: collectionId, workspaceId },
+    if (uniqueIds.length === 0) return;
+
+    // Batch verify collections belong to workspace in a single query (eliminates N+1)
+    const validCollections = await tx.collection.findMany({
+      where: {
+        id: { in: uniqueIds },
+        workspaceId,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+
+    const validIdSet = new Set(validCollections.map((c) => c.id));
+    const toInsert = uniqueIds
+      .filter((id) => validIdSet.has(id))
+      .map((collectionId, index) => ({
+        collectionId,
+        catalogItemId: itemId,
+        sortOrder: index,
+      }));
+
+    if (toInsert.length > 0) {
+      await tx.collectionItem.createMany({
+        data: toInsert,
+        skipDuplicates: true,
       });
-      if (collectionExists) {
-        const existingLink = await tx.collectionItem.findFirst({
-          where: { collectionId, catalogItemId: itemId },
-        });
-        if (!existingLink) {
-          await tx.collectionItem.create({
-            data: {
-              collectionId,
-              catalogItemId: itemId,
-              sortOrder: i,
-            },
-          });
-        }
-      }
     }
   }
 }

@@ -36,18 +36,18 @@ export class ProjectRoleGuard implements CanActivate {
     const userId = user.sub || user.id;
 
     // 1. Resolve project identifier
-    let explicitProjectId = request.params?.projectId;
-    let claimedHeaderProjectId =
+    const explicitProjectId = request.params?.projectId;
+    const claimedHeaderProjectId =
       request.headers?.['x-project-id'] || request.query?.projectId;
 
     let projectId: string | undefined = explicitProjectId;
 
     const hasSubResourceParam = Boolean(
       request.params?.cycleId ||
-        request.params?.taskId ||
-        request.params?.pageId ||
-        request.params?.worklogId ||
-        request.params?.commentId,
+      request.params?.taskId ||
+      request.params?.pageId ||
+      request.params?.worklogId ||
+      request.params?.commentId,
     );
 
     let subResourceProjectId: string | undefined;
@@ -145,7 +145,10 @@ export class ProjectRoleGuard implements CanActivate {
           const proj = await this.prisma.project
             .findFirst({
               where: {
-                identifier: { equals: claimedHeaderProjectId, mode: 'insensitive' },
+                identifier: {
+                  equals: claimedHeaderProjectId,
+                  mode: 'insensitive',
+                },
                 deletedAt: null,
               },
               select: { id: true },

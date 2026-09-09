@@ -3,6 +3,7 @@ import {
   Logger,
   NotFoundException,
   ForbiddenException,
+  Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AnnotationsRepository } from './annotations.repository';
@@ -10,13 +11,7 @@ import {
   CreateAnnotationData,
   UpdateAnnotationData,
 } from './types/annotations.types';
-import {
-  normalizeAnnotationColor,
-  normalizeQuoteText,
-  normalizeRectCoords,
-  normalizeComment,
-  parseAnnotationType,
-} from './utils/annotations.utils';
+import { AnnotationNormalizer } from './normalizers/annotation.normalizer';
 
 import {
   TransactionService,
@@ -39,6 +34,8 @@ export class AnnotationsService {
     private readonly libraryTx: TransactionService,
     private readonly attachmentsService: AttachmentsService,
     private readonly prisma: PrismaService,
+    @Optional()
+    private readonly normalizer: AnnotationNormalizer = new AnnotationNormalizer(),
   ) {}
 
   async getAnnotationsByAttachment(
@@ -70,17 +67,9 @@ export class AnnotationsService {
         workspaceId,
         tx,
       );
+      const normalized = this.normalizer.normalizeCreateData(data);
       const annotation = await this.annotationsRepo.create(
-        {
-          ...data,
-          color: normalizeAnnotationColor(data.color),
-          quoteText: normalizeQuoteText(data.quoteText),
-          comment: normalizeComment(data.comment),
-          rectCoords:
-            data.rectCoords !== undefined
-              ? normalizeRectCoords(data.rectCoords)
-              : null,
-        },
+        normalized,
         tx,
       );
 
@@ -156,20 +145,7 @@ export class AnnotationsService {
         await this.assertCanModifyAnnotation(workspaceId, existing, userId, tx);
       }
 
-      const normalizedData: UpdateAnnotationData = {
-        ...(data.color !== undefined
-          ? { color: normalizeAnnotationColor(data.color) }
-          : {}),
-        ...(data.quoteText !== undefined
-          ? { quoteText: normalizeQuoteText(data.quoteText) }
-          : {}),
-        ...(data.comment !== undefined
-          ? { comment: normalizeComment(data.comment) }
-          : {}),
-        ...(data.rectCoords !== undefined
-          ? { rectCoords: normalizeRectCoords(data.rectCoords) }
-          : {}),
-      };
+      const normalizedData = this.normalizer.normalizeUpdateData(data);
 
       const updated = await this.annotationsRepo.update(
         id,
@@ -272,9 +248,9 @@ export class AnnotationsService {
       const updated = await tx.annotation.update({
         where: { id: command.existingId },
         data: {
-          quoteText: normalizeQuoteText(command.quoteText),
-          comment: normalizeComment(command.comment),
-          color: normalizeAnnotationColor(command.color),
+          quoteText: this.normalizer.normalizeQuote(command.quoteText),
+          comment: this.normalizer.normalizeComment(command.comment),
+          color: this.normalizer.normalizeColor(command.color),
           pageIndex: command.pageIndex,
           version: { increment: 1 },
         },
@@ -306,10 +282,10 @@ export class AnnotationsService {
           attachmentId: command.attachmentId,
           authorId: command.userId,
           pageIndex: command.pageIndex,
-          quoteText: normalizeQuoteText(command.quoteText),
-          comment: normalizeComment(command.comment),
-          color: normalizeAnnotationColor(command.color),
-          type: parseAnnotationType(command.type),
+          quoteText: this.normalizer.normalizeQuote(command.quoteText),
+          comment: this.normalizer.normalizeComment(command.comment),
+          color: this.normalizer.normalizeColor(command.color),
+          type: this.normalizer.parseType(command.type),
           version: 1,
         },
       });

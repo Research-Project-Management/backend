@@ -47,6 +47,18 @@ export class ExportsController {
     return this.exportsService.exportLibrary(workspaceId, dto);
   }
 
+  @Post('citations/bibtex')
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  async exportCitationsBibtex(
+    @Param('workspaceId') workspaceId: string,
+    @Body() body: { keys: string[] },
+  ) {
+    return this.exportsService.exportByCitationKeys(
+      workspaceId,
+      body.keys || [],
+    );
+  }
+
   @Get()
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async exportLibraryGet(

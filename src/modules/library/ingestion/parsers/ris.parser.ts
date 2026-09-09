@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ItemMetadata, CreatorInput } from '../metadata/types/metadata.types';
 import { IngestionValidationException } from '../errors/ingestion.errors';
+import { cleanAbstractText } from '../../items/utils/items.utils';
+import { normalizeAcademicTags } from '../../tags/utils/tags.utils';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { Cite } = require('@citation-js/core');
@@ -113,14 +115,14 @@ export class RisParser {
         }
 
         // Tags / keywords handling
-        const tags: string[] = [];
+        const rawKeywords: string[] = [];
         if (csl.keyword) {
           if (Array.isArray(csl.keyword)) {
-            tags.push(
+            rawKeywords.push(
               ...csl.keyword.map((k: string) => k.trim()).filter(Boolean),
             );
           } else if (typeof csl.keyword === 'string') {
-            tags.push(
+            rawKeywords.push(
               ...csl.keyword
                 .split(/[,;\n]/)
                 .map((k: string) => k.trim())
@@ -128,6 +130,15 @@ export class RisParser {
             );
           }
         }
+        if (currentRawRecord) {
+          const kwMatches = currentRawRecord.matchAll(/^(?:KW)\s*-\s*(.+)$/gim);
+          for (const m of kwMatches) {
+            if (m[1]?.trim()) {
+              rawKeywords.push(m[1].trim());
+            }
+          }
+        }
+        const tags = normalizeAcademicTags(rawKeywords);
 
         const year =
           csl.issued?.['date-parts']?.[0]?.[0] != null
@@ -138,11 +149,34 @@ export class RisParser {
           csl.type || 'article-journal',
         );
 
-        // Notes extraction
+        // Notes extraction (including RN Research Notes and N1 Notes)
+        const consolidatedNotes: Array<{ content: string; source?: string }> =
+          [];
+        const seenNotes = new Set<string>();
+
+        const addNote = (text?: string | null, source: string = 'ris') => {
+          if (!text || typeof text !== 'string') return;
+          const trimmed = text.trim();
+          if (trimmed && !seenNotes.has(trimmed)) {
+            seenNotes.add(trimmed);
+            consolidatedNotes.push({ content: trimmed, source });
+          }
+        };
+
+        if (currentRawRecord) {
+          const rnMatches = currentRawRecord.matchAll(
+            /^(?:RN|N1)\s*-\s*(.+)$/gim,
+          );
+          for (const m of rnMatches) {
+            addNote(m[1], 'ris');
+          }
+        }
+
         const rawNote = csl.note || csl.annote || csl.comment;
-        const notes = rawNote
-          ? [{ content: String(rawNote).trim(), source: 'ris' }]
-          : undefined;
+        addNote(typeof rawNote === 'string' ? rawNote : undefined, 'ris');
+
+        const notes =
+          consolidatedNotes.length > 0 ? consolidatedNotes : undefined;
 
         let archive = csl.archive || undefined;
         let callNumber = csl['call-number'] || undefined;
@@ -201,7 +235,16 @@ export class RisParser {
           isbn: csl.ISBN || undefined,
           issn: csl.ISSN || undefined,
           url: csl.URL || undefined,
-          abstract: csl.abstract || undefined,
+          abstract: (() => {
+            let rawAbstract = csl.abstract || undefined;
+            if (!rawAbstract && currentRawRecord) {
+              const abMatch = currentRawRecord.match(
+                /^(?:AB|N2)\s*-\s*([\s\S]*?)(?=\n[A-Z0-9]{2}\s*-|$)/im,
+              );
+              if (abMatch) rawAbstract = abMatch[1].trim();
+            }
+            return cleanAbstractText(rawAbstract);
+          })(),
           series,
           edition,
           language,
@@ -253,6 +296,7 @@ export class RisParser {
           endPage?: string;
         })
       | null = null;
+    let lastTag = '';
 
     for (const rawLine of lines) {
       const line = rawLine.trim();
@@ -260,14 +304,31 @@ export class RisParser {
 
       const match = rawLine.match(/^([A-Z0-9]{2})\s*-\s*(.*)$/);
       if (!match) {
-        if (currentRecord && line && currentRecord.abstract) {
-          currentRecord.abstract += ' ' + line;
+        if (currentRecord && line) {
+          if (lastTag === 'AB' || lastTag === 'N2') {
+            currentRecord.abstract =
+              (currentRecord.abstract ? currentRecord.abstract + ' ' : '') +
+              line;
+          } else if (
+            (lastTag === 'RN' || lastTag === 'N1') &&
+            currentRecord.rawNotes &&
+            currentRecord.rawNotes.length > 0
+          ) {
+            const lastIdx = currentRecord.rawNotes.length - 1;
+            currentRecord.rawNotes[lastIdx] += ' ' + line;
+          } else if (
+            (lastTag === 'TI' || lastTag === 'T1') &&
+            currentRecord.title
+          ) {
+            currentRecord.title += ' ' + line;
+          }
         }
         continue;
       }
 
       const [, tag, val] = match;
       const value = val.trim();
+      lastTag = tag;
 
       if (tag === 'TY') {
         currentRecord = {
@@ -370,6 +431,7 @@ export class RisParser {
         case 'KW':
           currentRecord.rawTags.push(value);
           break;
+        case 'RN':
         case 'N1':
           if (!currentRecord.rawNotes) currentRecord.rawNotes = [];
           currentRecord.rawNotes.push(value);
@@ -469,9 +531,9 @@ export class RisParser {
       callNumber: record.callNumber,
       archive: record.archive,
       series: record.series,
-      tags: record.rawTags,
-      keywords: record.rawTags,
-      abstract: record.abstract,
+      tags: normalizeAcademicTags(record.rawTags),
+      keywords: normalizeAcademicTags(record.rawTags),
+      abstract: cleanAbstractText(record.abstract),
       notes:
         record.rawNotes && record.rawNotes.length > 0
           ? record.rawNotes.map((n) => ({ content: n, source: 'ris' }))

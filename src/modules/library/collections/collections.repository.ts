@@ -209,31 +209,43 @@ export class CollectionsRepository {
   }
 
   /**
-   * Adds an item to a collection with dual-write semantics.
+   * Adds items to a collection with dual-write semantics.
    */
+  async addItemsToCollection(
+    workspaceId: string,
+    collectionId: string,
+    itemIds: string[],
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    if (itemIds.length === 0) return;
+    const client = this.getClient(tx);
+
+    await client.collectionItem.createMany({
+      data: itemIds.map((itemId) => ({
+        collectionId,
+        catalogItemId: itemId,
+        sortOrder: 0,
+      })),
+      skipDuplicates: true,
+    });
+  }
+
+  async addItems(
+    workspaceId: string,
+    collectionId: string,
+    itemIds: string[],
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    return this.addItemsToCollection(workspaceId, collectionId, itemIds, tx);
+  }
+
   async addItemToCollection(
     workspaceId: string,
     collectionId: string,
     itemId: string,
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
-    const client = this.getClient(tx);
-
-    // 1. Canonical write into collection_items (M:N)
-    await client.collectionItem.upsert({
-      where: {
-        collectionId_catalogItemId: {
-          collectionId,
-          catalogItemId: itemId,
-        },
-      },
-      create: {
-        collectionId,
-        catalogItemId: itemId,
-        sortOrder: 0,
-      },
-      update: {},
-    });
+    return this.addItemsToCollection(workspaceId, collectionId, [itemId], tx);
   }
 
   async addItem(
@@ -242,7 +254,7 @@ export class CollectionsRepository {
     itemId: string,
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
-    return this.addItemToCollection(workspaceId, collectionId, itemId, tx);
+    return this.addItemsToCollection(workspaceId, collectionId, [itemId], tx);
   }
 
   /**

@@ -137,6 +137,17 @@ const SCIENTIFIC_ACRONYMS = new Set([
   'TF-IDF',
   'GLUE',
   'SUPERGLUE',
+  'COVID',
+  'COVID-19',
+  'SARS',
+  'COV',
+  'CRISPR',
+  'MRI',
+  'FMRI',
+  'CT',
+  'EEG',
+  'ECG',
+  'PET',
 ]);
 
 // ── 3. Structural Document Noise Blacklist (Non-Keywords / Parsing Artifacts) ─
@@ -198,6 +209,11 @@ export function stripTagPrefixes(str: string): string {
 
 /** Converts string to intelligent Title Case preserving standard scientific acronyms */
 export function toTitleCaseWithAcronyms(str: string): string {
+  const fullUpper = str.trim().toUpperCase();
+  if (SCIENTIFIC_ACRONYMS.has(fullUpper)) {
+    return fullUpper;
+  }
+
   return str
     .split(/\s+/)
     .filter(Boolean)
@@ -206,8 +222,12 @@ export function toTitleCaseWithAcronyms(str: string): string {
       if (SCIENTIFIC_ACRONYMS.has(upper)) {
         return upper;
       }
-      // Handle hyphenated terms (e.g. Viola-Jones, Zero-Shot, Few-Shot)
+      // Handle hyphenated terms (e.g. Viola-Jones, Zero-Shot, Few-Shot, COVID-19)
       if (word.includes('-')) {
+        const wordUpper = word.toUpperCase();
+        if (SCIENTIFIC_ACRONYMS.has(wordUpper)) {
+          return wordUpper;
+        }
         return word
           .split('-')
           .map((part) => {

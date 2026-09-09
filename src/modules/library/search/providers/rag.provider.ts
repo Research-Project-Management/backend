@@ -19,8 +19,8 @@ export interface RagIndexResult {
 }
 
 @Injectable()
-export class RagIndexerProvider {
-  private readonly logger = new Logger(RagIndexerProvider.name);
+export class RagProvider {
+  private readonly logger = new Logger(RagProvider.name);
 
   constructor(
     private readonly configService: ConfigService,
@@ -88,3 +88,5 @@ export class RagIndexerProvider {
     return { docId: json.id };
   }
 }
+
+export { RagProvider as RagIndexerProvider };

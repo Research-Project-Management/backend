@@ -14,6 +14,7 @@ import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-
 import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
 import { CurrentUser } from '../../../modules/iam/authn/decorators/current-user.decorator';
 import { PushMutationsDto, ApplyExternalSyncBatchDto } from './dto/sync.dto';
+import { ExternalSyncOperation } from './ports/sync.port';
 
 @Controller([
   'api/v1/workspaces/:workspaceId/library/sync',
@@ -84,7 +85,7 @@ export class SyncController {
     return this.syncService.applyExternalSyncBatch(
       {
         workspaceId,
-        operations: body.operations as any,
+        operations: body.operations as unknown as ExternalSyncOperation[],
         idempotencyKey: body.idempotencyKey,
       },
       userId,

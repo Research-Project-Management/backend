@@ -11,6 +11,7 @@ import {
   GrobidFormula,
 } from '../../../../infra/grobid/grobid.client';
 import { SsrfGuardService } from '../../common/services/ssrf-guard.service';
+import { cleanAbstractText } from '../../items/utils/items.utils';
 
 export interface ExtractedPdfMetadata {
   doi?: string;
@@ -46,9 +47,9 @@ export interface ExtractedPdfDocument {
 }
 
 @Injectable()
-export class PdfExtractorProvider {
-  private readonly logger = new Logger(PdfExtractorProvider.name);
-  private static readonly TEXT_SCAN_LIMIT = 50_000;
+export class PdfProvider {
+  private readonly logger = new Logger(PdfProvider.name);
+  public static readonly TEXT_SCAN_LIMIT = 50_000;
 
   constructor(
     @Optional() private readonly grobidClient?: GrobidClient,
@@ -192,7 +193,9 @@ export class PdfExtractorProvider {
         unpdfExtractedMetadata.year ||
         headerExtractedMetadata.year,
       abstract:
-        textExtractedMetadata.abstract || headerExtractedMetadata.abstract,
+        cleanAbstractText(headerExtractedMetadata.abstract) ||
+        cleanAbstractText(textExtractedMetadata.abstract) ||
+        undefined,
       keywords:
         textExtractedMetadata.keywords &&
         textExtractedMetadata.keywords.length > 0
@@ -201,7 +204,7 @@ export class PdfExtractorProvider {
               unpdfExtractedMetadata.keywords.length > 0
             ? unpdfExtractedMetadata.keywords
             : headerExtractedMetadata.keywords,
-      rawText: combinedText.slice(0, PdfExtractorProvider.TEXT_SCAN_LIMIT),
+      rawText: combinedText.slice(0, PdfProvider.TEXT_SCAN_LIMIT),
     };
 
     // ── GROBID: Authoritative ML Document Layout & Full-Text Zoning ──────────
@@ -220,7 +223,10 @@ export class PdfExtractorProvider {
         if (fulltextResult) {
           const header = fulltextResult.header;
           if (header.abstract) {
-            metadata.abstract = header.abstract;
+            const cleanGrobidAbstract = cleanAbstractText(header.abstract);
+            if (cleanGrobidAbstract) {
+              metadata.abstract = cleanGrobidAbstract;
+            }
             metadata.abstractParagraphs = header.abstractParagraphs;
             metadata.abstractSections = header.abstractSections;
           }
@@ -384,7 +390,7 @@ export class PdfExtractorProvider {
   extractFromText(text: string): string | null {
     if (!text) return null;
 
-    const scannedText = text.slice(0, PdfExtractorProvider.TEXT_SCAN_LIMIT);
+    const scannedText = text.slice(0, PdfProvider.TEXT_SCAN_LIMIT);
     const joinedText = scannedText.replace(/(10\.\d{4,9}\/)\s+/g, '$1');
     const doiMatches =
       joinedText.match(/10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/g) ?? [];
@@ -400,7 +406,7 @@ export class PdfExtractorProvider {
   }
 
   extractMetadataFromText(text: string): ExtractedPdfMetadata {
-    const scannedText = text.slice(0, PdfExtractorProvider.TEXT_SCAN_LIMIT);
+    const scannedText = text.slice(0, PdfProvider.TEXT_SCAN_LIMIT);
     const metadata: ExtractedPdfMetadata = {};
     const doi = this.extractFromText(
       scannedText.replace(/(10\.\d{4,9}\/)\s*\n\s*/g, '$1'),
@@ -420,12 +426,26 @@ export class PdfExtractorProvider {
     }
 
     const abstractMatch = scannedText.match(
-      /Abstract[—:\-\s]+([\s\S]*?)(?=(?:\n\s*(?:Index Terms|Keywords|1\.|I\. INTRODUCTION|INTRODUCTION)\b)|$)/i,
+      /(?:^|\n)\s*(?:Abstract|ABSTRACT|Summary|Résumé)[—:\-\s.]*\s*([\s\S]*?)(?=(?:\n\s*(?:Index Terms|Keywords|Key\s*words|1\.?\s+[A-Z]|I\.?\s+[A-Z]|INTRODUCTION|Contents|Background|1\b|I\b))|(?:\r?\n\s*\r?\n\s*(?:[A-Z0-9\s]{3,30}\n|1\.|\bI\b))|$)/i,
     );
     if (abstractMatch?.[1]) {
-      const cleanAbstract = abstractMatch[1].replace(/\s+/g, ' ').trim();
-      if (cleanAbstract.length > 10) {
-        metadata.abstract = cleanAbstract.slice(0, 2500);
+      let candidate = abstractMatch[1].trim();
+      const doubleBreakIdx = candidate.search(
+        /\r?\n\s*\r?\n\s*(?:[0-9IVX]+\b|[A-Z\s]{4,}\b)/,
+      );
+      if (doubleBreakIdx > 50) {
+        candidate = candidate.slice(0, doubleBreakIdx);
+      } else if (candidate.length > 1800) {
+        const sentenceEnd = candidate.slice(0, 1500).lastIndexOf('.');
+        if (sentenceEnd > 200) {
+          candidate = candidate.slice(0, sentenceEnd + 1);
+        } else {
+          candidate = candidate.slice(0, 1500);
+        }
+      }
+      const cleanAbstract = cleanAbstractText(candidate);
+      if (cleanAbstract && cleanAbstract.length > 15) {
+        metadata.abstract = cleanAbstract;
       }
     }
 
@@ -584,7 +604,7 @@ export class PdfExtractorProvider {
 
     return this.extractFromText(
       buffer
-        .subarray(0, PdfExtractorProvider.TEXT_SCAN_LIMIT)
+        .subarray(0, PdfProvider.TEXT_SCAN_LIMIT)
         .toString('latin1'),
     );
   }
@@ -631,3 +651,5 @@ export class PdfExtractorProvider {
     }
   }
 }
+
+export { PdfProvider as PdfExtractorProvider };

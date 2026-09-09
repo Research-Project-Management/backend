@@ -7,7 +7,7 @@ import {
 } from './types/metadata.types';
 import { MetadataCache } from './cache/metadata.cache';
 import { ReconciliationService } from './services/reconciliation.service';
-import { ProviderExecutor } from './services/provider.executor';
+import { ExecutorService } from './services/executor.service';
 import { MetadataService } from './metadata.service';
 
 import { CrossRefProvider } from './providers/crossref.provider';
@@ -22,7 +22,7 @@ import { UnpaywallProvider } from './providers/unpaywall.provider';
   providers: [
     MetadataCache,
     ReconciliationService,
-    ProviderExecutor,
+    ExecutorService,
 
     // ── Metadata Providers ──────────────────────────────────────────────────
     CrossRefProvider,

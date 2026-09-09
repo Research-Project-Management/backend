@@ -16,8 +16,8 @@ export interface PageAnchorMatch {
 }
 
 @Injectable()
-export class FullTextIndexer {
-  private readonly logger = new Logger(FullTextIndexer.name);
+export class FullTextProvider {
+  private readonly logger = new Logger(FullTextProvider.name);
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -106,3 +106,5 @@ export class FullTextIndexer {
     return matches;
   }
 }
+
+export { FullTextProvider as FullTextIndexer };

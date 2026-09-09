@@ -3,7 +3,12 @@
  * Canonical Ground Truth for the Flux Library Domain, dynamically loaded from official
  * api.zotero.org/schema specifications. Eliminates manual maintenance and guesswork.
  */
-import { SchemaRegistrySnapshot, ItemTypeDefinition, ItemFieldDefinition, CreatorTypeDefinition } from '../types.types';
+import {
+  SchemaRegistrySnapshot,
+  ItemTypeDefinition,
+  ItemFieldDefinition,
+  CreatorTypeDefinition,
+} from '../types/types.types';
 import rawZoteroSchema from '../data/zotero-schema.json';
 
 export const LIBRARY_SCHEMA_VERSION = rawZoteroSchema.version || 42;
@@ -52,7 +57,10 @@ const CATEGORY_MAP: Record<string, ItemTypeDefinition['category']> = {
   note: 'special',
 };
 
-const FIELD_CATEGORY_MAP: Record<string, NonNullable<ItemFieldDefinition['category']>> = {
+const FIELD_CATEGORY_MAP: Record<
+  string,
+  NonNullable<ItemFieldDefinition['category']>
+> = {
   title: 'core',
   shortTitle: 'core',
   abstractNote: 'core',
@@ -118,12 +126,46 @@ const FIELD_CATEGORY_MAP: Record<string, NonNullable<ItemFieldDefinition['catego
 };
 
 const MONO_FIELDS = new Set([
-  'volume', 'issue', 'pages', 'seriesNumber', 'date', 'filingDate', 'accessDate',
-  'dateDecided', 'dateEnacted', 'issueDate', 'DOI', 'ISBN', 'ISSN', 'PMID', 'PMCID',
-  'archiveID', 'patentNumber', 'applicationNumber', 'reportNumber', 'docketNumber',
-  'documentNumber', 'billNumber', 'standardNumber', 'codeNumber', 'publicLawNumber',
-  'citationKey', 'url', 'callNumber', 'versionNumber', 'episodeNumber', 'runningTime',
-  'scale', 'numPages', 'numberOfVolumes', 'citationCount', 'doi', 'isbn', 'issn', 'pmid', 'pmcid'
+  'volume',
+  'issue',
+  'pages',
+  'seriesNumber',
+  'date',
+  'filingDate',
+  'accessDate',
+  'dateDecided',
+  'dateEnacted',
+  'issueDate',
+  'DOI',
+  'ISBN',
+  'ISSN',
+  'PMID',
+  'PMCID',
+  'archiveID',
+  'patentNumber',
+  'applicationNumber',
+  'reportNumber',
+  'docketNumber',
+  'documentNumber',
+  'billNumber',
+  'standardNumber',
+  'codeNumber',
+  'publicLawNumber',
+  'citationKey',
+  'url',
+  'callNumber',
+  'versionNumber',
+  'episodeNumber',
+  'runningTime',
+  'scale',
+  'numPages',
+  'numberOfVolumes',
+  'citationCount',
+  'doi',
+  'isbn',
+  'issn',
+  'pmid',
+  'pmcid',
 ]);
 
 export const BASE_SEMANTICS = [
@@ -144,7 +186,11 @@ export const BASE_SEMANTICS = [
 
 function buildCanonicalSnapshot(): SchemaRegistrySnapshot {
   const schema = rawZoteroSchema as any;
-  const en = schema.locales?.['en-US'] || { fields: {}, itemTypes: {}, creatorTypes: {} };
+  const en = schema.locales?.['en-US'] || {
+    fields: {},
+    itemTypes: {},
+    creatorTypes: {},
+  };
   const baseFieldMappings: Record<string, Record<string, string>> = {};
   const reverseBaseFieldMappings: Record<string, Record<string, string>> = {};
   const itemTypes: Record<string, ItemTypeDefinition> = {};
@@ -155,36 +201,44 @@ function buildCanonicalSnapshot(): SchemaRegistrySnapshot {
     baseFieldMappings[typeKey] = {};
     reverseBaseFieldMappings[typeKey] = {};
 
-    const fields: ItemFieldDefinition[] = (t.fields || []).map((f: any, idx: number) => {
-      distinctKeys.add(f.field);
-      if (f.baseField) {
-        baseFieldMappings[typeKey][f.baseField] = f.field;
-        reverseBaseFieldMappings[typeKey][f.field] = f.baseField;
-      }
-      return {
-        key: f.field,
-        label: en.fields[f.field] || f.field,
-        order: idx + 1,
-        baseField: f.baseField,
-        category: FIELD_CATEGORY_MAP[f.field] || 'publication',
-        type: schema.meta?.fields?.[f.field]?.type === 'date'
-          ? 'date'
-          : f.field === 'url'
-            ? 'url'
-            : f.field === 'abstractNote' || f.field === 'extra'
-              ? 'textarea'
-              : 'text',
-        mono: MONO_FIELDS.has(f.field),
-      };
-    });
+    const fields: ItemFieldDefinition[] = (t.fields || []).map(
+      (f: any, idx: number) => {
+        distinctKeys.add(f.field);
+        if (f.baseField) {
+          baseFieldMappings[typeKey][f.baseField] = f.field;
+          reverseBaseFieldMappings[typeKey][f.field] = f.baseField;
+        }
+        return {
+          key: f.field,
+          label: en.fields[f.field] || f.field,
+          order: idx + 1,
+          baseField: f.baseField,
+          category: FIELD_CATEGORY_MAP[f.field] || 'publication',
+          type:
+            schema.meta?.fields?.[f.field]?.type === 'date'
+              ? 'date'
+              : f.field === 'url'
+                ? 'url'
+                : f.field === 'abstractNote' || f.field === 'extra'
+                  ? 'textarea'
+                  : 'text',
+          mono: MONO_FIELDS.has(f.field),
+        };
+      },
+    );
 
-    const creatorTypes: CreatorTypeDefinition[] = (t.creatorTypes || []).map((c: any) => ({
-      creatorType: c.creatorType,
-      label: en.creatorTypes[c.creatorType] || c.creatorType,
-      primary: Boolean(c.primary),
-    }));
+    const creatorTypes: CreatorTypeDefinition[] = (t.creatorTypes || []).map(
+      (c: any) => ({
+        creatorType: c.creatorType,
+        label: en.creatorTypes[c.creatorType] || c.creatorType,
+        primary: Boolean(c.primary),
+      }),
+    );
 
-    const primaryCreator = creatorTypes.find((c) => c.primary)?.creatorType || creatorTypes[0]?.creatorType || 'author';
+    const primaryCreator =
+      creatorTypes.find((c) => c.primary)?.creatorType ||
+      creatorTypes[0]?.creatorType ||
+      'author';
     const isSpecial = ['attachment', 'note', 'annotation'].includes(typeKey);
 
     itemTypes[typeKey] = {
@@ -213,6 +267,8 @@ function buildCanonicalSnapshot(): SchemaRegistrySnapshot {
 }
 
 export const SCHEMA_V42_DATA: SchemaRegistrySnapshot = buildCanonicalSnapshot();
-export const ALL_CREATOR_ROLES: Record<string, string> = SCHEMA_V42_DATA.creatorRoles;
+export const ALL_CREATOR_ROLES: Record<string, string> =
+  SCHEMA_V42_DATA.creatorRoles;
 export const BASE_FIELD_MAPPINGS = SCHEMA_V42_DATA.baseFieldMappings;
-export const REVERSE_BASE_FIELD_MAPPINGS = SCHEMA_V42_DATA.reverseBaseFieldMappings;
+export const REVERSE_BASE_FIELD_MAPPINGS =
+  SCHEMA_V42_DATA.reverseBaseFieldMappings;

@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { LIBRARY_EVENT_TYPES } from '../../outbox/outbox.events';
-import { FullTextIndexer } from '../providers/full-text-indexer.provider';
+import { FullTextProvider } from '../providers/full-text.provider';
 import { PrismaService } from '../../../../core/database/prisma.service';
 
 import { DomainEventEnvelope } from '../../outbox/ports/event-publisher.port';
@@ -11,7 +11,7 @@ export class SearchEventHandler {
   private readonly logger = new Logger(SearchEventHandler.name);
 
   constructor(
-    private readonly fullTextIndexer: FullTextIndexer,
+    private readonly fullText: FullTextProvider,
     private readonly prisma: PrismaService,
   ) {}
 

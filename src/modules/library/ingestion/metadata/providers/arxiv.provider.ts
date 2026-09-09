@@ -12,10 +12,11 @@ import {
   normalizeArxivId,
   normalizeDoi,
   cleanBibliographicText,
+  cleanAbstractText,
   decodeHtmlEntities,
   normalizeTags,
 } from '../utils/metadata.utils';
-import { ProviderFetchError } from '../services/provider.executor';
+import { ProviderFetchError } from '../services/executor.service';
 
 @Injectable()
 export class ArxivProvider implements MetadataProvider {
@@ -124,7 +125,7 @@ export class ArxivProvider implements MetadataProvider {
     // Abstract / summary
     const summaryMatch = entry.match(/<summary>([\s\S]*?)<\/summary>/i);
     const abstract = summaryMatch
-      ? cleanBibliographicText(summaryMatch[1])
+      ? cleanAbstractText(summaryMatch[1])
       : undefined;
 
     const rawCategories = Array.from(

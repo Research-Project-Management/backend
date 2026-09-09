@@ -6,6 +6,7 @@ import {
   MetadataConflictDetail,
 } from '../types/metadata-candidate.types';
 import { ItemMetadata } from '../metadata/types/metadata.types';
+import { normalizeAcademicTags } from '../../tags/utils/tags.utils';
 
 @Injectable()
 export class ReconciliationPolicy {
@@ -30,7 +31,6 @@ export class ReconciliationPolicy {
     ZoteroSync: 85, // User's verified Zotero library data
     OpenAlex: 78, // Aggregator; strong for enrichment, weaker for core fields
     arXiv: 65, // ⚠️ Lowered: submission year ≠ publication year; preprint-only fields
-    SemanticScholar: 65, // Enrichment provider; strong for CS/ML citation graphs
     OpenLibrary: 65, // Book metadata only; community-maintained
     BibTeX: 60, // User-imported file; quality depends on export source
     RIS: 60, // User-imported file; quality depends on export source
@@ -99,17 +99,17 @@ export class ReconciliationPolicy {
 
       // Special handling for array fields: Union tags/keywords and notes across providers
       if (field === 'tags' || field === 'keywords' || field === 'labels') {
-        const unionSet = new Set<string>();
+        const candidateTags: string[] = [];
         for (const ev of evidences) {
           if (Array.isArray(ev.normalizedValue)) {
             for (const t of ev.normalizedValue) {
               if (typeof t === 'string' && t.trim()) {
-                unionSet.add(t.trim().toLowerCase());
+                candidateTags.push(t.trim());
               }
             }
           }
         }
-        const mergedArray = Array.from(unionSet);
+        const mergedArray = normalizeAcademicTags(candidateTags);
         selectedFields[field] = {
           ...best,
           normalizedValue: mergedArray,

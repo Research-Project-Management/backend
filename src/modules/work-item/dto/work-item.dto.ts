@@ -475,12 +475,18 @@ export const DuplicateTaskDto = DuplicateWorkItemDto;
 export type DuplicateTaskDto = DuplicateWorkItemDto;
 
 export class AddAttachmentDto {
-  @ApiPropertyOptional({ description: 'Name of the attachment', example: 'report.pdf' })
+  @ApiPropertyOptional({
+    description: 'Name of the attachment',
+    example: 'report.pdf',
+  })
   @IsOptional()
   @IsString()
   name?: string;
 
-  @ApiPropertyOptional({ description: 'URL of the attachment', example: 'https://...' })
+  @ApiPropertyOptional({
+    description: 'URL of the attachment',
+    example: 'https://...',
+  })
   @IsOptional()
   @IsString()
   url?: string;
@@ -490,11 +496,13 @@ export class AddAttachmentDto {
   @IsNumber()
   size?: number;
 
-  @ApiPropertyOptional({ description: 'MIME type of the attachment', example: 'application/pdf' })
+  @ApiPropertyOptional({
+    description: 'MIME type of the attachment',
+    example: 'application/pdf',
+  })
   @IsOptional()
   @IsString()
   mimeType?: string;
 
   [key: string]: unknown;
 }
-

@@ -42,7 +42,6 @@ export class ReconciliationService {
       Unpaywall: 0.9,
       BibTeX: 0.9,
       RIS: 0.9,
-      SemanticScholar: 0.9,
       LocalPDFExtraction: 0.82, // GROBID regex DOI extraction is reliable when found
       arXiv: 0.75, // Only present when author manually links to published version
     },
@@ -50,7 +49,6 @@ export class ReconciliationService {
       UserOverride: 1.0,
       arXiv: 1.0, // arXiv IS the authority for its own IDs
       OpenAlex: 0.92,
-      SemanticScholar: 0.9,
       BibTeX: 0.88,
       ZoteroSync: 0.92,
       LocalPDFExtraction: 0.8,
@@ -96,7 +94,6 @@ export class ReconciliationService {
       RIS: 0.89,
       OpenAlex: 0.87, // Aggregated; known misclassification edge cases
       OpenLibrary: 0.87,
-      SemanticScholar: 0.86,
       LocalPDFExtraction: 0.85, // GROBID: ~97% F1 on well-formatted PDFs
     },
     authors: {
@@ -108,7 +105,6 @@ export class ReconciliationService {
       BibTeX: 0.9,
       RIS: 0.88,
       OpenAlex: 0.85, // MAG-based disambiguation; good but imperfect
-      SemanticScholar: 0.83,
       OpenLibrary: 0.83,
       LocalPDFExtraction: 0.82,
     },
@@ -121,7 +117,6 @@ export class ReconciliationService {
       BibTeX: 0.9,
       RIS: 0.88,
       OpenAlex: 0.85,
-      SemanticScholar: 0.83,
       OpenLibrary: 0.83,
       LocalPDFExtraction: 0.82,
     },
@@ -131,7 +126,6 @@ export class ReconciliationService {
       arXiv: 0.97, // Author-submitted, almost always present and complete
       ZoteroSync: 0.88,
       LocalPDFExtraction: 0.88, // GROBID decent but layout-dependent
-      SemanticScholar: 0.86,
       BibTeX: 0.83,
       OpenAlex: 0.83, // Inverted-index reconstruction; occasional noise
       CrossRef: 0.7, // ⚠️ Only ~52.7% of records include abstract (2023–2024 data)
@@ -144,7 +138,6 @@ export class ReconciliationService {
       ZoteroSync: 0.92,
       RIS: 0.91,
       OpenAlex: 0.88,
-      SemanticScholar: 0.87,
       OpenLibrary: 0.86,
       LocalPDFExtraction: 0.75,
       arXiv: 0.72, // ⚠️ Submission year ≠ publication year (preprint→journal gap)
@@ -159,7 +152,6 @@ export class ReconciliationService {
       BibTeX: 0.88,
       RIS: 0.87,
       OpenAlex: 0.87,
-      SemanticScholar: 0.82,
       LocalPDFExtraction: 0.68, // Frequently confused with conference/book names
       arXiv: 0.6, // Typically empty for preprints
     },
@@ -214,7 +206,6 @@ export class ReconciliationService {
       BibTeX: 0.88,
       RIS: 0.86,
       ZoteroSync: 0.86,
-      SemanticScholar: 0.82,
       LocalPDFExtraction: 0.7,
       OpenAlex: 0.78, // ⚠️ Known misclassification: articles vs editorials/reviews
     },
@@ -228,7 +219,6 @@ export class ReconciliationService {
     citationCount: {
       UserOverride: 1.0,
       OpenAlex: 0.97, // Largest open citation graph (300M+ works)
-      SemanticScholar: 0.93, // Especially strong for CS/ML papers
       CrossRef: 0.95, // References data; less complete than OpenAlex for OA
     },
     extraFields: {
@@ -239,7 +229,6 @@ export class ReconciliationService {
       OpenLibrary: 0.9,
       ZoteroSync: 0.9,
       OpenAlex: 0.85,
-      SemanticScholar: 0.82,
       BibTeX: 0.8,
     },
   };
