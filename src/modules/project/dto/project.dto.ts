@@ -140,3 +140,14 @@ export class UpdateColumnDto {
   @IsOptional()
   accentColor?: string;
 }
+
+export class ReorderColumnsDto {
+  @IsArray()
+  @IsNotEmpty({ message: 'Columns list is required' })
+  columns!: Array<{
+    id: string;
+    title: string;
+    isDefault?: boolean;
+    accentColor?: string;
+  }>;
+}

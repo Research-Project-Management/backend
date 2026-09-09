@@ -4,7 +4,7 @@ import {
   Optional,
   BadRequestException,
 } from '@nestjs/common';
-import { IngestionSubmissionEnvelope } from '../types/ingestion-submission.types';
+import { IngestionSubmissionEnvelope } from '../types/submission.types';
 import { IngestionRepository } from '../ingestion.repository';
 import { IdentifyStage } from '../stages/identify.stage';
 import { NormalizeStage } from '../stages/normalize.stage';
@@ -20,8 +20,8 @@ import { getFileContentPath } from '../../../storage/storage.port';
 import { IngestionStatus, Prisma } from '@prisma/client';
 
 @Injectable()
-export class IngestionPipelineRunner {
-  private readonly logger = new Logger(IngestionPipelineRunner.name);
+export class PipelineService {
+  private readonly logger = new Logger(PipelineService.name);
 
   constructor(
     private readonly ingestionRepo: IngestionRepository,
@@ -579,3 +579,5 @@ export class IngestionPipelineRunner {
     }
   }
 }
+
+export { PipelineService as IngestionPipelineRunner };

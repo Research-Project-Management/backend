@@ -7,6 +7,7 @@ import { TransformInterceptor } from './interceptors/transform.interceptor';
 import { ObservabilityModule } from './observability/observability.module';
 import { IdempotencyModule } from './idempotency/idempotency.module';
 import { SandboxModule } from './sandbox/sandbox.module';
+import { MailModule } from './mail/mail.module';
 
 @Global()
 @Module({
@@ -17,6 +18,7 @@ import { SandboxModule } from './sandbox/sandbox.module';
     ObservabilityModule,
     IdempotencyModule,
     SandboxModule,
+    MailModule,
   ],
   providers: [GlobalExceptionFilter, TransformInterceptor],
   exports: [
@@ -26,6 +28,7 @@ import { SandboxModule } from './sandbox/sandbox.module';
     ObservabilityModule,
     IdempotencyModule,
     SandboxModule,
+    MailModule,
     GlobalExceptionFilter,
     TransformInterceptor,
   ],

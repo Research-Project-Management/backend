@@ -215,18 +215,20 @@ export class WorkspaceRoleGuard implements CanActivate {
 
     // Resolve workspace from task if taskId is present
     if (
-      request.params?.taskId &&
-      this.prisma?.task &&
-      isUuid(request.params.taskId)
+      (request.params?.taskId || request.params?.id) &&
+      this.prisma?.task
     ) {
-      const task = await this.prisma.task
-        .findUnique({
-          where: { id: request.params.taskId },
-          select: { project: { select: { workspaceId: true } } },
-        })
-        .catch(() => null);
-      if (task?.project?.workspaceId) {
-        entityWorkspaceId = task.project.workspaceId;
+      const taskId = request.params.taskId || request.params.id;
+      if (isUuid(taskId)) {
+        const task = await this.prisma.task
+          .findUnique({
+            where: { id: taskId },
+            select: { project: { select: { workspaceId: true } } },
+          })
+          .catch(() => null);
+        if (task?.project?.workspaceId) {
+          entityWorkspaceId = task.project.workspaceId;
+        }
       }
     }
 
@@ -250,7 +252,7 @@ export class WorkspaceRoleGuard implements CanActivate {
         }
       }
     } else if (!workspaceId) {
-      workspaceId = claimedHeaderWorkspaceId;
+      workspaceId = entityWorkspaceId || claimedHeaderWorkspaceId;
     }
 
     // Fallback: If no explicit workspace identifier in route, resolve user's active/primary workspace

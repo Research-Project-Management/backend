@@ -11,7 +11,7 @@ import {
   IngestionSubmissionEnvelope,
   IngestionAcceptedResult,
   SubmissionPayload,
-} from './types/ingestion-submission.types';
+} from './types/submission.types';
 import {
   IngestionCommand,
   IngestionResult,
@@ -20,8 +20,8 @@ import {
 } from './types/ingestion.types';
 import { IngestionRepository } from './ingestion.repository';
 import { IngestionStatus, Prisma } from '@prisma/client';
-import { IngestionPipelineRunner } from './services/ingestion-pipeline.runner';
-import { IngestionQueueService } from './services/ingestion-queue.service';
+import { PipelineService } from './services/pipeline.service';
+import { QueueService } from './services/queue.service';
 import { UrlCaptureService } from './services/url-capture.service';
 import { ItemsService } from '../items/items.service';
 import { createHash, randomUUID } from 'crypto';
@@ -33,8 +33,8 @@ export class IngestionService implements IngestionPort {
   constructor(
     private readonly prisma: PrismaService,
     private readonly ingestionRepo: IngestionRepository,
-    private readonly runner: IngestionPipelineRunner,
-    private readonly queueService: IngestionQueueService,
+    private readonly pipeline: PipelineService,
+    private readonly queue: QueueService,
     private readonly urlCapture: UrlCaptureService,
     private readonly itemsService: ItemsService,
   ) {}
@@ -94,7 +94,7 @@ export class IngestionService implements IngestionPort {
 
     // 3. Return the durable run immediately and dispatch to IngestionQueueService
     // for bounded concurrency and worker resilience.
-    this.queueService.enqueue(runId, workspaceId, envelope);
+    this.queue.enqueue(runId, workspaceId, envelope);
 
     return {
       runId,
@@ -111,14 +111,14 @@ export class IngestionService implements IngestionPort {
 
   /**
    * Executes the multi-stage ingestion pipeline.
-   * Delegated to IngestionPipelineRunner.
+   * Delegated to PipelineService.
    */
   async executePipeline(
     runId: string,
     workspaceId: string,
     envelope: IngestionSubmissionEnvelope,
   ): Promise<void> {
-    return this.runner.executePipeline(runId, workspaceId, envelope);
+    return this.pipeline.executePipeline(runId, workspaceId, envelope);
   }
 
   async getRunStatus(
@@ -225,7 +225,7 @@ export class IngestionService implements IngestionPort {
 
     const envelope = run.inputParams as unknown as IngestionSubmissionEnvelope;
     if (envelope && typeof envelope === 'object') {
-      this.queueService.enqueue(runId, canonicalWorkspaceId, {
+      this.queue.enqueue(runId, canonicalWorkspaceId, {
         ...envelope,
         workspaceId: canonicalWorkspaceId,
       });

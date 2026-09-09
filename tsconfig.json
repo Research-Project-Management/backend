@@ -18,7 +18,8 @@
     },
     "types": [
       "node",
-      "jest"
+      "jest",
+      "@fastify/multipart"
     ],
     "incremental": true,
     "tsBuildInfoFile": "./dist/tsconfig.tsbuildinfo",

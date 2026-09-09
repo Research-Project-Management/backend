@@ -65,8 +65,11 @@ export class ProjectRoleGuard implements CanActivate {
       if (cycle?.projectId) {
         subResourceProjectId = cycle.projectId;
       }
-    } else if (request.params?.taskId && this.prisma.task?.findUnique) {
-      const taskId = request.params.taskId;
+    } else if (
+      (request.params?.taskId || request.params?.id) &&
+      this.prisma.task?.findUnique
+    ) {
+      const taskId = request.params.taskId || request.params.id;
       const task = isUuid(taskId)
         ? await this.prisma.task
             .findUnique({
@@ -131,6 +134,32 @@ export class ProjectRoleGuard implements CanActivate {
             subResourceProjectId = pc.page.projectId;
           }
         }
+      }
+    } else if (request.params?.fileId && this.prisma.file?.findUnique) {
+      const fileId = request.params.fileId;
+      const file = isUuid(fileId)
+        ? await this.prisma.file
+              .findUnique({
+                where: { id: fileId },
+                select: { linkedToType: true, linkedToId: true },
+              })
+              .catch(() => null)
+          : null;
+        if (file?.linkedToType === 'project' && file.linkedToId) {
+          projectId = file.linkedToId;
+        }
+      }
+
+      // Direct /project/:id fallback
+      if (
+        !projectId &&
+        request.params?.id &&
+        !request.params?.workspaceId &&
+        !request.params?.pageId &&
+        !request.params?.taskId &&
+        !request.params?.fileId
+      ) {
+        projectId = request.params.id;
       }
     }
 

@@ -11,6 +11,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
+import '@fastify/multipart';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FileRepository } from './file.repository';
 import { R2Service } from '../r2/r2.service';
@@ -400,12 +401,13 @@ export class FileService implements OnModuleInit {
   }
 
   async uploadMultipart(req: FastifyRequest, authorId: string) {
-    const isMultipart = req.isMultipart();
+    const fastifyReq = req as any;
+    const isMultipart = Boolean(fastifyReq.isMultipart?.());
     if (!isMultipart) {
       throw new BadRequestException('Content-Type must be multipart/form-data');
     }
 
-    const parts = req.parts();
+    const parts = fastifyReq.parts();
     let buffer: Buffer | null = null;
     let filename = 'unnamed-file';
     let mimeType = 'application/octet-stream';

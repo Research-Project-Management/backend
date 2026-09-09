@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { FastifyRequest, FastifyReply } from 'fastify';
+import '@fastify/multipart';
 import { AiService } from './ai.service';
 import { AiQueryDto, GetDocumentsBulkDto } from './dto/ai.dto';
 import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
@@ -130,11 +131,12 @@ export class AiController {
     @CurrentUser('id') userId: string,
     @Req() req: FastifyRequest,
   ) {
-    if (!req.isMultipart()) {
+    const fastifyReq = req as any;
+    if (!fastifyReq.isMultipart?.() && !fastifyReq.isMultipart) {
       throw new BadRequestException('Content-Type must be multipart/form-data');
     }
 
-    const parts = req.parts();
+    const parts = fastifyReq.parts();
     let buffer: Buffer | null = null;
     let filename = 'document';
     let mimeType = 'application/octet-stream';

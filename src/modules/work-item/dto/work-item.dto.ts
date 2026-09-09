@@ -156,6 +156,26 @@ export class CreateWorkItemDto {
   @IsNumber()
   @IsOptional()
   timeSpent?: number;
+
+  @ApiPropertyOptional({ description: 'Work item issue type', example: 'task' })
+  @IsString()
+  @IsOptional()
+  issueType?: string;
+
+  @ApiPropertyOptional({ description: 'Story points estimate', example: 3 })
+  @IsNumber()
+  @IsOptional()
+  storyPoints?: number;
+
+  @ApiPropertyOptional({ description: 'Work item relations', example: [] })
+  @IsArray()
+  @IsOptional()
+  relations?: Prisma.InputJsonValue;
+
+  @ApiPropertyOptional({ description: 'Completed status override' })
+  @IsBoolean()
+  @IsOptional()
+  completed?: boolean;
 }
 
 export class UpdateWorkItemDto {
@@ -273,8 +293,24 @@ export class UpdateWorkItemDto {
   timeSpent?: number;
 
   @ApiPropertyOptional({ description: 'Completion status override' })
+  @IsBoolean()
   @IsOptional()
   completed?: boolean;
+
+  @ApiPropertyOptional({ description: 'Updated issue type' })
+  @IsString()
+  @IsOptional()
+  issueType?: string;
+
+  @ApiPropertyOptional({ description: 'Updated story points' })
+  @IsNumber()
+  @IsOptional()
+  storyPoints?: number;
+
+  @ApiPropertyOptional({ description: 'Updated relations' })
+  @IsArray()
+  @IsOptional()
+  relations?: Prisma.InputJsonValue;
 }
 
 export class AssignWorkItemDto {

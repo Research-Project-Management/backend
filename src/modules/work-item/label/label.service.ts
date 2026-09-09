@@ -9,11 +9,14 @@ import { CreateLabelDto, UpdateLabelDto } from './dto/label.dto';
 import { LabelType } from '@prisma/client';
 import { RedisCacheService } from '@/core/cache/redis-cache.service';
 import { WORK_ITEM_REDIS_KEYS } from '../constants/redis-keys.constant';
+import { PrismaService } from '@/core/database/prisma.service';
+import { resolveTenantWorkspaceId } from '@/core/utils/tenant.util';
 
 @Injectable()
 export class LabelService {
   constructor(
     private readonly labelRepo: LabelRepository,
+    private readonly prisma: PrismaService,
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
@@ -22,7 +25,8 @@ export class LabelService {
     await this.cache.del(WORK_ITEM_REDIS_KEYS.labels(workspaceId));
   }
 
-  async getLabels(workspaceId: string, type?: LabelType) {
+  async getLabels(workspaceIdOrSlug: string, type?: LabelType) {
+    const workspaceId = await resolveTenantWorkspaceId(this.prisma, workspaceIdOrSlug);
     const cacheKey = WORK_ITEM_REDIS_KEYS.labels(workspaceId);
 
     if (this.cache && !type) {
@@ -40,11 +44,12 @@ export class LabelService {
     return result;
   }
 
-  async createLabel(workspaceId: string, userId: string, dto: CreateLabelDto) {
+  async createLabel(workspaceIdOrSlug: string, userId: string, dto: CreateLabelDto) {
+    const workspaceId = await resolveTenantWorkspaceId(this.prisma, workspaceIdOrSlug);
     const label = await this.labelRepo.createLabel({
       name: dto.name,
       color: dto.color || '#3b82f6',
-      type: dto.type || LabelType.sticky,
+      type: dto.type || LabelType.task,
       workspace: { connect: { id: workspaceId } },
       createdBy: { connect: { id: userId } },
     });

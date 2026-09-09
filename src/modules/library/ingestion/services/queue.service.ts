@@ -1,7 +1,7 @@
 import { Injectable, Logger, Optional, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { IngestionSubmissionEnvelope } from '../types/ingestion-submission.types';
-import { IngestionPipelineRunner } from './ingestion-pipeline.runner';
+import { IngestionSubmissionEnvelope } from '../types/submission.types';
+import { PipelineService } from './pipeline.service';
 import { IngestionRepository } from '../ingestion.repository';
 import { IngestionStatus } from '@prisma/client';
 
@@ -18,8 +18,8 @@ export interface IngestionQueueStats {
 }
 
 @Injectable()
-export class IngestionQueueService implements OnModuleInit {
-  private readonly logger = new Logger(IngestionQueueService.name);
+export class QueueService implements OnModuleInit {
+  private readonly logger = new Logger(QueueService.name);
   private readonly queue: QueuedIngestionTask[] = [];
   private activeCount = 0;
   private readonly runningRunIds = new Set<string>();
@@ -27,7 +27,7 @@ export class IngestionQueueService implements OnModuleInit {
   private readonly maxConcurrency: number;
 
   constructor(
-    private readonly runner: IngestionPipelineRunner,
+    private readonly pipeline: PipelineService,
     private readonly ingestionRepo: IngestionRepository,
     @Optional() private readonly configService?: ConfigService,
   ) {
@@ -42,7 +42,7 @@ export class IngestionQueueService implements OnModuleInit {
         : 2;
 
     this.logger.log(
-      `IngestionQueueService initialized with maxConcurrency=${this.maxConcurrency}`,
+      `QueueService initialized with maxConcurrency=${this.maxConcurrency}`,
     );
   }
 
@@ -137,7 +137,7 @@ export class IngestionQueueService implements OnModuleInit {
   }
 
   /**
-   * Executes an individual ingestion run through IngestionPipelineRunner.
+   * Executes an individual ingestion run through PipelineService.
    */
   private async executeTask(task: QueuedIngestionTask): Promise<void> {
     const { runId, workspaceId, envelope } = task;
@@ -147,7 +147,7 @@ export class IngestionQueueService implements OnModuleInit {
       this.logger.log(
         `[QUEUE_START] Executing run ${runId} (active: ${this.activeCount}/${this.maxConcurrency}, remaining queued: ${this.queue.length})`,
       );
-      await this.runner.executePipeline(runId, workspaceId, envelope);
+      await this.pipeline.executePipeline(runId, workspaceId, envelope);
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       this.logger.log(
         `[QUEUE_DONE] Run ${runId} completed successfully in ${elapsed}s`,
@@ -173,3 +173,5 @@ export class IngestionQueueService implements OnModuleInit {
     }
   }
 }
+
+export { QueueService as IngestionQueueService };

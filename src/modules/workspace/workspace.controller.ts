@@ -191,7 +191,13 @@ export class WorkspaceController {
     return this.workspaceService.listPendingInvitations(workspaceId);
   }
 
-  @Post('invitations/:token/accept')
+  @Get(['invitations/token/:token', 'invitations/:token'])
+  @ApiOperation({ summary: 'Get invitation details by token' })
+  async getInvitationByToken(@Param('token') token: string) {
+    return this.workspaceService.getInvitationByToken(token);
+  }
+
+  @Post(['invitations/token/:token/accept', 'invitations/:token/accept'])
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Accept a workspace invitation by token' })
   async acceptInvitation(
@@ -199,6 +205,13 @@ export class WorkspaceController {
     @CurrentUser('id') userId: string,
   ) {
     return this.workspaceService.acceptInvitation(userId, token);
+  }
+
+  @Post(['invitations/token/:token/decline', 'invitations/:token/decline'])
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Decline a workspace invitation by token' })
+  async declineInvitation(@Param('token') token: string) {
+    return this.workspaceService.declineInvitation(token);
   }
 
   @Delete(':workspaceId/invitations/:invitationId')

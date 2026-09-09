@@ -8,6 +8,13 @@ export interface TaskColumn {
   accentColor?: string;
 }
 
+export const DEFAULT_TASK_COLUMNS: TaskColumn[] = [
+  { id: 'backlog', title: 'Backlog', isDefault: true, accentColor: '#6B7280' },
+  { id: 'todo', title: 'To Do', isDefault: true, accentColor: '#3B82F6' },
+  { id: 'in-progress', title: 'In Progress', isDefault: true, accentColor: '#F59E0B' },
+  { id: 'done', title: 'Done', isDefault: true, accentColor: '#10B981' },
+];
+
 /**
  * Checklist item in a Task
  */

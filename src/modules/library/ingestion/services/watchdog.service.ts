@@ -8,8 +8,8 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { IngestionStatus } from '@prisma/client';
 import { IngestionRepository } from '../ingestion.repository';
-import { IngestionQueueService } from './ingestion-queue.service';
-import { IngestionSubmissionEnvelope } from '../types/ingestion-submission.types';
+import { QueueService } from './queue.service';
+import { IngestionSubmissionEnvelope } from '../types/submission.types';
 
 export interface WatchdogReconciliationResult {
   reconciled: number;
@@ -18,16 +18,16 @@ export interface WatchdogReconciliationResult {
 }
 
 @Injectable()
-export class IngestionWatchdogService
+export class WatchdogService
   implements OnApplicationBootstrap, OnApplicationShutdown
 {
-  private readonly logger = new Logger(IngestionWatchdogService.name);
+  private readonly logger = new Logger(WatchdogService.name);
   private timer: NodeJS.Timeout | null = null;
   public static readonly DEFAULT_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
 
   constructor(
     private readonly ingestionRepo: IngestionRepository,
-    @Optional() private readonly queueService?: IngestionQueueService,
+    @Optional() private readonly queue?: QueueService,
     @Optional() private readonly configService?: ConfigService,
   ) {}
 
@@ -86,7 +86,7 @@ export class IngestionWatchdogService
    */
   async reconcileOrphanedRuns(
     workspaceId?: string,
-    timeoutMs: number = IngestionWatchdogService.DEFAULT_TIMEOUT_MS,
+    timeoutMs: number = WatchdogService.DEFAULT_TIMEOUT_MS,
   ): Promise<WatchdogReconciliationResult> {
     const olderThan = new Date(Date.now() - timeoutMs);
     const orphanedRuns = await this.ingestionRepo.findOrphanedRuns(olderThan, {
@@ -121,12 +121,12 @@ export class IngestionWatchdogService
           `Reconciled stalled run ${run.id} as FAILED_RETRYABLE (attempt ${nextAttempt}/${run.maxRetries})`,
         );
 
-        // Active recovery: automatically dispatch back to IngestionQueueService
-        if (this.queueService && run.inputParams) {
+        // Active recovery: automatically dispatch back to QueueService
+        if (this.queue && run.inputParams) {
           const envelope =
             run.inputParams as unknown as IngestionSubmissionEnvelope;
           if (envelope && typeof envelope === 'object') {
-            this.queueService.enqueue(run.id, run.workspaceId, {
+            this.queue.enqueue(run.id, run.workspaceId, {
               ...envelope,
               workspaceId: run.workspaceId,
             });

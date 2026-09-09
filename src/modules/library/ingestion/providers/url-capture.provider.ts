@@ -113,6 +113,22 @@ export class UrlCaptureProvider {
       process.env.URL_CAPTURE_SECRET ||
       'flux_default_url_capture_secret_key_32_bytes_long_fallback';
 
+    if (!configuredSecret || configuredSecret.length < 32) {
+      if (
+        process.env.NODE_ENV === 'production' ||
+        (configuredSecret && configuredSecret.length < 32)
+      ) {
+        throw new Error(
+          'CRITICAL: URL_CAPTURE_SECRET is missing or less than 32 characters in configuration',
+        );
+      }
+      this.logger.warn(
+        'URL_CAPTURE_SECRET is missing in non-production. Utilizing default secure 32-byte baseline.',
+      );
+      this.hmacSecret =
+        'flux_default_url_capture_secret_2026_dev_secure_32bytes';
+      return;
+    }
     this.hmacSecret = configuredSecret;
   }
 
