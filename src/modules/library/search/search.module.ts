@@ -4,7 +4,7 @@ import { SearchService } from './search.service';
 import { SearchRepository } from './search.repository';
 import { FullTextProvider } from './providers/full-text.provider';
 import { RagProvider } from './providers/rag.provider';
-import { SearchEventHandler } from './handlers/search-event.handler';
+import { EventHandler } from './handlers/event.handler';
 import { CoreModule } from '../../../core/core.module';
 
 @Module({
@@ -15,7 +15,7 @@ import { CoreModule } from '../../../core/core.module';
     SearchService,
     FullTextProvider,
     RagProvider,
-    SearchEventHandler,
+    EventHandler,
   ],
   exports: [SearchService, RagProvider],
 })

@@ -290,8 +290,8 @@ export class IdentifyStage {
             // rather than reducing the entire import to a filename.
             try {
               extractedMetadata =
-                fileBuffer && this.pdfExtractor.extractMetadataFromBuffer
-                  ? this.pdfExtractor.extractMetadataFromBuffer(fileBuffer)
+                fileBuffer && this.pdf?.extractMetadataFromBuffer
+                  ? this.pdf.extractMetadataFromBuffer(fileBuffer)
                   : {};
             } catch {
               extractedMetadata = {};

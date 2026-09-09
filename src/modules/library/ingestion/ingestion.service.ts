@@ -274,7 +274,7 @@ export class IngestionService implements IngestionPort {
     }
 
     try {
-      await this.runner.executePipeline(runId, workspaceId, envelope);
+      await this.pipeline.executePipeline(runId, workspaceId, envelope);
     } catch (err: any) {
       this.logger.error(
         `Ingestion pipeline failed for run ${runId}: ${err?.message || err}`,

@@ -158,10 +158,10 @@ export class WatchdogService
 
   /**
    * Scans for orphaned or stalled runs left behind after an abrupt pod/process restart,
-   * and automatically enqueues them back into IngestionQueueService.
+   * and automatically enqueues them back into QueueService.
    */
   async recoverPendingRunsOnStartup(): Promise<number> {
-    if (!this.queueService) return 0;
+    if (!this.queue) return 0;
 
     try {
       // Look back up to 24 hours for abandoned runs
@@ -180,7 +180,7 @@ export class WatchdogService
           run.inputParams as unknown as IngestionSubmissionEnvelope;
         if (!envelope || typeof envelope !== 'object') continue;
 
-        const enqueued = this.queueService.enqueue(run.id, run.workspaceId, {
+        const enqueued = this.queue.enqueue(run.id, run.workspaceId, {
           ...envelope,
           workspaceId: run.workspaceId,
         });
@@ -204,3 +204,5 @@ export class WatchdogService
     }
   }
 }
+
+export { WatchdogService as IngestionWatchdogService };

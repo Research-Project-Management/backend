@@ -161,7 +161,6 @@ export class ProjectRoleGuard implements CanActivate {
       ) {
         projectId = request.params.id;
       }
-    }
 
     if (hasSubResourceParam) {
       if (!subResourceProjectId) {

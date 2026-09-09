@@ -24,10 +24,10 @@ import { MatchStage } from './stages/match.stage';
 import { CommitStage } from './stages/commit.stage';
 import { UrlCaptureProvider } from './providers/url-capture.provider';
 import { INGESTION_PORT } from './types/ingestion.types';
-import { IngestionWatchdogService } from './services/ingestion-watchdog.service';
+import { WatchdogService, IngestionWatchdogService } from './services/watchdog.service';
 import { UrlCaptureService } from './services/url-capture.service';
-import { IngestionPipelineRunner } from './services/ingestion-pipeline.runner';
-import { IngestionQueueService } from './services/ingestion-queue.service';
+import { PipelineService, IngestionPipelineRunner } from './services/pipeline.service';
+import { QueueService, IngestionQueueService } from './services/queue.service';
 import { ZoteroTranslatorClient } from '../../../infra/zotero/zotero-translator.client';
 
 import { SsrfGuardService } from '../common/services/ssrf-guard.service';
@@ -72,10 +72,10 @@ import { NotesModule } from '../notes/notes.module';
     SsrfGuardService,
     ZoteroTranslatorClient, // OSS: Zotero Translation Server client (700+ publisher translators)
     UrlCaptureService,
-    IngestionPipelineRunner,
-    IngestionQueueService,
+    PipelineService,
+    QueueService,
     IngestionService,
-    IngestionWatchdogService,
+    WatchdogService,
     {
       provide: INGESTION_PORT,
       useExisting: IngestionService,
@@ -85,9 +85,12 @@ import { NotesModule } from '../notes/notes.module';
   exports: [
     INGESTION_PORT,
     IngestionService,
+    PipelineService,
+    QueueService,
+    UrlCaptureService,
+    WatchdogService,
     IngestionPipelineRunner,
     IngestionQueueService,
-    UrlCaptureService,
     IngestionWatchdogService,
     SsrfGuardService,
     DoiParser,

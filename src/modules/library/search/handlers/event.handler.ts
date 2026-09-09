@@ -7,8 +7,8 @@ import { PrismaService } from '../../../../core/database/prisma.service';
 import { DomainEventEnvelope } from '../../outbox/ports/event-publisher.port';
 
 @Injectable()
-export class SearchEventHandler {
-  private readonly logger = new Logger(SearchEventHandler.name);
+export class EventHandler {
+  private readonly logger = new Logger(EventHandler.name);
 
   constructor(
     private readonly fullText: FullTextProvider,
@@ -59,7 +59,9 @@ export class SearchEventHandler {
   @OnEvent(LIBRARY_EVENT_TYPES.ITEM_CREATED, { async: true })
   handleItemCreated(event: DomainEventEnvelope) {
     this.logger.debug(
-      `[SearchEventHandler] New item indexed in catalog: ${event.aggregateId} (workspace: ${event.workspaceId})`,
+      `[EventHandler] New item indexed in catalog: ${event.aggregateId} (workspace: ${event.workspaceId})`,
     );
   }
 }
+
+export { EventHandler as SearchEventHandler };
