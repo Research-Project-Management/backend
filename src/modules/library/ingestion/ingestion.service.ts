@@ -32,11 +32,11 @@ export class IngestionService implements IngestionPort {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly ingestionRepo: IngestionRepository,
+    private readonly repo: IngestionRepository,
     private readonly pipeline: PipelineService,
     private readonly queue: QueueService,
     private readonly urlCapture: UrlCaptureService,
-    private readonly itemsService: ItemsService,
+    private readonly items: ItemsService,
   ) {}
 
   /**
@@ -54,7 +54,7 @@ export class IngestionService implements IngestionPort {
 
     // 1. Idempotency Check & Atomic Claim
     if (idempotencyKey) {
-      const existingRun = await this.ingestionRepo.findRunByIdempotencyKey(
+      const existingRun = await this.repo.findRunByIdempotencyKey(
         workspaceId,
         idempotencyKey,
       );
@@ -81,7 +81,7 @@ export class IngestionService implements IngestionPort {
     }
 
     // 2. Create IngestionRun Record
-    const run = await this.ingestionRepo.createRun(workspaceId, {
+    const run = await this.repo.createRun(workspaceId, {
       requesterId: envelope.userId,
       inputParams: envelope as unknown as Prisma.InputJsonValue,
       inputHash: requestHash,
@@ -126,7 +126,7 @@ export class IngestionService implements IngestionPort {
     runId: string,
   ): Promise<IngestionRunSnapshot> {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const run = await this.ingestionRepo.findRunById(
+    const run = await this.repo.findRunById(
       canonicalWorkspaceId,
       runId,
     );
@@ -160,7 +160,7 @@ export class IngestionService implements IngestionPort {
     completedAt?: string;
   }> {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const run = await this.ingestionRepo.findRunById(
+    const run = await this.repo.findRunById(
       canonicalWorkspaceId,
       runId,
     );
@@ -209,7 +209,7 @@ export class IngestionService implements IngestionPort {
 
   async retryRun(workspaceId: string, runId: string): Promise<any> {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const run = await this.ingestionRepo.findRunById(
+    const run = await this.repo.findRunById(
       canonicalWorkspaceId,
       runId,
     );
@@ -217,7 +217,7 @@ export class IngestionService implements IngestionPort {
       throw new NotFoundException(`Ingestion run '${runId}' not found`);
     }
 
-    await this.ingestionRepo.updateRunStatus(
+    await this.repo.updateRunStatus(
       canonicalWorkspaceId,
       runId,
       IngestionStatus.RECEIVED,
@@ -257,8 +257,8 @@ export class IngestionService implements IngestionPort {
     const runId = submissionRes.runId;
 
     if (submissionRes.deduplicated && submissionRes.existingItemId) {
-      const item = this.itemsService
-        ? await this.itemsService
+      const item = this.items
+        ? await this.items
             .getItem(workspaceId, submissionRes.existingItemId)
             .catch(() => undefined)
         : undefined;
@@ -279,7 +279,7 @@ export class IngestionService implements IngestionPort {
       this.logger.error(
         `Ingestion pipeline failed for run ${runId}: ${err?.message || err}`,
       );
-      await this.ingestionRepo
+      await this.repo
         .updateRunStatus(workspaceId, runId, IngestionStatus.FAILED_FINAL, {
           lastError: err?.message || 'Unknown failure',
         })
@@ -294,11 +294,11 @@ export class IngestionService implements IngestionPort {
       };
     }
 
-    const updatedRun = await this.ingestionRepo.findRunById(workspaceId, runId);
+    const updatedRun = await this.repo.findRunById(workspaceId, runId);
     const itemId = updatedRun?.itemId ?? undefined;
     const item =
-      itemId && this.itemsService
-        ? await this.itemsService
+      itemId && this.items
+        ? await this.items
             .getItem(workspaceId, itemId)
             .catch(() => undefined)
         : undefined;

@@ -28,7 +28,7 @@ export class QueueService implements OnModuleInit {
 
   constructor(
     private readonly pipeline: PipelineService,
-    private readonly ingestionRepo: IngestionRepository,
+    private readonly repo: IngestionRepository,
     @Optional() private readonly configService?: ConfigService,
   ) {
     const configuredConcurrency = Number(
@@ -49,7 +49,7 @@ export class QueueService implements OnModuleInit {
   async onModuleInit(): Promise<void> {
     try {
       const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
-      const orphanedRuns = await this.ingestionRepo.findOrphanedRuns(
+      const orphanedRuns = await this.repo.findOrphanedRuns(
         tenMinutesAgo,
         { limit: 20 },
       );
@@ -58,7 +58,7 @@ export class QueueService implements OnModuleInit {
           `Found ${orphanedRuns.length} orphaned ingestion run(s) on startup. Marking as FAILED_RETRYABLE.`,
         );
         for (const run of orphanedRuns) {
-          await this.ingestionRepo.updateRunStatus(
+          await this.repo.updateRunStatus(
             run.workspaceId,
             run.id,
             IngestionStatus.FAILED_RETRYABLE,
@@ -157,7 +157,7 @@ export class QueueService implements OnModuleInit {
       this.logger.error(
         `[QUEUE_ERROR] Run ${runId} failed after ${elapsed}s: ${err?.message || err}`,
       );
-      await this.ingestionRepo
+      await this.repo
         .updateRunStatus(workspaceId, runId, IngestionStatus.FAILED_FINAL, {
           lastError: err?.message || 'Ingestion pipeline execution failed',
         })

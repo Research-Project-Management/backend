@@ -9,7 +9,7 @@ import { LIBRARY_REDIS_KEYS } from '../common/constants/redis-keys.constant';
 @Injectable()
 export class TagsService {
   constructor(
-    private readonly tagsRepo: TagsRepository,
+    private readonly repo: TagsRepository,
     private readonly libraryTx: TransactionService,
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
@@ -24,11 +24,11 @@ export class TagsService {
     if (this.cache) {
       return this.cache.wrap(
         LIBRARY_REDIS_KEYS.tags(workspaceId),
-        () => this.tagsRepo.findMany(workspaceId),
+        () => this.repo.findMany(workspaceId),
         300,
       );
     }
-    return this.tagsRepo.findMany(workspaceId);
+    return this.repo.findMany(workspaceId);
   }
 
   async createOrGetTag(
@@ -39,7 +39,7 @@ export class TagsService {
   ) {
     const result = await this.libraryTx.executeInTransaction(
       async (tx, helpers) => {
-        const tag = await this.tagsRepo.create(
+        const tag = await this.repo.create(
           workspaceId,
           name.trim(),
           color,
@@ -73,7 +73,7 @@ export class TagsService {
   async deleteTag(workspaceId: string, tagId: string) {
     const result = await this.libraryTx.executeInTransaction(
       async (tx, helpers) => {
-        const deleted = await this.tagsRepo.delete(workspaceId, tagId, tx);
+        const deleted = await this.repo.delete(workspaceId, tagId, tx);
         if (deleted) {
           await helpers.recordTombstone(workspaceId, {
             entityType: 'Tag',
@@ -120,7 +120,7 @@ export class TagsService {
         );
       }
 
-      await this.tagsRepo.assignToItem(tagId, catalogItemId, tx);
+      await this.repo.assignToItem(tagId, catalogItemId, tx);
 
       await helpers.appendChange(workspaceId, {
         entityType: 'CatalogItemTag',
@@ -161,7 +161,7 @@ export class TagsService {
         );
       }
 
-      await this.tagsRepo.removeFromItem(tagId, catalogItemId, tx);
+      await this.repo.removeFromItem(tagId, catalogItemId, tx);
 
       await helpers.recordTombstone(workspaceId, {
         entityType: 'CatalogItemTag',

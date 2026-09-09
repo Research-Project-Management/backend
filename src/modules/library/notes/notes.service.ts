@@ -43,7 +43,7 @@ export class NotesService implements IItemNotesExtractorPort {
   private readonly logger = new Logger(NotesService.name);
 
   constructor(
-    private readonly notesRepo: NotesRepository,
+    private readonly repo: NotesRepository,
     private readonly libraryTx: TransactionService,
     private readonly prisma: PrismaService,
     @Inject(ITEM_READ_PORT) private readonly itemReadPort: IItemReadPort,
@@ -58,12 +58,12 @@ export class NotesService implements IItemNotesExtractorPort {
 
   async listNotes(workspaceId: string, itemId?: string) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.notesRepo.findMany(canonicalWorkspaceId, itemId);
+    return this.repo.findMany(canonicalWorkspaceId, itemId);
   }
 
   async getNote(workspaceId: string, id: string) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.notesRepo.findById(canonicalWorkspaceId, id);
+    return this.repo.findById(canonicalWorkspaceId, id);
   }
 
   async createNote(workspaceId: string, data: CreateNoteData) {
@@ -85,7 +85,7 @@ export class NotesService implements IItemNotesExtractorPort {
       }
     }
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const note = await this.notesRepo.create(canonicalWorkspaceId, data, tx);
+      const note = await this.repo.create(canonicalWorkspaceId, data, tx);
 
       await helpers.appendChange(canonicalWorkspaceId, {
         entityType: 'Note',
@@ -114,7 +114,7 @@ export class NotesService implements IItemNotesExtractorPort {
   ) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const updated = await this.notesRepo.update(
+      const updated = await this.repo.update(
         canonicalWorkspaceId,
         id,
         expectedVersion,
@@ -148,7 +148,7 @@ export class NotesService implements IItemNotesExtractorPort {
   ): Promise<boolean> {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const deleted = await this.notesRepo.softDelete(
+      const deleted = await this.repo.softDelete(
         canonicalWorkspaceId,
         id,
         expectedVersion,

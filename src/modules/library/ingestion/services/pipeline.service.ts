@@ -24,16 +24,16 @@ export class PipelineService {
   private readonly logger = new Logger(PipelineService.name);
 
   constructor(
-    private readonly ingestionRepo: IngestionRepository,
-    private readonly identifyStage: IdentifyStage,
-    private readonly normalizeStage: NormalizeStage,
-    private readonly enrichStage: EnrichStage,
-    private readonly reconcileStage: ReconcileStage,
-    private readonly matchStage: MatchStage,
-    private readonly commitStage: CommitStage,
-    private readonly itemsService: ItemsService,
-    private readonly notesService: NotesService,
-    private readonly attachmentsService: AttachmentsService,
+    private readonly repo: IngestionRepository,
+    private readonly identify: IdentifyStage,
+    private readonly normalize: NormalizeStage,
+    private readonly enrich: EnrichStage,
+    private readonly reconcile: ReconcileStage,
+    private readonly match: MatchStage,
+    private readonly commit: CommitStage,
+    private readonly items: ItemsService,
+    private readonly notes: NotesService,
+    private readonly attachments: AttachmentsService,
   ) {}
 
   /**
@@ -46,7 +46,7 @@ export class PipelineService {
   ): Promise<void> {
     // Stage 1: IDENTIFY & PARSE
     const identifyStart = Date.now();
-    const identifiedCandidates = await this.identifyStage.execute(
+    const identifiedCandidates = await this.identify.execute(
       runId,
       envelope.payload,
       workspaceId,
@@ -58,7 +58,7 @@ export class PipelineService {
         ...(envelope.overrides || {}),
       },
     }));
-    await this.ingestionRepo.createStage(runId, {
+    await this.repo.createStage(runId, {
       stageName: 'IDENTIFY',
       durationMs: Date.now() - identifyStart,
       success: true,
@@ -68,7 +68,7 @@ export class PipelineService {
     });
 
     for (const cand of initialCandidates) {
-      await this.ingestionRepo.createCandidate(runId, {
+      await this.repo.createCandidate(runId, {
         sourceProvider: cand.sourceName,
         sourceRecordId: cand.sourceRecordId,
         confidenceScore: cand.confidenceScore,
@@ -85,8 +85,8 @@ export class PipelineService {
     // Stage 2: NORMALIZE
     const normalizeStart = Date.now();
     const normalizedCandidates =
-      await this.normalizeStage.execute(initialCandidates);
-    await this.ingestionRepo.createStage(runId, {
+      await this.normalize.execute(initialCandidates);
+    await this.repo.createStage(runId, {
       stageName: 'NORMALIZE',
       durationMs: Date.now() - normalizeStart,
       success: true,
@@ -97,11 +97,11 @@ export class PipelineService {
 
     // Stage 3: ENRICH (Crossref, OpenAlex, PubMed, arXiv)
     const enrichStart = Date.now();
-    const enrichedCandidates = await this.enrichStage.execute(
+    const enrichedCandidates = await this.enrich.execute(
       workspaceId,
       normalizedCandidates,
     );
-    await this.ingestionRepo.createStage(runId, {
+    await this.repo.createStage(runId, {
       stageName: 'ENRICH',
       durationMs: Date.now() - enrichStart,
       success: true,
@@ -132,8 +132,8 @@ export class PipelineService {
           'Untitled Record';
 
         try {
-          const itemDecision = await this.reconcileStage.execute([candidate]);
-          const matchRes = await this.matchStage.execute(
+          const itemDecision = await this.reconcile.execute([candidate]);
+          const matchRes = await this.match.execute(
             workspaceId,
             itemDecision.proposedItem,
           );
@@ -147,7 +147,7 @@ export class PipelineService {
               itemId: matchRes.targetItemId,
             });
           } else {
-            const created = await this.commitStage.execute(
+            const created = await this.commit.execute(
               workspaceId,
               itemDecision.proposedItem,
               {
@@ -184,7 +184,7 @@ export class PipelineService {
         } finally {
           processed++;
           try {
-            await this.ingestionRepo.updateRunProgress(workspaceId, runId, {
+            await this.repo.updateRunProgress(workspaceId, runId, {
               total,
               processed,
               succeeded,
@@ -201,7 +201,7 @@ export class PipelineService {
         }
       }
 
-      await this.ingestionRepo.createStage(runId, {
+      await this.repo.createStage(runId, {
         stageName: 'COMMIT',
         durationMs: Date.now() - identifyStart,
         success: true,
@@ -214,7 +214,7 @@ export class PipelineService {
         },
       });
 
-      await this.ingestionRepo.updateRunStatus(
+      await this.repo.updateRunStatus(
         workspaceId,
         runId,
         IngestionStatus.READY,
@@ -238,8 +238,8 @@ export class PipelineService {
 
     // Stage 4: RECONCILE (Field Provenance & Conflict Detection)
     const reconcileStart = Date.now();
-    const decision = await this.reconcileStage.execute(enrichedCandidates);
-    await this.ingestionRepo.createStage(runId, {
+    const decision = await this.reconcile.execute(enrichedCandidates);
+    await this.repo.createStage(runId, {
       stageName: 'RECONCILE',
       durationMs: Date.now() - reconcileStart,
       success: true,
@@ -251,11 +251,11 @@ export class PipelineService {
 
     // Stage 5: MATCH (Duplicate Detection)
     const matchStart = Date.now();
-    const matchResult = await this.matchStage.execute(
+    const matchResult = await this.match.execute(
       workspaceId,
       decision.proposedItem,
     );
-    await this.ingestionRepo.createStage(runId, {
+    await this.repo.createStage(runId, {
       stageName: 'MATCH',
       durationMs: Date.now() - matchStart,
       success: true,
@@ -272,9 +272,9 @@ export class PipelineService {
       let enrichedItem: any = null;
       const enrichPatch: Record<string, any> = {};
 
-      if (this.itemsService) {
+      if (this.items) {
         // Fetch current state to build a null-safe patch
-        const existing = await this.itemsService.getItem(
+        const existing = await this.items.getItem(
           workspaceId,
           matchResult.targetItemId,
         );
@@ -344,7 +344,7 @@ export class PipelineService {
         }
 
         if (Object.keys(enrichPatch).length > 0) {
-          enrichedItem = await this.itemsService.updateItem(
+          enrichedItem = await this.items.updateItem(
             workspaceId,
             matchResult.targetItemId,
             undefined,
@@ -364,12 +364,12 @@ export class PipelineService {
         if (
           envelope.payload.kind === 'FILE' &&
           envelope.payload.fileId &&
-          this.attachmentsService
+          this.attachments
         ) {
           const uploadedFileIdentifier = envelope.payload.fileId;
           const uploadedFilename = envelope.payload.filename || 'document.pdf';
           try {
-            await this.attachmentsService.createAttachment({
+            await this.attachments.createAttachment({
               workspaceId,
               catalogItemId: matchResult.targetItemId,
               fileId: uploadedFileIdentifier,
@@ -393,7 +393,7 @@ export class PipelineService {
         }
 
         // Add literature notes from proposed item if not already recorded
-        if (Array.isArray(p.notes) && p.notes.length > 0 && this.notesService) {
+        if (Array.isArray(p.notes) && p.notes.length > 0 && this.notes) {
           for (const noteItem of p.notes) {
             const rawContent =
               typeof noteItem === 'object' && noteItem !== null
@@ -413,7 +413,7 @@ export class PipelineService {
                   ? String((noteItem as Record<string, unknown>).source)
                   : undefined
                 : undefined;
-            await this.notesService.createLiteratureNote(
+            await this.notes.createLiteratureNote(
               workspaceId,
               matchResult.targetItemId,
               envelope.userId || 'system',
@@ -427,7 +427,7 @@ export class PipelineService {
         }
       }
 
-      await this.ingestionRepo.createDecision(runId, {
+      await this.repo.createDecision(runId, {
         decisionType: 'UPDATE',
         decisionReason:
           'Exact DOI match — additive enrichment applied to existing item',
@@ -435,7 +435,7 @@ export class PipelineService {
         duplicateMatch: matchResult as unknown as Prisma.InputJsonValue,
       });
 
-      await this.ingestionRepo.createStage(runId, {
+      await this.repo.createStage(runId, {
         stageName: 'ENRICH_EXISTING',
         durationMs: Date.now() - enrichExistingStart,
         success: true,
@@ -446,7 +446,7 @@ export class PipelineService {
         },
       });
 
-      await this.ingestionRepo.updateRunStatus(
+      await this.repo.updateRunStatus(
         workspaceId,
         runId,
         IngestionStatus.READY,
@@ -477,14 +477,14 @@ export class PipelineService {
 
     // PROBABLE fuzzy match → Queue for human review (unchanged)
     if (matchResult.matchType === 'PROBABLE' && matchResult.targetItemId) {
-      await this.ingestionRepo.createDecision(runId, {
+      await this.repo.createDecision(runId, {
         decisionType: 'REVIEW',
         decisionReason: 'Probable duplicate matched via fuzzy title similarity',
         proposedItem: decision.proposedItem as unknown as Prisma.InputJsonValue,
         duplicateMatch: matchResult as unknown as Prisma.InputJsonValue,
       });
 
-      await this.ingestionRepo.createReviewCase(workspaceId, runId, {
+      await this.repo.createReviewCase(workspaceId, runId, {
         targetItemId: matchResult.targetItemId,
         reason: `Probable match with existing item "${matchResult.targetItemTitle}"`,
         evidence: {
@@ -497,7 +497,7 @@ export class PipelineService {
         } as unknown as Prisma.InputJsonValue,
       });
 
-      await this.ingestionRepo.updateRunStatus(
+      await this.repo.updateRunStatus(
         workspaceId,
         runId,
         IngestionStatus.NEEDS_REVIEW,
@@ -508,7 +508,7 @@ export class PipelineService {
 
     // Stage 6: COMMIT (create new CatalogItem via CommitStage)
     const commitStart = Date.now();
-    const createdItem = await this.commitStage.execute(
+    const createdItem = await this.commit.execute(
       workspaceId,
       decision.proposedItem,
       {
@@ -527,14 +527,14 @@ export class PipelineService {
       },
     );
 
-    await this.ingestionRepo.createStage(runId, {
+    await this.repo.createStage(runId, {
       stageName: 'COMMIT',
       durationMs: Date.now() - commitStart,
       success: true,
       outputSnapshot: { itemId: createdItem?.id },
     });
 
-    await this.ingestionRepo.updateRunStatus(
+    await this.repo.updateRunStatus(
       workspaceId,
       runId,
       IngestionStatus.READY,

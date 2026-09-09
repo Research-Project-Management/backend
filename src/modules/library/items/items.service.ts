@@ -67,15 +67,15 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
   private readonly logger = new Logger(ItemsService.name);
 
   constructor(
-    private readonly queryRepo: QueryRepository,
-    private readonly commandRepo: CommandRepository,
+    private readonly query: QueryRepository,
+    private readonly command: CommandRepository,
     private readonly libraryTx: TransactionService,
     private readonly prisma: PrismaService,
     private readonly tagsService: TagsService,
     private readonly collectionsService: CollectionsService,
     private readonly typesService: TypesService,
     private readonly rag: RagProvider,
-    private readonly itemTransformer: ItemTransformer,
+    private readonly transformer: ItemTransformer,
   ) {}
 
   private resolveWorkspaceId(workspaceId: string): Promise<string> {
@@ -91,14 +91,14 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
 
   async getItem(workspaceId: string, id: string, userId?: string) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const item = await this.queryRepo.findById(canonicalWorkspaceId, id);
+    const item = await this.query.findById(canonicalWorkspaceId, id);
     if (!item) return null;
     return this.mapFlattenedState(item, userId);
   }
 
   async getFulltext(workspaceId: string, id: string) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.queryRepo.getFulltext(canonicalWorkspaceId, id);
+    return this.query.getFulltext(canonicalWorkspaceId, id);
   }
 
   async listItems(
@@ -116,8 +116,8 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     const limit = Math.min(options.limit ?? 50, 100);
     const [totalCount, rawItems] = await Promise.all([
-      this.queryRepo.count(canonicalWorkspaceId, options),
-      this.queryRepo.findMany(canonicalWorkspaceId, {
+      this.query.count(canonicalWorkspaceId, options),
+      this.query.findMany(canonicalWorkspaceId, {
         ...options,
         limit,
       }),
@@ -159,7 +159,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       tx: Prisma.TransactionClient,
       helpers: TransactionHelpers,
     ) => {
-      const item = await this.commandRepo.create(
+      const item = await this.command.create(
         canonicalWorkspaceId,
         data,
         tx,
@@ -207,7 +207,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
   ): Promise<any> {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     if (context) {
-      const updated = await this.commandRepo.update(
+      const updated = await this.command.update(
         canonicalWorkspaceId,
         id,
         expectedVersion,
@@ -242,13 +242,13 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
   }
 
   private async executePaperRagIndexing(item: any): Promise<void> {
-    await this.commandRepo.updateRagStatus(item.id, {
+    await this.command.updateRagStatus(item.id, {
       ragStatus: RagStatus.pending,
       ragLastAttemptAt: new Date(),
     });
     try {
       const result = await this.rag.indexPaper(item);
-      await this.commandRepo.updateRagStatus(item.id, {
+      await this.command.updateRagStatus(item.id, {
         ragDocId: result.docId,
         ragStatus: 'indexed',
         ragIndexedAt: new Date(),
@@ -259,7 +259,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       );
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Indexing failed';
-      await this.commandRepo.updateRagStatus(item.id, {
+      await this.command.updateRagStatus(item.id, {
         ragStatus: 'failed',
         ragError: message,
       });
@@ -269,7 +269,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
 
   async reindexItem(workspaceId: string, id: string, userId: string) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const item = await this.queryRepo.findById(canonicalWorkspaceId, id);
+    const item = await this.query.findById(canonicalWorkspaceId, id);
     if (!item) {
       throw new NotFoundException(
         `Item ${id} not found in workspace ${canonicalWorkspaceId}`,
@@ -308,7 +308,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
   ): Promise<boolean> {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     if (context) {
-      const deleted = await this.commandRepo.softDelete(
+      const deleted = await this.command.softDelete(
         canonicalWorkspaceId,
         id,
         expectedVersion,
@@ -346,7 +346,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
   async restoreItem(workspaceId: string, id: string, expectedVersion?: number) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const restored = await this.commandRepo.restore(
+      const restored = await this.command.restore(
         canonicalWorkspaceId,
         id,
         expectedVersion,
@@ -380,7 +380,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
   async purgeItem(workspaceId: string, id: string): Promise<boolean> {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const purged = await this.commandRepo.purge(canonicalWorkspaceId, id, tx);
+      const purged = await this.command.purge(canonicalWorkspaceId, id, tx);
 
       await helpers.recordTombstone(canonicalWorkspaceId, {
         entityType: 'CatalogItem',
@@ -403,12 +403,12 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
 
   async getRelatedItems(workspaceId: string, itemId: string) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const item = await this.queryRepo.findById(canonicalWorkspaceId, itemId);
+    const item = await this.query.findById(canonicalWorkspaceId, itemId);
     if (!item) {
       throw new NotFoundException(`Item ${itemId} not found`);
     }
 
-    const relations = await this.queryRepo.getRelations(itemId);
+    const relations = await this.query.getRelations(itemId);
     return {
       relatedItems: relations,
       total: relations.length,
@@ -421,7 +421,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     data: { targetItemId: string; relationType?: string; note?: string },
   ) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const sourceItem = await this.queryRepo.findById(
+    const sourceItem = await this.query.findById(
       canonicalWorkspaceId,
       sourceItemId,
     );
@@ -429,7 +429,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       throw new NotFoundException(`Source item ${sourceItemId} not found`);
     }
 
-    const targetItem = await this.queryRepo.findById(
+    const targetItem = await this.query.findById(
       canonicalWorkspaceId,
       data.targetItemId,
     );
@@ -448,7 +448,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       linkedAt: now,
     };
 
-    await this.commandRepo.putRelation(sourceItemId, relation);
+    await this.command.putRelation(sourceItemId, relation);
 
     return {
       success: true,
@@ -463,7 +463,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     targetItemId: string,
   ) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const sourceItem = await this.queryRepo.findById(
+    const sourceItem = await this.query.findById(
       canonicalWorkspaceId,
       sourceItemId,
     );
@@ -471,7 +471,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       throw new NotFoundException(`Source item ${sourceItemId} not found`);
     }
 
-    await this.commandRepo.removeRelation(sourceItemId, targetItemId);
+    await this.command.removeRelation(sourceItemId, targetItemId);
 
     return {
       success: true,
@@ -482,24 +482,24 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
 
   async getItemSnapshot(workspaceId: string, itemId: string) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.queryRepo.getItemSnapshot(canonicalWorkspaceId, itemId);
+    return this.query.getItemSnapshot(canonicalWorkspaceId, itemId);
   }
 
   async getItemSnapshots(workspaceId: string, itemIds: string[]) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.queryRepo.getItemSnapshots(canonicalWorkspaceId, itemIds);
+    return this.query.getItemSnapshots(canonicalWorkspaceId, itemIds);
   }
 
   // ── Port Implementations (IItemExistencePort & ICatalogReadPort) ────────────
 
   async exists(workspaceId: string, itemId: string): Promise<boolean> {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.queryRepo.exists(canonicalWorkspaceId, itemId);
+    return this.query.exists(canonicalWorkspaceId, itemId);
   }
 
   async assertExists(workspaceId: string, itemId: string): Promise<void> {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.queryRepo.assertExists(canonicalWorkspaceId, itemId);
+    return this.query.assertExists(canonicalWorkspaceId, itemId);
   }
 
   async existMany(
@@ -507,42 +507,42 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     itemIds: string[],
   ): Promise<Map<string, boolean>> {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.queryRepo.existMany(canonicalWorkspaceId, itemIds);
+    return this.query.existMany(canonicalWorkspaceId, itemIds);
   }
 
   async findById(workspaceId: string, itemId: string) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.queryRepo.findById(canonicalWorkspaceId, itemId);
+    return this.query.findById(canonicalWorkspaceId, itemId);
   }
 
   async findByIds(workspaceId: string, itemIds: string[]) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.queryRepo.findByIds(canonicalWorkspaceId, itemIds);
+    return this.query.findByIds(canonicalWorkspaceId, itemIds);
   }
 
   async findByDoi(workspaceId: string, doi: string) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.queryRepo.findByDoi(canonicalWorkspaceId, doi);
+    return this.query.findByDoi(canonicalWorkspaceId, doi);
   }
 
   async findSummaryById(workspaceId: string, itemId: string) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.queryRepo.findSummaryById(canonicalWorkspaceId, itemId);
+    return this.query.findSummaryById(canonicalWorkspaceId, itemId);
   }
 
   async findSummariesByIds(workspaceId: string, itemIds: string[]) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.queryRepo.findSummariesByIds(canonicalWorkspaceId, itemIds);
+    return this.query.findSummariesByIds(canonicalWorkspaceId, itemIds);
   }
 
   async findQualityAuditItems(workspaceId: string, limit?: number) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.queryRepo.findQualityAuditItems(canonicalWorkspaceId, limit);
+    return this.query.findQualityAuditItems(canonicalWorkspaceId, limit);
   }
 
   async findDuplicateCandidateItems(workspaceId: string, limit?: number) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.queryRepo.findDuplicateCandidateItems(
+    return this.query.findDuplicateCandidateItems(
       canonicalWorkspaceId,
       limit,
     );
@@ -582,7 +582,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         ...(command.tags || []),
       ]);
 
-      const updated = await this.commandRepo.update(
+      const updated = await this.command.update(
         command.workspaceId,
         command.existingId,
         undefined,
@@ -604,7 +604,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
 
       return { id: updated.id, isNew: false, version: updated.version };
     } else {
-      const created = await this.commandRepo.create(
+      const created = await this.command.create(
         command.workspaceId,
         {
           ...command,
@@ -694,7 +694,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     targetType: string,
     options: { retainUnmappedInExtra?: boolean } = {},
   ): TypeConversionPreview {
-    return this.itemTransformer.previewConversion(rawItem, targetType, options);
+    return this.transformer.previewConversion(rawItem, targetType, options);
   }
 
   /**
@@ -708,7 +708,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     tx?: Prisma.TransactionClient,
   ) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const rawExisting = await this.queryRepo.findById(
+    const rawExisting = await this.query.findById(
       canonicalWorkspaceId,
       itemId,
       tx,
@@ -732,7 +732,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     };
 
     for (const field of targetFields) {
-      const val = this.itemTransformer.getItemFieldValue(projected, field.key);
+      const val = this.transformer.getItemFieldValue(projected, field.key);
       if (
         val !== undefined &&
         val !== null &&
@@ -763,7 +763,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         updatePayload[col] = '';
       } else {
         const val =
-          this.itemTransformer.getItemFieldValue(projected, col) ??
+          this.transformer.getItemFieldValue(projected, col) ??
           (existing as unknown as Record<string, unknown>)[col];
         if (val !== undefined) {
           updatePayload[col] = val;
@@ -771,7 +771,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       }
     }
 
-    const updated = await this.commandRepo.update(
+    const updated = await this.command.update(
       canonicalWorkspaceId,
       itemId,
       options.expectedVersion,

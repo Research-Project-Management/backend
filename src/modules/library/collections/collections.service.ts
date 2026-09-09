@@ -39,7 +39,7 @@ export class CollectionsService {
   private readonly logger = new Logger(CollectionsService.name);
 
   constructor(
-    private readonly collectionsRepo: CollectionsRepository,
+    private readonly repo: CollectionsRepository,
     private readonly prisma: PrismaService,
     @Optional()
     private readonly tree: TreeEngine = new TreeEngine(),
@@ -62,7 +62,7 @@ export class CollectionsService {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     const fetchCollections = async () => {
       const rawCollections =
-        await this.collectionsRepo.findAll(canonicalWorkspaceId);
+        await this.repo.findAll(canonicalWorkspaceId);
       const collections = rawCollections.map((c: any) => ({
         ...c,
         itemCount: c.itemCount ?? c._count?.collectionItems ?? 0,
@@ -91,7 +91,7 @@ export class CollectionsService {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     const fetchTree = async () => {
       const collections =
-        await this.collectionsRepo.findAll(canonicalWorkspaceId);
+        await this.repo.findAll(canonicalWorkspaceId);
 
       return { tree: this.tree.buildTree(collections) };
     };
@@ -108,7 +108,7 @@ export class CollectionsService {
 
   async getCollectionById(workspaceId: string, collectionId: string) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const raw = await this.collectionsRepo.findById(
+    const raw = await this.repo.findById(
       canonicalWorkspaceId,
       collectionId,
     );
@@ -142,7 +142,7 @@ export class CollectionsService {
     );
 
     if (rawParentId) {
-      const parent = await this.collectionsRepo.findById(
+      const parent = await this.repo.findById(
         canonicalWorkspaceId,
         rawParentId,
       );
@@ -163,7 +163,7 @@ export class CollectionsService {
       authorId = member?.userId || authorId;
     }
 
-    const collection = await this.collectionsRepo.create(
+    const collection = await this.repo.create(
       canonicalWorkspaceId,
       authorId,
       {
@@ -185,7 +185,7 @@ export class CollectionsService {
     dto: UpdateCollectionDto,
   ) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const existing = await this.collectionsRepo.findById(
+    const existing = await this.repo.findById(
       canonicalWorkspaceId,
       collectionId,
     );
@@ -201,7 +201,7 @@ export class CollectionsService {
       if (rawParentId === collectionId) {
         throw new BadRequestException('A collection cannot be its own parent');
       }
-      const parent = await this.collectionsRepo.findById(
+      const parent = await this.repo.findById(
         canonicalWorkspaceId,
         rawParentId,
       );
@@ -213,11 +213,11 @@ export class CollectionsService {
 
       // Assert no indirect or direct circular loops in collection hierarchy
       const allCollections =
-        await this.collectionsRepo.findAll(canonicalWorkspaceId);
+        await this.repo.findAll(canonicalWorkspaceId);
       this.tree.assertNoCycle(allCollections, collectionId, rawParentId);
     }
 
-    const collection = await this.collectionsRepo.update(
+    const collection = await this.repo.update(
       canonicalWorkspaceId,
       collectionId,
       {
@@ -235,7 +235,7 @@ export class CollectionsService {
     strategy: CollectionDeleteStrategy = 'orphan',
   ) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const existing = await this.collectionsRepo.findById(
+    const existing = await this.repo.findById(
       canonicalWorkspaceId,
       collectionId,
     );
@@ -243,7 +243,7 @@ export class CollectionsService {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
     }
 
-    await this.collectionsRepo.delete(
+    await this.repo.delete(
       canonicalWorkspaceId,
       collectionId,
       strategy,
@@ -259,7 +259,7 @@ export class CollectionsService {
   ) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     if (collectionId !== 'unfiled') {
-      const collection = await this.collectionsRepo.findById(
+      const collection = await this.repo.findById(
         canonicalWorkspaceId,
         collectionId,
       );
@@ -270,7 +270,7 @@ export class CollectionsService {
 
     const destinationCollectionId =
       collectionId === 'unfiled' ? null : collectionId;
-    await this.collectionsRepo.moveItems(
+    await this.repo.moveItems(
       canonicalWorkspaceId,
       destinationCollectionId,
       itemIds,
@@ -293,8 +293,8 @@ export class CollectionsService {
     }>,
   ) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    await this.collectionsRepo.reorder(canonicalWorkspaceId, collections);
-    const updated = await this.collectionsRepo.findAll(canonicalWorkspaceId);
+    await this.repo.reorder(canonicalWorkspaceId, collections);
+    const updated = await this.repo.findAll(canonicalWorkspaceId);
     await this.invalidateCollectionsCache(canonicalWorkspaceId);
     return { collections: updated };
   }
@@ -305,7 +305,7 @@ export class CollectionsService {
     dto: AssignItemsToCollectionDto,
   ) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const collection = await this.collectionsRepo.findById(
+    const collection = await this.repo.findById(
       canonicalWorkspaceId,
       collectionId,
     );
@@ -337,7 +337,7 @@ export class CollectionsService {
     }
 
     // 2. Batch add items to collection using createMany (eliminates N+1 roundtrips)
-    await this.collectionsRepo.addItems(
+    await this.repo.addItems(
       canonicalWorkspaceId,
       collectionId,
       ids,
@@ -353,7 +353,7 @@ export class CollectionsService {
     itemId: string,
   ) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const collection = await this.collectionsRepo.findById(
+    const collection = await this.repo.findById(
       canonicalWorkspaceId,
       collectionId,
     );
@@ -374,7 +374,7 @@ export class CollectionsService {
       throw new NotFoundException(`Item not found in workspace: ${itemId}`);
     }
 
-    await this.collectionsRepo.removeItem(
+    await this.repo.removeItem(
       canonicalWorkspaceId,
       collectionId,
       itemId,

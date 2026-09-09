@@ -42,7 +42,7 @@ export class AttachmentsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly attachmentsRepo: AttachmentsRepository,
+    private readonly repo: AttachmentsRepository,
     private readonly libraryTx: TransactionService,
     @Inject(ITEM_EXISTENCE_PORT)
     private readonly itemExistencePort: IItemExistencePort,
@@ -105,7 +105,7 @@ export class AttachmentsService {
       });
 
       if (resolvedFileId) {
-        await this.attachmentsRepo.updateLinkedFile(
+        await this.repo.updateLinkedFile(
           resolvedFileId,
           input.catalogItemId,
           tx,
@@ -158,7 +158,7 @@ export class AttachmentsService {
       fileHash: input.fileHash,
     });
 
-    const attachment = await this.attachmentsRepo.findUnique(attachmentId, {
+    const attachment = await this.repo.findUnique(attachmentId, {
       catalogItem: true,
       revisions: { orderBy: { revisionNumber: 'desc' }, take: 1 },
     });
@@ -214,7 +214,7 @@ export class AttachmentsService {
    * Retrieves revision history for an attachment.
    */
   async getRevisions(workspaceId: string, attachmentId: string) {
-    const attachment = await this.attachmentsRepo.findFirst({
+    const attachment = await this.repo.findFirst({
       id: attachmentId,
       catalogItem: { workspaceId, deletedAt: null },
     });
@@ -223,7 +223,7 @@ export class AttachmentsService {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
-    return this.attachmentsRepo.findRevisions(attachment.id);
+    return this.repo.findRevisions(attachment.id);
   }
 
   /**
@@ -232,7 +232,7 @@ export class AttachmentsService {
   async getItemAttachments(workspaceId: string, itemId: string) {
     await this.itemExistencePort.assertExists(workspaceId, itemId);
 
-    const attachments = await this.attachmentsRepo.findManyByItemId(itemId);
+    const attachments = await this.repo.findManyByItemId(itemId);
 
     return { attachments, total: attachments.length };
   }
@@ -253,7 +253,7 @@ export class AttachmentsService {
       where.catalogItemId = itemId;
     }
 
-    const attachment = await this.attachmentsRepo.findFirst(where, {
+    const attachment = await this.repo.findFirst(where, {
       revisions: { orderBy: { revisionNumber: 'desc' } },
     });
 
@@ -272,7 +272,7 @@ export class AttachmentsService {
       throw new BadRequestException('Attachment ID is required');
     }
 
-    const attachment = await this.attachmentsRepo.findFirst(
+    const attachment = await this.repo.findFirst(
       {
         id: attachmentId,
         ...(workspaceId ? { catalogItem: { workspaceId } } : {}),
@@ -485,7 +485,7 @@ export class AttachmentsService {
     targetItemId: string,
     tx: Prisma.TransactionClient,
   ): Promise<void> {
-    await this.attachmentsRepo.reassignToItem(sourceItemIds, targetItemId, tx);
+    await this.repo.reassignToItem(sourceItemIds, targetItemId, tx);
   }
 
   /**
@@ -496,7 +496,7 @@ export class AttachmentsService {
     workspaceId: string,
     tx?: Prisma.TransactionClient,
   ): Promise<any> {
-    const attachment = await this.attachmentsRepo.findUnique(
+    const attachment = await this.repo.findUnique(
       attachmentId,
       { catalogItem: true },
       tx,

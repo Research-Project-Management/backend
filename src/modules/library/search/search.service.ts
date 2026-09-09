@@ -18,7 +18,7 @@ export class SearchService {
   private readonly logger = new Logger(SearchService.name);
 
   constructor(
-    private readonly searchRepo: SearchRepository,
+    private readonly repo: SearchRepository,
     private readonly prisma: PrismaService,
     private readonly fullText: FullTextProvider,
     private readonly rag: RagProvider,
@@ -37,8 +37,8 @@ export class SearchService {
     };
 
     const [searchResult, facets] = await Promise.all([
-      this.searchRepo.searchItems(workspaceId, searchOptions),
-      this.searchRepo.computeFacets(workspaceId, searchOptions),
+      this.repo.searchItems(workspaceId, searchOptions),
+      this.repo.computeFacets(workspaceId, searchOptions),
     ]);
 
     return {
@@ -103,7 +103,7 @@ export class SearchService {
     workspaceId: string,
   ): Promise<{ indexedItems: number; indexedAttachments: number }> {
     this.logger.log(`Rebuilding search index for workspace ${workspaceId}...`);
-    const facets = await this.searchRepo.computeFacets(workspaceId, {});
+    const facets = await this.repo.computeFacets(workspaceId, {});
     const totalTypes = Object.values(facets.itemTypes).reduce(
       (a, b) => a + b,
       0,

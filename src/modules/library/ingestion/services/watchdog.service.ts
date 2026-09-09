@@ -26,7 +26,7 @@ export class WatchdogService
   public static readonly DEFAULT_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
 
   constructor(
-    private readonly ingestionRepo: IngestionRepository,
+    private readonly repo: IngestionRepository,
     @Optional() private readonly queue?: QueueService,
     @Optional() private readonly configService?: ConfigService,
   ) {}
@@ -89,7 +89,7 @@ export class WatchdogService
     timeoutMs: number = WatchdogService.DEFAULT_TIMEOUT_MS,
   ): Promise<WatchdogReconciliationResult> {
     const olderThan = new Date(Date.now() - timeoutMs);
-    const orphanedRuns = await this.ingestionRepo.findOrphanedRuns(olderThan, {
+    const orphanedRuns = await this.repo.findOrphanedRuns(olderThan, {
       workspaceId,
       limit: 100,
     });
@@ -110,7 +110,7 @@ export class WatchdogService
       const canRetry = nextAttempt < run.maxRetries;
 
       if (canRetry) {
-        await this.ingestionRepo.reconcileRun(run.workspaceId, run.id, {
+        await this.repo.reconcileRun(run.workspaceId, run.id, {
           status: IngestionStatus.FAILED_RETRYABLE,
           lastError: `Ingestion run stalled at status ${run.status} after ${timeoutMs / 1000}s. Reconciled by watchdog for retry.`,
           attemptsIncrement: true,
@@ -136,7 +136,7 @@ export class WatchdogService
           }
         }
       } else {
-        await this.ingestionRepo.reconcileRun(run.workspaceId, run.id, {
+        await this.repo.reconcileRun(run.workspaceId, run.id, {
           status: IngestionStatus.FAILED_FINAL,
           lastError: `Ingestion run stalled at status ${run.status} and exhausted maximum retries (${run.maxRetries}). Marked failed by watchdog.`,
           attemptsIncrement: true,
@@ -166,7 +166,7 @@ export class WatchdogService
     try {
       // Look back up to 24 hours for abandoned runs
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-      const pendingRuns = await this.ingestionRepo.findRecoverableRuns(
+      const pendingRuns = await this.repo.findRecoverableRuns(
         since,
         50,
       );
