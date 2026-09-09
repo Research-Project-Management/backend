@@ -126,5 +126,5 @@ export class UnifiedIngestionDto {
   silent?: boolean;
 }
 
-export * from './ingestion-submission.dto';
+export * from './submission.dto';
 export * from './capture-url.dto';

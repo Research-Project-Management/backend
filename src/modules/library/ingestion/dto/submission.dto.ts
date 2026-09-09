@@ -13,7 +13,7 @@ import {
   SubmissionKind,
   IdentifierType,
   RecordFormat,
-} from '../types/ingestion-submission.types';
+} from '../types/submission.types';
 
 export class IdentifierPayloadDto {
   @IsIn(['IDENTIFIER'])
