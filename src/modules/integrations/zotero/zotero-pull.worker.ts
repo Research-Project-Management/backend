@@ -372,7 +372,7 @@ export class ZoteroPullWorker {
 
     const operations: ExternalSyncOperation[] = [];
 
-    // Top-level Catalog Items
+    // Top-level Items
     for (const rawItem of rawItems) {
       const itemType = rawItem.data?.itemType;
       if (
@@ -412,7 +412,7 @@ export class ZoteroPullWorker {
 
         operations.push({
           operationId: `item:${mapped.remoteKey}`,
-          op: 'upsertCatalogItem',
+          op: 'upsertItem',
           command: {
             workspaceId,
             userId,
@@ -482,7 +482,7 @@ export class ZoteroPullWorker {
           command: {
             workspaceId,
             existingId: existing?.entityId,
-            catalogItemId: parentBinding?.entityId,
+            itemId: parentBinding?.entityId,
             filename: mapped.filename,
             url:
               mapped.url ||
@@ -515,7 +515,7 @@ export class ZoteroPullWorker {
             workspaceId,
             userId,
             existingId: existing?.entityId,
-            catalogItemId: parentBinding?.entityId,
+            itemId: parentBinding?.entityId,
             title: 'Zotero Note',
             contentMd: mapped.contentHtml,
             tags: mapped.tags || [],

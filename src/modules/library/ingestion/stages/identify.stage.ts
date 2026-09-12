@@ -272,9 +272,7 @@ export class IdentifyStage {
                 this.pdf.extractMetadataFromBuffer
               ) {
                 extractedMetadata =
-                  this.pdf.extractMetadataFromBuffer(
-                    fileRecord.buffer,
-                  ) || {};
+                  this.pdf.extractMetadataFromBuffer(fileRecord.buffer) || {};
               }
             }
           } catch (caughtError: unknown) {

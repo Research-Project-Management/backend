@@ -2,8 +2,13 @@ import { Injectable } from '@nestjs/common';
 import { ItemMetadata } from '../metadata/types/metadata.types';
 import { DuplicateMatchResult } from '../types/metadata-candidate.types';
 import { normalizeDoi } from '../metadata/utils/metadata.utils';
+import {
+  calculateTitleSimilarity,
+  firstAuthorMatches,
+  normalizeTitleForDedupe,
+} from '../../curation/utils/curation.utils';
 
-export interface ExistingCatalogItemSummary {
+export interface ExistingItemSummary {
   id: string;
   title: string;
   doi?: string | null;
@@ -19,7 +24,7 @@ export class DuplicatePolicy {
    */
   evaluate(
     proposed: ItemMetadata,
-    existingItems: ExistingCatalogItemSummary[],
+    existingItems: ExistingItemSummary[],
   ): DuplicateMatchResult {
     const cleanProposedDoi =
       normalizeDoi(proposed.doi) || proposed.doi?.toLowerCase().trim();
@@ -90,30 +95,14 @@ export class DuplicatePolicy {
   }
 
   private normalizeTitle(title?: string | null): string {
-    if (!title) return '';
-    return title
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+    return normalizeTitleForDedupe(title);
   }
 
   private calculateTitleSimilarity(a: string, b: string): number {
-    if (a === b) return 1.0;
-    if (a.includes(b) || b.includes(a)) return 0.92;
-    const wordsA = new Set(a.split(' '));
-    const wordsB = new Set(b.split(' '));
-    let intersection = 0;
-    for (const w of wordsA) {
-      if (wordsB.has(w)) intersection++;
-    }
-    const union = new Set([...wordsA, ...wordsB]).size;
-    return union > 0 ? intersection / union : 0.0;
+    return calculateTitleSimilarity(a, b);
   }
 
   private firstAuthorMatches(a: string, b: string): boolean {
-    const normA = a.toLowerCase().replace(/[^a-z]/g, '');
-    const normB = b.toLowerCase().replace(/[^a-z]/g, '');
-    return normA.includes(normB) || normB.includes(normA);
+    return firstAuthorMatches(a, b);
   }
 }

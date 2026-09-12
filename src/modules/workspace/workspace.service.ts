@@ -13,12 +13,12 @@ import { WORKSPACE_REDIS_KEYS } from './constants/redis-keys.constant';
 import {
   CreateWorkspaceDto,
   UpdateWorkspaceDto,
+  CreateWorkspaceInvitationDto,
   AddWorkspaceMemberDto,
   UpdateWorkspaceMemberDto,
-  CreateWorkspaceInvitationDto,
 } from './dto/workspace.dto';
 import { SearchResultItem } from './dto/search-result.dto';
-import { WorkspaceMemberRole, Prisma } from '@prisma/client';
+import { Prisma, WorkspaceMemberRole } from '@prisma/client';
 import * as crypto from 'crypto';
 import { generateWorkspaceSlug } from './utils/workspace.utils';
 
@@ -54,12 +54,11 @@ export class WorkspaceService {
       throw new NotFoundException('Workspace not found');
     }
 
-    const member = workspace.members.find(
-      (workspaceMember) => workspaceMember.userId === userId,
-    );
+    // Personal workspace model: user is the owner (ownerId === userId)
+    const isOwner = workspace.ownerId === userId;
     return {
       workspace,
-      yourRole: member?.role || WorkspaceMemberRole.member,
+      yourRole: isOwner ? 'owner' : null,
     };
   }
 
@@ -86,13 +85,8 @@ export class WorkspaceService {
       plan: dto.plan || 'free',
       inviteCode,
       createdById: userId,
+      ownerId: userId, // Personal workspace: creator is the owner (1-to-1)
       settings: (dto.settings as Prisma.InputJsonValue) ?? {},
-      members: {
-        create: {
-          userId,
-          role: WorkspaceMemberRole.owner,
-        },
-      },
     });
 
     await this.invalidateUserWorkspacesCache(userId);
@@ -129,13 +123,11 @@ export class WorkspaceService {
     return { workspace };
   }
 
-  async deleteWorkspace(workspaceId: string) {
+  async deleteWorkspace(workspaceId: string, userId: string) {
     const workspace = await this.workspaceRepo.findById(workspaceId);
     if (!workspace) {
       throw new NotFoundException('Workspace not found');
     }
-
-    const members = await this.workspaceRepo.findMembers(workspaceId);
 
     await this.workspaceRepo.softDeleteWorkspace(workspaceId);
     await Promise.all([
@@ -143,188 +135,71 @@ export class WorkspaceService {
         workspaceId,
         workspace.slug || workspace.url,
       ),
-      ...members.map((m) => this.invalidateUserWorkspacesCache(m.userId)),
+      this.invalidateUserWorkspacesCache(userId),
     ]);
 
     return { message: 'Workspace deleted successfully' };
   }
 
-  async restoreWorkspace(workspaceId: string) {
+  async restoreWorkspace(workspaceId: string, userId: string) {
     const workspace = await this.workspaceRepo.restoreWorkspace(workspaceId);
-    const members = await this.workspaceRepo.findMembers(workspaceId);
 
     await Promise.all([
       this.invalidateWorkspaceCache(
         workspaceId,
         workspace.slug || workspace.url,
       ),
-      ...members.map((m) => this.invalidateUserWorkspacesCache(m.userId)),
+      this.invalidateUserWorkspacesCache(userId),
     ]);
 
     return { message: 'Workspace restored successfully', workspace };
   }
 
+  // ── Workspace Member Management (DEPRECATED) ─────────────────────────────
+  // In the personal-workspace model, there are no workspace-level members.
+  // Collaboration is handled at the Project level via ProjectMember.
+  // These methods are kept as stubs to avoid breaking existing routes until
+  // Phase 4 frontend cleanup and Phase 5 controller cleanup is complete.
+
+  /** @deprecated Use project members instead */
   async getMembers(workspaceId: string) {
-    const members = await this.workspaceRepo.findMembers(workspaceId);
-    return { members };
+    // Return empty list — workspace no longer has members
+    return { members: [], deprecated: true };
   }
 
-  async addMember(workspaceId: string, dto: AddWorkspaceMemberDto) {
-    let targetUserId = dto.userId || dto.email;
-    if (!targetUserId) {
-      throw new BadRequestException('User ID or Email is required');
-    }
-
-    if (targetUserId.includes('@')) {
-      const user = await this.workspaceRepo.findUserByEmail(targetUserId);
-      if (!user) {
-        throw new NotFoundException('User with this email was not found');
-      }
-      targetUserId = user.id;
-    }
-
-    const existing = await this.workspaceRepo.findMember(
-      workspaceId,
-      targetUserId,
+  /** @deprecated Workspace membership no longer exists */
+  async addMember(_workspaceId: string, _dto: unknown) {
+    throw new ForbiddenException(
+      'Workspace member management is disabled. Invite users to specific projects instead.',
     );
-
-    if (existing) {
-      throw new BadRequestException(
-        'User is already a member of this workspace',
-      );
-    }
-
-    const member = await this.workspaceRepo.createMember(
-      workspaceId,
-      targetUserId,
-      dto.role || WorkspaceMemberRole.member,
-    );
-
-    await Promise.all([
-      this.invalidateUserWorkspacesCache(targetUserId),
-      this.cache.del(`flux:iam:ws_role:${workspaceId}:${targetUserId}`),
-    ]);
-
-    return {
-      message: 'Member added successfully',
-      member,
-    };
   }
 
-  async updateMember(
-    workspaceId: string,
-    targetUserId: string,
-    dto: UpdateWorkspaceMemberDto,
-  ) {
-    const currentMember = await this.workspaceRepo.findMember(
-      workspaceId,
-      targetUserId,
+  /** @deprecated Workspace membership no longer exists */
+  async updateMember(_workspaceId: string, _userId: string, _dto: unknown) {
+    throw new ForbiddenException(
+      'Workspace member management is disabled. Manage roles at the project level.',
     );
-    if (!currentMember) {
-      throw new NotFoundException('Member not found in this workspace');
-    }
-
-    if (
-      currentMember.role === WorkspaceMemberRole.owner &&
-      dto.role !== WorkspaceMemberRole.owner
-    ) {
-      const ownerCount = await this.workspaceRepo.countOwners(workspaceId);
-      if (ownerCount <= 1) {
-        throw new ForbiddenException(
-          'Cannot demote the only owner of the workspace. Transfer ownership first.',
-        );
-      }
-    }
-
-    const member = await this.workspaceRepo.updateMemberRole(
-      workspaceId,
-      targetUserId,
-      dto.role,
-    );
-
-    await Promise.all([
-      this.invalidateUserWorkspacesCache(targetUserId),
-      this.cache.del(`flux:iam:ws_role:${workspaceId}:${targetUserId}`),
-    ]);
-
-    return {
-      message: 'Member role updated successfully',
-      member,
-    };
   }
 
-  async removeMember(workspaceId: string, targetUserId: string) {
-    const member = await this.workspaceRepo.findMember(
-      workspaceId,
-      targetUserId,
+  /** @deprecated Workspace membership no longer exists */
+  async removeMember(_workspaceId: string, _userId: string) {
+    throw new ForbiddenException(
+      'Workspace member management is disabled. Remove from specific projects instead.',
     );
-    if (!member) {
-      throw new NotFoundException('Member not found');
-    }
-
-    if (member.role === WorkspaceMemberRole.owner) {
-      const ownerCount = await this.workspaceRepo.countOwners(workspaceId);
-      if (ownerCount <= 1) {
-        throw new ForbiddenException(
-          'Cannot remove the only owner of the workspace. Transfer ownership first.',
-        );
-      }
-    }
-
-    await this.workspaceRepo.deleteMember(workspaceId, targetUserId);
-
-    await Promise.all([
-      this.invalidateUserWorkspacesCache(targetUserId),
-      this.cache.del(`flux:iam:ws_role:${workspaceId}:${targetUserId}`),
-    ]);
-
-    return { message: 'Member removed successfully' };
   }
 
-  async joinByCode(userId: string, inviteCode: string) {
-    const workspace = await this.workspaceRepo.findByInviteCode(inviteCode);
-
-    if (!workspace) {
-      throw new NotFoundException('Invalid invite code');
-    }
-
-    const existing = await this.workspaceRepo.findMember(workspace.id, userId);
-
-    if (!existing) {
-      await this.workspaceRepo.createMember(
-        workspace.id,
-        userId,
-        WorkspaceMemberRole.member,
-      );
-      await this.invalidateUserWorkspacesCache(userId);
-    }
-
-    return this.getWorkspace(workspace.id, userId);
+  /** @deprecated Workspace invite codes are disabled in personal workspace model */
+  async joinByCode(_userId: string, _inviteCode: string) {
+    throw new ForbiddenException(
+      'Workspace invite codes are disabled. Users get their own workspace on registration.',
+    );
   }
 
-  async leaveWorkspace(workspaceId: string, userId: string) {
-    const member = await this.workspaceRepo.findMember(workspaceId, userId);
-    if (!member) {
-      throw new NotFoundException('Member not found');
-    }
-
-    if (member.role === WorkspaceMemberRole.owner) {
-      const ownerCount = await this.workspaceRepo.countOwners(workspaceId);
-      if (ownerCount <= 1) {
-        throw new ForbiddenException(
-          'Cannot leave workspace as the only owner. Transfer ownership first.',
-        );
-      }
-    }
-
-    await this.workspaceRepo.deleteMember(workspaceId, userId);
-
-    await Promise.all([
-      this.invalidateUserWorkspacesCache(userId),
-      this.cache.del(`flux:iam:ws_role:${workspaceId}:${userId}`),
-    ]);
-
-    return { message: 'Left workspace successfully' };
+  /** @deprecated No-op in personal workspace model */
+  async leaveWorkspace(_workspaceId: string, _userId: string) {
+    throw new ForbiddenException(
+      'You cannot leave your personal workspace. Your workspace is created automatically on registration.',
+    );
   }
 
   // ── Invitations Lifecycle ──────────────────────────────────────────────────
@@ -332,18 +207,19 @@ export class WorkspaceService {
   async createInvitation(
     workspaceId: string,
     invitedById: string,
-    dto: CreateWorkspaceInvitationDto | any,
+    dto: CreateWorkspaceInvitationDto,
   ) {
     const workspace = await this.workspaceRepo.findById(workspaceId);
     if (!workspace) {
       throw new NotFoundException('Workspace not found');
     }
 
-    const inviter = await this.workspaceRepo.findMember(workspaceId, invitedById);
-
     // Support both single email and batch emails
-    const emails: string[] = Array.isArray(dto.emails)
-      ? dto.emails.map((e: any) => (typeof e === 'string' ? e : e?.email)).filter(Boolean)
+    const rawDto = dto as any;
+    const emails: string[] = Array.isArray(rawDto.emails)
+      ? rawDto.emails
+          .map((e: any) => (typeof e === 'string' ? e : e?.email))
+          .filter(Boolean)
       : dto.email
         ? [dto.email]
         : [];
@@ -352,7 +228,6 @@ export class WorkspaceService {
       throw new BadRequestException('At least one email is required');
     }
 
-    const role = dto.role || WorkspaceMemberRole.member;
     const expiresInDays = dto.expiresInDays || 7;
     const createdInvitations: any[] = [];
     const skipped: any[] = [];
@@ -363,7 +238,6 @@ export class WorkspaceService {
         const invitation = await this.invitationRepo.createInvitation({
           workspaceId,
           email,
-          role,
           invitedById,
           expiresInDays,
         });
@@ -374,10 +248,10 @@ export class WorkspaceService {
           try {
             await this.mailService.sendWorkspaceInvite({
               to: email,
-              inviterName: (inviter as any)?.user?.name || 'A team member',
+              inviterName: 'A team member',
               workspaceName: workspace.name,
               workspaceUrl: workspace.url || workspace.id,
-              role,
+              role: (dto.role as string) || 'member',
               token: invitation.token,
               expiresAt: invitation.expiresAt,
             });
@@ -386,7 +260,10 @@ export class WorkspaceService {
           }
         }
       } catch (err: any) {
-        skipped.push({ email, reason: err.message || 'Failed to create invite' });
+        skipped.push({
+          email,
+          reason: err.message || 'Failed to create invite',
+        });
       }
     }
 
@@ -418,10 +295,14 @@ export class WorkspaceService {
       throw new NotFoundException('Invitation not found');
     }
     if (invitation.status !== 'pending') {
-      throw new BadRequestException(`Invitation is already ${invitation.status}`);
+      throw new BadRequestException(
+        `Invitation is already ${invitation.status}`,
+      );
     }
     await this.invitationRepo.updateStatus(invitation.id, 'declined');
-    await this.cache.del(WORKSPACE_REDIS_KEYS.pendingInvitations(invitation.workspaceId));
+    await this.cache.del(
+      WORKSPACE_REDIS_KEYS.pendingInvitations(invitation.workspaceId),
+    );
     return { message: 'Invitation declined successfully' };
   }
 
@@ -553,14 +434,14 @@ export class WorkspaceService {
     );
 
     const results: SearchResultItem[] = [
-      ...projects.map((project) => ({
+      ...projects.map((project: any) => ({
         type: 'project' as const,
         id: project.id,
         name: project.name,
         icon: project.avatar || null,
         updatedAt: project.updatedAt,
       })),
-      ...tasks.map((task) => ({
+      ...tasks.map((task: any) => ({
         type: 'task' as const,
         id: task.id,
         name: task.title,
@@ -569,13 +450,13 @@ export class WorkspaceService {
         projectName: task.project?.name,
         updatedAt: task.updatedAt,
       })),
-      ...papers.map((paper) => ({
+      ...papers.map((paper: any) => ({
         type: 'paper' as const,
         id: paper.id,
         name: paper.title,
         updatedAt: paper.updatedAt,
       })),
-      ...pages.map((page) => ({
+      ...pages.map((page: any) => ({
         type: 'page' as const,
         id: page.id,
         name: page.title,
@@ -583,7 +464,7 @@ export class WorkspaceService {
         projectName: page.project?.name,
         updatedAt: page.updatedAt,
       })),
-      ...files.map((file) => ({
+      ...files.map((file: any) => ({
         type: file.isFolder ? ('folder' as const) : ('file' as const),
         id: file.id,
         name: file.filename,
@@ -591,7 +472,7 @@ export class WorkspaceService {
         size: file.size,
         updatedAt: file.updatedAt,
       })),
-      ...stickies.map((sticky) => ({
+      ...stickies.map((sticky: any) => ({
         type: 'sticky' as const,
         id: sticky.id,
         name: sticky.title || 'Untitled Sticky',

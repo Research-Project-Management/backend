@@ -61,8 +61,7 @@ export class CollectionsService {
   async getCollections(workspaceId: string) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     const fetchCollections = async () => {
-      const rawCollections =
-        await this.repo.findAll(canonicalWorkspaceId);
+      const rawCollections = await this.repo.findAll(canonicalWorkspaceId);
       const collections = rawCollections.map((c: any) => ({
         ...c,
         itemCount: c.itemCount ?? c._count?.collectionItems ?? 0,
@@ -90,8 +89,7 @@ export class CollectionsService {
   ): Promise<{ tree: CollectionTreeNode[] }> {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     const fetchTree = async () => {
-      const collections =
-        await this.repo.findAll(canonicalWorkspaceId);
+      const collections = await this.repo.findAll(canonicalWorkspaceId);
 
       return { tree: this.tree.buildTree(collections) };
     };
@@ -108,10 +106,7 @@ export class CollectionsService {
 
   async getCollectionById(workspaceId: string, collectionId: string) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const raw = await this.repo.findById(
-      canonicalWorkspaceId,
-      collectionId,
-    );
+    const raw = await this.repo.findById(canonicalWorkspaceId, collectionId);
     if (!raw) {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
     }
@@ -163,17 +158,13 @@ export class CollectionsService {
       authorId = member?.userId || authorId;
     }
 
-    const collection = await this.repo.create(
-      canonicalWorkspaceId,
-      authorId,
-      {
-        name: dto.name,
-        description: dto.description,
-        color: dto.color,
-        icon: dto.icon,
-        parentId: rawParentId,
-      },
-    );
+    const collection = await this.repo.create(canonicalWorkspaceId, authorId, {
+      name: dto.name,
+      description: dto.description,
+      color: dto.color,
+      icon: dto.icon,
+      parentId: rawParentId,
+    });
 
     await this.invalidateCollectionsCache(canonicalWorkspaceId);
     return { collection };
@@ -212,8 +203,7 @@ export class CollectionsService {
       }
 
       // Assert no indirect or direct circular loops in collection hierarchy
-      const allCollections =
-        await this.repo.findAll(canonicalWorkspaceId);
+      const allCollections = await this.repo.findAll(canonicalWorkspaceId);
       this.tree.assertNoCycle(allCollections, collectionId, rawParentId);
     }
 
@@ -243,11 +233,7 @@ export class CollectionsService {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
     }
 
-    await this.repo.delete(
-      canonicalWorkspaceId,
-      collectionId,
-      strategy,
-    );
+    await this.repo.delete(canonicalWorkspaceId, collectionId, strategy);
     await this.invalidateCollectionsCache(canonicalWorkspaceId);
     return { success: true };
   }
@@ -319,7 +305,7 @@ export class CollectionsService {
     }
 
     // 1. Verify all itemIds belong to this workspace (prevent IDOR / BOLA)
-    const validItems = await this.prisma.catalogItem.findMany({
+    const validItems = await this.prisma.item.findMany({
       where: {
         id: { in: ids },
         workspaceId: canonicalWorkspaceId,
@@ -337,11 +323,7 @@ export class CollectionsService {
     }
 
     // 2. Batch add items to collection using createMany (eliminates N+1 roundtrips)
-    await this.repo.addItems(
-      canonicalWorkspaceId,
-      collectionId,
-      ids,
-    );
+    await this.repo.addItems(canonicalWorkspaceId, collectionId, ids);
 
     await this.invalidateCollectionsCache(canonicalWorkspaceId);
     return { success: true, count: ids.length };
@@ -362,7 +344,7 @@ export class CollectionsService {
     }
 
     // Assert item belongs to workspace
-    const item = await this.prisma.catalogItem.findFirst({
+    const item = await this.prisma.item.findFirst({
       where: {
         id: itemId,
         workspaceId: canonicalWorkspaceId,
@@ -374,11 +356,7 @@ export class CollectionsService {
       throw new NotFoundException(`Item not found in workspace: ${itemId}`);
     }
 
-    await this.repo.removeItem(
-      canonicalWorkspaceId,
-      collectionId,
-      itemId,
-    );
+    await this.repo.removeItem(canonicalWorkspaceId, collectionId, itemId);
     await this.invalidateCollectionsCache(canonicalWorkspaceId);
     return { success: true };
   }
@@ -505,7 +483,7 @@ export class CollectionsService {
     if (sourceItemIds.length === 0) return;
 
     const primaryItems = await tx.collectionItem.findMany({
-      where: { catalogItemId: targetItemId },
+      where: { itemId: targetItemId },
       select: { collectionId: true },
     });
     const primaryCollectionIds = new Set(
@@ -513,7 +491,7 @@ export class CollectionsService {
     );
 
     const dupItems = await tx.collectionItem.findMany({
-      where: { catalogItemId: { in: sourceItemIds } },
+      where: { itemId: { in: sourceItemIds } },
       select: { collectionId: true },
     });
 
@@ -521,13 +499,13 @@ export class CollectionsService {
       if (!primaryCollectionIds.has(dup.collectionId)) {
         await tx.collectionItem.upsert({
           where: {
-            collectionId_catalogItemId: {
+            collectionId_itemId: {
               collectionId: dup.collectionId,
-              catalogItemId: targetItemId,
+              itemId: targetItemId,
             },
           },
           create: {
-            catalogItemId: targetItemId,
+            itemId: targetItemId,
             collectionId: dup.collectionId,
           },
           update: {},
@@ -537,7 +515,7 @@ export class CollectionsService {
     }
 
     await tx.collectionItem.deleteMany({
-      where: { catalogItemId: { in: sourceItemIds } },
+      where: { itemId: { in: sourceItemIds } },
     });
   }
 
@@ -558,7 +536,7 @@ export class CollectionsService {
     // Delete unlinked collection associations
     await tx.collectionItem.deleteMany({
       where: {
-        catalogItemId: itemId,
+        itemId,
         ...(uniqueIds.length > 0 ? { collectionId: { notIn: uniqueIds } } : {}),
       },
     });
@@ -580,7 +558,7 @@ export class CollectionsService {
       .filter((id) => validIdSet.has(id))
       .map((collectionId, index) => ({
         collectionId,
-        catalogItemId: itemId,
+        itemId,
         sortOrder: index,
       }));
 

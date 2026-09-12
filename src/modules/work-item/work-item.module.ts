@@ -1,35 +1,67 @@
 import { Module } from '@nestjs/common';
-import { WorkItemController } from './work-item.controller';
-import { WorkItemService } from './work-item.service';
-import { WorkItemRepository } from './work-item.repository';
+import { WorkItemCoreModule } from './core/core.module';
 import { CycleModule } from './cycle/cycle.module';
-import { WorklogModule } from './worklog/worklog.module';
 import { LabelModule } from './label/label.module';
-import { TaskCommentModule } from './comment/comment.module';
-import { ActivityModule } from '@/modules/activity/activity.module';
+import { CommentModule } from './comment/comment.module';
+import { StateModule } from './state/state.module';
+import { AssignmentModule } from './assignment/assignment.module';
+import { RelationModule } from './relation/relation.module';
+import { UpdateModule } from './update/update.module';
+import { ExportModule } from './export/export.module';
+import { HistoryModule } from './history/history.module';
+import { ViewModule } from './view/view.module';
+import { PropertyModule } from './property/property.module';
+import { AttachmentModule } from './attachment/attachment.module';
+import { DraftModule } from './draft/draft.module';
+import { ArchiveModule } from './archive/archive.module';
+import { WorklogModule } from './worklog/worklog.module';
+import { TemplateModule } from './template/template.module';
 
 @Module({
   imports: [
+    WorkItemCoreModule,
     CycleModule,
-    WorklogModule,
     LabelModule,
-    TaskCommentModule,
-    ActivityModule,
+    CommentModule,
+    StateModule,
+    AssignmentModule,
+    RelationModule,
+    UpdateModule,
+    ExportModule,
+    HistoryModule,
+    ViewModule,
+    PropertyModule,
+    AttachmentModule,
+    DraftModule,
+    ArchiveModule,
+    WorklogModule,
+    TemplateModule,
   ],
-  controllers: [WorkItemController],
-  providers: [WorkItemService, WorkItemRepository],
   exports: [
-    WorkItemService,
+    WorkItemCoreModule,
     CycleModule,
-    WorklogModule,
     LabelModule,
-    TaskCommentModule,
+    CommentModule,
+    StateModule,
+    AssignmentModule,
+    RelationModule,
+    UpdateModule,
+    ExportModule,
+    HistoryModule,
+    ViewModule,
+    PropertyModule,
+    AttachmentModule,
+    DraftModule,
+    ArchiveModule,
+    WorklogModule,
+    TemplateModule,
   ],
 })
 export class WorkItemModule {}
 
-// Backward compatibility alias
+// Backward compatibility aliases
 export const TaskModule = WorkItemModule;
 export type TaskModule = WorkItemModule;
 export const WorkflowModule = WorkItemModule;
 export type WorkflowModule = WorkItemModule;
+

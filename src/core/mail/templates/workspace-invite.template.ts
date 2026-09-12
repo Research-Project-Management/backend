@@ -7,9 +7,11 @@ export interface WorkspaceInviteEmailData {
   recipientEmail: string;
 }
 
-export function renderWorkspaceInviteEmail(
-  data: WorkspaceInviteEmailData,
-): { subject: string; html: string; text: string } {
+export function renderWorkspaceInviteEmail(data: WorkspaceInviteEmailData): {
+  subject: string;
+  html: string;
+  text: string;
+} {
   const {
     inviterName,
     workspaceName,

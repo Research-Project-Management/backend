@@ -1,4 +1,4 @@
-import {
+﻿import {
   Controller,
   Get,
   Post,
@@ -32,7 +32,7 @@ export class ZoteroController {
   constructor(private readonly zoteroService: ZoteroService) {}
 
   @Post('connections')
-  @WorkspaceRoles(WorkspaceRole.ADMIN, WorkspaceRole.OWNER)
+  @WorkspaceRoles(WorkspaceRole.OWNER, WorkspaceRole.OWNER)
   async createConnection(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
@@ -65,7 +65,7 @@ export class ZoteroController {
   }
 
   @Delete('connections/:connectionId')
-  @WorkspaceRoles(WorkspaceRole.ADMIN, WorkspaceRole.OWNER)
+  @WorkspaceRoles(WorkspaceRole.OWNER, WorkspaceRole.OWNER)
   async revokeConnection(
     @Param('workspaceId') workspaceId: string,
     @Param('connectionId') connectionId: string,
@@ -90,7 +90,7 @@ export class ZoteroController {
   }
 
   @Post('bindings')
-  @WorkspaceRoles(WorkspaceRole.ADMIN, WorkspaceRole.OWNER)
+  @WorkspaceRoles(WorkspaceRole.OWNER, WorkspaceRole.OWNER)
   async createBinding(
     @Param('workspaceId') workspaceId: string,
     @Body() body: CreateZoteroBindingDto,
@@ -122,7 +122,7 @@ export class ZoteroController {
   }
 
   @Patch('bindings/:bindingId/sync-direction')
-  @WorkspaceRoles(WorkspaceRole.ADMIN, WorkspaceRole.OWNER)
+  @WorkspaceRoles(WorkspaceRole.OWNER, WorkspaceRole.OWNER)
   async updateSyncDirection(
     @Param('workspaceId') workspaceId: string,
     @Param('bindingId') bindingId: string,
@@ -144,7 +144,7 @@ export class ZoteroController {
   }
 
   @Post('bindings/:bindingId/sync-runs')
-  @WorkspaceRoles(WorkspaceRole.ADMIN, WorkspaceRole.OWNER)
+  @WorkspaceRoles(WorkspaceRole.OWNER, WorkspaceRole.OWNER)
   async triggerPull(
     @Param('workspaceId') workspaceId: string,
     @Param('bindingId') bindingId: string,
@@ -159,7 +159,7 @@ export class ZoteroController {
   }
 
   @Post('bindings/:bindingId/reconcile')
-  @WorkspaceRoles(WorkspaceRole.ADMIN, WorkspaceRole.OWNER)
+  @WorkspaceRoles(WorkspaceRole.OWNER, WorkspaceRole.OWNER)
   async triggerReconcile(
     @Param('workspaceId') workspaceId: string,
     @Param('bindingId') bindingId: string,
@@ -177,7 +177,7 @@ export class ZoteroController {
   }
 
   @Post('bindings/:bindingId/push/:itemId')
-  @WorkspaceRoles(WorkspaceRole.ADMIN, WorkspaceRole.OWNER)
+  @WorkspaceRoles(WorkspaceRole.OWNER, WorkspaceRole.OWNER)
   async pushItem(
     @Param('workspaceId') workspaceId: string,
     @Param('bindingId') bindingId: string,
@@ -224,7 +224,7 @@ export class ZoteroController {
   }
 
   @Post('bindings/:bindingId/conflicts/:itemId/resolve')
-  @WorkspaceRoles(WorkspaceRole.ADMIN, WorkspaceRole.OWNER)
+  @WorkspaceRoles(WorkspaceRole.OWNER, WorkspaceRole.OWNER)
   async resolveConflict(
     @Param('workspaceId') workspaceId: string,
     @Param('bindingId') bindingId: string,
@@ -252,7 +252,7 @@ export class ZoteroController {
   }
 
   @Post('kill-switch')
-  @WorkspaceRoles(WorkspaceRole.ADMIN, WorkspaceRole.OWNER)
+  @WorkspaceRoles(WorkspaceRole.OWNER, WorkspaceRole.OWNER)
   async setKillSwitch(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
@@ -278,3 +278,4 @@ export class ZoteroController {
     return { data: quota };
   }
 }
+

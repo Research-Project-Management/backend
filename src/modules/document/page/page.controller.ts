@@ -65,18 +65,17 @@ export class PageController {
     'workspace/:workspaceId/pages',
     'pages',
   ])
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('admin', 'contributor')
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Create a new page in a project or workspace' })
+  @ApiOperation({ summary: 'Create a new page in a project' })
   async createPage(
     @CurrentUser('id') userId: string,
     @Body() dto: CreatePageDto,
     @Param('projectId') projectId?: string,
-    @Param('workspaceId') workspaceId?: string,
   ) {
     const effectiveProjectId = projectId || dto.projectId || '';
-    const effectiveWorkspaceId = workspaceId || dto.workspaceId || '';
     return this.pageService.createPage(
-      effectiveWorkspaceId,
       effectiveProjectId,
       userId,
       dto,
@@ -91,8 +90,11 @@ export class PageController {
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get a single page by ID' })
-  async getPage(@Param('pageId') pageId: string) {
-    return this.pageService.getPage(pageId);
+  async getPage(
+    @Param('pageId') pageId: string,
+    @Param('projectId') projectId?: string,
+  ) {
+    return this.pageService.getPage(pageId, projectId);
   }
 
   @Put([
@@ -106,8 +108,9 @@ export class PageController {
   async updatePage(
     @Param('pageId') pageId: string,
     @Body() dto: UpdatePageDto,
+    @Param('projectId') projectId?: string,
   ) {
-    return this.pageService.updatePage(pageId, dto);
+    return this.pageService.updatePage(pageId, dto, projectId);
   }
 
   @Delete([
@@ -118,8 +121,11 @@ export class PageController {
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
   @ApiOperation({ summary: 'Soft delete a page' })
-  async deletePage(@Param('pageId') pageId: string) {
-    return this.pageService.deletePage(pageId);
+  async deletePage(
+    @Param('pageId') pageId: string,
+    @Param('projectId') projectId?: string,
+  ) {
+    return this.pageService.deletePage(pageId, projectId);
   }
 
   @Post([
@@ -130,8 +136,11 @@ export class PageController {
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
   @ApiOperation({ summary: 'Restore a soft-deleted page' })
-  async restorePage(@Param('pageId') pageId: string) {
-    return this.pageService.restorePage(pageId);
+  async restorePage(
+    @Param('pageId') pageId: string,
+    @Param('projectId') projectId?: string,
+  ) {
+    return this.pageService.restorePage(pageId, projectId);
   }
 
   @Post([
@@ -146,8 +155,9 @@ export class PageController {
   async duplicatePage(
     @Param('pageId') pageId: string,
     @CurrentUser('id') userId: string,
+    @Param('projectId') projectId?: string,
   ) {
-    return this.pageService.duplicatePage(pageId, userId);
+    return this.pageService.duplicatePage(pageId, userId, projectId);
   }
 
   @Get([
@@ -158,8 +168,11 @@ export class PageController {
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'List files attached to a page' })
-  async getPageFiles(@Param('pageId') pageId: string) {
-    return this.pageService.getPageFiles(pageId);
+  async getPageFiles(
+    @Param('pageId') pageId: string,
+    @Param('projectId') projectId?: string,
+  ) {
+    return this.pageService.getPageFiles(pageId, projectId);
   }
 
   @Post([
@@ -180,8 +193,9 @@ export class PageController {
       content?: any;
       parentPageId?: string;
     },
+    @Param('projectId') projectId?: string,
   ) {
-    return this.pageService.createPageFile(pageId, userId, dto);
+    return this.pageService.createPageFile(pageId, userId, dto, projectId);
   }
 
   @Put([
@@ -195,8 +209,9 @@ export class PageController {
   async setMainFile(
     @Param('pageId') pageId: string,
     @Body() dto: SetMainFileDto,
+    @Param('projectId') projectId?: string,
   ) {
-    return this.pageService.setMainFile(pageId, dto.mainFileId);
+    return this.pageService.setMainFile(pageId, dto.mainFileId, projectId);
   }
 
   @Put([
@@ -210,7 +225,8 @@ export class PageController {
   async updateThumbnail(
     @Param('pageId') pageId: string,
     @Body() dto: UpdateThumbnailDto,
+    @Param('projectId') projectId?: string,
   ) {
-    return this.pageService.updateThumbnail(pageId, dto.pdfThumbnail);
+    return this.pageService.updateThumbnail(pageId, dto.pdfThumbnail, projectId);
   }
 }

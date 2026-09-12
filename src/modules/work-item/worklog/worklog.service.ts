@@ -1,191 +1,224 @@
 import {
   Injectable,
   NotFoundException,
+  BadRequestException,
   ForbiddenException,
+  Optional,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { EntityType } from '@prisma/client';
 import { WorklogRepository } from './worklog.repository';
-import {
-  CreateWorklogDto,
-  UpdateWorklogDto,
-  QueryWorklogDto,
-} from './dto/worklog.dto';
-import {
-  calculateTotalWorklogHours,
-  normalizePagination,
-} from './utils/worklog.util';
-import { WorklogPaginationResult } from './types/worklog.types';
-import { PrismaService } from '@/core/database/prisma.service';
-
-export { WorklogPaginationResult };
+import { CreateWorklogDto } from './dto/create-worklog.dto';
+import { UpdateWorklogDto } from './dto/update-worklog.dto';
+import { QueryWorklogDto } from './dto/query-worklog.dto';
+import { RedisCacheService } from '@/core/cache/redis-cache.service';
+import { WORK_ITEM_REDIS_KEYS } from '../core/constants/redis-keys.constant';
+import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
 
 @Injectable()
 export class WorklogService {
   constructor(
-    private readonly worklogRepo: WorklogRepository,
-    private readonly prisma: PrismaService,
+    private readonly worklogRepository: WorklogRepository,
+    @Optional() private readonly eventEmitter?: EventEmitter2,
+    @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
-  async getProjectWorklogs(projectId: string, query: QueryWorklogDto) {
-    const { page, limit, offset } = normalizePagination(
-      query.page,
-      query.limit,
-    );
-    const { startDate, endDate } = this.parseFilterDates(
-      query.startDate,
-      query.endDate,
-    );
-
-    const { items, total } = await this.worklogRepo.findProjectWorklogs(
-      projectId,
-      {
-        userId: query.userId,
-        startDate,
-        endDate,
-        limit,
-        offset,
-      },
-    );
-
-    return this.formatWorklogPageResult(items, total, page, limit);
+  private async invalidateTaskCache(taskId: string, projectId?: string) {
+    if (!this.cache) return;
+    const promises: Promise<any>[] = [
+      this.cache.del(WORK_ITEM_REDIS_KEYS.task(taskId)),
+    ];
+    if (projectId) {
+      promises.push(this.cache.del(WORK_ITEM_REDIS_KEYS.projectTasks(projectId)));
+    }
+    await Promise.all(promises).catch(() => {});
   }
 
-  async getWorkspaceWorklogs(workspaceId: string, query: QueryWorklogDto) {
-    const { page, limit, offset } = normalizePagination(
-      query.page,
-      query.limit,
-    );
-    const { startDate, endDate } = this.parseFilterDates(
-      query.startDate,
-      query.endDate,
-    );
-
-    const { items, total } = await this.worklogRepo.findWorkspaceWorklogs(
-      workspaceId,
-      {
-        userId: query.userId,
-        startDate,
-        endDate,
-        limit,
-        offset,
-      },
-    );
-
-    return this.formatWorklogPageResult(items, total, page, limit);
-  }
-
-  private parseFilterDates(startDateStr?: string, endDateStr?: string) {
-    return {
-      startDate: startDateStr ? new Date(startDateStr) : undefined,
-      endDate: endDateStr ? new Date(endDateStr) : undefined,
-    };
-  }
-
-  private formatWorklogPageResult<T extends { hours?: number | null }>(
-    items: T[],
-    total: number,
-    page: number,
-    limit: number,
-  ) {
-    const totalHours = calculateTotalWorklogHours(items);
-    return {
-      items,
-      total,
-      totalHours,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit) || 1,
-    };
-  }
-
-  async createWorklog(
-    projectId: string,
-    userId: string,
-    dto: CreateWorklogDto,
-  ) {
-    const workspaceId = await this.worklogRepo.resolveWorkspaceId(projectId);
-    if (!workspaceId) {
-      throw new NotFoundException(`Project with ID ${projectId} not found`);
+  async logWork(taskId: string, userId: string, createWorklogDto: CreateWorklogDto) {
+    const task = await this.worklogRepository.findTaskWithProject(taskId);
+    if (!task) {
+      throw new NotFoundException(`Work item "${taskId}" not found`);
     }
 
-    const log = await this.worklogRepo.createWorklog({
-      hours: dto.hours,
-      description: dto.description || '',
-      date: dto.date ? new Date(dto.date) : new Date(),
-      user: { connect: { id: userId } },
-      project: { connect: { id: projectId } },
-      ...(dto.taskId ? { task: { connect: { id: dto.taskId } } } : {}),
+    const hours = Number(createWorklogDto.hours) || 0;
+    const minutes = Number(createWorklogDto.minutes) || 0;
+    const totalDuration = Math.round((hours + minutes / 60) * 100) / 100;
+
+    if (totalDuration <= 0) {
+      throw new BadRequestException('Total logged work time must be greater than 0');
+    }
+
+    const date = createWorklogDto.date ? new Date(createWorklogDto.date) : new Date();
+
+    const worklog = await this.worklogRepository.createWorklog({
+      hours: totalDuration,
+      description: createWorklogDto.description?.trim() || '',
+      date,
+      taskId: task.id,
+      projectId: task.projectId,
+      userId,
     });
+
+    const newTimeSpent = await this.worklogRepository.calculateTaskTotalTime(task.id);
+    await this.worklogRepository.updateTaskTimeSpent(task.id, newTimeSpent);
+    await this.invalidateTaskCache(task.id, task.projectId);
+
+    if (this.eventEmitter) {
+      this.eventEmitter.emit('worklog.created', {
+        worklogId: worklog.id,
+        taskId: task.id,
+        projectId: task.projectId,
+        userId,
+        hours: totalDuration,
+      });
+
+      if (task.project?.workspaceId) {
+        this.eventEmitter.emit(
+          'activity.log',
+          new DomainActivityEvent({
+            entityType: EntityType.task,
+            entityId: task.id,
+            verb: 'logged_time',
+            field: 'timeSpent',
+            oldValue: String(task.timeSpent || 0),
+            newValue: String(newTimeSpent),
+            actorId: userId,
+            workspaceId: task.project.workspaceId,
+            projectId: task.projectId,
+          }),
+        );
+      }
+    }
 
     return {
       success: true,
-      data: log,
+      message: `Logged ${totalDuration} hour(s) on ${task.identifier || task.title}`,
+      worklog,
+      taskTimeSpent: newTimeSpent,
     };
   }
 
-  private async assertCanModifyWorklog(
-    id: string,
-    userId: string,
-    action: string,
-  ) {
-    const log = await this.prisma.worklog.findUnique({
-      where: { id },
-      include: {
-        project: {
-          select: {
-            id: true,
-            workspaceId: true,
-          },
-        },
-      },
-    });
+  async getTaskWorklogs(taskId: string) {
+    const task = await this.worklogRepository.findTaskWithProject(taskId);
+    if (!task) {
+      throw new NotFoundException(`Work item "${taskId}" not found`);
+    }
 
-    if (!log) {
+    const worklogs = await this.worklogRepository.findWorklogsByTaskId(task.id);
+
+    return {
+      taskId: task.id,
+      identifier: task.identifier,
+      title: task.title,
+      totalHours: task.timeSpent || 0,
+      worklogs,
+    };
+  }
+
+  async updateWorklog(
+    worklogId: string,
+    userId: string,
+    updateWorklogDto: UpdateWorklogDto,
+    isProjectAdmin: boolean = false,
+  ) {
+    const existing = await this.worklogRepository.findWorklogById(worklogId);
+    if (!existing) {
       throw new NotFoundException('Worklog not found');
     }
 
-    if (log.userId === userId) {
-      return log;
+    if (existing.userId !== userId && !isProjectAdmin) {
+      throw new ForbiddenException('You do not have permission to edit this worklog');
     }
 
-    const wsMember = await this.prisma.workspaceMember.findFirst({
-      where: { workspaceId: log.project.workspaceId, userId },
+    let updatedHours: number | undefined;
+    if (updateWorklogDto.hours !== undefined || updateWorklogDto.minutes !== undefined) {
+      const currentWholeHours = Math.floor(existing.hours);
+      const currentMinutes = Math.round((existing.hours - currentWholeHours) * 60);
+
+      const hours = updateWorklogDto.hours !== undefined ? Number(updateWorklogDto.hours) : currentWholeHours;
+      const minutes = updateWorklogDto.minutes !== undefined ? Number(updateWorklogDto.minutes) : currentMinutes;
+      updatedHours = Math.round((hours + minutes / 60) * 100) / 100;
+
+      if (updatedHours <= 0) {
+        throw new BadRequestException('Total logged work time must be greater than 0');
+      }
+    }
+
+    const updated = await this.worklogRepository.updateWorklog(worklogId, {
+      ...(updatedHours !== undefined ? { hours: updatedHours } : {}),
+      ...(updateWorklogDto.description !== undefined ? { description: updateWorklogDto.description.trim() } : {}),
+      ...(updateWorklogDto.date ? { date: new Date(updateWorklogDto.date) } : {}),
     });
-    if (wsMember?.role === 'owner' || wsMember?.role === 'admin') {
-      return log;
+
+    let newTimeSpent: number | undefined;
+    if (existing.taskId) {
+      newTimeSpent = await this.worklogRepository.calculateTaskTotalTime(existing.taskId);
+      await this.worklogRepository.updateTaskTimeSpent(existing.taskId, newTimeSpent);
+      await this.invalidateTaskCache(existing.taskId, existing.projectId);
     }
 
-    const projMember = await this.prisma.projectMember.findUnique({
-      where: {
-        projectId_userId: { projectId: log.projectId, userId },
-      },
-    });
-    if (projMember?.role === 'admin') {
-      return log;
+    if (this.eventEmitter) {
+      this.eventEmitter.emit('worklog.updated', {
+        worklogId,
+        taskId: existing.taskId,
+        projectId: existing.projectId,
+        userId,
+      });
     }
 
-    throw new ForbiddenException(
-      `You do not have permission to ${action} this worklog`,
-    );
+    return {
+      success: true,
+      message: 'Worklog updated successfully',
+      worklog: updated,
+      taskTimeSpent: newTimeSpent,
+    };
   }
 
-  async deleteWorklog(id: string, userId: string) {
-    await this.assertCanModifyWorklog(id, userId, 'delete');
-    await this.worklogRepo.deleteWorklog(id);
-    return { success: true, message: 'Worklog deleted successfully' };
+  async deleteWorklog(
+    worklogId: string,
+    userId: string,
+    isProjectAdmin: boolean = false,
+  ) {
+    const existing = await this.worklogRepository.findWorklogById(worklogId);
+    if (!existing) {
+      throw new NotFoundException('Worklog not found');
+    }
+
+    if (existing.userId !== userId && !isProjectAdmin) {
+      throw new ForbiddenException('You do not have permission to delete this worklog');
+    }
+
+    await this.worklogRepository.deleteWorklog(worklogId);
+
+    let newTimeSpent = 0;
+    if (existing.taskId) {
+      newTimeSpent = await this.worklogRepository.calculateTaskTotalTime(existing.taskId);
+      await this.worklogRepository.updateTaskTimeSpent(existing.taskId, newTimeSpent);
+      await this.invalidateTaskCache(existing.taskId, existing.projectId);
+    }
+
+    if (this.eventEmitter) {
+      this.eventEmitter.emit('worklog.deleted', {
+        worklogId,
+        taskId: existing.taskId,
+        projectId: existing.projectId,
+        userId,
+        hoursRemoved: existing.hours,
+      });
+    }
+
+    return {
+      success: true,
+      message: 'Worklog entry removed successfully',
+      taskTimeSpent: newTimeSpent,
+    };
   }
 
-  async updateWorklog(id: string, userId: string, dto: UpdateWorklogDto) {
-    await this.assertCanModifyWorklog(id, userId, 'update');
-    const log = await this.worklogRepo.updateWorklog(id, {
-      ...(dto.hours !== undefined && { hours: dto.hours }),
-      ...(dto.description !== undefined && { description: dto.description }),
-      ...(dto.date !== undefined && { date: new Date(dto.date) }),
-      ...(dto.taskId !== undefined && {
-        task: dto.taskId
-          ? { connect: { id: dto.taskId } }
-          : { disconnect: true },
-      }),
-    });
-    return { success: true, data: log };
+  async getProjectTimesheet(projectId: string, queryWorklogDto: QueryWorklogDto) {
+    return this.worklogRepository.findProjectTimesheet(projectId, queryWorklogDto);
+  }
+
+  async getWorkspaceTimesheet(workspaceId: string, queryWorklogDto: QueryWorklogDto) {
+    return this.worklogRepository.findWorkspaceTimesheet(workspaceId, queryWorklogDto);
   }
 }

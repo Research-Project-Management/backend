@@ -79,7 +79,7 @@ export class CslJsonMapper {
   }
 
   /**
-   * Transforms a database CatalogItem and related entities into a standard CSL-JSON item.
+   * Transforms a database Item and related entities into a standard CSL-JSON item.
    */
   static toCsl(item: any): CslItemData {
     const rawType = item.itemType || 'journalArticle';

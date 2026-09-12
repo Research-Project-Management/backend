@@ -49,10 +49,9 @@ export class QueueService implements OnModuleInit {
   async onModuleInit(): Promise<void> {
     try {
       const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
-      const orphanedRuns = await this.repo.findOrphanedRuns(
-        tenMinutesAgo,
-        { limit: 20 },
-      );
+      const orphanedRuns = await this.repo.findOrphanedRuns(tenMinutesAgo, {
+        limit: 20,
+      });
       if (orphanedRuns.length > 0) {
         this.logger.warn(
           `Found ${orphanedRuns.length} orphaned ingestion run(s) on startup. Marking as FAILED_RETRYABLE.`,

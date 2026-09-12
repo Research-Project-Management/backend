@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../core/database/prisma.service';
 import { isUuid } from '../../../../core/utils/tenant.util';
 import { normalizeTags } from '../../tags/utils/tags.utils';
-import { CatalogItemSummary } from '../types/items.types';
+import { ItemSummary } from '../types/items.types';
 
 @Injectable()
 export class QueryRepository {
@@ -20,7 +20,7 @@ export class QueryRepository {
   ) {
     if (!isUuid(id) || !isUuid(workspaceId)) return null;
     const client = this.getClient(tx);
-    return client.catalogItem.findFirst({
+    return client.item.findFirst({
       where: { id, workspaceId, deletedAt: null },
       include: {
         contributors: {
@@ -52,7 +52,7 @@ export class QueryRepository {
     const validIds = (ids || []).filter(isUuid);
     if (validIds.length === 0) return [];
     const client = this.getClient(tx);
-    return client.catalogItem.findMany({
+    return client.item.findMany({
       where: {
         id: { in: validIds },
         workspaceId,
@@ -84,7 +84,7 @@ export class QueryRepository {
   ) {
     if (!isUuid(itemId) || !isUuid(workspaceId)) return null;
     const client = this.getClient(tx);
-    const item = await client.catalogItem.findUnique({
+    const item = await client.item.findUnique({
       where: { id: itemId },
       include: {
         itemTags: { include: { tag: true } },
@@ -95,7 +95,7 @@ export class QueryRepository {
       return null;
     }
 
-    const relationTags = item.itemTags.map((it) => it.tag.name);
+    const relationTags = item.itemTags.map((it: any) => it.tag.name);
     const tags = normalizeTags(relationTags);
 
     return {
@@ -127,7 +127,7 @@ export class QueryRepository {
     if (validIds.length === 0) return [];
 
     const client = this.getClient(tx);
-    return client.catalogItem.findMany({
+    return client.item.findMany({
       where: {
         workspaceId,
         id: { in: validIds },
@@ -150,7 +150,7 @@ export class QueryRepository {
   ) {
     if (!isUuid(workspaceId)) return null;
     const client = this.getClient(tx);
-    return client.catalogItem.findFirst({
+    return client.item.findFirst({
       where: {
         workspaceId,
         doi,
@@ -218,14 +218,14 @@ export class QueryRepository {
       // the cursor to a lastReadAt timestamp and use that for keyset pagination.
       let cursorLastReadAt: Date | undefined;
       if (options.cursor) {
-        const cursorState = await client.userItemState.findFirst({
+        const cursorState = await client.state.findFirst({
           where: { userId: options.userId, itemId: options.cursor },
           select: { lastReadAt: true },
         });
         cursorLastReadAt = cursorState?.lastReadAt ?? undefined;
       }
 
-      const userStates = await client.userItemState.findMany({
+      const userStates = await client.state.findMany({
         where: {
           userId: options.userId,
           ...(cursorLastReadAt
@@ -284,14 +284,14 @@ export class QueryRepository {
       });
 
       return userStates
-        .filter((us) => Boolean(us.item))
-        .map((us) => ({
+        .filter((us: any) => Boolean(us.item))
+        .map((us: any) => ({
           ...us.item,
           lastReadAt: us.lastReadAt,
         }));
     }
 
-    return client.catalogItem.findMany({
+    return client.item.findMany({
       where: this.buildWhereClause(workspaceId, options),
       take: limit + 1,
       ...(options.cursor ? { cursor: { id: options.cursor }, skip: 1 } : {}),
@@ -312,9 +312,9 @@ export class QueryRepository {
       tagId?: string;
       search?: string;
     },
-  ): Prisma.CatalogItemWhereInput {
+  ): Prisma.ItemWhereInput {
     const view = options.view ?? 'all';
-    const where: Prisma.CatalogItemWhereInput = { workspaceId };
+    const where: Prisma.ItemWhereInput = { workspaceId };
 
     if (view === 'trash') {
       where.deletedAt = { not: null };
@@ -360,7 +360,7 @@ export class QueryRepository {
     const view = options.view ?? 'all';
 
     if (view === 'recent' && options.userId) {
-      return client.userItemState.count({
+      return client.state.count({
         where: {
           userId: options.userId,
           lastReadAt: { not: null },
@@ -402,7 +402,7 @@ export class QueryRepository {
       });
     }
 
-    return client.catalogItem.count({
+    return client.item.count({
       where: this.buildWhereClause(workspaceId, options),
     });
   }
@@ -414,7 +414,7 @@ export class QueryRepository {
   ): Promise<boolean> {
     if (!isUuid(itemId) || !isUuid(workspaceId)) return false;
     const client = this.getClient(tx);
-    const count = await client.catalogItem.count({
+    const count = await client.item.count({
       where: { id: itemId, workspaceId, deletedAt: null },
     });
     return count > 0;
@@ -447,11 +447,11 @@ export class QueryRepository {
 
     const validIds = itemIds.filter(isUuid);
     const client = this.getClient(tx);
-    const found = await client.catalogItem.findMany({
+    const found = await client.item.findMany({
       where: { id: { in: validIds }, workspaceId, deletedAt: null },
       select: { id: true },
     });
-    const foundSet = new Set(found.map((it) => it.id));
+    const foundSet = new Set(found.map((it: any) => it.id));
     for (const id of itemIds) {
       result.set(id, foundSet.has(id));
     }
@@ -462,10 +462,10 @@ export class QueryRepository {
     workspaceId: string,
     itemId: string,
     tx?: Prisma.TransactionClient,
-  ): Promise<CatalogItemSummary | null> {
+  ): Promise<ItemSummary | null> {
     if (!isUuid(itemId) || !isUuid(workspaceId)) return null;
     const client = this.getClient(tx);
-    const item = await client.catalogItem.findFirst({
+    const item = await client.item.findFirst({
       where: { id: itemId, workspaceId, deletedAt: null },
       select: {
         id: true,
@@ -493,7 +493,7 @@ export class QueryRepository {
       year: item.year,
       doi: item.doi || null,
       primaryAuthors: item.contributors.map(
-        (c) => c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+        (c: any) => c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
       ),
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
@@ -504,13 +504,13 @@ export class QueryRepository {
     workspaceId: string,
     itemIds: string[],
     tx?: Prisma.TransactionClient,
-  ): Promise<CatalogItemSummary[]> {
+  ): Promise<ItemSummary[]> {
     if (!itemIds || itemIds.length === 0 || !isUuid(workspaceId)) return [];
     const validIds = itemIds.filter(isUuid);
     if (validIds.length === 0) return [];
 
     const client = this.getClient(tx);
-    const items = await client.catalogItem.findMany({
+    const items = await client.item.findMany({
       where: { id: { in: validIds }, workspaceId, deletedAt: null },
       select: {
         id: true,
@@ -530,7 +530,7 @@ export class QueryRepository {
       },
     });
 
-    return items.map((item) => ({
+    return items.map((item: any) => ({
       id: item.id,
       workspaceId: item.workspaceId,
       title: item.title,
@@ -538,7 +538,7 @@ export class QueryRepository {
       year: item.year,
       doi: item.doi || null,
       primaryAuthors: item.contributors.map(
-        (c) => c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+        (c: any) => c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
       ),
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
@@ -564,7 +564,7 @@ export class QueryRepository {
         targetItem: r.targetItem,
       }));
     }
-    const item = await client.catalogItem.findUnique({
+    const item = await client.item.findUnique({
       where: { id: itemId },
       select: { extra: true },
     });
@@ -584,7 +584,7 @@ export class QueryRepository {
   ) {
     if (!isUuid(workspaceId)) return [];
     const client = this.getClient(tx);
-    return client.catalogItem.findMany({
+    return client.item.findMany({
       where: { workspaceId, deletedAt: null },
       take: limit,
       orderBy: { createdAt: 'desc' },
@@ -610,7 +610,7 @@ export class QueryRepository {
   ) {
     if (!isUuid(workspaceId)) return [];
     const client = this.getClient(tx);
-    return client.catalogItem.findMany({
+    return client.item.findMany({
       where: { workspaceId, deletedAt: null },
       select: {
         id: true,
@@ -644,7 +644,7 @@ export class QueryRepository {
   ) {
     if (!isUuid(itemId) || !isUuid(workspaceId)) return null;
     const client = this.getClient(tx);
-    const item = await client.catalogItem.findFirst({
+    const item = await client.item.findFirst({
       where: { id: itemId, workspaceId, deletedAt: null },
       select: { id: true },
     });
@@ -652,7 +652,7 @@ export class QueryRepository {
 
     const sourceRecord = await client.metadataSourceRecord.findFirst({
       where: {
-        catalogItemId: itemId,
+        itemId: itemId,
         sourceProvider: 'grobid_fulltext',
       },
       orderBy: { fetchedAt: 'desc' },

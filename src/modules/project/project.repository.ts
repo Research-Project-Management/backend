@@ -353,4 +353,72 @@ export class ProjectRepository implements IProjectRepository {
     });
     return member?.role || null;
   }
+
+  async findWorkspaceArchivedProjects(
+    workspaceId: string,
+  ): Promise<ProjectWithMembers[]> {
+    const ws = await this.resolveWorkspace(workspaceId);
+    const canonicalWorkspaceId =
+      ws?.id || (isUuid(workspaceId) ? workspaceId : null);
+    if (!canonicalWorkspaceId) return [];
+
+    return this.prisma.project.findMany({
+      where: {
+        workspaceId: canonicalWorkspaceId,
+        isActive: false,
+        deletedAt: null,
+      },
+      include: {
+        members: {
+          take: 20,
+          include: {
+            user: { select: USER_SELECT },
+          },
+        },
+        lead: { select: USER_SELECT },
+        _count: {
+          select: { members: true },
+        },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+  }
+
+  async archiveProject(projectId: string): Promise<ProjectWithMembers> {
+    return this.prisma.project.update({
+      where: { id: projectId },
+      data: { isActive: false },
+      include: {
+        members: {
+          take: 20,
+          include: {
+            user: { select: USER_SELECT },
+          },
+        },
+        lead: { select: USER_SELECT },
+        _count: {
+          select: { members: true },
+        },
+      },
+    });
+  }
+
+  async unarchiveProject(projectId: string): Promise<ProjectWithMembers> {
+    return this.prisma.project.update({
+      where: { id: projectId },
+      data: { isActive: true },
+      include: {
+        members: {
+          take: 20,
+          include: {
+            user: { select: USER_SELECT },
+          },
+        },
+        lead: { select: USER_SELECT },
+        _count: {
+          select: { members: true },
+        },
+      },
+    });
+  }
 }

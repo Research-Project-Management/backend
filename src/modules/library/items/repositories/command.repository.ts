@@ -22,13 +22,13 @@ import {
 } from '../utils/items.utils';
 import { getFileContentPath } from '@/modules/storage/storage.port';
 import {
-  CATALOG_COLUMN_METADATA_FIELDS,
+  ITEM_COLUMN_METADATA_FIELDS,
   TYPE_SPECIFIC_EXTRA_FIELDS,
   parseAccessDate,
 } from '../constants/items.constants';
 import {
-  CreateCatalogItemData,
-  UpdateCatalogItemData,
+  CreateItemData,
+  UpdateItemData,
 } from '../types/items.types';
 
 function formatExtraMetadataEntries(parsed: Record<string, unknown>): string {
@@ -38,7 +38,7 @@ function formatExtraMetadataEntries(parsed: Record<string, unknown>): string {
       v !== null &&
       v !== undefined &&
       v !== '' &&
-      !CATALOG_COLUMN_METADATA_FIELDS.has(k)
+      !ITEM_COLUMN_METADATA_FIELDS.has(k)
     ) {
       let formatted: string;
       if (typeof v === 'string') {
@@ -193,7 +193,7 @@ async function resolveOrCreateTags(
   const normalizedTagNames = normalizeTags(rawTagList).slice(0, 30);
   if (normalizedTagNames.length === 0) return [];
 
-  await client.catalogTag.createMany({
+  await client.tag.createMany({
     data: normalizedTagNames.map((name) => ({
       workspaceId,
       name,
@@ -201,7 +201,7 @@ async function resolveOrCreateTags(
     skipDuplicates: true,
   });
 
-  const existingTags = await client.catalogTag.findMany({
+  const existingTags = await client.tag.findMany({
     where: {
       workspaceId,
       name: { in: normalizedTagNames },
@@ -214,20 +214,20 @@ async function resolveOrCreateTags(
 async function syncTagsForCatalogItem(
   client: Prisma.TransactionClient | PrismaService,
   workspaceId: string,
-  catalogItemId: string,
+  itemId: string,
   rawTags: (TagInput | null | undefined)[],
 ): Promise<void> {
   const normalizedTagsList = normalizeTags(rawTags);
   if (normalizedTagsList.length === 0) {
-    await client.catalogItemTag.deleteMany({
-      where: { catalogItemId },
+    await client.itemTag.deleteMany({
+      where: { itemId },
     });
     return;
   }
 
-  await client.catalogItemTag.deleteMany({
+  await client.itemTag.deleteMany({
     where: {
-      catalogItemId,
+      itemId,
       tag: {
         name: { notIn: normalizedTagsList },
       },
@@ -235,7 +235,7 @@ async function syncTagsForCatalogItem(
   });
 
   for (const tagName of normalizedTagsList) {
-    const tag = await client.catalogTag.upsert({
+    const tag = await client.tag.upsert({
       where: {
         workspaceId_name: {
           workspaceId,
@@ -248,16 +248,16 @@ async function syncTagsForCatalogItem(
       },
       update: {},
     });
-    await client.catalogItemTag.upsert({
+    await client.itemTag.upsert({
       where: {
-        tagId_catalogItemId: {
+        tagId_itemId: {
           tagId: tag.id,
-          catalogItemId,
+          itemId,
         },
       },
       create: {
         tagId: tag.id,
-        catalogItemId,
+        itemId,
       },
       update: {},
     });
@@ -276,7 +276,7 @@ export class CommandRepository {
 
   async create(
     workspaceId: string,
-    data: CreateCatalogItemData,
+    data: CreateItemData,
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
@@ -311,7 +311,7 @@ export class CommandRepository {
       rawTagList,
     );
 
-    const createData: Prisma.CatalogItemUncheckedCreateInput = {
+    const createData: Prisma.ItemUncheckedCreateInput = {
       workspaceId,
       title: data.title,
       year: data.year ?? null,
@@ -545,7 +545,7 @@ export class CommandRepository {
         : {}),
     };
 
-    const item = await client.catalogItem.create({
+    const item = await client.item.create({
       data: createData,
       include: {
         collectionItems: {
@@ -578,11 +578,11 @@ export class CommandRepository {
     workspaceId: string,
     id: string,
     expectedVersion: number | undefined,
-    data: UpdateCatalogItemData,
+    data: UpdateItemData,
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    const existing = await client.catalogItem.findFirst({
+    const existing = await client.item.findFirst({
       where: { id, workspaceId, deletedAt: null },
       include: {
         identifiers: true,
@@ -640,7 +640,7 @@ export class CommandRepository {
       existing.notesList,
     );
 
-    const updated = await client.catalogItem.update({
+    const updated = await client.item.update({
       where: { id },
       data: {
         title: data.title ?? existing.title,
@@ -722,7 +722,7 @@ export class CommandRepository {
                 const unique = Array.from(
                   new Set(
                     raw.filter(
-                      (cid): cid is string =>
+                      (cid: string): cid is string =>
                         typeof cid === 'string' && cid.trim().length > 0,
                     ),
                   ),
@@ -731,7 +731,7 @@ export class CommandRepository {
                   ? {
                       deleteMany: {},
                       create: unique.map((cid, idx) => ({
-                        collectionId: cid,
+                        collection: { connect: { id: cid as string } },
                         sortOrder: idx,
                       })),
                     }
@@ -749,7 +749,7 @@ export class CommandRepository {
                     ? {
                         deleteMany: {},
                         create: {
-                          collectionId: data.collectionId.trim(),
+                          collection: { connect: { id: data.collectionId.trim() as string } },
                           sortOrder: 0,
                         },
                       }
@@ -837,7 +837,7 @@ export class CommandRepository {
       });
     }
     const existingArxivIdentifier = existing.identifiers?.find(
-      (identifierItem) => identifierItem.type === 'arxiv',
+      (identifierItem: any) => identifierItem.type === 'arxiv',
     )?.value;
     if (
       cleanArxivId !== undefined &&
@@ -884,13 +884,13 @@ export class CommandRepository {
       });
     }
     for (const ident of identifierChanges) {
-      await client.catalogIdentifier.deleteMany({
-        where: { catalogItemId: updated.id, type: ident.type },
+      await client.identifier.deleteMany({
+        where: { itemId: updated.id, type: ident.type },
       });
       if (ident.value) {
-        await client.catalogIdentifier.create({
+        await client.identifier.create({
           data: {
-            catalogItemId: updated.id,
+            itemId: updated.id,
             type: ident.type,
             value: ident.value,
             canonicalUri: ident.canonicalUri || undefined,
@@ -903,7 +903,7 @@ export class CommandRepository {
     if (rawTags && Array.isArray(rawTags)) {
       await syncTagsForCatalogItem(client, workspaceId, updated.id, rawTags);
 
-      const reloaded = await client.catalogItem.findUnique({
+      const reloaded = await client.item.findUnique({
         where: { id: updated.id },
         include: {
           collectionItems: {
@@ -936,7 +936,7 @@ export class CommandRepository {
   ): Promise<boolean> {
     const client = this.getClient(tx);
     if (expectedVersion !== undefined) {
-      const existing = await client.catalogItem.findFirst({
+      const existing = await client.item.findFirst({
         where: { id, workspaceId, deletedAt: null },
       });
       if (existing && existing.version !== expectedVersion) {
@@ -949,7 +949,7 @@ export class CommandRepository {
       }
     }
 
-    const result = await client.catalogItem.updateMany({
+    const result = await client.item.updateMany({
       where: { id, workspaceId, deletedAt: null },
       data: { deletedAt: new Date() },
     });
@@ -964,7 +964,7 @@ export class CommandRepository {
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    const existing = await client.catalogItem.findFirst({
+    const existing = await client.item.findFirst({
       where: { id, workspaceId, deletedAt: { not: null } },
     });
 
@@ -997,7 +997,7 @@ export class CommandRepository {
       });
     }
 
-    return client.catalogItem.update({
+    return client.item.update({
       where: { id },
       data: {
         deletedAt: null,
@@ -1020,7 +1020,7 @@ export class CommandRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<boolean> {
     const client = this.getClient(tx);
-    const existing = await client.catalogItem.findFirst({
+    const existing = await client.item.findFirst({
       where: { id, workspaceId },
     });
 
@@ -1036,7 +1036,7 @@ export class CommandRepository {
       );
     }
 
-    await client.catalogItem.delete({
+    await client.item.delete({
       where: { id },
     });
 
@@ -1052,7 +1052,7 @@ export class CommandRepository {
     const targetItemId = relation.targetItemId || relation.targetId;
     if (!targetItemId) return;
 
-    const source = await client.catalogItem.findUnique({
+    const source = await client.item.findUnique({
       where: { id: itemId },
       select: { workspaceId: true },
     });
@@ -1092,7 +1092,7 @@ export class CommandRepository {
       },
     });
 
-    const item = await client.catalogItem.findUnique({
+    const item = await client.item.findUnique({
       where: { id: itemId },
       select: { extra: true },
     });
@@ -1103,7 +1103,7 @@ export class CommandRepository {
           extraObj.relations = extraObj.relations.filter(
             (r: any) => (r.targetItemId || r.targetId) !== targetItemId,
           );
-          await client.catalogItem.update({
+          await client.item.update({
             where: { id: itemId },
             data: { extra: JSON.stringify(extraObj) },
           });
@@ -1128,7 +1128,7 @@ export class CommandRepository {
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    return client.catalogItem.update({
+    return client.item.update({
       where: { id },
       data,
     });

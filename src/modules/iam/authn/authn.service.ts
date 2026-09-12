@@ -15,6 +15,7 @@ import { AuthnRepository } from './authn.repository';
 import { UserService } from '../user/user.service';
 import { AuditService } from '../audit/audit.service';
 import { RedisCacheService } from '@/core/cache/redis-cache.service';
+import { PrismaService } from '@/core/database/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import {
@@ -67,6 +68,7 @@ export class AuthnService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly redis: RedisCacheService,
+    private readonly prisma: PrismaService,
   ) {}
 
   /**
@@ -536,6 +538,22 @@ export class AuthnService {
       avatar: dto.avatar || null,
       isVerified: true,
       status: 'active',
+    });
+
+    // Auto-create personal workspace — 1 email = 1 workspace model
+    const emailPrefix = dto.email.split('@')[0].toLowerCase();
+    const workspaceSlug = emailPrefix.replace(/[^a-z0-9-]/g, '-').slice(0, 48);
+    const workspaceName = `${user.name}'s Workspace`;
+
+    await this.prisma.workspace.create({
+      data: {
+        name: workspaceName,
+        url: workspaceSlug,
+        slug: workspaceSlug,
+        ownerId: user.id,
+        createdById: user.id,
+        plan: 'free',
+      },
     });
 
     const tokens = await this.generateTokens(user);

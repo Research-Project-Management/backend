@@ -9,6 +9,9 @@ import {
   IStoragePort,
   ReadOwnedFileInput,
   ReadOwnedFileOutput,
+  LinkFileInput,
+  UploadFileInput,
+  UploadFileOutput,
   getFileContentPath,
 } from './storage.port';
 import { PrismaService } from '@/core/database/prisma.service';
@@ -120,5 +123,86 @@ export class StorageAdapter implements IStoragePort {
         `Storage read failure for file ${fileId}: ${err.message}`,
       );
     }
+  }
+
+  async linkFile(input: LinkFileInput): Promise<void> {
+    if (!input.fileId) return;
+    await this.prisma.file.updateMany({
+      where: { id: input.fileId },
+      data: {
+        linkedToType: input.linkedToType,
+        linkedToId: input.linkedToId,
+      },
+    });
+  }
+
+  async uploadFile(input: UploadFileInput): Promise<UploadFileOutput> {
+    const {
+      workspaceId,
+      userId,
+      filename,
+      buffer,
+      mimeType,
+      source,
+      parentId,
+    } = input;
+    const cleanName = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const key = `uploads/${Date.now()}-${cleanName}`;
+    const uploadRes = await this.r2Service.uploadBuffer(key, buffer, mimeType);
+
+    const isLibrary =
+      source?.toLowerCase() === 'library' || source?.toLowerCase() === 'paper';
+
+    const linkedToType = isLibrary
+      ? 'Library'
+      : workspaceId
+        ? 'Workspace'
+        : null;
+    const linkedToId = workspaceId || null;
+
+    let resolvedWorkspaceId = workspaceId;
+    if (workspaceId) {
+      const ws = await this.prisma.workspace.findFirst({
+        where: buildWorkspaceIdentifierWhere(workspaceId),
+        select: { id: true },
+      });
+      if (ws?.id) {
+        resolvedWorkspaceId = ws.id;
+      }
+    }
+
+    const file = await this.prisma.file.create({
+      data: {
+        filename,
+        isFolder: false,
+        size: buffer.length,
+        mimeType: mimeType || 'application/octet-stream',
+        url: uploadRes.url,
+        thumbnail: null,
+        parentId: parentId || null,
+        metaData: source ? { source } : {},
+        authorId: userId,
+        workspaceId: resolvedWorkspaceId,
+        linkedToType,
+        linkedToId,
+      },
+    });
+
+    return {
+      fileId: file.id,
+      url: uploadRes.url,
+      path: uploadRes.path,
+      filename: file.filename,
+      size: file.size ?? 0,
+      mimeType: file.mimeType || mimeType,
+    };
+  }
+
+  async uploadBuffer(
+    key: string,
+    buffer: Buffer,
+    contentType?: string,
+  ): Promise<{ path: string; url: string }> {
+    return this.r2Service.uploadBuffer(key, buffer, contentType);
   }
 }

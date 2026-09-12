@@ -1,4 +1,4 @@
-﻿import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class CreateCommentDto {
   @IsString()
@@ -12,6 +12,9 @@ export class CreateCommentDto {
   @IsString()
   @IsOptional()
   workspaceId?: string;
+
+  @IsOptional()
+  attachments?: any[];
 }
 
 export class UpdateCommentDto {
@@ -26,6 +29,9 @@ export class UpdateCommentDto {
   @IsString()
   @IsOptional()
   workspaceId?: string;
+
+  @IsOptional()
+  attachments?: any[];
 }
 
 export class AddReplyDto {

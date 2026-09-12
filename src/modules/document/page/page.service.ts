@@ -104,7 +104,7 @@ export class PageService {
     return { pages: rawPages.map((pageItem) => this.formatPage(pageItem)) };
   }
 
-  async getPage(pageId: string) {
+  async getPage(pageId: string, projectId?: string) {
     const cacheKey = DOCUMENT_REDIS_KEYS.page(pageId);
     let page = this.cache ? await this.cache.get<any>(cacheKey) : null;
 
@@ -126,21 +126,40 @@ export class PageService {
       );
     }
 
+    if (projectId && page.projectId !== projectId) {
+      throw new NotFoundException('Page not found in this project');
+    }
+
     return { page };
   }
 
   async createPage(
-    workspaceId: string,
-    projectId: string,
-    userId: string,
-    dto: CreatePageDto,
+    effectiveWorkspaceIdOrProjectId: string,
+    projectIdOrUserId: string,
+    userIdOrDto: string | CreatePageDto,
+    maybeDto?: CreatePageDto,
   ) {
+    let projectId: string;
+    let userId: string;
+    let dto: CreatePageDto;
+
+    if (typeof userIdOrDto === 'object' && userIdOrDto !== null) {
+      // Direct projectId scoping: (projectId, userId, dto)
+      projectId = effectiveWorkspaceIdOrProjectId;
+      userId = projectIdOrUserId;
+      dto = userIdOrDto;
+    } else {
+      // Legacy signature: (workspaceId, projectId, userId, dto)
+      projectId = projectIdOrUserId || (maybeDto?.projectId ?? '');
+      userId = userIdOrDto as string;
+      dto = maybeDto!;
+    }
+
     const resolvedProjectId = projectId || dto.projectId;
-    let resolvedWorkspaceId = workspaceId || dto.workspaceId;
 
     if (!resolvedProjectId) {
       throw new BadRequestException(
-        'Project context is required to create a page',
+        'Project context (projectId) is required to create a page',
       );
     }
 
@@ -149,30 +168,21 @@ export class PageService {
       throw new NotFoundException('Project not found');
     }
 
-    if (resolvedWorkspaceId && project.workspaceId !== resolvedWorkspaceId) {
-      throw new BadRequestException(
-        'Project does not belong to the specified workspace',
-      );
-    }
-    resolvedWorkspaceId = project.workspaceId;
+    const resolvedWorkspaceId = project.workspaceId;
 
-    const wsMember = await this.pageRepo.findWorkspaceMember(
-      resolvedWorkspaceId,
+    const projMember = await this.pageRepo.findProjectMember(
+      project.id,
       userId,
     );
-    if (!wsMember) {
-      throw new ForbiddenException('User is not a member of this workspace');
-    }
-
-    if (wsMember.role !== 'owner' && wsMember.role !== 'admin') {
-      const projMember = await this.pageRepo.findProjectMember(
-        resolvedProjectId,
+    if (
+      !projMember ||
+      (projMember.role !== 'admin' && projMember.role !== 'contributor')
+    ) {
+      const wsMember = await this.pageRepo.findWorkspaceMember(
+        resolvedWorkspaceId,
         userId,
       );
-      if (
-        !projMember ||
-        (projMember.role !== 'admin' && projMember.role !== 'contributor')
-      ) {
+      if (!wsMember || (wsMember.role !== 'owner' && wsMember.role !== 'admin')) {
         throw new ForbiddenException(
           'You need contributor or admin role in the project to create pages',
         );
@@ -185,7 +195,7 @@ export class PageService {
       if (!parent || parent.deletedAt) {
         throw new NotFoundException('Parent page not found');
       }
-      if (parent.projectId !== resolvedProjectId) {
+      if (parent.projectId !== project.id) {
         throw new BadRequestException(
           'Parent page belongs to a different project',
         );
@@ -203,14 +213,14 @@ export class PageService {
       content: dto.content !== undefined ? dto.content : Prisma.JsonNull,
       status: dto.status || PageStatus.draft,
       workspace: { connect: { id: resolvedWorkspaceId } },
-      project: { connect: { id: resolvedProjectId } },
+      project: { connect: { id: project.id } },
       author: { connect: { id: userId } },
       ...(parentPageId
         ? { parentPage: { connect: { id: parentPageId } } }
         : {}),
     });
 
-    await this.invalidatePageCache(resolvedProjectId || '', page.id);
+    await this.invalidatePageCache(project.id, page.id);
 
     this.eventEmitter?.emit(
       'page.created',
@@ -227,10 +237,14 @@ export class PageService {
     return { page: this.formatPage(page) };
   }
 
-  async updatePage(pageId: string, dto: UpdatePageDto) {
+  async updatePage(pageId: string, dto: UpdatePageDto, projectId?: string) {
     const existing = await this.pageRepo.findPageById(pageId);
     if (!existing || existing.deletedAt) {
       throw new NotFoundException('Page not found');
+    }
+
+    if (projectId && existing.projectId !== projectId) {
+      throw new NotFoundException('Page not found in this project');
     }
 
     const parentPageId = dto.parentPageId ?? dto.parentPage;
@@ -287,10 +301,14 @@ export class PageService {
     return { page: this.formatPage(page) };
   }
 
-  async deletePage(pageId: string) {
+  async deletePage(pageId: string, projectId?: string) {
     const page = await this.pageRepo.findPageById(pageId);
     if (!page) {
       throw new NotFoundException('Page not found');
+    }
+
+    if (projectId && page.projectId !== projectId) {
+      throw new NotFoundException('Page not found in this project');
     }
 
     await this.pageRepo.softDeletePage(pageId);
@@ -311,7 +329,12 @@ export class PageService {
     return { message: 'Page deleted successfully' };
   }
 
-  async restorePage(pageId: string) {
+  async restorePage(pageId: string, projectId?: string) {
+    const page = await this.pageRepo.findPageById(pageId);
+    if (page && projectId && page.projectId !== projectId) {
+      throw new NotFoundException('Page not found in this project');
+    }
+
     const restored = await this.pageRepo.restorePage(pageId);
     await this.invalidatePageCache(restored.projectId, pageId);
     return {
@@ -320,10 +343,14 @@ export class PageService {
     };
   }
 
-  async duplicatePage(pageId: string, userId: string) {
+  async duplicatePage(pageId: string, userId: string, projectId?: string) {
     const source = await this.pageRepo.findPageById(pageId);
     if (!source) {
       throw new NotFoundException('Page not found');
+    }
+
+    if (projectId && source.projectId !== projectId) {
+      throw new NotFoundException('Page not found in this project');
     }
 
     const duplicated = await this.pageRepo.createPage({
@@ -347,10 +374,13 @@ export class PageService {
     return { page: this.formatPage(duplicated) };
   }
 
-  async getPageFiles(pageId: string) {
+  async getPageFiles(pageId: string, projectId?: string) {
     const page = await this.pageRepo.findPageById(pageId);
     if (!page) {
       throw new NotFoundException('Page not found');
+    }
+    if (projectId && page.projectId !== projectId) {
+      throw new NotFoundException('Page not found in this project');
     }
     const files = await this.pageRepo.findChildPages(pageId);
     return { files: files.map((f) => this.formatPage(f)) };
@@ -360,10 +390,14 @@ export class PageService {
     pageId: string,
     userId: string,
     dto: { title: string; content?: any; parentPageId?: string },
+    projectId?: string,
   ) {
     const parent = await this.pageRepo.findPageById(pageId);
     if (!parent) {
       throw new NotFoundException('Parent page not found');
+    }
+    if (projectId && parent.projectId !== projectId) {
+      throw new NotFoundException('Page not found in this project');
     }
 
     const created = await this.pageRepo.createPage({
@@ -381,20 +415,36 @@ export class PageService {
     return { file: this.formatPage(created) };
   }
 
-  async setMainFile(pageId: string, mainFileId: string) {
-    const page = await this.pageRepo.updatePage(pageId, {
+  async setMainFile(pageId: string, mainFileId: string, projectId?: string) {
+    const page = await this.pageRepo.findPageById(pageId);
+    if (!page) {
+      throw new NotFoundException('Page not found');
+    }
+    if (projectId && page.projectId !== projectId) {
+      throw new NotFoundException('Page not found in this project');
+    }
+
+    const updated = await this.pageRepo.updatePage(pageId, {
       mainFile: { connect: { id: mainFileId } },
     });
     await this.invalidatePageCache(page.projectId, pageId);
-    return { page: this.formatPage(page) };
+    return { page: this.formatPage(updated) };
   }
 
-  async updateThumbnail(pageId: string, pdfThumbnail: string) {
-    const page = await this.pageRepo.updatePage(pageId, {
+  async updateThumbnail(pageId: string, pdfThumbnail: string, projectId?: string) {
+    const page = await this.pageRepo.findPageById(pageId);
+    if (!page) {
+      throw new NotFoundException('Page not found');
+    }
+    if (projectId && page.projectId !== projectId) {
+      throw new NotFoundException('Page not found in this project');
+    }
+
+    const updated = await this.pageRepo.updatePage(pageId, {
       pdfThumbnail,
     });
     await this.invalidatePageCache(page.projectId, pageId);
-    return { page: this.formatPage(page) };
+    return { page: this.formatPage(updated) };
   }
 
   async findPageWithVersions(pageId: string) {

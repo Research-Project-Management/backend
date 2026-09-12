@@ -12,7 +12,7 @@ import { TagsService } from '../../tags/tags.service';
 import { CollectionsService } from '../../collections/collections.service';
 import { AttachmentsService } from '../../attachments/attachments.service';
 import { NotesService } from '../../notes/notes.service';
-import { ReadingService } from '../../reading/reading.service';
+import { StateService } from '../../state/state.service';
 import { ITEM_READ_PORT, IItemReadPort } from '../../items/ports/items.ports';
 import { MergeDuplicatesDto } from '../dto/curation.dto';
 import {
@@ -39,7 +39,7 @@ export class DuplicateService {
     private readonly collectionsService: CollectionsService,
     private readonly attachmentsService: AttachmentsService,
     private readonly notesService: NotesService,
-    private readonly readingService: ReadingService,
+    private readonly stateService: StateService,
     @Inject(ITEM_READ_PORT) private readonly itemReadPort: IItemReadPort,
   ) {}
 
@@ -267,8 +267,8 @@ export class DuplicateService {
         }
       }
 
-      // ── 6. Merge User States (Delegated to ReadingService) ────────────────────
-      await this.readingService.transferUserItemStates(
+      // ── 6. Merge User States (Delegated to StateService) ────────────────────
+      await this.stateService.transferUserItemStates(
         tx,
         uniqueDupIds,
         primary.id,
@@ -296,7 +296,7 @@ export class DuplicateService {
       );
 
       // ── 8. Update Primary Item ───────────────────────────────────────────────
-      const updatedPrimary = await tx.catalogItem.update({
+      const updatedPrimary = await tx.item.update({
         where: { id: primary.id },
         data: {
           ...(dto.fieldSelections || {}),
@@ -306,7 +306,7 @@ export class DuplicateService {
       });
 
       await helpers.appendChange(canonicalWorkspaceId, {
-        entityType: 'CatalogItem',
+        entityType: 'Item',
         entityId: updatedPrimary.id,
         action: 'update',
         version: updatedPrimary.version,
@@ -336,7 +336,7 @@ export class DuplicateService {
         dupExtra.mergedIntoId = primary.id;
         dupExtra.mergedAt = now.toISOString();
 
-        const softDeleted = await tx.catalogItem.update({
+        const softDeleted = await tx.item.update({
           where: { id: dup.id },
           data: {
             deletedAt: now,
@@ -346,12 +346,12 @@ export class DuplicateService {
         });
 
         await helpers.recordTombstone(canonicalWorkspaceId, {
-          entityType: 'CatalogItem',
+          entityType: 'Item',
           entityId: dup.id,
         });
 
         await helpers.appendChange(canonicalWorkspaceId, {
-          entityType: 'CatalogItem',
+          entityType: 'Item',
           entityId: dup.id,
           action: 'delete',
           version: softDeleted.version,
@@ -371,7 +371,7 @@ export class DuplicateService {
       }
 
       // Reload primary item with full relations so response is complete & normalized
-      const reloadedPrimary = await tx.catalogItem.findUnique({
+      const reloadedPrimary = await tx.item.findUnique({
         where: { id: primary.id },
         include: {
           contributors: { orderBy: { orderIndex: 'asc' } },
@@ -391,6 +391,3 @@ export class DuplicateService {
     });
   }
 }
-
-export const CatalogDuplicateService = DuplicateService;
-export type CatalogDuplicateService = DuplicateService;

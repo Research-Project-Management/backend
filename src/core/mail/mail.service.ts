@@ -12,7 +12,7 @@ export interface SendWorkspaceInviteOptions {
   inviterName: string;
   workspaceName: string;
   workspaceUrl: string;
-  role: string;
+  role?: string;
   token: string;
   expiresAt: Date;
 }

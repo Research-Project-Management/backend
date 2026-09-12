@@ -18,13 +18,7 @@ import { CurrentUser } from '../../../modules/iam/authn/decorators/current-user.
 import { IngestionPort, INGESTION_PORT } from './types/ingestion.types';
 import { IngestionService } from './ingestion.service';
 import { IngestionSubmissionDto } from './dto/submission.dto';
-import {
-  StartIngestionDto,
-  IngestDoiDto,
-  IngestBibtexDto,
-  IngestPdfDto,
-  UnifiedIngestionDto,
-} from './dto/ingestion.dto';
+import { UnifiedIngestionDto } from './dto/ingestion.dto';
 import { CaptureUrlDto, ConfirmCapturedUrlDto } from './dto/capture-url.dto';
 
 @Controller([
@@ -251,66 +245,5 @@ export class IngestionController {
       dto,
     );
   }
-
-  @Post('start')
-  @WorkspaceRoles('owner', 'admin', 'member')
-  async startRun(
-    @Param('workspaceId') workspaceId: string,
-    @CurrentUser('id') userId: string,
-    @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
-    @Body() dto: StartIngestionDto,
-  ) {
-    return this.ingestionService.startRun(workspaceId, userId || 'system', {
-      ...dto,
-      idempotencyKey: idempotencyKeyHeader || dto.idempotencyKey,
-    });
-  }
-
-  @Post('doi')
-  @WorkspaceRoles('owner', 'admin', 'member')
-  async ingestDoi(
-    @Param('workspaceId') workspaceId: string,
-    @CurrentUser('id') userId: string,
-    @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
-    @Body() dto: IngestDoiDto,
-  ) {
-    return this.ingestionService.ingestDoi(workspaceId, userId || 'system', {
-      ...dto,
-      idempotencyKey: idempotencyKeyHeader || dto.idempotencyKey,
-    });
-  }
-
-  @Post('bibtex')
-  @WorkspaceRoles('owner', 'admin', 'member')
-  async ingestBibtex(
-    @Param('workspaceId') workspaceId: string,
-    @CurrentUser('id') userId: string,
-    @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
-    @Body() dto: IngestBibtexDto,
-  ) {
-    return this.ingestionService.ingestBibtex(workspaceId, userId || 'system', {
-      ...dto,
-      idempotencyKey: idempotencyKeyHeader || dto.idempotencyKey,
-    });
-  }
-
-  @Post('pdf')
-  @WorkspaceRoles('owner', 'admin', 'member')
-  async ingestPdf(
-    @Param('workspaceId') workspaceId: string,
-    @CurrentUser('id') userId: string,
-    @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
-    @Body() dto: IngestPdfDto,
-  ) {
-    return this.unifiedService.ingest({
-      source: 'pdf',
-      workspaceId,
-      userId,
-      fileId: dto.fileId,
-      filename: dto.filename,
-      collectionId: dto.collectionId,
-      overrides: dto.overrides,
-      idempotencyKey: idempotencyKeyHeader || dto.idempotencyKey,
-    });
-  }
 }
+

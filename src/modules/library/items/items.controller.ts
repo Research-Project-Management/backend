@@ -26,8 +26,8 @@ import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-
 import { CurrentUser } from '../../../modules/iam/authn/decorators/current-user.decorator';
 import {
   CursorPaginationQueryDto,
-  CreateCatalogItemDto,
-  UpdateCatalogItemDto,
+  CreateItemDto,
+  UpdateItemDto,
 } from './dto/items.dto';
 
 @Controller([
@@ -82,7 +82,7 @@ export class ItemsController {
     );
     if (!item)
       throw new NotFoundException(
-        `CatalogItem ${id} not found in workspace ${workspaceId}`,
+        `Item ${id} not found in workspace ${workspaceId}`,
       );
     return item;
   }
@@ -107,7 +107,7 @@ export class ItemsController {
   async createItem(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') currentUserId: string,
-    @Body() body: CreateCatalogItemDto,
+    @Body() body: CreateItemDto,
   ) {
     return this.itemsService.createItem(workspaceId, {
       ...body,
@@ -121,7 +121,7 @@ export class ItemsController {
     @Param('workspaceId') workspaceId: string,
     @Param('id') id: string,
     @Headers('if-match') ifMatch: string | undefined,
-    @Body() body: UpdateCatalogItemDto,
+    @Body() body: UpdateItemDto,
   ) {
     const parsedHeaderVersion = ifMatch
       ? parseInt(ifMatch.replace(/["']/g, ''), 10)
@@ -149,7 +149,7 @@ export class ItemsController {
     @Param('workspaceId') workspaceId: string,
     @Param('id') id: string,
     @Headers('if-match') ifMatch: string | undefined,
-    @Body() body: UpdateCatalogItemDto,
+    @Body() body: UpdateItemDto,
   ) {
     return this.updateItem(workspaceId, id, ifMatch, body);
   }
@@ -183,7 +183,7 @@ export class ItemsController {
     );
     if (!item) {
       throw new NotFoundException(
-        `CatalogItem ${id} not found in workspace ${workspaceId}`,
+        `Item ${id} not found in workspace ${workspaceId}`,
       );
     }
     const preview = this.itemsService.previewTypeConversion(
@@ -330,6 +330,3 @@ export class ItemsController {
     );
   }
 }
-
-export const CatalogController = ItemsController;
-export type CatalogController = ItemsController;

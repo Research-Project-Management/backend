@@ -116,38 +116,3 @@ export class UpdateProjectMemberDto {
   @IsOptional()
   userId?: string;
 }
-
-export class AddColumnDto {
-  @IsString()
-  @IsNotEmpty({ message: 'Column title is required' })
-  title!: string;
-
-  @IsString()
-  @IsOptional()
-  id?: string;
-
-  @IsString()
-  @IsOptional()
-  accentColor?: string;
-}
-
-export class UpdateColumnDto {
-  @IsString()
-  @IsOptional()
-  title?: string;
-
-  @IsString()
-  @IsOptional()
-  accentColor?: string;
-}
-
-export class ReorderColumnsDto {
-  @IsArray()
-  @IsNotEmpty({ message: 'Columns list is required' })
-  columns!: Array<{
-    id: string;
-    title: string;
-    isDefault?: boolean;
-    accentColor?: string;
-  }>;
-}

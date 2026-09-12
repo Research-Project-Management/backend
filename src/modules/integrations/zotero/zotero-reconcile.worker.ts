@@ -71,9 +71,9 @@ export class ZoteroReconcileWorker {
       });
 
       if (itemBinding) {
-        let entityType: SyncEntityType = 'CatalogItem';
+        let entityType: SyncEntityType = 'Item';
         if (itemBinding.entityType === 'attachment') {
-          entityType = 'CatalogAttachment';
+          entityType = 'Attachment';
         } else if (itemBinding.entityType === 'note') {
           entityType = 'Note';
         } else if (itemBinding.entityType === 'annotation') {

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ItemsService } from '../../items/items.service';
 import { ItemMetadata } from '../metadata/types/metadata.types';
-import { CreateCatalogItemData } from '../../items/types/items.types';
+import { CreateItemData } from '../../items/types/items.types';
 import { LibraryItemSource } from '../../outbox/outbox.events';
 import {
   splitAuthorString,
@@ -132,12 +132,12 @@ function generateBibtexCitationKey(metadata: ItemMetadata): string | undefined {
   return `${authorPart || 'ref'}${yearPart}${titlePart || 'paper'}`;
 }
 
-/** Converts reconciled provider metadata to the Catalog persistence contract.
+/** Converts reconciled provider metadata to the Item persistence contract.
  * This is the sole conversion used by the asynchronous ingestion path. */
-export function toCatalogItemData(
+export function toItemData(
   metadata: ItemMetadata,
   options?: CommitStageOptions,
-): CreateCatalogItemData {
+): CreateItemData {
   const rawTags = normalizeTags(
     metadata.tags || metadata.keywords || metadata.labels || [],
   );
@@ -249,15 +249,15 @@ export class CommitStage {
   constructor(private readonly itemsService: ItemsService) {}
 
   /**
-   * Executes canonical Catalog commit for a reconciled item proposal.
-   * Persists CatalogItem, child attachments, tags/keywords, and literature notes.
+   * Executes canonical Item commit for a reconciled item proposal.
+   * Persists Item, child attachments, tags/keywords, and literature notes.
    */
   async execute(
     workspaceId: string,
     metadata: ItemMetadata,
     options?: CommitStageOptions,
   ): Promise<any> {
-    const createData = toCatalogItemData(metadata, options);
+    const createData = toItemData(metadata, options);
 
     const createdItem = await this.itemsService.createItem(
       workspaceId,

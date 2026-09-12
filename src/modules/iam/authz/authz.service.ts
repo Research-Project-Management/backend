@@ -24,14 +24,15 @@ export class AuthzService {
   ) {}
 
   /**
-   * Check if a workspace role has a specific permission
+   * Check if a workspace role has a specific permission.
+   * In personal workspace model: only 'owner' role exists, and owners have all permissions.
    */
   hasWorkspacePermission(
     role: WorkspaceRole | string,
-    permission: Permission,
+    _permission: Permission,
   ): boolean {
-    const permissions = WORKSPACE_ROLE_PERMISSIONS[role as WorkspaceRole] || [];
-    return permissions.includes(permission);
+    // Workspace is personal; the owner has full access.
+    return role === WorkspaceRole.OWNER || role === 'owner';
   }
 
   /**
@@ -193,19 +194,8 @@ export class AuthzService {
       throw new ForbiddenException('Project not found');
     }
 
-    // Workspace owner / admin superuser access
-    const wsRole = await this.getWorkspaceMemberRole(
-      project.workspaceId,
-      userId,
-    );
-    const normalizedWsRole = wsRole?.toUpperCase() as WorkspaceRole | undefined;
-    if (
-      normalizedWsRole === WorkspaceRole.OWNER ||
-      normalizedWsRole === WorkspaceRole.ADMIN
-    ) {
-      return { projectId, role: ProjectRole.ADMIN };
-    }
-
+    // Personal workspace model: no workspace-level bypass.
+    // Access is determined solely by ProjectMember.role.
     const role = await this.getProjectMemberRole(projectId, userId);
     if (!role) {
       throw new ForbiddenException('You are not a member of this project');

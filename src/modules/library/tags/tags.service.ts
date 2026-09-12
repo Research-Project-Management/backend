@@ -14,21 +14,24 @@ export class TagsService {
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
-  private async invalidateTagsCache(workspaceId: string): Promise<void> {
+  async invalidateTagsCache(workspaceId: string): Promise<void> {
     if (this.cache) {
       await this.cache.delPattern(LIBRARY_REDIS_KEYS.tagsPattern(workspaceId));
     }
   }
 
-  async getTags(workspaceId: string) {
+  async getTags(workspaceId: string, options?: { includeInactive?: boolean }) {
     if (this.cache) {
+      const cacheKey = options?.includeInactive
+        ? `${LIBRARY_REDIS_KEYS.tags(workspaceId)}:all`
+        : LIBRARY_REDIS_KEYS.tags(workspaceId);
       return this.cache.wrap(
-        LIBRARY_REDIS_KEYS.tags(workspaceId),
-        () => this.repo.findMany(workspaceId),
+        cacheKey,
+        () => this.repo.findMany(workspaceId, options),
         300,
       );
     }
-    return this.repo.findMany(workspaceId);
+    return this.repo.findMany(workspaceId, options);
   }
 
   async createOrGetTag(
@@ -98,10 +101,34 @@ export class TagsService {
     return result;
   }
 
-  async assignTag(workspaceId: string, tagId: string, catalogItemId: string) {
+  async deleteAutomaticTags(workspaceId: string) {
+    const result = await this.libraryTx.executeInTransaction(
+      async (tx, helpers) => {
+        const deletedTagIds = await this.repo.deleteAutomatic(workspaceId, tx);
+        for (const tagId of deletedTagIds) {
+          await helpers.recordTombstone(workspaceId, {
+            entityType: 'Tag',
+            entityId: tagId,
+          });
+          await helpers.publishOutbox(
+            workspaceId,
+            tagId,
+            'library.tag.deleted',
+            { id: tagId, deletedAt: new Date() },
+          );
+        }
+        return { count: deletedTagIds.length };
+      },
+    );
+
+    await this.invalidateTagsCache(workspaceId);
+    return result;
+  }
+
+  async assignTag(workspaceId: string, tagId: string, itemId: string) {
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
       // 1. Verify tag belongs to workspace (prevent IDOR / BOLA)
-      const tag = await tx.catalogTag.findFirst({
+      const tag = await tx.tag.findFirst({
         where: { id: tagId, workspaceId },
         select: { id: true },
       });
@@ -109,40 +136,36 @@ export class TagsService {
         throw new NotFoundException(`Tag ${tagId} not found in workspace`);
       }
 
-      // 2. Verify catalogItem belongs to workspace (prevent IDOR / BOLA)
-      const item = await tx.catalogItem.findFirst({
-        where: { id: catalogItemId, workspaceId, deletedAt: null },
+      // 2. Verify item belongs to workspace (prevent IDOR / BOLA)
+      const item = await tx.item.findFirst({
+        where: { id: itemId, workspaceId, deletedAt: null },
         select: { id: true },
       });
       if (!item) {
-        throw new NotFoundException(
-          `Item ${catalogItemId} not found in workspace`,
-        );
+        throw new NotFoundException(`Item ${itemId} not found in workspace`);
       }
 
-      await this.repo.assignToItem(tagId, catalogItemId, tx);
+      await this.repo.assignToItem(tagId, itemId, tx);
 
       await helpers.appendChange(workspaceId, {
-        entityType: 'CatalogItemTag',
-        entityId: `${tagId}:${catalogItemId}`,
+        entityType: 'ItemTag',
+        entityId: `${tagId}:${itemId}`,
         action: 'create',
         version: 1,
-        data: { tagId, catalogItemId },
+        data: { tagId, itemId },
       });
 
-      await helpers.publishOutbox(
-        workspaceId,
-        catalogItemId,
-        'library.item.tagged',
-        { tagId, catalogItemId },
-      );
+      await helpers.publishOutbox(workspaceId, itemId, 'library.item.tagged', {
+        tagId,
+        itemId,
+      });
     });
   }
 
-  async removeTag(workspaceId: string, tagId: string, catalogItemId: string) {
+  async removeTag(workspaceId: string, tagId: string, itemId: string) {
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
       // 1. Verify tag belongs to workspace (prevent IDOR / BOLA)
-      const tag = await tx.catalogTag.findFirst({
+      const tag = await tx.tag.findFirst({
         where: { id: tagId, workspaceId },
         select: { id: true },
       });
@@ -150,41 +173,39 @@ export class TagsService {
         throw new NotFoundException(`Tag ${tagId} not found in workspace`);
       }
 
-      // 2. Verify catalogItem belongs to workspace (prevent IDOR / BOLA)
-      const item = await tx.catalogItem.findFirst({
-        where: { id: catalogItemId, workspaceId, deletedAt: null },
+      // 2. Verify item belongs to workspace (prevent IDOR / BOLA)
+      const item = await tx.item.findFirst({
+        where: { id: itemId, workspaceId, deletedAt: null },
         select: { id: true },
       });
       if (!item) {
-        throw new NotFoundException(
-          `Item ${catalogItemId} not found in workspace`,
-        );
+        throw new NotFoundException(`Item ${itemId} not found in workspace`);
       }
 
-      await this.repo.removeFromItem(tagId, catalogItemId, tx);
+      await this.repo.removeFromItem(tagId, itemId, tx);
 
       await helpers.recordTombstone(workspaceId, {
-        entityType: 'CatalogItemTag',
-        entityId: `${tagId}:${catalogItemId}`,
+        entityType: 'ItemTag',
+        entityId: `${tagId}:${itemId}`,
       });
 
       await helpers.publishOutbox(
         workspaceId,
-        catalogItemId,
+        itemId,
         'library.item.untagged',
-        { tagId, catalogItemId },
+        { tagId, itemId },
       );
     });
   }
 
   /**
-   * Resolves or creates tags by name in bulk and upserts all CatalogItemTag join records.
+   * Resolves or creates tags by name in bulk and upserts all ItemTag join records.
    * Uses 3 queries total regardless of tag count, replacing the previous N*3 sequential loop.
    */
   async syncTagsToItem(
     tx: Prisma.TransactionClient,
     workspaceId: string,
-    catalogItemId: string,
+    itemId: string,
     tagNames: string[],
   ): Promise<void> {
     if (tagNames.length === 0) return;
@@ -194,7 +215,7 @@ export class TagsService {
     if (dedupedTags.length === 0) return;
 
     // 1. Fetch all existing tags in one query
-    const existingTags = await tx.catalogTag.findMany({
+    const existingTags = await tx.tag.findMany({
       where: {
         workspaceId,
         name: { in: dedupedTags, mode: 'insensitive' },
@@ -211,7 +232,7 @@ export class TagsService {
       (n) => !existingNameSet.has(n.toLowerCase()),
     );
     if (missingNames.length > 0) {
-      await tx.catalogTag.createMany({
+      await tx.tag.createMany({
         data: missingNames.map((name) => ({ workspaceId, name })),
         skipDuplicates: true,
       });
@@ -220,7 +241,7 @@ export class TagsService {
     // 3. Re-fetch to get IDs of newly created tags
     const allTags =
       missingNames.length > 0
-        ? await tx.catalogTag.findMany({
+        ? await tx.tag.findMany({
             where: {
               workspaceId,
               name: { in: dedupedTags, mode: 'insensitive' },
@@ -230,8 +251,8 @@ export class TagsService {
         : existingTags;
 
     // 4. Upsert all join records in one batch
-    await tx.catalogItemTag.createMany({
-      data: allTags.map((tag) => ({ tagId: tag.id, catalogItemId })),
+    await tx.itemTag.createMany({
+      data: allTags.map((tag) => ({ tagId: tag.id, itemId })),
       skipDuplicates: true,
     });
 
@@ -250,28 +271,28 @@ export class TagsService {
   ): Promise<void> {
     if (sourceItemIds.length === 0) return;
 
-    const primaryTags = await tx.catalogItemTag.findMany({
-      where: { catalogItemId: targetItemId },
+    const primaryTags = await tx.itemTag.findMany({
+      where: { itemId: targetItemId },
       select: { tagId: true },
     });
     const primaryTagIds = new Set(primaryTags.map((it) => it.tagId));
 
-    const dupTags = await tx.catalogItemTag.findMany({
-      where: { catalogItemId: { in: sourceItemIds } },
+    const dupTags = await tx.itemTag.findMany({
+      where: { itemId: { in: sourceItemIds } },
       select: { tagId: true },
     });
 
     for (const dup of dupTags) {
       if (!primaryTagIds.has(dup.tagId)) {
-        await tx.catalogItemTag.upsert({
+        await tx.itemTag.upsert({
           where: {
-            tagId_catalogItemId: {
+            tagId_itemId: {
               tagId: dup.tagId,
-              catalogItemId: targetItemId,
+              itemId: targetItemId,
             },
           },
           create: {
-            catalogItemId: targetItemId,
+            itemId: targetItemId,
             tagId: dup.tagId,
           },
           update: {},
@@ -280,8 +301,8 @@ export class TagsService {
       }
     }
 
-    await tx.catalogItemTag.deleteMany({
-      where: { catalogItemId: { in: sourceItemIds } },
+    await tx.itemTag.deleteMany({
+      where: { itemId: { in: sourceItemIds } },
     });
   }
 }

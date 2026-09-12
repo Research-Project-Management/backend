@@ -1,4 +1,7 @@
-export type { CollectionId, WorkspaceId } from '../../../../core/types/brand.type';
+export type {
+  CollectionId,
+  WorkspaceId,
+} from '../../../../core/types/brand.type';
 
 export type CollectionDeleteStrategy = 'cascade' | 'move-to-parent' | 'orphan';
 

@@ -26,9 +26,9 @@ export interface AttachmentRevisionEntity {
   createdAt: Date;
 }
 
-export interface CatalogAttachmentEntity {
+export interface AttachmentEntity {
   id: string;
-  catalogItemId: string;
+  itemId: string;
   fileId?: string | null;
   filename: string;
   url: string;
@@ -47,7 +47,7 @@ export interface CatalogAttachmentEntity {
 
 export interface CreateAttachmentInput {
   workspaceId: string;
-  catalogItemId: string;
+  itemId?: string;
   filename: string;
   url: string;
   mimeType?: string;

@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ItemsController } from './items.controller';
-import { ItemsService, CatalogService } from './items.service';
+import { ItemsService } from './items.service';
 import { QueryRepository } from './repositories/query.repository';
 import { CommandRepository } from './repositories/command.repository';
 import { ItemsMapper } from './mappers/items.mapper';
@@ -40,7 +40,6 @@ import { ITEM_EXISTENCE_PORT, ITEM_READ_PORT } from './ports/items.ports';
   ],
   exports: [
     ItemsService,
-    CatalogService,
     QueryRepository,
     CommandRepository,
     ItemsMapper,

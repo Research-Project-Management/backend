@@ -1,10 +1,10 @@
 import { OutboxEvent } from '@prisma/client';
 
 /**
- * Formal Typed Catalog of all Domain Events produced within the Library Bounded Context.
+ * Formal Typed Registry of all Domain Events produced within the Library Bounded Context.
  */
 export const LIBRARY_EVENT_TYPES = {
-  // Catalog Items
+  // Items
   ITEM_CREATED: 'library.item.created',
   ITEM_UPDATED: 'library.item.updated',
   ITEM_DELETED: 'library.item.deleted',
@@ -85,7 +85,7 @@ export function buildItemCreatedOutboxPayload(input: {
   };
 }
 
-export interface EventCatalogEntry {
+export interface EventRegistryEntry {
   eventType: string;
   producer: string;
   consumer: string;
@@ -94,10 +94,10 @@ export interface EventCatalogEntry {
   expectedSideEffect: string;
 }
 
-export const LIBRARY_EVENT_CATALOG: Record<string, EventCatalogEntry> = {
+export const LIBRARY_EVENT_REGISTRY: Record<string, EventRegistryEntry> = {
   [LIBRARY_EVENT_TYPES.ITEM_CREATED]: {
     eventType: LIBRARY_EVENT_TYPES.ITEM_CREATED,
-    producer: 'CatalogService.createItem',
+    producer: 'ItemsService.createItem',
     consumer: 'EventDispatcher',
     retryPolicy: 'exponential_backoff',
     idempotency: 'aggregate_version',
@@ -106,7 +106,7 @@ export const LIBRARY_EVENT_CATALOG: Record<string, EventCatalogEntry> = {
   },
   [LIBRARY_EVENT_TYPES.ITEM_UPDATED]: {
     eventType: LIBRARY_EVENT_TYPES.ITEM_UPDATED,
-    producer: 'CatalogService.updateItem',
+    producer: 'ItemsService.updateItem',
     consumer: 'EventDispatcher',
     retryPolicy: 'exponential_backoff',
     idempotency: 'aggregate_version',
@@ -115,7 +115,7 @@ export const LIBRARY_EVENT_CATALOG: Record<string, EventCatalogEntry> = {
   },
   [LIBRARY_EVENT_TYPES.ITEM_DELETED]: {
     eventType: LIBRARY_EVENT_TYPES.ITEM_DELETED,
-    producer: 'CatalogService.deleteItem',
+    producer: 'ItemsService.deleteItem',
     consumer: 'EventDispatcher',
     retryPolicy: 'exponential_backoff',
     idempotency: 'aggregate_version',
@@ -123,7 +123,7 @@ export const LIBRARY_EVENT_CATALOG: Record<string, EventCatalogEntry> = {
   },
   [LIBRARY_EVENT_TYPES.ITEM_RESTORED]: {
     eventType: LIBRARY_EVENT_TYPES.ITEM_RESTORED,
-    producer: 'CatalogService.restoreItem',
+    producer: 'ItemsService.restoreItem',
     consumer: 'EventDispatcher',
     retryPolicy: 'exponential_backoff',
     idempotency: 'aggregate_version',
@@ -131,7 +131,7 @@ export const LIBRARY_EVENT_CATALOG: Record<string, EventCatalogEntry> = {
   },
   [LIBRARY_EVENT_TYPES.ITEM_PURGED]: {
     eventType: LIBRARY_EVENT_TYPES.ITEM_PURGED,
-    producer: 'CatalogService.purgeItem',
+    producer: 'ItemsService.purgeItem',
     consumer: 'EventDispatcher',
     retryPolicy: 'exponential_backoff',
     idempotency: 'aggregate_version',

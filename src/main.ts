@@ -238,7 +238,7 @@ async function bootstrap() {
       'Manuscript',
       'LaTeX Editor Pages, Hierarchies, Snapshots, Versions',
     )
-    .addTag('Planning', 'Kanban Tasks, Priorities, Checklists, Cycles')
+    .addTag('Planning', 'Kanban Tasks, Priorities, Relations, Cycles')
     .addTag(
       'Collaboration',
       'Page Line Comments, Task Reactions, Sticky Canvas',

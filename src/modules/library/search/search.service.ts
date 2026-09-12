@@ -11,7 +11,7 @@ import {
   RagIndexPaperInput,
   RagIndexResult,
 } from './providers/rag.provider';
-import { SearchCatalogQueryDto } from './dto/search.dto';
+import { SearchItemsQueryDto } from './dto/search.dto';
 
 @Injectable()
 export class SearchService {
@@ -27,7 +27,7 @@ export class SearchService {
   /**
    * Faceted search returning items, facets, and cursor pagination metadata.
    */
-  async search(workspaceId: string, dto: SearchCatalogQueryDto) {
+  async search(workspaceId: string, dto: SearchItemsQueryDto) {
     const searchOptions: SearchOptions = {
       q: dto.query,
       collectionId: dto.collectionId,
@@ -53,13 +53,6 @@ export class SearchService {
   }
 
   /**
-   * Search alias for searchCatalog
-   */
-  async searchCatalog(workspaceId: string, dto: SearchCatalogQueryDto) {
-    return this.search(workspaceId, dto);
-  }
-
-  /**
    * Search PDF attachment pages for text occurrences and character offsets.
    */
   async searchPageAnchors(
@@ -68,10 +61,10 @@ export class SearchService {
     term: string,
     pageIndex?: number,
   ): Promise<PageAnchorMatch[]> {
-    const attachment = await this.prisma.catalogAttachment.findFirst({
+    const attachment = await this.prisma.attachment.findFirst({
       where: {
         id: attachmentId,
-        catalogItem: { workspaceId, deletedAt: null },
+        item: { workspaceId, deletedAt: null },
       },
       select: { id: true },
     });
@@ -82,11 +75,7 @@ export class SearchService {
       );
     }
 
-    return this.fullText.searchPageAnchors(
-      attachmentId,
-      term,
-      pageIndex,
-    );
+    return this.fullText.searchPageAnchors(attachmentId, term, pageIndex);
   }
 
   async indexAttachmentPages(

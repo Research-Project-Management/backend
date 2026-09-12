@@ -54,3 +54,29 @@ export function generateDedupeBucketKey(
   const authorFamily = extractFirstAuthorFamily(authors);
   return `${normTitle.substring(0, titlePrefixLength)}::${authorFamily}`;
 }
+
+/**
+ * Calculates Jaccard similarity score between two normalized titles.
+ */
+export function calculateTitleSimilarity(a: string, b: string): number {
+  if (a === b) return 1.0;
+  if (a.includes(b) || b.includes(a)) return 0.92;
+  const wordsA = new Set(a.split(/\s+/).filter(Boolean));
+  const wordsB = new Set(b.split(/\s+/).filter(Boolean));
+  let intersection = 0;
+  for (const w of wordsA) {
+    if (wordsB.has(w)) intersection++;
+  }
+  const union = new Set([...wordsA, ...wordsB]).size;
+  return union > 0 ? intersection / union : 0.0;
+}
+
+/**
+ * Compares two author family strings fuzzily.
+ */
+export function firstAuthorMatches(a: string, b: string): boolean {
+  const normA = a.toLowerCase().replace(/[^a-z]/g, '');
+  const normB = b.toLowerCase().replace(/[^a-z]/g, '');
+  return normA.includes(normB) || normB.includes(normA);
+}
+

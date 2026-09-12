@@ -603,9 +603,7 @@ export class PdfProvider {
     }
 
     return this.extractFromText(
-      buffer
-        .subarray(0, PdfProvider.TEXT_SCAN_LIMIT)
-        .toString('latin1'),
+      buffer.subarray(0, PdfProvider.TEXT_SCAN_LIMIT).toString('latin1'),
     );
   }
 

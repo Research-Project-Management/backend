@@ -11,12 +11,16 @@ import { EntityType } from '@prisma/client';
 
 @ApiTags('Activity')
 @ApiBearerAuth('JWT-auth')
-@Controller(['api/activity', 'activity'])
+@Controller()
 @UseGuards(JwtAuthGuard)
 export class ActivityController {
   constructor(private readonly activityService: ActivityService) {}
 
-  @Get(['workspaces/:workspaceId/feed', 'workspace/:workspaceId/feed'])
+  @Get([
+    'api/activity/workspaces/:workspaceId/feed',
+    'activity/workspaces/:workspaceId/feed',
+    'api/workspaces/:workspaceId/activity/feed',
+  ])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'Get workspace collaboration activity feed' })
@@ -33,7 +37,11 @@ export class ActivityController {
     });
   }
 
-  @Get(['workspaces/:workspaceId/recent', 'workspace/:workspaceId/recent'])
+  @Get([
+    'api/activity/workspaces/:workspaceId/recent',
+    'activity/workspaces/:workspaceId/recent',
+    'api/workspaces/:workspaceId/recent',
+  ])
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   @ApiOperation({ summary: 'Get user recent interacted items' })
@@ -49,7 +57,11 @@ export class ActivityController {
     );
   }
 
-  @Get(['projects/:projectId/feed', 'project/:projectId/feed'])
+  @Get([
+    'api/activity/projects/:projectId/feed',
+    'activity/projects/:projectId/feed',
+    'api/projects/:projectId/activity/feed',
+  ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get project specific activity feed' })

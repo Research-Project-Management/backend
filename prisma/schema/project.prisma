@@ -26,7 +26,7 @@ model File {
 
   // Relations
   sharedWith  FileShare[]
-  attachments CatalogAttachment[]
+  attachments Attachment[]
 
   @@index([workspaceId, parentId, trashedAt])
   @@index([workspaceId, isFolder, trashedAt])
@@ -55,7 +55,14 @@ model Label {
   id          String    @id @default(uuid()) @db.Uuid
   name        String
   color       String    @default("#3b82f6")
+  description String?
   type        LabelType @default(sticky)
+  sortOrder   Float     @default(65535) @map("sort_order")
+  parentId    String?   @map("parent_id") @db.Uuid
+  parent      Label?    @relation("LabelHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children    Label[]   @relation("LabelHierarchy")
+  projectId   String?   @map("project_id") @db.Uuid
+  project     Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   workspaceId String    @map("workspace_id") @db.Uuid
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   createdById String    @map("created_by_id") @db.Uuid
@@ -64,6 +71,8 @@ model Label {
   updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([workspaceId, name, type])
+  @@index([projectId, sortOrder])
+  @@index([projectId, parentId])
   @@map("labels")
 }
 
@@ -138,24 +147,16 @@ model Task {
   id             String         @id @default(uuid()) @db.Uuid
   title          String
   content        String?        @default("")
-  description    String?        @default("")
   columnId       String         @map("column_id")
   startDate      DateTime?      @map("start_date") @db.Timestamptz(6)
   dueDate        DateTime?      @map("due_date") @db.Timestamptz(6)
-  recurrence     TaskRecurrence @default(none)
-  reminder       TaskReminder   @default(d1)
   labels         String[]       @default([])
   rank           Float          @default(0)
   priority       TaskPriority   @default(none)
-  issueType      String?        @default("task") @map("issue_type")
-  storyPoints    Int?           @map("story_points")
   relations      Json?          @default("[]")
-  estimate       Float?
   identifier     String?        @map("identifier")
   sequenceNumber Int?           @map("sequence_number")
   timeSpent      Float?         @default(0) @map("time_spent")
-  checklists     Json?          @default("[]")
-  attachments    Json?          @default("[]")
   completed      Boolean        @default(false)
   archivedAt     DateTime?      @map("archived_at") @db.Timestamptz(6)
   projectId      String         @map("project_id") @db.Uuid
@@ -164,18 +165,23 @@ model Task {
   author         User           @relation("TaskAuthor", fields: [authorId], references: [id], onDelete: Restrict)
   assigneeId     String?        @map("assignee_id") @db.Uuid
   assignee       User?          @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  /// Additional co-assignees stored as JSON array of user IDs.
+  /// Primary assignee is always mirrored in assigneeId for backward compat.
+  assigneeIds    Json           @default("[]") @map("assignee_ids")
   cycleId        String?        @map("cycle_id") @db.Uuid
   cycle          Cycle?         @relation(fields: [cycleId], references: [id], onDelete: SetNull)
   parentTaskId   String?        @map("parent_task_id") @db.Uuid
   parentTask     Task?          @relation("TaskSubtasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
   subtasks       Task[]         @relation("TaskSubtasks")
+  /// Status update signals (On Track / At Risk / Off Track). Stored as JSON array, newest first.
+  updates        Json           @default("[]")
   createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt      DateTime?      @map("deleted_at") @db.Timestamptz(6)
 
   // Relations
-  comments TaskComment[]
-  worklogs Worklog[]
+  comments    TaskComment[]
+  worklogs    Worklog[]
 
   @@index([projectId, columnId, rank])
   @@index([projectId, columnId, deletedAt, rank])
@@ -276,9 +282,10 @@ model TaskComment {
   author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
   content   String
   isEdited  Boolean  @default(false) @map("is_edited")
-  reactions Json?    @default("[]")
-  replies   Json?    @default("[]")
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  reactions   Json?    @default("[]")
+  replies     Json?    @default("[]")
+  attachments Json?    @default("[]")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([taskId])
@@ -310,3 +317,152 @@ model Sticky {
   @@index([userId])
   @@map("stickies")
 }
+
+// ── 8. Saved Views Context (Plane.so parity) ────────────────────────────────
+
+enum ViewAccess {
+  public
+  private
+}
+
+model WorkItemView {
+  id                String         @id @default(uuid()) @db.Uuid
+  name              String
+  description       String?        @default("")
+  query             Json           @default("{}")
+  filters           Json?          @default("{}")
+  displayFilters    Json?          @default("{}") @map("display_filters")
+  displayProperties Json?          @default("{}") @map("display_properties")
+  richFilters       Json?          @default("{}") @map("rich_filters")
+  access            ViewAccess     @default(public)
+  sortOrder         Float          @default(65535) @map("sort_order")
+  logoProps         Json?          @default("{}") @map("logo_props")
+  isLocked          Boolean        @default(false) @map("is_locked")
+  archivedAt        DateTime?      @map("archived_at") @db.Timestamptz(6)
+  projectId         String         @map("project_id") @db.Uuid
+  project           Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdById       String         @map("created_by_id") @db.Uuid
+  createdBy         User           @relation("ViewAuthor", fields: [createdById], references: [id], onDelete: Cascade)
+  favorites         ViewFavorite[]
+  createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([projectId, access])
+  @@index([projectId, createdById])
+  @@map("work_item_views")
+}
+
+model ViewFavorite {
+  id        String       @id @default(uuid()) @db.Uuid
+  viewId    String       @map("view_id") @db.Uuid
+  view      WorkItemView @relation(fields: [viewId], references: [id], onDelete: Cascade)
+  userId    String       @map("user_id") @db.Uuid
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([viewId, userId])
+  @@index([userId])
+  @@map("view_favorites")
+}
+
+model ProjectUserProperty {
+  id                String    @id @default(uuid()) @db.Uuid
+  projectId         String    @map("project_id") @db.Uuid
+  project           Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId            String    @map("user_id") @db.Uuid
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  filters           Json      @default("{}")
+  displayFilters    Json      @default("{}") @map("display_filters")
+  displayProperties Json      @default("{}") @map("display_properties")
+  richFilters       Json      @default("{}") @map("rich_filters")
+  preferences       Json      @default("{}")
+  sortOrder         Float     @default(65535) @map("sort_order")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([projectId, userId])
+  @@index([userId])
+  @@map("project_user_properties")
+}
+
+// ── 9. Universal Entity Attachment Context ───────────────────────────────────
+
+model EntityAttachment {
+  id          String     @id @default(uuid()) @db.Uuid
+  entityType  EntityType @map("entity_type")
+  entityId    String     @map("entity_id")
+  workspaceId String?    @map("workspace_id") @db.Uuid
+  projectId   String?    @map("project_id") @db.Uuid
+  filename    String
+  url         String
+  storageKey  String?    @map("storage_key")
+  size        Int        @default(0)
+  mimeType    String     @default("application/octet-stream") @map("mime_type")
+  metadata    Json?      @default("{}")
+  authorId    String?    @map("author_id") @db.Uuid
+  author      User?      @relation("UserAttachments", fields: [authorId], references: [id], onDelete: SetNull)
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([entityType, entityId, createdAt], map: "idx_entity_attachments_entity")
+  @@index([workspaceId, createdAt], map: "idx_entity_attachments_workspace")
+  @@index([projectId, createdAt], map: "idx_entity_attachments_project")
+  @@index([authorId], map: "idx_entity_attachments_author")
+  @@map("entity_attachments")
+}
+
+// ── 10. Work Item Drafts Context (Plane.so parity) ───────────────────────────
+
+model WorkItemDraft {
+  id          String        @id @default(uuid()) @db.Uuid
+  title       String        @default("")
+  content     String?       @default("")
+  description String?       @default("")
+  columnId    String?       @map("column_id")
+  priority    TaskPriority  @default(none)
+  startDate   DateTime?     @map("start_date") @db.Timestamptz(6)
+  dueDate     DateTime?     @map("due_date") @db.Timestamptz(6)
+  labels      String[]      @default([])
+  assigneeId  String?       @map("assignee_id") @db.Uuid
+  assigneeIds Json          @default("[]") @map("assignee_ids")
+  metadata    Json?         @default("{}")
+  projectId   String?       @map("project_id") @db.Uuid
+  project     Project?      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  authorId    String        @map("author_id") @db.Uuid
+  author      User          @relation("UserDrafts", fields: [authorId], references: [id], onDelete: Cascade)
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([authorId, createdAt])
+  @@index([projectId, authorId])
+  @@map("work_item_drafts")
+}
+
+// ── 11. Work Item Templates Context (Plane.so parity) ─────────────────────────
+
+model WorkItemTemplate {
+  id          String        @id @default(uuid()) @db.Uuid
+  name        String
+  description String?       @default("")
+  title       String?       @default("")
+  content     String?       @default("")
+  priority    TaskPriority  @default(none)
+  labels      String[]      @default([])
+  labelIds    Json          @default("[]") @map("label_ids")
+  assigneeIds Json          @default("[]") @map("assignee_ids")
+  checklists  Json          @default("[]")
+  isDefault   Boolean       @default(false) @map("is_default")
+  projectId   String        @map("project_id") @db.Uuid
+  project     Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  authorId    String        @map("author_id") @db.Uuid
+  author      User          @relation("UserTemplates", fields: [authorId], references: [id], onDelete: Cascade)
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt   DateTime?     @map("deleted_at") @db.Timestamptz(6)
+
+  @@index([projectId, isDefault])
+  @@index([projectId, deletedAt])
+  @@index([authorId])
+  @@map("work_item_templates")
+}
+

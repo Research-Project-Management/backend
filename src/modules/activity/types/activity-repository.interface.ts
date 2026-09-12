@@ -66,4 +66,10 @@ export interface IActivityRepository {
       updatedAt: Date;
     }>;
   }>;
+  findTaskWithProject(taskId: string): Promise<any>;
+  findTaskComments(taskId: string, sort?: 'asc' | 'desc'): Promise<any[]>;
+  findTaskActivityEvents(
+    taskId: string,
+    sort?: 'asc' | 'desc',
+  ): Promise<ActivityEventWithActor[]>;
 }

@@ -22,21 +22,31 @@ describe('AnnotationNormalizer (Matt Pocock Pattern)', () => {
     });
 
     it('falls back to DEFAULT_ANNOTATION_COLOR on invalid hex', () => {
-      expect(normalizer.normalizeColor('invalid-color')).toBe(DEFAULT_ANNOTATION_COLOR);
-      expect(normalizer.normalizeColor('#12345')).toBe(DEFAULT_ANNOTATION_COLOR);
+      expect(normalizer.normalizeColor('invalid-color')).toBe(
+        DEFAULT_ANNOTATION_COLOR,
+      );
+      expect(normalizer.normalizeColor('#12345')).toBe(
+        DEFAULT_ANNOTATION_COLOR,
+      );
       expect(normalizer.normalizeColor('')).toBe(DEFAULT_ANNOTATION_COLOR);
       expect(normalizer.normalizeColor(null)).toBe(DEFAULT_ANNOTATION_COLOR);
-      expect(normalizer.normalizeColor(undefined)).toBe(DEFAULT_ANNOTATION_COLOR);
+      expect(normalizer.normalizeColor(undefined)).toBe(
+        DEFAULT_ANNOTATION_COLOR,
+      );
     });
   });
 
   describe('normalizeCoords', () => {
     it('normalizes standard 4-element coordinates', () => {
-      expect(normalizer.normalizeCoords([10, 20, 100, 200])).toEqual([10, 20, 100, 200]);
+      expect(normalizer.normalizeCoords([10, 20, 100, 200])).toEqual([
+        10, 20, 100, 200,
+      ]);
     });
 
     it('enforces bounding box order x1 <= x2 and y1 <= y2', () => {
-      expect(normalizer.normalizeCoords([100, 200, 10, 20])).toEqual([10, 20, 100, 200]);
+      expect(normalizer.normalizeCoords([100, 200, 10, 20])).toEqual([
+        10, 20, 100, 200,
+      ]);
     });
 
     it('returns null for non-array or incorrect length', () => {
@@ -55,12 +65,16 @@ describe('AnnotationNormalizer (Matt Pocock Pattern)', () => {
 
   describe('normalizeQuote & normalizeComment', () => {
     it('trims whitespace and replaces CRLF with LF in quote', () => {
-      expect(normalizer.normalizeQuote('  hello \r\n world  ')).toBe('hello \n world');
+      expect(normalizer.normalizeQuote('  hello \r\n world  ')).toBe(
+        'hello \n world',
+      );
       expect(normalizer.normalizeQuote(null)).toBe('');
     });
 
     it('trims comment string', () => {
-      expect(normalizer.normalizeComment('  important note  ')).toBe('important note');
+      expect(normalizer.normalizeComment('  important note  ')).toBe(
+        'important note',
+      );
       expect(normalizer.normalizeComment(undefined)).toBe('');
     });
   });
@@ -73,7 +87,9 @@ describe('AnnotationNormalizer (Matt Pocock Pattern)', () => {
     });
 
     it('falls back to highlight for invalid or missing type', () => {
-      expect(normalizer.parseType('unknown_type')).toBe(AnnotationType.highlight);
+      expect(normalizer.parseType('unknown_type')).toBe(
+        AnnotationType.highlight,
+      );
       expect(normalizer.parseType(null)).toBe(AnnotationType.highlight);
       expect(normalizer.parseType(undefined)).toBe(AnnotationType.highlight);
     });

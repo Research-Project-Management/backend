@@ -85,7 +85,7 @@ export interface IWorkspaceInvitationRepository {
   createInvitation(data: {
     workspaceId: string;
     email: string;
-    role: WorkspaceMemberRole;
+    // role removed: workspace invitations no longer carry roles
     invitedById: string;
     expiresInDays?: number;
   }): Promise<WorkspaceInvitation>;
@@ -94,7 +94,7 @@ export interface IWorkspaceInvitationRepository {
     id: string;
     workspaceId: string;
     email: string;
-    role: WorkspaceMemberRole;
+    // role removed
     token: string;
     status: InvitationStatus;
     expiresAt: Date;

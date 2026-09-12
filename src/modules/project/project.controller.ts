@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Put,
+  Patch,
   Delete,
   Body,
   Param,
@@ -13,15 +14,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ProjectService } from './project.service';
-import {
-  CreateProjectDto,
-  UpdateProjectDto,
-  AddProjectMemberDto,
-  UpdateProjectMemberDto,
-  AddColumnDto,
-  UpdateColumnDto,
-  ReorderColumnsDto,
-} from './dto/project.dto';
+import { CreateProjectDto, UpdateProjectDto } from './dto/project.dto';
 import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
 import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
 import { WorkspaceRoleGuard } from '@/modules/iam/authz/guards/workspace-role.guard';
@@ -124,146 +117,42 @@ export class ProjectController {
     return this.projectService.restoreProject(projectId);
   }
 
-  @Get(['project/:projectId/members', 'projects/:projectId/members'])
-  @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
-  @ApiOperation({ summary: 'List project members' })
-  async getProjectMembers(@Param('projectId') projectId: string) {
-    return this.projectService.getProjectMembers(projectId);
-  }
-
-  @Post(['project/:projectId/members', 'projects/:projectId/members'])
-  @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('admin')
-  @ApiOperation({ summary: 'Add a member to the project' })
-  async addProjectMember(
-    @Param('projectId') projectId: string,
-    @Body() dto: AddProjectMemberDto,
-  ) {
-    return this.projectService.addProjectMember(projectId, dto);
-  }
-
-  @Put([
-    'project/:projectId/members/:userId',
-    'projects/:projectId/members/:userId',
+  @Get([
+    'workspace/:workspaceId/projects/archived',
+    'workspaces/:workspaceId/projects/archived',
+    ':workspaceId/projects/archived',
   ])
-  @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('admin')
-  @ApiOperation({ summary: 'Update project member role' })
-  async updateProjectMember(
-    @Param('projectId') projectId: string,
-    @Param('userId') userId: string,
-    @Body() dto: UpdateProjectMemberDto,
-  ) {
-    return this.projectService.updateProjectMember(projectId, userId, dto);
+  @UseGuards(WorkspaceRoleGuard)
+  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'List all archived projects in a workspace' })
+  async getArchivedProjects(@Param('workspaceId') workspaceId: string) {
+    return this.projectService.getArchivedProjects(workspaceId);
   }
 
-  @Delete([
-    'project/:projectId/members/:userId',
-    'projects/:projectId/members/:userId',
-  ])
+  @Patch(['project/:projectId/archive', 'projects/:projectId/archive'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
-  @ApiOperation({
-    summary: 'Remove a member from the project (single-admin protected)',
-  })
-  async removeProjectMember(
-    @Param('projectId') projectId: string,
-    @Param('userId') userId: string,
-  ) {
-    return this.projectService.removeProjectMember(projectId, userId);
-  }
-
-  @Post(['project/:projectId/leave', 'projects/:projectId/leave'])
-  @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
-  @ApiOperation({ summary: 'Leave project (single-admin protected)' })
-  async leaveProject(
+  @ApiOperation({ summary: 'Archive a project (freezes data and hides from active lists)' })
+  async archiveProject(
     @Param('projectId') projectId: string,
     @CurrentUser('id') userId: string,
   ) {
-    return this.projectService.leaveProject(projectId, userId);
+    return this.projectService.archiveProject(projectId, userId);
   }
 
-  @Get(['project/:projectId/columns', 'projects/:projectId/columns'])
-  @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
-  @ApiOperation({ summary: 'List project columns (task board lanes)' })
-  async getColumns(@Param('projectId') projectId: string) {
-    return this.projectService.getColumns(projectId);
-  }
-
-  @Post(['project/:projectId/columns', 'projects/:projectId/columns'])
-  @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('admin')
-  @ApiOperation({ summary: 'Add a new column to the project board' })
-  async addColumn(
-    @Param('projectId') projectId: string,
-    @Body() dto: AddColumnDto,
-  ) {
-    return this.projectService.addColumn(projectId, dto);
-  }
-
-  @Put([
-    'project/:projectId/columns/:columnId',
-    'projects/:projectId/columns/:columnId',
+  @Patch([
+    'project/:projectId/unarchive',
+    'projects/:projectId/unarchive',
+    'project/:projectId/restore-archive',
+    'projects/:projectId/restore-archive',
   ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('admin')
-  @ApiOperation({ summary: 'Update a project board column' })
-  async updateColumn(
+  @ApiOperation({ summary: 'Unarchive/restore a project to active status' })
+  async unarchiveProject(
     @Param('projectId') projectId: string,
-    @Param('columnId') columnId: string,
-    @Body() dto: UpdateColumnDto,
+    @CurrentUser('id') userId: string,
   ) {
-    return this.projectService.updateColumn(projectId, columnId, dto);
-  }
-
-  @Delete([
-    'project/:projectId/columns/:columnId',
-    'projects/:projectId/columns/:columnId',
-  ])
-  @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('admin')
-  @ApiOperation({
-    summary: 'Delete a project board column with automatic task migration',
-  })
-  async deleteColumn(
-    @Param('projectId') projectId: string,
-    @Param('columnId') columnId: string,
-    @Query('fallbackColumnId') fallbackColumnId?: string,
-    @CurrentUser('id') userId?: string,
-  ) {
-    return this.projectService.deleteColumn(
-      projectId,
-      columnId,
-      fallbackColumnId,
-      userId,
-    );
-  }
-
-  @Put([
-    'project/:projectId/columns/reorder',
-    'projects/:projectId/columns/reorder',
-  ])
-  @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('admin')
-  @ApiOperation({ summary: 'Reorder project board columns' })
-  async reorderColumns(
-    @Param('projectId') projectId: string,
-    @Body() dto: ReorderColumnsDto,
-  ) {
-    return this.projectService.reorderColumns(projectId, dto);
-  }
-
-  @Post([
-    'project/:projectId/columns/reset',
-    'projects/:projectId/columns/reset',
-  ])
-  @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('admin')
-  @ApiOperation({ summary: 'Reset project board columns to default' })
-  async resetColumns(@Param('projectId') projectId: string) {
-    return this.projectService.resetColumns(projectId);
+    return this.projectService.unarchiveProject(projectId, userId);
   }
 }

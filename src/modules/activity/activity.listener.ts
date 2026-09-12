@@ -24,10 +24,59 @@ export class ActivityListener {
   }
 
   @OnEvent('task.*', { async: true })
-  async handleTaskEvents(event: DomainActivityEvent) {
-    if (event?.entityType) {
-      await this.handleGenericActivity(event);
+  async handleTaskEvents(event: any) {
+    if (event instanceof DomainActivityEvent) {
+      return this.handleGenericActivity(event);
     }
+    const entityId = event?.entityId || event?.taskId;
+    if (entityId) {
+      const activityEvent = new DomainActivityEvent({
+        entityType: 'task' as any,
+        entityId,
+        verb: event.verb || 'updated',
+        actorId: event.actorId || event.authorId || '',
+        projectId: event.projectId,
+        workspaceId: event.workspaceId,
+        field: event.field,
+        oldValue: event.oldValue,
+        newValue: event.newValue,
+      });
+      await this.handleGenericActivity(activityEvent);
+
+      // Record initial state if task was created with a column
+      if (event.verb === 'created' && event.columnId) {
+        const stateInitEvent = new DomainActivityEvent({
+          entityType: 'task' as any,
+          entityId,
+          verb: 'transitioned',
+          actorId: event.actorId || event.authorId || '',
+          projectId: event.projectId,
+          workspaceId: event.workspaceId,
+          field: 'state',
+          oldValue: null as any,
+          newValue: event.columnId,
+        });
+        await this.handleGenericActivity(stateInitEvent);
+      }
+    }
+  }
+
+  @OnEvent('comment.*', { async: true })
+  async handleCommentEvents(event: any) {
+    const taskId = event.taskId;
+    if (!taskId) return;
+
+    const activityEvent = new DomainActivityEvent({
+      entityType: 'comment' as any,
+      entityId: event.commentId || taskId,
+      verb: event.content !== undefined ? 'commented' : 'updated_comment',
+      actorId: event.authorId || '',
+      projectId: event.projectId,
+      workspaceId: event.workspaceId,
+      field: 'comment',
+      newValue: typeof event.content === 'string' ? event.content.slice(0, 100) : undefined,
+    });
+    await this.handleGenericActivity(activityEvent);
   }
 
   @OnEvent('paper.*', { async: true })
@@ -51,10 +100,44 @@ export class ActivityListener {
     }
   }
 
+  @OnEvent('state.*', { async: true })
+  async handleStateEvents(event: any) {
+    if (event instanceof DomainActivityEvent) {
+      return this.handleGenericActivity(event);
+    }
+    const entityId = event?.entityId || event?.projectId;
+    if (entityId) {
+      const activityEvent = new DomainActivityEvent({
+        entityType: 'project' as any,
+        entityId,
+        verb: event.verb || 'updated',
+        actorId: event.actorId || '',
+        projectId: event.projectId,
+        workspaceId: event.workspaceId,
+      });
+      await this.handleGenericActivity(activityEvent);
+    }
+  }
+
   @OnEvent('cycle.*', { async: true })
-  async handleCycleEvents(event: DomainActivityEvent) {
-    if (event?.entityType) {
-      await this.handleGenericActivity(event);
+  async handleCycleEvents(event: any) {
+    if (event instanceof DomainActivityEvent) {
+      return this.handleGenericActivity(event);
+    }
+    const entityId = event?.entityId || event?.cycleId;
+    if (entityId) {
+      const activityEvent = new DomainActivityEvent({
+        entityType: 'cycle' as any,
+        entityId,
+        verb: event.verb || 'updated',
+        actorId: event.actorId || event.userId || '',
+        projectId: event.projectId,
+        workspaceId: event.workspaceId,
+        field: event.field,
+        oldValue: event.oldValue,
+        newValue: event.newValue,
+      });
+      await this.handleGenericActivity(activityEvent);
     }
   }
 

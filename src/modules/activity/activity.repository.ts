@@ -34,6 +34,14 @@ export class ActivityRepository implements IActivityRepository {
     });
   }
 
+  async findProjectWorkspaceId(projectId: string): Promise<string | null> {
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { workspaceId: true },
+    });
+    return project?.workspaceId ?? null;
+  }
+
   async resolveWorkspace(workspaceIdOrSlug: string) {
     return this.prisma.workspace.findFirst({
       where: buildWorkspaceIdentifierWhere(workspaceIdOrSlug),
@@ -144,7 +152,7 @@ export class ActivityRepository implements IActivityRepository {
           })
         : [],
       validPaperIds.length
-        ? this.prisma.catalogItem.findMany({
+        ? this.prisma.item.findMany({
             where: { id: { in: validPaperIds }, deletedAt: null },
             select: { id: true, title: true },
           })
@@ -190,7 +198,7 @@ export class ActivityRepository implements IActivityRepository {
         take: limit,
         select: { id: true, title: true, projectId: true, updatedAt: true },
       }),
-      this.prisma.catalogItem.findMany({
+      this.prisma.item.findMany({
         where: {
           workspaceId: canonicalWorkspaceId,
           uploadedById: userId,
@@ -217,5 +225,51 @@ export class ActivityRepository implements IActivityRepository {
       }),
     ]);
     return { tasks, papers, pages };
+  }
+
+  async findTaskWithProject(taskId: string) {
+    return this.prisma.task.findUnique({
+      where: { id: taskId },
+      select: {
+        id: true,
+        title: true,
+        projectId: true,
+        columnId: true,
+        completed: true,
+        createdAt: true,
+        updatedAt: true,
+        project: {
+          select: {
+            id: true,
+            name: true,
+            taskColumns: true,
+          },
+        },
+      },
+    });
+  }
+
+  async findTaskComments(taskId: string, sort: 'asc' | 'desc' = 'asc') {
+    return this.prisma.taskComment.findMany({
+      where: { taskId },
+      orderBy: { createdAt: sort },
+      include: {
+        author: { select: ACTOR_MINIMAL_SELECT },
+      },
+    });
+  }
+
+  async findTaskActivityEvents(taskId: string, sort: 'asc' | 'desc' = 'asc') {
+    return this.prisma.activityEvent.findMany({
+      where: {
+        entityType: EntityType.task,
+        entityId: taskId,
+      },
+      orderBy: { createdAt: sort },
+      include: {
+        actor: { select: ACTOR_MINIMAL_SELECT },
+        project: { select: { id: true, name: true } },
+      },
+    });
   }
 }

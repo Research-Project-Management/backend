@@ -371,7 +371,7 @@ export class PipelineService {
           try {
             await this.attachments.createAttachment({
               workspaceId,
-              catalogItemId: matchResult.targetItemId,
+              itemId: matchResult.targetItemId,
               fileId: uploadedFileIdentifier,
               filename: uploadedFilename,
               url: getFileContentPath(uploadedFileIdentifier),
@@ -506,7 +506,7 @@ export class PipelineService {
       return;
     }
 
-    // Stage 6: COMMIT (create new CatalogItem via CommitStage)
+    // Stage 6: COMMIT (create new Item via CommitStage)
     const commitStart = Date.now();
     const createdItem = await this.commit.execute(
       workspaceId,
@@ -534,32 +534,27 @@ export class PipelineService {
       outputSnapshot: { itemId: createdItem?.id },
     });
 
-    await this.repo.updateRunStatus(
-      workspaceId,
-      runId,
-      IngestionStatus.READY,
-      {
-        itemId: createdItem?.id,
-        completedAt: new Date(),
-        executionLog: {
-          total: 1,
-          processed: 1,
-          succeeded: 1,
-          duplicates: 0,
-          failed: 0,
-          percentage: 100,
-          status: 'COMPLETED',
-          currentTitle: createdItem?.title || 'Document',
-          items: [
-            {
-              title: createdItem?.title || 'Document',
-              status: 'SUCCEEDED',
-              itemId: createdItem?.id,
-            },
-          ],
-        } as unknown as Prisma.InputJsonValue,
-      },
-    );
+    await this.repo.updateRunStatus(workspaceId, runId, IngestionStatus.READY, {
+      itemId: createdItem?.id,
+      completedAt: new Date(),
+      executionLog: {
+        total: 1,
+        processed: 1,
+        succeeded: 1,
+        duplicates: 0,
+        failed: 0,
+        percentage: 100,
+        status: 'COMPLETED',
+        currentTitle: createdItem?.title || 'Document',
+        items: [
+          {
+            title: createdItem?.title || 'Document',
+            status: 'SUCCEEDED',
+            itemId: createdItem?.id,
+          },
+        ],
+      } as unknown as Prisma.InputJsonValue,
+    });
   }
 
   private mapPayloadToSource(kind: string): LibraryItemSource {

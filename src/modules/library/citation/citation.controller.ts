@@ -19,6 +19,8 @@ import { normalizeCitationStyleId } from './utils/citation.utils';
   'api/v1/workspaces/:workspaceId/library/citation',
   'api/v1/workspace/:workspaceId/library/citation',
   'api/v1/library/citation',
+  'api/v1/library/references',
+  'api/library/references',
 ])
 @UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
 export class CitationController {

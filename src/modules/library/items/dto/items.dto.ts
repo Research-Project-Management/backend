@@ -34,7 +34,7 @@ export class CreatorDto {
   orderIndex?: number;
 }
 
-export class CreateCatalogItemDto {
+export class CreateItemDto {
   @IsString()
   title!: string;
 
@@ -383,7 +383,7 @@ export class CreateCatalogItemDto {
   provenance?: any;
 }
 
-export class UpdateCatalogItemDto {
+export class UpdateItemDto {
   @IsOptional()
   @IsString()
   title?: string;
@@ -734,13 +734,13 @@ export class TypeConversionDto {
   customFieldOverrides?: Record<string, any>;
 }
 
-export class BulkDeleteCatalogItemsDto {
+export class BulkDeleteItemsDto {
   @IsArray()
   @IsString({ each: true })
   itemIds!: string[];
 }
 
-export class BulkMoveCatalogItemsDto {
+export class BulkMoveItemsDto {
   @IsArray()
   @IsString({ each: true })
   itemIds!: string[];
@@ -750,7 +750,7 @@ export class BulkMoveCatalogItemsDto {
   targetCollectionId?: string | null;
 }
 
-export class BulkTagCatalogItemsDto {
+export class BulkTagItemsDto {
   @IsArray()
   @IsString({ each: true })
   itemIds!: string[];
@@ -759,12 +759,6 @@ export class BulkTagCatalogItemsDto {
   @IsString({ each: true })
   tagIds!: string[];
 }
-
-export const CreateItemDto = CreateCatalogItemDto;
-export type CreateItemDto = CreateCatalogItemDto;
-
-export const UpdateItemDto = UpdateCatalogItemDto;
-export type UpdateItemDto = UpdateCatalogItemDto;
 
 export class CursorPaginationQueryDto {
   @IsOptional()

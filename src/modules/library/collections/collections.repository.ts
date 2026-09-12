@@ -223,7 +223,7 @@ export class CollectionsRepository {
     await client.collectionItem.createMany({
       data: itemIds.map((itemId) => ({
         collectionId,
-        catalogItemId: itemId,
+        itemId,
         sortOrder: 0,
       })),
       skipDuplicates: true,
@@ -272,7 +272,7 @@ export class CollectionsRepository {
     await client.collectionItem.deleteMany({
       where: {
         collectionId,
-        catalogItemId: itemId,
+        itemId,
       },
     });
   }
@@ -301,7 +301,7 @@ export class CollectionsRepository {
       // Remove items from all collections (unfiled)
       await client.collectionItem.deleteMany({
         where: {
-          catalogItemId: { in: itemIds },
+          itemId: { in: itemIds },
         },
       });
     } else {
@@ -340,7 +340,7 @@ export class CollectionsRepository {
   }
 
   /**
-   * Retrieves catalog item IDs belonging to a collection.
+   * Retrieves item IDs belonging to a collection.
    */
   async findItemIdsByCollection(
     workspaceId: string,
@@ -352,15 +352,15 @@ export class CollectionsRepository {
     const items = await client.collectionItem.findMany({
       where: {
         collectionId,
-        catalogItem: {
+        item: {
           workspaceId,
           deletedAt: null,
         },
       },
-      select: { catalogItemId: true },
+      select: { itemId: true },
       orderBy: { sortOrder: 'asc' },
     });
 
-    return items.map((i: { catalogItemId: string }) => i.catalogItemId);
+    return items.map((i: { itemId: string }) => i.itemId);
   }
 }

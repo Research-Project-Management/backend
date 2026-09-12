@@ -41,9 +41,9 @@ export class TaskCommentController {
   async createTaskComment(
     @Param('taskId') taskId: string,
     @CurrentUser('id') userId: string,
-    @Body() dto: CreateCommentDto,
+    @Body() createCommentDto: CreateCommentDto,
   ) {
-    return this.commentService.createTaskComment(taskId, userId, dto);
+    return this.commentService.createTaskComment(taskId, userId, createCommentDto);
   }
 
   @Put(['tasks/comments/:commentId', 'work-items/comments/:commentId'])
@@ -52,9 +52,9 @@ export class TaskCommentController {
   async updateTaskComment(
     @Param('commentId') commentId: string,
     @CurrentUser('id') userId: string,
-    @Body() dto: UpdateCommentDto,
+    @Body() updateCommentDto: UpdateCommentDto,
   ) {
-    return this.commentService.updateTaskComment(commentId, userId, dto);
+    return this.commentService.updateTaskComment(commentId, userId, updateCommentDto);
   }
 
   @Delete(['tasks/comments/:commentId', 'work-items/comments/:commentId'])
@@ -76,9 +76,9 @@ export class TaskCommentController {
   async addTaskReply(
     @Param('commentId') commentId: string,
     @CurrentUser('id') userId: string,
-    @Body() dto: AddReplyDto,
+    @Body() addReplyDto: AddReplyDto,
   ) {
-    return this.commentService.addTaskReply(commentId, userId, dto);
+    return this.commentService.addTaskReply(commentId, userId, addReplyDto);
   }
 
   @Post([
@@ -90,8 +90,11 @@ export class TaskCommentController {
   async reactToTaskComment(
     @Param('commentId') commentId: string,
     @CurrentUser('id') userId: string,
-    @Body() dto: ReactCommentDto,
+    @Body() reactCommentDto: ReactCommentDto,
   ) {
-    return this.commentService.reactToTaskComment(commentId, userId, dto);
+    return this.commentService.reactToTaskComment(commentId, userId, reactCommentDto);
   }
 }
+
+export const CommentController = TaskCommentController;
+export type CommentController = TaskCommentController;

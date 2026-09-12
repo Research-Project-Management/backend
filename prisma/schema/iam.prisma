@@ -19,7 +19,8 @@ model User {
   // IAM Relations
   federatedIdentities FederatedIdentity[]
   refreshTokens       RefreshToken[]
-  workspaceMembers    WorkspaceMember[]
+  // Personal workspace — 1-to-1: each user owns exactly one workspace
+  personalWorkspace   Workspace?            @relation("WorkspaceOwner")
   projectMembers      ProjectMember[]
   sentInvitations     WorkspaceInvitation[] @relation("InvitationSender")
   securityAuditLogs   SecurityAuditLog[]    @relation("AuditActor")
@@ -31,7 +32,7 @@ model User {
   authoredFiles        File[]             @relation("FileAuthor")
   sharedFiles          FileShare[]
   createdLabels        Label[]
-  uploadedCatalogItems CatalogItem[]      @relation("CatalogItemUploader")
+  uploadedItems        Item[]             @relation("ItemUploader")
   createdCollections   Collection[]
   authoredPages        Page[]             @relation("PageAuthor")
   authoredTasks        Task[]             @relation("TaskAuthor")
@@ -40,14 +41,21 @@ model User {
   stickies             Sticky[]
   pageComments         PageComment[]
   taskComments         TaskComment[]
+  workspaceMembers     WorkspaceMember[]
   aiChats              AiChat[]
   activityEvents       ActivityEvent[]
   authoredNotes        Note[]
   authoredAnnotations  Annotation[]
-  userItemStates       UserItemState[]
+  states               State[]
   worklogs             Worklog[]          @relation("UserWorklogs")
+  authoredViews        WorkItemView[]     @relation("ViewAuthor")
+  viewFavorites        ViewFavorite[]
+  userProperties       ProjectUserProperty[]
   zoteroConnections    ZoteroConnection[]
   capturePreviews      CapturePreview[]
+  entityAttachments    EntityAttachment[] @relation("UserAttachments")
+  authoredDrafts       WorkItemDraft[]    @relation("UserDrafts")
+  authoredTemplates    WorkItemTemplate[] @relation("UserTemplates")
 
   @@index([email])
   @@index([status, deletedAt])
@@ -102,19 +110,19 @@ model RefreshToken {
 }
 
 model WorkspaceInvitation {
-  id          String              @id @default(uuid()) @db.Uuid
-  workspaceId String              @map("workspace_id") @db.Uuid
-  workspace   Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  id          String           @id @default(uuid()) @db.Uuid
+  workspaceId String           @map("workspace_id") @db.Uuid
+  workspace   Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   email       String
   role        WorkspaceMemberRole @default(member)
-  token       String              @unique
-  status      InvitationStatus    @default(pending)
-  invitedById String              @map("invited_by_id") @db.Uuid
-  invitedBy   User                @relation("InvitationSender", fields: [invitedById], references: [id], onDelete: Cascade)
-  expiresAt   DateTime            @map("expires_at") @db.Timestamptz(6)
-  acceptedAt  DateTime?           @map("accepted_at") @db.Timestamptz(6)
-  createdAt   DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  token       String           @unique
+  status      InvitationStatus @default(pending)
+  invitedById String           @map("invited_by_id") @db.Uuid
+  invitedBy   User             @relation("InvitationSender", fields: [invitedById], references: [id], onDelete: Cascade)
+  expiresAt   DateTime         @map("expires_at") @db.Timestamptz(6)
+  acceptedAt  DateTime?        @map("accepted_at") @db.Timestamptz(6)
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([workspaceId, status])
   @@index([email, status])
@@ -148,10 +156,13 @@ model Workspace {
   url         String    @unique
   slug        String?   @unique @map("slug")
   avatar      String?
-  companySize String?    @map("company_size")
+  companySize String?   @map("company_size")
   plan        String    @default("free")
   inviteCode  String?   @unique @map("invite_code")
   settings    Json?     @default("{}")
+  // Personal workspace: each workspace belongs to exactly one user (1-to-1)
+  ownerId     String?   @unique @map("owner_id") @db.Uuid
+  owner       User?     @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: SetNull)
   createdById String?   @map("created_by_id") @db.Uuid
   createdBy   User?     @relation("WorkspaceCreator", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -159,13 +170,12 @@ model Workspace {
   deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
 
   // Relations
-  members            WorkspaceMember[]
   invitations        WorkspaceInvitation[]
   projects           Project[]
   files              File[]
   labels             Label[]
-  catalogItems       CatalogItem[]
-  catalogTags        CatalogTag[]
+  items              Item[]
+  tags               Tag[]
   collections        Collection[]
   pages              Page[]
   stickies           Sticky[]
@@ -183,7 +193,9 @@ model Workspace {
   zoteroSyncFailures ZoteroSyncFailure[]
   capturePreviews    CapturePreview[]
   ingestionReviewCases IngestionReviewCase[]
+  members            WorkspaceMember[]
 
+  @@index([ownerId])
   @@index([createdById])
   @@index([url])
   @@index([slug])
@@ -238,6 +250,11 @@ model Project {
   stickies       Sticky[]
   activityEvents ActivityEvent[]
   worklogs       Worklog[]
+  labels         Label[]
+  views          WorkItemView[]
+  userProperties ProjectUserProperty[]
+  drafts         WorkItemDraft[]
+  templates      WorkItemTemplate[]
 
   @@unique([workspaceId, identifier])
   @@index([workspaceId, isActive, deletedAt])

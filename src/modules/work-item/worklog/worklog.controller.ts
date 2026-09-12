@@ -15,90 +15,83 @@ import {
   ApiTags,
   ApiBearerAuth,
   ApiOperation,
-  ApiResponse,
+  ApiParam,
 } from '@nestjs/swagger';
-import { WorklogService } from './worklog.service';
-import {
-  CreateWorklogDto,
-  UpdateWorklogDto,
-  QueryWorklogDto,
-} from './dto/worklog.dto';
 import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
 import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
-import { ProjectRoleGuard } from '@/modules/iam/authz/guards/project-role.guard';
-import { ProjectRoles } from '@/modules/iam/authz/decorators/project-roles.decorator';
-import { WorkspaceRoleGuard } from '@/modules/iam/authz/guards/workspace-role.guard';
-import { WorkspaceRoles } from '@/modules/iam/authz/decorators/workspace-roles.decorator';
+import { WorklogService } from './worklog.service';
+import { CreateWorklogDto } from './dto/create-worklog.dto';
+import { UpdateWorklogDto } from './dto/update-worklog.dto';
+import { QueryWorklogDto } from './dto/query-worklog.dto';
 
-@ApiTags('Work Item - Worklogs')
+@ApiTags('work-items')
 @ApiBearerAuth('JWT-auth')
-@Controller('api')
+@Controller('api/work-items')
 @UseGuards(JwtAuthGuard)
 export class WorklogController {
   constructor(private readonly worklogService: WorklogService) {}
 
-  @Get(['projects/:projectId/worklogs', 'project/:projectId/worklogs'])
-  @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
-  @ApiOperation({
-    summary: 'Get project worklogs with filtering and pagination',
-  })
-  @ApiResponse({ status: 200, description: 'Paginated project worklogs' })
-  async getProjectWorklogs(
-    @Param('projectId') projectId: string,
-    @Query() query: QueryWorklogDto,
-  ) {
-    return this.worklogService.getProjectWorklogs(projectId, query);
-  }
-
-  @Post(['projects/:projectId/worklogs', 'project/:projectId/worklogs'])
+  @Post(':taskId/worklogs')
   @HttpCode(HttpStatus.CREATED)
-  @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('admin', 'contributor')
-  @ApiOperation({
-    summary: 'Log work hours for a project or specific work item',
-  })
-  @ApiResponse({ status: 201, description: 'Created worklog entry' })
-  async createWorklog(
-    @Param('projectId') projectId: string,
+  @ApiOperation({ summary: 'Log work / hours spent on a work item' })
+  @ApiParam({ name: 'taskId', description: 'Work item UUID or identifier (e.g. FLUX-123)' })
+  async logWork(
+    @Param('taskId') taskId: string,
     @CurrentUser('id') userId: string,
-    @Body() dto: CreateWorklogDto,
+    @Body() createWorklogDto: CreateWorklogDto,
   ) {
-    return this.worklogService.createWorklog(projectId, userId, dto);
+    return this.worklogService.logWork(taskId, userId, createWorklogDto);
   }
 
-  @Get(['workspaces/:workspaceId/worklogs', 'workspace/:workspaceId/worklogs'])
-  @UseGuards(WorkspaceRoleGuard)
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
-  @ApiOperation({ summary: 'Get workspace consolidated worklogs' })
-  @ApiResponse({ status: 200, description: 'Paginated workspace worklogs' })
-  async getWorkspaceWorklogs(
-    @Param('workspaceId') workspaceId: string,
-    @Query() query: QueryWorklogDto,
-  ) {
-    return this.worklogService.getWorkspaceWorklogs(workspaceId, query);
-  }
-
-  @Delete('worklogs/:id')
-  @ApiOperation({ summary: 'Delete a worklog entry' })
-  @ApiResponse({ status: 200, description: 'Worklog deletion confirmation' })
-  async deleteWorklog(
-    @Param('id') id: string,
-    @CurrentUser('id') userId: string,
-  ) {
-    return this.worklogService.deleteWorklog(id, userId);
+  @Get(':taskId/worklogs')
+  @ApiOperation({ summary: 'Get all logged work entries for a work item' })
+  @ApiParam({ name: 'taskId', description: 'Work item UUID or identifier' })
+  async getTaskWorklogs(@Param('taskId') taskId: string) {
+    return this.worklogService.getTaskWorklogs(taskId);
   }
 
   @Put('worklogs/:id')
-  @ApiOperation({
-    summary: 'Update a worklog entry (hours, description, date, task)',
-  })
-  @ApiResponse({ status: 200, description: 'Updated worklog entry' })
+  @ApiOperation({ summary: 'Update an existing worklog entry' })
+  @ApiParam({ name: 'id', description: 'Worklog entry UUID' })
   async updateWorklog(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
-    @Body() dto: UpdateWorklogDto,
+    @CurrentUser() user: any,
+    @Body() updateWorklogDto: UpdateWorklogDto,
   ) {
-    return this.worklogService.updateWorklog(id, userId, dto);
+    const isAdmin = user?.role === 'admin' || user?.role === 'owner';
+    return this.worklogService.updateWorklog(id, userId, updateWorklogDto, isAdmin);
+  }
+
+  @Delete('worklogs/:id')
+  @ApiOperation({ summary: 'Delete a worklog entry and deduct logged hours' })
+  @ApiParam({ name: 'id', description: 'Worklog entry UUID' })
+  async deleteWorklog(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser() user: any,
+  ) {
+    const isAdmin = user?.role === 'admin' || user?.role === 'owner';
+    return this.worklogService.deleteWorklog(id, userId, isAdmin);
+  }
+
+  @Get('projects/:projectId/worklogs')
+  @ApiOperation({ summary: 'Get project-wide timesheet and logged hours report' })
+  @ApiParam({ name: 'projectId', description: 'Project UUID or identifier' })
+  async getProjectTimesheet(
+    @Param('projectId') projectId: string,
+    @Query() queryWorklogDto: QueryWorklogDto,
+  ) {
+    return this.worklogService.getProjectTimesheet(projectId, queryWorklogDto);
+  }
+
+  @Get('workspaces/:workspaceId/worklogs')
+  @ApiOperation({ summary: 'Get workspace-wide timesheet and logged hours report' })
+  @ApiParam({ name: 'workspaceId', description: 'Workspace UUID or slug' })
+  async getWorkspaceTimesheet(
+    @Param('workspaceId') workspaceId: string,
+    @Query() queryWorklogDto: QueryWorklogDto,
+  ) {
+    return this.worklogService.getWorkspaceTimesheet(workspaceId, queryWorklogDto);
   }
 }

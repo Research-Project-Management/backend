@@ -29,7 +29,7 @@ export function formatToPrefixTsQuery(query: string): string {
 export function buildBaseSearchWhere(
   workspaceId: string,
   options: SearchOptions,
-): Prisma.CatalogItemWhereInput {
+): Prisma.ItemWhereInput {
   return {
     workspaceId,
     deletedAt: null,

@@ -39,7 +39,7 @@ export interface GetSyncItemSnapshotsQuery {
 export * from '../../common/types/sync.types';
 import type {
   UpsertSyncCollectionCommand,
-  UpsertSyncCatalogItemCommand,
+  UpsertSyncItemCommand,
   UpsertSyncAttachmentCommand,
   UpsertSyncNoteCommand,
   UpsertSyncAnnotationCommand,
@@ -66,8 +66,8 @@ export type ExternalSyncOperation =
       command: UpsertSyncCollectionCommand;
     } & BaseExternalSyncOperation)
   | ({
-      op: 'upsertCatalogItem';
-      command: UpsertSyncCatalogItemCommand;
+      op: 'upsertItem';
+      command: UpsertSyncItemCommand;
     } & BaseExternalSyncOperation)
   | ({
       op: 'upsertAttachment';
@@ -130,8 +130,8 @@ export interface SyncPort {
     command: UpsertSyncCollectionCommand,
   ): Promise<UpsertSyncEntityResult>;
 
-  upsertCatalogItem(
-    command: UpsertSyncCatalogItemCommand,
+  upsertItem(
+    command: UpsertSyncItemCommand,
   ): Promise<UpsertSyncEntityResult>;
 
   upsertAttachment(

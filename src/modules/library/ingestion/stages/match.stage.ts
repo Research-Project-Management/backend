@@ -4,7 +4,7 @@ import { ItemMetadata } from '../metadata/types/metadata.types';
 import { DuplicateMatchResult } from '../types/metadata-candidate.types';
 import {
   DuplicatePolicy,
-  ExistingCatalogItemSummary,
+  ExistingItemSummary,
 } from '../policies/duplicate.policy';
 
 @Injectable()
@@ -38,7 +38,7 @@ export class MatchStage {
   ) {}
 
   /**
-   * Evaluates potential duplicate matches against existing CatalogItems in the workspace.
+   * Evaluates potential duplicate matches against existing Items in the workspace.
    *
    * Strategy:
    *  1. Fast-path: exact DOI lookup (O(1) with index). Exits immediately on hit.
@@ -54,7 +54,7 @@ export class MatchStage {
 
     // ── Stage 1: Exact DOI lookup ─────────────────────────────────────────────
     if (proposedDoi) {
-      const doiMatch = await this.prisma.catalogItem.findFirst({
+      const doiMatch = await this.prisma.item.findFirst({
         where: { workspaceId, doi: proposedDoi, deletedAt: null },
         select: { id: true, title: true, doi: true },
       });
@@ -86,7 +86,7 @@ export class MatchStage {
         .find((w) => w.length > 2 && !MatchStage.STOPWORDS.has(w)) ??
       proposedTitle.toLowerCase().split(/\s+/)[0];
 
-    const candidateItems = await this.prisma.catalogItem.findMany({
+    const candidateItems = await this.prisma.item.findMany({
       where: {
         workspaceId,
         deletedAt: null,
@@ -107,7 +107,7 @@ export class MatchStage {
       return { matchType: 'NO_MATCH', confidence: 0.0, matchReason: 'NONE' };
     }
 
-    const summaries: ExistingCatalogItemSummary[] = candidateItems.map(
+    const summaries: ExistingItemSummary[] = candidateItems.map(
       (it: any) => ({
         id: it.id,
         title: it.title,

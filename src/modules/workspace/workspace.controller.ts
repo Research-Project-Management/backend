@@ -98,16 +98,22 @@ export class WorkspaceController {
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner')
   @ApiOperation({ summary: 'Delete (soft-delete) a workspace' })
-  async deleteWorkspace(@Param('workspaceId') workspaceId: string) {
-    return this.workspaceService.deleteWorkspace(workspaceId);
+  async deleteWorkspace(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.workspaceService.deleteWorkspace(workspaceId, userId);
   }
 
   @Post(':workspaceId/restore')
   @UseGuards(WorkspaceRoleGuard)
   @WorkspaceRoles('owner')
   @ApiOperation({ summary: 'Restore a soft-deleted workspace' })
-  async restoreWorkspace(@Param('workspaceId') workspaceId: string) {
-    return this.workspaceService.restoreWorkspace(workspaceId);
+  async restoreWorkspace(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.workspaceService.restoreWorkspace(workspaceId, userId);
   }
 
   // ── Member Management ──────────────────────────────────────────────────────

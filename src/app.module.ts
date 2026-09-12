@@ -15,6 +15,7 @@ import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { DocumentModule } from './modules/document/document.module';
 import { WorkItemModule } from './modules/work-item/work-item.module';
 import { AiModule } from './modules/ai/ai.module';
+import { AttachmentModule } from './modules/attachment/attachment.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -43,6 +44,7 @@ import { AppService } from './app.service';
     IntegrationsModule,
     StorageModule,
     AiModule,
+    AttachmentModule,
   ],
   controllers: [AppController],
   providers: [AppService],

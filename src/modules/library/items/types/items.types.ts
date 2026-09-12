@@ -105,8 +105,8 @@ export interface ItemRelationInput {
   description?: string;
 }
 
-// ── Catalog Item Domain Models & Inputs ──────────────────────────────────────
-export interface CatalogItemSummary {
+// ── Item Domain Models & Inputs ──────────────────────────────────────────────
+export interface ItemSummary {
   id: string;
   workspaceId: string;
   title: string;
@@ -173,7 +173,7 @@ export interface ItemMetadata {
   identifiers?: ItemIdentifier[];
 }
 
-export interface CreateCatalogItemInput {
+export interface CreateItemInput {
   title: string;
   itemType?: string;
   year?: number | null;
@@ -225,7 +225,7 @@ export interface CreateCatalogItemInput {
   uploadedById: string;
 }
 
-export interface UpdateCatalogItemInput {
+export interface UpdateItemInput {
   title?: string;
   itemType?: string;
   year?: number | null;
@@ -329,7 +329,7 @@ export interface ConvertTypeOptions {
 }
 
 // ── Persistence Layer Data Transfer Shapes ─────────────────────────────────
-export interface CreateCatalogItemData {
+export interface CreateItemData {
   title: string;
   authors?: string[];
   year?: number | null;
@@ -406,7 +406,7 @@ export interface CreateCatalogItemData {
   userId?: string;
 }
 
-export interface UpdateCatalogItemData {
+export interface UpdateItemData {
   // Canonical Zotero v42 Schema Aliases
   DOI?: string;
   archiveId?: string;

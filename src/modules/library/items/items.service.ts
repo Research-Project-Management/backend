@@ -9,8 +9,8 @@ import { Prisma, RagStatus } from '@prisma/client';
 import { QueryRepository } from './repositories/query.repository';
 import { CommandRepository } from './repositories/command.repository';
 import {
-  CreateCatalogItemData,
-  UpdateCatalogItemData,
+  CreateItemData,
+  UpdateItemData,
 } from './types/items.types';
 import {
   TransactionService,
@@ -31,34 +31,29 @@ import { CollectionsService } from '../collections/collections.service';
 import { TypesService } from '../types/types.service';
 import { RagProvider } from '../search/providers/rag.provider';
 import { ItemsMapper } from './mappers/items.mapper';
-import {
-  TypeConversionPreview,
-  ConvertTypeOptions,
-} from './types/items.types';
+import { TypeConversionPreview, ConvertTypeOptions } from './types/items.types';
 import { ItemTransformer } from './transformers/item.transformer';
 import { randomUUID } from 'crypto';
 import {
   IItemReadPort,
   IItemExistencePort,
-  CatalogItemDetail,
+  ItemDetail,
 } from './ports/items.ports';
 
 import type {
-  UpsertSyncCatalogItemCommand,
+  UpsertSyncItemCommand,
   DeleteSyncEntityCommand,
   UpsertSyncEntityResult,
 } from '../common/types/sync.types';
 
 /** Transaction context passed to write methods for composing operations within a parent transaction. */
-export interface CatalogTransactionContext {
+export interface ItemTransactionContext {
   tx: Prisma.TransactionClient;
   helpers: TransactionHelpers;
 }
 
-export type ItemTransactionContext = CatalogTransactionContext;
-
 import {
-  CATALOG_COLUMN_METADATA_FIELDS,
+  ITEM_COLUMN_METADATA_FIELDS,
   FIELD_ALIASES,
 } from './constants/items.constants';
 
@@ -148,8 +143,8 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
 
   async createItem(
     workspaceId: string,
-    data: CreateCatalogItemData,
-    context?: Partial<CatalogTransactionContext> & {
+    data: CreateItemData,
+    context?: Partial<ItemTransactionContext> & {
       source?: LibraryItemSource;
     },
   ): Promise<any> {
@@ -159,14 +154,10 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       tx: Prisma.TransactionClient,
       helpers: TransactionHelpers,
     ) => {
-      const item = await this.command.create(
-        canonicalWorkspaceId,
-        data,
-        tx,
-      );
+      const item = await this.command.create(canonicalWorkspaceId, data, tx);
 
       await helpers.appendChange(canonicalWorkspaceId, {
-        entityType: 'CatalogItem',
+        entityType: 'Item',
         entityId: item.id,
         action: 'create',
         version: item.version,
@@ -202,8 +193,8 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     workspaceId: string,
     id: string,
     expectedVersion: number | undefined,
-    data: UpdateCatalogItemData,
-    context?: CatalogTransactionContext,
+    data: UpdateItemData,
+    context?: ItemTransactionContext,
   ): Promise<any> {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     if (context) {
@@ -216,7 +207,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       );
 
       await context.helpers.appendChange(canonicalWorkspaceId, {
-        entityType: 'CatalogItem',
+        entityType: 'Item',
         entityId: id,
         action: 'update',
         version: updated.version,
@@ -304,7 +295,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     workspaceId: string,
     id: string,
     expectedVersion?: number,
-    context?: CatalogTransactionContext,
+    context?: ItemTransactionContext,
   ): Promise<boolean> {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     if (context) {
@@ -317,7 +308,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
 
       if (deleted) {
         await context.helpers.recordTombstone(canonicalWorkspaceId, {
-          entityType: 'CatalogItem',
+          entityType: 'Item',
           entityId: id,
         });
 
@@ -336,10 +327,17 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     }
 
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      return this.deleteItem(canonicalWorkspaceId, id, expectedVersion, {
-        tx,
-        helpers,
-      });
+      const deleted = await this.deleteItem(
+        canonicalWorkspaceId,
+        id,
+        expectedVersion,
+        {
+          tx,
+          helpers,
+        },
+      );
+      await this.tagsService.invalidateTagsCache(canonicalWorkspaceId);
+      return deleted;
     });
   }
 
@@ -354,7 +352,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       );
 
       await helpers.appendChange(canonicalWorkspaceId, {
-        entityType: 'CatalogItem',
+        entityType: 'Item',
         entityId: id,
         action: 'update',
         version: restored.version,
@@ -371,6 +369,8 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         },
       );
 
+      await this.tagsService.invalidateTagsCache(canonicalWorkspaceId);
+
       // Normalize through mapper so response shape is consistent with
       // getItem / createItem / updateItem (creators, fileUrl, tags, etc.)
       return ItemsMapper.toDomain(restored);
@@ -383,7 +383,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       const purged = await this.command.purge(canonicalWorkspaceId, id, tx);
 
       await helpers.recordTombstone(canonicalWorkspaceId, {
-        entityType: 'CatalogItem',
+        entityType: 'Item',
         entityId: id,
       });
 
@@ -396,6 +396,8 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
           purgedAt: new Date(),
         },
       );
+
+      await this.tagsService.invalidateTagsCache(canonicalWorkspaceId);
 
       return purged;
     });
@@ -490,7 +492,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     return this.query.getItemSnapshots(canonicalWorkspaceId, itemIds);
   }
 
-  // ── Port Implementations (IItemExistencePort & ICatalogReadPort) ────────────
+  // ── Port Implementations (IItemExistencePort & IItemReadPort) ────────────
 
   async exists(workspaceId: string, itemId: string): Promise<boolean> {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
@@ -542,35 +544,32 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
 
   async findDuplicateCandidateItems(workspaceId: string, limit?: number) {
     const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.query.findDuplicateCandidateItems(
-      canonicalWorkspaceId,
-      limit,
-    );
+    return this.query.findDuplicateCandidateItems(canonicalWorkspaceId, limit);
   }
 
   /**
-   * Sync protocol adapter: transactional upsert for a CatalogItem from an external sync batch.
+   * Sync protocol adapter: transactional upsert for a Item from an external sync batch.
    */
   async upsertFromSync(
-    command: UpsertSyncCatalogItemCommand,
+    command: UpsertSyncItemCommand,
     tx: Prisma.TransactionClient,
     helpers: TransactionHelpers,
   ): Promise<UpsertSyncEntityResult> {
     if (command.existingId) {
-      const existing = await tx.catalogItem.findUnique({
+      const existing = await tx.item.findUnique({
         where: { id: command.existingId },
         include: { itemTags: { include: { tag: true } } },
       });
 
       if (!existing) {
         throw new NotFoundException(
-          `Catalog item ${command.existingId} not found in workspace ${command.workspaceId}`,
+          `Item ${command.existingId} not found in workspace ${command.workspaceId}`,
         );
       }
 
       if (existing.workspaceId !== command.workspaceId) {
         throw new ForbiddenException(
-          `Catalog item ${command.existingId} does not belong to workspace ${command.workspaceId}`,
+          `Item ${command.existingId} does not belong to workspace ${command.workspaceId}`,
         );
       }
 
@@ -595,7 +594,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       );
 
       await helpers.appendChange(command.workspaceId, {
-        entityType: 'CatalogItem',
+        entityType: 'Item',
         entityId: updated.id,
         action: 'update',
         version: updated.version,
@@ -614,7 +613,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       );
 
       await helpers.appendChange(command.workspaceId, {
-        entityType: 'CatalogItem',
+        entityType: 'Item',
         entityId: created.id,
         action: 'create',
         version: 1,
@@ -638,7 +637,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
   }
 
   /**
-   * Sync protocol adapter: transactional soft-delete for a CatalogItem from an external sync batch.
+   * Sync protocol adapter: transactional soft-delete for a Item from an external sync batch.
    */
   async deleteFromSync(
     command: DeleteSyncEntityCommand,
@@ -652,30 +651,30 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       publishOutboxEventType,
       publishOutboxPayload,
     } = command;
-    const existing = await tx.catalogItem.findUnique({
+    const existing = await tx.item.findUnique({
       where: { id: entityId },
     });
     if (!existing) return;
 
     if (existing.workspaceId !== workspaceId) {
       throw new ForbiddenException(
-        `Catalog item ${entityId} does not belong to workspace ${workspaceId}`,
+        `Item ${entityId} does not belong to workspace ${workspaceId}`,
       );
     }
 
-    await tx.catalogItem.update({
+    await tx.item.update({
       where: { id: entityId },
       data: { deletedAt: new Date() },
     });
     await helpers.appendChange(workspaceId, {
-      entityType: 'CatalogItem',
+      entityType: 'Item',
       entityId,
       action: 'delete',
       version: existing.version + 1,
       data: { reason },
     });
     await helpers.recordTombstone(workspaceId, {
-      entityType: 'CatalogItem',
+      entityType: 'Item',
       entityId,
     });
     await helpers.publishOutbox(
@@ -718,7 +717,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         `Item ${itemId} not found in workspace ${canonicalWorkspaceId}`,
       );
     }
-    const existing = ItemsMapper.toDomain<CatalogItemDetail>(rawExisting);
+    const existing = ItemsMapper.toDomain<ItemDetail>(rawExisting);
 
     const preview = this.previewTypeConversion(existing, targetType, {
       retainUnmappedInExtra: options.retainUnmappedInExtra ?? true,
@@ -737,8 +736,8 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         val !== undefined &&
         val !== null &&
         val !== '' &&
-        !CATALOG_COLUMN_METADATA_FIELDS.has(field.key) &&
-        !CATALOG_COLUMN_METADATA_FIELDS.has(FIELD_ALIASES[field.key])
+        !ITEM_COLUMN_METADATA_FIELDS.has(field.key) &&
+        !ITEM_COLUMN_METADATA_FIELDS.has(FIELD_ALIASES[field.key])
       ) {
         dynamicExtraFields[field.key] = val;
       }
@@ -755,7 +754,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       preview.droppedFields.map((d) => d.field.toLowerCase()),
     );
 
-    for (const col of CATALOG_COLUMN_METADATA_FIELDS) {
+    for (const col of ITEM_COLUMN_METADATA_FIELDS) {
       if (FIELD_ALIASES[col] && FIELD_ALIASES[col] !== col) continue;
 
       const colLower = col.toLowerCase();
@@ -786,6 +785,3 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     };
   }
 }
-
-export const CatalogService = ItemsService;
-export type CatalogService = ItemsService;

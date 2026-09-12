@@ -68,10 +68,7 @@ export class AnnotationsService {
         tx,
       );
       const normalized = this.normalizer.normalizeCreateData(data);
-      const annotation = await this.annotationsRepo.create(
-        normalized,
-        tx,
-      );
+      const annotation = await this.annotationsRepo.create(normalized, tx);
 
       await helpers.appendChange(workspaceId, {
         entityType: 'Annotation',

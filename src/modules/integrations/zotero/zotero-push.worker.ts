@@ -39,7 +39,7 @@ export class ZoteroPushWorker {
   ) {}
 
   /**
-   * Pushes a local CatalogItem change to Zotero with 3-way merge conflict detection and version preconditions.
+   * Pushes a local Item change to Zotero with 3-way merge conflict detection and version preconditions.
    */
   async pushItem(
     workspaceId: string,
@@ -88,7 +88,7 @@ export class ZoteroPushWorker {
 
     if (!item || item.workspaceId !== workspaceId) {
       throw new NotFoundException(
-        `Catalog item ${itemId} not found in workspace ${workspaceId}`,
+        `Item ${itemId} not found in workspace ${workspaceId}`,
       );
     }
 
@@ -297,7 +297,7 @@ export class ZoteroPushWorker {
     // Delete local entity if present
     await this.libraryBridge.deleteEntity({
       workspaceId,
-      entityType: 'CatalogItem',
+      entityType: 'Item',
       entityId: itemId,
     });
 
@@ -394,7 +394,7 @@ export class ZoteroPushWorker {
 
       if (retryPush.success) {
         // Update local entity with merged fields
-        await this.libraryBridge.upsertCatalogItem({
+        await this.libraryBridge.upsertItem({
           workspaceId,
           userId: binding.connection.userId,
           existingId: item.id,
@@ -561,7 +561,7 @@ export class ZoteroPushWorker {
     }
 
     // Update local entity and clear conflict state
-    await this.libraryBridge.upsertCatalogItem({
+    await this.libraryBridge.upsertItem({
       workspaceId,
       userId: itemBinding.binding.connection.userId,
       existingId: itemId,

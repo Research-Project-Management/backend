@@ -166,10 +166,7 @@ export class WatchdogService
     try {
       // Look back up to 24 hours for abandoned runs
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-      const pendingRuns = await this.repo.findRecoverableRuns(
-        since,
-        50,
-      );
+      const pendingRuns = await this.repo.findRecoverableRuns(since, 50);
 
       if (pendingRuns.length === 0) return 0;
 

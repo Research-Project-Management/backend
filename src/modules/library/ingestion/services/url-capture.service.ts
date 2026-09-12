@@ -9,7 +9,7 @@ import {
 import { PrismaService } from '../../../../core/database/prisma.service';
 import { UrlCaptureProvider } from '../providers/url-capture.provider';
 import { TransactionService } from '../../outbox/transaction.service';
-import { CatalogService } from '../../items/items.service';
+import { ItemsService } from '../../items/items.service';
 import { Prisma } from '@prisma/client';
 import { createHash } from 'crypto';
 
@@ -23,7 +23,7 @@ export class UrlCaptureService {
     private readonly prisma: PrismaService,
     @Optional() private readonly urlCaptureProvider?: UrlCaptureProvider,
     @Optional() private readonly txService?: TransactionService,
-    @Optional() private readonly catalogService?: CatalogService,
+    @Optional() private readonly itemsService?: ItemsService,
     @Optional() private readonly webSnapshotService?: WebSnapshotService,
   ) {}
 
@@ -84,7 +84,7 @@ export class UrlCaptureService {
 
   /**
    * Confirms a previously captured URL by validating its token, claiming it atomically,
-   * and committing a CatalogItem to the catalog.
+   * and committing an Item to the library.
    */
   async confirmCapturedUrl(
     workspaceId: string,
@@ -194,8 +194,8 @@ export class UrlCaptureService {
             );
           }
 
-          if (this.catalogService?.createItem) {
-            return this.catalogService.createItem(workspaceId, itemData, {
+          if (this.itemsService?.createItem) {
+            return this.itemsService.createItem(workspaceId, itemData, {
               tx,
               helpers,
               source: 'url',
@@ -203,7 +203,7 @@ export class UrlCaptureService {
           }
 
           throw new Error(
-            'CatalogService is required to confirm captured URL item',
+            'ItemsService is required to confirm captured URL item',
           );
         },
       );
@@ -219,8 +219,8 @@ export class UrlCaptureService {
         );
       }
 
-      if (this.catalogService?.createItem) {
-        createdItem = await this.catalogService.createItem(
+      if (this.itemsService?.createItem) {
+        createdItem = await this.itemsService.createItem(
           workspaceId,
           itemData,
           {
@@ -229,7 +229,7 @@ export class UrlCaptureService {
         );
       } else {
         throw new Error(
-          'CatalogService is required to confirm captured URL item',
+          'ItemsService is required to confirm captured URL item',
         );
       }
     }

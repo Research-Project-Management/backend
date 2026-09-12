@@ -8,23 +8,17 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ProjectRepository } from './project.repository';
 import { Prisma, ProjectMemberRole, EntityType } from '@prisma/client';
-import {
-  parseTaskColumns,
-  DEFAULT_TASK_COLUMNS,
-  TaskColumn,
-} from './types/project.types';
+import { DEFAULT_WORK_ITEM_STATES } from '@/modules/work-item/state/types/state.types';
+import { MemberService } from './member/member.service';
 import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
 import { RedisCacheService } from '@/core/cache/redis-cache.service';
 import { PROJECT_REDIS_KEYS } from './constants/redis-keys.constant';
-import { WORK_ITEM_REDIS_KEYS } from '@/modules/work-item/constants/redis-keys.constant';
+import { WORK_ITEM_REDIS_KEYS } from '@/modules/work-item/core/constants/redis-keys.constant';
 import {
   CreateProjectDto,
   UpdateProjectDto,
   AddProjectMemberDto,
   UpdateProjectMemberDto,
-  AddColumnDto,
-  UpdateColumnDto,
-  ReorderColumnsDto,
 } from './dto/project.dto';
 
 const VALID_PROJECT_ROLES = new Set<string>(Object.values(ProjectMemberRole));
@@ -33,6 +27,7 @@ const VALID_PROJECT_ROLES = new Set<string>(Object.values(ProjectMemberRole));
 export class ProjectService {
   constructor(
     private readonly projectRepo: ProjectRepository,
+    @Optional() private readonly memberService?: MemberService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
@@ -87,16 +82,8 @@ export class ProjectService {
       return member.role;
     }
 
-    if (project.workspaceId) {
-      const wsRole = await this.projectRepo.findWorkspaceMemberRole(
-        project.workspaceId,
-        userId,
-      );
-      if (wsRole === 'owner' || wsRole === 'admin') {
-        return ProjectMemberRole.admin;
-      }
-    }
-
+    // Personal workspace model: no workspace-level role fallback.
+    // If the user is not a project member, they have no access.
     return ProjectMemberRole.viewer;
   }
 
@@ -185,15 +172,15 @@ export class ProjectService {
         'pages',
         'storage',
         'stickies',
-        'collection',
       ],
       workspace: { connect: { id: resolvedWorkspaceId } },
       createdBy: { connect: { id: userId } },
+      taskColumns: DEFAULT_WORK_ITEM_STATES as unknown as Prisma.InputJsonValue,
       ...(dto.leadId ? { lead: { connect: { id: dto.leadId } } } : {}),
       members: {
         create: {
           userId,
-          role: ProjectMemberRole.admin,
+          role: ProjectMemberRole.owner, // Creator becomes project owner (PI/team lead)
         },
       },
     });
@@ -309,12 +296,86 @@ export class ProjectService {
     };
   }
 
+  async archiveProject(projectId: string, userId?: string) {
+    const existing = await this.projectRepo.findProjectById(projectId);
+    if (!existing) {
+      throw new NotFoundException('Project not found');
+    }
+    if (!existing.isActive) {
+      throw new BadRequestException('Project is already archived');
+    }
+
+    const archived = await this.projectRepo.archiveProject(projectId);
+    await this.invalidateProjectCache(projectId, existing.workspaceId);
+
+    this.eventEmitter?.emit(
+      'project.archived',
+      new DomainActivityEvent({
+        entityType: 'project' as unknown as EntityType,
+        entityId: projectId,
+        verb: 'archived',
+        actorId: userId || '',
+        workspaceId: existing.workspaceId,
+        projectId: projectId,
+      }),
+    );
+
+    return {
+      message: 'Project archived successfully',
+      project: archived,
+    };
+  }
+
+  async unarchiveProject(projectId: string, userId?: string) {
+    const existing = await this.projectRepo.findProjectById(projectId);
+    if (!existing) {
+      throw new NotFoundException('Project not found');
+    }
+    if (existing.isActive) {
+      throw new BadRequestException('Project is not archived');
+    }
+
+    const restored = await this.projectRepo.unarchiveProject(projectId);
+    await this.invalidateProjectCache(projectId, existing.workspaceId);
+
+    this.eventEmitter?.emit(
+      'project.unarchived',
+      new DomainActivityEvent({
+        entityType: 'project' as unknown as EntityType,
+        entityId: projectId,
+        verb: 'restored',
+        actorId: userId || '',
+        workspaceId: existing.workspaceId,
+        projectId: projectId,
+      }),
+    );
+
+    return {
+      message: 'Project restored from archive successfully',
+      project: restored,
+    };
+  }
+
+  async getArchivedProjects(workspaceId: string) {
+    const workspace = await this.projectRepo.resolveWorkspace(workspaceId);
+    const canonicalWorkspaceId = workspace?.id || workspaceId;
+    const projects =
+      await this.projectRepo.findWorkspaceArchivedProjects(canonicalWorkspaceId);
+    return { projects };
+  }
+
   async getProjectMembers(projectId: string) {
+    if (this.memberService) {
+      return this.memberService.getMembers(projectId);
+    }
     const members = await this.projectRepo.findProjectMembers(projectId);
     return { members };
   }
 
   async addProjectMember(projectId: string, dto: AddProjectMemberDto) {
+    if (this.memberService) {
+      return this.memberService.addMember(projectId, dto);
+    }
     const existing = await this.projectRepo.findProjectMember(
       projectId,
       dto.userId,
@@ -328,6 +389,15 @@ export class ProjectService {
     if (!VALID_PROJECT_ROLES.has(role)) {
       throw new BadRequestException(
         `Invalid project role "${role}". Valid roles are: ${Object.values(ProjectMemberRole).join(', ')}`,
+      );
+    }
+
+    // Personal workspace model: any registered user can be invited to a project.
+    // There is no workspace membership prerequisite.
+    // Prevent inviting someone as 'owner' — ownership is set at project creation only.
+    if (role === ProjectMemberRole.owner) {
+      throw new ForbiddenException(
+        'Cannot invite a user as project owner. Use transfer ownership instead.',
       );
     }
 
@@ -353,6 +423,11 @@ export class ProjectService {
     targetUserId: string,
     dto: UpdateProjectMemberDto,
   ) {
+    if (this.memberService && dto.role) {
+      return this.memberService.updateMemberRole(projectId, targetUserId, {
+        role: dto.role,
+      });
+    }
     const role = dto.role;
     if (!role || !VALID_PROJECT_ROLES.has(role)) {
       throw new BadRequestException(
@@ -366,6 +441,23 @@ export class ProjectService {
     );
     if (!existing) {
       throw new NotFoundException('Project member not found');
+    }
+
+    const project = await this.projectRepo.findProjectById(projectId);
+    if (project) {
+      const wsRole = await this.projectRepo.findWorkspaceMemberRole(
+        project.workspaceId,
+        targetUserId,
+      );
+      if (
+        wsRole === 'viewer' &&
+        (role === ProjectMemberRole.admin ||
+          role === ProjectMemberRole.contributor)
+      ) {
+        throw new ForbiddenException(
+          'Workspace viewers cannot be granted contributor or admin roles in projects',
+        );
+      }
     }
 
     // Single Admin Invariant check
@@ -399,6 +491,9 @@ export class ProjectService {
   }
 
   async removeProjectMember(projectId: string, targetUserId: string) {
+    if (this.memberService) {
+      return this.memberService.removeMember(projectId, targetUserId);
+    }
     const existing = await this.projectRepo.findProjectMember(
       projectId,
       targetUserId,
@@ -426,216 +521,9 @@ export class ProjectService {
   }
 
   async leaveProject(projectId: string, userId: string) {
+    if (this.memberService) {
+      return this.memberService.leaveProject(projectId, userId);
+    }
     return this.removeProjectMember(projectId, userId);
-  }
-
-  async getColumns(projectId: string) {
-    const project = await this.projectRepo.findProjectById(projectId);
-    if (!project) throw new NotFoundException('Project not found');
-    return { columns: parseTaskColumns(project.taskColumns) };
-  }
-
-  async addColumn(projectId: string, dto: AddColumnDto) {
-    const project = await this.projectRepo.findProjectById(projectId);
-
-    if (!project) {
-      throw new NotFoundException('Project not found');
-    }
-
-    const columns = parseTaskColumns(project.taskColumns);
-    const newColumn: TaskColumn = {
-      id: dto.id || dto.title.toLowerCase().replace(/\s+/g, '-'),
-      title: dto.title,
-      isDefault: false,
-      accentColor: dto.accentColor || '#6366F1',
-    };
-
-    const updatedColumns = [...columns, newColumn];
-    await this.persistAndPublishColumns(
-      projectId,
-      project.workspaceId,
-      updatedColumns,
-    );
-
-    return { columns: updatedColumns };
-  }
-
-  async updateColumn(
-    projectId: string,
-    columnId: string,
-    dto: UpdateColumnDto,
-  ) {
-    const project = await this.projectRepo.findProjectById(projectId);
-
-    if (!project) {
-      throw new NotFoundException('Project not found');
-    }
-
-    const columns = parseTaskColumns(project.taskColumns);
-    const updatedColumns = columns.map((col) => {
-      if (col.id === columnId) {
-        return {
-          ...col,
-          ...(dto.title !== undefined && { title: dto.title }),
-          ...(dto.accentColor !== undefined && {
-            accentColor: dto.accentColor,
-          }),
-        };
-      }
-      return col;
-    });
-
-    await this.persistAndPublishColumns(
-      projectId,
-      project.workspaceId,
-      updatedColumns,
-    );
-
-    return { columns: updatedColumns };
-  }
-
-  private async persistAndPublishColumns(
-    projectId: string,
-    workspaceId: string,
-    updatedColumns: TaskColumn[],
-  ): Promise<void> {
-    await this.projectRepo.updateProject(projectId, {
-      taskColumns: updatedColumns as unknown as Prisma.InputJsonValue,
-    });
-
-    await this.invalidateProjectCache(projectId, workspaceId);
-
-    this.eventEmitter?.emit(
-      'project.updated',
-      new DomainActivityEvent({
-        entityType: 'project' as unknown as EntityType,
-        entityId: projectId,
-        verb: 'updated',
-        actorId: '',
-        workspaceId,
-        projectId,
-      }),
-    );
-  }
-
-  async deleteColumn(
-    projectId: string,
-    columnId: string,
-    fallbackColumnId?: string,
-    userId?: string,
-  ) {
-    const project = await this.projectRepo.findProjectById(projectId);
-
-    if (!project) {
-      throw new NotFoundException('Project not found');
-    }
-
-    const columns = parseTaskColumns(project.taskColumns);
-    if (columns.length <= 1) {
-      throw new BadRequestException('Project must have at least one column');
-    }
-
-    const updatedColumns = columns.filter((col) => col.id !== columnId);
-    const targetFallback =
-      fallbackColumnId &&
-      updatedColumns.some((col) => col.id === fallbackColumnId)
-        ? fallbackColumnId
-        : updatedColumns[0].id;
-
-    await this.projectRepo.deleteColumnWithTaskMigration(
-      projectId,
-      columnId,
-      targetFallback,
-      updatedColumns as unknown as Prisma.InputJsonValue,
-    );
-
-    await this.invalidateProjectCache(projectId, project.workspaceId);
-    if (this.cache) {
-      await Promise.all([
-        this.cache.del(WORK_ITEM_REDIS_KEYS.projectTasks(projectId)),
-        this.cache.del(PROJECT_REDIS_KEYS.overview(projectId)),
-      ]);
-    }
-
-    this.eventEmitter?.emit(
-      'project.updated',
-      new DomainActivityEvent({
-        entityType: 'project' as unknown as EntityType,
-        entityId: projectId,
-        verb: 'updated',
-        actorId: userId || '',
-        workspaceId: project.workspaceId,
-        projectId,
-      }),
-    );
-
-    return { columns: updatedColumns, migratedTo: targetFallback };
-  }
-
-  async reorderColumns(projectId: string, dto: ReorderColumnsDto) {
-    const project = await this.projectRepo.findProjectById(projectId);
-
-    if (!project) {
-      throw new NotFoundException('Project not found');
-    }
-
-    if (!Array.isArray(dto.columns) || dto.columns.length === 0) {
-      throw new BadRequestException('Columns list cannot be empty');
-    }
-
-    const validColumns: TaskColumn[] = dto.columns.map((c) => ({
-      id: c.id,
-      title: c.title.trim(),
-      isDefault: Boolean(c.isDefault),
-      accentColor: c.accentColor || '#6366F1',
-    }));
-
-    await this.projectRepo.updateProject(projectId, {
-      taskColumns: validColumns as unknown as Prisma.InputJsonValue,
-    });
-
-    await this.invalidateProjectCache(projectId, project.workspaceId);
-
-    this.eventEmitter?.emit(
-      'project.updated',
-      new DomainActivityEvent({
-        entityType: 'project' as unknown as EntityType,
-        entityId: projectId,
-        verb: 'updated',
-        actorId: '',
-        workspaceId: project.workspaceId,
-        projectId,
-      }),
-    );
-
-    return { columns: validColumns };
-  }
-
-  async resetColumns(projectId: string) {
-    const project = await this.projectRepo.findProjectById(projectId);
-
-    if (!project) {
-      throw new NotFoundException('Project not found');
-    }
-
-    await this.projectRepo.updateProject(projectId, {
-      taskColumns: DEFAULT_TASK_COLUMNS as unknown as Prisma.InputJsonValue,
-    });
-
-    await this.invalidateProjectCache(projectId, project.workspaceId);
-
-    this.eventEmitter?.emit(
-      'project.updated',
-      new DomainActivityEvent({
-        entityType: 'project' as unknown as EntityType,
-        entityId: projectId,
-        verb: 'updated',
-        actorId: '',
-        workspaceId: project.workspaceId,
-        projectId,
-      }),
-    );
-
-    return { columns: DEFAULT_TASK_COLUMNS };
   }
 }

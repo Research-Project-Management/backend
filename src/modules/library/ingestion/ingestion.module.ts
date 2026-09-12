@@ -24,9 +24,15 @@ import { MatchStage } from './stages/match.stage';
 import { CommitStage } from './stages/commit.stage';
 import { UrlCaptureProvider } from './providers/url-capture.provider';
 import { INGESTION_PORT } from './types/ingestion.types';
-import { WatchdogService, IngestionWatchdogService } from './services/watchdog.service';
+import {
+  WatchdogService,
+  IngestionWatchdogService,
+} from './services/watchdog.service';
 import { UrlCaptureService } from './services/url-capture.service';
-import { PipelineService, IngestionPipelineRunner } from './services/pipeline.service';
+import {
+  PipelineService,
+  IngestionPipelineRunner,
+} from './services/pipeline.service';
 import { QueueService, IngestionQueueService } from './services/queue.service';
 import { ZoteroTranslatorClient } from '../../../infra/zotero/zotero-translator.client';
 

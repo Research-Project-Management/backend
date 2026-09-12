@@ -1,6 +1,6 @@
 import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { SearchService } from './search.service';
-import { SearchCatalogQueryDto } from './dto/search.dto';
+import { SearchItemsQueryDto } from './dto/search.dto';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
 import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
 import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
@@ -15,11 +15,11 @@ export class SearchController {
 
   @Get()
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
-  async searchCatalog(
+  async searchItems(
     @Param('workspaceId') workspaceId: string,
-    @Query() dto: SearchCatalogQueryDto,
+    @Query() dto: SearchItemsQueryDto,
   ) {
-    return this.searchService.searchCatalog(workspaceId, dto);
+    return this.searchService.search(workspaceId, dto);
   }
 
   @Get('attachments/:attachmentId/anchors')

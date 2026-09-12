@@ -9,6 +9,7 @@ import {
   HttpCode,
   HttpStatus,
   NotFoundException,
+  Query,
 } from '@nestjs/common';
 import { TagsService } from './tags.service';
 import { CreateTagDto } from './dto/tags.dto';
@@ -27,8 +28,13 @@ export class TagsController {
 
   @Get()
   @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
-  async getTags(@Param('workspaceId') workspaceId: string) {
-    return this.tagsService.getTags(workspaceId);
+  async getTags(
+    @Param('workspaceId') workspaceId: string,
+    @Query('includeInactive') includeInactive?: string,
+  ) {
+    return this.tagsService.getTags(workspaceId, {
+      includeInactive: includeInactive === 'true',
+    });
   }
 
   @Post()
@@ -44,6 +50,13 @@ export class TagsController {
       body.color,
       body.type,
     );
+  }
+
+  @Delete('automatic')
+  @HttpCode(HttpStatus.OK)
+  @WorkspaceRoles('owner', 'admin')
+  async deleteAutomaticTags(@Param('workspaceId') workspaceId: string) {
+    return this.tagsService.deleteAutomaticTags(workspaceId);
   }
 
   @Delete(':tagId')

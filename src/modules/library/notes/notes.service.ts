@@ -80,7 +80,7 @@ export class NotesService implements IItemNotesExtractorPort {
           data.itemId,
         );
         if (!item) {
-          throw new NotFoundException(`Catalog item not found in workspace`);
+          throw new NotFoundException(`Item not found in workspace`);
         }
       }
     }
@@ -229,7 +229,7 @@ export class NotesService implements IItemNotesExtractorPort {
         data: {
           workspaceId: command.workspaceId,
           createdById: command.userId,
-          itemId: command.catalogItemId,
+          itemId: command.itemId,
           contentMd: command.contentMd,
           title: command.title || 'Note',
           tags: command.tags ? normalizeTags(command.tags) : [],
@@ -369,8 +369,8 @@ export class NotesService implements IItemNotesExtractorPort {
       );
     }
 
-    const attachments = await this.prisma.catalogAttachment.findMany({
-      where: { catalogItemId: itemId },
+    const attachments = await this.prisma.attachment.findMany({
+      where: { itemId },
       select: { id: true, filename: true },
     });
 

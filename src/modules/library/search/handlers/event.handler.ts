@@ -22,8 +22,8 @@ export class EventHandler {
     );
 
     try {
-      const attachments = await this.prisma.catalogAttachment.findMany({
-        where: { catalogItemId: event.aggregateId },
+      const attachments = await this.prisma.attachment.findMany({
+        where: { itemId: event.aggregateId },
         select: { id: true },
       });
 
@@ -59,7 +59,7 @@ export class EventHandler {
   @OnEvent(LIBRARY_EVENT_TYPES.ITEM_CREATED, { async: true })
   handleItemCreated(event: DomainEventEnvelope) {
     this.logger.debug(
-      `[EventHandler] New item indexed in catalog: ${event.aggregateId} (workspace: ${event.workspaceId})`,
+      `[EventHandler] New item indexed in library: ${event.aggregateId} (workspace: ${event.workspaceId})`,
     );
   }
 }

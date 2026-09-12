@@ -23,7 +23,11 @@ describe('Library Multi-Tenant Security & Batch Insertion Tests', () => {
       collectionsRepo = {
         findById: jest.fn().mockImplementation((wsId, colId) => {
           if (wsId === WORKSPACE_A && colId === COLLECTION_ID) {
-            return Promise.resolve({ id: COLLECTION_ID, workspaceId: WORKSPACE_A, name: 'Research' } as any);
+            return Promise.resolve({
+              id: COLLECTION_ID,
+              workspaceId: WORKSPACE_A,
+              name: 'Research',
+            } as any);
           }
           return Promise.resolve(null);
         }),
@@ -35,12 +39,15 @@ describe('Library Multi-Tenant Security & Batch Insertion Tests', () => {
         workspace: {
           findFirst: jest.fn().mockResolvedValue({ id: WORKSPACE_A }),
         } as any,
-        catalogItem: {
+        item: {
           findMany: jest.fn().mockImplementation(({ where }) => {
             const requestedIds: string[] = where.id?.in || [];
             // Only ITEM_A belongs to WORKSPACE_A
             const found = [];
-            if (where.workspaceId === WORKSPACE_A && requestedIds.includes(ITEM_A)) {
+            if (
+              where.workspaceId === WORKSPACE_A &&
+              requestedIds.includes(ITEM_A)
+            ) {
               found.push({ id: ITEM_A });
             }
             return Promise.resolve(found);
@@ -112,7 +119,7 @@ describe('Library Multi-Tenant Security & Batch Insertion Tests', () => {
       };
 
       mockTx = {
-        catalogTag: {
+        tag: {
           findFirst: jest.fn().mockImplementation(({ where }) => {
             if (where.workspaceId === WORKSPACE_A && where.id === TAG_A) {
               return Promise.resolve({ id: TAG_A, workspaceId: WORKSPACE_A });
@@ -120,7 +127,7 @@ describe('Library Multi-Tenant Security & Batch Insertion Tests', () => {
             return Promise.resolve(null);
           }),
         },
-        catalogItem: {
+        item: {
           findFirst: jest.fn().mockImplementation(({ where }) => {
             if (where.workspaceId === WORKSPACE_A && where.id === ITEM_A) {
               return Promise.resolve({ id: ITEM_A, workspaceId: WORKSPACE_A });

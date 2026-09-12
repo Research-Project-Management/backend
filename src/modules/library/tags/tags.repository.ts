@@ -10,14 +10,35 @@ export class TagsRepository {
     return tx ?? this.prisma;
   }
 
-  async findMany(workspaceId: string, tx?: Prisma.TransactionClient) {
+  async findMany(
+    workspaceId: string,
+    options?: { includeInactive?: boolean },
+    tx?: Prisma.TransactionClient,
+  ) {
     const client = this.getClient(tx);
-    return client.catalogTag.findMany({
-      where: { workspaceId },
+    return client.tag.findMany({
+      where: {
+        workspaceId,
+        ...(options?.includeInactive
+          ? {}
+          : {
+              itemTags: {
+                some: {
+                  item: { deletedAt: null },
+                },
+              },
+            }),
+      },
       orderBy: { name: 'asc' },
       include: {
         _count: {
-          select: { itemTags: true },
+          select: {
+            itemTags: {
+              where: {
+                item: { deletedAt: null },
+              },
+            },
+          },
         },
       },
     });
@@ -29,7 +50,7 @@ export class TagsRepository {
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    return client.catalogTag.findUnique({
+    return client.tag.findUnique({
       where: {
         workspaceId_name: {
           workspaceId,
@@ -47,7 +68,7 @@ export class TagsRepository {
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    return client.catalogTag.upsert({
+    return client.tag.upsert({
       where: {
         workspaceId_name: {
           workspaceId,
@@ -72,28 +93,54 @@ export class TagsRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<boolean> {
     const client = this.getClient(tx);
-    const result = await client.catalogTag.deleteMany({
+    const result = await client.tag.deleteMany({
       where: { id, workspaceId },
     });
     return result.count > 0;
   }
 
+  async deleteAutomatic(
+    workspaceId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<string[]> {
+    const client = this.getClient(tx);
+    const automaticTags = await client.tag.findMany({
+      where: {
+        workspaceId,
+        type: { in: ['automatic', 'academic'] },
+      },
+      select: { id: true },
+    });
+    if (automaticTags.length === 0) return [];
+    const tagIds = automaticTags.map((t) => t.id);
+
+    await client.itemTag.deleteMany({
+      where: { tagId: { in: tagIds } },
+    });
+
+    await client.tag.deleteMany({
+      where: { id: { in: tagIds } },
+    });
+
+    return tagIds;
+  }
+
   async assignToItem(
     tagId: string,
-    catalogItemId: string,
+    itemId: string,
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
     const client = this.getClient(tx);
-    await client.catalogItemTag.upsert({
+    await client.itemTag.upsert({
       where: {
-        tagId_catalogItemId: {
+        tagId_itemId: {
           tagId,
-          catalogItemId,
+          itemId,
         },
       },
       create: {
         tagId,
-        catalogItemId,
+        itemId,
       },
       update: {},
     });
@@ -101,14 +148,14 @@ export class TagsRepository {
 
   async removeFromItem(
     tagId: string,
-    catalogItemId: string,
+    itemId: string,
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
     const client = this.getClient(tx);
-    await client.catalogItemTag.deleteMany({
+    await client.itemTag.deleteMany({
       where: {
         tagId,
-        catalogItemId,
+        itemId,
       },
     });
   }

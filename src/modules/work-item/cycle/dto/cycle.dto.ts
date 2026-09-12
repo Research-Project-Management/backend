@@ -1,9 +1,10 @@
 import {
+  IsArray,
   IsEnum,
   IsNotEmpty,
   IsOptional,
   IsString,
-  IsDateString,
+  MaxLength,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { CycleStatus, CyclePhase } from '@prisma/client';
@@ -22,11 +23,13 @@ export class CreateCycleDto {
   })
   @IsString()
   @IsNotEmpty({ message: 'Cycle name is required' })
+  @MaxLength(255)
   name!: string;
 
   @ApiPropertyOptional({ description: 'Cycle objective or description' })
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   description?: string;
 
   @ApiPropertyOptional({
@@ -65,24 +68,16 @@ export class CreateCycleDto {
 }
 
 export class UpdateCycleDto {
-  @ApiPropertyOptional({ description: 'Project ID' })
-  @IsString()
-  @IsOptional()
-  projectId?: string;
-
-  @ApiPropertyOptional({ description: 'Workspace ID' })
-  @IsString()
-  @IsOptional()
-  workspaceId?: string;
-
   @ApiPropertyOptional({ description: 'Updated cycle name' })
   @IsString()
   @IsOptional()
+  @MaxLength(255)
   name?: string;
 
   @ApiPropertyOptional({ description: 'Updated cycle description' })
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   description?: string;
 
   @ApiPropertyOptional({ description: 'Updated start date' })
@@ -102,6 +97,16 @@ export class UpdateCycleDto {
   @IsEnum(CyclePhase)
   @IsOptional()
   phase?: CyclePhase;
+
+  @ApiPropertyOptional({ description: 'Project ID' })
+  @IsString()
+  @IsOptional()
+  projectId?: string;
+
+  @ApiPropertyOptional({ description: 'Workspace ID' })
+  @IsString()
+  @IsOptional()
+  workspaceId?: string;
 }
 
 export class AddCycleTaskDto {
@@ -122,6 +127,16 @@ export class AddCycleTaskDto {
   @IsString()
   @IsOptional()
   workspaceId?: string;
+}
+
+export class AddCycleTasksBatchDto {
+  @ApiProperty({
+    description: 'Array of task IDs to add to cycle',
+    type: [String],
+  })
+  @IsArray()
+  @IsNotEmpty({ message: 'Task IDs array is required' })
+  taskIds!: string[];
 }
 
 export class CompleteCycleDto {

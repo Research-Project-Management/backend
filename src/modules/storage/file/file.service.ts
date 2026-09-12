@@ -210,8 +210,8 @@ export class FileService implements OnModuleInit {
         (Array.isArray((file as any).attachments) &&
           (file as any).attachments.length > 0);
 
-      if (!isLibraryFile && this.prisma?.catalogAttachment) {
-        const attCount = await this.prisma.catalogAttachment.count({
+      if (!isLibraryFile && this.prisma?.attachment) {
+        const attCount = await this.prisma.attachment.count({
           where: { fileId: file.id },
         });
         if (attCount > 0) isLibraryFile = true;
@@ -264,12 +264,8 @@ export class FileService implements OnModuleInit {
       }
     }
 
-    if (
-      file.linkedToType === 'Paper' &&
-      file.linkedToId &&
-      this.prisma?.catalogItem
-    ) {
-      const paper = await this.prisma.catalogItem.findUnique({
+    if (file.linkedToType === 'Paper' && file.linkedToId && this.prisma?.item) {
+      const paper = await this.prisma.item.findUnique({
         where: { id: file.linkedToId },
         select: { workspaceId: true },
       });

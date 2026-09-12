@@ -12,7 +12,6 @@ import {
   ProjectRoleInput,
 } from '../decorators/project-roles.decorator';
 import { ProjectRole, ProjectRoleHierarchy } from '../enums/project-role.enum';
-import { WorkspaceRole } from '../enums/workspace-role.enum';
 
 @Injectable()
 export class ProjectRoleGuard implements CanActivate {
@@ -38,7 +37,9 @@ export class ProjectRoleGuard implements CanActivate {
     // 1. Resolve project identifier
     const explicitProjectId = request.params?.projectId;
     const claimedHeaderProjectId =
-      request.headers?.['x-project-id'] || request.query?.projectId;
+      request.headers?.['x-project-id'] ||
+      request.query?.projectId ||
+      request.body?.projectId;
 
     let projectId: string | undefined = explicitProjectId;
 
@@ -46,7 +47,6 @@ export class ProjectRoleGuard implements CanActivate {
       request.params?.cycleId ||
       request.params?.taskId ||
       request.params?.pageId ||
-      request.params?.worklogId ||
       request.params?.commentId,
     );
 
@@ -94,19 +94,6 @@ export class ProjectRoleGuard implements CanActivate {
       if (page?.projectId) {
         subResourceProjectId = page.projectId;
       }
-    } else if (request.params?.worklogId && this.prisma.worklog?.findUnique) {
-      const worklogId = request.params.worklogId;
-      const wl = isUuid(worklogId)
-        ? await this.prisma.worklog
-            .findUnique({
-              where: { id: worklogId },
-              select: { task: { select: { projectId: true } } },
-            })
-            .catch(() => null)
-        : null;
-      if (wl?.task?.projectId) {
-        subResourceProjectId = wl.task.projectId;
-      }
     } else if (request.params?.commentId) {
       const commentId = request.params.commentId;
       if (isUuid(commentId)) {
@@ -139,28 +126,28 @@ export class ProjectRoleGuard implements CanActivate {
       const fileId = request.params.fileId;
       const file = isUuid(fileId)
         ? await this.prisma.file
-              .findUnique({
-                where: { id: fileId },
-                select: { linkedToType: true, linkedToId: true },
-              })
-              .catch(() => null)
-          : null;
-        if (file?.linkedToType === 'project' && file.linkedToId) {
-          projectId = file.linkedToId;
-        }
+            .findUnique({
+              where: { id: fileId },
+              select: { linkedToType: true, linkedToId: true },
+            })
+            .catch(() => null)
+        : null;
+      if (file?.linkedToType === 'project' && file.linkedToId) {
+        projectId = file.linkedToId;
       }
+    }
 
-      // Direct /project/:id fallback
-      if (
-        !projectId &&
-        request.params?.id &&
-        !request.params?.workspaceId &&
-        !request.params?.pageId &&
-        !request.params?.taskId &&
-        !request.params?.fileId
-      ) {
-        projectId = request.params.id;
-      }
+    // Direct /project/:id fallback
+    if (
+      !projectId &&
+      request.params?.id &&
+      !request.params?.workspaceId &&
+      !request.params?.pageId &&
+      !request.params?.taskId &&
+      !request.params?.fileId
+    ) {
+      projectId = request.params.id;
+    }
 
     if (hasSubResourceParam) {
       if (!subResourceProjectId) {
@@ -241,29 +228,9 @@ export class ProjectRoleGuard implements CanActivate {
       request.params.projectId = canonicalProjectId;
     }
 
-    // 3. Workspace OWNER/ADMIN super-permission bypass
-    const workspaceMember = await this.prisma.workspaceMember.findFirst({
-      where: {
-        workspaceId: project.workspaceId,
-        userId,
-      },
-    });
-
-    if (
-      workspaceMember &&
-      ((workspaceMember.role as unknown as WorkspaceRole) ===
-        WorkspaceRole.OWNER ||
-        (workspaceMember.role as unknown as WorkspaceRole) ===
-          WorkspaceRole.ADMIN)
-    ) {
-      request.project = project;
-      request.projectId = canonicalProjectId;
-      request.workspaceId = project.workspaceId;
-      request.projectRole = ProjectRole.ADMIN;
-      return true;
-    }
-
-    // 4. Project Membership check
+    // 3. Project Membership check
+    // Note: In the personal-workspace model, there is no workspace-level bypass.
+    // Access is determined solely by ProjectMember.role.
     const projectMember = await this.prisma.projectMember.findFirst({
       where: {
         projectId: canonicalProjectId,
@@ -285,24 +252,16 @@ export class ProjectRoleGuard implements CanActivate {
       return true;
     }
 
-    // 5. Evaluate role hierarchy
+    // 4. Evaluate role hierarchy
     const roleMapping: Record<string, ProjectRole> = {
-      ADMIN: ProjectRole.ADMIN,
-      admin: ProjectRole.ADMIN,
-      OWNER: ProjectRole.ADMIN,
-      owner: ProjectRole.ADMIN,
-      LEAD: ProjectRole.ADMIN,
-      lead: ProjectRole.ADMIN,
-      RESEARCHER: ProjectRole.CONTRIBUTOR,
-      researcher: ProjectRole.CONTRIBUTOR,
+      OWNER: ProjectRole.OWNER,
+      owner: ProjectRole.OWNER,
       CONTRIBUTOR: ProjectRole.CONTRIBUTOR,
       contributor: ProjectRole.CONTRIBUTOR,
       COMMENTER: ProjectRole.COMMENTER,
       commenter: ProjectRole.COMMENTER,
       VIEWER: ProjectRole.VIEWER,
       viewer: ProjectRole.VIEWER,
-      MEMBER: ProjectRole.CONTRIBUTOR,
-      member: ProjectRole.CONTRIBUTOR,
     };
 
     const rawMemberRole = projectMember.role as string;

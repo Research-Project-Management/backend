@@ -83,36 +83,4 @@ export class CycleAnalyticsDto {
   completionRate!: number;
 }
 
-export class YourWorkSummaryDto {
-  @ApiProperty()
-  @IsString()
-  workspaceId!: string;
-
-  @ApiProperty()
-  @IsString()
-  userId!: string;
-
-  @ApiProperty()
-  @IsArray()
-  assigned!: any[];
-
-  @ApiProperty()
-  @IsArray()
-  created!: any[];
-
-  @ApiProperty()
-  @IsArray()
-  subscribed!: any[];
-
-  @ApiProperty()
-  @IsArray()
-  activity!: any[];
-
-  @ApiProperty()
-  @IsArray()
-  recent!: any[];
-
-  @ApiProperty()
-  @IsBoolean()
-  success!: boolean;
-}
+export { YourWorkSummaryDto } from '../your-work/dto/your-work.dto';

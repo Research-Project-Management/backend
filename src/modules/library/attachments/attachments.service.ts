@@ -67,10 +67,12 @@ export class AttachmentsService {
       fileHash: input.fileHash,
     });
 
-    await this.itemExistencePort.assertExists(
-      input.workspaceId,
-      input.catalogItemId,
-    );
+    const targetItemId = input.itemId;
+    if (!targetItemId) {
+      throw new BadRequestException('Item ID is required');
+    }
+
+    await this.itemExistencePort.assertExists(input.workspaceId, targetItemId);
 
     const resolvedFileId =
       input.fileId ||
@@ -78,9 +80,9 @@ export class AttachmentsService {
       null;
 
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const attachment = await tx.catalogAttachment.create({
+      const attachment = await tx.attachment.create({
         data: {
-          catalogItemId: input.catalogItemId,
+          itemId: targetItemId,
           filename: input.filename,
           url: input.url,
           mimeType: input.mimeType ?? 'application/pdf',
@@ -105,11 +107,7 @@ export class AttachmentsService {
       });
 
       if (resolvedFileId) {
-        await this.repo.updateLinkedFile(
-          resolvedFileId,
-          input.catalogItemId,
-          tx,
-        );
+        await this.repo.updateLinkedFile(resolvedFileId, targetItemId, tx);
       }
 
       await helpers.appendChange(input.workspaceId, {
@@ -134,7 +132,7 @@ export class AttachmentsService {
           'library.attachment.extraction_requested',
           {
             attachmentId: attachment.id,
-            catalogItemId: attachment.catalogItemId,
+            itemId: attachment.itemId,
             workspaceId: input.workspaceId,
           },
         );
@@ -159,11 +157,11 @@ export class AttachmentsService {
     });
 
     const attachment = await this.repo.findUnique(attachmentId, {
-      catalogItem: true,
+      item: true,
       revisions: { orderBy: { revisionNumber: 'desc' }, take: 1 },
     });
 
-    if (!attachment || attachment.catalogItem.workspaceId !== workspaceId) {
+    if (!attachment || attachment.item.workspaceId !== workspaceId) {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
@@ -171,7 +169,7 @@ export class AttachmentsService {
       (attachment.revisions[0]?.revisionNumber ?? 0) + 1;
 
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const updatedAttachment = await tx.catalogAttachment.update({
+      const updatedAttachment = await tx.attachment.update({
         where: { id: attachmentId },
         data: {
           url: input.url,
@@ -191,7 +189,7 @@ export class AttachmentsService {
         },
       });
 
-      await helpers.appendChange(attachment.catalogItem.workspaceId, {
+      await helpers.appendChange(attachment.item.workspaceId, {
         entityType: 'Attachment',
         entityId: attachmentId,
         action: 'update',
@@ -200,7 +198,7 @@ export class AttachmentsService {
       });
 
       await helpers.publishOutbox(
-        attachment.catalogItem.workspaceId,
+        attachment.item.workspaceId,
         attachmentId,
         'library.attachment.revision_added',
         { attachmentId, revisionNumber: nextRevisionNumber },
@@ -216,7 +214,7 @@ export class AttachmentsService {
   async getRevisions(workspaceId: string, attachmentId: string) {
     const attachment = await this.repo.findFirst({
       id: attachmentId,
-      catalogItem: { workspaceId, deletedAt: null },
+      item: { workspaceId, deletedAt: null },
     });
 
     if (!attachment) {
@@ -227,7 +225,7 @@ export class AttachmentsService {
   }
 
   /**
-   * Retrieves all attachments for a catalog item in a workspace.
+   * Retrieves all attachments for an item in a workspace.
    */
   async getItemAttachments(workspaceId: string, itemId: string) {
     await this.itemExistencePort.assertExists(workspaceId, itemId);
@@ -238,7 +236,7 @@ export class AttachmentsService {
   }
 
   /**
-   * Retrieves a specific attachment for a catalog item in a workspace.
+   * Retrieves a specific attachment for an item in a workspace.
    */
   async getItemAttachment(
     workspaceId: string,
@@ -247,10 +245,10 @@ export class AttachmentsService {
   ) {
     const where: any = {
       id: attachmentId,
-      catalogItem: { workspaceId, deletedAt: null },
+      item: { workspaceId, deletedAt: null },
     };
     if (itemId) {
-      where.catalogItemId = itemId;
+      where.itemId = itemId;
     }
 
     const attachment = await this.repo.findFirst(where, {
@@ -275,20 +273,19 @@ export class AttachmentsService {
     const attachment = await this.repo.findFirst(
       {
         id: attachmentId,
-        ...(workspaceId ? { catalogItem: { workspaceId } } : {}),
+        ...(workspaceId ? { item: { workspaceId } } : {}),
       },
-      { catalogItem: true },
+      { item: true },
     );
 
     if (!attachment) {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
-    const canonicalWorkspaceId =
-      workspaceId || attachment.catalogItem.workspaceId;
+    const canonicalWorkspaceId = workspaceId || attachment.item.workspaceId;
 
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      await tx.catalogAttachment.delete({ where: { id: attachment.id } });
+      await tx.attachment.delete({ where: { id: attachment.id } });
 
       await helpers.appendChange(canonicalWorkspaceId, {
         entityType: 'Attachment',
@@ -310,7 +307,7 @@ export class AttachmentsService {
   }
 
   /**
-   * Sync protocol adapter: transactional upsert for a CatalogAttachment from an external sync batch.
+   * Sync protocol adapter: transactional upsert for a Attachment from an external sync batch.
    */
   async upsertFromSync(
     command: UpsertSyncAttachmentCommand,
@@ -318,9 +315,9 @@ export class AttachmentsService {
     helpers: TransactionHelpers,
   ): Promise<UpsertSyncEntityResult> {
     if (command.existingId) {
-      const existing = await tx.catalogAttachment.findUnique({
+      const existing = await tx.attachment.findUnique({
         where: { id: command.existingId },
-        include: { catalogItem: true },
+        include: { item: true },
       });
 
       if (!existing) {
@@ -329,7 +326,7 @@ export class AttachmentsService {
         );
       }
 
-      if (existing.catalogItem.workspaceId !== command.workspaceId) {
+      if (existing.item.workspaceId !== command.workspaceId) {
         throw new ForbiddenException(
           `Attachment ${command.existingId} does not belong to workspace ${command.workspaceId}`,
         );
@@ -340,7 +337,7 @@ export class AttachmentsService {
       });
       const nextRevisionNumber = revisionCount + 1;
 
-      const updated = await tx.catalogAttachment.update({
+      const updated = await tx.attachment.update({
         where: { id: command.existingId },
         data: {
           filename: command.filename,
@@ -363,7 +360,7 @@ export class AttachmentsService {
       });
 
       await helpers.appendChange(command.workspaceId, {
-        entityType: 'CatalogAttachment',
+        entityType: 'Attachment',
         entityId: updated.id,
         action: 'update',
         version: nextRevisionNumber,
@@ -371,25 +368,26 @@ export class AttachmentsService {
 
       return { id: updated.id, isNew: false, version: nextRevisionNumber };
     } else {
-      if (!command.catalogItemId) {
+      const parentItemId = command.itemId;
+      if (!parentItemId) {
         throw new NotFoundException(
-          `Parent catalog item ID required for attachment ${command.filename}`,
+          `Parent item ID required for attachment ${command.filename}`,
         );
       }
 
-      const item = await tx.catalogItem.findUnique({
-        where: { id: command.catalogItemId },
+      const item = await tx.item.findUnique({
+        where: { id: parentItemId },
       });
 
       if (!item || item.workspaceId !== command.workspaceId) {
         throw new NotFoundException(
-          `Catalog item ${command.catalogItemId} not found in workspace ${command.workspaceId}`,
+          `Item ${parentItemId} not found in workspace ${command.workspaceId}`,
         );
       }
 
-      const created = await tx.catalogAttachment.create({
+      const created = await tx.attachment.create({
         data: {
-          catalogItemId: command.catalogItemId,
+          itemId: parentItemId,
           filename: command.filename,
           url: command.url,
           mimeType: command.mimeType,
@@ -413,7 +411,7 @@ export class AttachmentsService {
       });
 
       await helpers.appendChange(command.workspaceId, {
-        entityType: 'CatalogAttachment',
+        entityType: 'Attachment',
         entityId: created.id,
         action: 'create',
         version: 1,
@@ -436,7 +434,7 @@ export class AttachmentsService {
           'library.attachment.extraction_requested',
           {
             attachmentId: created.id,
-            catalogItemId: command.catalogItemId,
+            itemId: created.itemId,
             workspaceId: command.workspaceId,
           },
         );
@@ -447,7 +445,7 @@ export class AttachmentsService {
   }
 
   /**
-   * Sync protocol adapter: transactional deletion for a CatalogAttachment from an external sync batch.
+   * Sync protocol adapter: transactional deletion for a Attachment from an external sync batch.
    */
   async deleteFromSync(
     command: DeleteSyncEntityCommand,
@@ -459,18 +457,18 @@ export class AttachmentsService {
       this.prisma,
       workspaceId,
     );
-    const existing = await tx.catalogAttachment.findFirst({
+    const existing = await tx.attachment.findFirst({
       where: {
         id: entityId,
-        catalogItem: { workspaceId: canonicalWorkspaceId },
+        item: { workspaceId: canonicalWorkspaceId },
       },
-      include: { catalogItem: true },
+      include: { item: true },
     });
     if (!existing) return;
 
-    await tx.catalogAttachment.delete({ where: { id: entityId } });
+    await tx.attachment.delete({ where: { id: entityId } });
     await helpers.appendChange(canonicalWorkspaceId, {
-      entityType: 'CatalogAttachment',
+      entityType: 'Attachment',
       entityId,
       action: 'delete',
       version: 1,
@@ -498,14 +496,49 @@ export class AttachmentsService {
   ): Promise<any> {
     const attachment = await this.repo.findUnique(
       attachmentId,
-      { catalogItem: true },
+      { item: true },
       tx,
     );
-    if (!attachment || attachment.catalogItem.workspaceId !== workspaceId) {
+    if (!attachment || attachment.item.workspaceId !== workspaceId) {
       throw new NotFoundException(
         `Attachment ${attachmentId} not found in workspace ${workspaceId}`,
       );
     }
     return attachment;
+  }
+
+  /**
+   * Sets an attachment as the primary attachment for an item.
+   */
+  async setPrimaryAttachment(
+    workspaceId: string,
+    itemId: string,
+    attachmentId: string,
+  ) {
+    const canonicalWorkspaceId = await resolveTenantWorkspaceId(
+      this.prisma,
+      workspaceId,
+    );
+    const attachment = await this.repo.findFirst({
+      id: attachmentId,
+      itemId,
+      item: { workspaceId: canonicalWorkspaceId },
+    });
+    if (!attachment) {
+      throw new NotFoundException(`Attachment ${attachmentId} not found`);
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.attachment.updateMany({
+        where: { itemId, attachmentType: 'primary_pdf' },
+        data: { attachmentType: 'supplementary' },
+      });
+      await tx.attachment.update({
+        where: { id: attachmentId },
+        data: { attachmentType: 'primary_pdf' },
+      });
+    });
+
+    return { success: true };
   }
 }

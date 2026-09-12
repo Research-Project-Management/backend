@@ -15,18 +15,24 @@ describe('ItemTransformer (Matt Pocock Pattern)', () => {
     it('retrieves values from direct top-level properties', () => {
       const item = { title: 'Direct Title', publicationTitle: 'Nature' };
       expect(transformer.getItemFieldValue(item, 'title')).toBe('Direct Title');
-      expect(transformer.getItemFieldValue(item, 'publicationTitle')).toBe('Nature');
+      expect(transformer.getItemFieldValue(item, 'publicationTitle')).toBe(
+        'Nature',
+      );
     });
 
     it('retrieves values from extraFields object when not at top-level', () => {
       const item = { title: 'Test', extraFields: { series: 'Physics Series' } };
-      expect(transformer.getItemFieldValue(item, 'series')).toBe('Physics Series');
+      expect(transformer.getItemFieldValue(item, 'series')).toBe(
+        'Physics Series',
+      );
     });
 
     it('resolves field aliases transparently', () => {
       const item = { journal: 'Science' };
       // journal is alias for publicationTitle
-      expect(transformer.getItemFieldValue(item, 'publicationTitle')).toBe('Science');
+      expect(transformer.getItemFieldValue(item, 'publicationTitle')).toBe(
+        'Science',
+      );
       expect(transformer.getItemFieldValue(item, 'journal')).toBe('Science');
     });
 
@@ -37,7 +43,9 @@ describe('ItemTransformer (Matt Pocock Pattern)', () => {
 
     it('returns undefined if field does not exist', () => {
       const item = { title: 'Test' };
-      expect(transformer.getItemFieldValue(item, 'nonExistent')).toBeUndefined();
+      expect(
+        transformer.getItemFieldValue(item, 'nonExistent'),
+      ).toBeUndefined();
     });
   });
 
@@ -47,28 +55,32 @@ describe('ItemTransformer (Matt Pocock Pattern)', () => {
         { key: 'title', label: 'Title' },
         { key: 'abstractNote', label: 'Abstract' },
       ] as any;
-      expect(transformer.findMatchingTargetField('title', targetFields)).toBe('title');
+      expect(transformer.findMatchingTargetField('title', targetFields)).toBe(
+        'title',
+      );
     });
 
     it('resolves alias keys to matching target fields', () => {
       const targetFields = [
         { key: 'publicationTitle', label: 'Publication' },
       ] as any;
-      expect(transformer.findMatchingTargetField('journal', targetFields)).toBe('publicationTitle');
+      expect(transformer.findMatchingTargetField('journal', targetFields)).toBe(
+        'publicationTitle',
+      );
     });
 
     it('matches field keys case-insensitively', () => {
-      const targetFields = [
-        { key: 'doi', label: 'DOI' },
-      ] as any;
-      expect(transformer.findMatchingTargetField('DOI', targetFields)).toBe('doi');
+      const targetFields = [{ key: 'doi', label: 'DOI' }] as any;
+      expect(transformer.findMatchingTargetField('DOI', targetFields)).toBe(
+        'doi',
+      );
     });
 
     it('returns undefined when no matching field is found', () => {
-      const targetFields = [
-        { key: 'title', label: 'Title' },
-      ] as any;
-      expect(transformer.findMatchingTargetField('volume', targetFields)).toBeUndefined();
+      const targetFields = [{ key: 'title', label: 'Title' }] as any;
+      expect(
+        transformer.findMatchingTargetField('volume', targetFields),
+      ).toBeUndefined();
     });
   });
 
@@ -78,7 +90,9 @@ describe('ItemTransformer (Matt Pocock Pattern)', () => {
         id: 'item-1',
         itemType: 'journalArticle',
         title: 'Original Article',
-        creators: [{ firstName: 'Alice', lastName: 'Smith', creatorType: 'author' }],
+        creators: [
+          { firstName: 'Alice', lastName: 'Smith', creatorType: 'author' },
+        ],
       };
       const result = transformer.previewConversion(item, 'journalArticle');
       expect(result.sourceType).toBe('journalArticle');
@@ -91,9 +105,9 @@ describe('ItemTransformer (Matt Pocock Pattern)', () => {
 
     it('throws BadRequestException for invalid target type', () => {
       const item = { itemType: 'journalArticle', title: 'Test' };
-      expect(() => transformer.previewConversion(item, 'invalidTypeUnknown')).toThrow(
-        BadRequestException,
-      );
+      expect(() =>
+        transformer.previewConversion(item, 'invalidTypeUnknown'),
+      ).toThrow(BadRequestException);
     });
 
     it('throws BadRequestException for non-bibliographic target type', () => {
@@ -109,7 +123,9 @@ describe('ItemTransformer (Matt Pocock Pattern)', () => {
         itemType: 'book',
         title: 'The Great Handbook',
         publisher: 'Oxford Press',
-        creators: [{ firstName: 'Jane', lastName: 'Doe', creatorType: 'author' }],
+        creators: [
+          { firstName: 'Jane', lastName: 'Doe', creatorType: 'author' },
+        ],
       };
 
       const result = transformer.previewConversion(bookItem, 'bookSection');
@@ -134,7 +150,9 @@ describe('ItemTransformer (Matt Pocock Pattern)', () => {
         itemType: 'bookSection',
         title: 'Chapter 1: Intro',
         bookTitle: 'The Great Handbook',
-        creators: [{ firstName: 'Jane', lastName: 'Doe', creatorType: 'author' }],
+        creators: [
+          { firstName: 'Jane', lastName: 'Doe', creatorType: 'author' },
+        ],
       };
 
       const result = transformer.previewConversion(sectionItem, 'book');
@@ -183,7 +201,9 @@ describe('ItemTransformer (Matt Pocock Pattern)', () => {
       expect(result.droppedFields).toContainEqual(
         expect.objectContaining({ field: 'issue', value: '12' }),
       );
-      expect(result.projectedItem.extraFields['__unmapped_journalArticle_issue']).toBe('12');
+      expect(
+        result.projectedItem.extraFields['__unmapped_journalArticle_issue'],
+      ).toBe('12');
     });
 
     it('handles creator role changes with primary and secondary fallback', () => {
@@ -193,8 +213,16 @@ describe('ItemTransformer (Matt Pocock Pattern)', () => {
         itemType: 'film',
         title: 'Documentary',
         creators: [
-          { firstName: 'Martin', lastName: 'Scorsese', creatorType: 'director' },
-          { firstName: 'Roger', lastName: 'Deakins', creatorType: 'cinematographer' },
+          {
+            firstName: 'Martin',
+            lastName: 'Scorsese',
+            creatorType: 'director',
+          },
+          {
+            firstName: 'Roger',
+            lastName: 'Deakins',
+            creatorType: 'cinematographer',
+          },
         ],
       };
 

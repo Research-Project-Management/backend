@@ -384,10 +384,10 @@ export class ZoteroConnectionService {
     });
 
     const itemIds = conflicts.map((c) => c.entityId);
-    const catalogItems = this.libraryBridge
+    const conflictItems = this.libraryBridge
       ? await this.libraryBridge.getItemSnapshots({ workspaceId, itemIds })
       : [];
-    const itemMap = new Map(catalogItems.map((i) => [i.id, i]));
+    const itemMap = new Map(conflictItems.map((i) => [i.id, i]));
 
     return conflicts.map((c) => {
       const item = itemMap.get(c.entityId);
@@ -426,10 +426,10 @@ export class ZoteroConnectionService {
     });
 
     const itemIds = items.map((i) => i.entityId);
-    const catalogItems = this.libraryBridge
+    const fetchedItems = this.libraryBridge
       ? await this.libraryBridge.getItemSnapshots({ workspaceId, itemIds })
       : [];
-    const itemMap = new Map(catalogItems.map((i) => [i.id, i]));
+    const itemMap = new Map(fetchedItems.map((i) => [i.id, i]));
 
     return items.map((i) => {
       const item = itemMap.get(i.entityId);

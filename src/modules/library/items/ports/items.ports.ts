@@ -1,4 +1,4 @@
-import { ItemMetadata, CatalogItemSummary } from '../types/items.types';
+import { ItemMetadata, ItemSummary as ItemDomainSummary } from '../types/items.types';
 
 export interface ItemSnapshot {
   id: string;
@@ -29,7 +29,7 @@ export interface ItemSummary {
 export type SyncItemSnapshot = ItemSnapshot;
 export type SyncItemSummary = ItemSummary;
 
-export interface CatalogItemDetail extends ItemMetadata {
+export interface ItemDetail extends ItemMetadata {
   id: string;
   workspaceId: string;
   version: number;
@@ -38,13 +38,13 @@ export interface CatalogItemDetail extends ItemMetadata {
   deletedAt?: Date | null;
 }
 
-export interface CreateCatalogItemCommand {
+export interface CreateItemCommand {
   workspaceId: string;
   userId: string;
   metadata: ItemMetadata;
 }
 
-export interface UpdateCatalogItemCommand {
+export interface UpdateItemCommand {
   workspaceId: string;
   itemId: string;
   metadata: Partial<ItemMetadata>;
@@ -78,27 +78,27 @@ export interface DuplicateCandidateItem {
   }>;
 }
 
-export interface ICatalogReadPort {
+export interface IItemReadPort {
   findById(
     workspaceId: string,
     itemId: string,
-  ): Promise<CatalogItemDetail | null>;
+  ): Promise<ItemDetail | null>;
   findByIds(
     workspaceId: string,
     itemIds: string[],
-  ): Promise<CatalogItemDetail[]>;
+  ): Promise<ItemDetail[]>;
   findByDoi(
     workspaceId: string,
     doi: string,
-  ): Promise<CatalogItemDetail | null>;
+  ): Promise<ItemDetail | null>;
   findSummaryById(
     workspaceId: string,
     itemId: string,
-  ): Promise<CatalogItemSummary | null>;
+  ): Promise<ItemDomainSummary | null>;
   findSummariesByIds(
     workspaceId: string,
     itemIds: string[],
-  ): Promise<CatalogItemSummary[]>;
+  ): Promise<ItemDomainSummary[]>;
   getItemSnapshot(
     workspaceId: string,
     itemId: string,
@@ -118,8 +118,6 @@ export interface ICatalogReadPort {
 }
 
 export const ITEM_READ_PORT = Symbol('ITEM_READ_PORT');
-export const CATALOG_READ_PORT = ITEM_READ_PORT;
-export type IItemReadPort = ICatalogReadPort;
 
 export interface IItemExistencePort {
   exists(workspaceId: string, itemId: string): Promise<boolean>;

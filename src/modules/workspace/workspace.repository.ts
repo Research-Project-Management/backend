@@ -4,7 +4,7 @@ import {
   buildWorkspaceIdentifierWhere,
   isUuid,
 } from '@/core/utils/tenant.util';
-import { Prisma, WorkspaceMemberRole, Workspace } from '@prisma/client';
+import { Prisma, Workspace } from '@prisma/client';
 import {
   IWorkspaceRepository,
   WorkspaceWithMembers,
@@ -33,45 +33,31 @@ export class WorkspaceRepository implements IWorkspaceRepository {
     return ws?.id ?? null;
   }
 
+  /**
+   * Personal workspace model: user's workspace is the one where ownerId === userId.
+   * Returns array with at most 1 workspace.
+   */
   async findUserWorkspaces(userId: string): Promise<WorkspaceWithMembers[]> {
-    const memberships = await this.prisma.workspaceMember.findMany({
+    const workspace = await this.prisma.workspace.findFirst({
       where: {
-        userId,
-        workspace: {
-          deletedAt: null,
-        },
+        ownerId: userId,
+        deletedAt: null,
       },
       include: {
-        workspace: {
+        members: {
+          take: 50,
           include: {
-            members: {
-              take: 50,
-              include: {
-                user: { select: USER_SELECT },
-              },
-              orderBy: { joinedAt: 'asc' },
-            },
-            _count: {
-              select: { members: true },
-            },
+            user: { select: USER_SELECT },
           },
+          orderBy: { joinedAt: 'asc' },
+        },
+        _count: {
+          select: { members: true },
         },
       },
-      orderBy: { joinedAt: 'desc' },
     });
 
-    return memberships.map((m) => {
-      const ws = m.workspace;
-      const hasSelf = ws.members.some((mem) => mem.userId === userId);
-      const members = hasSelf
-        ? ws.members
-        : [{ ...m, user: undefined }, ...ws.members];
-
-      return {
-        ...ws,
-        members,
-      } as unknown as WorkspaceWithMembers;
-    });
+    return workspace ? [workspace as unknown as WorkspaceWithMembers] : [];
   }
 
   async findById(id: string): Promise<WorkspaceWithMembers | null> {
@@ -322,7 +308,7 @@ export class WorkspaceRepository implements IWorkspaceRepository {
   async searchPapers(workspaceId: string, query: string) {
     const canonicalId = await this.getCanonicalWorkspaceId(workspaceId);
     if (!canonicalId) return [];
-    return this.prisma.catalogItem.findMany({
+    return this.prisma.item.findMany({
       where: {
         workspaceId: canonicalId,
         deletedAt: null,

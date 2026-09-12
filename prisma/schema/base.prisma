@@ -58,10 +58,11 @@ enum WorkspaceMemberRole {
 }
 
 enum ProjectMemberRole {
+  owner       // Trưởng nhóm nghiên cứu — full control, manages members
   admin
-  contributor
-  commenter
-  viewer
+  contributor // Thành viên nghiên cứu — create/edit tasks, upload papers, write docs
+  commenter   // GVHD / Reviewer — view + comment only, cannot create content
+  viewer      // Hội đồng phản biện — read-only, no writes
 }
 
 enum FilePermission {

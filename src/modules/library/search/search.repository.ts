@@ -28,7 +28,7 @@ export class SearchRepository implements OnModuleInit {
   private buildBaseWhere(
     workspaceId: string,
     options: SearchOptions,
-  ): Prisma.CatalogItemWhereInput {
+  ): Prisma.ItemWhereInput {
     return buildBaseSearchWhere(workspaceId, options);
   }
 
@@ -36,7 +36,7 @@ export class SearchRepository implements OnModuleInit {
    * Builds a Prisma text-search OR clause using ILIKE.
    * Used as fallback when tsvector is not available.
    */
-  private buildTextWhereIlike(q: string): Prisma.CatalogItemWhereInput {
+  private buildTextWhereIlike(q: string): Prisma.ItemWhereInput {
     const trimmed = q.trim();
     return {
       OR: [
@@ -181,7 +181,7 @@ export class SearchRepository implements OnModuleInit {
 
     // Fetch full records with relations in original ranked order
     const client = this.getClient(tx);
-    const items = await client.catalogItem.findMany({
+    const items = await client.item.findMany({
       where: { id: { in: ids } },
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
@@ -210,19 +210,19 @@ export class SearchRepository implements OnModuleInit {
     const client = this.getClient(tx);
     const q = options.q?.trim();
 
-    const where: Prisma.CatalogItemWhereInput = {
+    const where: Prisma.ItemWhereInput = {
       ...this.buildBaseWhere(workspaceId, options),
       ...(q ? this.buildTextWhereIlike(q) : {}),
     };
 
-    const orderBy: Prisma.CatalogItemOrderByWithRelationInput =
+    const orderBy: Prisma.ItemOrderByWithRelationInput =
       options.sortBy === 'year'
         ? { year: options.sortOrder || 'desc' }
         : options.sortBy === 'title'
           ? { title: options.sortOrder || 'asc' }
           : { createdAt: options.sortOrder || 'desc' };
 
-    const items = await client.catalogItem.findMany({
+    const items = await client.item.findMany({
       where,
       orderBy,
       take: limit + 1,
@@ -257,13 +257,13 @@ export class SearchRepository implements OnModuleInit {
 
     // Use the same text where logic as ILIKE for facets (FTS facets are computed same way)
     const q = options.q?.trim();
-    const where: Prisma.CatalogItemWhereInput = {
+    const where: Prisma.ItemWhereInput = {
       ...this.buildBaseWhere(workspaceId, options),
       ...(q ? this.buildTextWhereIlike(q) : {}),
     };
 
     // Limit facet sampling to top 2,000 matches to prevent OOM on massive libraries
-    const items = await client.catalogItem.findMany({
+    const items = await client.item.findMany({
       where,
       take: 2000,
       select: {
@@ -300,7 +300,7 @@ export class SearchRepository implements OnModuleInit {
   }
 
   /**
-   * Checks if the search_vector FTS column exists on CatalogItem.
+   * Checks if the search_vector FTS column exists on Item.
    * Used to gracefully degrade to ILIKE before the migration has run.
    *
    * Cached after first successful query to avoid repeated pg_attribute checks.

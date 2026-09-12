@@ -1,4 +1,4 @@
-﻿import {
+import {
   IsArray,
   IsEnum,
   IsNotEmpty,
@@ -13,9 +13,9 @@
 import { Type } from 'class-transformer';
 
 export enum SyncEntityTypeEnum {
-  CatalogItem = 'CatalogItem',
+  Item = 'Item',
   Collection = 'Collection',
-  CatalogAttachment = 'CatalogAttachment',
+  Attachment = 'Attachment',
   Note = 'Note',
   Annotation = 'Annotation',
 }
@@ -59,7 +59,7 @@ export class PushMutationsDto {
 
 export enum SyncBatchOpTypeEnum {
   UpsertCollection = 'upsertCollection',
-  UpsertCatalogItem = 'upsertCatalogItem',
+  UpsertItem = 'upsertItem',
   UpsertAttachment = 'upsertAttachment',
   UpsertNote = 'upsertNote',
   UpsertAnnotation = 'upsertAnnotation',

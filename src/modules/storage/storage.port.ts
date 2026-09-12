@@ -23,9 +23,29 @@ export interface LinkFileInput {
   linkedToId: string;
 }
 
+export interface UploadFileInput {
+  workspaceId: string;
+  userId: string;
+  filename: string;
+  buffer: Buffer;
+  mimeType: string;
+  source?: string;
+  parentId?: string | null;
+}
+
+export interface UploadFileOutput {
+  fileId: string;
+  url: string;
+  path: string;
+  filename: string;
+  size: number;
+  mimeType: string;
+}
+
 export interface IStoragePort {
   readOwnedFile(input: ReadOwnedFileInput): Promise<ReadOwnedFileOutput>;
-  linkFile?(input: LinkFileInput): Promise<void>;
+  linkFile(input: LinkFileInput): Promise<void>;
+  uploadFile(input: UploadFileInput): Promise<UploadFileOutput>;
   uploadBuffer?(
     key: string,
     buffer: Buffer,

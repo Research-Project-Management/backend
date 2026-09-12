@@ -9,7 +9,7 @@ import { TagsModule } from '../tags/tags.module';
 import { CollectionsModule } from '../collections/collections.module';
 import { AttachmentsModule } from '../attachments/attachments.module';
 import { NotesModule } from '../notes/notes.module';
-import { ReadingModule } from '../reading/reading.module';
+import { StateModule } from '../state/state.module';
 import { OutboxModule } from '../outbox/outbox.module';
 
 @Module({
@@ -22,7 +22,7 @@ import { OutboxModule } from '../outbox/outbox.module';
     CollectionsModule,
     AttachmentsModule,
     NotesModule,
-    ReadingModule,
+    StateModule,
   ],
   controllers: [CurationController],
   providers: [DuplicateService, QualityService],

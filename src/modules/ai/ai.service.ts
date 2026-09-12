@@ -11,7 +11,6 @@ import { FastifyReply } from 'fastify';
 import { EngineService } from './engine/engine.service';
 import { ThreadService } from './thread/thread.service';
 import { AiQueryDto } from './dto/ai.dto';
-import { CatalogService } from '../library/items/items.service';
 import { buildAiPayload, formatPaperContext } from './utils/ai.util';
 
 import { PrismaService } from '@/core/database/prisma.service';
@@ -24,7 +23,6 @@ export class AiService {
     private readonly engineService: EngineService,
     private readonly threadService: ThreadService,
     private readonly prisma: PrismaService,
-    @Optional() private readonly catalogService?: CatalogService,
   ) {}
 
   async health() {
@@ -151,7 +149,7 @@ export class AiService {
     dto: AiQueryDto,
     reply: FastifyReply,
   ): Promise<void> {
-    const paper = await this.prisma.catalogItem.findFirst({
+    const paper = await this.prisma.item.findFirst({
       where: { id: paperId, deletedAt: null },
       include: { contributors: { orderBy: { orderIndex: 'asc' } } },
     });
@@ -226,7 +224,7 @@ export class AiService {
    * Paper-scoped synchronous RAG handler
    */
   async executePaper(userId: string, paperId: string, dto: AiQueryDto) {
-    const paper = await this.prisma.catalogItem.findFirst({
+    const paper = await this.prisma.item.findFirst({
       where: { id: paperId, deletedAt: null },
       include: { contributors: { orderBy: { orderIndex: 'asc' } } },
     });

@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import {
-  WorkspaceMemberRole,
   InvitationStatus,
   WorkspaceInvitation,
 } from '@prisma/client';
@@ -15,7 +14,7 @@ export class WorkspaceInvitationRepository implements IWorkspaceInvitationReposi
   async createInvitation(data: {
     workspaceId: string;
     email: string;
-    role: WorkspaceMemberRole;
+    // role removed: workspace invitations no longer carry workspace roles
     invitedById: string;
     expiresInDays?: number;
   }): Promise<WorkspaceInvitation> {
@@ -27,7 +26,7 @@ export class WorkspaceInvitationRepository implements IWorkspaceInvitationReposi
       data: {
         workspaceId: data.workspaceId,
         email: data.email.toLowerCase(),
-        role: data.role,
+        // role field removed from workspace_invitations table
         token,
         invitedById: data.invitedById,
         status: 'pending',

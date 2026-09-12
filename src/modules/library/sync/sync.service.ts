@@ -20,7 +20,7 @@ import {
   GetSyncItemSnapshotQuery,
   GetSyncItemSnapshotsQuery,
   UpsertSyncCollectionCommand,
-  UpsertSyncCatalogItemCommand,
+  UpsertSyncItemCommand,
   UpsertSyncAttachmentCommand,
   UpsertSyncNoteCommand,
   UpsertSyncAnnotationCommand,
@@ -48,7 +48,7 @@ export class SyncService implements SyncPort {
     private readonly txService: TransactionService,
     private readonly outboxWorker: OutboxWorker,
     private readonly collectionsService: CollectionsService,
-    private readonly catalogService: ItemsService,
+    private readonly itemsService: ItemsService,
     private readonly attachmentsService: AttachmentsService,
     private readonly notesService: NotesService,
     private readonly annotationsService: AnnotationsService,
@@ -152,8 +152,8 @@ export class SyncService implements SyncPort {
         } else {
           const cleanData = sanitizeData(mutation.data);
           switch (mutation.entityType) {
-            case 'CatalogItem':
-              await this.executeUpsertCatalogItem(tx, helpers, {
+            case 'Item':
+              await this.executeUpsertItem(tx, helpers, {
                 ...cleanData,
                 workspaceId,
                 userId: currentUserId,
@@ -170,12 +170,12 @@ export class SyncService implements SyncPort {
                 name: cleanData.name || 'Untitled',
               });
               break;
-            case 'CatalogAttachment':
+            case 'Attachment':
               await this.executeUpsertAttachment(tx, helpers, {
                 ...cleanData,
                 workspaceId,
                 existingId: mutation.entityId,
-                catalogItemId: cleanData.catalogItemId,
+                itemId: cleanData.itemId,
                 filename: cleanData.filename || 'attachment',
                 url: cleanData.url || '',
                 mimeType: cleanData.mimeType || 'application/pdf',
@@ -187,7 +187,7 @@ export class SyncService implements SyncPort {
                 workspaceId,
                 userId: currentUserId,
                 existingId: mutation.entityId,
-                catalogItemId: cleanData.catalogItemId,
+                itemId: cleanData.itemId,
                 title: cleanData.title || 'Note',
                 contentMd: cleanData.contentMd || '',
               });
@@ -233,7 +233,7 @@ export class SyncService implements SyncPort {
   async getItemSnapshot(
     query: GetSyncItemSnapshotQuery,
   ): Promise<SyncItemSnapshot | null> {
-    return this.catalogService.getItemSnapshot(query.workspaceId, query.itemId);
+    return this.itemsService.getItemSnapshot(query.workspaceId, query.itemId);
   }
 
   async getItemSnapshots(
@@ -243,7 +243,7 @@ export class SyncService implements SyncPort {
       return [];
     }
 
-    return this.catalogService.getItemSnapshots(
+    return this.itemsService.getItemSnapshots(
       query.workspaceId,
       query.itemIds,
     );
@@ -257,11 +257,11 @@ export class SyncService implements SyncPort {
     });
   }
 
-  async upsertCatalogItem(
-    command: UpsertSyncCatalogItemCommand,
+  async upsertItem(
+    command: UpsertSyncItemCommand,
   ): Promise<UpsertSyncEntityResult> {
     return this.txService.executeInTransaction(async (tx, helpers) => {
-      return this.executeUpsertCatalogItem(tx, helpers, command);
+      return this.executeUpsertItem(tx, helpers, command);
     });
   }
 
@@ -426,8 +426,8 @@ export class SyncService implements SyncPort {
           );
           if (op.operationId) refMap.set(op.operationId, res.id);
           results.push({ operationId: op.operationId, op: op.op, result: res });
-        } else if (op.op === 'upsertCatalogItem') {
-          const res = await this.executeUpsertCatalogItem(
+        } else if (op.op === 'upsertItem') {
+          const res = await this.executeUpsertItem(
             tx,
             helpers,
             op.command,
@@ -435,15 +435,15 @@ export class SyncService implements SyncPort {
           if (op.operationId) refMap.set(op.operationId, res.id);
           results.push({ operationId: op.operationId, op: op.op, result: res });
         } else if (op.op === 'upsertAttachment') {
-          if (op.parentRef && !op.command.catalogItemId) {
+          if (op.parentRef && !op.command.itemId) {
             const resolved = refMap.get(op.parentRef);
             if (!resolved) {
               throw new NotFoundException(
                 `Cannot resolve parentRef "${op.parentRef}" for upsertAttachment (operationId: ${op.operationId ?? 'n/a'}). ` +
-                  `Parent catalog item must appear earlier in the batch.`,
+                  `Parent item must appear earlier in the batch.`,
               );
             }
-            op.command.catalogItemId = resolved;
+            op.command.itemId = resolved;
           }
           const res = await this.executeUpsertAttachment(
             tx,
@@ -453,15 +453,15 @@ export class SyncService implements SyncPort {
           if (op.operationId) refMap.set(op.operationId, res.id);
           results.push({ operationId: op.operationId, op: op.op, result: res });
         } else if (op.op === 'upsertNote') {
-          if (op.parentRef && !op.command.catalogItemId) {
+          if (op.parentRef && !op.command.itemId) {
             const resolved = refMap.get(op.parentRef);
             if (!resolved) {
               throw new NotFoundException(
                 `Cannot resolve parentRef "${op.parentRef}" for upsertNote (operationId: ${op.operationId ?? 'n/a'}). ` +
-                  `Parent catalog item must appear earlier in the batch or have a catalogItemId.`,
+                  `Parent item must appear earlier in the batch or have an itemId.`,
               );
             }
-            op.command.catalogItemId = resolved;
+            op.command.itemId = resolved;
           }
           const res = await this.executeUpsertNote(tx, helpers, op.command);
           if (op.operationId) refMap.set(op.operationId, res.id);
@@ -598,12 +598,12 @@ export class SyncService implements SyncPort {
     return this.collectionsService.upsertFromSync(command, tx, helpers);
   }
 
-  private async executeUpsertCatalogItem(
+  private async executeUpsertItem(
     tx: Prisma.TransactionClient,
     helpers: TransactionHelpers,
-    command: UpsertSyncCatalogItemCommand,
+    command: UpsertSyncItemCommand,
   ): Promise<UpsertSyncEntityResult> {
-    return this.catalogService.upsertFromSync(command, tx, helpers);
+    return this.itemsService.upsertFromSync(command, tx, helpers);
   }
 
   private async executeUpsertAttachment(
@@ -636,11 +636,11 @@ export class SyncService implements SyncPort {
     command: DeleteSyncEntityCommand,
   ): Promise<void> {
     switch (command.entityType) {
-      case 'CatalogItem':
-        return this.catalogService.deleteFromSync(command, tx, helpers);
+      case 'Item':
+        return this.itemsService.deleteFromSync(command, tx, helpers);
       case 'Collection':
         return this.collectionsService.deleteFromSync(command, tx, helpers);
-      case 'CatalogAttachment':
+      case 'Attachment':
         return this.attachmentsService.deleteFromSync(command, tx, helpers);
       case 'Note':
         return this.notesService.deleteFromSync(command, tx, helpers);

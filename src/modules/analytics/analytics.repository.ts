@@ -60,7 +60,7 @@ export class AnalyticsRepository {
       this.prisma.task.count({
         where: { project: { workspaceId: canonicalId } },
       }),
-      this.prisma.catalogItem.count({
+      this.prisma.item.count({
         where: { workspaceId: canonicalId, deletedAt: null },
       }),
       this.prisma.page.count({
@@ -131,26 +131,55 @@ export class AnalyticsRepository {
     });
   }
 
-  async findUserWorkspaceTasks(workspaceId: string, userId: string) {
-    const canonicalId = await this.getCanonicalWorkspaceId(workspaceId);
-    if (!canonicalId) return [];
+  /** Label distribution: count tasks per label string in a project */
+  async findProjectTasksByLabel(projectId: string) {
+    if (!isUuid(projectId)) return [];
+    return this.prisma.task.findMany({
+      where: { projectId, deletedAt: null },
+      select: { id: true, labels: true },
+    });
+  }
 
+  /** Time-series: tasks created and completed per day within a date range */
+  async findProjectTasksTimeSeries(projectId: string, from: Date, to: Date) {
+    if (!isUuid(projectId)) return [];
     return this.prisma.task.findMany({
       where: {
-        project: { workspaceId: canonicalId },
-        OR: [
-          { assigneeId: userId },
-          { authorId: userId },
-          { comments: { some: { authorId: userId } } },
-        ],
+        projectId,
+        deletedAt: null,
+        createdAt: { gte: from, lte: to },
       },
-      include: {
-        author: { select: USER_SELECT },
-        assignee: { select: USER_SELECT },
-        project: { select: { id: true, name: true, avatar: true } },
-        comments: { select: { id: true } },
+      select: {
+        id: true,
+        createdAt: true,
+        updatedAt: true,
+        completed: true,
       },
-      orderBy: { updatedAt: 'desc' },
+    });
+  }
+
+  /** Cycle burndown: tasks with dates for daily completion tracking */
+  async findCycleTasksWithDates(cycleId: string) {
+    if (!isUuid(cycleId)) return [];
+    return this.prisma.task.findMany({
+      where: { cycleId, deletedAt: null },
+      select: {
+        id: true,
+        completed: true,
+        updatedAt: true,
+        createdAt: true,
+      },
+    });
+  }
+
+
+
+  /** Cycle start and end dates for burndown axis */
+  async findCycleById(cycleId: string) {
+    if (!isUuid(cycleId)) return null;
+    return this.prisma.cycle.findUnique({
+      where: { id: cycleId },
+      select: { id: true, startDate: true, endDate: true, name: true },
     });
   }
 }

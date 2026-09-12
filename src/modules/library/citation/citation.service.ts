@@ -467,7 +467,7 @@ export class CitationService {
   }
 
   /**
-   * Formats citation directly for a stored CatalogItem by ID.
+   * Formats citation directly for a stored Item by ID.
    */
   async formatItemById(
     workspaceId: string,
@@ -477,7 +477,7 @@ export class CitationService {
   ) {
     const item: any = this.itemsService
       ? await this.itemsService.getItem(workspaceId, itemId)
-      : await this.prisma?.catalogItem.findFirst({
+      : await this.prisma?.item.findFirst({
           where: {
             id: itemId,
             workspaceId,
@@ -580,7 +580,7 @@ export class CitationService {
   ) {
     const items = this.itemsService
       ? await this.itemsService.findByIds(workspaceId, itemIds)
-      : (await this.prisma?.catalogItem.findMany({
+      : (await this.prisma?.item.findMany({
           where: {
             id: { in: itemIds },
             workspaceId,
