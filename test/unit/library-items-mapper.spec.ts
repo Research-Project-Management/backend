@@ -1,7 +1,7 @@
 import { ItemsMapper } from '../../src/modules/library/items/mappers/items.mapper';
 import { CslJsonMapper } from '../../src/modules/library/citation/mappers/csl-json.mapper';
 import {
-  CATALOG_COLUMN_METADATA_FIELDS,
+  ITEM_COLUMN_METADATA_FIELDS,
   TYPE_SPECIFIC_EXTRA_FIELDS,
   FIELD_ALIASES,
   REVERSE_FIELD_ALIASES,
@@ -54,7 +54,7 @@ describe('Library Canonical Reconstruction Suite (Batch 11)', () => {
       ];
 
       for (const col of physicalColumns) {
-        expect(CATALOG_COLUMN_METADATA_FIELDS.has(col)).toBe(true);
+        expect(ITEM_COLUMN_METADATA_FIELDS.has(col)).toBe(true);
       }
     });
 

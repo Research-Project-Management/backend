@@ -8,24 +8,23 @@ import {
   UseGuards,
   NotFoundException,
 } from '@nestjs/common';
-import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
-import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
-import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
+import { JwtAuthGuard } from '../../../modules/iam/authn/guards/auth.guard';
+import { CurrentUser } from '../../../modules/iam/authn/decorators/user.decorator';
 import { CitationService } from './citation.service';
 import { FormatCitationDto, FormatBatchCitationDto } from './dto/citation.dto';
 import { normalizeCitationStyleId } from './utils/citation.utils';
 
 @Controller([
-  'api/v1/workspaces/:workspaceId/library/citation',
-  'api/v1/workspace/:workspaceId/library/citation',
   'api/v1/library/citation',
+  'api/v1/library/references',
+  'api/library/citation',
+  'api/library/references',
 ])
-@UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
+@UseGuards(JwtAuthGuard)
 export class CitationController {
   constructor(private readonly citationService: CitationService) {}
 
   @Get('styles')
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   getStyles() {
     return this.citationService.getAvailableStyles();
   }
@@ -35,7 +34,6 @@ export class CitationController {
    * Use GET /citation/items/:itemId/citation for persisted items.
    */
   @Post('format')
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   format(@Body() dto: FormatCitationDto) {
     return this.citationService.formatItem(
       dto.item,
@@ -45,7 +43,6 @@ export class CitationController {
   }
 
   @Post('batch')
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   formatBatch(@Body() dto: FormatBatchCitationDto) {
     return this.citationService.formatBatch(
       dto.items || [],
@@ -58,17 +55,16 @@ export class CitationController {
    * Gracefully returns { found: false, ... } without throwing 404 HTTP errors on misses.
    */
   @Post('resolve')
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async resolve(
+    @CurrentUser('id') userId: string,
     @Body('doi') doi?: string,
     @Body('query') query?: string,
-    @Param('workspaceId') workspaceId?: string,
   ) {
     const input = (query || doi || '').trim();
     const result = await this.citationService.resolveAcademicQuery(
       input,
       doi,
-      workspaceId,
+      userId,
     );
     return {
       found: result.found,
@@ -83,19 +79,17 @@ export class CitationController {
 
   /**
    * GET /citation/doi/:doi — for encoded DOIs (use encodeURIComponent on client).
-   * Wildcard alias doi/* removed: client must encode slashes in DOI as %2F.
    */
   @Get('doi/:doi')
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async getDoiReference(
+    @CurrentUser('id') userId: string,
     @Param('doi') doi: string,
-    @Param('workspaceId') workspaceId?: string,
   ) {
     const cleanDoi = decodeURIComponent(doi);
     const result = await this.citationService.resolveAcademicQuery(
       cleanDoi,
       cleanDoi,
-      workspaceId,
+      userId,
     );
     if (!result.found || !result.work) {
       throw new NotFoundException(`DOI not found on CrossRef (404)`);
@@ -111,7 +105,6 @@ export class CitationController {
   }
 
   @Get('crossref/search')
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async searchCrossRef(
     @Query('query') query: string,
     @Query('rows') rows?: string,
@@ -125,17 +118,16 @@ export class CitationController {
    * Route: GET /citation/items/:itemId/citation
    */
   @Get('items/:itemId/citation')
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async getItemCitation(
+    @CurrentUser('id') userId: string,
     @Param('itemId') itemId: string,
-    @Param('workspaceId') workspaceId: string,
     @Query('style') style?: string,
     @Query('index') index?: string,
   ) {
     const styleId = normalizeCitationStyleId(style);
     const numIndex = index ? parseInt(index, 10) : 1;
     const res = await this.citationService.formatItemById(
-      workspaceId,
+      userId,
       itemId,
       styleId,
       numIndex,
@@ -149,12 +141,11 @@ export class CitationController {
 
   /**
    * Batch format citations for multiple item IDs.
-   * Route: POST /citation/batch
+   * Route: POST /citation/batch-items
    */
   @Post('batch-items')
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async getBatchCitations(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Body('itemIds') itemIds?: string[],
     @Body('paperIds') paperIds?: string[],
     @Body('style') style?: string,
@@ -165,6 +156,6 @@ export class CitationController {
       : Array.isArray(paperIds)
         ? paperIds
         : [];
-    return this.citationService.formatItemBatch(workspaceId, ids, styleId);
+    return this.citationService.formatItemBatch(userId, ids, styleId);
   }
 }

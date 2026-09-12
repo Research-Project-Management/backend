@@ -3,6 +3,7 @@ import {
   Logger,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
   Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
@@ -10,20 +11,22 @@ import { AnnotationsRepository } from './annotations.repository';
 import {
   CreateAnnotationData,
   UpdateAnnotationData,
+  BatchAnnotationsData,
+  BatchAnnotationsResult,
 } from './types/annotations.types';
 import { AnnotationNormalizer } from './normalizers/annotation.normalizer';
-
 import {
   TransactionService,
   TransactionHelpers,
 } from '../outbox/transaction.service';
 import { AttachmentsService } from '../attachments/attachments.service';
-import { PrismaService } from '@/core/database/prisma.service';
 import type {
   UpsertSyncAnnotationCommand,
   DeleteSyncEntityCommand,
   UpsertSyncEntityResult,
-} from '../common/types/sync.types';
+} from '../sync/types/sync.types';
+import { AnnotationType } from '@prisma/client';
+import { buildAnnotationSortIndex } from './utils/sort-index.util';
 
 @Injectable()
 export class AnnotationsService {
@@ -33,56 +36,57 @@ export class AnnotationsService {
     private readonly annotationsRepo: AnnotationsRepository,
     private readonly libraryTx: TransactionService,
     private readonly attachmentsService: AttachmentsService,
-    private readonly prisma: PrismaService,
     @Optional()
     private readonly normalizer: AnnotationNormalizer = new AnnotationNormalizer(),
   ) {}
 
+  // ─── Queries ───────────────────────────────────────────────────────────────
+
   async getAnnotationsByAttachment(
-    workspaceId: string,
+    userId: string,
     attachmentId: string,
     pageIndex?: number,
+    type?: AnnotationType,
   ) {
-    await this.attachmentsService.assertAttachmentInWorkspace(
+    await this.attachmentsService.assertAttachmentExists(
       attachmentId,
-      workspaceId,
+      userId,
     );
-    return this.annotationsRepo.findByAttachment(attachmentId, pageIndex);
+    return this.annotationsRepo.findByAttachment(attachmentId, pageIndex, type);
   }
 
-  async getAnnotation(workspaceId: string, id: string) {
+  async getAnnotation(userId: string, id: string) {
     const annotation = await this.annotationsRepo.findById(id);
     if (!annotation) return null;
-    await this.attachmentsService.assertAttachmentInWorkspace(
+    await this.attachmentsService.assertAttachmentExists(
       annotation.attachmentId,
-      workspaceId,
+      userId,
     );
     return annotation;
   }
 
-  async createAnnotation(workspaceId: string, data: CreateAnnotationData) {
+  // ─── Mutations ─────────────────────────────────────────────────────────────
+
+  async createAnnotation(userId: string, data: CreateAnnotationData) {
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      await this.attachmentsService.assertAttachmentInWorkspace(
+      await this.attachmentsService.assertAttachmentExists(
         data.attachmentId,
-        workspaceId,
+        userId,
         tx,
       );
       const normalized = this.normalizer.normalizeCreateData(data);
-      const annotation = await this.annotationsRepo.create(
-        normalized,
-        tx,
-      );
+      const annotation = await this.annotationsRepo.create(normalized, tx);
 
-      await helpers.appendChange(workspaceId, {
+      await helpers.appendChange(userId, {
         entityType: 'Annotation',
-        entityId: annotation.id,
-        action: 'create',
-        version: annotation.version,
-        data: annotation,
+        entityId:   annotation.id,
+        action:     'create',
+        version:    annotation.version,
+        data:       annotation,
       });
 
       await helpers.publishOutbox(
-        workspaceId,
+        userId,
         annotation.id,
         'library.annotation.created',
         annotation,
@@ -92,61 +96,25 @@ export class AnnotationsService {
     });
   }
 
-  private async assertCanModifyAnnotation(
-    workspaceId: string,
-    annotation: { authorId?: string | null },
-    userId?: string,
-    tx?: Prisma.TransactionClient,
-  ) {
-    if (!userId) {
-      throw new ForbiddenException('User is not authenticated');
-    }
-    // Author can always edit/delete their own annotation
-    if (annotation.authorId && annotation.authorId === userId) {
-      return;
-    }
-    // Otherwise user must have admin or owner role in the workspace
-    const memberClient =
-      tx && 'workspaceMember' in tx && tx.workspaceMember
-        ? tx.workspaceMember
-        : this.prisma.workspaceMember;
-    const member = await memberClient.findUnique({
-      where: {
-        workspaceId_userId: { workspaceId, userId },
-      },
-    });
-    if (member?.role === 'owner' || member?.role === 'admin') {
-      return;
-    }
-    throw new ForbiddenException(
-      'Only the annotation author or workspace admin/owner can modify or delete this annotation',
-    );
-  }
-
   async updateAnnotation(
-    workspaceId: string,
+    userId: string,
     id: string,
     expectedVersion: number,
     data: UpdateAnnotationData,
-    userId?: string,
   ) {
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
       const existing = await this.annotationsRepo.findById(id, tx);
-      if (!existing) {
-        throw new NotFoundException(`Annotation ${id} not found`);
-      }
-      await this.attachmentsService.assertAttachmentInWorkspace(
+      if (!existing) throw new NotFoundException(`Annotation ${id} not found`);
+
+      await this.attachmentsService.assertAttachmentExists(
         existing.attachmentId,
-        workspaceId,
+        userId,
         tx,
       );
 
-      if (userId) {
-        await this.assertCanModifyAnnotation(workspaceId, existing, userId, tx);
-      }
+      this.assertCanModifyAnnotation(userId, existing);
 
       const normalizedData = this.normalizer.normalizeUpdateData(data);
-
       const updated = await this.annotationsRepo.update(
         id,
         expectedVersion,
@@ -155,16 +123,16 @@ export class AnnotationsService {
         existing,
       );
 
-      await helpers.appendChange(workspaceId, {
+      await helpers.appendChange(userId, {
         entityType: 'Annotation',
-        entityId: updated.id,
-        action: 'update',
-        version: updated.version,
-        data: updated,
+        entityId:   updated.id,
+        action:     'update',
+        version:    updated.version,
+        data:       updated,
       });
 
       await helpers.publishOutbox(
-        workspaceId,
+        userId,
         updated.id,
         'library.annotation.updated',
         updated,
@@ -175,25 +143,21 @@ export class AnnotationsService {
   }
 
   async deleteAnnotation(
-    workspaceId: string,
+    userId: string,
     id: string,
     expectedVersion?: number,
-    userId?: string,
   ) {
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
       const existing = await this.annotationsRepo.findById(id, tx);
-      if (!existing) {
-        throw new NotFoundException(`Annotation ${id} not found`);
-      }
-      await this.attachmentsService.assertAttachmentInWorkspace(
+      if (!existing) throw new NotFoundException(`Annotation ${id} not found`);
+
+      await this.attachmentsService.assertAttachmentExists(
         existing.attachmentId,
-        workspaceId,
+        userId,
         tx,
       );
 
-      if (userId) {
-        await this.assertCanModifyAnnotation(workspaceId, existing, userId, tx);
-      }
+      this.assertCanModifyAnnotation(userId, existing);
 
       const deleted = await this.annotationsRepo.softDelete(
         id,
@@ -203,13 +167,13 @@ export class AnnotationsService {
       );
 
       if (deleted) {
-        await helpers.recordTombstone(workspaceId, {
+        await helpers.recordTombstone(userId, {
           entityType: 'Annotation',
-          entityId: id,
+          entityId:   id,
         });
 
         await helpers.publishOutbox(
-          workspaceId,
+          userId,
           id,
           'library.annotation.deleted',
           { id, deletedAt: new Date() },
@@ -220,14 +184,90 @@ export class AnnotationsService {
     });
   }
 
-  /**
-   * Sync protocol adapter: transactional upsert for an Annotation from an external sync batch.
-   */
+  // ─── Batch ─────────────────────────────────────────────────────────────────
+
+  async batchUpsertAnnotations(
+    userId:       string,
+    attachmentId: string,
+    data:         BatchAnnotationsData,
+  ): Promise<BatchAnnotationsResult> {
+    if (data.upserts.length === 0 && data.deletes.length === 0) {
+      return { created: [], updated: [], deleted: [] };
+    }
+
+    return this.libraryTx.executeInTransaction(async (tx, helpers) => {
+      await this.attachmentsService.assertAttachmentExists(
+        attachmentId,
+        userId,
+        tx,
+      );
+
+      const result = await this.annotationsRepo.batchUpsert(
+        attachmentId,
+        userId,
+        data.upserts,
+        data.deletes,
+        tx,
+      );
+
+      // Outbox events for created
+      for (const annotation of result.created) {
+        await helpers.appendChange(userId, {
+          entityType: 'Annotation',
+          entityId:   annotation.id,
+          action:     'create',
+          version:    annotation.version,
+        });
+        await helpers.publishOutbox(
+          userId,
+          annotation.id,
+          'library.annotation.created',
+          annotation,
+        );
+      }
+
+      // Outbox events for updated
+      for (const annotation of result.updated) {
+        await helpers.appendChange(userId, {
+          entityType: 'Annotation',
+          entityId:   annotation.id,
+          action:     'update',
+          version:    annotation.version,
+        });
+        await helpers.publishOutbox(
+          userId,
+          annotation.id,
+          'library.annotation.updated',
+          annotation,
+        );
+      }
+
+      // Tombstones for deleted
+      for (const id of result.deleted) {
+        await helpers.recordTombstone(userId, {
+          entityType: 'Annotation',
+          entityId:   id,
+        });
+        await helpers.publishOutbox(
+          userId,
+          id,
+          'library.annotation.deleted',
+          { id, deletedAt: new Date() },
+        );
+      }
+
+      return result;
+    });
+  }
+
+  // ─── Sync adapters ─────────────────────────────────────────────────────────
+
   async upsertFromSync(
     command: UpsertSyncAnnotationCommand,
     tx: Prisma.TransactionClient,
     helpers: TransactionHelpers,
   ): Promise<UpsertSyncEntityResult> {
+    const userId = command.userId;
     if (command.existingId) {
       const existing = await tx.annotation.findUnique({
         where: { id: command.existingId },
@@ -235,13 +275,13 @@ export class AnnotationsService {
 
       if (!existing) {
         throw new NotFoundException(
-          `Annotation ${command.existingId} not found in workspace ${command.workspaceId}`,
+          `Annotation ${command.existingId} not found`,
         );
       }
 
-      await this.attachmentsService.assertAttachmentInWorkspace(
+      await this.attachmentsService.assertAttachmentExists(
         existing.attachmentId,
-        command.workspaceId,
+        userId,
         tx,
       );
 
@@ -249,18 +289,18 @@ export class AnnotationsService {
         where: { id: command.existingId },
         data: {
           quoteText: this.normalizer.normalizeQuote(command.quoteText),
-          comment: this.normalizer.normalizeComment(command.comment),
-          color: this.normalizer.normalizeColor(command.color),
+          comment:   this.normalizer.normalizeComment(command.comment),
+          color:     this.normalizer.normalizeColor(command.color),
           pageIndex: command.pageIndex,
-          version: { increment: 1 },
+          version:   { increment: 1 },
         },
       });
 
-      await helpers.appendChange(command.workspaceId, {
+      await helpers.appendChange(userId, {
         entityType: 'Annotation',
-        entityId: updated.id,
-        action: 'update',
-        version: updated.version,
+        entityId:   updated.id,
+        action:     'update',
+        version:    updated.version,
       });
 
       return { id: updated.id, isNew: false, version: updated.version };
@@ -271,34 +311,35 @@ export class AnnotationsService {
         );
       }
 
-      await this.attachmentsService.assertAttachmentInWorkspace(
+      await this.attachmentsService.assertAttachmentExists(
         command.attachmentId,
-        command.workspaceId,
+        userId,
         tx,
       );
 
       const created = await tx.annotation.create({
         data: {
-          attachmentId: command.attachmentId,
-          authorId: command.userId,
-          pageIndex: command.pageIndex,
-          quoteText: this.normalizer.normalizeQuote(command.quoteText),
-          comment: this.normalizer.normalizeComment(command.comment),
-          color: this.normalizer.normalizeColor(command.color),
-          type: this.normalizer.parseType(command.type),
-          version: 1,
+          attachmentId:        command.attachmentId,
+          authorId:            userId,
+          pageIndex:           command.pageIndex,
+          annotationSortIndex: buildAnnotationSortIndex(command.pageIndex),
+          quoteText:           this.normalizer.normalizeQuote(command.quoteText),
+          comment:             this.normalizer.normalizeComment(command.comment),
+          color:               this.normalizer.normalizeColor(command.color),
+          type:                this.normalizer.parseType(command.type),
+          version:             1,
         },
       });
 
-      await helpers.appendChange(command.workspaceId, {
+      await helpers.appendChange(userId, {
         entityType: 'Annotation',
-        entityId: created.id,
-        action: 'create',
-        version: 1,
+        entityId:   created.id,
+        action:     'create',
+        version:    1,
       });
 
       await helpers.publishOutbox(
-        command.workspaceId,
+        userId,
         created.id,
         'library.annotation.created',
         { annotationId: created.id },
@@ -308,35 +349,46 @@ export class AnnotationsService {
     }
   }
 
-  /**
-   * Sync protocol adapter: transactional soft-delete for an Annotation from an external sync batch.
-   */
   async deleteFromSync(
     command: DeleteSyncEntityCommand,
     tx: Prisma.TransactionClient,
     helpers: TransactionHelpers,
   ): Promise<void> {
-    const { workspaceId, entityId } = command;
-    const existing = await tx.annotation.findUnique({
-      where: { id: entityId },
-    });
+    const userId = command.userId || (command as any).workspaceId || 'system';
+    const { entityId } = command;
+    const existing = await tx.annotation.findUnique({ where: { id: entityId } });
     if (!existing) return;
 
-    await this.attachmentsService.assertAttachmentInWorkspace(
+    await this.attachmentsService.assertAttachmentExists(
       existing.attachmentId,
-      workspaceId,
+      userId,
       tx,
     );
 
     await tx.annotation.update({
       where: { id: entityId },
-      data: { deletedAt: new Date() },
+      data:  { deletedAt: new Date() },
     });
-    await helpers.appendChange(workspaceId, {
+
+    await helpers.appendChange(userId, {
       entityType: 'Annotation',
       entityId,
-      action: 'delete',
-      version: existing.version + 1,
+      action:     'delete',
+      version:    existing.version + 1,
     });
   }
+
+  // ─── Auth helpers ──────────────────────────────────────────────────────────
+
+  private assertCanModifyAnnotation(
+    userId: string,
+    annotation: { authorId?: string | null },
+  ) {
+    if (annotation.authorId && annotation.authorId !== userId) {
+      throw new ForbiddenException(
+        'Only the annotation author can modify or delete this annotation',
+      );
+    }
+  }
 }
+

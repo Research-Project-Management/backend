@@ -15,26 +15,28 @@ import {
   Optional,
   Inject,
 } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ItemsService } from './items.service';
 import {
   ITEM_NOTES_EXTRACTOR_PORT,
   IItemNotesExtractorPort,
 } from './ports/items.ports';
-import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
-import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
-import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
-import { CurrentUser } from '../../../modules/iam/authn/decorators/current-user.decorator';
+import { JwtAuthGuard } from '../../../modules/iam/authn/guards/auth.guard';
+import { CurrentUser } from '../../../modules/iam/authn/decorators/user.decorator';
 import {
   CursorPaginationQueryDto,
-  CreateCatalogItemDto,
-  UpdateCatalogItemDto,
+  CreateItemDto,
+  UpdateItemDto,
 } from './dto/items.dto';
 
+@ApiTags('Library Items')
+@ApiBearerAuth('JWT-auth')
 @Controller([
-  'api/v1/workspaces/:workspaceId/library/items',
-  'api/v1/workspace/:workspaceId/library/items',
+  'api/v1/library/items',
+  'api/v1/me/library/items',
+  'api/v1/projects/:projectId/library/items',
 ])
-@UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
+@UseGuards(JwtAuthGuard)
 export class ItemsController {
   constructor(
     private readonly itemsService: ItemsService,
@@ -44,56 +46,77 @@ export class ItemsController {
   ) {}
 
   @Get()
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'List library items' })
   async listItems(
-    @Param('workspaceId') workspaceId: string,
-    @CurrentUser('id') currentUserId: string,
+    @CurrentUser('id') userId: string,
     @Query()
-    query: CursorPaginationQueryDto & {
-      view?: 'all' | 'recent' | 'unfiled' | 'trash';
+    query?: CursorPaginationQueryDto & {
+      view?:
+        | 'all'
+        | 'recent'
+        | 'unfiled'
+        | 'trash'
+        | 'my-publications'
+        | 'publications';
       collectionId?: string;
       tagId?: string;
       search?: string;
     },
+    @Param('projectId') projectId?: string,
   ) {
-    const result = await this.itemsService.listItems(workspaceId, {
-      view: query.view,
-      userId: currentUserId,
-      collectionId: query.collectionId,
-      tagId: query.tagId,
-      search: query.search,
-      cursor: query.cursor,
-      limit: query.limit,
+    const effectiveProjectId = projectId || (query as any)?.projectId;
+    const result = await this.itemsService.listItems(userId, {
+      view: query?.view,
+      collectionId: query?.collectionId,
+      tagId: query?.tagId,
+      search: query?.search,
+      cursor: query?.cursor,
+      limit: query?.limit,
+      projectId: effectiveProjectId,
     });
     return { items: result.items, pagination: result.meta };
   }
 
-  @Get(':id')
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
-  async getItem(
-    @Param('workspaceId') workspaceId: string,
-    @Param('id') id: string,
-    @CurrentUser('id') currentUserId: string,
+  @Post('import')
+  @ApiOperation({ summary: 'Import items from personal library into project' })
+  async importItems(
+    @CurrentUser('id') userId: string,
+    @Param('projectId') projectId: string | undefined,
+    @Body() body: { itemIds: string[] },
   ) {
-    const item = await this.itemsService.getItem(
-      workspaceId,
-      id,
-      currentUserId,
-    );
-    if (!item)
-      throw new NotFoundException(
-        `CatalogItem ${id} not found in workspace ${workspaceId}`,
+    if (!projectId) {
+      throw new BadRequestException(
+        'Project ID is required in URL parameter to import items',
       );
+    }
+    return this.itemsService.importItemsToProject(
+      userId,
+      projectId,
+      body.itemIds || [],
+    );
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Get a library item by ID' })
+  async getItem(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+    @Param('projectId') projectId?: string,
+  ) {
+    const item = await this.itemsService.getItem(userId, id, projectId);
+    if (!item) {
+      throw new NotFoundException(`Item ${id} not found in library`);
+    }
     return item;
   }
 
   @Get(':id/fulltext')
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'Get fulltext of an item' })
   async getFulltext(
-    @Param('workspaceId') workspaceId: string,
     @Param('id') id: string,
+    @CurrentUser('id') userId: string,
   ) {
-    const fulltext = await this.itemsService.getFulltext(workspaceId, id);
+    const fulltext = await this.itemsService.getFulltext(userId, id);
     if (!fulltext) {
       throw new NotFoundException(
         `Full-text structured extraction not found for item ${id}`,
@@ -103,25 +126,26 @@ export class ItemsController {
   }
 
   @Post()
-  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Create a new library item' })
   async createItem(
-    @Param('workspaceId') workspaceId: string,
-    @CurrentUser('id') currentUserId: string,
-    @Body() body: CreateCatalogItemDto,
+    @CurrentUser('id') userId: string,
+    @Param('projectId') projectId: string | undefined,
+    @Body() body: CreateItemDto,
   ) {
-    return this.itemsService.createItem(workspaceId, {
+    return this.itemsService.createItem(userId, {
       ...body,
-      uploadedById: currentUserId || 'system',
+      uploadedById: userId || 'system',
+      projectId: projectId || body.projectId,
     });
   }
 
   @Patch(':id')
-  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Update a library item' })
   async updateItem(
-    @Param('workspaceId') workspaceId: string,
     @Param('id') id: string,
+    @CurrentUser('id') userId: string,
     @Headers('if-match') ifMatch: string | undefined,
-    @Body() body: UpdateCatalogItemDto,
+    @Body() body: UpdateItemDto,
   ) {
     const parsedHeaderVersion = ifMatch
       ? parseInt(ifMatch.replace(/["']/g, ''), 10)
@@ -136,7 +160,7 @@ export class ItemsController {
     }
     const { expectedVersion: _, ...updateData } = body;
     return this.itemsService.updateItem(
-      workspaceId,
+      userId,
       id,
       expectedVersion,
       updateData,
@@ -144,47 +168,40 @@ export class ItemsController {
   }
 
   @Put(':id')
-  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Replace a library item' })
   async replaceItem(
-    @Param('workspaceId') workspaceId: string,
     @Param('id') id: string,
+    @CurrentUser('id') userId: string,
     @Headers('if-match') ifMatch: string | undefined,
-    @Body() body: UpdateCatalogItemDto,
+    @Body() body: UpdateItemDto,
   ) {
-    return this.updateItem(workspaceId, id, ifMatch, body);
+    return this.updateItem(
+      id,
+      userId,
+      ifMatch,
+      body,
+    );
   }
 
   @Post(':id/reindex')
-  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Reindex a library item' })
   async reindexItem(
-    @Param('workspaceId') workspaceId: string,
     @Param('id') id: string,
-    @CurrentUser('id') currentUserId: string,
+    @CurrentUser('id') userId: string,
   ) {
-    return this.itemsService.reindexItem(
-      workspaceId,
-      id,
-      currentUserId || 'system',
-    );
+    return this.itemsService.reindexItem(userId, id);
   }
 
   @Post(':id/convert-type/preview')
-  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Preview type conversion of an item' })
   async previewTypeConversion(
-    @Param('workspaceId') workspaceId: string,
     @Param('id') id: string,
-    @CurrentUser('id') currentUserId: string,
+    @CurrentUser('id') userId: string,
     @Body() body: { targetType: string; retainUnmappedInExtra?: boolean },
   ) {
-    const item = await this.itemsService.getItem(
-      workspaceId,
-      id,
-      currentUserId,
-    );
+    const item = await this.itemsService.getItem(userId, id);
     if (!item) {
-      throw new NotFoundException(
-        `CatalogItem ${id} not found in workspace ${workspaceId}`,
-      );
+      throw new NotFoundException(`Item ${id} not found in library`);
     }
     const preview = this.itemsService.previewTypeConversion(
       item,
@@ -197,10 +214,10 @@ export class ItemsController {
   }
 
   @Post(':id/convert-type')
-  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Convert item type' })
   async convertItemType(
-    @Param('workspaceId') workspaceId: string,
     @Param('id') id: string,
+    @CurrentUser('id') userId: string,
     @Headers('if-match') ifMatch?: string,
     @Body()
     body?: {
@@ -216,7 +233,7 @@ export class ItemsController {
           ? parseInt(ifMatch.replace(/["']/g, ''), 10)
           : undefined;
     const result = await this.itemsService.convertItemType(
-      workspaceId,
+      userId,
       id,
       body?.targetType || 'journalArticle',
       {
@@ -234,17 +251,17 @@ export class ItemsController {
   }
 
   @Delete(':id')
-  @WorkspaceRoles('owner', 'admin')
+  @ApiOperation({ summary: 'Delete an item (soft delete)' })
   async deleteItem(
-    @Param('workspaceId') workspaceId: string,
     @Param('id') id: string,
+    @CurrentUser('id') userId: string,
     @Headers('if-match') ifMatch?: string,
   ) {
     const expectedVersion = ifMatch
       ? parseInt(ifMatch.replace(/["']/g, ''), 10)
       : undefined;
     const deleted = await this.itemsService.deleteItem(
-      workspaceId,
+      userId,
       id,
       expectedVersion,
     );
@@ -252,10 +269,10 @@ export class ItemsController {
   }
 
   @Post(':id/restore')
-  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Restore a deleted item' })
   async restoreItem(
-    @Param('workspaceId') workspaceId: string,
     @Param('id') id: string,
+    @CurrentUser('id') userId: string,
     @Query('expectedVersion') expectedVersionQuery?: string,
     @Headers('if-match') ifMatch?: string,
   ) {
@@ -266,7 +283,7 @@ export class ItemsController {
           ? parseInt(ifMatch.replace(/["']/g, ''), 10)
           : undefined;
     const item = await this.itemsService.restoreItem(
-      workspaceId,
+      userId,
       id,
       expectedVersion,
     );
@@ -274,62 +291,85 @@ export class ItemsController {
   }
 
   @Delete(':id/purge')
-  @WorkspaceRoles('owner', 'admin')
+  @ApiOperation({ summary: 'Permanently purge a deleted item' })
   async purgeItem(
-    @Param('workspaceId') workspaceId: string,
     @Param('id') id: string,
+    @CurrentUser('id') userId: string,
   ) {
-    const purged = await this.itemsService.purgeItem(workspaceId, id);
+    const purged = await this.itemsService.purgeItem(userId, id);
     return { success: true, purged, id };
   }
 
   @Get(':id/relations')
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'Get related items' })
   async getRelatedItems(
-    @Param('workspaceId') workspaceId: string,
     @Param('id') id: string,
+    @CurrentUser('id') userId: string,
   ) {
-    return this.itemsService.getRelatedItems(workspaceId, id);
+    return this.itemsService.getRelatedItems(userId, id);
   }
 
   @Post([':id/relations', ':id/link'])
-  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Link two items together' })
   async linkItems(
-    @Param('workspaceId') workspaceId: string,
     @Param('id') id: string,
     @Body()
     body: { targetItemId: string; relationType?: string; note?: string },
+    @CurrentUser('id') userId: string,
   ) {
-    return this.itemsService.linkItems(workspaceId, id, body);
+    return this.itemsService.linkItems(userId, id, body);
   }
 
   @Delete([':id/relations/:targetId', ':id/link/:targetId'])
-  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Unlink items' })
   async unlinkItems(
-    @Param('workspaceId') workspaceId: string,
     @Param('id') id: string,
     @Param('targetId') targetItemId: string,
+    @CurrentUser('id') userId: string,
   ) {
-    return this.itemsService.unlinkItems(workspaceId, id, targetItemId);
+    return this.itemsService.unlinkItems(userId, id, targetItemId);
   }
 
   @Post(':id/extract-notes')
-  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Extract notes from annotations' })
   async extractNotes(
-    @Param('workspaceId') workspaceId: string,
     @Param('id') id: string,
-    @CurrentUser('id') currentUserId: string,
+    @CurrentUser('id') userId: string,
   ) {
     if (!this.notesExtractor) {
       throw new BadRequestException('NotesService is not available');
     }
     return this.notesExtractor.extractNotesFromAnnotations(
-      workspaceId,
+      userId,
       id,
-      currentUserId,
     );
   }
-}
 
-export const CatalogController = ItemsController;
-export type CatalogController = ItemsController;
+  @Post(':id/my-publication')
+  @ApiOperation({ summary: 'Mark an item as my publication' })
+  async markMyPublication(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    const item = await this.itemsService.setMyPublication(
+      userId,
+      id,
+      true,
+    );
+    return { success: true, data: item, item };
+  }
+
+  @Delete(':id/my-publication')
+  @ApiOperation({ summary: 'Unmark an item as my publication' })
+  async unmarkMyPublication(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    const item = await this.itemsService.setMyPublication(
+      userId,
+      id,
+      false,
+    );
+    return { success: true, data: item, item };
+  }
+}

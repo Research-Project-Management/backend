@@ -4,25 +4,26 @@ import { DuplicateService } from './services/duplicate.service';
 import { QualityService } from './services/quality.service';
 import { CoreModule } from '../../../core/core.module';
 import { ItemsModule } from '../items/items.module';
-import { TypesModule } from '../types/types.module';
 import { TagsModule } from '../tags/tags.module';
 import { CollectionsModule } from '../collections/collections.module';
 import { AttachmentsModule } from '../attachments/attachments.module';
 import { NotesModule } from '../notes/notes.module';
-import { ReadingModule } from '../reading/reading.module';
 import { OutboxModule } from '../outbox/outbox.module';
+
+import { StateModule } from '../state/state.module';
+import { TypesModule } from '../types/types.module';
 
 @Module({
   imports: [
     CoreModule,
     ItemsModule,
     OutboxModule,
-    TypesModule,
     TagsModule,
     CollectionsModule,
     AttachmentsModule,
     NotesModule,
-    ReadingModule,
+    StateModule,
+    TypesModule,
   ],
   controllers: [CurationController],
   providers: [DuplicateService, QualityService],

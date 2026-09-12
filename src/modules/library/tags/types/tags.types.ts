@@ -7,7 +7,7 @@ export type TagInput = string | TagObjectInput;
 
 export interface TagDetail {
   id: string;
-  workspaceId: string;
+  projectId?: string;
   name: string;
   color?: string | null;
   type?: string | null;

@@ -14,7 +14,6 @@ export type ChatWithMessages = Prisma.AiChatGetPayload<{
 
 export interface IAiRepository {
   findUserChats(
-    workspaceSlug: string,
     userId: string,
     projectId?: string | null,
   ): Promise<ChatWithMessages[]>;
@@ -25,7 +24,6 @@ export interface IAiRepository {
   ): Promise<ChatWithMessages | null>;
   findPageChat(
     pageId: string,
-    workspaceSlug: string,
     userId: string,
   ): Promise<ChatWithMessages | null>;
   createChat(
@@ -38,8 +36,11 @@ export interface IAiRepository {
   deleteChat(chatId: string): Promise<AiChat>;
   deletePageChat(
     pageId: string,
-    workspaceSlug: string,
     userId: string,
+  ): Promise<{ count: number }>;
+  clearUserChats(
+    userId: string,
+    projectId?: string | null,
   ): Promise<{ count: number }>;
   appendMessage(
     chatId: string,

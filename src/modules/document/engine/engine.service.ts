@@ -5,7 +5,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
-import { PageService } from '../page/page.service';
+import { PageService } from '../core/core.service';
 import { HistoryService } from '../history/history.service';
 import { LatexService } from '../latex/latex.service';
 import { SaveAndSyncDto, CompileDocumentDto } from './dto/engine.dto';

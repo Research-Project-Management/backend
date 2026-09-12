@@ -187,7 +187,7 @@ export class ZoteroWebSocketListener implements OnModuleInit, OnModuleDestroy {
     if (this.libraryBridge) {
       try {
         const res = await this.libraryBridge.publishIntegrationEvent({
-          workspaceId: sub.workspaceId,
+          userId: sub.workspaceId,
           aggregateId: sub.bindingId,
           eventType: 'library.zotero.stream_event_received',
           dedupeKey,
@@ -341,7 +341,7 @@ export class ZoteroWebSocketListener implements OnModuleInit, OnModuleDestroy {
       const dedupeKey = `zotero_catchup_${sub.bindingId}_${timeWindow}`;
       try {
         await this.libraryBridge.publishIntegrationEvent({
-          workspaceId: sub.workspaceId,
+          userId: sub.workspaceId,
           aggregateId: sub.bindingId,
           eventType: 'library.zotero.stream_event_received',
           dedupeKey,

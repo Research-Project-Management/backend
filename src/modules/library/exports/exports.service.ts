@@ -7,7 +7,6 @@ import {
   Inject,
 } from '@nestjs/common';
 import { PrismaService } from '../../../core/database/prisma.service';
-import { resolveTenantWorkspaceId } from '../../../core/utils/tenant.util';
 import { CitationService } from '../citation/citation.service';
 import { CslJsonMapper } from '../citation/mappers/csl-json.mapper';
 import { ExportLibraryDto, ExportFormatType } from './dto/exports.dto';
@@ -46,15 +45,11 @@ export class ExportsService {
     private readonly pdfBakerService: PdfBakerService = new PdfBakerService(),
   ) {}
 
-  private resolveWorkspaceId(workspaceId: string): Promise<string> {
-    return resolveTenantWorkspaceId(this.prisma, workspaceId);
-  }
-
   /**
    * Fetches items in cursor-based chunks to avoid loading the entire library
    * into Node.js RAM in a single query.
    *
-   * @param where  Prisma `CatalogItem` where clause.
+   * @param where  Prisma `Item` where clause.
    * @param maxItems  Hard cap on total items returned (default: EXPORT_MAX_ITEMS).
    * @returns `{ items, truncated }` — `truncated` is true when the library
    *          contained more rows than `maxItems`.
@@ -72,7 +67,7 @@ export class ExportsService {
       const pageSize = Math.min(EXPORT_CHUNK_SIZE, remaining);
       const take = pageSize + 1; // +1 sentinel to detect if DB has more rows than this page
 
-      const chunk = await this.prisma.catalogItem.findMany({
+      const chunk = await this.prisma.item.findMany({
         where,
         include: {
           contributors: { orderBy: { orderIndex: 'asc' } },
@@ -85,7 +80,7 @@ export class ExportsService {
       // hasMore: DB returned more rows than the page we requested → still more data in DB
       const hasMore = chunk.length > pageSize;
       if (hasMore) {
-        chunk.pop(); // discard the sentinel overflow row
+        chunk.pop(); // discard sentinel
       }
 
       collected.push(...chunk);
@@ -108,13 +103,11 @@ export class ExportsService {
   }
 
   async exportLibrary(
-    rawWorkspaceId: string,
+    userId: string,
     dto: ExportLibraryDto,
   ): Promise<ExportResult> {
-    const workspaceId = await this.resolveWorkspaceId(rawWorkspaceId);
-
     const where = {
-      workspaceId,
+      userId,
       deletedAt: null,
       ...(dto.itemIds && dto.itemIds.length > 0
         ? { id: { in: dto.itemIds } }
@@ -132,8 +125,8 @@ export class ExportsService {
 
     if (dto.itemIds && dto.itemIds.length > 0) {
       items = this.itemReadPort
-        ? await this.itemReadPort.findByIds(workspaceId, dto.itemIds)
-        : await this.prisma.catalogItem.findMany({
+        ? await this.itemReadPort.findByIds(userId, dto.itemIds)
+        : await this.prisma.item.findMany({
             where,
             include: { contributors: { orderBy: { orderIndex: 'asc' } } },
             orderBy: { createdAt: 'desc' },
@@ -143,7 +136,7 @@ export class ExportsService {
       ({ items, truncated } = await this.fetchItemsInChunks(where));
       if (truncated) {
         this.logger.warn(
-          `exportLibrary: workspace=${workspaceId} has >${EXPORT_MAX_ITEMS} items; export truncated to ${EXPORT_MAX_ITEMS}.`,
+          `exportLibrary: userId=${userId} has >${EXPORT_MAX_ITEMS} items; export truncated to ${EXPORT_MAX_ITEMS}.`,
         );
       }
     }
@@ -279,19 +272,22 @@ export class ExportsService {
     }
   }
 
-  async exportBundle(rawWorkspaceId: string, collectionId: string) {
-    const workspaceId = await this.resolveWorkspaceId(rawWorkspaceId);
+  async exportBundle(userId: string, collectionId: string) {
     const collection = await this.prisma.collection.findFirst({
-      where: { id: collectionId, workspaceId, deletedAt: null },
+      where: {
+        id: collectionId,
+        userId,
+        deletedAt: null,
+      },
     });
 
     if (!collection) {
       throw new BadRequestException(`Collection ${collectionId} not found`);
     }
 
-    const items = await this.prisma.catalogItem.findMany({
+    const items = await this.prisma.item.findMany({
       where: {
-        workspaceId,
+        userId,
         deletedAt: null,
         collectionItems: { some: { collectionId } },
       },
@@ -302,7 +298,7 @@ export class ExportsService {
       take: 2000,
     });
 
-    const bibtexRes = await this.exportLibrary(workspaceId, {
+    const bibtexRes = await this.exportLibrary(userId, {
       format: 'bibtex',
       collectionId,
     });
@@ -344,25 +340,28 @@ export class ExportsService {
   }
 
   /**
-   * Exports an annotated PDF for a specific CatalogItem.
+   * Exports an annotated PDF for a specific Item.
    */
   async exportAnnotatedItemPdf(
-    rawWorkspaceId: string,
+    userId: string,
     itemId: string,
     rawPdfBuffer?: Buffer,
   ): Promise<{ filename: string; buffer: Uint8Array }> {
-    const workspaceId = await this.resolveWorkspaceId(rawWorkspaceId);
     const item: any = this.itemReadPort
-      ? await this.itemReadPort.findById(workspaceId, itemId)
-      : await this.prisma.catalogItem.findFirst({
-          where: { id: itemId, workspaceId, deletedAt: null },
+      ? await this.itemReadPort.findById(userId, itemId)
+      : await this.prisma.item.findFirst({
+          where: {
+            id: itemId,
+            userId,
+            deletedAt: null,
+          },
           include: {
             attachments: true,
           },
         });
 
     if (!item) {
-      throw new NotFoundException('Catalog item not found');
+      throw new NotFoundException('Item not found');
     }
 
     const pdfAttachment = Array.isArray(item.attachments)
@@ -377,7 +376,7 @@ export class ExportsService {
     const annotations =
       this.annotationsService && pdfAttachment?.id
         ? await this.annotationsService.getAnnotationsByAttachment(
-            workspaceId,
+            userId,
             pdfAttachment.id,
           )
         : await this.prisma.annotation.findMany({
@@ -419,7 +418,7 @@ export class ExportsService {
    * Used for on-demand BibTeX sync and automatic \bibliography injection during LaTeX compilation.
    */
   async exportByCitationKeys(
-    rawWorkspaceId: string,
+    userId: string,
     keys: string[],
   ): Promise<{
     content: string;
@@ -431,14 +430,13 @@ export class ExportsService {
       return { content: '', count: 0, foundKeys: [], missingKeys: [] };
     }
 
-    const workspaceId = await this.resolveWorkspaceId(rawWorkspaceId);
     const normalizedKeys = keys
       .map((k) => k.trim().toLowerCase())
       .filter(Boolean);
 
-    const items = await this.prisma.catalogItem.findMany({
+    const items = await this.prisma.item.findMany({
       where: {
-        workspaceId,
+        userId,
         deletedAt: null,
       },
       include: {
@@ -485,6 +483,3 @@ export class ExportsService {
     };
   }
 }
-
-export const PdfExportService = ExportsService;
-export type PdfExportService = ExportsService;

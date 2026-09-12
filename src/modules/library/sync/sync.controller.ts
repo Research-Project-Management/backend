@@ -2,32 +2,25 @@ import {
   Controller,
   Get,
   Post,
-  Param,
   Query,
   Body,
   UseGuards,
   BadRequestException,
 } from '@nestjs/common';
 import { SyncService } from './sync.service';
-import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
-import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
-import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
-import { CurrentUser } from '../../../modules/iam/authn/decorators/current-user.decorator';
+import { JwtAuthGuard } from '../../../modules/iam/authn/guards/auth.guard';
+import { CurrentUser } from '../../../modules/iam/authn/decorators/user.decorator';
 import { PushMutationsDto, ApplyExternalSyncBatchDto } from './dto/sync.dto';
 import { ExternalSyncOperation } from './ports/sync.port';
 
-@Controller([
-  'api/v1/workspaces/:workspaceId/library/sync',
-  'api/v1/workspace/:workspaceId/library/sync',
-])
-@UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
+@Controller('api/v1/library/sync')
+@UseGuards(JwtAuthGuard)
 export class SyncController {
   constructor(private readonly syncService: SyncService) {}
 
   @Get('pull')
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async pullDelta(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Query('sinceSeq') sinceSeq?: string,
     @Query('limit') limit?: string,
   ) {
@@ -44,13 +37,11 @@ export class SyncController {
       throw new BadRequestException('Invalid sync limit');
     }
 
-    return this.syncService.pullDelta(workspaceId, parsedSeq, parsedLimit);
+    return this.syncService.pullDelta(userId, parsedSeq, parsedLimit);
   }
 
   @Post('push')
-  @WorkspaceRoles('owner', 'admin', 'member')
   async pushMutations(
-    @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
     @Body() body: PushMutationsDto,
   ) {
@@ -61,7 +52,7 @@ export class SyncController {
     }
 
     const applied = await this.syncService.pushMutations(
-      workspaceId,
+      userId,
       body.mutations,
       userId,
     );
@@ -70,9 +61,7 @@ export class SyncController {
   }
 
   @Post('batch')
-  @WorkspaceRoles('owner', 'admin', 'member')
   async applyBatch(
-    @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
     @Body() body: ApplyExternalSyncBatchDto,
   ) {
@@ -84,7 +73,7 @@ export class SyncController {
 
     return this.syncService.applyExternalSyncBatch(
       {
-        workspaceId,
+        userId,
         operations: body.operations as unknown as ExternalSyncOperation[],
         idempotencyKey: body.idempotencyKey,
       },
@@ -93,9 +82,10 @@ export class SyncController {
   }
 
   @Post('resync')
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
-  async resync(@Param('workspaceId') workspaceId: string) {
-    const latestSeq = await this.syncService.getLatestSequence(workspaceId);
+  async resync(
+    @CurrentUser('id') userId: string,
+  ) {
+    const latestSeq = await this.syncService.getLatestSequence(userId);
     return {
       requiresFullResync: true,
       latestSeq: latestSeq.toString(),
@@ -103,3 +93,4 @@ export class SyncController {
     };
   }
 }
+

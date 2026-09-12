@@ -266,7 +266,7 @@ export class ZoteroPullWorker {
     const idempotencyKey = `zotero:pull:${workspaceId}:${bindingId}:cols:v${remoteVersion}`;
 
     const batchRes = await this.libraryBridge.applyExternalSyncBatch({
-      workspaceId,
+      userId: workspaceId,
       idempotencyKey,
       operations,
     });
@@ -372,7 +372,7 @@ export class ZoteroPullWorker {
 
     const operations: ExternalSyncOperation[] = [];
 
-    // Top-level Catalog Items
+    // Top-level Items
     for (const rawItem of rawItems) {
       const itemType = rawItem.data?.itemType;
       if (
@@ -412,9 +412,8 @@ export class ZoteroPullWorker {
 
         operations.push({
           operationId: `item:${mapped.remoteKey}`,
-          op: 'upsertCatalogItem',
+          op: 'upsertItem',
           command: {
-            workspaceId,
             userId,
             existingId: existing?.entityId,
             title: mapped.title,
@@ -480,9 +479,9 @@ export class ZoteroPullWorker {
             ? `item:${mapped.parentItemKey}`
             : undefined,
           command: {
-            workspaceId,
+            userId: workspaceId,
             existingId: existing?.entityId,
-            catalogItemId: parentBinding?.entityId,
+            itemId: parentBinding?.entityId,
             filename: mapped.filename,
             url:
               mapped.url ||
@@ -512,10 +511,9 @@ export class ZoteroPullWorker {
             ? `item:${mapped.parentItemKey}`
             : undefined,
           command: {
-            workspaceId,
             userId,
             existingId: existing?.entityId,
-            catalogItemId: parentBinding?.entityId,
+            itemId: parentBinding?.entityId,
             title: 'Zotero Note',
             contentMd: mapped.contentHtml,
             tags: mapped.tags || [],
@@ -540,7 +538,6 @@ export class ZoteroPullWorker {
             ? `att:${mapped.parentAttachmentKey}`
             : undefined,
           command: {
-            workspaceId,
             userId,
             existingId: existing?.entityId,
             attachmentId: parentAttBinding?.entityId,
@@ -558,7 +555,7 @@ export class ZoteroPullWorker {
 
     // 3. Execute in 1 atomic Library transaction
     const batchRes = await this.libraryBridge.applyExternalSyncBatch({
-      workspaceId,
+      userId: workspaceId,
       idempotencyKey,
       operations,
     });

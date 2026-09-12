@@ -12,11 +12,11 @@ import { OutboxWorker } from '../outbox/outbox.worker';
 import { SearchModule } from '../search/search.module';
 import { StorageModule } from '../../storage/storage.module';
 import { ItemsModule } from '../items/items.module';
-import { GrobidClient } from '../../../infra/grobid/grobid.client';
+import { GrobidClient } from '../infra/grobid/grobid.client';
 
 import { AttachmentsRepository } from './attachments.repository';
 import { WebSnapshotService } from './services/web-snapshot.service';
-import { SsrfGuardService } from '../common/services/ssrf-guard.service';
+import { SsrfGuardService } from '../core/services/ssrf-guard.service';
 
 @Module({
   imports: [CoreModule, OutboxModule, SearchModule, StorageModule, ItemsModule],

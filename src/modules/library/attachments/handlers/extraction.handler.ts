@@ -48,7 +48,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     }
 
     // 1. Atomically claim PENDING / FAILED_RETRYABLE -> PROCESSING
-    let claim = await this.prisma.catalogAttachment.updateMany({
+    let claim = await this.prisma.attachment.updateMany({
       where: {
         id: attachmentId,
         extractionStatus: { in: ['PENDING', 'FAILED_RETRYABLE'] },
@@ -63,7 +63,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     // 2. If standard claim did not match, check for stale PROCESSING reclamation
     if (claim.count === 0) {
       const staleCutoff = new Date(Date.now() - this.staleThresholdMs);
-      claim = await this.prisma.catalogAttachment.updateMany({
+      claim = await this.prisma.attachment.updateMany({
         where: {
           id: attachmentId,
           extractionStatus: 'PROCESSING',
@@ -88,7 +88,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     }
 
     if (claim.count === 0) {
-      const existing = await this.prisma.catalogAttachment.findUnique({
+      const existing = await this.prisma.attachment.findUnique({
         where: { id: attachmentId },
         select: { id: true, extractionStatus: true, extractionStartedAt: true },
       });
@@ -106,9 +106,9 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       return;
     }
 
-    const attachment = await this.prisma.catalogAttachment.findUnique({
+    const attachment = await this.prisma.attachment.findUnique({
       where: { id: attachmentId },
-      include: { file: true, catalogItem: true },
+      include: { file: true, item: true },
     });
 
     if (!attachment) {
@@ -123,26 +123,21 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         event: 'library.extraction.started',
         eventId: event.id,
         attachmentId,
-        catalogItemId: attachment.catalogItemId,
+        itemId: attachment.itemId,
       }),
     );
 
     try {
-      const workspaceId =
-        attachment.catalogItem?.workspaceId ||
-        attachment.file?.workspaceId ||
-        payload.workspaceId;
       const fileId = attachment.fileId || attachment.file?.id;
 
-      if (!fileId || !workspaceId) {
+      if (!fileId) {
         throw new AttachmentStorageException(
-          `Could not resolve workspaceId or fileId for attachment ${attachmentId}`,
+          `Could not resolve fileId for attachment ${attachmentId}`,
         );
       }
 
       // 2. Storage-first reading via Storage Port
       const storageFile = await this.storagePort.readOwnedFile({
-        workspaceId,
         fileId,
       });
       const buffer = storageFile.buffer;
@@ -171,9 +166,8 @@ export class ExtractionHandler implements OutboxDispatchHandler {
           // Store full-text structured tree (sections, figures, tables, formulas)
           await this.prisma.metadataSourceRecord.create({
             data: {
-              catalogItemId: attachment.catalogItemId,
+              itemId: attachment.itemId,
               sourceProvider: 'grobid_fulltext',
-              confidenceScore: 1.0,
               rawPayload: {
                 title: doc.metadata.title,
                 abstract: doc.metadata.abstract,
@@ -199,9 +193,8 @@ export class ExtractionHandler implements OutboxDispatchHandler {
           // Also keep grobid metadata provenance record for backward compatibility
           await this.prisma.metadataSourceRecord.create({
             data: {
-              catalogItemId: attachment.catalogItemId,
+              itemId: attachment.itemId,
               sourceProvider: 'grobid',
-              confidenceScore: 1.0,
               rawPayload: {
                 title: doc.metadata.title,
                 abstract: doc.metadata.abstract,
@@ -222,12 +215,18 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         }
       }
 
-      // 6. Build in-library citation graph (match references against papers in same workspace)
-      if (doc.references && doc.references.length > 0) {
+      const tenantId =
+        (attachment.item as any)?.projectId ||
+        (attachment.item as any)?.userId ||
+        payload.projectId ||
+        (payload as any).userId;
+
+      // 6. Build in-library citation graph (match references against papers in same project scope)
+      if (doc.references && doc.references.length > 0 && tenantId) {
         try {
           await this.linkInLibraryCitations(
-            workspaceId,
-            attachment.catalogItemId,
+            tenantId,
+            attachment.itemId,
             doc.references,
           );
         } catch (linkErr: any) {
@@ -238,7 +237,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       }
 
       // 7. Update status to READY on completion
-      await this.prisma.catalogAttachment.update({
+      await this.prisma.attachment.update({
         where: { id: attachment.id },
         data: {
           extractionStatus: 'READY',
@@ -251,14 +250,14 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         JSON.stringify({
           event: 'library.extraction.completed',
           attachmentId,
-          catalogItemId: attachment.catalogItemId,
+          itemId: attachment.itemId,
           pageCount: doc.pages.length,
           referenceCount: doc.references?.length ?? 0,
           hasMetadata: Boolean(doc.metadata.doi || doc.metadata.title),
         }),
       );
     } catch (err: any) {
-      const updatedAttachment = await this.prisma.catalogAttachment.findUnique({
+      const updatedAttachment = await this.prisma.attachment.findUnique({
         where: { id: attachmentId },
         select: { extractionAttempts: true },
       });
@@ -271,7 +270,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         500,
       );
 
-      await this.prisma.catalogAttachment.update({
+      await this.prisma.attachment.update({
         where: { id: attachment.id },
         data: {
           extractionStatus: nextStatus,
@@ -284,7 +283,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         JSON.stringify({
           event: 'library.extraction.failed',
           attachmentId,
-          catalogItemId: attachment.catalogItemId,
+          itemId: attachment.itemId,
           attempts: currentAttempts,
           status: nextStatus,
           error: sanitizedError,
@@ -296,17 +295,17 @@ export class ExtractionHandler implements OutboxDispatchHandler {
   }
 
   /**
-   * Matches extracted bibliographic references against other papers in the same workspace.
+   * Matches extracted bibliographic references against other papers in the same scope.
    * Automatically establishes in-library citation edges ('cites') in item_relations.
    */
   private async linkInLibraryCitations(
-    workspaceId: string,
+    tenantId: string,
     sourceItemId: string,
     references: Array<{ title?: string; doi?: string; arxivId?: string }>,
   ): Promise<void> {
-    const workspacePapers = await this.prisma.catalogItem.findMany({
+    const scopePapers = await this.prisma.item.findMany({
       where: {
-        workspaceId,
+        OR: [{ projectId: tenantId }, { userId: tenantId }],
         id: { not: sourceItemId },
         deletedAt: null,
       },
@@ -317,7 +316,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       },
     });
 
-    if (workspacePapers.length === 0) return;
+    if (scopePapers.length === 0) return;
 
     const doiMap = new Map<string, string>();
     const titleMap = new Map<string, string>();
@@ -328,7 +327,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         .replace(/[^a-z0-9]/g, '')
         .trim();
 
-    for (const p of workspacePapers) {
+    for (const p of scopePapers) {
       if (p.doi) {
         doiMap.set(p.doi.toLowerCase().trim(), p.id);
       }
@@ -360,7 +359,6 @@ export class ExtractionHandler implements OutboxDispatchHandler {
             },
             update: {},
             create: {
-              workspaceId,
               sourceItemId,
               targetItemId,
               relationType: 'cites',

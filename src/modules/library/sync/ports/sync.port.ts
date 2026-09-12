@@ -2,7 +2,7 @@ export const SYNC_PORT = Symbol('SYNC_PORT');
 
 export interface SyncItemSnapshot {
   id: string;
-  workspaceId: string;
+  userId?: string;
   title: string;
   abstract?: string | null;
   year?: number | null;
@@ -27,28 +27,38 @@ export interface SyncItemSummary {
 }
 
 export interface GetSyncItemSnapshotQuery {
-  workspaceId: string;
+  userId: string;
   itemId: string;
 }
 
 export interface GetSyncItemSnapshotsQuery {
-  workspaceId: string;
+  userId: string;
   itemIds: string[];
 }
 
-export * from '../../common/types/sync.types';
-import type {
+export type {
+  SyncEntityType,
   UpsertSyncCollectionCommand,
-  UpsertSyncCatalogItemCommand,
+  UpsertSyncItemCommand,
   UpsertSyncAttachmentCommand,
   UpsertSyncNoteCommand,
   UpsertSyncAnnotationCommand,
   DeleteSyncEntityCommand,
   UpsertSyncEntityResult,
-} from '../../common/types/sync.types';
+} from '../types/sync.types';
+
+import type {
+  UpsertSyncCollectionCommand,
+  UpsertSyncItemCommand,
+  UpsertSyncAttachmentCommand,
+  UpsertSyncNoteCommand,
+  UpsertSyncAnnotationCommand,
+  DeleteSyncEntityCommand,
+  UpsertSyncEntityResult,
+} from '../types/sync.types';
 
 export interface PublishIntegrationEventCommand<T = Record<string, unknown>> {
-  workspaceId: string;
+  userId: string;
   aggregateId: string;
   eventType: string;
   dedupeKey?: string;
@@ -66,8 +76,8 @@ export type ExternalSyncOperation =
       command: UpsertSyncCollectionCommand;
     } & BaseExternalSyncOperation)
   | ({
-      op: 'upsertCatalogItem';
-      command: UpsertSyncCatalogItemCommand;
+      op: 'upsertItem';
+      command: UpsertSyncItemCommand;
     } & BaseExternalSyncOperation)
   | ({
       op: 'upsertAttachment';
@@ -94,7 +104,7 @@ export interface ExternalSyncBatchOperationResult {
 }
 
 export interface ApplyExternalSyncBatchCommand {
-  workspaceId: string;
+  userId: string;
   idempotencyKey?: string;
   operations: ExternalSyncOperation[];
 }
@@ -105,7 +115,7 @@ export interface ExternalSyncBatchResult {
 
 export interface IntegrationOutboxEvent<T = Record<string, unknown>> {
   id: string;
-  workspaceId: string;
+  userId: string;
   aggregateId: string;
   eventType: string;
   payload: T;
@@ -130,9 +140,7 @@ export interface SyncPort {
     command: UpsertSyncCollectionCommand,
   ): Promise<UpsertSyncEntityResult>;
 
-  upsertCatalogItem(
-    command: UpsertSyncCatalogItemCommand,
-  ): Promise<UpsertSyncEntityResult>;
+  upsertItem(command: UpsertSyncItemCommand): Promise<UpsertSyncEntityResult>;
 
   upsertAttachment(
     command: UpsertSyncAttachmentCommand,

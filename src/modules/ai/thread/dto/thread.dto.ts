@@ -3,14 +3,6 @@ import { IsArray, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 export class CreateThreadDto {
   @IsString()
   @IsOptional()
-  workspaceSlug?: string;
-
-  @IsString()
-  @IsOptional()
-  workspaceId?: string;
-
-  @IsString()
-  @IsOptional()
   projectId?: string;
 
   @IsString()
@@ -42,10 +34,6 @@ export class AppendMessagesDto {
   @IsString()
   @IsOptional()
   projectId?: string;
-
-  @IsString()
-  @IsOptional()
-  workspaceId?: string;
 }
 
 export class RenameThreadDto {
@@ -56,8 +44,4 @@ export class RenameThreadDto {
   @IsString()
   @IsOptional()
   projectId?: string;
-
-  @IsString()
-  @IsOptional()
-  workspaceId?: string;
 }

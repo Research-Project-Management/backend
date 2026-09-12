@@ -1,9 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
-import {
-  buildWorkspaceIdentifierWhere,
-  isUuid,
-} from '@/core/utils/tenant.util';
+import { isUUID } from 'class-validator';
 
 const USER_SELECT = {
   id: true,
@@ -16,82 +13,132 @@ const USER_SELECT = {
 export class AnalyticsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  private async getCanonicalWorkspaceId(
-    workspaceId: string,
-  ): Promise<string | null> {
-    if (!workspaceId) return null;
-    if (isUuid(workspaceId)) return workspaceId;
-    const ws = await this.prisma.workspace.findFirst({
-      where: buildWorkspaceIdentifierWhere(workspaceId),
-      select: { id: true },
-    });
-    return ws?.id ?? null;
-  }
-
-  async countWorkspaceStats(workspaceId: string) {
-    const canonicalId = await this.getCanonicalWorkspaceId(workspaceId);
-    if (!canonicalId) {
-      return {
-        members: 0,
-        projects: 0,
-        tasks: 0,
-        papers: 0,
-        pages: 0,
-        files: 0,
-        stickies: 0,
-      };
+  async countProjectStats(projectId: string) {
+    let canonicalProjectId = projectId;
+    if (!isUUID(canonicalProjectId)) {
+      const proj = await this.prisma.project
+        .findFirst({
+          where: {
+            identifier: { equals: canonicalProjectId, mode: 'insensitive' },
+            deletedAt: null,
+          },
+          select: { id: true },
+        })
+        .catch(() => null);
+      if (!proj) {
+        return {
+          members: 0,
+          tasks: 0,
+          pages: 0,
+          files: 0,
+          stickies: 0,
+          cycles: 0,
+          papers: 0,
+        };
+      }
+      canonicalProjectId = proj.id;
     }
 
     const [
       membersCount,
-      projectsCount,
       tasksCount,
-      papersCount,
       pagesCount,
       filesCount,
       stickiesCount,
+      cyclesCount,
+      papersCount,
     ] = await Promise.all([
-      this.prisma.workspaceMember.count({
-        where: { workspaceId: canonicalId },
+      this.prisma.projectMember.count({
+        where: { projectId: canonicalProjectId },
       }),
-      this.prisma.project.count({
-        where: { workspaceId: canonicalId, isActive: true },
-      }),
-      this.prisma.task.count({
-        where: { project: { workspaceId: canonicalId } },
-      }),
-      this.prisma.catalogItem.count({
-        where: { workspaceId: canonicalId, deletedAt: null },
+      this.prisma.workItem.count({
+        where: { projectId: canonicalProjectId, deletedAt: null },
       }),
       this.prisma.page.count({
-        where: {
-          OR: [
-            { workspaceId: canonicalId },
-            { project: { workspaceId: canonicalId } },
-          ],
-          deletedAt: null,
-        },
+        where: { projectId: canonicalProjectId, deletedAt: null },
       }),
       this.prisma.file.count({
-        where: { workspaceId: canonicalId, trashedAt: null },
+        where: {
+          linkedToType: 'project',
+          linkedToId: canonicalProjectId,
+          trashedAt: null,
+        },
       }),
-      this.prisma.sticky.count({ where: { workspaceId: canonicalId } }),
+      this.prisma.sticky.count({
+        where: { projectId: canonicalProjectId, deletedAt: null },
+      }),
+      this.prisma.cycle.count({
+        where: { projectId: canonicalProjectId, deletedAt: null },
+      }),
+      this.prisma.item.count({
+        where: { projectId: canonicalProjectId, deletedAt: null },
+      }),
     ]);
 
     return {
       members: membersCount,
-      projects: projectsCount,
       tasks: tasksCount,
-      papers: papersCount,
       pages: pagesCount,
       files: filesCount,
       stickies: stickiesCount,
+      cycles: cyclesCount,
+      papers: papersCount,
+    };
+  }
+
+  async countUserStats(userId: string) {
+    if (!isUUID(userId)) {
+      return {
+        projects: 0,
+        assignedWorkItems: 0,
+        createdTasks: 0,
+        pages: 0,
+        stickies: 0,
+        papers: 0,
+      };
+    }
+
+    const [
+      projectsCount,
+      assignedTasksCount,
+      createdTasksCount,
+      pagesCount,
+      stickiesCount,
+      papersCount,
+    ] = await Promise.all([
+      this.prisma.projectMember.count({
+        where: { userId },
+      }),
+      this.prisma.workItem.count({
+        where: { assigneeId: userId, deletedAt: null },
+      }),
+      this.prisma.workItem.count({
+        where: { authorId: userId, deletedAt: null },
+      }),
+      this.prisma.page.count({
+        where: { authorId: userId, deletedAt: null },
+      }),
+      this.prisma.sticky.count({
+        where: { userId, deletedAt: null },
+      }),
+      this.prisma.item.count({
+        where: { userId, deletedAt: null },
+      }),
+    ]);
+
+    return {
+      projects: projectsCount,
+      assignedWorkItems: assignedTasksCount,
+      createdTasks: createdTasksCount,
+      pages: pagesCount,
+      stickies: stickiesCount,
+      papers: papersCount,
     };
   }
 
   async findProjectTasksWithAssignees(projectId: string) {
     let canonicalProjectId = projectId;
-    if (!isUuid(canonicalProjectId)) {
+    if (!isUUID(canonicalProjectId)) {
       const proj = await this.prisma.project
         .findFirst({
           where: {
@@ -105,7 +152,7 @@ export class AnalyticsRepository {
       canonicalProjectId = proj.id;
     }
 
-    return this.prisma.task.findMany({
+    return this.prisma.workItem.findMany({
       where: { projectId: canonicalProjectId },
       select: {
         id: true,
@@ -119,8 +166,8 @@ export class AnalyticsRepository {
   }
 
   async findCycleTasks(cycleId: string) {
-    if (!isUuid(cycleId)) return [];
-    return this.prisma.task.findMany({
+    if (!isUUID(cycleId)) return [];
+    return this.prisma.workItem.findMany({
       where: { cycleId },
       select: {
         id: true,
@@ -131,26 +178,53 @@ export class AnalyticsRepository {
     });
   }
 
-  async findUserWorkspaceTasks(workspaceId: string, userId: string) {
-    const canonicalId = await this.getCanonicalWorkspaceId(workspaceId);
-    if (!canonicalId) return [];
+  /** Label distribution: count tasks per label string in a project */
+  async findProjectTasksByLabel(projectId: string) {
+    if (!isUUID(projectId)) return [];
+    return this.prisma.workItem.findMany({
+      where: { projectId, deletedAt: null },
+      select: { id: true, labels: true },
+    });
+  }
 
-    return this.prisma.task.findMany({
+  /** Time-series: tasks created and completed per day within a date range */
+  async findProjectTasksTimeSeries(projectId: string, from: Date, to: Date) {
+    if (!isUUID(projectId)) return [];
+    return this.prisma.workItem.findMany({
       where: {
-        project: { workspaceId: canonicalId },
-        OR: [
-          { assigneeId: userId },
-          { authorId: userId },
-          { comments: { some: { authorId: userId } } },
-        ],
+        projectId,
+        deletedAt: null,
+        createdAt: { gte: from, lte: to },
       },
-      include: {
-        author: { select: USER_SELECT },
-        assignee: { select: USER_SELECT },
-        project: { select: { id: true, name: true, avatar: true } },
-        comments: { select: { id: true } },
+      select: {
+        id: true,
+        createdAt: true,
+        updatedAt: true,
+        completed: true,
       },
-      orderBy: { updatedAt: 'desc' },
+    });
+  }
+
+  /** Cycle burndown: tasks with dates for daily completion tracking */
+  async findCycleTasksWithDates(cycleId: string) {
+    if (!isUUID(cycleId)) return [];
+    return this.prisma.workItem.findMany({
+      where: { cycleId, deletedAt: null },
+      select: {
+        id: true,
+        completed: true,
+        updatedAt: true,
+        createdAt: true,
+      },
+    });
+  }
+
+  /** Cycle start and end dates for burndown axis */
+  async findCycleById(cycleId: string) {
+    if (!isUUID(cycleId)) return null;
+    return this.prisma.cycle.findUnique({
+      where: { id: cycleId },
+      select: { id: true, startDate: true, endDate: true, name: true },
     });
   }
 }

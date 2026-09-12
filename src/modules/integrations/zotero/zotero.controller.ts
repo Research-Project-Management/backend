@@ -9,11 +9,8 @@ import {
   UseGuards,
   Query,
 } from '@nestjs/common';
-import { JwtAuthGuard } from '../../iam/authn/guards/jwt-auth.guard';
-import { WorkspaceRoleGuard } from '../../iam/authz/guards/workspace-role.guard';
-import { WorkspaceRoles } from '../../iam/authz/decorators/workspace-roles.decorator';
-import { WorkspaceRole } from '../../iam/authz/enums/workspace-role.enum';
-import { CurrentUser } from '../../iam/authn/decorators/current-user.decorator';
+import { JwtAuthGuard } from '../../iam/authn/guards/auth.guard';
+import { CurrentUser } from '../../iam/authn/decorators/user.decorator';
 import { ZoteroService } from './zotero.service';
 import { SetKillSwitchDto } from './dto/set-kill-switch.dto';
 import {
@@ -24,22 +21,20 @@ import { UpdateZoteroSyncDirectionDto } from './dto/update-zotero-sync-direction
 import { ResolveZoteroConflictDto } from './dto/resolve-zotero-conflict.dto';
 
 @Controller([
+  'api/v1/library/integrations/zotero',
   'api/v1/workspaces/:workspaceId/library/integrations/zotero',
-  'api/v1/workspace/:workspaceId/library/integrations/zotero',
 ])
-@UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
+@UseGuards(JwtAuthGuard)
 export class ZoteroController {
   constructor(private readonly zoteroService: ZoteroService) {}
 
   @Post('connections')
-  @WorkspaceRoles(WorkspaceRole.ADMIN, WorkspaceRole.OWNER)
   async createConnection(
-    @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
     @Body() body: CreateZoteroConnectionDto,
   ) {
     const connection = await this.zoteroService.createConnection(
-      workspaceId,
+      userId,
       userId,
       body,
     );
@@ -47,31 +42,30 @@ export class ZoteroController {
   }
 
   @Get('connections')
-  async listConnections(@Param('workspaceId') workspaceId: string) {
-    const data = await this.zoteroService.listConnections(workspaceId);
+  async listConnections(@CurrentUser('id') userId: string) {
+    const data = await this.zoteroService.listConnections(userId);
     return { data };
   }
 
   @Get('connections/:connectionId')
   async getConnection(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Param('connectionId') connectionId: string,
   ) {
     const data = await this.zoteroService.getConnection(
-      workspaceId,
+      userId,
       connectionId,
     );
     return { data };
   }
 
   @Delete('connections/:connectionId')
-  @WorkspaceRoles(WorkspaceRole.ADMIN, WorkspaceRole.OWNER)
   async revokeConnection(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Param('connectionId') connectionId: string,
   ) {
     const res = await this.zoteroService.revokeConnection(
-      workspaceId,
+      userId,
       connectionId,
     );
     return { data: res };
@@ -79,23 +73,22 @@ export class ZoteroController {
 
   @Get('connections/:connectionId/libraries')
   async listRemoteLibraries(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Param('connectionId') connectionId: string,
   ) {
     const libraries = await this.zoteroService.listRemoteLibraries(
-      workspaceId,
+      userId,
       connectionId,
     );
     return { data: libraries };
   }
 
   @Post('bindings')
-  @WorkspaceRoles(WorkspaceRole.ADMIN, WorkspaceRole.OWNER)
   async createBinding(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Body() body: CreateZoteroBindingDto,
   ) {
-    const binding = await this.zoteroService.createBinding(workspaceId, body);
+    const binding = await this.zoteroService.createBinding(userId, body);
     return {
       data: {
         ...binding,
@@ -106,11 +99,11 @@ export class ZoteroController {
 
   @Get('bindings')
   async listBindings(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Query('connectionId') connectionId?: string,
   ) {
     const bindings = await this.zoteroService.listBindings(
-      workspaceId,
+      userId,
       connectionId,
     );
     return {
@@ -122,15 +115,13 @@ export class ZoteroController {
   }
 
   @Patch('bindings/:bindingId/sync-direction')
-  @WorkspaceRoles(WorkspaceRole.ADMIN, WorkspaceRole.OWNER)
   async updateSyncDirection(
-    @Param('workspaceId') workspaceId: string,
-    @Param('bindingId') bindingId: string,
     @CurrentUser('id') userId: string,
+    @Param('bindingId') bindingId: string,
     @Body() body: UpdateZoteroSyncDirectionDto,
   ) {
     const updated = await this.zoteroService.updateBindingSyncDirection(
-      workspaceId,
+      userId,
       bindingId,
       body.syncDirection,
       userId,
@@ -144,12 +135,11 @@ export class ZoteroController {
   }
 
   @Post('bindings/:bindingId/sync-runs')
-  @WorkspaceRoles(WorkspaceRole.ADMIN, WorkspaceRole.OWNER)
   async triggerPull(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Param('bindingId') bindingId: string,
   ) {
-    const result = await this.zoteroService.executePull(workspaceId, bindingId);
+    const result = await this.zoteroService.executePull(userId, bindingId);
     return {
       data: {
         ...result,
@@ -159,13 +149,12 @@ export class ZoteroController {
   }
 
   @Post('bindings/:bindingId/reconcile')
-  @WorkspaceRoles(WorkspaceRole.ADMIN, WorkspaceRole.OWNER)
   async triggerReconcile(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Param('bindingId') bindingId: string,
   ) {
     const result = await this.zoteroService.executeReconciliation(
-      workspaceId,
+      userId,
       bindingId,
     );
     return {
@@ -177,14 +166,13 @@ export class ZoteroController {
   }
 
   @Post('bindings/:bindingId/push/:itemId')
-  @WorkspaceRoles(WorkspaceRole.ADMIN, WorkspaceRole.OWNER)
   async pushItem(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Param('bindingId') bindingId: string,
     @Param('itemId') itemId: string,
   ) {
     const result = await this.zoteroService.executePush(
-      workspaceId,
+      userId,
       bindingId,
       itemId,
     );
@@ -197,42 +185,41 @@ export class ZoteroController {
   }
 
   @Get('conflicts')
-  async listWorkspaceConflicts(@Param('workspaceId') workspaceId: string) {
-    const data = await this.zoteroService.listConflicts(workspaceId);
+  async listWorkspaceConflicts(@CurrentUser('id') userId: string) {
+    const data = await this.zoteroService.listConflicts(userId);
     return { data };
   }
 
   @Get('bindings/:bindingId/conflicts')
   async listBindingConflicts(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Param('bindingId') bindingId: string,
   ) {
-    const data = await this.zoteroService.listConflicts(workspaceId, bindingId);
+    const data = await this.zoteroService.listConflicts(userId, bindingId);
     return { data };
   }
 
   @Get('bindings/:bindingId/pending-pushes')
   async listPendingPushes(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Param('bindingId') bindingId: string,
   ) {
     const data = await this.zoteroService.listPendingPushes(
-      workspaceId,
+      userId,
       bindingId,
     );
     return { data };
   }
 
   @Post('bindings/:bindingId/conflicts/:itemId/resolve')
-  @WorkspaceRoles(WorkspaceRole.ADMIN, WorkspaceRole.OWNER)
   async resolveConflict(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Param('bindingId') bindingId: string,
     @Param('itemId') itemId: string,
     @Body() body: ResolveZoteroConflictDto,
   ) {
     const result = await this.zoteroService.resolveConflict(
-      workspaceId,
+      userId,
       bindingId,
       itemId,
       body,
@@ -246,20 +233,18 @@ export class ZoteroController {
   }
 
   @Get('kill-switch')
-  async getKillSwitchStatus(@Param('workspaceId') workspaceId: string) {
-    const status = await this.zoteroService.getKillSwitchStatus(workspaceId);
+  async getKillSwitchStatus(@CurrentUser('id') userId: string) {
+    const status = await this.zoteroService.getKillSwitchStatus(userId);
     return { data: status };
   }
 
   @Post('kill-switch')
-  @WorkspaceRoles(WorkspaceRole.ADMIN, WorkspaceRole.OWNER)
   async setKillSwitch(
-    @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
     @Body() body: SetKillSwitchDto,
   ) {
     const status = await this.zoteroService.setKillSwitch(
-      workspaceId,
+      userId,
       body,
       userId,
     );
@@ -268,11 +253,11 @@ export class ZoteroController {
 
   @Get('bindings/:bindingId/storage/quota')
   async getStorageQuota(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Param('bindingId') bindingId: string,
   ) {
     const quota = await this.zoteroService.getStorageQuota(
-      workspaceId,
+      userId,
       bindingId,
     );
     return { data: quota };

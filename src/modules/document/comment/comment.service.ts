@@ -3,7 +3,7 @@ import {
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
-import { PageCommentRepository } from './comment.repository';
+import { CommentRepository } from './comment.repository';
 import {
   CreateCommentDto,
   UpdateCommentDto,
@@ -19,9 +19,9 @@ import {
 import { PrismaService } from '@/core/database/prisma.service';
 
 @Injectable()
-export class PageCommentService {
+export class CommentService {
   constructor(
-    private readonly commentRepo: PageCommentRepository,
+    private readonly commentRepo: CommentRepository,
     private readonly prisma: PrismaService,
   ) {}
 
@@ -35,7 +35,6 @@ export class PageCommentService {
       include: {
         page: {
           select: {
-            workspaceId: true,
             projectId: true,
           },
         },
@@ -50,20 +49,13 @@ export class PageCommentService {
       return comment;
     }
 
-    const wsMember = await this.prisma.workspaceMember.findFirst({
-      where: { workspaceId: comment.page.workspaceId, userId },
-    });
-    if (wsMember?.role === 'owner' || wsMember?.role === 'admin') {
-      return comment;
-    }
-
     if (comment.page.projectId) {
       const projMember = await this.prisma.projectMember.findUnique({
         where: {
           projectId_userId: { projectId: comment.page.projectId, userId },
         },
       });
-      if (projMember?.role === 'admin') {
+      if (projMember?.role === 'owner') {
         return comment;
       }
     }
@@ -86,17 +78,17 @@ export class PageCommentService {
     };
   }
 
-  async getPageComments(pageId: string) {
-    const comments = await this.commentRepo.findPageComments(pageId);
+  async getComments(pageId: string) {
+    const comments = await this.commentRepo.findComments(pageId);
     return { comments };
   }
 
-  async createPageComment(
+  async createComment(
     pageId: string,
     userId: string,
     dto: CreateCommentDto,
   ) {
-    const comment = await this.commentRepo.createPageComment({
+    const comment = await this.commentRepo.createComment({
       pageId,
       authorId: userId,
       content: dto.content,
@@ -108,14 +100,14 @@ export class PageCommentService {
     return { comment };
   }
 
-  async updatePageComment(
+  async updateComment(
     commentId: string,
     userId: string,
     dto: UpdateCommentDto,
   ) {
     await this.assertCanModifyComment(commentId, userId, 'update');
 
-    const comment = await this.commentRepo.updatePageComment(commentId, {
+    const comment = await this.commentRepo.updateComment(commentId, {
       content: dto.content,
       status: dto.status,
       isEdited: true,
@@ -124,15 +116,15 @@ export class PageCommentService {
     return { comment };
   }
 
-  async deletePageComment(commentId: string, userId: string) {
+  async deleteComment(commentId: string, userId: string) {
     await this.assertCanModifyComment(commentId, userId, 'delete');
 
-    await this.commentRepo.deletePageComment(commentId);
+    await this.commentRepo.deleteComment(commentId);
     return { success: true };
   }
 
-  async addPageReply(commentId: string, userId: string, dto: AddReplyDto) {
-    const existing = await this.commentRepo.findPageCommentById(commentId);
+  async addReply(commentId: string, userId: string, dto: AddReplyDto) {
+    const existing = await this.commentRepo.findCommentById(commentId);
     if (!existing) {
       throw new NotFoundException('Comment not found');
     }
@@ -142,20 +134,19 @@ export class PageCommentService {
     const newReply = this.buildReply(dto.content, author);
     replies.push(newReply);
 
-    const comment = await this.commentRepo.updatePageComment(commentId, {
+    const comment = await this.commentRepo.updateComment(commentId, {
       replies: replies as unknown as Prisma.InputJsonValue,
     });
 
     return { comment };
   }
 
-  async deletePageReply(commentId: string, replyId: string, userId: string) {
+  async deleteReply(commentId: string, replyId: string, userId: string) {
     const existing = await this.prisma.pageComment.findUnique({
       where: { id: commentId },
       include: {
         page: {
           select: {
-            workspaceId: true,
             projectId: true,
           },
         },
@@ -169,23 +160,17 @@ export class PageCommentService {
     const targetReply = replies.find((r) => r.id === replyId);
 
     if (targetReply?.author?.id !== userId) {
-      const wsMember = await this.prisma.workspaceMember.findFirst({
-        where: { workspaceId: existing.page.workspaceId, userId },
-      });
-      const isWsAdmin =
-        wsMember?.role === 'owner' || wsMember?.role === 'admin';
-
-      let isProjAdmin = false;
+      let isProjOwner = false;
       if (existing.page.projectId) {
         const projMember = await this.prisma.projectMember.findUnique({
           where: {
             projectId_userId: { projectId: existing.page.projectId, userId },
           },
         });
-        isProjAdmin = projMember?.role === 'admin';
+        isProjOwner = projMember?.role === 'owner';
       }
 
-      if (!isWsAdmin && !isProjAdmin) {
+      if (!isProjOwner) {
         throw new ForbiddenException(
           'You do not have permission to delete this reply',
         );
@@ -193,10 +178,22 @@ export class PageCommentService {
     }
 
     const filteredReplies = replies.filter((r) => r.id !== replyId);
-    const comment = await this.commentRepo.updatePageComment(commentId, {
+    const comment = await this.commentRepo.updateComment(commentId, {
       replies: filteredReplies as unknown as Prisma.InputJsonValue,
     });
 
     return { comment };
   }
+
+  // Backward-compatible aliases
+  getPageComments = this.getComments.bind(this);
+  createPageComment = this.createComment.bind(this);
+  updatePageComment = this.updateComment.bind(this);
+  deletePageComment = this.deleteComment.bind(this);
+  addPageReply = this.addReply.bind(this);
+  deletePageReply = this.deleteReply.bind(this);
 }
+
+export const PageCommentService = CommentService;
+export type PageCommentService = CommentService;
+

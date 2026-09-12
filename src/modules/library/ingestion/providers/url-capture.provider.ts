@@ -7,11 +7,11 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { createHmac, createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { MetadataRoutingPolicy } from '../metadata/policies/metadata.policy';
-import { SsrfGuardService } from '../../common/services/ssrf-guard.service';
+import { SsrfGuardService } from '../../core/services/ssrf-guard.service';
 import {
   ZoteroTranslatorClient,
   ZoteroItem,
-} from '../../../../infra/zotero/zotero-translator.client';
+} from '../../infra/zotero/zotero-translator.client';
 
 // ─── Public Interfaces ────────────────────────────────────────────────────────
 

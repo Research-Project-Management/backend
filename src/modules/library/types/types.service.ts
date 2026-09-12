@@ -216,6 +216,3 @@ export class TypesService {
     return found || key;
   }
 }
-
-export const ItemTypeRegistryService = TypesService;
-export type ItemTypeRegistryService = TypesService;

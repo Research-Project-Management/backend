@@ -9,10 +9,12 @@ import {
   IStoragePort,
   ReadOwnedFileInput,
   ReadOwnedFileOutput,
+  LinkFileInput,
+  UploadFileInput,
+  UploadFileOutput,
   getFileContentPath,
 } from './storage.port';
 import { PrismaService } from '@/core/database/prisma.service';
-import { buildWorkspaceIdentifierWhere } from '@/core/utils/tenant.util';
 import { R2Service } from './r2/r2.service';
 import {
   assertFileNotTrashed,
@@ -30,7 +32,7 @@ export class StorageAdapter implements IStoragePort {
   ) {}
 
   async readOwnedFile(input: ReadOwnedFileInput): Promise<ReadOwnedFileOutput> {
-    const { workspaceId, fileId } = input;
+    const { fileId, projectId } = input;
 
     if (!fileId || typeof fileId !== 'string') {
       throw new NotFoundException('fileId is required');
@@ -44,23 +46,7 @@ export class StorageAdapter implements IStoragePort {
       throw new NotFoundException(`File ${fileId} not found`);
     }
 
-    if (file.workspaceId) {
-      let matches = file.workspaceId === workspaceId;
-      if (!matches && workspaceId) {
-        const ws = await this.prisma.workspace.findFirst({
-          where: buildWorkspaceIdentifierWhere(workspaceId),
-          select: { id: true },
-        });
-        if (ws?.id === file.workspaceId) {
-          matches = true;
-        }
-      }
-      if (!matches) {
-        throw new ForbiddenException(
-          `Access denied: file ${fileId} does not belong to workspace ${workspaceId}`,
-        );
-      }
-    }
+    // projectId ownership check removed (workspace cleanup — File.projectId no longer exists)
 
     assertFileNotTrashed(file, fileId);
     const storageKey = resolveFileStorageKey(file, fileId);
@@ -120,5 +106,76 @@ export class StorageAdapter implements IStoragePort {
         `Storage read failure for file ${fileId}: ${err.message}`,
       );
     }
+  }
+
+  async linkFile(input: LinkFileInput): Promise<void> {
+    if (!input.fileId) return;
+    await this.prisma.file.updateMany({
+      where: { id: input.fileId },
+      data: {
+        linkedToType: input.linkedToType,
+        linkedToId: input.linkedToId,
+      },
+    });
+  }
+
+  async uploadFile(input: UploadFileInput): Promise<UploadFileOutput> {
+    const {
+      projectId,
+      userId,
+      filename,
+      buffer,
+      mimeType,
+      source,
+      parentId,
+    } = input;
+    const cleanName = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const key = projectId
+      ? `projects/${projectId}/uploads/${Date.now()}-${cleanName}`
+      : `users/${userId}/uploads/${Date.now()}-${cleanName}`;
+    const uploadRes = await this.r2Service.uploadBuffer(key, buffer, mimeType);
+
+    const isLibrary =
+      source?.toLowerCase() === 'library' || source?.toLowerCase() === 'paper';
+
+    const linkedToType = isLibrary
+      ? 'Library'
+      : projectId
+        ? 'Project'
+        : 'Personal';
+    const linkedToId = projectId || userId || null;
+
+    const file = await this.prisma.file.create({
+      data: {
+        filename,
+        isFolder: false,
+        size: buffer.length,
+        mimeType: mimeType || 'application/octet-stream',
+        url: uploadRes.url,
+        thumbnail: null,
+        parentId: parentId || null,
+        metaData: source ? { source } : {},
+        authorId: userId,
+        linkedToType,
+        linkedToId,
+      },
+    });
+
+    return {
+      fileId: file.id,
+      url: uploadRes.url,
+      path: uploadRes.path,
+      filename: file.filename,
+      size: file.size ?? 0,
+      mimeType: file.mimeType || mimeType,
+    };
+  }
+
+  async uploadBuffer(
+    key: string,
+    buffer: Buffer,
+    contentType?: string,
+  ): Promise<{ path: string; url: string }> {
+    return this.r2Service.uploadBuffer(key, buffer, contentType);
   }
 }

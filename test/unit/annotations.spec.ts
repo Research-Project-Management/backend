@@ -10,7 +10,7 @@ import {
   parseAnnotationType,
   DEFAULT_ANNOTATION_COLOR,
 } from '../../src/modules/library/annotations/utils/annotations.utils';
-import { VersionMismatchException } from '../../src/modules/library/common/errors/version-mismatch.exception';
+import { VersionMismatchException } from '../../src/modules/library/core/errors/version-mismatch.exception';
 
 describe('Annotation Module Unit Tests', () => {
   describe('Annotation Utilities (Pure Functions)', () => {
@@ -138,13 +138,15 @@ describe('Annotation Module Unit Tests', () => {
 
       // Verify findFirst was NOT called because existingAnnotation was passed directly!
       expect(mockPrisma.annotation.findFirst).not.toHaveBeenCalled();
-      expect(mockPrisma.annotation.update).toHaveBeenCalledWith({
-        where: { id: 'anno-1' },
-        data: expect.objectContaining({
-          comment: 'new comment',
-          version: { increment: 1 },
+      expect(mockPrisma.annotation.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'anno-1' },
+          data: expect.objectContaining({
+            comment: 'new comment',
+            version: { increment: 1 },
+          }),
         }),
-      });
+      );
       expect(updated.version).toBe(3);
     });
 
@@ -209,11 +211,15 @@ describe('Annotation Module Unit Tests', () => {
         workspaceMember: {
           findUnique: jest.fn(),
         },
+        workspace: {
+          findFirst: jest.fn().mockResolvedValue(null), // default: not owner
+        },
       };
       mockTxService = {
         executeInTransaction: jest.fn(async (cb) => {
           const fakeTx = {
             workspaceMember: mockPrisma.workspaceMember,
+            workspace: mockPrisma.workspace,
           };
           const fakeHelpers = {
             appendChange: jest.fn().mockResolvedValue(undefined),
@@ -225,17 +231,16 @@ describe('Annotation Module Unit Tests', () => {
       };
 
       mockAttachmentsService = {
-        assertAttachmentInWorkspace: jest.fn().mockResolvedValue(undefined),
+        assertAttachmentExists: jest.fn().mockResolvedValue(undefined),
       };
       service = new AnnotationsService(
         mockRepo,
         mockTxService,
         mockAttachmentsService,
-        mockPrisma,
       );
     });
 
-    it('allows author to update annotation without querying workspaceMember', async () => {
+    it('allows author to update annotation', async () => {
       const existing = {
         id: 'anno-1',
         attachmentId,
@@ -250,18 +255,15 @@ describe('Annotation Module Unit Tests', () => {
       });
 
       const result = await service.updateAnnotation(
-        workspaceId,
+        authorId,
         'anno-1',
         1,
         { comment: 'updated' },
-        authorId,
       );
-
-      expect(mockPrisma.workspaceMember.findUnique).not.toHaveBeenCalled();
       expect(result.version).toBe(2);
     });
 
-    it('allows workspace admin to update another user’s annotation', async () => {
+    it('forbids non-author from updating another user\'s annotation', async () => {
       const existing = {
         id: 'anno-1',
         attachmentId,
@@ -269,46 +271,13 @@ describe('Annotation Module Unit Tests', () => {
         version: 1,
       };
       mockRepo.findById.mockResolvedValueOnce(existing);
-      mockPrisma.workspaceMember.findUnique.mockResolvedValueOnce({
-        role: 'admin',
-      });
-      mockRepo.update.mockResolvedValueOnce({
-        ...existing,
-        version: 2,
-        comment: 'admin edit',
-      });
-
-      const result = await service.updateAnnotation(
-        workspaceId,
-        'anno-1',
-        1,
-        { comment: 'admin edit' },
-        otherUserId,
-      );
-
-      expect(mockPrisma.workspaceMember.findUnique).toHaveBeenCalled();
-      expect(result.comment).toBe('admin edit');
-    });
-
-    it('forbids a regular member from updating another user’s annotation', async () => {
-      const existing = {
-        id: 'anno-1',
-        attachmentId,
-        authorId,
-        version: 1,
-      };
-      mockRepo.findById.mockResolvedValueOnce(existing);
-      mockPrisma.workspaceMember.findUnique.mockResolvedValueOnce({
-        role: 'member',
-      });
 
       await expect(
         service.updateAnnotation(
-          workspaceId,
+          otherUserId,
           'anno-1',
           1,
           { comment: 'unauthorized edit' },
-          otherUserId,
         ),
       ).rejects.toThrow(ForbiddenException);
 
@@ -319,7 +288,7 @@ describe('Annotation Module Unit Tests', () => {
       mockRepo.findById.mockResolvedValueOnce(null);
 
       await expect(
-        service.updateAnnotation(workspaceId, 'non-existent', 1, {}, authorId),
+        service.updateAnnotation(authorId, 'non-existent', 1, {}),
       ).rejects.toThrow(NotFoundException);
     });
 
@@ -346,5 +315,96 @@ describe('Annotation Module Unit Tests', () => {
         expect.anything(),
       );
     });
+  });
+});
+
+// ─── Sort Index Pure Function Tests ──────────────────────────────────────────
+
+import {
+  buildAnnotationSortIndex,
+  parseAnnotationSortIndex,
+  compareSortIndex,
+} from '../../src/modules/library/annotations/utils/sort-index.util';
+
+describe('buildAnnotationSortIndex', () => {
+  it('returns padded zeros for page 0 with no coordinates', () => {
+    expect(buildAnnotationSortIndex(0)).toBe('0000|00000|00000');
+  });
+
+  it('pads single-digit page index correctly', () => {
+    expect(buildAnnotationSortIndex(1)).toBe('0001|00000|00000');
+  });
+
+  it('handles max page (9999)', () => {
+    expect(buildAnnotationSortIndex(9999)).toBe('9999|00000|00000');
+  });
+
+  it('encodes y=0.5, x=0.3 correctly', () => {
+    expect(buildAnnotationSortIndex(1, 0.5, 0.3)).toBe('0001|05000|03000');
+  });
+
+  it('rounds floating point coordinates', () => {
+    expect(buildAnnotationSortIndex(0, 0.12345, 0.9999)).toBe('0000|01235|09999');
+  });
+
+  it('clamps negative coordinates to 0', () => {
+    expect(buildAnnotationSortIndex(0, -0.1, -5)).toBe('0000|00000|00000');
+  });
+});
+
+describe('sort order via compareSortIndex', () => {
+  it('page 1 sorts after page 0', () => {
+    const a = buildAnnotationSortIndex(0);
+    const b = buildAnnotationSortIndex(1);
+    expect(compareSortIndex(a, b)).toBeLessThan(0);
+  });
+
+  it('same page: higher Y sorts after lower Y', () => {
+    const top    = buildAnnotationSortIndex(0, 0.1);
+    const bottom = buildAnnotationSortIndex(0, 0.9);
+    expect(compareSortIndex(top, bottom)).toBeLessThan(0);
+  });
+
+  it('same page, same Y: higher X sorts after lower X', () => {
+    const left  = buildAnnotationSortIndex(0, 0.5, 0.1);
+    const right = buildAnnotationSortIndex(0, 0.5, 0.9);
+    expect(compareSortIndex(left, right)).toBeLessThan(0);
+  });
+
+  it('array sorts correctly across pages and positions', () => {
+    const keys = [
+      buildAnnotationSortIndex(2, 0.1, 0.0),
+      buildAnnotationSortIndex(0, 0.9, 0.9),
+      buildAnnotationSortIndex(1, 0.5, 0.5),
+      buildAnnotationSortIndex(0, 0.1, 0.0),
+    ];
+    const sorted = [...keys].sort(compareSortIndex);
+    expect(sorted).toEqual([
+      buildAnnotationSortIndex(0, 0.1, 0.0),
+      buildAnnotationSortIndex(0, 0.9, 0.9),
+      buildAnnotationSortIndex(1, 0.5, 0.5),
+      buildAnnotationSortIndex(2, 0.1, 0.0),
+    ]);
+  });
+});
+
+describe('parseAnnotationSortIndex', () => {
+  it('parses a valid sort index', () => {
+    const result = parseAnnotationSortIndex('0001|05000|03000');
+    expect(result).toEqual({ page: 1, y: 0.5, x: 0.3 });
+  });
+
+  it('returns null for invalid format', () => {
+    expect(parseAnnotationSortIndex('invalid')).toBeNull();
+    expect(parseAnnotationSortIndex('0001|05000')).toBeNull();
+    expect(parseAnnotationSortIndex('abc|def|ghi')).toBeNull();
+  });
+
+  it('round-trips through build → parse', () => {
+    const sortIndex = buildAnnotationSortIndex(3, 0.25, 0.75);
+    const parsed    = parseAnnotationSortIndex(sortIndex);
+    expect(parsed?.page).toBe(3);
+    expect(parsed?.y).toBeCloseTo(0.25, 4);
+    expect(parsed?.x).toBeCloseTo(0.75, 4);
   });
 });

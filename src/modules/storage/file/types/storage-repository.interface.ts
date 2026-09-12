@@ -27,12 +27,6 @@ export type FileWithAuthor = Prisma.FileGetPayload<{
 }>;
 
 export interface IFileRepository {
-  findWorkspaceFiles(
-    workspaceId: string,
-    parentId?: string | null,
-    trashed?: boolean,
-  ): Promise<FileWithAuthor[]>;
-  findFolderTree(workspaceId: string): Promise<File[]>;
   findFileById(fileId: string): Promise<FileWithAuthor | null>;
   findFileByKey?(key: string): Promise<FileWithAuthor | null>;
   createFile(
@@ -47,13 +41,32 @@ export interface IFileRepository {
   deleteFile(fileId: string): Promise<File>;
   findUserStarredFiles(
     userId: string,
-    workspaceId: string,
   ): Promise<FileWithAuthor[]>;
-  calculateWorkspaceStorageUsage(workspaceId: string): Promise<number>;
+  calculateUserStorageUsage(userId: string): Promise<number>;
   shareFile(
     fileId: string,
     userId: string,
     permission: string,
   ): Promise<FileShare>;
   unshareFile(fileId: string, userId: string): Promise<FileShare>;
+  findFiles(
+    where: Prisma.FileWhereInput,
+    orderBy?: Prisma.FileOrderByWithRelationInput[],
+    take?: number,
+  ): Promise<FileWithAuthor[]>;
+  findFileShares(userId: string): Promise<any[]>;
+  getFileShares(fileId: string): Promise<FileShare[]>;
+  findPageScope(
+    pageId: string,
+  ): Promise<{ id: string; projectId: string | null } | null>;
+  findProjectScope(
+    projectId: string,
+  ): Promise<{ id: string; createdById: string } | null>;
+  findProjectMemberRole(
+    projectId: string,
+    userId: string,
+  ): Promise<string | null>;
+  calculateProjectStorageUsage(projectId: string): Promise<number>;
+  getProjectWithHierarchy(projectId: string): Promise<any>;
 }
+

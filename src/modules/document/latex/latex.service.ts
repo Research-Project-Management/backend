@@ -6,11 +6,11 @@ import {
   Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PageService } from '../page/page.service';
+import { PageService } from '../core/core.service';
 import { CompileLatexDto, SyncIncrementalDto } from './dto/latex.dto';
 import { getErrorMessage, tryCatch } from '@/core/utils/error.util';
-import { RedisCacheService } from '@/core/cache/redis-cache.service';
-import { DOCUMENT_REDIS_KEYS } from '../constants/redis-keys.constant';
+import { RedisCacheService } from '@/core/cache/redis.service';
+import { DOCUMENT_REDIS_KEYS } from '../core/constants/redis-keys.constant';
 import { ExportsService } from '../../library/exports/exports.service';
 import { PrismaService } from '@/core/database/prisma.service';
 import * as crypto from 'crypto';
@@ -209,26 +209,26 @@ export class LatexService {
     let bibContent: string | null = null;
     const citeKeys = extractCitationKeys(source);
     if (citeKeys.length > 0 && this.exportsService) {
-      let workspaceId = dto.workspaceId;
-      if (!workspaceId && pageId && this.prisma) {
+      let tenantId: string | undefined;
+      if (pageId && this.prisma) {
         const page = await this.prisma.page.findUnique({
           where: { id: pageId },
-          select: { workspaceId: true },
+          select: { authorId: true },
         });
-        workspaceId = page?.workspaceId;
+        tenantId = page?.authorId || (page as any)?.workspaceId;
       }
-      if (!workspaceId && projectId && this.prisma) {
+      if (!tenantId && projectId && this.prisma) {
         const project = await this.prisma.project.findUnique({
           where: { id: projectId },
-          select: { workspaceId: true },
+          select: { createdById: true },
         });
-        workspaceId = project?.workspaceId;
+        tenantId = project?.createdById || (project as any)?.workspaceId;
       }
 
-      if (workspaceId) {
+      if (tenantId) {
         try {
           const exportRes = await this.exportsService.exportByCitationKeys(
-            workspaceId,
+            tenantId,
             citeKeys,
           );
           if (exportRes && exportRes.content) {
@@ -279,11 +279,11 @@ export class LatexService {
       throw new NotFoundException('Page not found');
     }
 
-    const childPages = rootPage.childPages || [];
+    const childPages = (rootPage as any).childPages || [];
 
     return {
       ok: true,
-      synced: 1 + childPages.length,
+      synced: 1 + (Array.isArray(childPages) ? childPages.length : 0),
       rootPageId,
     };
   }

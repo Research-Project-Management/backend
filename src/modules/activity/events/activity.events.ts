@@ -11,7 +11,6 @@ export class DomainActivityEvent {
   oldIdentifier?: string;
   newIdentifier?: string;
   actorId!: string;
-  workspaceId!: string;
   projectId?: string;
   timestamp?: Date;
 
@@ -21,4 +20,3 @@ export class DomainActivityEvent {
   }
 }
 
-export * from '../types/activity.types';

@@ -11,7 +11,7 @@ import {
   RagIndexPaperInput,
   RagIndexResult,
 } from './providers/rag.provider';
-import { SearchCatalogQueryDto } from './dto/search.dto';
+import { SearchItemsQueryDto } from './dto/search.dto';
 
 @Injectable()
 export class SearchService {
@@ -27,7 +27,7 @@ export class SearchService {
   /**
    * Faceted search returning items, facets, and cursor pagination metadata.
    */
-  async search(workspaceId: string, dto: SearchCatalogQueryDto) {
+  async search(userId: string, dto: SearchItemsQueryDto) {
     const searchOptions: SearchOptions = {
       q: dto.query,
       collectionId: dto.collectionId,
@@ -37,8 +37,8 @@ export class SearchService {
     };
 
     const [searchResult, facets] = await Promise.all([
-      this.repo.searchItems(workspaceId, searchOptions),
-      this.repo.computeFacets(workspaceId, searchOptions),
+      this.repo.searchItems(userId, searchOptions),
+      this.repo.computeFacets(userId, searchOptions),
     ]);
 
     return {
@@ -53,40 +53,32 @@ export class SearchService {
   }
 
   /**
-   * Search alias for searchCatalog
-   */
-  async searchCatalog(workspaceId: string, dto: SearchCatalogQueryDto) {
-    return this.search(workspaceId, dto);
-  }
-
-  /**
    * Search PDF attachment pages for text occurrences and character offsets.
    */
   async searchPageAnchors(
-    workspaceId: string,
+    userId: string,
     attachmentId: string,
     term: string,
     pageIndex?: number,
   ): Promise<PageAnchorMatch[]> {
-    const attachment = await this.prisma.catalogAttachment.findFirst({
+    const attachment = await this.prisma.attachment.findFirst({
       where: {
         id: attachmentId,
-        catalogItem: { workspaceId, deletedAt: null },
+        item: {
+          userId,
+          deletedAt: null,
+        },
       },
       select: { id: true },
     });
 
     if (!attachment) {
       throw new NotFoundException(
-        `Attachment ${attachmentId} not found in workspace`,
+        `Attachment ${attachmentId} not found`,
       );
     }
 
-    return this.fullText.searchPageAnchors(
-      attachmentId,
-      term,
-      pageIndex,
-    );
+    return this.fullText.searchPageAnchors(attachmentId, term, pageIndex);
   }
 
   async indexAttachmentPages(
@@ -97,19 +89,19 @@ export class SearchService {
   }
 
   /**
-   * Rebuilds full-text and faceted search index for a given workspace.
+   * Rebuilds full-text and faceted search index for a given user library scope.
    */
   async rebuildIndex(
-    workspaceId: string,
+    userId: string,
   ): Promise<{ indexedItems: number; indexedAttachments: number }> {
-    this.logger.log(`Rebuilding search index for workspace ${workspaceId}...`);
-    const facets = await this.repo.computeFacets(workspaceId, {});
+    this.logger.log(`Rebuilding search index for user ${userId}...`);
+    const facets = await this.repo.computeFacets(userId, {});
     const totalTypes = Object.values(facets.itemTypes).reduce(
       (a, b) => a + b,
       0,
     );
     this.logger.log(
-      `Search index validated for workspace ${workspaceId}: ${totalTypes} active items indexed.`,
+      `Search index validated for user ${userId}: ${totalTypes} active items indexed.`,
     );
     return {
       indexedItems: totalTypes,

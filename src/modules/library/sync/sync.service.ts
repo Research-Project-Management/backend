@@ -20,7 +20,7 @@ import {
   GetSyncItemSnapshotQuery,
   GetSyncItemSnapshotsQuery,
   UpsertSyncCollectionCommand,
-  UpsertSyncCatalogItemCommand,
+  UpsertSyncItemCommand,
   UpsertSyncAttachmentCommand,
   UpsertSyncNoteCommand,
   UpsertSyncAnnotationCommand,
@@ -48,14 +48,15 @@ export class SyncService implements SyncPort {
     private readonly txService: TransactionService,
     private readonly outboxWorker: OutboxWorker,
     private readonly collectionsService: CollectionsService,
-    private readonly catalogService: ItemsService,
+    private readonly itemsService: ItemsService,
     private readonly attachmentsService: AttachmentsService,
     private readonly notesService: NotesService,
     private readonly annotationsService: AnnotationsService,
   ) {}
 
+
   async pullDelta(
-    workspaceId: string,
+    userId: string,
     sinceSeq?: bigint | number,
     limit: number = 100,
   ) {
@@ -63,16 +64,16 @@ export class SyncService implements SyncPort {
     const parsedLimit = Math.min(Math.max(limit, 1), 500);
 
     const changes = await this.txService.getChangesSince(
-      workspaceId,
+      userId,
       parsedSeq,
       parsedLimit,
     );
     const tombstones = await this.txService.getTombstonesSince(
-      workspaceId,
+      userId,
       parsedSeq,
       parsedLimit,
     );
-    const latestSeq = await this.txService.getLatestSequence(workspaceId);
+    const latestSeq = await this.txService.getLatestSequence(userId);
 
     const serializedChanges = changes.map((c) => ({
       ...c,
@@ -94,7 +95,7 @@ export class SyncService implements SyncPort {
   }
 
   async pushMutations(
-    workspaceId: string,
+    userId: string,
     mutations: Array<{
       entityType: string;
       entityId: string;
@@ -102,9 +103,9 @@ export class SyncService implements SyncPort {
       version?: number;
       data?: any;
     }>,
-    userId?: string,
+    currentUserId?: string,
   ) {
-    const currentUserId = userId || 'system';
+    const authorId = currentUserId || userId;
 
     const sanitizeData = (raw: unknown): Record<string, any> => {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
@@ -125,22 +126,12 @@ export class SyncService implements SyncPort {
       const results = [];
       for (const mutation of mutations) {
         if (mutation.action === 'delete') {
-          if (userId) {
-            const member = await this.prisma.workspaceMember.findUnique({
-              where: { workspaceId_userId: { workspaceId, userId } },
-            });
-            if (member?.role !== 'owner' && member?.role !== 'admin') {
-              throw new ForbiddenException(
-                'Admin or owner role is required to delete entities via sync',
-              );
-            }
-          }
           await this.executeDeleteEntity(tx, helpers, {
-            workspaceId,
+            userId,
             entityType: mutation.entityType as SyncEntityType,
             entityId: mutation.entityId,
           });
-          const tombstone = await helpers.recordTombstone(workspaceId, {
+          const tombstone = await helpers.recordTombstone(userId, {
             entityType: mutation.entityType,
             entityId: mutation.entityId,
           });
@@ -152,11 +143,10 @@ export class SyncService implements SyncPort {
         } else {
           const cleanData = sanitizeData(mutation.data);
           switch (mutation.entityType) {
-            case 'CatalogItem':
-              await this.executeUpsertCatalogItem(tx, helpers, {
+            case 'Item':
+              await this.executeUpsertItem(tx, helpers, {
                 ...cleanData,
-                workspaceId,
-                userId: currentUserId,
+                userId,
                 existingId: mutation.entityId,
                 title: cleanData.title || 'Untitled',
               });
@@ -164,18 +154,17 @@ export class SyncService implements SyncPort {
             case 'Collection':
               await this.executeUpsertCollection(tx, helpers, {
                 ...cleanData,
-                workspaceId,
-                userId: currentUserId,
+                userId,
                 existingId: mutation.entityId,
                 name: cleanData.name || 'Untitled',
               });
               break;
-            case 'CatalogAttachment':
+            case 'Attachment':
               await this.executeUpsertAttachment(tx, helpers, {
                 ...cleanData,
-                workspaceId,
+                userId,
                 existingId: mutation.entityId,
-                catalogItemId: cleanData.catalogItemId,
+                itemId: cleanData.itemId,
                 filename: cleanData.filename || 'attachment',
                 url: cleanData.url || '',
                 mimeType: cleanData.mimeType || 'application/pdf',
@@ -184,10 +173,9 @@ export class SyncService implements SyncPort {
             case 'Note':
               await this.executeUpsertNote(tx, helpers, {
                 ...cleanData,
-                workspaceId,
-                userId: currentUserId,
+                userId,
                 existingId: mutation.entityId,
-                catalogItemId: cleanData.catalogItemId,
+                itemId: cleanData.itemId,
                 title: cleanData.title || 'Note',
                 contentMd: cleanData.contentMd || '',
               });
@@ -195,8 +183,7 @@ export class SyncService implements SyncPort {
             case 'Annotation':
               await this.executeUpsertAnnotation(tx, helpers, {
                 ...cleanData,
-                workspaceId,
-                userId: currentUserId,
+                userId,
                 existingId: mutation.entityId,
                 attachmentId: cleanData.attachmentId,
                 pageIndex: cleanData.pageIndex ?? 1,
@@ -208,7 +195,7 @@ export class SyncService implements SyncPort {
               );
           }
 
-          const change = await helpers.appendChange(workspaceId, {
+          const change = await helpers.appendChange(userId, {
             entityType: mutation.entityType,
             entityId: mutation.entityId,
             action: mutation.action,
@@ -226,14 +213,14 @@ export class SyncService implements SyncPort {
     });
   }
 
-  async getLatestSequence(workspaceId: string): Promise<bigint> {
-    return this.txService.getLatestSequence(workspaceId);
+  async getLatestSequence(userId: string): Promise<bigint> {
+    return this.txService.getLatestSequence(userId);
   }
 
   async getItemSnapshot(
     query: GetSyncItemSnapshotQuery,
   ): Promise<SyncItemSnapshot | null> {
-    return this.catalogService.getItemSnapshot(query.workspaceId, query.itemId);
+    return this.itemsService.getItemSnapshot(query.userId, query.itemId);
   }
 
   async getItemSnapshots(
@@ -243,10 +230,7 @@ export class SyncService implements SyncPort {
       return [];
     }
 
-    return this.catalogService.getItemSnapshots(
-      query.workspaceId,
-      query.itemIds,
-    );
+    return this.itemsService.getItemSnapshots(query.userId, query.itemIds);
   }
 
   async upsertCollection(
@@ -257,11 +241,11 @@ export class SyncService implements SyncPort {
     });
   }
 
-  async upsertCatalogItem(
-    command: UpsertSyncCatalogItemCommand,
+  async upsertItem(
+    command: UpsertSyncItemCommand,
   ): Promise<UpsertSyncEntityResult> {
     return this.txService.executeInTransaction(async (tx, helpers) => {
-      return this.executeUpsertCatalogItem(tx, helpers, command);
+      return this.executeUpsertItem(tx, helpers, command);
     });
   }
 
@@ -314,6 +298,9 @@ export class SyncService implements SyncPort {
     command: ApplyExternalSyncBatchCommand,
     userId?: string,
   ): Promise<ExternalSyncBatchResult> {
+    const targetUserId = command.userId || userId || 'system';
+    command.userId = targetUserId;
+
     // 1. Deterministic, non-mutating request hash
     const requestHash = computeRequestHash(command);
 
@@ -322,7 +309,7 @@ export class SyncService implements SyncPort {
       const existing = await this.prisma.idempotencyRecord.findUnique({
         where: {
           workspaceId_idempotencyKey: {
-            workspaceId: command.workspaceId,
+            workspaceId: targetUserId,
             idempotencyKey: command.idempotencyKey,
           },
         },
@@ -355,7 +342,7 @@ export class SyncService implements SyncPort {
         try {
           await tx.idempotencyRecord.create({
             data: {
-              workspaceId: command.workspaceId,
+              workspaceId: targetUserId,
               idempotencyKey: command.idempotencyKey,
               requestHash,
               status: 'in_progress',
@@ -372,7 +359,7 @@ export class SyncService implements SyncPort {
             const claimed = await this.prisma.idempotencyRecord.findUnique({
               where: {
                 workspaceId_idempotencyKey: {
-                  workspaceId: command.workspaceId,
+                  workspaceId: targetUserId,
                   idempotencyKey: command.idempotencyKey,
                 },
               },
@@ -400,12 +387,7 @@ export class SyncService implements SyncPort {
       const results: ExternalSyncBatchOperationResult[] = [];
 
       for (const op of sortedOperations) {
-        // Workspace membership guard
-        if (op.command.workspaceId !== command.workspaceId) {
-          throw new ForbiddenException(
-            `Operation workspace mismatch: ${op.command.workspaceId} !== ${command.workspaceId}`,
-          );
-        }
+        op.command.userId = targetUserId;
 
         if (op.op === 'upsertCollection') {
           // Resolve parentRef if not already provided via existingId path
@@ -426,24 +408,20 @@ export class SyncService implements SyncPort {
           );
           if (op.operationId) refMap.set(op.operationId, res.id);
           results.push({ operationId: op.operationId, op: op.op, result: res });
-        } else if (op.op === 'upsertCatalogItem') {
-          const res = await this.executeUpsertCatalogItem(
-            tx,
-            helpers,
-            op.command,
-          );
+        } else if (op.op === 'upsertItem') {
+          const res = await this.executeUpsertItem(tx, helpers, op.command);
           if (op.operationId) refMap.set(op.operationId, res.id);
           results.push({ operationId: op.operationId, op: op.op, result: res });
         } else if (op.op === 'upsertAttachment') {
-          if (op.parentRef && !op.command.catalogItemId) {
+          if (op.parentRef && !op.command.itemId) {
             const resolved = refMap.get(op.parentRef);
             if (!resolved) {
               throw new NotFoundException(
                 `Cannot resolve parentRef "${op.parentRef}" for upsertAttachment (operationId: ${op.operationId ?? 'n/a'}). ` +
-                  `Parent catalog item must appear earlier in the batch.`,
+                  `Parent item must appear earlier in the batch.`,
               );
             }
-            op.command.catalogItemId = resolved;
+            op.command.itemId = resolved;
           }
           const res = await this.executeUpsertAttachment(
             tx,
@@ -453,15 +431,15 @@ export class SyncService implements SyncPort {
           if (op.operationId) refMap.set(op.operationId, res.id);
           results.push({ operationId: op.operationId, op: op.op, result: res });
         } else if (op.op === 'upsertNote') {
-          if (op.parentRef && !op.command.catalogItemId) {
+          if (op.parentRef && !op.command.itemId) {
             const resolved = refMap.get(op.parentRef);
             if (!resolved) {
               throw new NotFoundException(
                 `Cannot resolve parentRef "${op.parentRef}" for upsertNote (operationId: ${op.operationId ?? 'n/a'}). ` +
-                  `Parent catalog item must appear earlier in the batch or have a catalogItemId.`,
+                  `Parent item must appear earlier in the batch or have an itemId.`,
               );
             }
-            op.command.catalogItemId = resolved;
+            op.command.itemId = resolved;
           }
           const res = await this.executeUpsertNote(tx, helpers, op.command);
           if (op.operationId) refMap.set(op.operationId, res.id);
@@ -485,21 +463,6 @@ export class SyncService implements SyncPort {
           if (op.operationId) refMap.set(op.operationId, res.id);
           results.push({ operationId: op.operationId, op: op.op, result: res });
         } else if (op.op === 'deleteEntity') {
-          if (userId) {
-            const member = await this.prisma.workspaceMember.findUnique({
-              where: {
-                workspaceId_userId: {
-                  workspaceId: command.workspaceId,
-                  userId,
-                },
-              },
-            });
-            if (member?.role !== 'owner' && member?.role !== 'admin') {
-              throw new ForbiddenException(
-                'Admin or owner role is required to delete entities via sync',
-              );
-            }
-          }
           await this.executeDeleteEntity(tx, helpers, op.command);
           results.push({
             operationId: op.operationId,
@@ -518,7 +481,7 @@ export class SyncService implements SyncPort {
         await tx.idempotencyRecord.update({
           where: {
             workspaceId_idempotencyKey: {
-              workspaceId: command.workspaceId,
+              workspaceId: targetUserId,
               idempotencyKey: command.idempotencyKey,
             },
           },
@@ -538,12 +501,13 @@ export class SyncService implements SyncPort {
   async publishIntegrationEvent(
     command: PublishIntegrationEventCommand,
   ): Promise<{ id: string }> {
-    const { workspaceId, aggregateId, eventType, dedupeKey, payload } = command;
+    const userId = command.userId;
+    const { aggregateId, eventType, dedupeKey, payload } = command;
 
     try {
       const event = await this.prisma.outboxEvent.create({
         data: {
-          workspaceId,
+          workspaceId: userId,
           aggregateId,
           eventType,
           dedupeKey: dedupeKey || null,
@@ -574,7 +538,7 @@ export class SyncService implements SyncPort {
       handle: async (evt: any) => {
         await handler({
           id: evt.id,
-          workspaceId: evt.workspaceId,
+          userId: evt.workspaceId || evt.userId,
           aggregateId: evt.aggregateId,
           eventType: evt.eventType,
           payload: evt.payload,
@@ -598,12 +562,12 @@ export class SyncService implements SyncPort {
     return this.collectionsService.upsertFromSync(command, tx, helpers);
   }
 
-  private async executeUpsertCatalogItem(
+  private async executeUpsertItem(
     tx: Prisma.TransactionClient,
     helpers: TransactionHelpers,
-    command: UpsertSyncCatalogItemCommand,
+    command: UpsertSyncItemCommand,
   ): Promise<UpsertSyncEntityResult> {
-    return this.catalogService.upsertFromSync(command, tx, helpers);
+    return this.itemsService.upsertFromSync(command, tx, helpers);
   }
 
   private async executeUpsertAttachment(
@@ -636,11 +600,11 @@ export class SyncService implements SyncPort {
     command: DeleteSyncEntityCommand,
   ): Promise<void> {
     switch (command.entityType) {
-      case 'CatalogItem':
-        return this.catalogService.deleteFromSync(command, tx, helpers);
+      case 'Item':
+        return this.itemsService.deleteFromSync(command, tx, helpers);
       case 'Collection':
         return this.collectionsService.deleteFromSync(command, tx, helpers);
-      case 'CatalogAttachment':
+      case 'Attachment':
         return this.attachmentsService.deleteFromSync(command, tx, helpers);
       case 'Note':
         return this.notesService.deleteFromSync(command, tx, helpers);
@@ -648,7 +612,7 @@ export class SyncService implements SyncPort {
         return this.annotationsService.deleteFromSync(command, tx, helpers);
       default:
         this.logger.warn(
-          `executeDeleteEntity: unknown entityType "${String(command.entityType)}" for ${command.entityId} in workspace ${command.workspaceId}`,
+          `executeDeleteEntity: unknown entityType "${String(command.entityType)}" for ${command.entityId}`,
         );
     }
   }

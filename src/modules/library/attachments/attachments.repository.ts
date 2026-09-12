@@ -1,10 +1,16 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional, Inject } from '@nestjs/common';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { Prisma } from '@prisma/client';
+import { IStoragePort, STORAGE_PORT } from '../../storage/storage.port';
 
 @Injectable()
 export class AttachmentsRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional()
+    @Inject(STORAGE_PORT)
+    private readonly storagePort?: IStoragePort,
+  ) {}
 
   private getClient(tx?: Prisma.TransactionClient) {
     return tx ?? this.prisma;
@@ -12,23 +18,23 @@ export class AttachmentsRepository {
 
   async findUnique(
     id: string,
-    includeOptions?: Prisma.CatalogAttachmentInclude,
+    includeOptions?: Prisma.AttachmentInclude,
     tx?: Prisma.TransactionClient,
   ): Promise<any> {
     const client = this.getClient(tx);
-    return client.catalogAttachment.findUnique({
+    return client.attachment.findUnique({
       where: { id },
       include: includeOptions,
     });
   }
 
   async findFirst(
-    where: Prisma.CatalogAttachmentWhereInput,
-    include?: Prisma.CatalogAttachmentInclude,
+    where: Prisma.AttachmentWhereInput,
+    include?: Prisma.AttachmentInclude,
     tx?: Prisma.TransactionClient,
   ): Promise<any> {
     const client = this.getClient(tx);
-    return client.catalogAttachment.findFirst({
+    return client.attachment.findFirst({
       where,
       include,
     });
@@ -36,8 +42,8 @@ export class AttachmentsRepository {
 
   async findManyByItemId(itemId: string, tx?: Prisma.TransactionClient) {
     const client = this.getClient(tx);
-    return client.catalogAttachment.findMany({
-      where: { catalogItemId: itemId },
+    return client.attachment.findMany({
+      where: { itemId },
       include: {
         revisions: { orderBy: { revisionNumber: 'desc' } },
       },
@@ -60,11 +66,11 @@ export class AttachmentsRepository {
   }
 
   async create(
-    data: Prisma.CatalogAttachmentCreateInput,
+    data: Prisma.AttachmentCreateInput,
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    return client.catalogAttachment.create({
+    return client.attachment.create({
       data,
       include: {
         revisions: {
@@ -76,11 +82,11 @@ export class AttachmentsRepository {
 
   async update(
     id: string,
-    data: Prisma.CatalogAttachmentUpdateInput,
+    data: Prisma.AttachmentUpdateInput,
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    return client.catalogAttachment.update({
+    return client.attachment.update({
       where: { id },
       data,
     });
@@ -88,7 +94,7 @@ export class AttachmentsRepository {
 
   async delete(id: string, tx?: Prisma.TransactionClient) {
     const client = this.getClient(tx);
-    return client.catalogAttachment.delete({
+    return client.attachment.delete({
       where: { id },
     });
   }
@@ -110,25 +116,23 @@ export class AttachmentsRepository {
   ) {
     if (sourceItemIds.length === 0) return;
     const client = this.getClient(tx);
-    await client.catalogAttachment.updateMany({
-      where: { catalogItemId: { in: sourceItemIds } },
-      data: { catalogItemId: targetItemId },
+    await client.attachment.updateMany({
+      where: { itemId: { in: sourceItemIds } },
+      data: { itemId: targetItemId },
     });
   }
 
   async updateLinkedFile(
     fileId: string,
-    catalogItemId: string,
+    itemId: string,
     tx?: Prisma.TransactionClient,
   ) {
-    const client = this.getClient(tx);
-    if (fileId) {
-      await client.file.updateMany({
-        where: { id: fileId },
-        data: {
-          linkedToType: 'Paper',
-          linkedToId: catalogItemId,
-        },
+    if (!fileId) return;
+    if (this.storagePort?.linkFile) {
+      await this.storagePort.linkFile({
+        fileId,
+        linkedToType: 'Paper',
+        linkedToId: itemId,
       });
     }
   }

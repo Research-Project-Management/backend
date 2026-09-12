@@ -8,12 +8,7 @@ import { CoreModule } from '../../../core/core.module';
 @Module({
   imports: [CoreModule],
   controllers: [CollectionsController],
-  providers: [
-    CollectionsRepository,
-    CollectionsService,
-    TreeEngine,
-  ],
+  providers: [CollectionsRepository, CollectionsService, TreeEngine],
   exports: [CollectionsService, TreeEngine],
 })
 export class CollectionsModule {}
-

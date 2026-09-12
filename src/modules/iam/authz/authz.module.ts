@@ -1,13 +1,33 @@
+/**
+ * Authorization (Authz) Module
+ * Provides project-level RBAC guards, role decorators, permission validation,
+ * and authorization caching via Redis.
+ */
 import { Module } from '@nestjs/common';
+import { AuthzController } from './authz.controller';
 import { AuthzService } from './authz.service';
-import { WorkspaceRoleGuard } from './guards/workspace-role.guard';
-import { ProjectRoleGuard } from './guards/project-role.guard';
+import { AuthzRepository } from './authz.repository';
+import {
+  RoleGuard,
+  RolesGuard,
+  ProjectRoleGuard,
+  WorkspaceRoleGuard,
+} from './guards/role.guard';
+import { PermissionGuard, PermissionsGuard } from './guards/permission.guard';
 
 @Module({
-  providers: [AuthzService, WorkspaceRoleGuard, ProjectRoleGuard],
-  exports: [AuthzService, WorkspaceRoleGuard, ProjectRoleGuard],
+  controllers: [AuthzController],
+  providers: [
+    AuthzService,
+    AuthzRepository,
+    RoleGuard,
+    PermissionGuard,
+  ],
+  exports: [
+    AuthzService,
+    AuthzRepository,
+    RoleGuard,
+    PermissionGuard,
+  ],
 })
 export class AuthzModule {}
-
-// Backward compatibility alias
-export const AuthorizationModule = AuthzModule;

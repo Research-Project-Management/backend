@@ -9,29 +9,17 @@ import {
   HttpCode,
   HttpStatus,
   Inject,
-  Query,
 } from '@nestjs/common';
-import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
-import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
-import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
-import { CurrentUser } from '../../../modules/iam/authn/decorators/current-user.decorator';
+import { JwtAuthGuard } from '../../../modules/iam/authn/guards/auth.guard';
+import { CurrentUser } from '../../../modules/iam/authn/decorators/user.decorator';
 import { IngestionPort, INGESTION_PORT } from './types/ingestion.types';
 import { IngestionService } from './ingestion.service';
 import { IngestionSubmissionDto } from './dto/submission.dto';
-import {
-  StartIngestionDto,
-  IngestDoiDto,
-  IngestBibtexDto,
-  IngestPdfDto,
-  UnifiedIngestionDto,
-} from './dto/ingestion.dto';
+import { UnifiedIngestionDto } from './dto/ingestion.dto';
 import { CaptureUrlDto, ConfirmCapturedUrlDto } from './dto/capture-url.dto';
 
-@Controller([
-  'api/v1/workspaces/:workspaceId/library/ingestion',
-  'api/v1/workspace/:workspaceId/library/ingestion',
-])
-@UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
+@Controller('api/v1/library/ingestion')
+@UseGuards(JwtAuthGuard)
 export class IngestionController {
   constructor(
     @Inject(INGESTION_PORT)
@@ -44,9 +32,7 @@ export class IngestionController {
    */
   @Post('submit')
   @HttpCode(HttpStatus.ACCEPTED)
-  @WorkspaceRoles('owner', 'admin', 'member')
   async submit(
-    @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
     @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
     @Body() dto: IngestionSubmissionDto,
@@ -102,7 +88,8 @@ export class IngestionController {
     }
 
     return this.ingestionService.submit({
-      workspaceId,
+      projectId: userId,
+      workspaceId: userId,
       userId,
       idempotencyKey: effectiveIdempotencyKey,
       payload,
@@ -117,24 +104,22 @@ export class IngestionController {
    * Ingestion Run Status Endpoint
    */
   @Get('status/:runId')
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async getStatus(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Param('runId') runId: string,
   ) {
-    return this.ingestionService.getRunStatus(workspaceId, runId);
+    return this.ingestionService.getRunStatus(userId, runId);
   }
 
   /**
    * Ingestion Run Real-time Progress Endpoint (Zotero-style progress modal)
    */
   @Get('status/:runId/progress')
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async getProgress(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Param('runId') runId: string,
   ) {
-    return this.ingestionService.getRunProgress(workspaceId, runId);
+    return this.ingestionService.getRunProgress(userId, runId);
   }
 
   /**
@@ -142,24 +127,16 @@ export class IngestionController {
    */
   @Post('retry/:runId')
   @HttpCode(HttpStatus.ACCEPTED)
-  @WorkspaceRoles('owner', 'admin', 'member')
   async retry(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Param('runId') runId: string,
   ) {
-    return this.ingestionService.retryRun(workspaceId, runId);
+    return this.ingestionService.retryRun(userId, runId);
   }
 
-  // ──────────────── Backward Compatibility Endpoints ──────────────────────────
-
-  // ─── Legacy Backward-Compatibility Endpoint ─────────────────────────────────
-  // POST /api/v1/workspaces/:workspaceId/library/ingestion
-  // Kept for frontend consumers that have not yet migrated to /submit.
   @Post()
   @HttpCode(HttpStatus.OK)
-  @WorkspaceRoles('owner', 'admin', 'member')
   async ingestUnified(
-    @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
     @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
     @Body() dto: UnifiedIngestionDto,
@@ -171,7 +148,8 @@ export class IngestionController {
       case 'doi':
         command = {
           source: 'doi',
-          workspaceId,
+          workspaceId: userId,
+          projectId: userId,
           userId,
           doi: dto.doi || '',
           collectionId: dto.collectionId,
@@ -182,7 +160,8 @@ export class IngestionController {
       case 'url':
         command = {
           source: 'url',
-          workspaceId,
+          workspaceId: userId,
+          projectId: userId,
           userId,
           url: dto.url || '',
           previewToken: dto.previewToken,
@@ -195,7 +174,8 @@ export class IngestionController {
       case 'bibtex':
         command = {
           source: 'bibtex',
-          workspaceId,
+          workspaceId: userId,
+          projectId: userId,
           userId,
           content: dto.content || dto.bibtex || '',
           collectionId: dto.collectionId,
@@ -206,7 +186,8 @@ export class IngestionController {
       case 'pdf':
         command = {
           source: 'pdf',
-          workspaceId,
+          workspaceId: userId,
+          projectId: userId,
           userId,
           fileId: dto.fileId,
           filename: dto.filename,
@@ -219,7 +200,8 @@ export class IngestionController {
       default:
         command = {
           source: dto.source,
-          workspaceId,
+          workspaceId: userId,
+          projectId: userId,
           userId,
           idempotencyKey: effectiveIdempotencyKey,
         };
@@ -229,88 +211,22 @@ export class IngestionController {
   }
 
   @Post('capture-url')
-  @WorkspaceRoles('owner', 'admin', 'member')
   async captureUrl(
-    @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
     @Body() dto: CaptureUrlDto,
   ) {
-    return this.ingestionService.captureUrl(dto.url, { workspaceId, userId });
+    return this.ingestionService.captureUrl(dto.url, { workspaceId: userId, projectId: userId, userId });
   }
 
   @Post('confirm-url')
-  @WorkspaceRoles('owner', 'admin', 'member')
   async confirmUrl(
-    @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
     @Body() dto: ConfirmCapturedUrlDto,
   ) {
     return this.ingestionService.confirmCapturedUrl(
-      workspaceId,
-      userId || 'system',
+      userId,
+      userId,
       dto,
     );
-  }
-
-  @Post('start')
-  @WorkspaceRoles('owner', 'admin', 'member')
-  async startRun(
-    @Param('workspaceId') workspaceId: string,
-    @CurrentUser('id') userId: string,
-    @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
-    @Body() dto: StartIngestionDto,
-  ) {
-    return this.ingestionService.startRun(workspaceId, userId || 'system', {
-      ...dto,
-      idempotencyKey: idempotencyKeyHeader || dto.idempotencyKey,
-    });
-  }
-
-  @Post('doi')
-  @WorkspaceRoles('owner', 'admin', 'member')
-  async ingestDoi(
-    @Param('workspaceId') workspaceId: string,
-    @CurrentUser('id') userId: string,
-    @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
-    @Body() dto: IngestDoiDto,
-  ) {
-    return this.ingestionService.ingestDoi(workspaceId, userId || 'system', {
-      ...dto,
-      idempotencyKey: idempotencyKeyHeader || dto.idempotencyKey,
-    });
-  }
-
-  @Post('bibtex')
-  @WorkspaceRoles('owner', 'admin', 'member')
-  async ingestBibtex(
-    @Param('workspaceId') workspaceId: string,
-    @CurrentUser('id') userId: string,
-    @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
-    @Body() dto: IngestBibtexDto,
-  ) {
-    return this.ingestionService.ingestBibtex(workspaceId, userId || 'system', {
-      ...dto,
-      idempotencyKey: idempotencyKeyHeader || dto.idempotencyKey,
-    });
-  }
-
-  @Post('pdf')
-  @WorkspaceRoles('owner', 'admin', 'member')
-  async ingestPdf(
-    @Param('workspaceId') workspaceId: string,
-    @CurrentUser('id') userId: string,
-    @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
-    @Body() dto: IngestPdfDto,
-  ) {
-    return this.unifiedService.ingest({
-      source: 'pdf',
-      workspaceId,
-      userId,
-      fileId: dto.fileId,
-      filename: dto.filename,
-      collectionId: dto.collectionId,
-      overrides: dto.overrides,
-      idempotencyKey: idempotencyKeyHeader || dto.idempotencyKey,
-    });
   }
 }

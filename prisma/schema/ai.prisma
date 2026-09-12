@@ -1,27 +1,33 @@
-// ── 8. Intelligence Context (AI & Chat History) ─────────────────────────────
+// -- 5. AI & Intelligence Context (AI Microservice) ---------------------------
+
+enum MessageRole {
+  user
+  assistant
+  system
+}
 
 model AiChat {
-  id            String   @id @default(uuid()) @db.Uuid
-  workspaceSlug String   @map("workspace_slug")
-  userId        String   @map("user_id") @db.Uuid
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  projectId     String?  @map("project_id") @db.Uuid
-  pageId        String?  @map("page_id") @db.Uuid
-  title         String   @default("New Chat")
-  summary       String?  @default("")
-  keyFacts      String[] @default([]) @map("key_facts")
-  openQuestions String[] @default([]) @map("open_questions")
-  documentIds   String[] @default([]) @map("document_ids")
-  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id            String      @id @default(uuid()) @db.Uuid
+  userId        String      @map("user_id") @db.Uuid
+  user          User        @relation("UserAiChats", fields: [userId], references: [id], onDelete: Cascade)
+  projectId     String?     @map("project_id") @db.Uuid
+  project       Project?    @relation("ProjectAiChats", fields: [projectId], references: [id], onDelete: Cascade)
+  pageId        String?     @map("page_id") @db.Uuid
+  page          Page?       @relation("PageAiChats", fields: [pageId], references: [id], onDelete: SetNull)
+  title         String      @default("New Chat")
+  summary       String?     @default("")
+  keyFacts      String[]    @default([]) @map("key_facts")
+  openQuestions String[]    @default([]) @map("open_questions")
+  documentIds   String[]    @default([]) @map("document_ids")
+  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   // Relations
-  messages AiMessage[]
+  messages      AiMessage[]
 
-  @@index([workspaceSlug, userId, updatedAt])
+  @@index([userId, updatedAt])
   @@index([projectId, userId, updatedAt])
   @@index([pageId, userId])
-  @@index([userId])
   @@map("ai_chats")
 }
 
@@ -38,32 +44,4 @@ model AiMessage {
 
   @@index([chatId, createdAt])
   @@map("ai_messages")
-}
-
-// ── 9. Activity Context (Event Stream & Collaboration Feed) ─────────────────
-
-model ActivityEvent {
-  id            String     @id @default(uuid()) @db.Uuid
-  entityType    EntityType @map("entity_type")
-  entityId      String     @map("entity_id")
-  verb          String // "created" | "updated" | "deleted" | "assigned" | etc.
-  field         String? // specific field changed (e.g. "state", "priority", "assigneeId")
-  oldValue      String?    @map("old_value")
-  newValue      String?    @map("new_value")
-  oldIdentifier String?    @map("old_identifier")
-  newIdentifier String?    @map("new_identifier")
-  actorId       String?    @map("actor_id") @db.Uuid
-  actor         User?      @relation(fields: [actorId], references: [id], onDelete: SetNull)
-  workspaceId   String     @map("workspace_id") @db.Uuid
-  workspace     Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  projectId     String?    @map("project_id") @db.Uuid
-  project       Project?   @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  @@index([workspaceId, createdAt])
-  @@index([workspaceId, entityType, createdAt])
-  @@index([projectId, createdAt])
-  @@index([entityType, entityId, createdAt])
-  @@index([actorId, createdAt])
-  @@map("activity_events")
 }

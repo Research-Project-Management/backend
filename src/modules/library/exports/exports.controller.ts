@@ -7,28 +7,23 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
-import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
-import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
+import { JwtAuthGuard } from '../../../modules/iam/authn/guards/auth.guard';
+import { CurrentUser } from '../../../modules/iam/authn/decorators/user.decorator';
 import { ExportsService } from './exports.service';
 import { ExportLibraryDto, ExportFormatType } from './dto/exports.dto';
 
-@Controller([
-  'api/v1/workspaces/:workspaceId/library/exports',
-  'api/v1/workspace/:workspaceId/library/exports',
-])
-@UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
+@Controller('api/v1/library/exports')
+@UseGuards(JwtAuthGuard)
 export class ExportsController {
   constructor(private readonly exportsService: ExportsService) {}
 
   @Get('items/:itemId/annotated-pdf')
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async exportAnnotatedPdf(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Param('itemId') itemId: string,
   ) {
     const res = await this.exportsService.exportAnnotatedItemPdf(
-      workspaceId,
+      userId,
       itemId,
     );
     return {
@@ -39,44 +34,35 @@ export class ExportsController {
   }
 
   @Post()
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async exportLibrary(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Body() dto: ExportLibraryDto,
   ) {
-    return this.exportsService.exportLibrary(workspaceId, dto);
+    return this.exportsService.exportLibrary(userId, dto);
   }
 
   @Post('citations/bibtex')
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async exportCitationsBibtex(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Body() body: { keys: string[] },
   ) {
     return this.exportsService.exportByCitationKeys(
-      workspaceId,
+      userId,
       body.keys || [],
     );
   }
 
   @Get()
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async exportLibraryGet(
-    @Param('workspaceId') workspaceId: string,
-    @Param('collectionId') collectionIdParam: string | undefined,
+    @CurrentUser('id') userId: string,
     @Query('format') format?: ExportFormatType,
     @Query('collectionId') collectionIdQuery?: string,
     @Query('tagId') tagId?: string,
   ) {
-    const targetCollectionId = collectionIdParam || collectionIdQuery;
-    if (collectionIdParam) {
-      return this.exportsService.exportBundle(workspaceId, collectionIdParam);
-    }
-
     const effectiveFormat = format || 'bibtex';
-    const result = await this.exportsService.exportLibrary(workspaceId, {
+    const result = await this.exportsService.exportLibrary(userId, {
       format: effectiveFormat,
-      collectionId: targetCollectionId,
+      collectionId: collectionIdQuery,
       tagId,
     });
 
@@ -89,11 +75,10 @@ export class ExportsController {
   }
 
   @Get(':collectionId/export-bundle')
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
   async getCollectionBundle(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Param('collectionId') collectionId: string,
   ) {
-    return this.exportsService.exportBundle(workspaceId, collectionId);
+    return this.exportsService.exportBundle(userId, collectionId);
   }
 }

@@ -2,16 +2,14 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
-  BadRequestException,
   Optional,
   Logger,
 } from '@nestjs/common';
 import { StickyRepository } from './sticky.repository';
-import { StickyWithUser } from './types/sticky-repository.interface';
 import { CreateStickyDto, UpdateStickyDto } from './dto/sticky.dto';
-import { StickyScope } from '@prisma/client';
-import { RedisCacheService } from '@/core/cache/redis-cache.service';
+import { RedisCacheService } from '@/core/cache/redis.service';
 import { STICKY_REDIS_KEYS } from './constants/redis-keys.constant';
+import { PrismaService } from '@/core/database/prisma.service';
 
 @Injectable()
 export class StickyService {
@@ -19,31 +17,48 @@ export class StickyService {
 
   constructor(
     private readonly stickyRepo: StickyRepository,
+    private readonly prisma: PrismaService,
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
   private async invalidateStickyCache(
     userId: string,
-    workspaceId?: string | null,
     projectId?: string | null,
   ) {
     if (!this.cache) return;
-    const promises: Promise<any>[] = [];
-    if (workspaceId) {
-      promises.push(
-        this.cache.del(
-          STICKY_REDIS_KEYS.workspaceStickies(workspaceId, userId),
-        ),
-      );
-    }
-    if (projectId) {
-      promises.push(
-        this.cache.del(STICKY_REDIS_KEYS.projectStickies(projectId, userId)),
-      );
-    }
-    await Promise.all(promises).catch((err) => {
+    try {
+      const promises: Promise<any>[] = [
+        this.cache.del(STICKY_REDIS_KEYS.userStickies(userId)),
+      ];
+      if (projectId) {
+        promises.push(
+          this.cache.del(STICKY_REDIS_KEYS.projectStickies(projectId)),
+        );
+      }
+      await Promise.all(promises);
+    } catch (err) {
       this.logger.warn(`Failed to invalidate sticky cache: ${err}`);
+    }
+  }
+
+  private async validateProjectAccess(
+    userId: string,
+    projectId: string,
+  ): Promise<void> {
+    const project = await this.prisma.project.findFirst({
+      where: {
+        id: projectId,
+        deletedAt: null,
+        OR: [
+          { createdById: userId },
+          { members: { some: { userId } } },
+        ],
+      },
+      select: { id: true },
     });
+    if (!project) {
+      throw new ForbiddenException('You do not have access to this project');
+    }
   }
 
   private formatSticky<T extends { positionX: number; positionY: number }>(
@@ -56,24 +71,23 @@ export class StickyService {
     };
   }
 
-  async getWorkspaceStickies(workspaceId: string, userId: string) {
-    const workspace = await this.stickyRepo.resolveWorkspace(workspaceId);
-    const resolvedWorkspaceId = workspace?.id || workspaceId;
-    const cacheKey = STICKY_REDIS_KEYS.workspaceStickies(
-      resolvedWorkspaceId,
-      userId,
-    );
+  async getStickies(userId: string, projectId?: string) {
+    if (projectId) {
+      await this.validateProjectAccess(userId, projectId);
+      const cacheKey = STICKY_REDIS_KEYS.projectStickies(projectId);
+      return this.getStickiesWithCache(cacheKey, async () => {
+        return this.stickyRepo.findStickiesByProjectId(projectId);
+      });
+    }
 
-    return this.getStickiesWithCache(cacheKey, () =>
-      this.stickyRepo.findWorkspaceStickies(resolvedWorkspaceId, userId),
-    );
+    const cacheKey = STICKY_REDIS_KEYS.userStickies(userId);
+    return this.getStickiesWithCache(cacheKey, async () => {
+      return this.stickyRepo.findStickiesByUserId(userId);
+    });
   }
 
-  async getProjectStickies(projectId: string, userId: string) {
-    const cacheKey = STICKY_REDIS_KEYS.projectStickies(projectId, userId);
-    return this.getStickiesWithCache(cacheKey, () =>
-      this.stickyRepo.findProjectStickies(projectId, userId),
-    );
+  async getPersonalStickies(userId: string) {
+    return this.getStickies(userId);
   }
 
   private async getStickiesWithCache(
@@ -97,170 +111,131 @@ export class StickyService {
     return result;
   }
 
-  async createWorkspaceSticky(
-    workspaceId: string,
-    userId: string,
-    dto: CreateStickyDto,
-  ) {
-    const workspace = await this.stickyRepo.resolveWorkspace(workspaceId);
-    const resolvedWorkspaceId = workspace?.id || workspaceId;
+  async createSticky(userId: string, dto: CreateStickyDto) {
+    let order: number;
+    let scope: 'personal' | 'project' = 'personal';
 
-    const count = await this.stickyRepo.countWorkspaceStickies(
-      resolvedWorkspaceId,
-      userId,
-    );
+    if (dto.projectId) {
+      await this.validateProjectAccess(userId, dto.projectId);
+      scope = 'project';
+      order = await this.stickyRepo.countStickiesByProjectId(dto.projectId);
+    } else {
+      order = await this.stickyRepo.countStickiesByUserId(userId);
+    }
 
     const sticky = await this.stickyRepo.createSticky({
       title: dto.title || '',
       content: dto.content,
       color: dto.color || 'yellow-1',
-      scope: StickyScope.workspace,
+      scope,
       positionX: dto.position?.x ?? 0,
       positionY: dto.position?.y ?? 0,
-      order: count,
-      workspaceId: resolvedWorkspaceId,
+      order,
       userId,
+      projectId: dto.projectId,
     });
 
-    await this.invalidateStickyCache(userId, resolvedWorkspaceId);
+    await this.invalidateStickyCache(userId, dto.projectId);
 
     return { sticky: this.formatSticky(sticky) };
   }
 
-  async createProjectSticky(
-    projectId: string,
-    userId: string,
-    dto: CreateStickyDto,
-  ) {
-    let workspaceId = '';
-    const resolvedWorkspaceId =
-      await this.stickyRepo.findProjectWorkspaceId(projectId);
-    if (resolvedWorkspaceId) {
-      workspaceId = resolvedWorkspaceId;
-    }
-
-    const count = await this.stickyRepo.countProjectStickies(projectId, userId);
-
-    const sticky = await this.stickyRepo.createSticky({
-      title: dto.title || '',
-      content: dto.content,
-      color: dto.color || 'yellow-1',
-      scope: StickyScope.project,
-      positionX: dto.position?.x ?? 0,
-      positionY: dto.position?.y ?? 0,
-      order: count,
-      workspaceId,
-      projectId,
-      userId,
-    });
-
-    await this.invalidateStickyCache(userId, workspaceId, projectId);
-
-    return { sticky: this.formatSticky(sticky) };
+  async createPersonalSticky(userId: string, dto: CreateStickyDto) {
+    return this.createSticky(userId, dto);
   }
 
   async updateSticky(stickyId: string, userId: string, dto: UpdateStickyDto) {
     const existingSticky = await this.stickyRepo.findStickyById(stickyId);
     if (!existingSticky) {
-      throw new NotFoundException('Sticky note not found');
-    }
-    if (existingSticky.userId !== userId) {
-      throw new ForbiddenException('You can only update your own sticky notes');
+      throw new NotFoundException('Sticky not found');
     }
 
-    const sticky = await this.stickyRepo.updateSticky(stickyId, {
-      ...(dto.title !== undefined && { title: dto.title }),
-      ...(dto.content !== undefined && { content: dto.content }),
-      ...(dto.color !== undefined && { color: dto.color }),
-      ...(dto.scope !== undefined && { scope: dto.scope }),
-      ...(dto.position?.x !== undefined && { positionX: dto.position.x }),
-      ...(dto.position?.y !== undefined && { positionY: dto.position.y }),
-      ...(dto.projectId !== undefined && { projectId: dto.projectId }),
-    });
+    if (existingSticky.projectId) {
+      await this.validateProjectAccess(userId, existingSticky.projectId);
+    } else if (existingSticky.userId !== userId) {
+      throw new ForbiddenException(
+        'You can only update your own sticky notes',
+      );
+    }
+
+    const updateData: any = {};
+    if (dto.title !== undefined) updateData.title = dto.title;
+    if (dto.content !== undefined) updateData.content = dto.content;
+    if (dto.color !== undefined) updateData.color = dto.color;
+    if (dto.position) {
+      updateData.positionX = dto.position.x;
+      updateData.positionY = dto.position.y;
+    }
+
+    const updated = await this.stickyRepo.updateSticky(stickyId, updateData);
 
     await this.invalidateStickyCache(
-      userId,
-      existingSticky.workspaceId,
+      existingSticky.userId,
       existingSticky.projectId,
     );
 
-    return { sticky: this.formatSticky(sticky) };
+    return { sticky: this.formatSticky(updated) };
   }
 
   async deleteSticky(stickyId: string, userId: string) {
     const existingSticky = await this.stickyRepo.findStickyById(stickyId);
     if (!existingSticky) {
-      throw new NotFoundException('Sticky note not found');
+      throw new NotFoundException('Sticky not found');
     }
-    if (existingSticky.userId !== userId) {
-      throw new ForbiddenException('You can only delete your own sticky notes');
+
+    if (existingSticky.projectId) {
+      await this.validateProjectAccess(userId, existingSticky.projectId);
+    } else if (existingSticky.userId !== userId) {
+      throw new ForbiddenException(
+        'You can only delete your own sticky notes',
+      );
     }
 
     await this.stickyRepo.deleteSticky(stickyId);
+
     await this.invalidateStickyCache(
-      userId,
-      existingSticky.workspaceId,
+      existingSticky.userId,
       existingSticky.projectId,
     );
 
-    return { message: 'Sticky deleted successfully', success: true };
+    return { success: true, message: 'Sticky deleted successfully' };
   }
 
   async reorderStickies(
     stickyIds: string[],
-    userId?: string,
-    scopeContext?: {
-      workspaceId?: string;
-      projectId?: string;
-      scope?: StickyScope;
-    },
+    userId: string,
+    projectId?: string,
   ) {
-    if (!stickyIds || stickyIds.length <= 1) {
-      return { success: true };
+    if (!stickyIds || stickyIds.length === 0) {
+      return { success: true, count: 0 };
     }
 
-    if (userId) {
-      const existingStickies =
-        await this.stickyRepo.findStickiesByIds(stickyIds);
-      if (existingStickies.length !== stickyIds.length) {
-        throw new NotFoundException('One or more stickies not found');
-      }
+    if (projectId) {
+      await this.validateProjectAccess(userId, projectId);
+    }
 
-      for (const sticky of existingStickies) {
-        if (sticky.userId !== userId) {
-          throw new ForbiddenException(
-            'Cannot reorder sticky notes belonging to another user',
-          );
+    const stickies = await this.stickyRepo.findStickiesByIds(stickyIds);
+
+    for (const sticky of stickies) {
+      if (sticky.projectId) {
+        if (sticky.projectId !== projectId) {
+          await this.validateProjectAccess(userId, sticky.projectId);
         }
-        if (scopeContext?.scope && sticky.scope !== scopeContext.scope) {
-          throw new BadRequestException('Sticky scope mismatch');
-        }
-        if (
-          scopeContext?.workspaceId &&
-          sticky.workspaceId !== scopeContext.workspaceId
-        ) {
-          throw new BadRequestException('Sticky workspace mismatch');
-        }
-        if (
-          scopeContext?.projectId &&
-          sticky.projectId !== scopeContext.projectId
-        ) {
-          throw new BadRequestException('Sticky project mismatch');
-        }
+      } else if (sticky.userId !== userId) {
+        throw new ForbiddenException(
+          'You can only reorder your own sticky notes',
+        );
       }
     }
 
-    const stickies = await this.stickyRepo.reorderStickies(stickyIds);
+    const reordered = await this.stickyRepo.reorderStickies(stickyIds);
 
-    if (userId && stickies.length > 0) {
-      const firstSticky = stickies[0];
-      await this.invalidateStickyCache(
-        userId,
-        firstSticky.workspaceId,
-        firstSticky.projectId,
-      );
-    }
+    await this.invalidateStickyCache(userId, projectId);
 
-    return { success: true };
+    return {
+      success: true,
+      count: reordered.length,
+      stickies: reordered.map((s) => this.formatSticky(s)),
+    };
   }
 }

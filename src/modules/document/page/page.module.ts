@@ -1,11 +1,13 @@
 import { Module } from '@nestjs/common';
-import { PageController } from './page.controller';
-import { PageService } from './page.service';
-import { PageRepository } from './page.repository';
+import { CoreModule } from '../core/core.module';
+import { PageController } from '../core/core.controller';
+import { PageService } from '../core/core.service';
+import { PageRepository } from '../core/core.repository';
 
 @Module({
-  controllers: [PageController],
-  providers: [PageService, PageRepository],
-  exports: [PageService],
+  imports: [CoreModule],
+  exports: [CoreModule],
 })
 export class PageModule {}
+
+export { PageController, PageService, PageRepository };

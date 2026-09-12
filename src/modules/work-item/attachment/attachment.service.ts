@@ -1,0 +1,686 @@
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+  Optional,
+} from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { FastifyRequest } from 'fastify';
+import { AttachmentRepository } from './attachment.repository';
+import { R2Service } from '@/modules/storage/r2/r2.service';
+import { PrismaService } from '@/core/database/prisma.service';
+import {
+  CreateAttachmentDto as TaskCreateAttachmentDto,
+  AttachPageDto,
+  AttachPaperDto,
+  AttachFileDto,
+  AttachLinkDto,
+} from './dto/attachment.dto';
+import { CreateAttachmentDto } from './dto/create-attachment.dto';
+import { PresignAttachmentDto } from './dto/presign-attachment.dto';
+import { QueryAttachmentDto } from './dto/query-attachment.dto';
+import { PresignedAttachmentResponse } from './types/attachment.types';
+import { EntityType } from '@prisma/client';
+import { formatWorkItem } from '../core/utils/work-item.util';
+
+@Injectable()
+export class AttachmentService {
+  private readonly logger = new Logger(AttachmentService.name);
+
+  constructor(
+    private readonly repository: AttachmentRepository,
+    private readonly r2Service: R2Service,
+    private readonly prismaService: PrismaService,
+    @Optional() private readonly eventEmitter?: EventEmitter2,
+  ) {}
+
+  /**
+   * Generates a presigned upload URL for direct cloud upload (R2/S3).
+   */
+  async generatePresignedUpload(
+    dto: PresignAttachmentDto,
+    userId: string,
+  ): Promise<PresignedAttachmentResponse> {
+    if (dto.size && dto.size > 100 * 1024 * 1024) {
+      throw new BadRequestException('Attachment size exceeds 100MB limit');
+    }
+
+    const cleanName = dto.filename.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const storageKey = `attachments/${dto.entityType}/${dto.entityId}/${Date.now()}-${cleanName}`;
+    const contentType = dto.contentType || 'application/octet-stream';
+
+    const presigned = await this.r2Service.getPresignedUploadUrl(
+      storageKey,
+      contentType,
+      3600,
+    );
+
+    return {
+      signedUrl: presigned.signedUrl,
+      storageKey: presigned.path,
+      fileUrl: presigned.url,
+      entityType: dto.entityType,
+      entityId: dto.entityId,
+    };
+  }
+
+  /**
+   * Direct multipart file upload streaming into storage and recording metadata.
+   */
+  async uploadMultipart(req: FastifyRequest, authorId: string) {
+    const fastifyReq = req as any;
+    if (!fastifyReq.isMultipart?.()) {
+      throw new BadRequestException('Content-Type must be multipart/form-data');
+    }
+
+    const parts = fastifyReq.parts();
+    let buffer: Buffer | null = null;
+    let filename = 'attachment';
+    let mimeType = 'application/octet-stream';
+    const fields: Record<string, string> = {};
+
+    for await (const part of parts) {
+      if (part.type === 'file') {
+        filename = part.filename;
+        mimeType = part.mimetype;
+        buffer = await part.toBuffer();
+      } else {
+        fields[part.fieldname] = String(part.value);
+      }
+    }
+
+    if (!buffer) {
+      throw new BadRequestException(
+        'No file payload found in multipart request',
+      );
+    }
+
+    const rawEntityType = fields.entityType || 'task';
+    const entityId = fields.entityId;
+    if (!entityId) {
+      throw new BadRequestException(
+        'entityId is required in multipart form data',
+      );
+    }
+
+    const entityType = rawEntityType as EntityType;
+    const cleanName = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const storageKey = `attachments/${entityType}/${entityId}/${Date.now()}-${cleanName}`;
+
+    const uploadRes = await this.r2Service.uploadBuffer(
+      storageKey,
+      buffer,
+      mimeType,
+    );
+
+    const attachment = await this.repository.create(
+      {
+        entityType,
+        entityId,
+        filename,
+        url: uploadRes.url,
+        storageKey: uploadRes.path,
+        size: buffer.length,
+        mimeType,
+        projectId: fields.projectId,
+      },
+      authorId,
+    );
+
+    this.eventEmitter?.emit('attachment.created', {
+      attachmentId: attachment.id,
+      entityType,
+      entityId,
+      authorId,
+    });
+
+    return attachment;
+  }
+
+  /**
+   * Commits attachment metadata after client direct upload.
+   */
+  async createAttachment(dto: CreateAttachmentDto, authorId: string) {
+    const attachment = await this.repository.create(dto, authorId);
+
+    this.eventEmitter?.emit('attachment.created', {
+      attachmentId: attachment.id,
+      entityType: dto.entityType,
+      entityId: dto.entityId,
+      authorId,
+    });
+
+    return attachment;
+  }
+
+  private formatAttachments(records: any[]) {
+    const pages: any[] = [];
+    const papers: any[] = [];
+    const files: any[] = [];
+    const links: any[] = [];
+
+    for (const r of records) {
+      const meta = (r.metadata as Record<string, any>) || {};
+      const category =
+        meta.category ||
+        (r.mimeType === 'application/x-page'
+          ? 'page'
+          : r.mimeType === 'application/x-paper'
+          ? 'paper'
+          : r.mimeType === 'text/uri-list'
+          ? 'link'
+          : 'file');
+
+      if (category === 'page') {
+        pages.push({
+          id: r.id,
+          pageId: meta.pageId || r.id,
+          title: meta.title || r.filename,
+          slug: meta.slug || null,
+          addedAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
+        });
+      } else if (category === 'paper') {
+        papers.push({
+          id: r.id,
+          paperId: meta.paperId || r.id,
+          title: meta.title || r.filename,
+          doi: meta.doi || null,
+          citationKey: meta.citationKey || null,
+          addedAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
+        });
+      } else if (category === 'link') {
+        links.push({
+          id: r.id,
+          title: meta.title || r.filename,
+          url: r.url,
+          addedAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
+        });
+      } else {
+        files.push({
+          id: r.id,
+          name: r.filename,
+          url: r.url,
+          size: r.size ? `${Math.round(r.size / 1024)} KB` : undefined,
+          type: r.mimeType,
+          createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
+          uploadedAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
+        });
+      }
+    }
+
+    return { pages, papers, files, links };
+  }
+
+  private async getFormattedTask(taskId: string) {
+    const task = await this.prismaService.workItem.findUnique({
+      where: { id: taskId },
+      include: {
+        assignee: { select: { id: true, name: true, email: true, avatar: true } },
+        cycle: { select: { id: true, name: true } },
+        parentTask: { select: { id: true, title: true, identifier: true } },
+        subtasks: {
+          select: {
+            id: true,
+            title: true,
+            identifier: true,
+            columnId: true,
+            completed: true,
+            rank: true,
+            assigneeId: true,
+            assignee: { select: { id: true, name: true, email: true, avatar: true } },
+            dueDate: true,
+          },
+        },
+        project: { select: { id: true } },
+      },
+    });
+    if (!task) {
+      throw new NotFoundException(`Work item ${taskId} not found`);
+    }
+    const records = await this.repository.findByEntity(EntityType.task, taskId);
+    const center = this.formatAttachments(records);
+    return formatWorkItem({
+      ...task,
+      attachments: center,
+    });
+  }
+
+  /**
+   * Retrieves all attachments for a work item / task.
+   */
+  async getAttachments(taskId: string) {
+    const task = await this.prismaService.workItem.findUnique({
+      where: { id: taskId },
+      select: { id: true },
+    });
+    if (!task) {
+      throw new NotFoundException(`Work item ${taskId} not found`);
+    }
+
+    const records = await this.repository.findByEntity(EntityType.task, taskId);
+    const center = this.formatAttachments(records);
+
+    return {
+      taskId,
+      total: records.length,
+      attachments: records,
+      center,
+      pages: center.pages,
+      papers: center.papers,
+      files: center.files,
+      links: center.links,
+    };
+  }
+
+  /**
+   * Adds an attachment to a work item / task.
+   */
+  async addAttachment(
+    taskId: string,
+    createAttachmentDto: TaskCreateAttachmentDto,
+    authorId: string,
+  ) {
+    const task = await this.prismaService.workItem.findUnique({
+      where: { id: taskId },
+      select: { id: true, projectId: true },
+    });
+    if (!task) {
+      throw new NotFoundException(`Work item ${taskId} not found`);
+    }
+
+    const attachment = await this.repository.create(
+      {
+        entityType: EntityType.task,
+        entityId: taskId,
+        filename:
+          createAttachmentDto.filename ||
+          createAttachmentDto.name ||
+          'attachment',
+        url: createAttachmentDto.url,
+        storageKey: createAttachmentDto.storageKey,
+        size: createAttachmentDto.size || 0,
+        mimeType: createAttachmentDto.mimeType || 'application/octet-stream',
+        projectId: task.projectId,
+        metadata: createAttachmentDto.metadata,
+      },
+      authorId,
+    );
+
+    this.eventEmitter?.emit('attachment.created', {
+      attachmentId: attachment.id,
+      entityType: EntityType.task,
+      entityId: taskId,
+      authorId,
+    });
+
+    return attachment;
+  }
+
+  /**
+   * Removes an attachment from a work item / task.
+   */
+  async removeAttachment(
+    taskId: string,
+    attachmentId: string,
+    authorId: string,
+  ) {
+    const task = await this.prismaService.workItem.findUnique({
+      where: { id: taskId },
+      select: { id: true },
+    });
+    if (!task) {
+      throw new NotFoundException(`Work item ${taskId} not found`);
+    }
+
+    return this.deleteAttachment(attachmentId, authorId);
+  }
+
+  async attachPage(taskId: string, dto: AttachPageDto, authorId: string) {
+    const task = await this.prismaService.workItem.findUnique({
+      where: { id: taskId },
+      select: { id: true, projectId: true },
+    });
+    if (!task) {
+      throw new NotFoundException(`Work item ${taskId} not found`);
+    }
+
+    const title = dto.title?.trim() || 'Untitled Page';
+    const pageId = dto.pageId;
+
+    const attachment = await this.repository.create(
+      {
+        entityType: EntityType.task,
+        entityId: taskId,
+        filename: title,
+        url: `/pages/${pageId}`,
+        mimeType: 'application/x-page',
+        size: 0,
+        projectId: task.projectId,
+        metadata: {
+          category: 'page',
+          pageId,
+          title,
+        },
+      },
+      authorId,
+    );
+
+    const formattedTask = await this.getFormattedTask(taskId);
+    return {
+      message: 'Page attached successfully',
+      task: formattedTask,
+      item: formattedTask,
+      page: {
+        id: attachment.id,
+        pageId,
+        title,
+        addedAt: attachment.createdAt.toISOString(),
+      },
+    };
+  }
+
+  async detachPage(taskId: string, pageId: string, _authorId?: string) {
+    const task = await this.prismaService.workItem.findUnique({
+      where: { id: taskId },
+      select: { id: true },
+    });
+    if (!task) {
+      throw new NotFoundException(`Work item ${taskId} not found`);
+    }
+
+    const records = await this.repository.findByEntity(EntityType.task, taskId);
+    const target = records.find(
+      (r) => r.id === pageId || (r.metadata as any)?.pageId === pageId,
+    );
+    if (target) {
+      await this.repository.delete(target.id);
+    }
+
+    const formattedTask = await this.getFormattedTask(taskId);
+    return {
+      message: 'Page detached successfully',
+      task: formattedTask,
+      item: formattedTask,
+    };
+  }
+
+  async attachPaper(taskId: string, dto: AttachPaperDto, authorId: string) {
+    const task = await this.prismaService.workItem.findUnique({
+      where: { id: taskId },
+      select: { id: true, projectId: true },
+    });
+    if (!task) {
+      throw new NotFoundException(`Work item ${taskId} not found`);
+    }
+
+    const title = dto.title?.trim() || 'Untitled Paper';
+    const paperId = dto.paperId;
+    const url = dto.doi ? `https://doi.org/${dto.doi}` : '';
+
+    const attachment = await this.repository.create(
+      {
+        entityType: EntityType.task,
+        entityId: taskId,
+        filename: title,
+        url,
+        mimeType: 'application/x-paper',
+        size: 0,
+        projectId: task.projectId,
+        metadata: {
+          category: 'paper',
+          paperId,
+          title,
+          doi: dto.doi || null,
+          citationKey: dto.citationKey || null,
+        },
+      },
+      authorId,
+    );
+
+    const formattedTask = await this.getFormattedTask(taskId);
+    return {
+      message: 'Paper attached successfully',
+      task: formattedTask,
+      item: formattedTask,
+      paper: {
+        id: attachment.id,
+        paperId,
+        title,
+        doi: dto.doi,
+        citationKey: dto.citationKey,
+        addedAt: attachment.createdAt.toISOString(),
+      },
+    };
+  }
+
+  async detachPaper(taskId: string, paperId: string, _authorId?: string) {
+    const task = await this.prismaService.workItem.findUnique({
+      where: { id: taskId },
+      select: { id: true },
+    });
+    if (!task) {
+      throw new NotFoundException(`Work item ${taskId} not found`);
+    }
+
+    const records = await this.repository.findByEntity(EntityType.task, taskId);
+    const target = records.find(
+      (r) => r.id === paperId || (r.metadata as any)?.paperId === paperId,
+    );
+    if (target) {
+      await this.repository.delete(target.id);
+    }
+
+    const formattedTask = await this.getFormattedTask(taskId);
+    return {
+      message: 'Paper detached successfully',
+      task: formattedTask,
+      item: formattedTask,
+    };
+  }
+
+  async attachFile(taskId: string, dto: AttachFileDto, authorId: string) {
+    const task = await this.prismaService.workItem.findUnique({
+      where: { id: taskId },
+      select: { id: true, projectId: true },
+    });
+    if (!task) {
+      throw new NotFoundException(`Work item ${taskId} not found`);
+    }
+
+    const parsedSize = typeof dto.size === 'string' ? parseInt(dto.size, 10) || 0 : dto.size || 0;
+    const attachment = await this.repository.create(
+      {
+        entityType: EntityType.task,
+        entityId: taskId,
+        filename: dto.name,
+        url: dto.url,
+        mimeType: dto.type || 'application/octet-stream',
+        size: parsedSize,
+        projectId: task.projectId,
+        metadata: {
+          category: 'file',
+          name: dto.name,
+        },
+      },
+      authorId,
+    );
+
+    const formattedTask = await this.getFormattedTask(taskId);
+    return {
+      message: 'File attached successfully',
+      task: formattedTask,
+      item: formattedTask,
+      file: {
+        id: attachment.id,
+        name: dto.name,
+        url: dto.url,
+        size: parsedSize,
+        type: dto.type,
+        uploadedAt: attachment.createdAt.toISOString(),
+      },
+    };
+  }
+
+  async detachFile(taskId: string, fileId: string, _authorId?: string) {
+    const task = await this.prismaService.workItem.findUnique({
+      where: { id: taskId },
+      select: { id: true },
+    });
+    if (!task) {
+      throw new NotFoundException(`Work item ${taskId} not found`);
+    }
+
+    await this.repository.delete(fileId);
+
+    const formattedTask = await this.getFormattedTask(taskId);
+    return {
+      message: 'File detached successfully',
+      task: formattedTask,
+      item: formattedTask,
+    };
+  }
+
+  async attachLink(taskId: string, dto: AttachLinkDto, authorId: string) {
+    const task = await this.prismaService.workItem.findUnique({
+      where: { id: taskId },
+      select: { id: true, projectId: true },
+    });
+    if (!task) {
+      throw new NotFoundException(`Work item ${taskId} not found`);
+    }
+
+    const title = dto.title?.trim() || dto.url;
+    const attachment = await this.repository.create(
+      {
+        entityType: EntityType.task,
+        entityId: taskId,
+        filename: title,
+        url: dto.url,
+        mimeType: 'text/uri-list',
+        size: 0,
+        projectId: task.projectId,
+        metadata: {
+          category: 'link',
+          title,
+          url: dto.url,
+        },
+      },
+      authorId,
+    );
+
+    const formattedTask = await this.getFormattedTask(taskId);
+    return {
+      message: 'Link attached successfully',
+      task: formattedTask,
+      item: formattedTask,
+      link: {
+        title,
+        url: dto.url,
+        addedAt: attachment.createdAt.toISOString(),
+      },
+    };
+  }
+
+  async detachLink(taskId: string, linkIndexOrId: string | number, _authorId?: string) {
+    const task = await this.prismaService.workItem.findUnique({
+      where: { id: taskId },
+      select: { id: true },
+    });
+    if (!task) {
+      throw new NotFoundException(`Work item ${taskId} not found`);
+    }
+
+    const records = await this.repository.findByEntity(EntityType.task, taskId);
+    const linkRecords = records.filter(
+      (r) => (r.metadata as any)?.category === 'link' || r.mimeType === 'text/uri-list',
+    );
+
+    let target = linkRecords.find((r) => r.id === String(linkIndexOrId));
+    if (!target) {
+      const idx = Number(linkIndexOrId);
+      if (!Number.isNaN(idx) && linkRecords[idx]) {
+        target = linkRecords[idx];
+      }
+    }
+
+    if (target) {
+      await this.repository.delete(target.id);
+    }
+
+    const formattedTask = await this.getFormattedTask(taskId);
+    return {
+      message: 'Link detached successfully',
+      task: formattedTask,
+      item: formattedTask,
+    };
+  }
+
+  /**
+   * Retrieves list of attachments matching filters.
+   */
+  async getAttachmentsFiltered(query: QueryAttachmentDto) {
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 50;
+    const skip = (page - 1) * limit;
+
+    return this.repository.findMany(
+      {
+        entityType: query.entityType,
+        entityId: query.entityId,
+        projectId: query.projectId,
+      },
+      skip,
+      limit,
+    );
+  }
+
+  /**
+   * Retrieves all attachments for a specific entity.
+   */
+  async getAttachmentsForEntity(entityType: EntityType, entityId: string) {
+    return this.repository.findByEntity(entityType, entityId);
+  }
+
+  /**
+   * Retrieves a single attachment by ID.
+   */
+  async getAttachmentById(id: string) {
+    const attachment = await this.repository.findById(id);
+    if (!attachment) {
+      throw new NotFoundException(`Attachment ${id} not found`);
+    }
+    return attachment;
+  }
+
+  /**
+   * Deletes an attachment from database and underlying storage.
+   */
+  async deleteAttachment(id: string, authorId?: string) {
+    const attachment = await this.repository.findById(id);
+    if (!attachment) {
+      throw new NotFoundException(`Attachment ${id} not found`);
+    }
+
+    if (attachment.storageKey) {
+      try {
+        await this.r2Service.deleteObject(attachment.storageKey);
+      } catch (err: any) {
+        this.logger.warn(
+          `Failed to delete storage object ${attachment.storageKey}: ${err.message}`,
+        );
+      }
+    }
+
+    await this.repository.delete(id);
+
+    this.eventEmitter?.emit('attachment.deleted', {
+      attachmentId: id,
+      entityType: attachment.entityType,
+      entityId: attachment.entityId,
+      authorId,
+    });
+
+    return { success: true, id };
+  }
+}

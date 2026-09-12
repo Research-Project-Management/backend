@@ -1,16 +1,18 @@
 import { Global, Module } from '@nestjs/common';
-import { AppLogger } from './app-logger.service';
-import { LoggingInterceptor } from './logging.interceptor';
+import { LoggerService, AppLogger } from './logger.service';
+import { LoggerInterceptor, LoggingInterceptor } from './logger.interceptor';
 
 @Global()
 @Module({
   providers: [
     {
-      provide: AppLogger,
-      useFactory: () => AppLogger.getInstance(),
+      provide: LoggerService,
+      useFactory: () => LoggerService.getInstance(),
     },
+    LoggerInterceptor,
     LoggingInterceptor,
   ],
-  exports: [AppLogger, LoggingInterceptor],
+  exports: [LoggerService, LoggerInterceptor, LoggingInterceptor],
 })
 export class LoggerModule {}
+

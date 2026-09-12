@@ -7,7 +7,7 @@ import {
   DomainEventEnvelope,
 } from './ports/event-publisher.port';
 import { OutboxMetrics } from './outbox.metrics';
-import { LIBRARY_EVENT_CATALOG } from './outbox.events';
+import { LIBRARY_EVENT_REGISTRY } from './outbox.events';
 
 /**
  * Generic Domain Event Publisher/Dispatcher for internal Library Domain Events.
@@ -26,7 +26,7 @@ export class OutboxDispatcher
   ) {}
 
   async publish<T = any>(envelope: DomainEventEnvelope<T>): Promise<void> {
-    const entry = LIBRARY_EVENT_CATALOG[envelope.eventType];
+    const entry = LIBRARY_EVENT_REGISTRY[envelope.eventType];
     this.logger.debug(
       `[DomainEventDispatcher] Dispatched ${envelope.eventType} for aggregate ${envelope.aggregateId} (workspace: ${envelope.workspaceId}) - ${entry?.expectedSideEffect || 'internal'}`,
     );

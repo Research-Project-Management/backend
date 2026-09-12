@@ -10,12 +10,7 @@ import { AttachmentsModule } from '../attachments/attachments.module';
 @Module({
   imports: [CoreModule, OutboxModule, AttachmentsModule],
   controllers: [AnnotationsController],
-  providers: [
-    AnnotationsRepository,
-    AnnotationsService,
-    AnnotationNormalizer,
-  ],
+  providers: [AnnotationsRepository, AnnotationsService, AnnotationNormalizer],
   exports: [AnnotationsService, AnnotationNormalizer],
 })
 export class AnnotationsModule {}
-

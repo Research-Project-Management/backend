@@ -21,7 +21,7 @@ export class EngineService {
 
   private async createDelegationToken(
     userId: string,
-    workspaceId?: string | null,
+    scopeId?: string | null,
     projectId?: string | null,
   ): Promise<string> {
     const secret =
@@ -32,7 +32,7 @@ export class EngineService {
     return this.jwtService.signAsync(
       {
         sub: userId,
-        workspace_id: workspaceId || undefined,
+        workspace_id: scopeId || undefined,
         project_id: projectId || undefined,
         scope: 'ai-delegated-action',
       },
@@ -232,7 +232,7 @@ export class EngineService {
     filename: string,
     context: {
       userId: string;
-      workspaceId: string;
+      scopeId: string;
       projectId?: string;
       chatId?: string;
       title?: string;
@@ -241,7 +241,7 @@ export class EngineService {
   ): Promise<Record<string, unknown>> {
     const delegationToken = await this.createDelegationToken(
       context.userId,
-      context.workspaceId,
+      context.scopeId,
       context.projectId,
     );
     const headers = this.getInternalHeaders(delegationToken);
@@ -249,7 +249,7 @@ export class EngineService {
     const formData = new FormData();
     const blob = new Blob([new Uint8Array(rawBody)], { type: contentType });
     formData.append('file', blob, filename);
-    formData.append('workspace_id', context.workspaceId);
+    formData.append('workspace_id', context.scopeId);
     if (context.userId) formData.append('user_id', context.userId);
     if (context.projectId) formData.append('project_id', context.projectId);
     if (context.chatId) formData.append('chat_id', context.chatId);
@@ -277,18 +277,18 @@ export class EngineService {
 
   async getDocumentsBulk(
     ids: string[],
-    context?: { userId: string; workspaceId: string; projectId?: string },
+    context?: { userId: string; scopeId: string; projectId?: string },
   ): Promise<Array<Record<string, unknown>>> {
     let headers: Record<string, string> = {};
     let wsQuery = '';
     if (context) {
       const delegationToken = await this.createDelegationToken(
         context.userId,
-        context.workspaceId,
+        context.scopeId,
         context.projectId,
       );
       headers = this.getInternalHeaders(delegationToken);
-      wsQuery = `&workspace_id=${encodeURIComponent(context.workspaceId)}`;
+      wsQuery = `&workspace_id=${encodeURIComponent(context.scopeId)}`;
     }
     const result = await tryCatch(
       fetch(
@@ -314,18 +314,18 @@ export class EngineService {
 
   async getDocument(
     docId: string,
-    context?: { userId: string; workspaceId: string; projectId?: string },
+    context?: { userId: string; scopeId: string; projectId?: string },
   ): Promise<Record<string, unknown> | null> {
     let headers: Record<string, string> = {};
     let wsQuery = '';
     if (context) {
       const delegationToken = await this.createDelegationToken(
         context.userId,
-        context.workspaceId,
+        context.scopeId,
         context.projectId,
       );
       headers = this.getInternalHeaders(delegationToken);
-      wsQuery = `?workspace_id=${encodeURIComponent(context.workspaceId)}`;
+      wsQuery = `?workspace_id=${encodeURIComponent(context.scopeId)}`;
     }
     const result = await tryCatch(
       fetch(
@@ -346,7 +346,7 @@ export class EngineService {
 
   async getDocuments(context?: {
     userId: string;
-    workspaceId: string;
+    scopeId: string;
     projectId?: string;
   }): Promise<Array<Record<string, unknown>>> {
     let headers: Record<string, string> = {};
@@ -354,11 +354,11 @@ export class EngineService {
     if (context) {
       const delegationToken = await this.createDelegationToken(
         context.userId,
-        context.workspaceId,
+        context.scopeId,
         context.projectId,
       );
       headers = this.getInternalHeaders(delegationToken);
-      wsQuery = `?workspace_id=${encodeURIComponent(context.workspaceId)}`;
+      wsQuery = `?workspace_id=${encodeURIComponent(context.scopeId)}`;
     }
     const result = await tryCatch(
       fetch(`${this.fluxUrl}/documents/${wsQuery}`, { headers }),

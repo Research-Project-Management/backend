@@ -75,8 +75,7 @@ export function calculateCycleMetrics(
   const totalTasks = tasks.length;
   const completedTasks = tasks.filter((task) => task.completed).length;
   const inProgressTasks = tasks.filter(
-    (task) =>
-      task.columnId === 'doing' ||
+    (task) => task.columnId === 'doing' ||
       task.columnId === 'in_progress' ||
       task.columnId === 'review' ||
       task.columnId === 'in_review',

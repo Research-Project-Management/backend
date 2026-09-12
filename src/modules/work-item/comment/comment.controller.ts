@@ -16,10 +16,10 @@ import {
   AddReplyDto,
   ReactCommentDto,
 } from './dto/comment.dto';
-import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
-import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
-import { ProjectRoleGuard } from '@/modules/iam/authz/guards/project-role.guard';
-import { ProjectRoles } from '@/modules/iam/authz/decorators/project-roles.decorator';
+import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
+import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
+import { ProjectRoleGuard } from '@/modules/iam/authz/guards/role.guard';
+import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
 
 @ApiTags('Planning Tasks & Work Items')
 @ApiBearerAuth('JWT-auth')
@@ -28,38 +28,46 @@ import { ProjectRoles } from '@/modules/iam/authz/decorators/project-roles.decor
 export class TaskCommentController {
   constructor(private readonly commentService: TaskCommentService) {}
 
-  @Get(['tasks/:taskId/comments', 'work-items/:taskId/comments'])
-  @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
-  @ApiOperation({ summary: 'Get all comments for a task' })
+  @Get('work-items/:taskId/comments')
+  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ApiOperation({ summary: 'Get all comments for a work item' })
   async getTaskComments(@Param('taskId') taskId: string) {
     return this.commentService.getTaskComments(taskId);
   }
 
-  @Post(['tasks/:taskId/comments', 'work-items/:taskId/comments'])
-  @ProjectRoles('admin', 'contributor', 'commenter')
-  @ApiOperation({ summary: 'Add a comment to a task' })
+  @Post('work-items/:taskId/comments')
+  @ProjectRoles('owner', 'contributor', 'commenter')
+  @ApiOperation({ summary: 'Add a comment to a work item' })
   async createTaskComment(
     @Param('taskId') taskId: string,
     @CurrentUser('id') userId: string,
-    @Body() dto: CreateCommentDto,
+    @Body() createCommentDto: CreateCommentDto,
   ) {
-    return this.commentService.createTaskComment(taskId, userId, dto);
+    return this.commentService.createTaskComment(
+      taskId,
+      userId,
+      createCommentDto,
+    );
   }
 
-  @Put(['tasks/comments/:commentId', 'work-items/comments/:commentId'])
-  @ProjectRoles('admin', 'contributor', 'commenter')
-  @ApiOperation({ summary: 'Update a task comment' })
+  @Put('work-items/comments/:commentId')
+  @ProjectRoles('owner', 'contributor', 'commenter')
+  @ApiOperation({ summary: 'Update a WorkItem comment' })
   async updateTaskComment(
     @Param('commentId') commentId: string,
     @CurrentUser('id') userId: string,
-    @Body() dto: UpdateCommentDto,
+    @Body() updateCommentDto: UpdateCommentDto,
   ) {
-    return this.commentService.updateTaskComment(commentId, userId, dto);
+    return this.commentService.updateTaskComment(
+      commentId,
+      userId,
+      updateCommentDto,
+    );
   }
 
-  @Delete(['tasks/comments/:commentId', 'work-items/comments/:commentId'])
-  @ProjectRoles('admin', 'contributor', 'commenter')
-  @ApiOperation({ summary: 'Delete a task comment' })
+  @Delete('work-items/comments/:commentId')
+  @ProjectRoles('owner', 'contributor', 'commenter')
+  @ApiOperation({ summary: 'Delete a WorkItem comment' })
   async deleteTaskComment(
     @Param('commentId') commentId: string,
     @CurrentUser('id') userId: string,
@@ -67,31 +75,29 @@ export class TaskCommentController {
     return this.commentService.deleteTaskComment(commentId, userId);
   }
 
-  @Post([
-    'tasks/comments/:commentId/replies',
-    'work-items/comments/:commentId/replies',
-  ])
-  @ProjectRoles('admin', 'contributor', 'commenter')
-  @ApiOperation({ summary: 'Reply to a task comment' })
+  @Post('work-items/comments/:commentId/replies')
+  @ProjectRoles('owner', 'contributor', 'commenter')
+  @ApiOperation({ summary: 'Reply to a WorkItem comment' })
   async addTaskReply(
     @Param('commentId') commentId: string,
     @CurrentUser('id') userId: string,
-    @Body() dto: AddReplyDto,
+    @Body() addReplyDto: AddReplyDto,
   ) {
-    return this.commentService.addTaskReply(commentId, userId, dto);
+    return this.commentService.addTaskReply(commentId, userId, addReplyDto);
   }
 
-  @Post([
-    'tasks/comments/:commentId/reactions',
-    'work-items/comments/:commentId/reactions',
-  ])
-  @ProjectRoles('admin', 'contributor', 'commenter')
-  @ApiOperation({ summary: 'React to a task comment with emoji' })
+  @Post('work-items/comments/:commentId/reactions')
+  @ProjectRoles('owner', 'contributor', 'commenter')
+  @ApiOperation({ summary: 'React to a WorkItem comment with emoji' })
   async reactToTaskComment(
     @Param('commentId') commentId: string,
     @CurrentUser('id') userId: string,
-    @Body() dto: ReactCommentDto,
+    @Body() reactCommentDto: ReactCommentDto,
   ) {
-    return this.commentService.reactToTaskComment(commentId, userId, dto);
+    return this.commentService.reactToTaskComment(
+      commentId,
+      userId,
+      reactCommentDto,
+    );
   }
 }

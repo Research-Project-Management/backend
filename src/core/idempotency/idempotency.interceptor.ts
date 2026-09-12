@@ -11,6 +11,7 @@ import { Observable, of, from } from 'rxjs';
 import { mergeMap, tap } from 'rxjs/operators';
 import { IdempotencyService } from './idempotency.service';
 import { createHash } from 'crypto';
+import { isUuid, NIL_UUID } from '../utils/uuid.util';
 
 interface LocalCacheEntry {
   body: any;
@@ -53,8 +54,16 @@ export class IdempotencyInterceptor implements NestInterceptor {
     const cleanKey = idempotencyKey.trim();
     if (!cleanKey) return next.handle();
 
+    const candidateScope =
+      req.user?.id ||
+      req.user?.sub ||
+      req.params?.projectId ||
+      req.body?.projectId ||
+      req.params?.workspaceId ||
+      req.body?.workspaceId;
+
     const workspaceId =
-      req.params?.workspaceId || req.body?.workspaceId || 'global';
+      candidateScope && isUuid(candidateScope) ? candidateScope : NIL_UUID;
 
     const requestHash = createHash('md5')
       .update(`${method}:${req.url || ''}:${JSON.stringify(req.body || {})}`)

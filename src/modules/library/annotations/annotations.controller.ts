@@ -4,6 +4,7 @@ import {
   Post,
   Patch,
   Delete,
+  Put,
   Param,
   Query,
   Body,
@@ -12,137 +13,177 @@ import {
   NotFoundException,
   BadRequestException,
   UnauthorizedException,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiParam,
+  ApiQuery,
+} from '@nestjs/swagger';
+import { AnnotationType } from '@prisma/client';
 import { AnnotationsService } from './annotations.service';
-import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
-import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
-import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
-import { CurrentUser } from '../../../modules/iam/authn/decorators/current-user.decorator';
+import { JwtAuthGuard } from '../../../modules/iam/authn/guards/auth.guard';
+import { CurrentUser } from '../../../modules/iam/authn/decorators/user.decorator';
 import {
   CreateAnnotationDto,
   UpdateAnnotationDto,
+  BatchAnnotationsDto,
 } from './dto/annotations.dto';
 
-@Controller([
-  'api/v1/workspaces/:workspaceId/library/attachments/:attachmentId/annotations',
-  'api/v1/workspace/:workspaceId/library/attachments/:attachmentId/annotations',
-])
-@UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
+@ApiTags('Annotations')
+@ApiBearerAuth('JWT-auth')
+@Controller('api/v1/library/attachments/:attachmentId/annotations')
+@UseGuards(JwtAuthGuard)
 export class AnnotationsController {
   constructor(private readonly annotationsService: AnnotationsService) {}
 
+  // ─── GET / ─────────────────────────────────────────────────────────────────
+
   @Get()
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'List annotations for an attachment, sorted by position' })
+  @ApiQuery({ name: 'pageIndex', required: false, type: Number })
+  @ApiQuery({ name: 'type',      required: false, enum: AnnotationType })
   async listAnnotations(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id')     userId:       string,
     @Param('attachmentId') attachmentId: string,
-    @Query('pageIndex') pageIndex?: string,
+    @Query('pageIndex')    pageIndexRaw?: string,
+    @Query('type')         type?: AnnotationType,
   ) {
-    let parsedPage: number | undefined;
-    if (pageIndex !== undefined) {
-      parsedPage = parseInt(pageIndex, 10);
-      if (isNaN(parsedPage) || parsedPage < 0) {
-        throw new BadRequestException(
-          'pageIndex must be a non-negative integer',
-        );
+    let pageIndex: number | undefined;
+    if (pageIndexRaw !== undefined) {
+      pageIndex = parseInt(pageIndexRaw, 10);
+      if (isNaN(pageIndex) || pageIndex < 0) {
+        throw new BadRequestException('pageIndex must be a non-negative integer');
       }
     }
+
+    if (type !== undefined && !Object.values(AnnotationType).includes(type)) {
+      throw new BadRequestException(`type must be one of: ${Object.values(AnnotationType).join(', ')}`);
+    }
+
     return this.annotationsService.getAnnotationsByAttachment(
-      workspaceId,
+      userId,
       attachmentId,
-      parsedPage,
+      pageIndex,
+      type,
     );
   }
 
+  // ─── POST / ────────────────────────────────────────────────────────────────
+
   @Post()
-  @WorkspaceRoles('owner', 'admin', 'member')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Create an annotation' })
   async createAnnotation(
-    @Param('workspaceId') workspaceId: string,
-    @Param('attachmentId') attachmentId: string,
-    @CurrentUser('id') currentUserId: string,
-    @Body() body: CreateAnnotationDto,
+    @CurrentUser('id')     userId:        string,
+    @Param('attachmentId') attachmentId:  string,
+    @Body()                body:          CreateAnnotationDto,
   ) {
-    if (!currentUserId) {
-      throw new UnauthorizedException(
-        'Authentication required to create annotations',
-      );
+    if (!userId) {
+      throw new UnauthorizedException('Authentication required to create annotations');
     }
-    return this.annotationsService.createAnnotation(workspaceId, {
+    return this.annotationsService.createAnnotation(userId, {
       attachmentId,
-      type: body.type,
+      type:      body.type,
       pageIndex: body.pageIndex,
-      color: body.color,
+      y:         body.y,
+      x:         body.x,
+      color:     body.color,
       quoteText: body.quoteText,
-      comment: body.comment,
+      comment:   body.comment,
       rectCoords: body.rectCoords,
-      authorId: currentUserId,
+      authorId:  userId,
     });
   }
 
+  // ─── PATCH /:id ────────────────────────────────────────────────────────────
+
   @Patch(':id')
-  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Update an annotation (optimistic lock via If-Match or expectedVersion)' })
+  @ApiParam({ name: 'id', description: 'Annotation UUID' })
   async updateAnnotation(
-    @Param('workspaceId') workspaceId: string,
-    @Param('id') id: string,
-    @CurrentUser('id') currentUserId: string,
-    @Headers('if-match') ifMatch: string | undefined,
-    @Body() body: UpdateAnnotationDto,
+    @CurrentUser('id')     userId:        string,
+    @Param('attachmentId') attachmentId:  string,
+    @Param('id')           id:            string,
+    @Headers('if-match')   ifMatch:       string | undefined,
+    @Body()                body:          UpdateAnnotationDto,
   ) {
     const rawVersion =
       body.expectedVersion ??
-      (ifMatch ? parseInt(ifMatch.replace(/["']/g, ''), 10) : undefined);
+      (ifMatch ? parseInt(ifMatch.replace(/['"]/g, ''), 10) : undefined);
+
     if (rawVersion === undefined || isNaN(rawVersion) || rawVersion < 1) {
       throw new BadRequestException(
-        'Optimistic locking requirement: expectedVersion (>= 1) or If-Match header is required',
+        'Optimistic locking required: provide expectedVersion (>= 1) or If-Match header',
       );
     }
 
     const { expectedVersion: _, ...updateData } = body;
     return this.annotationsService.updateAnnotation(
-      workspaceId,
+      userId,
       id,
       rawVersion,
       updateData,
-      currentUserId,
     );
   }
 
+  // ─── DELETE /:id ───────────────────────────────────────────────────────────
+
   @Delete(':id')
-  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Soft-delete an annotation' })
+  @ApiParam({ name: 'id', description: 'Annotation UUID' })
   async deleteAnnotation(
-    @Param('workspaceId') workspaceId: string,
-    @Param('id') id: string,
-    @CurrentUser('id') currentUserId: string,
-    @Query('expectedVersion') expectedVersionQuery?: string,
-    @Headers('if-match') ifMatch?: string,
+    @CurrentUser('id')            userId:               string,
+    @Param('attachmentId')        attachmentId:         string,
+    @Param('id')                  id:                   string,
+    @Query('expectedVersion')     expectedVersionQuery?: string,
+    @Headers('if-match')          ifMatch?:             string,
   ) {
     let expectedVersion: number | undefined;
     if (expectedVersionQuery !== undefined) {
       expectedVersion = parseInt(expectedVersionQuery, 10);
       if (isNaN(expectedVersion) || expectedVersion < 1) {
-        throw new BadRequestException(
-          'expectedVersion must be a positive integer',
-        );
+        throw new BadRequestException('expectedVersion must be a positive integer');
       }
     } else if (ifMatch) {
-      expectedVersion = parseInt(ifMatch.replace(/["']/g, ''), 10);
+      expectedVersion = parseInt(ifMatch.replace(/['"]/g, ''), 10);
       if (isNaN(expectedVersion) || expectedVersion < 1) {
-        throw new BadRequestException(
-          'If-Match header must be a positive integer',
-        );
+        throw new BadRequestException('If-Match header must be a positive integer');
       }
     }
 
     const deleted = await this.annotationsService.deleteAnnotation(
-      workspaceId,
+      userId,
       id,
       expectedVersion,
-      currentUserId,
     );
-    if (!deleted) {
-      throw new NotFoundException(`Annotation ${id} not found`);
-    }
 
-    return { deleted, id };
+    if (!deleted) throw new NotFoundException(`Annotation ${id} not found`);
+    return { id, deleted: true };
+  }
+
+  // ─── PUT /batch ────────────────────────────────────────────────────────────
+
+  @Put('batch')
+  @ApiOperation({
+    summary: 'Batch upsert/delete annotations (max 200 items, single transaction)',
+  })
+  async batchUpsertAnnotations(
+    @CurrentUser('id')     userId:        string,
+    @Param('attachmentId') attachmentId:  string,
+    @Body()                body:          BatchAnnotationsDto,
+  ) {
+    if (!userId) {
+      throw new UnauthorizedException('Authentication required');
+    }
+    return this.annotationsService.batchUpsertAnnotations(
+      userId,
+      attachmentId,
+      { upserts: body.upserts, deletes: body.deletes },
+    );
   }
 }
+

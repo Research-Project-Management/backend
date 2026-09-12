@@ -24,12 +24,11 @@ import {
 
 import { normalizeTags } from '../tags/utils/tags.utils';
 import { PrismaService } from '../../../core/database/prisma.service';
-import { resolveTenantWorkspaceId } from '../../../core/utils/tenant.util';
 import type {
   UpsertSyncNoteCommand,
   DeleteSyncEntityCommand,
   UpsertSyncEntityResult,
-} from '../common/types/sync.types';
+} from '../sync/types/sync.types';
 import {
   ITEM_READ_PORT,
   IItemReadPort,
@@ -52,42 +51,35 @@ export class NotesService implements IItemNotesExtractorPort {
     private readonly itemExistencePort?: IItemExistencePort,
   ) {}
 
-  private resolveWorkspaceId(workspaceId: string): Promise<string> {
-    return resolveTenantWorkspaceId(this.prisma, workspaceId);
+  async listNotes(userId: string, itemId?: string) {
+    return this.repo.findMany(userId, itemId);
   }
 
-  async listNotes(workspaceId: string, itemId?: string) {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.repo.findMany(canonicalWorkspaceId, itemId);
+  async getNote(userId: string, id: string) {
+    return this.repo.findById(userId, id);
   }
 
-  async getNote(workspaceId: string, id: string) {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.repo.findById(canonicalWorkspaceId, id);
-  }
-
-  async createNote(workspaceId: string, data: CreateNoteData) {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+  async createNote(userId: string, data: CreateNoteData) {
     if (data.itemId) {
       if (this.itemExistencePort) {
         await this.itemExistencePort.assertExists(
-          canonicalWorkspaceId,
+          userId,
           data.itemId,
         );
       } else {
         const item = await this.itemReadPort.findById(
-          canonicalWorkspaceId,
+          userId,
           data.itemId,
         );
         if (!item) {
-          throw new NotFoundException(`Catalog item not found in workspace`);
+          throw new NotFoundException(`Item not found`);
         }
       }
     }
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const note = await this.repo.create(canonicalWorkspaceId, data, tx);
+      const note = await this.repo.create(userId, data, tx);
 
-      await helpers.appendChange(canonicalWorkspaceId, {
+      await helpers.appendChange(userId, {
         entityType: 'Note',
         entityId: note.id,
         action: 'create',
@@ -96,7 +88,7 @@ export class NotesService implements IItemNotesExtractorPort {
       });
 
       await helpers.publishOutbox(
-        canonicalWorkspaceId,
+        userId,
         note.id,
         'library.note.created',
         note,
@@ -107,22 +99,21 @@ export class NotesService implements IItemNotesExtractorPort {
   }
 
   async updateNote(
-    workspaceId: string,
+    userId: string,
     id: string,
     expectedVersion: number,
     data: UpdateNoteData,
   ) {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
       const updated = await this.repo.update(
-        canonicalWorkspaceId,
+        userId,
         id,
         expectedVersion,
         data,
         tx,
       );
 
-      await helpers.appendChange(canonicalWorkspaceId, {
+      await helpers.appendChange(userId, {
         entityType: 'Note',
         entityId: updated.id,
         action: 'update',
@@ -131,7 +122,7 @@ export class NotesService implements IItemNotesExtractorPort {
       });
 
       await helpers.publishOutbox(
-        canonicalWorkspaceId,
+        userId,
         updated.id,
         'library.note.updated',
         updated,
@@ -142,27 +133,26 @@ export class NotesService implements IItemNotesExtractorPort {
   }
 
   async deleteNote(
-    workspaceId: string,
+    userId: string,
     id: string,
     expectedVersion?: number,
   ): Promise<boolean> {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
       const deleted = await this.repo.softDelete(
-        canonicalWorkspaceId,
+        userId,
         id,
         expectedVersion,
         tx,
       );
 
       if (deleted) {
-        await helpers.recordTombstone(canonicalWorkspaceId, {
+        await helpers.recordTombstone(userId, {
           entityType: 'Note',
           entityId: id,
         });
 
         await helpers.publishOutbox(
-          canonicalWorkspaceId,
+          userId,
           id,
           'library.note.deleted',
           {
@@ -184,6 +174,7 @@ export class NotesService implements IItemNotesExtractorPort {
     tx: Prisma.TransactionClient,
     helpers: TransactionHelpers,
   ): Promise<UpsertSyncEntityResult> {
+    const targetUserId = command.userId || (command as any).projectId || '';
     if (command.existingId) {
       const existing = await tx.note.findUnique({
         where: { id: command.existingId },
@@ -191,13 +182,7 @@ export class NotesService implements IItemNotesExtractorPort {
 
       if (!existing) {
         throw new NotFoundException(
-          `Note ${command.existingId} not found in workspace ${command.workspaceId}`,
-        );
-      }
-
-      if (existing.workspaceId !== command.workspaceId) {
-        throw new ForbiddenException(
-          `Note ${command.existingId} does not belong to workspace ${command.workspaceId}`,
+          `Note ${command.existingId} not found`,
         );
       }
 
@@ -216,7 +201,7 @@ export class NotesService implements IItemNotesExtractorPort {
         },
       });
 
-      await helpers.appendChange(command.workspaceId, {
+      await helpers.appendChange(targetUserId, {
         entityType: 'Note',
         entityId: updated.id,
         action: 'update',
@@ -227,9 +212,9 @@ export class NotesService implements IItemNotesExtractorPort {
     } else {
       const created = await tx.note.create({
         data: {
-          workspaceId: command.workspaceId,
+          userId: targetUserId,
           createdById: command.userId,
-          itemId: command.catalogItemId,
+          itemId: command.itemId,
           contentMd: command.contentMd,
           title: command.title || 'Note',
           tags: command.tags ? normalizeTags(command.tags) : [],
@@ -237,7 +222,7 @@ export class NotesService implements IItemNotesExtractorPort {
         },
       });
 
-      await helpers.appendChange(command.workspaceId, {
+      await helpers.appendChange(targetUserId, {
         entityType: 'Note',
         entityId: created.id,
         action: 'create',
@@ -245,7 +230,7 @@ export class NotesService implements IItemNotesExtractorPort {
       });
 
       await helpers.publishOutbox(
-        command.workspaceId,
+        targetUserId,
         created.id,
         'library.note.created',
         { noteId: created.id },
@@ -263,22 +248,22 @@ export class NotesService implements IItemNotesExtractorPort {
     tx: Prisma.TransactionClient,
     helpers: TransactionHelpers,
   ): Promise<void> {
-    const { workspaceId, entityId } = command;
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+    const targetUserId = command.userId || (command as any).projectId || '';
+    const { entityId } = command;
     const existing = await tx.note.findFirst({
       where: {
         id: entityId,
-        workspaceId: canonicalWorkspaceId,
+        userId: targetUserId,
         deletedAt: null,
       },
     });
     if (!existing) return;
 
     await tx.note.updateMany({
-      where: { id: entityId, workspaceId: canonicalWorkspaceId },
+      where: { id: entityId, userId: targetUserId, deletedAt: null },
       data: { deletedAt: new Date() },
     });
-    await helpers.appendChange(canonicalWorkspaceId, {
+    await helpers.appendChange(targetUserId, {
       entityType: 'Note',
       entityId,
       action: 'delete',
@@ -305,9 +290,8 @@ export class NotesService implements IItemNotesExtractorPort {
    * Ingestion helper: creates literature notes from ingestion pipelines (avoids bypass).
    */
   async createLiteratureNote(
-    workspaceId: string,
-    itemId: string,
     userId: string,
+    itemId: string,
     content: string,
     source?: string,
     tx?: Prisma.TransactionClient,
@@ -318,7 +302,7 @@ export class NotesService implements IItemNotesExtractorPort {
     const createFn = async (client: Prisma.TransactionClient) => {
       const existing = await client.note.findFirst({
         where: {
-          workspaceId,
+          userId,
           itemId,
           contentMd: trimmed,
           deletedAt: null,
@@ -328,7 +312,7 @@ export class NotesService implements IItemNotesExtractorPort {
 
       await client.note.create({
         data: {
-          workspaceId,
+          userId,
           itemId,
           title: source ? `Imported Note (${source})` : 'Imported Note',
           contentMd: trimmed,
@@ -353,24 +337,18 @@ export class NotesService implements IItemNotesExtractorPort {
   }
 
   async extractNotesFromAnnotations(
-    workspaceId: string,
-    itemId: string,
     userId: string,
+    itemId: string,
   ) {
-    const canonicalWorkspaceId = await resolveTenantWorkspaceId(
-      this.prisma,
-      workspaceId,
-    );
-
-    const item = await this.itemReadPort.findById(canonicalWorkspaceId, itemId);
+    const item = await this.itemReadPort.findById(userId, itemId);
     if (!item) {
       throw new NotFoundException(
-        `Item ${itemId} not found in workspace ${canonicalWorkspaceId}`,
+        `Item ${itemId} not found`,
       );
     }
 
-    const attachments = await this.prisma.catalogAttachment.findMany({
-      where: { catalogItemId: itemId },
+    const attachments = await this.prisma.attachment.findMany({
+      where: { itemId },
       select: { id: true, filename: true },
     });
 
@@ -393,7 +371,7 @@ export class NotesService implements IItemNotesExtractorPort {
 
     const markdown = formatLiteratureNoteMarkdown(item, annotations);
 
-    const note = await this.createNote(canonicalWorkspaceId, {
+    const note = await this.createNote(userId, {
       itemId,
       title: `Literature Notes — ${item.title?.slice(0, 50) || 'Untitled'}`,
       contentMd: markdown,

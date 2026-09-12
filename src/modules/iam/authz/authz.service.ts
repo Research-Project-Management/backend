@@ -1,17 +1,14 @@
 import { Injectable, Logger, ForbiddenException } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
-import { RedisCacheService } from '@/core/cache/redis-cache.service';
-import { Permission } from './enums/permissions.enum';
+import { RedisCacheService } from '@/core/cache/redis.service';
+import { Permission } from './enums/permission.enum';
+import { Role, RoleHierarchy } from './enums/role.enum';
 import {
-  WorkspaceRole,
-  WorkspaceRoleHierarchy,
-} from './enums/workspace-role.enum';
-import { ProjectRole, ProjectRoleHierarchy } from './enums/project-role.enum';
-import {
-  WORKSPACE_ROLE_PERMISSIONS,
-  PROJECT_ROLE_PERMISSIONS,
-} from './constants/permission-matrix.constant';
-import { IAM_REDIS_KEYS } from '../constants/redis-keys.constant';
+  ROLE_PERMISSIONS,
+  getPermissionsForRole,
+  roleHasPermission,
+} from './constants/permission.constant';
+import { IAM_REDIS_KEYS } from '../core/constants/redis.constant';
+import { AuthzRepository } from './authz.repository';
 
 @Injectable()
 export class AuthzService {
@@ -19,229 +16,149 @@ export class AuthzService {
   private static readonly ROLE_CACHE_TTL = 600; // 10 minutes
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repo: AuthzRepository,
     private readonly redis: RedisCacheService,
   ) {}
 
   /**
-   * Check if a workspace role has a specific permission
+   * Check if a role has a specific permission.
    */
-  hasWorkspacePermission(
-    role: WorkspaceRole | string,
-    permission: Permission,
-  ): boolean {
-    const permissions = WORKSPACE_ROLE_PERMISSIONS[role as WorkspaceRole] || [];
-    return permissions.includes(permission);
+  hasPermission(role: Role | string, permission: Permission): boolean {
+    return roleHasPermission(role as Role, permission);
   }
 
   /**
-   * Check if a project role has a specific permission
+   * Retrieve all permissions mapped to a given role.
    */
-  hasProjectPermission(
-    role: ProjectRole | string,
-    permission: Permission,
-  ): boolean {
-    const permissions = PROJECT_ROLE_PERMISSIONS[role as ProjectRole] || [];
-    return permissions.includes(permission);
+  getRolePermissions(role: Role | string): readonly Permission[] {
+    return getPermissionsForRole(role as Role);
   }
 
   /**
-   * General permission check for backward compatibility
+   * Check if a user's role meets or exceeds a minimum role hierarchy.
    */
-  hasPermission(role: WorkspaceRole | string, permission: Permission): boolean {
-    return this.hasWorkspacePermission(role, permission);
-  }
-
-  /**
-   * Fetch a user's role in a given workspace with Redis caching.
-   */
-  async getWorkspaceMemberRole(
-    workspaceId: string,
-    userId: string,
-  ): Promise<WorkspaceRole | null> {
-    if (!workspaceId || !userId) return null;
-
-    const cacheKey = IAM_REDIS_KEYS.workspaceRole(workspaceId, userId);
-    const cachedRole = await this.redis.get<WorkspaceRole>(cacheKey);
-    if (cachedRole) return cachedRole;
-
-    const member = await this.prisma.workspaceMember.findUnique({
-      where: {
-        workspaceId_userId: {
-          workspaceId,
-          userId,
-        },
-      },
-      select: { role: true },
-    });
-    if (!member) return null;
-
-    const role = member.role as unknown as WorkspaceRole;
-    await this.redis.set(cacheKey, role, AuthzService.ROLE_CACHE_TTL);
-    return role;
+  hasRole(userRole: Role | string, minRole: Role): boolean {
+    const userLevel = RoleHierarchy[userRole as Role] || 0;
+    const requiredLevel = RoleHierarchy[minRole] || 0;
+    return userLevel >= requiredLevel;
   }
 
   /**
    * Fetch a user's role in a given project with Redis caching.
    */
-  async getProjectMemberRole(
-    projectId: string,
-    userId: string,
-  ): Promise<ProjectRole | null> {
+  async getRole(projectId: string, userId: string): Promise<Role | null> {
     if (!projectId || !userId) return null;
 
-    const cacheKey = IAM_REDIS_KEYS.projectRole(projectId, userId);
-    const cachedRole = await this.redis.get<ProjectRole>(cacheKey);
-    if (cachedRole) return cachedRole;
+    const cacheKey = IAM_REDIS_KEYS.role(projectId, userId);
 
-    const member = await this.prisma.projectMember.findUnique({
-      where: {
-        projectId_userId: {
-          projectId,
-          userId,
-        },
-      },
-      select: { role: true },
-    });
-    if (!member) return null;
+    // Check Redis cache first
+    try {
+      const cachedRole = await this.redis.get<Role>(cacheKey);
+      if (cachedRole) return cachedRole;
+    } catch (err) {
+      this.logger.warn(`Redis getRole cache miss/error: ${err}`);
+    }
 
-    const role = member.role as unknown as ProjectRole;
-    await this.redis.set(cacheKey, role, AuthzService.ROLE_CACHE_TTL);
+    // 1. Check if user is Project Creator -> OWNER
+    const project = await this.repo.findProjectContext(projectId);
+
+    if (project && project.createdById === userId) {
+      await this.redis
+        .set(cacheKey, Role.OWNER, AuthzService.ROLE_CACHE_TTL)
+        .catch(() => {});
+      return Role.OWNER;
+    }
+
+    // 2. Query ProjectMember record
+    const role = await this.repo.findMemberRole(projectId, userId);
+
+    if (role) {
+      await this.redis
+        .set(cacheKey, role, AuthzService.ROLE_CACHE_TTL)
+        .catch(() => {});
+      return role;
+    }
+
+    return null;
+  }
+
+  /**
+   * Enforce that a user has at least minRole in a project.
+   */
+  async requireRole(
+    projectId: string,
+    userId: string,
+    minRole: Role,
+  ): Promise<Role> {
+    const role = await this.getRole(projectId, userId);
+    if (!role) {
+      throw new ForbiddenException(
+        'Access denied: You are not a member of this project',
+      );
+    }
+
+    if (!this.hasRole(role, minRole)) {
+      throw new ForbiddenException(
+        `Access denied: Required role is ${minRole}, current role is ${role}`,
+      );
+    }
+
     return role;
   }
 
   /**
-   * Invalidate cached role for a user in a workspace.
+   * Enforce that a user has a specific permission in a project.
    */
-  async invalidateWorkspaceRoleCache(
-    workspaceId: string,
-    userId: string,
-  ): Promise<void> {
-    const cacheKey = IAM_REDIS_KEYS.workspaceRole(workspaceId, userId);
-    await this.redis.del(cacheKey);
-  }
-
-  /**
-   * Invalidate cached role for a user in a project.
-   */
-  async invalidateProjectRoleCache(
+  async requirePermission(
     projectId: string,
     userId: string,
-  ): Promise<void> {
-    const cacheKey = IAM_REDIS_KEYS.projectRole(projectId, userId);
-    await this.redis.del(cacheKey);
-  }
-
-  /**
-   * Assert workspace membership and optionally required roles at service layer.
-   */
-  async assertWorkspaceMember(
-    workspaceId: string,
-    userId: string,
-    allowedRoles?: (WorkspaceRole | string)[],
-  ): Promise<{ workspaceId: string; role: WorkspaceRole }> {
-    if (!workspaceId || !userId) {
+    permission: Permission,
+  ): Promise<Role> {
+    const role = await this.getRole(projectId, userId);
+    if (!role) {
       throw new ForbiddenException(
-        'Workspace context and authenticated user are required',
+        'Access denied: You are not a member of this project',
       );
     }
 
-    const role = await this.getWorkspaceMemberRole(workspaceId, userId);
-    if (!role) {
-      throw new ForbiddenException('You are not a member of this workspace');
-    }
-
-    if (allowedRoles && allowedRoles.length > 0) {
-      const memberRole = (role as string).toUpperCase() as WorkspaceRole;
-      const memberLevel = WorkspaceRoleHierarchy[memberRole] || 0;
-
-      const isAllowed = allowedRoles.some((reqRole) => {
-        const normalized = reqRole.toUpperCase() as WorkspaceRole;
-        const requiredLevel = WorkspaceRoleHierarchy[normalized] || 0;
-        return memberLevel >= requiredLevel;
-      });
-
-      if (!isAllowed) {
-        throw new ForbiddenException(
-          `Insufficient workspace permissions. Required: ${allowedRoles.join(', ')}`,
-        );
-      }
-    }
-
-    return { workspaceId, role };
-  }
-
-  /**
-   * Assert project membership and optionally required roles at service layer.
-   */
-  async assertProjectMember(
-    projectId: string,
-    userId: string,
-    allowedRoles?: (ProjectRole | string)[],
-  ): Promise<{ projectId: string; role: ProjectRole }> {
-    if (!projectId || !userId) {
+    if (!this.hasPermission(role, permission)) {
       throw new ForbiddenException(
-        'Project context and authenticated user are required',
+        `Access denied: Missing required permission '${permission}'`,
       );
     }
 
-    const project = await this.prisma.project.findUnique({
-      where: { id: projectId },
-      select: { id: true, workspaceId: true },
-    });
-    if (!project) {
-      throw new ForbiddenException('Project not found');
-    }
-
-    // Workspace owner / admin superuser access
-    const wsRole = await this.getWorkspaceMemberRole(
-      project.workspaceId,
-      userId,
-    );
-    const normalizedWsRole = wsRole?.toUpperCase() as WorkspaceRole | undefined;
-    if (
-      normalizedWsRole === WorkspaceRole.OWNER ||
-      normalizedWsRole === WorkspaceRole.ADMIN
-    ) {
-      return { projectId, role: ProjectRole.ADMIN };
-    }
-
-    const role = await this.getProjectMemberRole(projectId, userId);
-    if (!role) {
-      throw new ForbiddenException('You are not a member of this project');
-    }
-
-    if (allowedRoles && allowedRoles.length > 0) {
-      const memberRole = (role as string).toUpperCase() as ProjectRole;
-      const memberLevel = ProjectRoleHierarchy[memberRole] || 0;
-
-      const isAllowed = allowedRoles.some((reqRole) => {
-        const normalized = reqRole.toUpperCase() as ProjectRole;
-        const requiredLevel = ProjectRoleHierarchy[normalized] || 0;
-        return memberLevel >= requiredLevel;
-      });
-
-      if (!isAllowed) {
-        throw new ForbiddenException(
-          `Insufficient project permissions. Required: ${allowedRoles.join(', ')}`,
-        );
-      }
-    }
-
-    return { projectId, role };
+    return role;
   }
 
   /**
-   * Deprecated alias for backward compatibility
+   * Evicts the cached role for a user in a project.
    */
-  async getMemberRole(
-    workspaceId: string,
+  async invalidateRoleCache(projectId: string, userId: string): Promise<void> {
+    const cacheKey = IAM_REDIS_KEYS.role(projectId, userId);
+    await this.redis.del(cacheKey).catch(() => {});
+  }
+
+  // ─── Direct Project Method Aliases ─────────────────────────────────────────
+
+  async getProjectMemberRole(
+    projectId: string,
     userId: string,
-  ): Promise<string | null> {
-    return this.getWorkspaceMemberRole(workspaceId, userId);
+  ): Promise<Role | null> {
+    return this.getRole(projectId, userId);
+  }
+
+  hasProjectPermission(
+    role: Role | string,
+    permission: Permission,
+  ): boolean {
+    return this.hasPermission(role, permission);
+  }
+
+  async requireProjectPermission(
+    projectId: string,
+    userId: string,
+    permission: Permission,
+  ): Promise<Role> {
+    return this.requirePermission(projectId, userId, permission);
   }
 }
-
-// Backward compatibility alias
-export const AuthorizationService = AuthzService;
-export type AuthorizationService = AuthzService;

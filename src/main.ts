@@ -16,9 +16,9 @@ import rateLimit from '@fastify/rate-limit';
 import multipart from '@fastify/multipart';
 import { isSensitiveAuthRoute } from './core/utils/rate-limit.util';
 import { AppModule } from './app.module';
-import { GlobalExceptionFilter } from './core/filters/global-exception.filter';
-import { AppLogger } from './core/logger/app-logger.service';
-import { LoggingInterceptor } from './core/logger/logging.interceptor';
+import { GlobalExceptionFilter } from './core/filters/exception.filter';
+import { LoggerService } from './core/logger/logger.service';
+import { LoggerInterceptor } from './core/logger/logger.interceptor';
 
 import { Reflector } from '@nestjs/core';
 import { TransformInterceptor } from './core/interceptors/transform.interceptor';
@@ -26,7 +26,7 @@ import { IdempotencyInterceptor } from './core/idempotency/idempotency.intercept
 import { IdempotencyService } from './core/idempotency/idempotency.service';
 
 async function bootstrap() {
-  const logger = AppLogger.getInstance('Bootstrap');
+  const logger = LoggerService.getInstance('Bootstrap');
 
   // Process-level safety nets to prevent unexpected crashes from background promises or async events
   process.on('unhandledRejection', (reason: unknown) => {
@@ -107,7 +107,7 @@ async function bootstrap() {
   }
 
   app.useGlobalInterceptors(
-    new LoggingInterceptor(),
+    new LoggerInterceptor(),
     new IdempotencyInterceptor(idempotencyService),
     new TransformInterceptor(reflector),
   );
@@ -238,10 +238,10 @@ async function bootstrap() {
       'Manuscript',
       'LaTeX Editor Pages, Hierarchies, Snapshots, Versions',
     )
-    .addTag('Planning', 'Kanban Tasks, Priorities, Checklists, Cycles')
+    .addTag('Planning', 'Kanban Tasks, Priorities, Relations, Cycles')
     .addTag(
       'Collaboration',
-      'Page Line Comments, Task Reactions, Sticky Canvas',
+      'Page Line Comments, WorkItem Reactions, Sticky Canvas',
     )
     .addTag(
       'Intelligence',

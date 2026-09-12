@@ -8,8 +8,8 @@ import {
 import { Reflector } from '@nestjs/core';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
-import { BYPASS_ENVELOPE_KEY } from '../decorators/bypass-envelope.decorator';
-import { ApiResponseEnvelope } from '../types/api-response.interface';
+import { BYPASS_ENVELOPE_KEY } from '../decorators/bypass.decorator';
+import { ApiResponseEnvelope } from '../types/response.type';
 
 @Injectable()
 export class TransformInterceptor<T> implements NestInterceptor<T, unknown> {

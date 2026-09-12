@@ -5,7 +5,8 @@ import { JwtService } from '@nestjs/jwt';
 export interface RagIndexPaperInput {
   id: string;
   title: string;
-  workspaceId?: string;
+  projectId?: string;
+  userId?: string;
   year?: number | null;
   doi?: string | null;
   publicationTitle?: string | null;
@@ -50,8 +51,9 @@ export class RagProvider {
     formData.append('file', blob, `${item.id}.md`);
     formData.append('title', item.title);
     formData.append('tags', 'academic-paper,library');
-    if (item.workspaceId) {
-      formData.append('workspace_id', item.workspaceId);
+    const targetScopeId = item.userId || item.projectId || (item as any).workspaceId;
+    if (targetScopeId) {
+      formData.append('project_id', targetScopeId);
     }
 
     const headers: Record<string, string> = {};
@@ -62,7 +64,7 @@ export class RagProvider {
       const token = await this.jwtService.signAsync(
         {
           sub: 'system',
-          workspace_id: item.workspaceId,
+          project_id: targetScopeId,
           scope: 'ai-delegated-action',
         },
         { secret: jwtSecret, expiresIn: '5m' },

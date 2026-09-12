@@ -13,7 +13,7 @@ import {
   RenameThreadDto,
 } from './dto/thread.dto';
 import { MessageRole } from '@prisma/client';
-import { RedisCacheService } from '@/core/cache/redis-cache.service';
+import { RedisCacheService } from '@/core/cache/redis.service';
 import { AI_REDIS_KEYS } from './constants/redis-keys.constant';
 import { PrismaService } from '@/core/database/prisma.service';
 
@@ -22,7 +22,7 @@ export interface FormattedChatSession {
   title: string;
   projectId?: string | null;
   pageId?: string | null;
-  workspaceSlug: string;
+  scopeSlug?: string;
   messageCount: number;
   lastMessage: string;
   documentIds: string[];
@@ -47,7 +47,7 @@ function formatChat(chat: any): FormattedChatSession {
     title: chat.title,
     projectId: chat.projectId,
     pageId: chat.pageId,
-    workspaceSlug: chat.workspaceSlug,
+    scopeSlug: chat.projectId || chat.userId,
     messageCount: msgs.length,
     lastMessage: lastMsg,
     documentIds: chat.documentIds || [],
@@ -76,14 +76,14 @@ export class ThreadService {
 
   private async invalidateThreadCache(
     userId: string,
-    workspaceSlug: string,
     chatId?: string,
     projectId?: string | null,
   ) {
     if (!this.cache) return;
+    const scopeId = projectId || userId;
     const promises: Promise<any>[] = [
-      this.cache.del(AI_REDIS_KEYS.userChats(workspaceSlug, userId, projectId)),
-      this.cache.del(AI_REDIS_KEYS.userChats(workspaceSlug, userId, null)),
+      this.cache.del(AI_REDIS_KEYS.userChats(scopeId, userId, projectId)),
+      this.cache.del(AI_REDIS_KEYS.userChats(userId, userId, null)),
     ];
     if (chatId) {
       promises.push(this.cache.del(AI_REDIS_KEYS.chatThread(chatId)));
@@ -97,34 +97,34 @@ export class ThreadService {
   }
 
   async getChats(
-    workspaceId: string,
     userId: string,
     projectId?: string | null,
   ): Promise<FormattedChatSession[]> {
-    if (!workspaceId) {
-      throw new BadRequestException('workspaceId is required');
-    }
-
-    const member = await this.prisma.workspaceMember.findFirst({
-      where: {
-        workspace: {
-          OR: [{ id: workspaceId }, { slug: workspaceId }],
+    if (projectId) {
+      const project = await this.prisma.project.findFirst({
+        where: {
+          id: projectId,
+          deletedAt: null,
+          OR: [
+            { createdById: userId },
+            { members: { some: { userId } } },
+          ],
         },
-        userId,
-      },
-    });
-    if (!member) {
-      throw new ForbiddenException('User is not a member of this workspace');
+        select: { id: true },
+      });
+      if (!project) {
+        throw new ForbiddenException('User does not have access to this project');
+      }
     }
 
-    const cacheKey = AI_REDIS_KEYS.userChats(workspaceId, userId, projectId);
+    const scopeId = projectId || userId;
+    const cacheKey = AI_REDIS_KEYS.userChats(scopeId, userId, projectId);
     if (this.cache) {
       const cached = await this.cache.get<FormattedChatSession[]>(cacheKey);
       if (cached) return cached;
     }
 
     const rawChats = await this.threadRepo.findUserChats(
-      workspaceId,
       userId,
       projectId,
     );
@@ -137,23 +137,23 @@ export class ThreadService {
     return result;
   }
 
-  async getPageChat(pageId: string, workspaceId: string, userId: string) {
-    if (!pageId || !workspaceId) {
-      throw new BadRequestException('pageId and workspaceId are required');
+  async getPageChat(pageId: string, userId: string) {
+    if (!pageId) {
+      throw new BadRequestException('pageId is required');
     }
-    const raw = await this.threadRepo.findPageChat(pageId, workspaceId, userId);
+    const raw = await this.threadRepo.findPageChat(pageId, userId);
     return {
       chat: raw ? formatChat(raw) : null,
       messages: raw?.messages || [],
     };
   }
 
-  async clearPageChat(pageId: string, workspaceId: string, userId: string) {
-    if (!pageId || !workspaceId) {
-      throw new BadRequestException('pageId and workspaceId are required');
+  async clearPageChat(pageId: string, userId: string) {
+    if (!pageId) {
+      throw new BadRequestException('pageId is required');
     }
-    await this.threadRepo.deletePageChat(pageId, workspaceId, userId);
-    await this.invalidateThreadCache(userId, workspaceId);
+    await this.threadRepo.deletePageChat(pageId, userId);
+    await this.invalidateThreadCache(userId);
     return { success: true };
   }
 
@@ -181,78 +181,56 @@ export class ThreadService {
     userId: string,
     dto: CreateThreadDto,
   ): Promise<FormattedChatSession> {
-    const workspaceSlug = dto.workspaceSlug || dto.workspaceId;
-    if (!workspaceSlug) {
-      throw new BadRequestException('workspaceSlug or workspaceId is required');
-    }
-
-    // Verify workspace access
-    const workspace = await this.prisma.workspace.findFirst({
-      where: {
-        OR: [{ id: workspaceSlug }, { slug: workspaceSlug }],
-      },
-    });
-    if (!workspace) {
-      throw new NotFoundException(`Workspace "${workspaceSlug}" not found`);
-    }
-
-    const member = await this.prisma.workspaceMember.findUnique({
-      where: {
-        workspaceId_userId: { workspaceId: workspace.id, userId },
-      },
-    });
-    if (!member) {
-      throw new ForbiddenException('User is not a member of this workspace');
-    }
-
     // Verify project access if specified
     if (dto.projectId) {
       const project = await this.prisma.project.findFirst({
-        where: { id: dto.projectId, workspaceId: workspace.id },
+        where: {
+          id: dto.projectId,
+          deletedAt: null,
+          OR: [
+            { createdById: userId },
+            { members: { some: { userId } } },
+          ],
+        },
+        select: { id: true, identifier: true },
       });
       if (!project) {
-        throw new NotFoundException('Project not found in this workspace');
-      }
-      if (member.role !== 'owner' && member.role !== 'admin') {
-        const projMember = await this.prisma.projectMember.findUnique({
-          where: {
-            projectId_userId: { projectId: dto.projectId, userId },
-          },
-        });
-        if (!projMember) {
-          throw new ForbiddenException(
-            'User does not have access to this project',
-          );
-        }
+        throw new ForbiddenException('User does not have access to this project');
       }
     }
 
     // Verify page access if specified
     if (dto.pageId) {
       const page = await this.prisma.page.findFirst({
-        where: { id: dto.pageId },
-        include: { project: true },
-      });
-      if (!page || page.project?.workspaceId !== workspace.id) {
-        throw new NotFoundException('Page not found in this workspace');
-      }
-      if (member.role !== 'owner' && member.role !== 'admin') {
-        const projMember = await this.prisma.projectMember.findUnique({
-          where: {
-            projectId_userId: { projectId: page.projectId, userId },
+        where: { id: dto.pageId, deletedAt: null },
+        include: {
+          project: {
+            select: {
+              id: true,
+              identifier: true,
+              createdById: true,
+              members: { where: { userId }, select: { userId: true } },
+            },
           },
-        });
-        if (!projMember) {
-          throw new ForbiddenException(
-            'User does not have access to this page',
-          );
-        }
+        },
+      });
+      if (!page) {
+        throw new NotFoundException('Page not found');
+      }
+      const canAccess =
+        page.authorId === userId ||
+        page.project?.createdById === userId ||
+        (page.project?.members && page.project.members.length > 0);
+      if (!canAccess) {
+        throw new ForbiddenException('User does not have access to this page');
+      }
+      if (!dto.projectId && page.projectId) {
+        dto.projectId = page.projectId;
       }
     }
 
     const created = await this.threadRepo.createChat({
       userId,
-      workspaceSlug,
       projectId: dto.projectId,
       pageId: dto.pageId,
       title: dto.title,
@@ -275,7 +253,6 @@ export class ThreadService {
       const result = formatChat(updated);
       await this.invalidateThreadCache(
         userId,
-        workspaceSlug,
         created.id,
         dto.projectId,
       );
@@ -285,7 +262,6 @@ export class ThreadService {
     const result = formatChat(created);
     await this.invalidateThreadCache(
       userId,
-      workspaceSlug,
       created.id,
       dto.projectId,
     );
@@ -319,7 +295,6 @@ export class ThreadService {
 
     await this.invalidateThreadCache(
       chat.userId,
-      chat.workspaceSlug,
       chatId,
       chat.projectId,
     );
@@ -342,7 +317,6 @@ export class ThreadService {
 
     await this.invalidateThreadCache(
       chat.userId,
-      chat.workspaceSlug,
       chatId,
       chat.projectId,
     );
@@ -359,7 +333,6 @@ export class ThreadService {
 
     await this.invalidateThreadCache(
       chat.userId,
-      chat.workspaceSlug,
       chatId,
       chat.projectId,
     );
@@ -367,9 +340,10 @@ export class ThreadService {
     return { success: true };
   }
 
-  async clearMemory(workspaceId: string, userId: string) {
-    await this.threadRepo.clearUserWorkspaceChats(workspaceId, userId);
-    await this.invalidateThreadCache(userId, workspaceId);
+  async clearMemory(userId: string, scopeId?: string) {
+    const targetProject = scopeId && scopeId !== 'clear' && scopeId !== userId ? scopeId : null;
+    await this.threadRepo.clearUserChats(userId, targetProject);
+    await this.invalidateThreadCache(userId, undefined, targetProject);
     return { success: true };
   }
 }

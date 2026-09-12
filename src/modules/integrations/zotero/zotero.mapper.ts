@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { normalizeDoi } from '../../library/items/utils/items.utils';
 
-export interface MappedCatalogItem {
+export interface MappedItem {
   remoteKey: string;
   remoteVersion: bigint;
   title: string;
@@ -132,9 +132,9 @@ export class ZoteroMapper {
   ]);
 
   /**
-   * Maps a raw Zotero Item payload to canonical CatalogItem structure.
+   * Maps a raw Zotero Item payload to canonical Item structure.
    */
-  mapZoteroItem(rawItem: any): MappedCatalogItem {
+  mapZoteroItem(rawItem: any): MappedItem {
     const data = rawItem.data || rawItem;
     const remoteKey = String(rawItem.key || data.key);
     const remoteVersion = BigInt(rawItem.version || data.version || 0);
@@ -388,7 +388,7 @@ export class ZoteroMapper {
   }
 
   /**
-   * Maps a canonical CatalogItem to Zotero API payload format.
+   * Maps a canonical Item to Zotero API payload format.
    */
   mapToZoteroItem(
     item: Record<string, any>,

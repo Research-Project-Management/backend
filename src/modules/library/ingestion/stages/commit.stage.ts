@@ -1,11 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { ItemsService } from '../../items/items.service';
 import { ItemMetadata } from '../metadata/types/metadata.types';
-import { CreateCatalogItemData } from '../../items/types/items.types';
+import { CreateItemData } from '../../items/types/items.types';
 import { LibraryItemSource } from '../../outbox/outbox.events';
 import {
   splitAuthorString,
   cleanAbstractText,
+  parseCreatorString,
 } from '../../items/utils/items.utils';
 import { normalizeTags } from '../../tags/utils/tags.utils';
 
@@ -51,13 +52,33 @@ function mergeCreators(metadata: ItemMetadata) {
   const creators: any[] = [];
   const knownCreators = new Set<string>();
 
-  const append = (name: string, creatorType: string = 'author') => {
+  const append = (
+    name: string,
+    creatorType: string = 'author',
+    firstName?: string,
+    lastName?: string,
+  ) => {
     const normalizedName = name.trim();
     if (!normalizedName) return;
     const key = `${creatorType}:${normalizedName.toLocaleLowerCase()}`;
     if (knownCreators.has(key)) return;
     knownCreators.add(key);
-    creators.push({ name: normalizedName, creatorType });
+
+    let finalFirst = firstName?.trim();
+    let finalLast = lastName?.trim();
+    if (!finalFirst && !finalLast) {
+      const parsed = parseCreatorString(normalizedName);
+      finalFirst = parsed.firstName;
+      finalLast = parsed.lastName;
+    }
+
+    creators.push({
+      name: normalizedName,
+      fullName: normalizedName,
+      creatorType,
+      firstName: finalFirst || '',
+      lastName: finalLast || '',
+    });
   };
 
   for (const c of initialCreators) {
@@ -65,7 +86,12 @@ function mergeCreators(metadata: ItemMetadata) {
     const rawName = extractAuthorString(c);
     if (rawName) {
       for (const p of splitAuthorString(rawName)) {
-        append(p, creatorType);
+        append(
+          p,
+          creatorType,
+          c.firstName || undefined,
+          c.lastName || undefined,
+        );
       }
     }
   }
@@ -132,18 +158,19 @@ function generateBibtexCitationKey(metadata: ItemMetadata): string | undefined {
   return `${authorPart || 'ref'}${yearPart}${titlePart || 'paper'}`;
 }
 
-/** Converts reconciled provider metadata to the Catalog persistence contract.
+/** Converts reconciled provider metadata to the Item persistence contract.
  * This is the sole conversion used by the asynchronous ingestion path. */
-export function toCatalogItemData(
+export function toItemData(
   metadata: ItemMetadata,
   options?: CommitStageOptions,
-): CreateCatalogItemData {
+): CreateItemData {
   const rawTags = normalizeTags(
     metadata.tags || metadata.keywords || metadata.labels || [],
   );
   // Only fields with no dedicated DB column go into extraFields
   const extraFields: Record<string, unknown> = {
     ...(metadata.extraFields || {}),
+    ...(metadata.edition ? { edition: metadata.edition } : {}),
     ...(metadata.storageId !== undefined
       ? { storageId: metadata.storageId }
       : {}),
@@ -174,7 +201,18 @@ export function toCatalogItemData(
     section: metadata.section,
     partNumber: metadata.partNumber,
     partTitle: metadata.partTitle,
-    pages: metadata.pages,
+    pages:
+      metadata.pages ||
+      (metadata.extraFields?.numberOfPages !== undefined &&
+      metadata.extraFields?.numberOfPages !== null &&
+      typeof metadata.extraFields.numberOfPages !== 'object'
+        ? String(metadata.extraFields.numberOfPages as string | number | boolean)
+        : undefined) ||
+      (metadata.extraFields?.numPages !== undefined &&
+      metadata.extraFields?.numPages !== null &&
+      typeof metadata.extraFields.numPages !== 'object'
+        ? String(metadata.extraFields.numPages as string | number | boolean)
+        : undefined),
     series: metadata.series,
     seriesTitle: metadata.seriesTitle,
     seriesText: metadata.seriesText,
@@ -249,15 +287,15 @@ export class CommitStage {
   constructor(private readonly itemsService: ItemsService) {}
 
   /**
-   * Executes canonical Catalog commit for a reconciled item proposal.
-   * Persists CatalogItem, child attachments, tags/keywords, and literature notes.
+   * Executes canonical Item commit for a reconciled item proposal.
+   * Persists Item, child attachments, tags/keywords, and literature notes.
    */
   async execute(
     workspaceId: string,
     metadata: ItemMetadata,
     options?: CommitStageOptions,
   ): Promise<any> {
-    const createData = toCatalogItemData(metadata, options);
+    const createData = toItemData(metadata, options);
 
     const createdItem = await this.itemsService.createItem(
       workspaceId,

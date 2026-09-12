@@ -8,22 +8,14 @@ import {
   IsOptional,
 } from 'class-validator';
 
-export class WorkspaceStatsResponse {
+export class ProjectOverviewDto {
   @ApiProperty()
   @IsNumber()
   members!: number;
 
   @ApiProperty()
   @IsNumber()
-  projects!: number;
-
-  @ApiProperty()
-  @IsNumber()
   tasks!: number;
-
-  @ApiProperty()
-  @IsNumber()
-  papers!: number;
 
   @ApiProperty()
   @IsNumber()
@@ -36,6 +28,42 @@ export class WorkspaceStatsResponse {
   @ApiProperty()
   @IsNumber()
   stickies!: number;
+
+  @ApiProperty()
+  @IsNumber()
+  cycles!: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  papers?: number;
+}
+
+export class UserOverviewDto {
+  @ApiProperty()
+  @IsNumber()
+  projects!: number;
+
+  @ApiProperty()
+  @IsNumber()
+  assignedWorkItems!: number;
+
+  @ApiProperty()
+  @IsNumber()
+  createdTasks!: number;
+
+  @ApiProperty()
+  @IsNumber()
+  pages!: number;
+
+  @ApiProperty()
+  @IsNumber()
+  stickies!: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  papers?: number;
 }
 
 export class ProjectTaskDistributionDto {
@@ -83,36 +111,4 @@ export class CycleAnalyticsDto {
   completionRate!: number;
 }
 
-export class YourWorkSummaryDto {
-  @ApiProperty()
-  @IsString()
-  workspaceId!: string;
-
-  @ApiProperty()
-  @IsString()
-  userId!: string;
-
-  @ApiProperty()
-  @IsArray()
-  assigned!: any[];
-
-  @ApiProperty()
-  @IsArray()
-  created!: any[];
-
-  @ApiProperty()
-  @IsArray()
-  subscribed!: any[];
-
-  @ApiProperty()
-  @IsArray()
-  activity!: any[];
-
-  @ApiProperty()
-  @IsArray()
-  recent!: any[];
-
-  @ApiProperty()
-  @IsBoolean()
-  success!: boolean;
-}
+export { YourWorkSummaryDto } from '../your-work/dto/your-work.dto';

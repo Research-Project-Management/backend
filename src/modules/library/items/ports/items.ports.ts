@@ -1,8 +1,11 @@
-import { ItemMetadata, CatalogItemSummary } from '../types/items.types';
+import {
+  ItemMetadata,
+  ItemSummary as ItemDomainSummary,
+} from '../types/items.types';
 
 export interface ItemSnapshot {
   id: string;
-  workspaceId: string;
+  userId?: string;
   title: string;
   abstract?: string | null;
   year?: number | null;
@@ -20,6 +23,7 @@ export interface ItemSnapshot {
 
 export interface ItemSummary {
   id: string;
+  userId?: string;
   title: string;
   itemType?: string | null;
   version?: number;
@@ -29,23 +33,22 @@ export interface ItemSummary {
 export type SyncItemSnapshot = ItemSnapshot;
 export type SyncItemSummary = ItemSummary;
 
-export interface CatalogItemDetail extends ItemMetadata {
+export interface ItemDetail extends ItemMetadata {
   id: string;
-  workspaceId: string;
+  userId?: string;
   version: number;
   createdAt: Date;
   updatedAt: Date;
   deletedAt?: Date | null;
 }
 
-export interface CreateCatalogItemCommand {
-  workspaceId: string;
+export interface CreateItemCommand {
   userId: string;
   metadata: ItemMetadata;
 }
 
-export interface UpdateCatalogItemCommand {
-  workspaceId: string;
+export interface UpdateItemCommand {
+  userId: string;
   itemId: string;
   metadata: Partial<ItemMetadata>;
   expectedVersion?: number;
@@ -78,54 +81,43 @@ export interface DuplicateCandidateItem {
   }>;
 }
 
-export interface ICatalogReadPort {
-  findById(
-    workspaceId: string,
-    itemId: string,
-  ): Promise<CatalogItemDetail | null>;
-  findByIds(
-    workspaceId: string,
-    itemIds: string[],
-  ): Promise<CatalogItemDetail[]>;
-  findByDoi(
-    workspaceId: string,
-    doi: string,
-  ): Promise<CatalogItemDetail | null>;
+export interface IItemReadPort {
+  findById(userId: string, itemId: string): Promise<ItemDetail | null>;
+  findByIds(userId: string, itemIds: string[]): Promise<ItemDetail[]>;
+  findByDoi(userId: string, doi: string): Promise<ItemDetail | null>;
   findSummaryById(
-    workspaceId: string,
+    userId: string,
     itemId: string,
-  ): Promise<CatalogItemSummary | null>;
+  ): Promise<ItemDomainSummary | null>;
   findSummariesByIds(
-    workspaceId: string,
+    userId: string,
     itemIds: string[],
-  ): Promise<CatalogItemSummary[]>;
+  ): Promise<ItemDomainSummary[]>;
   getItemSnapshot(
-    workspaceId: string,
+    userId: string,
     itemId: string,
   ): Promise<SyncItemSnapshot | null>;
   getItemSnapshots(
-    workspaceId: string,
+    userId: string,
     itemIds: string[],
   ): Promise<SyncItemSummary[]>;
   findQualityAuditItems(
-    workspaceId: string,
+    userId: string,
     limit?: number,
   ): Promise<QualityAuditCandidateItem[]>;
   findDuplicateCandidateItems(
-    workspaceId: string,
+    userId: string,
     limit?: number,
   ): Promise<DuplicateCandidateItem[]>;
 }
 
 export const ITEM_READ_PORT = Symbol('ITEM_READ_PORT');
-export const CATALOG_READ_PORT = ITEM_READ_PORT;
-export type IItemReadPort = ICatalogReadPort;
 
 export interface IItemExistencePort {
-  exists(workspaceId: string, itemId: string): Promise<boolean>;
-  assertExists(workspaceId: string, itemId: string): Promise<void>;
+  exists(userId: string, itemId: string): Promise<boolean>;
+  assertExists(userId: string, itemId: string): Promise<void>;
   existMany(
-    workspaceId: string,
+    userId: string,
     itemIds: string[],
   ): Promise<Map<string, boolean>>;
 }
@@ -136,8 +128,7 @@ export const ITEM_NOTES_EXTRACTOR_PORT = Symbol('ITEM_NOTES_EXTRACTOR_PORT');
 
 export interface IItemNotesExtractorPort {
   extractNotesFromAnnotations(
-    workspaceId: string,
-    itemId: string,
     userId: string,
+    itemId: string,
   ): Promise<unknown>;
 }

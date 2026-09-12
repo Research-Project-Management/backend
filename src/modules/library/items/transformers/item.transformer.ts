@@ -8,7 +8,7 @@ import {
   CreatorRoleChange,
 } from '../types/items.types';
 import {
-  CATALOG_COLUMN_METADATA_FIELDS,
+  ITEM_COLUMN_METADATA_FIELDS,
   FIELD_ALIASES,
   REVERSE_FIELD_ALIASES,
 } from '../constants/items.constants';
@@ -293,7 +293,10 @@ export class ItemTransformer {
     }
 
     for (const [sField, val] of Object.entries(sourceValues)) {
-      const matchedTargetKey = this.findMatchingTargetField(sField, targetFields);
+      const matchedTargetKey = this.findMatchingTargetField(
+        sField,
+        targetFields,
+      );
       if (matchedTargetKey) {
         projectedItem[matchedTargetKey] = val;
         const dbCol = FIELD_ALIASES[matchedTargetKey];
@@ -321,8 +324,8 @@ export class ItemTransformer {
           });
         } else {
           const isPersistentCol =
-            CATALOG_COLUMN_METADATA_FIELDS.has(sField) ||
-            CATALOG_COLUMN_METADATA_FIELDS.has(FIELD_ALIASES[sField]);
+            ITEM_COLUMN_METADATA_FIELDS.has(sField) ||
+            ITEM_COLUMN_METADATA_FIELDS.has(FIELD_ALIASES[sField]);
 
           if (
             isPersistentCol &&

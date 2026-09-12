@@ -17,10 +17,10 @@ import { FastifyRequest, FastifyReply } from 'fastify';
 import '@fastify/multipart';
 import { AiService } from './ai.service';
 import { AiQueryDto, GetDocumentsBulkDto } from './dto/ai.dto';
-import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
-import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
+import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
+import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
 import { Public } from '@/modules/iam/authn/decorators/public.decorator';
-import { BypassEnvelope } from '@/core/decorators/bypass-envelope.decorator';
+import { BypassEnvelope } from '@/core/decorators/bypass.decorator';
 
 @ApiTags('AI - Unified Copilot')
 @ApiBearerAuth('JWT-auth')
@@ -156,23 +156,19 @@ export class AiController {
       throw new BadRequestException('File is required');
     }
 
-    const workspaceId = fields.workspaceId || fields.workspace_id;
-    if (!workspaceId) {
-      throw new BadRequestException('workspaceId is required');
-    }
-
     const projectId = fields.projectId || fields.project_id;
+    const scopeId = projectId || fields.scopeId || userId;
     const title = fields.title;
     const tags = fields.tags;
     const chatId = fields.chatId || fields.chat_id;
 
     return this.aiService.uploadDocument(
       userId,
-      String(workspaceId),
       buffer,
       mimeType,
       filename,
       {
+        scopeId: String(scopeId),
         projectId: projectId ? String(projectId) : undefined,
         chatId: chatId ? String(chatId) : undefined,
         title: title ? String(title) : undefined,
@@ -188,35 +184,29 @@ export class AiController {
     @CurrentUser('id') userId: string,
     @Body() body: GetDocumentsBulkDto,
   ) {
-    if (!body?.workspaceId) {
-      throw new BadRequestException('workspaceId is required');
-    }
     return this.aiService.getDocumentsBulk(
       userId,
-      body.workspaceId,
       body.ids || [],
+      body.projectId,
     );
   }
 
   @Get('documents')
   @ApiOperation({
-    summary: 'List all RAG documents in workspace vector store',
+    summary: 'List all RAG documents in vector store',
   })
   async getDocuments(
     @CurrentUser('id') userId: string,
     @Req() req: FastifyRequest,
   ) {
     const query = req.query as Record<string, string>;
-    const workspaceId = query?.workspaceId || query?.workspace_id;
-    if (!workspaceId) {
-      throw new BadRequestException('workspaceId query parameter is required');
-    }
-    return this.aiService.getDocuments(userId, workspaceId);
+    const projectId = query?.projectId || query?.project_id;
+    return this.aiService.getDocuments(userId, projectId);
   }
 
   @Get(['documents/:docId', 'documents/:docId/content'])
   @ApiOperation({
-    summary: 'Get document details from workspace vector store',
+    summary: 'Get document details from vector store',
   })
   async getDocument(
     @CurrentUser('id') userId: string,
@@ -224,10 +214,7 @@ export class AiController {
     @Req() req: FastifyRequest,
   ) {
     const query = req.query as Record<string, string>;
-    const workspaceId = query?.workspaceId || query?.workspace_id;
-    if (!workspaceId) {
-      throw new BadRequestException('workspaceId query parameter is required');
-    }
-    return this.aiService.getDocument(userId, workspaceId, docId);
+    const projectId = query?.projectId || query?.project_id;
+    return this.aiService.getDocument(userId, docId, projectId);
   }
 }

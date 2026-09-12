@@ -1,12 +1,11 @@
 import {
   IsArray,
-  IsEnum,
   IsNotEmpty,
   IsObject,
   IsOptional,
   IsString,
 } from 'class-validator';
-import { StickyScope } from '@prisma/client';
+import { PartialType } from '@nestjs/swagger';
 
 export class CreateStickyDto {
   @IsString()
@@ -21,10 +20,6 @@ export class CreateStickyDto {
   @IsOptional()
   color?: string;
 
-  @IsEnum(StickyScope)
-  @IsOptional()
-  scope?: StickyScope;
-
   @IsObject()
   @IsOptional()
   position?: { x: number; y: number };
@@ -35,10 +30,8 @@ export class CreateStickyDto {
 
   @IsString()
   @IsOptional()
-  workspaceId?: string;
+  scope?: 'personal' | 'project';
 }
-
-import { PartialType } from '@nestjs/swagger';
 
 export class UpdateStickyDto extends PartialType(CreateStickyDto) {
   @IsString()

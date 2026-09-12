@@ -91,7 +91,8 @@ export type ItemRelationType =
 
 export interface ItemRelation {
   id: string;
-  workspaceId: string;
+  projectId?: string;
+  workspaceId?: string;
   sourceItemId: string;
   targetItemId: string;
   relationType: ItemRelationType;
@@ -105,10 +106,12 @@ export interface ItemRelationInput {
   description?: string;
 }
 
-// ── Catalog Item Domain Models & Inputs ──────────────────────────────────────
-export interface CatalogItemSummary {
+// ── Item Domain Models & Inputs ──────────────────────────────────────────────
+export interface ItemSummary {
   id: string;
-  workspaceId: string;
+  projectId?: string;
+  workspaceId?: string;
+  userId?: string;
   title: string;
   itemType?: string;
   year?: number | null;
@@ -173,7 +176,7 @@ export interface ItemMetadata {
   identifiers?: ItemIdentifier[];
 }
 
-export interface CreateCatalogItemInput {
+export interface CreateItemInput {
   title: string;
   itemType?: string;
   year?: number | null;
@@ -225,7 +228,7 @@ export interface CreateCatalogItemInput {
   uploadedById: string;
 }
 
-export interface UpdateCatalogItemInput {
+export interface UpdateItemInput {
   title?: string;
   itemType?: string;
   year?: number | null;
@@ -318,8 +321,8 @@ export interface TypeConversionPreview {
   mappedFields: FieldMappingChange[];
   droppedFields: DroppedField[];
   creatorChanges: CreatorRoleChange[];
-  projectedItem: Record<string, any>;
-  unmappedRetained: Record<string, any>;
+  projectedItem: Record<string, unknown>;
+  unmappedRetained: Record<string, unknown>;
   hasLoss: boolean;
 }
 
@@ -329,7 +332,7 @@ export interface ConvertTypeOptions {
 }
 
 // ── Persistence Layer Data Transfer Shapes ─────────────────────────────────
-export interface CreateCatalogItemData {
+export interface CreateItemData {
   title: string;
   authors?: string[];
   year?: number | null;
@@ -404,9 +407,10 @@ export interface CreateCatalogItemData {
   journalAbbreviation?: string;
   citeKey?: string;
   userId?: string;
+  projectId?: string | null;
 }
 
-export interface UpdateCatalogItemData {
+export interface UpdateItemData {
   // Canonical Zotero v42 Schema Aliases
   DOI?: string;
   archiveId?: string;

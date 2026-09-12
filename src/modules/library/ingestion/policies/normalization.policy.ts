@@ -163,7 +163,25 @@ export class NormalizationPolicy {
       if (value) (result as Record<string, unknown>)[field] = value;
     }
 
-    const pages = this.cleanString(raw.pages);
+    const pageNum =
+      (raw as any).numberOfPages ??
+      (raw as any).numPages ??
+      (raw as any).pageCount;
+    if (pageNum != null) {
+      const cleanNum =
+        typeof pageNum === 'number' ? pageNum : parseInt(String(pageNum), 10);
+      if (!isNaN(cleanNum) && cleanNum > 0) {
+        result.extraFields = {
+          ...(result.extraFields || {}),
+          numberOfPages: cleanNum,
+          numPages: cleanNum,
+        };
+      }
+    }
+
+    const rawPages =
+      raw.pages || (pageNum != null ? String(pageNum) : undefined);
+    const pages = this.cleanString(rawPages);
     if (pages) result.pages = pages.replace(/--/g, '-');
 
     // 8. Abstract

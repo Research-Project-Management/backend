@@ -1,5 +1,3 @@
-export type { CollectionId, WorkspaceId } from '../../../../core/types/brand.type';
-
 export type CollectionDeleteStrategy = 'cascade' | 'move-to-parent' | 'orphan';
 
 export interface CollectionTreeNode {
@@ -15,7 +13,7 @@ export interface CollectionTreeNode {
 
 export interface CollectionDetail {
   id: string;
-  workspaceId: string;
+  projectId?: string;
   name: string;
   description?: string | null;
   color?: string | null;

@@ -7,14 +7,14 @@
 
 export const AI_REDIS_KEYS = {
   /**
-   * User AI chat sessions list in workspace (JSON array, TTL 30m)
+   * User AI chat sessions list in scope (project or personal) (JSON array, TTL 30m)
    */
   userChats: (
-    workspaceSlug: string,
+    scopeId: string,
     userId: string,
     projectId?: string | null,
   ) =>
-    `flux:ai:chats:ws:${workspaceSlug}:user:${userId}${projectId ? `:proj:${projectId}` : ''}`,
+    `flux:ai:chats:${scopeId}:user:${userId}${projectId ? `:proj:${projectId}` : ''}`,
 
   /**
    * Full chat thread with message history (JSON object, TTL 30m)

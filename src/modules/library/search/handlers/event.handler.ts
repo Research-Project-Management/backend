@@ -18,12 +18,12 @@ export class EventHandler {
   @OnEvent(LIBRARY_EVENT_TYPES.ITEM_DELETED, { async: true })
   async handleItemDeleted(event: DomainEventEnvelope) {
     this.logger.debug(
-      `[SearchEventHandler] Cleaning up full-text index for deleted item ${event.aggregateId} (workspace: ${event.workspaceId})`,
+      `[SearchEventHandler] Cleaning up full-text index for deleted item ${event.aggregateId} (scope: ${(event as any).userId || (event as any).projectId || (event as any).workspaceId})`,
     );
 
     try {
-      const attachments = await this.prisma.catalogAttachment.findMany({
-        where: { catalogItemId: event.aggregateId },
+      const attachments = await this.prisma.attachment.findMany({
+        where: { itemId: event.aggregateId },
         select: { id: true },
       });
 
@@ -59,9 +59,8 @@ export class EventHandler {
   @OnEvent(LIBRARY_EVENT_TYPES.ITEM_CREATED, { async: true })
   handleItemCreated(event: DomainEventEnvelope) {
     this.logger.debug(
-      `[EventHandler] New item indexed in catalog: ${event.aggregateId} (workspace: ${event.workspaceId})`,
+      `[EventHandler] New item indexed in library: ${event.aggregateId} (scope: ${(event as any).userId || (event as any).projectId || (event as any).workspaceId})`,
     );
   }
 }
 
-export { EventHandler as SearchEventHandler };

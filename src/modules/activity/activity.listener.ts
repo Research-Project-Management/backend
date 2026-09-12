@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { ActivityService } from './activity.service';
 import { DomainActivityEvent } from './events/activity.events';
-import { RedisCacheService } from '@/core/cache/redis-cache.service';
+import { RedisCacheService } from '@/core/cache/redis.service';
 
 @Injectable()
 export class ActivityListener {
@@ -20,14 +20,63 @@ export class ActivityListener {
     );
 
     await this.activityService.recordEvent(event);
-    await this.invalidateAnalyticsCache(event.workspaceId, event.projectId);
+    await this.invalidateAnalyticsCache(event.projectId, event.actorId);
   }
 
   @OnEvent('task.*', { async: true })
-  async handleTaskEvents(event: DomainActivityEvent) {
-    if (event?.entityType) {
-      await this.handleGenericActivity(event);
+  async handleTaskEvents(event: any) {
+    if (event instanceof DomainActivityEvent) {
+      return this.handleGenericActivity(event);
     }
+    const entityId = event?.entityId || event?.taskId;
+    if (entityId) {
+      const activityEvent = new DomainActivityEvent({
+        entityType: 'task',
+        entityId,
+        verb: event.verb || 'updated',
+        actorId: event.actorId || event.authorId || '',
+        projectId: event.projectId,
+        field: event.field,
+        oldValue: event.oldValue,
+        newValue: event.newValue,
+      });
+      await this.handleGenericActivity(activityEvent);
+
+      // Record initial state if WorkItem was created with a column
+      if (event.verb === 'created' && event.columnId) {
+        const stateInitEvent = new DomainActivityEvent({
+          entityType: 'task',
+          entityId,
+          verb: 'transitioned',
+          actorId: event.actorId || event.authorId || '',
+          projectId: event.projectId,
+          field: 'state',
+          oldValue: null as any,
+          newValue: event.columnId,
+        });
+        await this.handleGenericActivity(stateInitEvent);
+      }
+    }
+  }
+
+  @OnEvent('comment.*', { async: true })
+  async handleCommentEvents(event: any) {
+    const taskId = event.taskId;
+    if (!taskId) return;
+
+    const activityEvent = new DomainActivityEvent({
+      entityType: 'comment',
+      entityId: event.commentId || taskId,
+      verb: event.content !== undefined ? 'commented' : 'updated_comment',
+      actorId: event.authorId || '',
+      projectId: event.projectId,
+      field: 'comment',
+      newValue:
+        typeof event.content === 'string'
+          ? event.content.slice(0, 100)
+          : undefined,
+    });
+    await this.handleGenericActivity(activityEvent);
   }
 
   @OnEvent('paper.*', { async: true })
@@ -51,29 +100,57 @@ export class ActivityListener {
     }
   }
 
+  @OnEvent('state.*', { async: true })
+  async handleStateEvents(event: any) {
+    if (event instanceof DomainActivityEvent) {
+      return this.handleGenericActivity(event);
+    }
+    const entityId = event?.entityId || event?.projectId;
+    if (entityId) {
+      const activityEvent = new DomainActivityEvent({
+        entityType: 'project' as any,
+        entityId,
+        verb: event.verb || 'updated',
+        actorId: event.actorId || '',
+        projectId: event.projectId,
+      });
+      await this.handleGenericActivity(activityEvent);
+    }
+  }
+
   @OnEvent('cycle.*', { async: true })
-  async handleCycleEvents(event: DomainActivityEvent) {
-    if (event?.entityType) {
-      await this.handleGenericActivity(event);
+  async handleCycleEvents(event: any) {
+    if (event instanceof DomainActivityEvent) {
+      return this.handleGenericActivity(event);
+    }
+    const entityId = event?.entityId || event?.cycleId;
+    if (entityId) {
+      const activityEvent = new DomainActivityEvent({
+        entityType: 'cycle',
+        entityId,
+        verb: event.verb || 'updated',
+        actorId: event.actorId || event.userId || '',
+        projectId: event.projectId,
+        field: event.field,
+        oldValue: event.oldValue,
+        newValue: event.newValue,
+      });
+      await this.handleGenericActivity(activityEvent);
     }
   }
 
   private async invalidateAnalyticsCache(
-    workspaceId: string,
     projectId?: string | null,
+    userId?: string | null,
   ) {
     try {
-      if (workspaceId) {
-        await this.redisCache.del(
-          `analytics:workspace:${workspaceId}:overview`,
-        );
-        await this.redisCache.delPattern(
-          `analytics:workspace:${workspaceId}:*`,
-        );
-      }
       if (projectId) {
         await this.redisCache.del(`analytics:project:${projectId}:insights`);
         await this.redisCache.delPattern(`analytics:project:${projectId}:*`);
+      }
+      if (userId) {
+        await this.redisCache.del(`analytics:user:${userId}:overview`);
+        await this.redisCache.delPattern(`analytics:user:${userId}:*`);
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);

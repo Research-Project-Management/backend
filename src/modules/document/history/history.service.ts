@@ -5,12 +5,12 @@ import {
   Optional,
 } from '@nestjs/common';
 import { HistoryRepository } from './history.repository';
-import { PageService } from '../page/page.service';
+import { PageService } from '../core/core.service';
 import { CreateVersionDto } from './dto/history.dto';
 import { VersionEventType, Prisma } from '@prisma/client';
 import { tryCatchSync } from '@/core/utils/error.util';
-import { RedisCacheService } from '@/core/cache/redis-cache.service';
-import { DOCUMENT_REDIS_KEYS } from '../constants/redis-keys.constant';
+import { RedisCacheService } from '@/core/cache/redis.service';
+import { DOCUMENT_REDIS_KEYS } from '../core/constants/redis-keys.constant';
 
 @Injectable()
 export class HistoryService {

@@ -10,10 +10,10 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { EngineService } from './engine.service';
 import { SaveAndSyncDto, CompileDocumentDto } from './dto/engine.dto';
-import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
-import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
-import { ProjectRoleGuard } from '@/modules/iam/authz/guards/project-role.guard';
-import { ProjectRoles } from '@/modules/iam/authz/decorators/project-roles.decorator';
+import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
+import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
+import { ProjectRoleGuard } from '@/modules/iam/authz/guards/role.guard';
+import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
 
 @ApiTags('Document - Engine')
 @ApiBearerAuth('JWT-auth')
@@ -27,7 +27,7 @@ export class EngineController {
     'manuscript/pages/:pageId/save-and-sync',
   ])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('admin', 'contributor')
+  @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
@@ -43,7 +43,7 @@ export class EngineController {
 
   @Post(['documents/pages/:pageId/build', 'manuscript/pages/:pageId/build'])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('admin', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
@@ -61,7 +61,7 @@ export class EngineController {
     'manuscript/pages/:pageId/rollback/:versionId',
   ])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('admin', 'contributor')
+  @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:

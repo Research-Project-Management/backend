@@ -1,11 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
-import {
-  buildWorkspaceIdentifierWhere,
-  isUuid,
-} from '@/core/utils/tenant.util';
+import { isUUID } from 'class-validator';
 import { DomainActivityEvent } from './events/activity.events';
-import { EntityType, ActivityEvent } from '@prisma/client';
+import { EntityType, ActivityEvent, Prisma } from '@prisma/client';
 import {
   IActivityRepository,
   ActivityEventWithActor,
@@ -28,21 +25,48 @@ export class ActivityRepository implements IActivityRepository {
         oldIdentifier: event.oldIdentifier,
         newIdentifier: event.newIdentifier,
         actorId: event.actorId,
-        workspaceId: event.workspaceId,
         projectId: event.projectId,
       },
     });
   }
 
-  async resolveWorkspace(workspaceIdOrSlug: string) {
-    return this.prisma.workspace.findFirst({
-      where: buildWorkspaceIdentifierWhere(workspaceIdOrSlug),
-      select: { id: true },
-    });
+  async findProjectFeed(
+    projectId: string,
+    options?: {
+      entityType?: EntityType;
+      limit?: number;
+      offset?: number;
+    },
+  ): Promise<{ items: ActivityEventWithActor[]; total: number }> {
+    if (!isUUID(projectId)) return { items: [], total: 0 };
+
+    const limit = options?.limit ?? 50;
+    const offset = options?.offset ?? 0;
+
+    const where: any = { projectId };
+    if (options?.entityType) {
+      where.entityType = options.entityType;
+    }
+
+    const [items, total] = await Promise.all([
+      this.prisma.activityEvent.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        skip: offset,
+        include: {
+          actor: { select: ACTOR_MINIMAL_SELECT },
+          project: { select: { id: true, name: true } },
+        },
+      }),
+      this.prisma.activityEvent.count({ where }),
+    ]);
+
+    return { items, total };
   }
 
-  async findWorkspaceFeed(
-    workspaceId: string,
+  async findUserFeed(
+    userId: string,
     options?: {
       projectId?: string;
       entityType?: EntityType;
@@ -50,18 +74,20 @@ export class ActivityRepository implements IActivityRepository {
       offset?: number;
     },
   ): Promise<{ items: ActivityEventWithActor[]; total: number }> {
-    const ws = await this.resolveWorkspace(workspaceId);
-    const canonicalWorkspaceId =
-      ws?.id || (isUuid(workspaceId) ? workspaceId : null);
-    if (!canonicalWorkspaceId) return { items: [], total: 0 };
+    if (options?.projectId && isUUID(options.projectId)) {
+      return this.findProjectFeed(options.projectId, options);
+    }
+    if (!isUUID(userId)) return { items: [], total: 0 };
 
     const limit = options?.limit ?? 50;
     const offset = options?.offset ?? 0;
 
-    const where: any = { workspaceId: canonicalWorkspaceId };
-    if (options?.projectId && isUuid(options.projectId)) {
-      where.projectId = options.projectId;
-    }
+    const where: any = {
+      OR: [
+        { actorId: userId },
+        { project: { members: { some: { userId } } } },
+      ],
+    };
     if (options?.entityType) {
       where.entityType = options.entityType;
     }
@@ -88,7 +114,7 @@ export class ActivityRepository implements IActivityRepository {
     entityId: string,
     limit = 50,
   ): Promise<ActivityEventWithActor[]> {
-    if (!isUuid(entityId)) return [];
+    if (!isUUID(entityId)) return [];
     return this.prisma.activityEvent.findMany({
       where: {
         entityType,
@@ -103,24 +129,23 @@ export class ActivityRepository implements IActivityRepository {
     });
   }
 
-  async findRecentByActor(
-    workspaceId: string,
+  async findUserRecentEvents(
     actorId: string,
     limit = 50,
   ): Promise<ActivityEvent[]> {
-    const ws = await this.resolveWorkspace(workspaceId);
-    const canonicalWorkspaceId =
-      ws?.id || (isUuid(workspaceId) ? workspaceId : null);
-    if (!canonicalWorkspaceId || !isUuid(actorId)) return [];
-
+    if (!isUUID(actorId)) return [];
     return this.prisma.activityEvent.findMany({
-      where: {
-        workspaceId: canonicalWorkspaceId,
-        actorId,
-      },
+      where: { actorId },
       orderBy: { createdAt: 'desc' },
       take: limit,
     });
+  }
+
+  async findRecentByActor(
+    actorId: string,
+    limit = 50,
+  ): Promise<ActivityEvent[]> {
+    return this.findUserRecentEvents(actorId, limit);
   }
 
   /**
@@ -132,19 +157,19 @@ export class ActivityRepository implements IActivityRepository {
     paperIds: string[],
     pageIds: string[],
   ): Promise<Map<string, string>> {
-    const validTaskIds = taskIds.filter(isUuid);
-    const validPaperIds = paperIds.filter(isUuid);
-    const validPageIds = pageIds.filter(isUuid);
+    const validTaskIds = taskIds.filter((id) => isUUID(id));
+    const validPaperIds = paperIds.filter((id) => isUUID(id));
+    const validPageIds = pageIds.filter((id) => isUUID(id));
 
     const [tasks, papers, pages] = await Promise.all([
       validTaskIds.length
-        ? this.prisma.task.findMany({
+        ? this.prisma.workItem.findMany({
             where: { id: { in: validTaskIds }, deletedAt: null },
             select: { id: true, title: true },
           })
         : [],
       validPaperIds.length
-        ? this.prisma.catalogItem.findMany({
+        ? this.prisma.item.findMany({
             where: { id: { in: validPaperIds }, deletedAt: null },
             select: { id: true, title: true },
           })
@@ -164,25 +189,17 @@ export class ActivityRepository implements IActivityRepository {
     return map;
   }
 
-  /**
-   * Fallback: get recently updated items owned by user across all entity types.
-   */
-  async findFallbackRecentItems(
-    workspaceId: string,
+  async findUserRecentItems(
     userId: string,
     limit: number,
   ) {
-    const ws = await this.resolveWorkspace(workspaceId);
-    const canonicalWorkspaceId =
-      ws?.id || (isUuid(workspaceId) ? workspaceId : null);
-    if (!canonicalWorkspaceId || !isUuid(userId)) {
+    if (!isUUID(userId)) {
       return { tasks: [], papers: [], pages: [] };
     }
 
     const [tasks, papers, pages] = await Promise.all([
-      this.prisma.task.findMany({
+      this.prisma.workItem.findMany({
         where: {
-          project: { workspaceId: canonicalWorkspaceId },
           deletedAt: null,
           OR: [{ authorId: userId }, { assigneeId: userId }],
         },
@@ -190,9 +207,8 @@ export class ActivityRepository implements IActivityRepository {
         take: limit,
         select: { id: true, title: true, projectId: true, updatedAt: true },
       }),
-      this.prisma.catalogItem.findMany({
+      this.prisma.item.findMany({
         where: {
-          workspaceId: canonicalWorkspaceId,
           uploadedById: userId,
           deletedAt: null,
         },
@@ -203,13 +219,7 @@ export class ActivityRepository implements IActivityRepository {
       this.prisma.page.findMany({
         where: {
           deletedAt: null,
-          OR: [
-            { workspaceId: canonicalWorkspaceId, authorId: userId },
-            {
-              project: { workspaceId: canonicalWorkspaceId },
-              authorId: userId,
-            },
-          ],
+          authorId: userId,
         },
         orderBy: { updatedAt: 'desc' },
         take: limit,
@@ -217,5 +227,51 @@ export class ActivityRepository implements IActivityRepository {
       }),
     ]);
     return { tasks, papers, pages };
+  }
+
+  async findTaskWithProject(taskId: string) {
+    return this.prisma.workItem.findUnique({
+      where: { id: taskId },
+      select: {
+        id: true,
+        title: true,
+        projectId: true,
+        columnId: true,
+        completed: true,
+        createdAt: true,
+        updatedAt: true,
+        project: {
+          select: {
+            id: true,
+            name: true,
+            taskColumns: true,
+          },
+        },
+      },
+    });
+  }
+
+  async findTaskComments(taskId: string, sort: 'asc' | 'desc' = 'asc') {
+    return this.prisma.workItemComment.findMany({
+      where: { taskId },
+      orderBy: { createdAt: sort },
+      include: {
+        author: { select: ACTOR_MINIMAL_SELECT },
+      },
+    });
+  }
+
+  async findTaskActivityEvents(taskId: string, sort: 'asc' | 'desc' = 'asc') {
+    return this.prisma.activityEvent.findMany({
+      where: {
+        entityType: EntityType.task,
+        entityId: taskId,
+      },
+      orderBy: { createdAt: sort },
+      include: {
+        actor: { select: ACTOR_MINIMAL_SELECT },
+        project: { select: { id: true, name: true } },
+      },
+    });
   }
 }

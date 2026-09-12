@@ -3,6 +3,7 @@ export const EVENT_PUBLISHER_PORT = Symbol('EVENT_PUBLISHER_PORT');
 export interface DomainEventEnvelope<T = any> {
   eventId: string;
   workspaceId: string | null;
+  projectId?: string | null;
   aggregateId: string;
   eventType: string;
   payload: T;

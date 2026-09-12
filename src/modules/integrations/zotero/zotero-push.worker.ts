@@ -39,7 +39,7 @@ export class ZoteroPushWorker {
   ) {}
 
   /**
-   * Pushes a local CatalogItem change to Zotero with 3-way merge conflict detection and version preconditions.
+   * Pushes a local Item change to Zotero with 3-way merge conflict detection and version preconditions.
    */
   async pushItem(
     workspaceId: string,
@@ -82,13 +82,13 @@ export class ZoteroPushWorker {
     }
 
     const item = await this.libraryBridge.getItemSnapshot({
-      workspaceId,
+      userId: workspaceId,
       itemId,
     });
 
-    if (!item || item.workspaceId !== workspaceId) {
+    if (!item) {
       throw new NotFoundException(
-        `Catalog item ${itemId} not found in workspace ${workspaceId}`,
+        `Item ${itemId} not found for user ${workspaceId}`,
       );
     }
 
@@ -149,7 +149,7 @@ export class ZoteroPushWorker {
       });
 
       await this.libraryBridge.publishIntegrationEvent({
-        workspaceId,
+        userId: workspaceId,
         aggregateId: itemId,
         eventType: 'library.zotero.item_pushed',
         payload: {
@@ -200,7 +200,7 @@ export class ZoteroPushWorker {
       });
 
       await this.libraryBridge.publishIntegrationEvent({
-        workspaceId,
+        userId: workspaceId,
         aggregateId: itemId,
         eventType: 'library.zotero.item_pushed',
         payload: {
@@ -296,14 +296,14 @@ export class ZoteroPushWorker {
 
     // Delete local entity if present
     await this.libraryBridge.deleteEntity({
-      workspaceId,
-      entityType: 'CatalogItem',
+      userId: workspaceId,
+      entityType: 'Item',
       entityId: itemId,
     });
 
     // Directly publish integration outbox event
     await this.libraryBridge.publishIntegrationEvent({
-      workspaceId,
+      userId: workspaceId,
       aggregateId: itemId,
       eventType: 'library.zotero.item_deleted_pushed',
       payload: { itemId, remoteKey },
@@ -394,8 +394,7 @@ export class ZoteroPushWorker {
 
       if (retryPush.success) {
         // Update local entity with merged fields
-        await this.libraryBridge.upsertCatalogItem({
-          workspaceId,
+        await this.libraryBridge.upsertItem({
           userId: binding.connection.userId,
           existingId: item.id,
           title: mergeResult.mergedData.title || item.title,
@@ -460,7 +459,7 @@ export class ZoteroPushWorker {
     ]);
 
     await this.libraryBridge.publishIntegrationEvent({
-      workspaceId,
+      userId: workspaceId,
       aggregateId: item.id,
       eventType: 'library.zotero.conflict_detected',
       payload: conflictRecord,
@@ -561,8 +560,7 @@ export class ZoteroPushWorker {
     }
 
     // Update local entity and clear conflict state
-    await this.libraryBridge.upsertCatalogItem({
-      workspaceId,
+    await this.libraryBridge.upsertItem({
       userId: itemBinding.binding.connection.userId,
       existingId: itemId,
       title: resolvedFields.title,
@@ -590,7 +588,7 @@ export class ZoteroPushWorker {
     });
 
     await this.libraryBridge.publishIntegrationEvent({
-      workspaceId,
+      userId: workspaceId,
       aggregateId: itemId,
       eventType: 'library.zotero.conflict_resolved',
       payload: {

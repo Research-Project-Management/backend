@@ -1,3 +1,5 @@
+import { Provenance } from '../../ingestion/metadata/types/metadata.types';
+
 export type CitationStyleId =
   | 'apa'
   | 'apa-7th'
@@ -82,7 +84,7 @@ export interface ReferenceData {
   itemType?: string;
   containerTitle?: string;
   score?: number;
-  extraFields?: Record<string, any>;
-  provenance?: any;
-  [key: string]: any;
+  extraFields?: Record<string, unknown>;
+  provenance?: Provenance | Record<string, unknown> | null;
+  [key: string]: unknown;
 }

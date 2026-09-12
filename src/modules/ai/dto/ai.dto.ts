@@ -25,14 +25,7 @@ export class AiQueryDto {
   @IsOptional()
   query?: string;
 
-  // ── Session & Workspace Context ──────────────────────────────────────────
-  @IsString()
-  @IsOptional()
-  workspace_id?: string;
-
-  @IsString()
-  @IsOptional()
-  workspaceId?: string;
+  // ── Session & Project Context ──────────────────────────────────────────
 
   @IsString()
   @IsOptional()
@@ -185,6 +178,6 @@ export class GetDocumentsBulkDto {
   ids?: string[];
 
   @IsString()
-  @IsNotEmpty({ message: 'workspaceId is required' })
-  workspaceId!: string;
+  @IsOptional()
+  projectId?: string;
 }

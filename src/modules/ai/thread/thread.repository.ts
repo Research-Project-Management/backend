@@ -13,15 +13,13 @@ export class ThreadRepository implements IAiRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async findUserChats(
-    workspaceSlug: string,
     userId: string,
     projectId?: string | null,
   ): Promise<ChatWithMessages[]> {
     const where: Prisma.AiChatWhereInput = {
-      workspaceSlug,
       userId,
     };
-    if (projectId) {
+    if (projectId !== undefined) {
       where.projectId = projectId;
     }
 
@@ -63,13 +61,11 @@ export class ThreadRepository implements IAiRepository {
 
   async findPageChat(
     pageId: string,
-    workspaceSlug: string,
     userId: string,
   ): Promise<ChatWithMessages | null> {
     return this.prisma.aiChat.findFirst({
       where: {
         pageId,
-        workspaceSlug,
         userId,
       },
       include: {
@@ -83,10 +79,9 @@ export class ThreadRepository implements IAiRepository {
 
   async deletePageChat(
     pageId: string,
-    workspaceSlug: string,
     userId: string,
   ): Promise<{ count: number }> {
-    const chat = await this.findPageChat(pageId, workspaceSlug, userId);
+    const chat = await this.findPageChat(pageId, userId);
     if (chat) {
       await this.prisma.aiChat.delete({
         where: { id: chat.id },
@@ -205,12 +200,15 @@ export class ThreadRepository implements IAiRepository {
     });
   }
 
-  async clearUserWorkspaceChats(workspaceSlug: string, userId: string) {
+  async clearUserChats(userId: string, projectId?: string | null): Promise<{ count: number }> {
+    const where: Prisma.AiChatWhereInput = {
+      userId,
+    };
+    if (projectId !== undefined) {
+      where.projectId = projectId;
+    }
     return this.prisma.aiChat.deleteMany({
-      where: {
-        workspaceSlug,
-        userId,
-      },
+      where,
     });
   }
 }

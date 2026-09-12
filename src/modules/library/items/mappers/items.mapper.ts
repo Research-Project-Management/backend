@@ -1,16 +1,20 @@
 import { getFileContentPath } from '@/modules/storage/storage.port';
-import { CATALOG_COLUMN_METADATA_FIELDS } from '../constants/items.constants';
+import { ITEM_COLUMN_METADATA_FIELDS } from '../constants/items.constants';
 import { cleanAbstractText } from '../utils/items.utils';
 
 export class ItemsMapper {
   /**
-   * Normalizes a single CatalogItem record or payload to the canonical domain shape.
+   * Normalizes a single Item record or payload to the canonical domain shape.
    * Resolves primary PDF attachment priority and ensures all internal file attachments
    * use the authenticated canonical streaming content URL (/api/files/:fileId/content).
    */
   static toDomain<T>(item: T): T {
     if (!item || typeof item !== 'object') return item;
     const it = { ...(item as any) };
+
+    if (!it.userStates && Array.isArray(it.states)) {
+      it.userStates = it.states;
+    }
 
     if (Array.isArray(it.attachments)) {
       it.attachments = it.attachments.map((att: any) => {
@@ -140,7 +144,7 @@ export class ItemsMapper {
           v !== null &&
           v !== undefined &&
           v !== '' &&
-          !CATALOG_COLUMN_METADATA_FIELDS.has(k)
+          !ITEM_COLUMN_METADATA_FIELDS.has(k)
         ) {
           lines.push(`${k}: ${String(v)}`);
         }
@@ -535,7 +539,7 @@ export class ItemsMapper {
   }
 
   /**
-   * Normalizes an array of CatalogItem records.
+   * Normalizes an array of Item records.
    */
   static toDomainList<T>(items: T[]): T[] {
     if (!Array.isArray(items)) return items;
@@ -564,7 +568,7 @@ export class ItemsMapper {
           normalized.userStates[0]
         : normalized.userStates[0];
     }
-    const { userStates: _userStates, ...rest } = normalized;
+    const { userStates: _userStates, states: _states, ...rest } = normalized;
     return {
       ...rest,
       readStatus: userState?.readStatus ?? 'unread',
@@ -577,6 +581,3 @@ export class ItemsMapper {
     };
   }
 }
-
-export const CatalogItemMapper = ItemsMapper;
-export type CatalogItemMapper = ItemsMapper;

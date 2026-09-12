@@ -9,12 +9,13 @@ import {
   GrobidFigure,
   GrobidTable,
   GrobidFormula,
-} from '../../../../infra/grobid/grobid.client';
-import { SsrfGuardService } from '../../common/services/ssrf-guard.service';
+} from '../../infra/grobid/grobid.client';
+import { SsrfGuardService } from '../../core/services/ssrf-guard.service';
 import { cleanAbstractText } from '../../items/utils/items.utils';
 
 export interface ExtractedPdfMetadata {
   doi?: string;
+  isbn?: string;
   arxivId?: string;
   pmid?: string;
   title?: string;
@@ -22,6 +23,8 @@ export interface ExtractedPdfMetadata {
   creators?: GrobidCreator[];
   year?: number;
   publicationDate?: string;
+  publisher?: string;
+  numberOfPages?: number;
   abstract?: string;
   abstractParagraphs?: string[];
   abstractSections?: Array<{ heading?: string; text: string }>;
@@ -58,6 +61,7 @@ export class PdfProvider {
 
   async extractDocumentFromBuffer(
     buffer: Buffer,
+    options?: { maxPages?: number },
   ): Promise<ExtractedPdfDocument> {
     const pages: Array<{
       pageIndex: number;
@@ -129,18 +133,23 @@ export class PdfProvider {
         // Optional metadata inspection
       }
 
-      const extracted = await extractText(document, { mergePages: false });
-      const rawPages = Array.isArray(extracted?.text)
-        ? extracted.text
-        : typeof extracted === 'string'
-          ? [extracted]
-          : [];
+      const totalNumPages = document.numPages;
+      unpdfExtractedMetadata.numberOfPages = totalNumPages;
+
+      const maxPagesToExtract =
+        options?.maxPages && options.maxPages > 0
+          ? Math.min(totalNumPages, options.maxPages)
+          : totalNumPages > 25
+            ? 25
+            : totalNumPages;
 
       let currentOffset = 0;
-      for (let pageIndex = 0; pageIndex < rawPages.length; pageIndex++) {
-        const pageText = rawPages[pageIndex] || '';
+      for (let pageIndex = 1; pageIndex <= maxPagesToExtract; pageIndex++) {
+        const page = await document.getPage(pageIndex);
+        const content = await page.getTextContent();
+        const pageText = content.items.map((it: any) => it.str).join(' ');
         pages.push({
-          pageIndex: pageIndex,
+          pageIndex: pageIndex - 1,
           textContent: pageText,
           charOffset: currentOffset,
         });
@@ -167,6 +176,13 @@ export class PdfProvider {
         textExtractedMetadata.doi ||
         unpdfExtractedMetadata.doi ||
         headerExtractedMetadata.doi,
+      isbn:
+        textExtractedMetadata.isbn ||
+        unpdfExtractedMetadata.isbn ||
+        headerExtractedMetadata.isbn,
+      publisher:
+        textExtractedMetadata.publisher || unpdfExtractedMetadata.publisher,
+      numberOfPages: unpdfExtractedMetadata.numberOfPages,
       arxivId:
         textExtractedMetadata.arxivId ||
         unpdfExtractedMetadata.arxivId ||
@@ -425,6 +441,23 @@ export class PdfProvider {
       if (standalone?.[1]) metadata.arxivId = standalone[1];
     }
 
+    const isbnMatch = scannedText.match(
+      /(?:ISBN(?:-1[03])?:?\s*)([0-9Xx\s-]{10,20})/i,
+    );
+    if (isbnMatch) {
+      const cleanIsbn = isbnMatch[1].replace(/[-\s]/g, '').trim();
+      if (cleanIsbn.length === 10 || cleanIsbn.length === 13) {
+        metadata.isbn = cleanIsbn;
+      }
+    }
+
+    const pubMatch = scannedText.match(
+      /\b(Cambridge University Press|Springer(?:-Verlag)?|MIT Press|Prentice Hall|Stanford University(?: Press)?|Oxford University Press|IEEE|ACM|Elsevier|Wiley)\b/i,
+    );
+    if (pubMatch) {
+      metadata.publisher = pubMatch[1].trim();
+    }
+
     const abstractMatch = scannedText.match(
       /(?:^|\n)\s*(?:Abstract|ABSTRACT|Summary|Résumé)[—:\-\s.]*\s*([\s\S]*?)(?=(?:\n\s*(?:Index Terms|Keywords|Key\s*words|1\.?\s+[A-Z]|I\.?\s+[A-Z]|INTRODUCTION|Contents|Background|1\b|I\b))|(?:\r?\n\s*\r?\n\s*(?:[A-Z0-9\s]{3,30}\n|1\.|\bI\b))|$)/i,
     );
@@ -529,7 +562,11 @@ export class PdfProvider {
         }
       }
 
-      const candidateTitle = titleLines.join(' ').replace(/\s+/g, ' ').trim();
+      const candidateTitle = titleLines
+        .filter((l, i, arr) => arr.indexOf(l) === i)
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
       if (candidateTitle.length > 5 && candidateTitle.length < 250) {
         metadata.title = candidateTitle;
       }
@@ -547,7 +584,7 @@ export class PdfProvider {
               authorLine,
             )
           ) {
-            break;
+            continue;
           }
           if (authorLine.includes(',')) {
             const rawAuthorNames = authorLine
@@ -603,9 +640,7 @@ export class PdfProvider {
     }
 
     return this.extractFromText(
-      buffer
-        .subarray(0, PdfProvider.TEXT_SCAN_LIMIT)
-        .toString('latin1'),
+      buffer.subarray(0, PdfProvider.TEXT_SCAN_LIMIT).toString('latin1'),
     );
   }
 

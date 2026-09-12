@@ -1,7 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { Prisma } from '@prisma/client';
-import { VersionMismatchException } from '../common/errors/version-mismatch.exception';
+import { VersionMismatchException } from '../core/errors/version-mismatch.exception';
 import { CollectionDeleteStrategy } from './types/collections.types';
 
 export interface CreateCollectionInput {
@@ -33,16 +33,16 @@ export class CollectionsRepository {
   }
 
   /**
-   * Finds a collection by ID with strict workspace isolation.
+   * Finds a collection by ID with strict user isolation.
    */
   async findById(
-    workspaceId: string,
+    userId: string,
     id: string,
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
     return client.collection.findFirst({
-      where: { id, workspaceId, deletedAt: null },
+      where: { id, userId, deletedAt: null },
       include: {
         children: {
           where: { deletedAt: null },
@@ -55,12 +55,12 @@ export class CollectionsRepository {
   }
 
   /**
-   * Retrieves all collections for a workspace.
+   * Retrieves all collections for a user.
    */
-  async findAll(workspaceId: string, tx?: Prisma.TransactionClient) {
+  async findAll(userId: string, tx?: Prisma.TransactionClient) {
     const client = this.getClient(tx);
     return client.collection.findMany({
-      where: { workspaceId, deletedAt: null },
+      where: { userId, deletedAt: null },
       include: {
         _count: {
           select: { collectionItems: true },
@@ -73,20 +73,20 @@ export class CollectionsRepository {
   /**
    * Alias for findTree / findAll.
    */
-  async findTree(workspaceId: string, tx?: Prisma.TransactionClient) {
-    return this.findAll(workspaceId, tx);
+  async findTree(userId: string, tx?: Prisma.TransactionClient) {
+    return this.findAll(userId, tx);
   }
 
   /**
    * Creates a new collection with version 1.
    */
   async create(
-    workspaceId: string,
+    userId: string,
     userIdOrInput: string | CreateCollectionInput,
     inputOrTx?: CreateCollectionInput | Prisma.TransactionClient,
     tx?: Prisma.TransactionClient,
   ) {
-    let createdById = 'system';
+    let createdById = userId || 'system';
     let input: CreateCollectionInput;
     let clientTx: Prisma.TransactionClient | undefined;
 
@@ -96,14 +96,14 @@ export class CollectionsRepository {
       clientTx = tx;
     } else {
       input = userIdOrInput;
-      createdById = input.createdById || 'system';
+      createdById = input.createdById || userId || 'system';
       clientTx = inputOrTx as Prisma.TransactionClient | undefined;
     }
 
     const client = this.getClient(clientTx);
     return client.collection.create({
       data: {
-        workspaceId,
+        userId,
         name: input.name,
         description: input.description ?? '',
         color: input.color ?? '#3370ff',
@@ -119,7 +119,7 @@ export class CollectionsRepository {
    * Updates a collection enforcing optimistic concurrency control.
    */
   async update(
-    workspaceId: string,
+    userId: string,
     id: string,
     inputOrVersion: UpdateCollectionInput | number,
     inputOrTx?: UpdateCollectionInput | Prisma.TransactionClient,
@@ -140,10 +140,10 @@ export class CollectionsRepository {
     }
 
     const client = this.getClient(clientTx);
-    const existing = await this.findById(workspaceId, id, clientTx);
+    const existing = await this.findById(userId, id, clientTx);
     if (!existing) {
       throw new NotFoundException(
-        `Collection ${id} not found in workspace ${workspaceId}`,
+        `Collection ${id} not found`,
       );
     }
 
@@ -175,7 +175,7 @@ export class CollectionsRepository {
    * Soft deletes a collection according to strategy.
    */
   async delete(
-    workspaceId: string,
+    userId: string,
     id: string,
     strategyOrTx?: CollectionDeleteStrategy | Prisma.TransactionClient,
     tx?: Prisma.TransactionClient,
@@ -188,21 +188,21 @@ export class CollectionsRepository {
     if (strategy === 'cascade') {
       // Find all child collections and delete recursively
       const children = await client.collection.findMany({
-        where: { workspaceId, parentId: id, deletedAt: null },
+        where: { userId, parentId: id, deletedAt: null },
       });
       for (const child of children) {
-        await this.delete(workspaceId, child.id, 'cascade', clientTx);
+        await this.delete(userId, child.id, 'cascade', clientTx);
       }
     } else {
       // Orphan child collections by resetting parentId to null
       await client.collection.updateMany({
-        where: { workspaceId, parentId: id, deletedAt: null },
+        where: { userId, parentId: id, deletedAt: null },
         data: { parentId: null },
       });
     }
 
     const result = await client.collection.updateMany({
-      where: { id, workspaceId, deletedAt: null },
+      where: { id, userId, deletedAt: null },
       data: { deletedAt: new Date() },
     });
     return result.count > 0;
@@ -212,7 +212,7 @@ export class CollectionsRepository {
    * Adds items to a collection with dual-write semantics.
    */
   async addItemsToCollection(
-    workspaceId: string,
+    userId: string,
     collectionId: string,
     itemIds: string[],
     tx?: Prisma.TransactionClient,
@@ -223,7 +223,7 @@ export class CollectionsRepository {
     await client.collectionItem.createMany({
       data: itemIds.map((itemId) => ({
         collectionId,
-        catalogItemId: itemId,
+        itemId,
         sortOrder: 0,
       })),
       skipDuplicates: true,
@@ -231,37 +231,37 @@ export class CollectionsRepository {
   }
 
   async addItems(
-    workspaceId: string,
+    userId: string,
     collectionId: string,
     itemIds: string[],
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
-    return this.addItemsToCollection(workspaceId, collectionId, itemIds, tx);
+    return this.addItemsToCollection(userId, collectionId, itemIds, tx);
   }
 
   async addItemToCollection(
-    workspaceId: string,
+    userId: string,
     collectionId: string,
     itemId: string,
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
-    return this.addItemsToCollection(workspaceId, collectionId, [itemId], tx);
+    return this.addItemsToCollection(userId, collectionId, [itemId], tx);
   }
 
   async addItem(
-    workspaceId: string,
+    userId: string,
     collectionId: string,
     itemId: string,
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
-    return this.addItemsToCollection(workspaceId, collectionId, [itemId], tx);
+    return this.addItemsToCollection(userId, collectionId, [itemId], tx);
   }
 
   /**
    * Removes an item from a collection.
    */
   async removeItemFromCollection(
-    workspaceId: string,
+    userId: string,
     collectionId: string,
     itemId: string,
     tx?: Prisma.TransactionClient,
@@ -272,25 +272,25 @@ export class CollectionsRepository {
     await client.collectionItem.deleteMany({
       where: {
         collectionId,
-        catalogItemId: itemId,
+        itemId,
       },
     });
   }
 
   async removeItem(
-    workspaceId: string,
+    userId: string,
     collectionId: string,
     itemId: string,
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
-    return this.removeItemFromCollection(workspaceId, collectionId, itemId, tx);
+    return this.removeItemFromCollection(userId, collectionId, itemId, tx);
   }
 
   /**
    * Moves items to target collection.
    */
   async moveItems(
-    workspaceId: string,
+    userId: string,
     targetCollectionId: string | null,
     itemIds: string[],
     tx?: Prisma.TransactionClient,
@@ -301,13 +301,13 @@ export class CollectionsRepository {
       // Remove items from all collections (unfiled)
       await client.collectionItem.deleteMany({
         where: {
-          catalogItemId: { in: itemIds },
+          itemId: { in: itemIds },
         },
       });
     } else {
       for (const itemId of itemIds) {
         await this.addItemToCollection(
-          workspaceId,
+          userId,
           targetCollectionId,
           itemId,
           tx,
@@ -320,7 +320,7 @@ export class CollectionsRepository {
    * Reorders collections hierarchy and indices.
    */
   async reorder(
-    workspaceId: string,
+    userId: string,
     collections: Array<{
       id: string;
       parentId?: string | null;
@@ -331,7 +331,7 @@ export class CollectionsRepository {
     const client = this.getClient(tx);
     for (const c of collections) {
       await client.collection.updateMany({
-        where: { id: c.id, workspaceId },
+        where: { id: c.id, userId },
         data: {
           ...(c.parentId !== undefined ? { parentId: c.parentId } : {}),
         },
@@ -340,10 +340,10 @@ export class CollectionsRepository {
   }
 
   /**
-   * Retrieves catalog item IDs belonging to a collection.
+   * Retrieves item IDs belonging to a collection.
    */
   async findItemIdsByCollection(
-    workspaceId: string,
+    userId: string,
     collectionId: string,
     tx?: Prisma.TransactionClient,
   ): Promise<string[]> {
@@ -352,15 +352,15 @@ export class CollectionsRepository {
     const items = await client.collectionItem.findMany({
       where: {
         collectionId,
-        catalogItem: {
-          workspaceId,
+        item: {
+          userId,
           deletedAt: null,
         },
       },
-      select: { catalogItemId: true },
+      select: { itemId: true },
       orderBy: { sortOrder: 'asc' },
     });
 
-    return items.map((i: { catalogItemId: string }) => i.catalogItemId);
+    return items.map((i: { itemId: string }) => i.itemId);
   }
 }

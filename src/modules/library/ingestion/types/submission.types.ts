@@ -48,7 +48,8 @@ export type SubmissionPayload =
   | ConnectorSubmissionInput;
 
 export interface IngestionSubmissionEnvelope {
-  workspaceId: string;
+  projectId?: string;
+  workspaceId?: string;
   userId?: string;
   idempotencyKey?: string;
   payload: SubmissionPayload;

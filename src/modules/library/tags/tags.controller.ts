@@ -9,78 +9,87 @@ import {
   HttpCode,
   HttpStatus,
   NotFoundException,
+  Query,
 } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { TagsService } from './tags.service';
 import { CreateTagDto } from './dto/tags.dto';
-import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
-import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
-import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
+import { JwtAuthGuard } from '../../../modules/iam/authn/guards/auth.guard';
+import { CurrentUser } from '../../../modules/iam/authn/decorators/user.decorator';
 
-@Controller([
-  'api/v1/workspaces/:workspaceId/library/tags',
-  'api/v1/workspace/:workspaceId/library/tags',
-  'workspace/:workspaceId/library/tags',
-])
-@UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
+@ApiTags('Library Tags')
+@ApiBearerAuth('JWT-auth')
+@Controller('api/v1/library/tags')
+@UseGuards(JwtAuthGuard)
 export class TagsController {
   constructor(private readonly tagsService: TagsService) {}
 
   @Get()
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
-  async getTags(@Param('workspaceId') workspaceId: string) {
-    return this.tagsService.getTags(workspaceId);
+  @ApiOperation({ summary: 'List library tags' })
+  async getTags(
+    @CurrentUser('id') userId: string,
+    @Query('includeInactive') includeInactive?: string,
+  ) {
+    return this.tagsService.getTags(userId, {
+      includeInactive: includeInactive === 'true',
+    });
   }
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Create or get tag' })
   async createTag(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Body() body: CreateTagDto,
   ) {
     return this.tagsService.createOrGetTag(
-      workspaceId,
+      userId,
       body.name,
       body.color,
       body.type,
     );
   }
 
+  @Delete('automatic')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Delete automatic tags' })
+  async deleteAutomaticTags(@CurrentUser('id') userId: string) {
+    return this.tagsService.deleteAutomaticTags(userId);
+  }
+
   @Delete(':tagId')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @WorkspaceRoles('owner', 'admin')
+  @ApiOperation({ summary: 'Delete a tag' })
   async deleteTag(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Param('tagId') tagId: string,
   ) {
-    const deleted = await this.tagsService.deleteTag(workspaceId, tagId);
+    const deleted = await this.tagsService.deleteTag(userId, tagId);
     if (!deleted) {
-      throw new NotFoundException(
-        `Tag ${tagId} not found in workspace ${workspaceId}`,
-      );
+      throw new NotFoundException(`Tag ${tagId} not found`);
     }
   }
 
   @Post(':tagId/items/:itemId')
   @HttpCode(HttpStatus.CREATED)
-  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Assign tag to an item' })
   async assignTag(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Param('tagId') tagId: string,
     @Param('itemId') itemId: string,
   ) {
-    await this.tagsService.assignTag(workspaceId, tagId, itemId);
+    await this.tagsService.assignTag(userId, tagId, itemId);
     return { success: true };
   }
 
   @Delete(':tagId/items/:itemId')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Remove tag from an item' })
   async removeTag(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Param('tagId') tagId: string,
     @Param('itemId') itemId: string,
   ) {
-    await this.tagsService.removeTag(workspaceId, tagId, itemId);
+    await this.tagsService.removeTag(userId, tagId, itemId);
   }
 }

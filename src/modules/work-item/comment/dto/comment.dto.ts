@@ -1,4 +1,4 @@
-﻿import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class CreateCommentDto {
   @IsString()
@@ -9,9 +9,8 @@ export class CreateCommentDto {
   @IsOptional()
   projectId?: string;
 
-  @IsString()
   @IsOptional()
-  workspaceId?: string;
+  attachments?: any[];
 }
 
 export class UpdateCommentDto {
@@ -23,9 +22,8 @@ export class UpdateCommentDto {
   @IsOptional()
   projectId?: string;
 
-  @IsString()
   @IsOptional()
-  workspaceId?: string;
+  attachments?: any[];
 }
 
 export class AddReplyDto {
@@ -36,10 +34,6 @@ export class AddReplyDto {
   @IsString()
   @IsOptional()
   projectId?: string;
-
-  @IsString()
-  @IsOptional()
-  workspaceId?: string;
 }
 
 export class ReactCommentDto {
@@ -50,8 +44,4 @@ export class ReactCommentDto {
   @IsString()
   @IsOptional()
   projectId?: string;
-
-  @IsString()
-  @IsOptional()
-  workspaceId?: string;
 }

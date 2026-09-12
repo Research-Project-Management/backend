@@ -1,14 +1,15 @@
 import { Module } from '@nestjs/common';
-import { PageCommentController } from './comment.controller';
-import { PageCommentService } from './comment.service';
-import { PageCommentRepository } from './comment.repository';
+import { CommentController } from './comment.controller';
+import { CommentService } from './comment.service';
+import { CommentRepository } from './comment.repository';
 
 @Module({
-  controllers: [PageCommentController],
-  providers: [PageCommentService, PageCommentRepository],
-  exports: [PageCommentService],
+  controllers: [CommentController],
+  providers: [CommentService, CommentRepository],
+  exports: [CommentService],
 })
-export class PageCommentModule {}
+export class CommentModule {}
 
-export const CommentModule = PageCommentModule;
-export type CommentModule = PageCommentModule;
+export const PageCommentModule = CommentModule;
+export type PageCommentModule = CommentModule;
+

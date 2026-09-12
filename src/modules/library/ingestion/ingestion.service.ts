@@ -6,7 +6,6 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../../core/database/prisma.service';
-import { resolveTenantWorkspaceId } from '../../../core/utils/tenant.util';
 import {
   IngestionSubmissionEnvelope,
   IngestionAcceptedResult,
@@ -45,17 +44,17 @@ export class IngestionService implements IngestionPort {
   async submit(
     envelope: IngestionSubmissionEnvelope,
   ): Promise<IngestionAcceptedResult> {
-    const workspaceId = await this.resolveWorkspaceId(envelope.workspaceId);
+    const projectId = envelope.userId || envelope.projectId || envelope.workspaceId || '';
     const idempotencyKey = envelope.idempotencyKey?.trim();
 
     const requestHash = createHash('sha256')
-      .update(JSON.stringify({ workspaceId, payload: envelope.payload }))
+      .update(JSON.stringify({ projectId, payload: envelope.payload }))
       .digest('hex');
 
     // 1. Idempotency Check & Atomic Claim
     if (idempotencyKey) {
       const existingRun = await this.repo.findRunByIdempotencyKey(
-        workspaceId,
+        projectId,
         idempotencyKey,
       );
 
@@ -68,7 +67,7 @@ export class IngestionService implements IngestionPort {
 
         return {
           runId: existingRun.id,
-          statusUrl: `/api/v1/workspaces/${workspaceId}/library/ingestion/status/${existingRun.id}`,
+          statusUrl: `/api/v1/library/ingestion/status/${existingRun.id}`,
           acceptedAt: existingRun.startedAt
             ? existingRun.startedAt.toISOString()
             : new Date().toISOString(),
@@ -81,7 +80,7 @@ export class IngestionService implements IngestionPort {
     }
 
     // 2. Create IngestionRun Record
-    const run = await this.repo.createRun(workspaceId, {
+    const run = await this.repo.createRun(projectId, {
       requesterId: envelope.userId,
       inputParams: envelope as unknown as Prisma.InputJsonValue,
       inputHash: requestHash,
@@ -90,11 +89,11 @@ export class IngestionService implements IngestionPort {
     });
 
     const runId = run?.id || randomUUID();
-    const statusUrl = `/api/v1/workspaces/${workspaceId}/library/ingestion/status/${runId}`;
+    const statusUrl = `/api/v1/library/ingestion/status/${runId}`;
 
     // 3. Return the durable run immediately and dispatch to IngestionQueueService
     // for bounded concurrency and worker resilience.
-    this.queue.enqueue(runId, workspaceId, envelope);
+    this.queue.enqueue(runId, projectId, envelope);
 
     return {
       runId,
@@ -115,21 +114,17 @@ export class IngestionService implements IngestionPort {
    */
   async executePipeline(
     runId: string,
-    workspaceId: string,
+    projectId: string,
     envelope: IngestionSubmissionEnvelope,
   ): Promise<void> {
-    return this.pipeline.executePipeline(runId, workspaceId, envelope);
+    return this.pipeline.executePipeline(runId, projectId, envelope);
   }
 
   async getRunStatus(
-    workspaceId: string,
+    projectId: string,
     runId: string,
   ): Promise<IngestionRunSnapshot> {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const run = await this.repo.findRunById(
-      canonicalWorkspaceId,
-      runId,
-    );
+    const run = await this.repo.findRunById(projectId, runId);
     if (!run) {
       throw new NotFoundException(`Ingestion run '${runId}' not found`);
     }
@@ -137,11 +132,11 @@ export class IngestionService implements IngestionPort {
   }
 
   async getRunProgress(
-    workspaceId: string,
+    projectId: string,
     runId: string,
   ): Promise<{
     runId: string;
-    workspaceId: string;
+    projectId: string;
     status: string;
     total: number;
     processed: number;
@@ -159,11 +154,7 @@ export class IngestionService implements IngestionPort {
     startedAt: string;
     completedAt?: string;
   }> {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const run = await this.repo.findRunById(
-      canonicalWorkspaceId,
-      runId,
-    );
+    const run = await this.repo.findRunById(projectId, runId);
     if (!run) {
       throw new NotFoundException(`Ingestion run '${runId}' not found`);
     }
@@ -192,7 +183,7 @@ export class IngestionService implements IngestionPort {
 
     return {
       runId: run.id,
-      workspaceId: canonicalWorkspaceId,
+      projectId,
       status: String(run.status),
       total,
       processed,
@@ -207,30 +198,26 @@ export class IngestionService implements IngestionPort {
     };
   }
 
-  async retryRun(workspaceId: string, runId: string): Promise<any> {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const run = await this.repo.findRunById(
-      canonicalWorkspaceId,
-      runId,
-    );
+  async retryRun(projectId: string, runId: string): Promise<any> {
+    const run = await this.repo.findRunById(projectId, runId);
     if (!run) {
       throw new NotFoundException(`Ingestion run '${runId}' not found`);
     }
 
     await this.repo.updateRunStatus(
-      canonicalWorkspaceId,
+      projectId,
       runId,
       IngestionStatus.RECEIVED,
     );
 
     const envelope = run.inputParams as unknown as IngestionSubmissionEnvelope;
     if (envelope && typeof envelope === 'object') {
-      this.queue.enqueue(runId, canonicalWorkspaceId, {
+      this.queue.enqueue(runId, projectId, {
         ...envelope,
-        workspaceId: canonicalWorkspaceId,
+        projectId,
       });
       this.logger.log(
-        `Retry initiated and re-enqueued for run ${runId} in workspace ${canonicalWorkspaceId}`,
+        `Retry initiated and re-enqueued for run ${runId} in project ${projectId}`,
       );
     } else {
       this.logger.warn(
@@ -250,8 +237,8 @@ export class IngestionService implements IngestionPort {
    * Delegates to modern IngestionPipelineRunner via mapped envelope.
    */
   async ingest(command: IngestionCommand): Promise<IngestionResult> {
-    const workspaceId = await this.resolveWorkspaceId(command.workspaceId);
-    const envelope = this.mapCommandToEnvelope(workspaceId, command);
+    const projectId = command.userId || command.projectId || (command as any).workspaceId || '';
+    const envelope = this.mapCommandToEnvelope(projectId, command);
 
     const submissionRes = await this.submit(envelope);
     const runId = submissionRes.runId;
@@ -259,7 +246,7 @@ export class IngestionService implements IngestionPort {
     if (submissionRes.deduplicated && submissionRes.existingItemId) {
       const item = this.items
         ? await this.items
-            .getItem(workspaceId, submissionRes.existingItemId)
+            .getItem(projectId, submissionRes.existingItemId)
             .catch(() => undefined)
         : undefined;
 
@@ -274,13 +261,13 @@ export class IngestionService implements IngestionPort {
     }
 
     try {
-      await this.pipeline.executePipeline(runId, workspaceId, envelope);
+      await this.pipeline.executePipeline(runId, projectId, envelope);
     } catch (err: any) {
       this.logger.error(
         `Ingestion pipeline failed for run ${runId}: ${err?.message || err}`,
       );
       await this.repo
-        .updateRunStatus(workspaceId, runId, IngestionStatus.FAILED_FINAL, {
+        .updateRunStatus(projectId, runId, IngestionStatus.FAILED_FINAL, {
           lastError: err?.message || 'Unknown failure',
         })
         .catch(() => {});
@@ -294,13 +281,11 @@ export class IngestionService implements IngestionPort {
       };
     }
 
-    const updatedRun = await this.repo.findRunById(workspaceId, runId);
+    const updatedRun = await this.repo.findRunById(projectId, runId);
     const itemId = updatedRun?.itemId ?? undefined;
     const item =
       itemId && this.items
-        ? await this.items
-            .getItem(workspaceId, itemId)
-            .catch(() => undefined)
+        ? await this.items.getItem(projectId, itemId).catch(() => undefined)
         : undefined;
 
     return {
@@ -318,7 +303,7 @@ export class IngestionService implements IngestionPort {
   }
 
   private mapCommandToEnvelope(
-    workspaceId: string,
+    projectId: string,
     command: IngestionCommand,
   ): IngestionSubmissionEnvelope {
     let payload: SubmissionPayload;
@@ -358,24 +343,21 @@ export class IngestionService implements IngestionPort {
     }
 
     return {
-      workspaceId,
+      projectId,
       userId: command.userId,
       idempotencyKey: command.idempotencyKey,
       payload,
       collectionIds: command.collectionId ? [command.collectionId] : undefined,
-      overrides:
-        'overrides' in command
-          ? (command.overrides as Record<string, unknown>)
-          : undefined,
+      overrides: 'overrides' in command ? command.overrides : undefined,
     };
   }
 
   // ── Backward Compatibility Convenience Methods ────────────────────────────
 
-  async ingestDoi(workspaceId: string, userId: string, dto: any) {
+  async ingestDoi(projectId: string, userId: string, dto: any) {
     const res = await this.ingest({
       source: 'doi',
-      workspaceId,
+      projectId,
       userId,
       doi: dto.doi,
       collectionId: dto.collectionId,
@@ -384,10 +366,10 @@ export class IngestionService implements IngestionPort {
     return res.item || { id: res.itemId, runId: res.runId };
   }
 
-  async ingestBibtex(workspaceId: string, userId: string, dto: any) {
+  async ingestBibtex(projectId: string, userId: string, dto: any) {
     const res = await this.ingest({
       source: 'bibtex',
-      workspaceId,
+      projectId,
       userId,
       content: dto.bibtex || dto.content,
       collectionId: dto.collectionId,
@@ -396,10 +378,10 @@ export class IngestionService implements IngestionPort {
     return res.item || { id: res.itemId, runId: res.runId };
   }
 
-  async startRun(workspaceId: string, userId: string, dto: any) {
+  async startRun(projectId: string, userId: string, dto: any) {
     const res = await this.ingest({
       source: dto.source || 'doi',
-      workspaceId,
+      projectId,
       userId,
       doi: dto.doi || '',
       content: dto.content || '',
@@ -410,20 +392,16 @@ export class IngestionService implements IngestionPort {
 
   async captureUrl(
     url: string,
-    contextOrWorkspaceId: string | { workspaceId: string; userId?: string },
+    contextOrProjectId: string | { projectId?: string; workspaceId?: string; userId?: string },
   ) {
-    return this.urlCapture.captureUrl(url, contextOrWorkspaceId);
+    return this.urlCapture.captureUrl(url, contextOrProjectId);
   }
 
-  async confirmCapturedUrl(workspaceId: string, userId: string, dto: any) {
-    return this.urlCapture.confirmCapturedUrl(workspaceId, userId, dto);
+  async confirmCapturedUrl(projectId: string, userId: string, dto: any) {
+    return this.urlCapture.confirmCapturedUrl(projectId, userId, dto);
   }
 
   async cleanupExpiredPreviews(retentionDays = 7): Promise<number> {
     return this.urlCapture.cleanupExpiredPreviews(retentionDays);
-  }
-
-  private resolveWorkspaceId(workspaceId: string): Promise<string> {
-    return resolveTenantWorkspaceId(this.prisma, workspaceId);
   }
 }

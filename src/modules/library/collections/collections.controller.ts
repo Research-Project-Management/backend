@@ -12,6 +12,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { CollectionsService } from './collections.service';
 import {
   CreateCollectionDto,
@@ -21,94 +22,83 @@ import {
   AssignItemsToCollectionDto,
 } from './dto/collections.dto';
 import { CollectionDeleteStrategy } from './types/collections.types';
-import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
-import { CurrentUser } from '../../../modules/iam/authn/decorators/current-user.decorator';
-import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
-import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
+import { JwtAuthGuard } from '../../../modules/iam/authn/guards/auth.guard';
+import { CurrentUser } from '../../../modules/iam/authn/decorators/user.decorator';
 
-@Controller([
-  'api/v1/workspaces/:workspaceId/library/collections',
-  'api/v1/workspace/:workspaceId/library/collections',
-])
-@UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
+@ApiTags('Library Collections')
+@ApiBearerAuth('JWT-auth')
+@Controller('api/v1/library/collections')
+@UseGuards(JwtAuthGuard)
 export class CollectionsController {
   constructor(private readonly collectionsService: CollectionsService) {}
 
   @Get()
-  @UseGuards(WorkspaceRoleGuard)
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
-  async getCollections(@Param('workspaceId') workspaceId: string) {
-    return this.collectionsService.getCollections(workspaceId);
+  @ApiOperation({ summary: 'List all collections for user' })
+  async getCollections(@CurrentUser('id') userId: string) {
+    return this.collectionsService.getCollections(userId);
   }
 
   @Get('tree')
-  @UseGuards(WorkspaceRoleGuard)
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
-  async getCollectionTree(@Param('workspaceId') workspaceId: string) {
-    return this.collectionsService.getCollectionTree(workspaceId);
+  @ApiOperation({ summary: 'Get collection tree for user' })
+  async getCollectionTree(@CurrentUser('id') userId: string) {
+    return this.collectionsService.getCollectionTree(userId);
   }
 
   @Patch('reorder')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(WorkspaceRoleGuard)
-  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Reorder collections' })
   async reorderCollections(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Body() dto: ReorderCollectionsDto,
   ) {
     return this.collectionsService.reorderCollections(
-      workspaceId,
+      userId,
       dto.collections,
     );
   }
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @UseGuards(WorkspaceRoleGuard)
-  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Create collection' })
   async createCollection(
-    @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
     @Body() dto: CreateCollectionDto,
   ) {
-    return this.collectionsService.createCollection(workspaceId, userId, dto);
+    return this.collectionsService.createCollection(userId, dto);
   }
 
   @Get(':collectionId')
-  @UseGuards(WorkspaceRoleGuard)
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'Get collection by ID' })
   async getCollectionById(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Param('collectionId') collectionId: string,
   ) {
-    return this.collectionsService.getCollectionById(workspaceId, collectionId);
+    return this.collectionsService.getCollectionById(userId, collectionId);
   }
 
   @Put(':collectionId')
-  @UseGuards(WorkspaceRoleGuard)
-  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Update collection' })
   async updateCollection(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Param('collectionId') collectionId: string,
     @Body() dto: UpdateCollectionDto,
   ) {
     return this.collectionsService.updateCollection(
-      workspaceId,
+      userId,
       collectionId,
       dto,
     );
   }
 
   @Delete(':collectionId')
-  @UseGuards(WorkspaceRoleGuard)
-  @WorkspaceRoles('owner', 'admin')
+  @ApiOperation({ summary: 'Delete collection' })
   async deleteCollection(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Param('collectionId') collectionId: string,
     @Query('strategy') strategy?: CollectionDeleteStrategy,
   ) {
     return this.collectionsService.deleteCollection(
-      workspaceId,
+      userId,
       collectionId,
       strategy,
     );
@@ -116,46 +106,43 @@ export class CollectionsController {
 
   @Post(':collectionId/move-items')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(WorkspaceRoleGuard)
-  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Move items to collection' })
   async moveItems(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Param('collectionId') collectionId: string,
     @Body() dto: MoveItemsDto,
   ) {
     return this.collectionsService.moveItems(
-      workspaceId,
+      userId,
       collectionId,
-      dto.itemIds || [],
+      dto.itemIds || dto.paperIds || [],
     );
   }
 
   @Post(':collectionId/items')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(WorkspaceRoleGuard)
-  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Assign items to collection' })
   async assignItemsToCollection(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Param('collectionId') collectionId: string,
     @Body() dto: AssignItemsToCollectionDto,
   ) {
     return this.collectionsService.assignItemsToCollection(
-      workspaceId,
+      userId,
       collectionId,
       dto,
     );
   }
 
   @Delete(':collectionId/items/:itemId')
-  @UseGuards(WorkspaceRoleGuard)
-  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Detach item from collection' })
   async detachItemFromCollection(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') userId: string,
     @Param('collectionId') collectionId: string,
     @Param('itemId') itemId: string,
   ) {
     return this.collectionsService.detachItemFromCollection(
-      workspaceId,
+      userId,
       collectionId,
       itemId,
     );

@@ -108,7 +108,7 @@ export interface ItemMetadata {
   repository?: string;
   callNumber?: string;
   libraryCatalog?: string;
-  extraFields?: Record<string, any>;
+  extraFields?: Record<string, unknown>;
 
   provenance?: Provenance;
 }
@@ -235,6 +235,7 @@ export interface ResolvedMetadata {
 export interface MetadataRequest {
   query: string;
   queryType?: QueryType;
+  userId?: string;
   workspaceId?: string;
   forceRefresh?: boolean;
   signal?: AbortSignal;

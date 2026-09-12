@@ -1,4 +1,4 @@
-﻿import {
+import {
   IsEnum,
   IsNotEmpty,
   IsNumber,
@@ -30,7 +30,7 @@ export class CreateCommentDto {
 
   @IsString()
   @IsOptional()
-  workspaceId?: string;
+  pageId?: string;
 }
 
 export class UpdateCommentDto {
@@ -45,10 +45,6 @@ export class UpdateCommentDto {
   @IsString()
   @IsOptional()
   projectId?: string;
-
-  @IsString()
-  @IsOptional()
-  workspaceId?: string;
 }
 
 export class AddReplyDto {
@@ -59,8 +55,4 @@ export class AddReplyDto {
   @IsString()
   @IsOptional()
   projectId?: string;
-
-  @IsString()
-  @IsOptional()
-  workspaceId?: string;
 }

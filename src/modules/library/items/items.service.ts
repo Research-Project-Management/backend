@@ -8,10 +8,7 @@ import {
 import { Prisma, RagStatus } from '@prisma/client';
 import { QueryRepository } from './repositories/query.repository';
 import { CommandRepository } from './repositories/command.repository';
-import {
-  CreateCatalogItemData,
-  UpdateCatalogItemData,
-} from './types/items.types';
+import { CreateItemData, UpdateItemData } from './types/items.types';
 import {
   TransactionService,
   TransactionHelpers,
@@ -24,41 +21,35 @@ import {
 } from '../outbox/outbox.events';
 import { CursorPaginatedResult } from './dto/items.dto';
 import { PrismaService } from '../../../core/database/prisma.service';
-import { resolveTenantWorkspaceId } from '../../../core/utils/tenant.util';
 import { normalizeTags } from '../tags/utils/tags.utils';
 import { TagsService } from '../tags/tags.service';
 import { CollectionsService } from '../collections/collections.service';
 import { TypesService } from '../types/types.service';
 import { RagProvider } from '../search/providers/rag.provider';
 import { ItemsMapper } from './mappers/items.mapper';
-import {
-  TypeConversionPreview,
-  ConvertTypeOptions,
-} from './types/items.types';
+import { TypeConversionPreview, ConvertTypeOptions } from './types/items.types';
 import { ItemTransformer } from './transformers/item.transformer';
 import { randomUUID } from 'crypto';
 import {
   IItemReadPort,
   IItemExistencePort,
-  CatalogItemDetail,
+  ItemDetail,
 } from './ports/items.ports';
 
 import type {
-  UpsertSyncCatalogItemCommand,
+  UpsertSyncItemCommand,
   DeleteSyncEntityCommand,
   UpsertSyncEntityResult,
-} from '../common/types/sync.types';
+} from '../sync/types/sync.types';
 
 /** Transaction context passed to write methods for composing operations within a parent transaction. */
-export interface CatalogTransactionContext {
+export interface ItemTransactionContext {
   tx: Prisma.TransactionClient;
   helpers: TransactionHelpers;
 }
 
-export type ItemTransactionContext = CatalogTransactionContext;
-
 import {
-  CATALOG_COLUMN_METADATA_FIELDS,
+  ITEM_COLUMN_METADATA_FIELDS,
   FIELD_ALIASES,
 } from './constants/items.constants';
 
@@ -78,10 +69,6 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     private readonly transformer: ItemTransformer,
   ) {}
 
-  private resolveWorkspaceId(workspaceId: string): Promise<string> {
-    return resolveTenantWorkspaceId(this.prisma, workspaceId);
-  }
-
   private mapFlattenedState(
     item: Record<string, any>,
     userId?: string,
@@ -89,36 +76,40 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     return ItemsMapper.mapFlattenedState(item, userId);
   }
 
-  async getItem(workspaceId: string, id: string, userId?: string) {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const item = await this.query.findById(canonicalWorkspaceId, id);
+  async getItem(userId: string, id: string, projectId?: string) {
+    const item = await this.query.findById(userId, id, projectId);
     if (!item) return null;
     return this.mapFlattenedState(item, userId);
   }
 
-  async getFulltext(workspaceId: string, id: string) {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.query.getFulltext(canonicalWorkspaceId, id);
+  async getFulltext(userId: string, id: string) {
+    return this.query.getFulltext(userId, id);
   }
 
   async listItems(
-    workspaceId: string,
+    userId: string,
     options: {
-      view?: 'all' | 'recent' | 'unfiled' | 'trash';
-      userId?: string;
+      view?:
+        | 'all'
+        | 'recent'
+        | 'unfiled'
+        | 'trash'
+        | 'my-publications'
+        | 'publications';
       collectionId?: string;
       tagId?: string;
       search?: string;
       limit?: number;
       cursor?: string;
+      projectId?: string;
     },
   ): Promise<CursorPaginatedResult<any>> {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     const limit = Math.min(options.limit ?? 50, 100);
+    const queryOptions = { ...options, userId };
     const [totalCount, rawItems] = await Promise.all([
-      this.query.count(canonicalWorkspaceId, options),
-      this.query.findMany(canonicalWorkspaceId, {
-        ...options,
+      this.query.count(userId, queryOptions),
+      this.query.findMany(userId, {
+        ...queryOptions,
         limit,
       }),
     ]);
@@ -133,7 +124,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     }
 
     const items = rawItems.map((it) =>
-      this.mapFlattenedState(it, options.userId),
+      this.mapFlattenedState(it, userId),
     );
 
     return {
@@ -147,26 +138,20 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
   }
 
   async createItem(
-    workspaceId: string,
-    data: CreateCatalogItemData,
-    context?: Partial<CatalogTransactionContext> & {
+    userId: string,
+    data: CreateItemData,
+    context?: Partial<ItemTransactionContext> & {
       source?: LibraryItemSource;
     },
   ): Promise<any> {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-
     const execute = async (
       tx: Prisma.TransactionClient,
       helpers: TransactionHelpers,
     ) => {
-      const item = await this.command.create(
-        canonicalWorkspaceId,
-        data,
-        tx,
-      );
+      const item = await this.command.create(userId, data, tx);
 
-      await helpers.appendChange(canonicalWorkspaceId, {
-        entityType: 'CatalogItem',
+      await helpers.appendChange(userId, {
+        entityType: 'Item',
         entityId: item.id,
         action: 'create',
         version: item.version,
@@ -175,14 +160,14 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
 
       const payload = buildItemCreatedOutboxPayload({
         itemId: item.id,
-        workspaceId: canonicalWorkspaceId,
+        workspaceId: userId,
         title: item.title,
         source: context?.source ?? 'manual',
         doi: item.doi,
       });
 
       await helpers.publishOutbox(
-        canonicalWorkspaceId,
+        userId,
         item.id,
         LIBRARY_EVENT_TYPES.ITEM_CREATED,
         payload,
@@ -199,24 +184,23 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
   }
 
   async updateItem(
-    workspaceId: string,
+    userId: string,
     id: string,
     expectedVersion: number | undefined,
-    data: UpdateCatalogItemData,
-    context?: CatalogTransactionContext,
+    data: UpdateItemData,
+    context?: ItemTransactionContext,
   ): Promise<any> {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     if (context) {
       const updated = await this.command.update(
-        canonicalWorkspaceId,
+        userId,
         id,
         expectedVersion,
         data,
         context.tx,
       );
 
-      await context.helpers.appendChange(canonicalWorkspaceId, {
-        entityType: 'CatalogItem',
+      await context.helpers.appendChange(userId, {
+        entityType: 'Item',
         entityId: id,
         action: 'update',
         version: updated.version,
@@ -224,7 +208,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       });
 
       await context.helpers.publishOutbox(
-        canonicalWorkspaceId,
+        userId,
         id,
         LIBRARY_EVENT_TYPES.ITEM_UPDATED,
         updated,
@@ -234,10 +218,42 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     }
 
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      return this.updateItem(canonicalWorkspaceId, id, expectedVersion, data, {
+      return this.updateItem(userId, id, expectedVersion, data, {
         tx,
         helpers,
       });
+    });
+  }
+
+  async setMyPublication(
+    userId: string,
+    id: string,
+    isMyPublication: boolean,
+  ): Promise<any> {
+    return this.libraryTx.executeInTransaction(async (tx, helpers) => {
+      const updated = await this.command.setMyPublication(
+        userId,
+        id,
+        isMyPublication,
+        tx,
+      );
+
+      await helpers.appendChange(userId, {
+        entityType: 'Item',
+        entityId: id,
+        action: 'update',
+        version: updated.version,
+        data: updated,
+      });
+
+      await helpers.publishOutbox(
+        userId,
+        id,
+        LIBRARY_EVENT_TYPES.ITEM_UPDATED,
+        updated,
+      );
+
+      return ItemsMapper.toDomain(updated);
     });
   }
 
@@ -252,7 +268,6 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         ragDocId: result.docId,
         ragStatus: 'indexed',
         ragIndexedAt: new Date(),
-        ragError: null,
       });
       this.logger.log(
         `Paper ${item.id} successfully indexed into Qdrant (docId: ${result.docId})`,
@@ -267,23 +282,22 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     }
   }
 
-  async reindexItem(workspaceId: string, id: string, userId: string) {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const item = await this.query.findById(canonicalWorkspaceId, id);
+  async reindexItem(userId: string, id: string) {
+    const item = await this.query.findById(userId, id);
     if (!item) {
       throw new NotFoundException(
-        `Item ${id} not found in workspace ${canonicalWorkspaceId}`,
+        `Item ${id} not found in user library`,
       );
     }
 
     await this.libraryTx.executeInTransaction(async (_tx, helpers) => {
       await helpers.publishOutbox(
-        canonicalWorkspaceId,
+        userId,
         id,
         'library.item.reindexed',
         {
           itemId: id,
-          workspaceId: canonicalWorkspaceId,
+          workspaceId: userId,
           userId,
         },
       );
@@ -301,28 +315,27 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
   }
 
   async deleteItem(
-    workspaceId: string,
+    userId: string,
     id: string,
     expectedVersion?: number,
-    context?: CatalogTransactionContext,
+    context?: ItemTransactionContext,
   ): Promise<boolean> {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     if (context) {
       const deleted = await this.command.softDelete(
-        canonicalWorkspaceId,
+        userId,
         id,
         expectedVersion,
         context.tx,
       );
 
       if (deleted) {
-        await context.helpers.recordTombstone(canonicalWorkspaceId, {
-          entityType: 'CatalogItem',
+        await context.helpers.recordTombstone(userId, {
+          entityType: 'Item',
           entityId: id,
         });
 
         await context.helpers.publishOutbox(
-          canonicalWorkspaceId,
+          userId,
           id,
           'library.item.deleted',
           {
@@ -336,25 +349,31 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     }
 
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      return this.deleteItem(canonicalWorkspaceId, id, expectedVersion, {
-        tx,
-        helpers,
-      });
+      const deleted = await this.deleteItem(
+        userId,
+        id,
+        expectedVersion,
+        {
+          tx,
+          helpers,
+        },
+      );
+      await this.tagsService.invalidateTagsCache(userId);
+      return deleted;
     });
   }
 
-  async restoreItem(workspaceId: string, id: string, expectedVersion?: number) {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+  async restoreItem(userId: string, id: string, expectedVersion?: number) {
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
       const restored = await this.command.restore(
-        canonicalWorkspaceId,
+        userId,
         id,
         expectedVersion,
         tx,
       );
 
-      await helpers.appendChange(canonicalWorkspaceId, {
-        entityType: 'CatalogItem',
+      await helpers.appendChange(userId, {
+        entityType: 'Item',
         entityId: id,
         action: 'update',
         version: restored.version,
@@ -362,7 +381,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       });
 
       await helpers.publishOutbox(
-        canonicalWorkspaceId,
+        userId,
         id,
         'library.item.restored',
         {
@@ -371,24 +390,23 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         },
       );
 
-      // Normalize through mapper so response shape is consistent with
-      // getItem / createItem / updateItem (creators, fileUrl, tags, etc.)
+      await this.tagsService.invalidateTagsCache(userId);
+
       return ItemsMapper.toDomain(restored);
     });
   }
 
-  async purgeItem(workspaceId: string, id: string): Promise<boolean> {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+  async purgeItem(userId: string, id: string): Promise<boolean> {
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const purged = await this.command.purge(canonicalWorkspaceId, id, tx);
+      const purged = await this.command.purge(userId, id, tx);
 
-      await helpers.recordTombstone(canonicalWorkspaceId, {
-        entityType: 'CatalogItem',
+      await helpers.recordTombstone(userId, {
+        entityType: 'Item',
         entityId: id,
       });
 
       await helpers.publishOutbox(
-        canonicalWorkspaceId,
+        userId,
         id,
         'library.item.purged',
         {
@@ -397,13 +415,14 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         },
       );
 
+      await this.tagsService.invalidateTagsCache(userId);
+
       return purged;
     });
   }
 
-  async getRelatedItems(workspaceId: string, itemId: string) {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    const item = await this.query.findById(canonicalWorkspaceId, itemId);
+  async getRelatedItems(userId: string, itemId: string) {
+    const item = await this.query.findById(userId, itemId);
     if (!item) {
       throw new NotFoundException(`Item ${itemId} not found`);
     }
@@ -416,13 +435,12 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
   }
 
   async linkItems(
-    workspaceId: string,
+    userId: string,
     sourceItemId: string,
     data: { targetItemId: string; relationType?: string; note?: string },
   ) {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     const sourceItem = await this.query.findById(
-      canonicalWorkspaceId,
+      userId,
       sourceItemId,
     );
     if (!sourceItem) {
@@ -430,7 +448,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     }
 
     const targetItem = await this.query.findById(
-      canonicalWorkspaceId,
+      userId,
       data.targetItemId,
     );
     if (!targetItem) {
@@ -458,13 +476,12 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
   }
 
   async unlinkItems(
-    workspaceId: string,
+    userId: string,
     sourceItemId: string,
     targetItemId: string,
   ) {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     const sourceItem = await this.query.findById(
-      canonicalWorkspaceId,
+      userId,
       sourceItemId,
     );
     if (!sourceItem) {
@@ -480,97 +497,83 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     };
   }
 
-  async getItemSnapshot(workspaceId: string, itemId: string) {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.query.getItemSnapshot(canonicalWorkspaceId, itemId);
+  async getItemSnapshot(userId: string, itemId: string) {
+    return this.query.getItemSnapshot(userId, itemId);
   }
 
-  async getItemSnapshots(workspaceId: string, itemIds: string[]) {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.query.getItemSnapshots(canonicalWorkspaceId, itemIds);
+  async getItemSnapshots(userId: string, itemIds: string[]) {
+    return this.query.getItemSnapshots(userId, itemIds);
   }
 
-  // ── Port Implementations (IItemExistencePort & ICatalogReadPort) ────────────
+  // ── Port Implementations (IItemExistencePort & IItemReadPort) ────────────
 
-  async exists(workspaceId: string, itemId: string): Promise<boolean> {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.query.exists(canonicalWorkspaceId, itemId);
+  async exists(userId: string, itemId: string): Promise<boolean> {
+    return this.query.exists(userId, itemId);
   }
 
-  async assertExists(workspaceId: string, itemId: string): Promise<void> {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.query.assertExists(canonicalWorkspaceId, itemId);
+  async assertExists(userId: string, itemId: string): Promise<void> {
+    return this.query.assertExists(userId, itemId);
   }
 
   async existMany(
-    workspaceId: string,
+    userId: string,
     itemIds: string[],
   ): Promise<Map<string, boolean>> {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.query.existMany(canonicalWorkspaceId, itemIds);
+    return this.query.existMany(userId, itemIds);
   }
 
-  async findById(workspaceId: string, itemId: string) {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.query.findById(canonicalWorkspaceId, itemId);
+  async findById(userId: string, itemId: string) {
+    return this.query.findById(userId, itemId);
   }
 
-  async findByIds(workspaceId: string, itemIds: string[]) {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.query.findByIds(canonicalWorkspaceId, itemIds);
+  async findByIds(userId: string, itemIds: string[]) {
+    return this.query.findByIds(userId, itemIds);
   }
 
-  async findByDoi(workspaceId: string, doi: string) {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.query.findByDoi(canonicalWorkspaceId, doi);
+  async findByDoi(userId: string, doi: string) {
+    return this.query.findByDoi(userId, doi);
   }
 
-  async findSummaryById(workspaceId: string, itemId: string) {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.query.findSummaryById(canonicalWorkspaceId, itemId);
+  async findSummaryById(userId: string, itemId: string) {
+    return this.query.findSummaryById(userId, itemId);
   }
 
-  async findSummariesByIds(workspaceId: string, itemIds: string[]) {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.query.findSummariesByIds(canonicalWorkspaceId, itemIds);
+  async findSummariesByIds(userId: string, itemIds: string[]) {
+    return this.query.findSummariesByIds(userId, itemIds);
   }
 
-  async findQualityAuditItems(workspaceId: string, limit?: number) {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.query.findQualityAuditItems(canonicalWorkspaceId, limit);
+  async findQualityAuditItems(userId: string, limit?: number) {
+    return this.query.findQualityAuditItems(userId, limit);
   }
 
-  async findDuplicateCandidateItems(workspaceId: string, limit?: number) {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
-    return this.query.findDuplicateCandidateItems(
-      canonicalWorkspaceId,
-      limit,
-    );
+  async findDuplicateCandidateItems(userId: string, limit?: number) {
+    return this.query.findDuplicateCandidateItems(userId, limit);
   }
 
   /**
-   * Sync protocol adapter: transactional upsert for a CatalogItem from an external sync batch.
+   * Sync protocol adapter: transactional upsert for a Item from an external sync batch.
    */
   async upsertFromSync(
-    command: UpsertSyncCatalogItemCommand,
+    command: UpsertSyncItemCommand,
     tx: Prisma.TransactionClient,
     helpers: TransactionHelpers,
   ): Promise<UpsertSyncEntityResult> {
+    const userId = command.userId;
     if (command.existingId) {
-      const existing = await tx.catalogItem.findUnique({
+      const existing = await tx.item.findUnique({
         where: { id: command.existingId },
         include: { itemTags: { include: { tag: true } } },
       });
 
       if (!existing) {
         throw new NotFoundException(
-          `Catalog item ${command.existingId} not found in workspace ${command.workspaceId}`,
+          `Item ${command.existingId} not found`,
         );
       }
 
-      if (existing.workspaceId !== command.workspaceId) {
+      if (existing.userId && existing.userId !== userId) {
         throw new ForbiddenException(
-          `Catalog item ${command.existingId} does not belong to workspace ${command.workspaceId}`,
+          `Item ${command.existingId} does not belong to user ${userId}`,
         );
       }
 
@@ -583,7 +586,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       ]);
 
       const updated = await this.command.update(
-        command.workspaceId,
+        userId,
         command.existingId,
         undefined,
         {
@@ -594,8 +597,8 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         tx,
       );
 
-      await helpers.appendChange(command.workspaceId, {
-        entityType: 'CatalogItem',
+      await helpers.appendChange(userId, {
+        entityType: 'Item',
         entityId: updated.id,
         action: 'update',
         version: updated.version,
@@ -605,7 +608,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       return { id: updated.id, isNew: false, version: updated.version };
     } else {
       const created = await this.command.create(
-        command.workspaceId,
+        userId,
         {
           ...command,
           uploadedById: command.userId,
@@ -613,8 +616,8 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         tx,
       );
 
-      await helpers.appendChange(command.workspaceId, {
-        entityType: 'CatalogItem',
+      await helpers.appendChange(userId, {
+        entityType: 'Item',
         entityId: created.id,
         action: 'create',
         version: 1,
@@ -622,12 +625,12 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       });
 
       await helpers.publishOutbox(
-        command.workspaceId,
+        userId,
         created.id,
         LIBRARY_EVENT_TYPES.ITEM_CREATED,
         buildItemCreatedOutboxPayload({
           itemId: created.id,
-          workspaceId: command.workspaceId,
+          workspaceId: userId,
           title: created.title,
           source: 'external_sync',
         }),
@@ -638,48 +641,53 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
   }
 
   /**
-   * Sync protocol adapter: transactional soft-delete for a CatalogItem from an external sync batch.
+   * Sync protocol adapter: transactional soft-delete for a Item from an external sync batch.
    */
   async deleteFromSync(
     command: DeleteSyncEntityCommand,
     tx: Prisma.TransactionClient,
     helpers: TransactionHelpers,
   ): Promise<void> {
+    const targetUserId =
+      command.userId || (command as any).projectId || (command as any).workspaceId || '';
     const {
-      workspaceId,
       entityId,
       reason,
       publishOutboxEventType,
       publishOutboxPayload,
     } = command;
-    const existing = await tx.catalogItem.findUnique({
+    const existing = await tx.item.findUnique({
       where: { id: entityId },
     });
     if (!existing) return;
 
-    if (existing.workspaceId !== workspaceId) {
+    if (
+      targetUserId &&
+      existing.userId &&
+      existing.userId !== targetUserId
+    ) {
       throw new ForbiddenException(
-        `Catalog item ${entityId} does not belong to workspace ${workspaceId}`,
+        `Item ${entityId} does not belong to user ${targetUserId}`,
       );
     }
 
-    await tx.catalogItem.update({
+    await tx.item.update({
       where: { id: entityId },
       data: { deletedAt: new Date() },
     });
-    await helpers.appendChange(workspaceId, {
-      entityType: 'CatalogItem',
+    await helpers.appendChange(targetUserId, {
+      entityType: 'Item',
       entityId,
       action: 'delete',
       version: existing.version + 1,
       data: { reason },
     });
-    await helpers.recordTombstone(workspaceId, {
-      entityType: 'CatalogItem',
+    await helpers.recordTombstone(targetUserId, {
+      entityType: 'Item',
       entityId,
     });
     await helpers.publishOutbox(
-      workspaceId,
+      targetUserId,
       entityId,
       publishOutboxEventType ?? 'library.item.deleted',
       publishOutboxPayload ?? { itemId: entityId, reason },
@@ -701,24 +709,24 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
    * Executes type conversion transactionally in the database.
    */
   async convertItemType(
-    workspaceId: string,
+    userId: string,
     itemId: string,
     targetType: string,
     options: ConvertTypeOptions = {},
     tx?: Prisma.TransactionClient,
   ) {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     const rawExisting = await this.query.findById(
-      canonicalWorkspaceId,
+      userId,
       itemId,
+      undefined,
       tx,
     );
     if (!rawExisting) {
       throw new NotFoundException(
-        `Item ${itemId} not found in workspace ${canonicalWorkspaceId}`,
+        `Item ${itemId} not found in user library`,
       );
     }
-    const existing = ItemsMapper.toDomain<CatalogItemDetail>(rawExisting);
+    const existing = ItemsMapper.toDomain<ItemDetail>(rawExisting);
 
     const preview = this.previewTypeConversion(existing, targetType, {
       retainUnmappedInExtra: options.retainUnmappedInExtra ?? true,
@@ -737,8 +745,8 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         val !== undefined &&
         val !== null &&
         val !== '' &&
-        !CATALOG_COLUMN_METADATA_FIELDS.has(field.key) &&
-        !CATALOG_COLUMN_METADATA_FIELDS.has(FIELD_ALIASES[field.key])
+        !ITEM_COLUMN_METADATA_FIELDS.has(field.key) &&
+        !ITEM_COLUMN_METADATA_FIELDS.has(FIELD_ALIASES[field.key])
       ) {
         dynamicExtraFields[field.key] = val;
       }
@@ -755,7 +763,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       preview.droppedFields.map((d) => d.field.toLowerCase()),
     );
 
-    for (const col of CATALOG_COLUMN_METADATA_FIELDS) {
+    for (const col of ITEM_COLUMN_METADATA_FIELDS) {
       if (FIELD_ALIASES[col] && FIELD_ALIASES[col] !== col) continue;
 
       const colLower = col.toLowerCase();
@@ -772,7 +780,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     }
 
     const updated = await this.command.update(
-      canonicalWorkspaceId,
+      userId,
       itemId,
       options.expectedVersion,
       updatePayload,
@@ -785,7 +793,137 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       conversionReport: preview,
     };
   }
-}
 
-export const CatalogService = ItemsService;
-export type CatalogService = ItemsService;
+  async importItemsToProject(
+    userId: string,
+    projectId: string,
+    itemIds: string[],
+  ): Promise<{ success: boolean; importedCount: number }> {
+    if (!itemIds || itemIds.length === 0) {
+      return { success: true, importedCount: 0 };
+    }
+
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      include: { members: true },
+    });
+
+    if (!project) {
+      throw new NotFoundException(`Project ${projectId} not found`);
+    }
+
+    const isMember =
+      project.createdById === userId ||
+      project.members.some((m: any) => m.userId === userId);
+
+    if (!isMember) {
+      throw new ForbiddenException(
+        'You do not have permission to import items to this project',
+      );
+    }
+
+    const sourceItems = await this.query.findByIds(userId, itemIds);
+    let importedCount = 0;
+
+    for (const source of sourceItems) {
+      const existingInProject = await this.prisma.item.findFirst({
+        where: {
+          projectId,
+          deletedAt: null,
+          OR: [
+            ...(source.doi ? [{ doi: source.doi }] : []),
+            ...(source.citationKey ? [{ citationKey: source.citationKey }] : []),
+            { title: source.title },
+          ],
+        },
+      });
+
+      if (existingInProject) {
+        continue;
+      }
+
+      await this.prisma.item.create({
+        data: {
+          projectId,
+          userId: project.createdById,
+          uploadedById: userId,
+          title: source.title,
+          year: source.year,
+          doi: source.doi,
+          abstract: source.abstract,
+          itemType: source.itemType || 'journalArticle',
+          publicationTitle: source.publicationTitle,
+          publicationDate: source.publicationDate,
+          publisher: source.publisher,
+          place: source.place,
+          volume: source.volume,
+          issue: source.issue,
+          section: source.section,
+          partNumber: source.partNumber,
+          partTitle: source.partTitle,
+          pages: source.pages,
+          series: source.series,
+          seriesTitle: source.seriesTitle,
+          seriesText: source.seriesText,
+          issn: source.issn,
+          isbn: source.isbn,
+          pmid: source.pmid,
+          pmcid: source.pmcid,
+          url: source.url,
+          language: source.language,
+          journalAbbr: source.journalAbbr,
+          shortTitle: source.shortTitle,
+          rights: source.rights,
+          license: source.license,
+          citationKey: source.citationKey,
+          libraryCatalog: source.libraryCatalog,
+          archive: source.archive,
+          archiveLocation: source.archiveLocation,
+          callNumber: source.callNumber,
+          extra: source.extra,
+          version: 1,
+          contributors:
+            source.contributors && source.contributors.length > 0
+              ? {
+                  create: source.contributors.map((c: any) => ({
+                    creatorType: c.creatorType || 'author',
+                    firstName: c.firstName || '',
+                    lastName: c.lastName || '',
+                    fullName: c.fullName || '',
+                    orderIndex: c.orderIndex ?? 0,
+                  })),
+                }
+              : undefined,
+          identifiers:
+            source.identifiers && source.identifiers.length > 0
+              ? {
+                  create: source.identifiers.map((i: any) => ({
+                    type: i.type,
+                    value: i.value,
+                    canonicalUri: i.canonicalUri,
+                  })),
+                }
+              : undefined,
+          attachments:
+            source.attachments && source.attachments.length > 0
+              ? {
+                  create: source.attachments.map((a: any) => ({
+                    fileId: a.fileId,
+                    filename: a.filename,
+                    mimeType: a.mimeType,
+                    size: a.size,
+                    attachmentType: a.attachmentType,
+                    url: a.url,
+                    storageKey: a.storageKey,
+                  })),
+                }
+              : undefined,
+        },
+      });
+
+      importedCount++;
+    }
+
+    return { success: true, importedCount };
+  }
+}

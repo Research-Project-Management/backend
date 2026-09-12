@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { Prisma, User, RefreshToken } from '@prisma/client';
-import { IRefreshTokenRepository } from '../types/iam-repository.interface';
+import { IRefreshTokenRepository } from '../core/types/repository.type';
 import * as crypto from 'crypto';
 
 @Injectable()

@@ -35,7 +35,7 @@ jest.mock('@mozilla/readability', () => ({
   })),
 }));
 
-import { SsrfGuardService } from '@/modules/library/common/services/ssrf-guard.service';
+import { SsrfGuardService } from '@/modules/library/core/services/ssrf-guard.service';
 import { WebSnapshotService } from '@/modules/library/attachments/services/web-snapshot.service';
 import { AttachmentsService } from '@/modules/library/attachments/attachments.service';
 

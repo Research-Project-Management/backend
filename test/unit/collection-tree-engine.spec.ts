@@ -31,7 +31,12 @@ describe('TreeEngine (Matt Pocock Pattern)', () => {
 
     it('treats items with non-existent parentId as roots', () => {
       const collections = [
-        { id: 'c1', name: 'Orphan Child', parentId: 'missing-parent', itemCount: 3 },
+        {
+          id: 'c1',
+          name: 'Orphan Child',
+          parentId: 'missing-parent',
+          itemCount: 3,
+        },
       ];
 
       const tree = engine.buildTree(collections);

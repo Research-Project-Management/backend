@@ -1,7 +1,7 @@
 import { IsString, IsOptional, IsInt, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
 
-export class SearchCatalogQueryDto {
+export class SearchItemsQueryDto {
   @IsString()
   query!: string;
 
@@ -24,3 +24,6 @@ export class SearchCatalogQueryDto {
   @IsString()
   tagId?: string;
 }
+
+export const SearchQueryDto = SearchItemsQueryDto;
+export type SearchQueryDto = SearchItemsQueryDto;

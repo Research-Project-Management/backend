@@ -21,13 +21,10 @@ import {
   resolveFileStorageKey,
 } from './utils/storage-key.util';
 import { PrismaService } from '@/core/database/prisma.service';
-import {
-  buildWorkspaceIdentifierWhere,
-  isUuid,
-} from '@/core/utils/tenant.util';
+import { isUUID as isUuid } from 'class-validator';
 import { Prisma, EntityType } from '@prisma/client';
 import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
-import { RedisCacheService } from '@/core/cache/redis-cache.service';
+import { RedisCacheService } from '@/core/cache/redis.service';
 import { STORAGE_REDIS_KEYS } from './constants/redis-keys.constant';
 import {
   PresignDto,
@@ -47,11 +44,10 @@ export type FormattedFile<
   parent?: string | null;
 };
 
-export const NON_WORKSPACE_STORAGE_EXCLUSION: Prisma.FileWhereInput['NOT'] = [
-  { linkedToType: { in: ['Project', 'Page', 'Library', 'Paper'] } },
+export const NON_DRIVE_STORAGE_EXCLUSION: Prisma.FileWhereInput['NOT'] = [
+  { linkedToType: { in: ['Library', 'Paper'] } },
   { metaData: { path: ['source'], equals: 'library' } },
   { metaData: { path: ['source'], equals: 'paper' } },
-  { attachments: { some: {} } },
 ];
 
 @Injectable()
@@ -71,12 +67,11 @@ export class FileService implements OnModuleInit {
       // Self-healing migration: update legacy library files in files table to linkedToType: 'Library'
       const updated = await this.prisma.file.updateMany({
         where: {
-          linkedToType: 'Workspace',
           OR: [
             { metaData: { path: ['source'], equals: 'library' } },
             { metaData: { path: ['source'], equals: 'paper' } },
-            { attachments: { some: {} } },
           ],
+          NOT: { linkedToType: 'Library' },
         },
         data: {
           linkedToType: 'Library',
@@ -84,7 +79,7 @@ export class FileService implements OnModuleInit {
       });
       if (updated.count > 0) {
         this.logger.log(
-          `[Remediation] Isolated ${updated.count} legacy library files from Workspace Storage`,
+          `[Remediation] Isolated ${updated.count} legacy library files to Library storage type`,
         );
       }
     } catch (err) {
@@ -95,16 +90,16 @@ export class FileService implements OnModuleInit {
   }
 
   private async invalidateStorageCache(
-    workspaceId?: string | null,
+    scopeId?: string | null,
     fileId?: string,
   ) {
     if (!this.cache) return;
     const promises: Promise<any>[] = [];
-    if (workspaceId) {
+    if (scopeId) {
       promises.push(
-        this.cache.delPattern(`flux:storage:tree:${workspaceId}:*`),
+        this.cache.delPattern(`flux:storage:tree:${scopeId}:*`),
       );
-      promises.push(this.cache.del(STORAGE_REDIS_KEYS.quota(workspaceId)));
+      promises.push(this.cache.del(STORAGE_REDIS_KEYS.quota(scopeId)));
     }
     if (fileId) {
       promises.push(this.cache.del(STORAGE_REDIS_KEYS.file(fileId)));
@@ -139,58 +134,16 @@ export class FileService implements OnModuleInit {
 
   private async assertCanWriteScope(
     userId: string,
-    scope: { workspaceId?: string; projectId?: string; pageId?: string },
+    scope: { pageId?: string },
   ): Promise<void> {
     if (scope.pageId) {
       const page = await this.fileRepo.findPageScope(scope.pageId);
       if (!page) throw new NotFoundException('Page not found');
-      return this.assertCanWriteScope(userId, {
-        projectId: page.projectId || undefined,
-        workspaceId: page.workspaceId,
-      });
-    }
-
-    if (scope.projectId) {
-      const project = await this.fileRepo.findProjectScope(scope.projectId);
-      if (!project) throw new NotFoundException('Project not found');
-
-      const role = await this.fileRepo.findProjectMemberRole(
-        scope.projectId,
-        userId,
-      );
-      if (!role) {
-        throw new ForbiddenException('You are not a member of this project');
-      }
-      if (role === 'viewer') {
-        throw new ForbiddenException(
-          'Viewers cannot upload files to this project',
-        );
-      }
       return;
     }
 
-    if (scope.workspaceId) {
-      const workspace = await this.resolveWorkspace(scope.workspaceId);
-      if (!workspace) throw new NotFoundException('Workspace not found');
-
-      const role = await this.fileRepo.findWorkspaceMemberRole(
-        workspace.id,
-        userId,
-      );
-      if (!role) {
-        throw new ForbiddenException('You are not a member of this workspace');
-      }
-      if (role === 'viewer') {
-        throw new ForbiddenException(
-          'Viewers cannot upload files to this workspace',
-        );
-      }
-      return;
-    }
-
-    throw new BadRequestException(
-      'Upload scope (workspaceId, projectId, or pageId) is required',
-    );
+    // Personal / Global scope: authenticated user can upload their own files
+    return;
   }
 
   public async assertCanAccessFile(
@@ -210,8 +163,8 @@ export class FileService implements OnModuleInit {
         (Array.isArray((file as any).attachments) &&
           (file as any).attachments.length > 0);
 
-      if (!isLibraryFile && this.prisma?.catalogAttachment) {
-        const attCount = await this.prisma.catalogAttachment.count({
+      if (!isLibraryFile && (this.prisma as any)?.attachment) {
+        const attCount = await (this.prisma as any).attachment.count({
           where: { fileId: file.id },
         });
         if (attCount > 0) isLibraryFile = true;
@@ -224,9 +177,11 @@ export class FileService implements OnModuleInit {
       }
     }
 
+    // 1. Author has full access
     if (file.authorId === userId) return file;
 
-    const directShare = file.sharedWith?.find((s) => s.userId === userId);
+    // 2. Direct user share
+    const directShare = file.sharedWith?.find((s: any) => s.userId === userId);
     if (directShare) {
       if (required === 'write' && directShare.permission !== 'edit') {
         throw new ForbiddenException('You only have view access to this file');
@@ -234,54 +189,48 @@ export class FileService implements OnModuleInit {
       return file;
     }
 
-    if (file.workspaceId) {
-      const role = await this.fileRepo.findWorkspaceMemberRole(
-        file.workspaceId,
-        userId,
-      );
-      if (role) {
-        if (required === 'write' && role === 'viewer') {
-          throw new ForbiddenException(
-            'Viewers cannot modify files in this workspace',
-          );
-        }
+    // 3. Project-linked file
+    if (file.linkedToType === 'Project' && file.linkedToId) {
+      const project = await this.fileRepo.findProjectScope(file.linkedToId);
+      if (project && project.createdById === userId) {
         return file;
       }
-    }
-
-    if (file.linkedToType === 'Project' && file.linkedToId) {
       const role = await this.fileRepo.findProjectMemberRole(
         file.linkedToId,
         userId,
       );
       if (role) {
-        if (required === 'write' && role === 'viewer') {
+        if (
+          required === 'write' &&
+          (role === 'viewer' || role === 'commenter')
+        ) {
           throw new ForbiddenException(
-            'Viewers cannot modify files in this project',
+            'Viewers and commenters cannot modify files in this project',
           );
         }
         return file;
       }
     }
 
-    if (
-      file.linkedToType === 'Paper' &&
-      file.linkedToId &&
-      this.prisma?.catalogItem
-    ) {
-      const paper = await this.prisma.catalogItem.findUnique({
-        where: { id: file.linkedToId },
-        select: { workspaceId: true },
-      });
-      if (paper?.workspaceId) {
-        const role = await this.fileRepo.findWorkspaceMemberRole(
-          paper.workspaceId,
+    // 4. Page-linked file
+    if (file.linkedToType === 'Page' && file.linkedToId) {
+      const page = await this.fileRepo.findPageScope(file.linkedToId);
+      if (page?.projectId) {
+        const project = await this.fileRepo.findProjectScope(page.projectId);
+        if (project && project.createdById === userId) {
+          return file;
+        }
+        const role = await this.fileRepo.findProjectMemberRole(
+          page.projectId,
           userId,
         );
         if (role) {
-          if (required === 'write' && role === 'viewer') {
+          if (
+            required === 'write' &&
+            (role === 'viewer' || role === 'commenter')
+          ) {
             throw new ForbiddenException(
-              'Viewers cannot modify files in this workspace',
+              'Viewers and commenters cannot modify files in this page',
             );
           }
           return file;
@@ -292,32 +241,7 @@ export class FileService implements OnModuleInit {
     throw new ForbiddenException('You do not have access to this file');
   }
 
-  private async resolveWorkspace(workspaceIdOrSlug: string) {
-    return this.prisma.workspace.findFirst({
-      where: buildWorkspaceIdentifierWhere(workspaceIdOrSlug),
-      select: { id: true },
-    });
-  }
 
-  private async resolveWorkspaceId(scope: {
-    workspaceId?: string;
-    projectId?: string;
-    pageId?: string;
-  }): Promise<string | null> {
-    if (scope.workspaceId) {
-      const ws = await this.resolveWorkspace(scope.workspaceId);
-      return ws?.id || null;
-    }
-    if (scope.projectId) {
-      const project = await this.fileRepo.findProjectScope(scope.projectId);
-      return project?.workspaceId || null;
-    }
-    if (scope.pageId) {
-      const page = await this.fileRepo.findPageScope(scope.pageId);
-      return page?.workspaceId || null;
-    }
-    return null;
-  }
 
   private formatFile<
     T extends {
@@ -352,8 +276,6 @@ export class FileService implements OnModuleInit {
 
     // 1. Authorize scope before issuing presigned upload URL
     await this.assertCanWriteScope(userId, {
-      workspaceId: dto.workspaceId,
-      projectId: dto.projectId,
       pageId: dto.pageId,
     });
 
@@ -378,14 +300,7 @@ export class FileService implements OnModuleInit {
     }
 
     const cleanName = dto.filename.replace(/[^a-zA-Z0-9.-]/g, '_');
-    const wsId = await this.resolveWorkspaceId({
-      workspaceId: dto.workspaceId,
-      projectId: dto.projectId,
-      pageId: dto.pageId,
-    });
-    const key = wsId
-      ? `workspaces/${wsId}/uploads/${Date.now()}-${cleanName}`
-      : `uploads/${Date.now()}-${cleanName}`;
+    const key = `users/${userId}/uploads/${Date.now()}-${cleanName}`;
 
     const presigned = await this.r2Service.getPresignedUploadUrl(
       key,
@@ -438,21 +353,16 @@ export class FileService implements OnModuleInit {
       return undefined;
     };
 
-    const workspaceId = getFieldValue(fields.workspaceId);
     const projectId = getFieldValue(fields.projectId);
     const pageId = getFieldValue(fields.pageId);
     const source = getFieldValue(fields.source) || getFieldValue(fields.module);
 
     // Pre-authorize scope before performing any upload to R2
     await this.assertCanWriteScope(authorId, {
-      workspaceId,
-      projectId,
       pageId,
     });
 
     return this.uploadR2Buffer(authorId, filename, buffer, mimeType, {
-      workspaceId,
-      projectId,
       pageId,
       source,
       skipFileRecord: false, // Disallow skipping file record from public API
@@ -469,8 +379,6 @@ export class FileService implements OnModuleInit {
     buffer: Buffer,
     mimeType = 'application/octet-stream',
     scope: {
-      workspaceId?: string;
-      projectId?: string;
       pageId?: string;
       source?: string;
       skipFileRecord?: boolean;
@@ -478,7 +386,7 @@ export class FileService implements OnModuleInit {
     } = {},
   ) {
     const cleanName = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
-    const key = `uploads/${Date.now()}-${cleanName}`;
+    const key = `users/${userId}/uploads/${Date.now()}-${cleanName}`;
     const uploadRes = await this.r2Service.uploadBuffer(key, buffer, mimeType);
 
     // Pure binary upload transport if explicitly requested
@@ -490,23 +398,17 @@ export class FileService implements OnModuleInit {
       };
     }
 
-    const resolvedWorkspaceId = await this.resolveWorkspaceId(scope);
-
     const isLibrary =
       scope.source?.toLowerCase() === 'library' ||
       scope.source?.toLowerCase() === 'paper';
 
     const linkedToType = scope.pageId
       ? 'Page'
-      : scope.projectId
-        ? 'Project'
-        : isLibrary
-          ? 'Library'
-          : resolvedWorkspaceId
-            ? 'Workspace'
-            : null;
+      : isLibrary
+        ? 'Library'
+        : 'Personal';
     const linkedToId =
-      scope.pageId || scope.projectId || resolvedWorkspaceId || null;
+      scope.pageId || userId || null;
 
     let file = null;
     try {
@@ -521,13 +423,12 @@ export class FileService implements OnModuleInit {
           parentId: null,
           metaData: scope.source ? { source: scope.source } : {},
           authorId: userId,
-          workspaceId: resolvedWorkspaceId,
           linkedToType,
           linkedToId,
         });
 
-        if (resolvedWorkspaceId && file?.id) {
-          await this.invalidateStorageCache(resolvedWorkspaceId, file.id);
+        if (linkedToId && file?.id) {
+          await this.invalidateStorageCache(linkedToId, file.id);
         }
 
         if (file && linkedToType !== 'Library') {
@@ -538,8 +439,6 @@ export class FileService implements OnModuleInit {
               entityId: file.id,
               verb: 'uploaded',
               actorId: userId,
-              workspaceId: resolvedWorkspaceId || '',
-              projectId: scope.projectId || undefined,
             }),
           );
         }
@@ -566,33 +465,32 @@ export class FileService implements OnModuleInit {
 
   private async resolveScopeContext(
     userId: string,
-    scope: { workspaceId?: string; projectId?: string; pageId?: string },
+    scope: { pageId?: string } = {},
     parentIdDto?: string,
   ) {
     await this.assertCanWriteScope(userId, scope);
-    const workspaceId = await this.resolveWorkspaceId(scope);
-    const linkedToType = scope.pageId
-      ? 'Page'
-      : scope.projectId
-        ? 'Project'
-        : workspaceId
-          ? 'Workspace'
-          : null;
-    const linkedToId = scope.pageId || scope.projectId || workspaceId || null;
+    let linkedToType: string = 'Personal';
+    let linkedToId: string = userId;
+
+    if (scope.pageId) {
+      linkedToType = 'Page';
+      linkedToId = scope.pageId;
+    }
+
     const parentId =
       parentIdDto === 'null' || parentIdDto === 'undefined' || !parentIdDto
         ? null
         : parentIdDto;
 
-    return { workspaceId, linkedToType, linkedToId, parentId };
+    return { linkedToType, linkedToId, parentId };
   }
 
   async upload(
     userId: string,
-    scope: { workspaceId?: string; projectId?: string; pageId?: string },
+    scope: { pageId?: string } = {},
     dto: UploadFileDto,
   ) {
-    const { workspaceId, linkedToType, linkedToId, parentId } =
+    const { linkedToType, linkedToId, parentId } =
       await this.resolveScopeContext(userId, scope, dto.parentId);
 
     const file = await this.fileRepo.createFile({
@@ -605,35 +503,34 @@ export class FileService implements OnModuleInit {
       parentId,
       metaData: (dto.metaData as Prisma.InputJsonValue) || {},
       authorId: userId,
-      workspaceId,
       linkedToType,
       linkedToId,
     });
 
-    await this.invalidateStorageCache(workspaceId, file.id);
+    await this.invalidateStorageCache(linkedToId, file.id);
 
     return { file: this.formatFile(file) };
   }
 
   async createFolder(
     userId: string,
-    scope: { workspaceId?: string; projectId?: string; pageId?: string },
+    scope: { pageId?: string } = {},
     dto: CreateFolderDto,
   ) {
-    const { workspaceId, linkedToType, linkedToId, parentId } =
+    const { linkedToType, linkedToId, parentId } =
       await this.resolveScopeContext(userId, scope, dto.parentId);
 
     const folder = await this.fileRepo.createFile({
       filename: dto.filename || dto.name || 'Untitled Folder',
       isFolder: true,
+      url: '',
       parentId,
       authorId: userId,
-      workspaceId,
       linkedToType,
       linkedToId,
     });
 
-    await this.invalidateStorageCache(workspaceId, folder.id);
+    await this.invalidateStorageCache(linkedToId, folder.id);
 
     return { folder: this.formatFile(folder) };
   }
@@ -643,7 +540,7 @@ export class FileService implements OnModuleInit {
     const file = await this.assertCanAccessFile(userId, fileId, 'read');
     const formatted = this.formatFile(file);
 
-    const cacheKey = `${STORAGE_REDIS_KEYS.file(fileId)}:${file.workspaceId || 'global'}`;
+    const cacheKey = `${STORAGE_REDIS_KEYS.file(fileId)}:${file.linkedToId || 'global'}`;
     if (this.cache) {
       await this.cache.set(cacheKey, formatted, 1800);
     }
@@ -794,7 +691,7 @@ export class FileService implements OnModuleInit {
       }),
     });
 
-    await this.invalidateStorageCache(existing.workspaceId, fileId);
+    await this.invalidateStorageCache(existing.linkedToId || existing.authorId, fileId);
 
     return { file: this.formatFile(file) };
   }
@@ -802,7 +699,7 @@ export class FileService implements OnModuleInit {
   async deleteFile(fileId: string, userId: string) {
     const file = await this.assertCanAccessFile(userId, fileId, 'write');
     await this.fileRepo.trashFile(fileId);
-    await this.invalidateStorageCache(file.workspaceId, fileId);
+    await this.invalidateStorageCache(file.linkedToId || file.authorId, fileId);
     return { message: 'File moved to trash' };
   }
 
@@ -833,13 +730,7 @@ export class FileService implements OnModuleInit {
       );
     }
 
-    const primaryWorkspaceId = files[0].workspaceId;
     for (const f of files) {
-      if (f.workspaceId !== primaryWorkspaceId) {
-        throw new ForbiddenException(
-          'All files in batch operation must belong to the same workspace',
-        );
-      }
       await this.assertCanAccessFile(userId, f.id, 'write');
     }
 
@@ -855,7 +746,7 @@ export class FileService implements OnModuleInit {
     });
 
     for (const f of files) {
-      await this.invalidateStorageCache(f.workspaceId, f.id);
+      await this.invalidateStorageCache(f.linkedToId || f.authorId, f.id);
     }
 
     return { message: 'Files moved to trash', count: res.count };
@@ -864,7 +755,7 @@ export class FileService implements OnModuleInit {
   async restoreFile(fileId: string, userId: string) {
     const file = await this.assertCanAccessFile(userId, fileId, 'write');
     await this.fileRepo.restoreFile(fileId);
-    await this.invalidateStorageCache(file.workspaceId, fileId);
+    await this.invalidateStorageCache(file.linkedToId || file.authorId, fileId);
     return { message: 'File restored successfully' };
   }
 
@@ -877,7 +768,7 @@ export class FileService implements OnModuleInit {
     });
 
     for (const f of files) {
-      await this.invalidateStorageCache(f.workspaceId, f.id);
+      await this.invalidateStorageCache(f.linkedToId || f.authorId, f.id);
     }
 
     return { message: 'Files restored successfully', count: res.count };
@@ -894,7 +785,7 @@ export class FileService implements OnModuleInit {
       deletePromises.push(this.r2Service.deleteObject(key));
     }
     await Promise.all(deletePromises);
-    await this.invalidateStorageCache(file.workspaceId, fileId);
+    await this.invalidateStorageCache(file.linkedToId || file.authorId, fileId);
 
     return { message: 'File permanently deleted' };
   }
@@ -917,7 +808,7 @@ export class FileService implements OnModuleInit {
     await Promise.all(deletePromises);
 
     for (const f of files) {
-      await this.invalidateStorageCache(f.workspaceId, f.id);
+      await this.invalidateStorageCache(f.linkedToId || f.authorId, f.id);
     }
 
     return { message: 'Files permanently deleted', count: files.length };
@@ -930,7 +821,7 @@ export class FileService implements OnModuleInit {
       starred: !file.starred,
     });
 
-    await this.invalidateStorageCache(file.workspaceId, fileId);
+    await this.invalidateStorageCache(file.linkedToId || file.authorId, fileId);
 
     return { file: this.formatFile(updated) };
   }
@@ -944,7 +835,7 @@ export class FileService implements OnModuleInit {
     });
 
     for (const f of files) {
-      await this.invalidateStorageCache(f.workspaceId, f.id);
+      await this.invalidateStorageCache(f.linkedToId || f.authorId, f.id);
     }
 
     return {
@@ -958,7 +849,7 @@ export class FileService implements OnModuleInit {
     const updated = await this.fileRepo.updateFile(fileId, {
       filename,
     });
-    await this.invalidateStorageCache(file.workspaceId, fileId);
+    await this.invalidateStorageCache(file.linkedToId || file.authorId, fileId);
     return { file: this.formatFile(updated) };
   }
 
@@ -970,7 +861,7 @@ export class FileService implements OnModuleInit {
     const updated = await this.fileRepo.updateFile(fileId, {
       parentId: parentId || null,
     });
-    await this.invalidateStorageCache(file.workspaceId, fileId);
+    await this.invalidateStorageCache(file.linkedToId || file.authorId, fileId);
     return { file: this.formatFile(updated) };
   }
 
@@ -991,41 +882,107 @@ export class FileService implements OnModuleInit {
     return { shares };
   }
 
-  async getStorageUsage(workspaceParam: string) {
-    const workspaceId =
-      (await this.resolveWorkspaceId({ workspaceId: workspaceParam })) ||
-      (isUuid(workspaceParam) ? workspaceParam : null);
-    if (!workspaceId) {
-      return { totalBytes: 0 };
+  private formatStorageBytes(bytes: number): string {
+    if (bytes <= 0) return '0 MB';
+    const megabytes = bytes / (1024 * 1024);
+    if (megabytes < 1024) {
+      return `${megabytes.toFixed(1)} MB`;
     }
-    const cacheKey = STORAGE_REDIS_KEYS.quota(workspaceId);
+    const gigabytes = megabytes / 1024;
+    return `${gigabytes.toFixed(2)} GB`;
+  }
+
+  async getUserStorageUsage(userId: string) {
+    const cacheKey = STORAGE_REDIS_KEYS.quota(userId);
+    let usage: number | null = null;
 
     if (this.cache) {
-      const cached = await this.cache.get<number>(cacheKey);
-      if (cached !== null && cached !== undefined) {
-        return { totalBytes: cached };
+      usage = await this.cache.get<number>(cacheKey);
+    }
+
+    if (usage === null || usage === undefined) {
+      usage = await this.fileRepo.calculateUserStorageUsage(userId);
+      if (this.cache) {
+        await this.cache.set(cacheKey, usage, 1800);
       }
     }
 
-    const usage =
-      await this.fileRepo.calculateWorkspaceStorageUsage(workspaceId);
+    const limitBytes = 5 * 1024 * 1024 * 1024; // 5 GB default quota
+    const percentage = Number(Math.min(100, (usage / limitBytes) * 100).toFixed(1));
 
-    if (this.cache) {
-      await this.cache.set(cacheKey, usage, 1800);
+    return {
+      scope: 'personal' as const,
+      totalBytes: usage,
+      usedBytes: usage,
+      limitBytes,
+      usedFormatted: this.formatStorageBytes(usage),
+      limitFormatted: '5 GB',
+      percentage,
+    };
+  }
+
+  async getProjectStorageUsage(projectId: string, userId: string) {
+    const project = await this.fileRepo.getProjectWithHierarchy(projectId);
+    if (!project) {
+      throw new NotFoundException('Project not found');
     }
 
-    return { totalBytes: usage };
+    // Authorization: User must be creator, member, or project must be public
+    if (project.createdById !== userId && project.network !== 'public') {
+      const role = await this.fileRepo.findProjectMemberRole(project.id, userId);
+      if (!role) {
+        throw new ForbiddenException('You do not have access to this project');
+      }
+    }
+
+    const owner = project.createdBy || {
+      id: project.createdById,
+      name: 'Chủ trì đề tài',
+      email: '',
+      avatar: null,
+    };
+
+    // Calculate Project Owner's total storage usage
+    const ownerUsage = await this.fileRepo.calculateUserStorageUsage(owner.id);
+
+    // Calculate this specific project's storage usage
+    const projectUsage = await this.fileRepo.calculateProjectStorageUsage(project.id);
+
+    const limitBytes = 5 * 1024 * 1024 * 1024; // 5 GB
+    const percentage = Number(Math.min(100, (ownerUsage / limitBytes) * 100).toFixed(1));
+
+    return {
+      scope: 'project' as const,
+      projectId: project.id,
+      projectIdentifier: project.identifier,
+      projectName: project.name,
+      owner: {
+        id: owner.id,
+        name: owner.name || 'Chủ trì đề tài',
+        email: owner.email || '',
+        avatar: owner.avatar || null,
+      },
+      // Dung lượng được tính vào tài khoản Chủ trì đề tài (Project Owner)
+      totalBytes: ownerUsage,
+      usedBytes: ownerUsage,
+      projectBytes: projectUsage,
+      limitBytes,
+      usedFormatted: this.formatStorageBytes(ownerUsage),
+      projectFormatted: this.formatStorageBytes(projectUsage),
+      limitFormatted: '5 GB',
+      percentage,
+      note: 'Dung lượng dự án được ghi nhận vào tài khoản Chủ trì đề tài (Project Owner)',
+    };
   }
 
   // ── Scoped Queries ──────────────────────────────────────────────────────────
 
   async getFiles(scope: {
-    workspaceId?: string;
-    projectId?: string;
     pageId?: string;
     parentId?: string;
-  }) {
-    const workspaceId = await this.resolveWorkspaceId(scope);
+    userId?: string;
+  } = {}) {
+    const contextId = scope.pageId || scope.userId || null;
     const targetParentId =
       scope.parentId === 'null' ||
       scope.parentId === 'undefined' ||
@@ -1033,11 +990,11 @@ export class FileService implements OnModuleInit {
         ? null
         : scope.parentId;
 
-    const cacheKey = workspaceId
-      ? STORAGE_REDIS_KEYS.folderTree(workspaceId, targetParentId)
+    const cacheKey = contextId
+      ? STORAGE_REDIS_KEYS.folderTree(contextId, targetParentId)
       : null;
 
-    if (this.cache && cacheKey && !scope.pageId && !scope.projectId) {
+    if (this.cache && cacheKey) {
       const cached = await this.cache.get<any>(cacheKey);
       if (cached) return cached;
     }
@@ -1049,12 +1006,11 @@ export class FileService implements OnModuleInit {
     if (scope.pageId) {
       where.linkedToId = scope.pageId;
       where.linkedToType = 'Page';
-    } else if (scope.projectId) {
-      where.linkedToId = scope.projectId;
-      where.linkedToType = 'Project';
-    } else if (workspaceId) {
-      where.workspaceId = workspaceId;
-      where.NOT = NON_WORKSPACE_STORAGE_EXCLUSION;
+    } else if (scope.userId) {
+      where.authorId = scope.userId;
+      where.NOT = NON_DRIVE_STORAGE_EXCLUSION;
+    } else {
+      where.NOT = NON_DRIVE_STORAGE_EXCLUSION;
     }
 
     if (scope.parentId !== undefined) {
@@ -1068,116 +1024,49 @@ export class FileService implements OnModuleInit {
 
     const result = { files: files.map((f) => this.formatFile(f)) };
 
-    if (this.cache && cacheKey && !scope.pageId && !scope.projectId) {
+    if (this.cache && cacheKey) {
       await this.cache.set(cacheKey, result, 3600);
     }
 
     return result;
   }
 
-  async getHomeFiles(workspaceParam: string) {
-    const workspaceId =
-      (await this.resolveWorkspaceId({ workspaceId: workspaceParam })) ||
-      (isUuid(workspaceParam) ? workspaceParam : null);
-    if (!workspaceId) {
-      return { files: [] };
-    }
-    const files = await this.fileRepo.findFiles(
-      {
-        workspaceId,
-        trashedAt: null,
-        parentId: null,
-        NOT: NON_WORKSPACE_STORAGE_EXCLUSION,
-      },
-      [{ isFolder: 'desc' }, { createdAt: 'desc' }],
-      50,
-    );
-
-    return { files: files.map((f) => this.formatFile(f)) };
-  }
-
-  async getMyFiles(
-    userId: string,
-    workspaceParam?: string,
-    projectId?: string,
-  ) {
-    const workspaceId = workspaceParam
-      ? (await this.resolveWorkspaceId({ workspaceId: workspaceParam })) ||
-        (isUuid(workspaceParam) ? workspaceParam : undefined)
-      : undefined;
-    if (workspaceParam && !workspaceId && !projectId) {
-      return { files: [] };
-    }
+  async getMyFiles(userId: string) {
     const files = await this.fileRepo.findFiles(
       {
         authorId: userId,
         trashedAt: null,
-        ...(workspaceId &&
-          !projectId && {
-            workspaceId,
-            NOT: NON_WORKSPACE_STORAGE_EXCLUSION,
-          }),
-        ...(projectId && { linkedToId: projectId, linkedToType: 'Project' }),
+        NOT: NON_DRIVE_STORAGE_EXCLUSION,
       },
-      [{ createdAt: 'desc' }],
+      [{ isFolder: 'desc' }, { createdAt: 'desc' }],
     );
 
     return { files: files.map((f) => this.formatFile(f)) };
   }
 
-  async getStarredFiles(workspaceParam?: string, projectId?: string) {
-    const workspaceId = workspaceParam
-      ? (await this.resolveWorkspaceId({ workspaceId: workspaceParam })) ||
-        (isUuid(workspaceParam) ? workspaceParam : undefined)
-      : undefined;
-    if (workspaceParam && !workspaceId && !projectId) {
-      return { files: [] };
-    }
+  async getStarredFiles(userId: string) {
     const files = await this.fileRepo.findFiles(
       {
+        authorId: userId,
         starred: true,
         trashedAt: null,
-        ...(workspaceId &&
-          !projectId && {
-            workspaceId,
-            NOT: NON_WORKSPACE_STORAGE_EXCLUSION,
-          }),
-        ...(projectId && { linkedToId: projectId, linkedToType: 'Project' }),
+        NOT: NON_DRIVE_STORAGE_EXCLUSION,
       },
-      [{ updatedAt: 'desc' }],
+      [{ isFolder: 'desc' }, { updatedAt: 'desc' }],
     );
 
     return { files: files.map((f) => this.formatFile(f)) };
   }
 
-  async getSharedFiles(
-    userId: string,
-    workspaceParam?: string,
-    projectId?: string,
-  ) {
-    const workspaceId = workspaceParam
-      ? (await this.resolveWorkspaceId({ workspaceId: workspaceParam })) ||
-        (isUuid(workspaceParam) ? workspaceParam : undefined)
-      : undefined;
-    if (workspaceParam && !workspaceId && !projectId) {
-      return { files: [] };
-    }
+  async getSharedFiles(userId: string) {
     const shares = await this.fileRepo.findFileShares(userId);
 
     const files = shares
-      .map((s) => s.file)
-      .filter((f) => {
+      .map((s: any) => s.file)
+      .filter((f: any) => {
         if (!f || f.trashedAt) return false;
-        if (workspaceId && f.workspaceId !== workspaceId) return false;
         if (
-          projectId &&
-          (f.linkedToId !== projectId || f.linkedToType !== 'Project')
-        )
-          return false;
-        if (
-          ['Project', 'Page', 'Library', 'Paper'].includes(
-            f.linkedToType || '',
-          ) ||
+          ['Library', 'Paper'].includes(f.linkedToType || '') ||
           (f.metaData as any)?.source === 'library' ||
           (f.metaData as any)?.source === 'paper' ||
           (Array.isArray((f as any).attachments) &&
@@ -1188,26 +1077,15 @@ export class FileService implements OnModuleInit {
         return true;
       });
 
-    return { files: files.map((f) => this.formatFile(f)) };
+    return { files: files.map((f: any) => this.formatFile(f)) };
   }
 
-  async getTrashedFiles(workspaceParam?: string, projectId?: string) {
-    const workspaceId = workspaceParam
-      ? (await this.resolveWorkspaceId({ workspaceId: workspaceParam })) ||
-        (isUuid(workspaceParam) ? workspaceParam : undefined)
-      : undefined;
-    if (workspaceParam && !workspaceId && !projectId) {
-      return { files: [] };
-    }
+  async getTrashedFiles(userId: string) {
     const files = await this.fileRepo.findFiles(
       {
+        authorId: userId,
         trashedAt: { not: null },
-        ...(workspaceId &&
-          !projectId && {
-            workspaceId,
-            NOT: NON_WORKSPACE_STORAGE_EXCLUSION,
-          }),
-        ...(projectId && { linkedToId: projectId, linkedToType: 'Project' }),
+        NOT: NON_DRIVE_STORAGE_EXCLUSION,
       },
       [{ trashedAt: 'desc' }],
     );

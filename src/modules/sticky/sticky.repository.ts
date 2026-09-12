@@ -1,10 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
-import {
-  buildWorkspaceIdentifierWhere,
-  isUuid,
-} from '@/core/utils/tenant.util';
-import { Prisma, StickyScope, Sticky } from '@prisma/client';
+import { isUUID } from 'class-validator';
+import { Prisma, Sticky } from '@prisma/client';
 import {
   IStickyRepository,
   StickyWithUser,
@@ -17,17 +14,8 @@ export type { StickyWithUser };
 export class StickyRepository implements IStickyRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async resolveWorkspace(
-    workspaceIdOrSlug: string,
-  ): Promise<{ id: string } | null> {
-    return this.prisma.workspace.findFirst({
-      where: buildWorkspaceIdentifierWhere(workspaceIdOrSlug),
-      select: { id: true },
-    });
-  }
-
   async findStickyById(stickyId: string): Promise<StickyWithUser | null> {
-    if (!isUuid(stickyId)) return null;
+    if (!isUUID(stickyId)) return null;
     return this.prisma.sticky.findUnique({
       where: { id: stickyId },
       include: {
@@ -36,21 +24,10 @@ export class StickyRepository implements IStickyRepository {
     });
   }
 
-  async findWorkspaceStickies(
-    workspaceId: string,
-    userId: string,
-  ): Promise<StickyWithUser[]> {
-    const ws = await this.resolveWorkspace(workspaceId);
-    const canonicalWorkspaceId =
-      ws?.id || (isUuid(workspaceId) ? workspaceId : null);
-    if (!canonicalWorkspaceId || !isUuid(userId)) return [];
-
+  async findStickiesByUserId(userId: string): Promise<StickyWithUser[]> {
+    if (!isUUID(userId)) return [];
     return this.prisma.sticky.findMany({
-      where: {
-        workspaceId: canonicalWorkspaceId,
-        userId,
-        scope: StickyScope.workspace,
-      },
+      where: { userId },
       include: {
         user: { select: USER_MINIMAL_SELECT },
       },
@@ -58,17 +35,25 @@ export class StickyRepository implements IStickyRepository {
     });
   }
 
-  async findProjectStickies(
-    projectId: string,
-    userId: string,
-  ): Promise<StickyWithUser[]> {
-    if (!isUuid(projectId) || !isUuid(userId)) return [];
+  async findPersonalStickies(userId: string): Promise<StickyWithUser[]> {
+    return this.findStickiesByUserId(userId);
+  }
+
+  async countStickiesByUserId(userId: string): Promise<number> {
+    if (!isUUID(userId)) return 0;
+    return this.prisma.sticky.count({
+      where: { userId },
+    });
+  }
+
+  async countPersonalStickies(userId: string): Promise<number> {
+    return this.countStickiesByUserId(userId);
+  }
+
+  async findStickiesByProjectId(projectId: string): Promise<StickyWithUser[]> {
+    if (!isUUID(projectId)) return [];
     return this.prisma.sticky.findMany({
-      where: {
-        projectId,
-        userId,
-        scope: StickyScope.project,
-      },
+      where: { projectId },
       include: {
         user: { select: USER_MINIMAL_SELECT },
       },
@@ -76,35 +61,10 @@ export class StickyRepository implements IStickyRepository {
     });
   }
 
-  async countWorkspaceStickies(
-    workspaceId: string,
-    userId: string,
-  ): Promise<number> {
-    const ws = await this.resolveWorkspace(workspaceId);
-    const canonicalWorkspaceId =
-      ws?.id || (isUuid(workspaceId) ? workspaceId : null);
-    if (!canonicalWorkspaceId || !isUuid(userId)) return 0;
-
+  async countStickiesByProjectId(projectId: string): Promise<number> {
+    if (!isUUID(projectId)) return 0;
     return this.prisma.sticky.count({
-      where: {
-        workspaceId: canonicalWorkspaceId,
-        userId,
-        scope: StickyScope.workspace,
-      },
-    });
-  }
-
-  async countProjectStickies(
-    projectId: string,
-    userId: string,
-  ): Promise<number> {
-    if (!isUuid(projectId) || !isUuid(userId)) return 0;
-    return this.prisma.sticky.count({
-      where: {
-        projectId,
-        userId,
-        scope: StickyScope.project,
-      },
+      where: { projectId },
     });
   }
 
@@ -139,7 +99,7 @@ export class StickyRepository implements IStickyRepository {
   }
 
   async findStickiesByIds(stickyIds: string[]): Promise<Sticky[]> {
-    const validIds = stickyIds.filter(isUuid);
+    const validIds = stickyIds.filter((id) => isUUID(id));
     if (validIds.length === 0) return [];
     return this.prisma.sticky.findMany({
       where: { id: { in: validIds } },
@@ -147,7 +107,7 @@ export class StickyRepository implements IStickyRepository {
   }
 
   async reorderStickies(stickyIds: string[]): Promise<Sticky[]> {
-    const validIds = stickyIds.filter(isUuid);
+    const validIds = stickyIds.filter((id) => isUUID(id));
     if (validIds.length === 0) return [];
     const updates = validIds.map((id, index) =>
       this.prisma.sticky.update({
@@ -156,25 +116,5 @@ export class StickyRepository implements IStickyRepository {
       }),
     );
     return this.prisma.$transaction(updates);
-  }
-
-  async findProjectWorkspaceId(projectId: string): Promise<string | null> {
-    if (!isUuid(projectId)) {
-      const project = await this.prisma.project
-        .findFirst({
-          where: {
-            identifier: { equals: projectId, mode: 'insensitive' },
-            deletedAt: null,
-          },
-          select: { workspaceId: true },
-        })
-        .catch(() => null);
-      return project?.workspaceId || null;
-    }
-    const project = await this.prisma.project.findUnique({
-      where: { id: projectId },
-      select: { workspaceId: true },
-    });
-    return project?.workspaceId || null;
   }
 }

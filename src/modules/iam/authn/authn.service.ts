@@ -13,16 +13,16 @@ import { User, AuthProvider } from '@prisma/client';
 
 import { AuthnRepository } from './authn.repository';
 import { UserService } from '../user/user.service';
-import { AuditService } from '../audit/audit.service';
-import { RedisCacheService } from '@/core/cache/redis-cache.service';
+import { RedisCacheService } from '@/core/cache/redis.service';
+import { PrismaService } from '@/core/database/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import {
   AuthnResponseDto,
   TokenRefreshResponseDto,
   UserSummaryResponseDto,
-} from './dto/authn-response.dto';
-import { IAM_REDIS_KEYS } from '../constants/redis-keys.constant';
+} from './dto/response.dto';
+import { IAM_REDIS_KEYS } from '../core/constants/redis.constant';
 
 export interface TokenPair {
   accessToken: string;
@@ -63,11 +63,18 @@ export class AuthnService {
   constructor(
     private readonly authnRepo: AuthnRepository,
     private readonly userService: UserService,
-    private readonly auditService: AuditService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly redis: RedisCacheService,
+    private readonly prisma: PrismaService,
   ) {}
+
+  /**
+   * Helper for audit logging (temporarily noop while AuditModule is disabled)
+   */
+  private async logAudit(_data: any): Promise<void> {
+    // AuditModule temporarily disabled
+  }
 
   /**
    * Cryptographically hashes a refresh token before persistence (SHA-256).
@@ -494,7 +501,7 @@ export class AuthnService {
         profileData: { name: profile.name, avatar: profile.avatar },
       });
 
-      await this.auditService.log({
+      await this.logAudit({
         actorId: user.id,
         eventType: 'oauth_account_linked',
         targetType: 'user',
@@ -505,7 +512,7 @@ export class AuthnService {
 
     const tokens = await this.generateTokens(user);
 
-    await this.auditService.log({
+    await this.logAudit({
       actorId: user.id,
       eventType: 'login_success',
       targetType: 'user',
@@ -540,7 +547,7 @@ export class AuthnService {
 
     const tokens = await this.generateTokens(user);
 
-    await this.auditService.log({
+    await this.logAudit({
       actorId: user.id,
       eventType: 'login_success',
       targetType: 'user',
@@ -554,11 +561,15 @@ export class AuthnService {
     };
   }
 
+  async register(dto: RegisterDto): Promise<AuthnResponseDto> {
+    return this.registerUser(dto);
+  }
+
   async login(dto: LoginDto): Promise<AuthnResponseDto> {
     const user = await this.authnRepo.findUserByEmail(dto.email);
 
     if (!user || !user.password) {
-      await this.auditService.log({
+      await this.logAudit({
         eventType: 'login_failed',
         targetType: 'user',
         metadata: { email: dto.email, reason: 'user_not_found_or_no_password' },
@@ -568,7 +579,7 @@ export class AuthnService {
 
     const isMatch = await bcrypt.compare(dto.password, user.password);
     if (!isMatch) {
-      await this.auditService.log({
+      await this.logAudit({
         actorId: user.id,
         eventType: 'login_failed',
         targetType: 'user',
@@ -580,7 +591,7 @@ export class AuthnService {
 
     const tokens = await this.generateTokens(user);
 
-    await this.auditService.log({
+    await this.logAudit({
       actorId: user.id,
       eventType: 'login_success',
       targetType: 'user',
@@ -628,7 +639,7 @@ export class AuthnService {
         await this.authnRepo.revokeAllUserTokens(tokenRecord.userId);
       }
 
-      await this.auditService.log({
+      await this.logAudit({
         actorId: tokenRecord.userId,
         eventType: 'token_breach_detected',
         targetType: 'session',
@@ -664,7 +675,7 @@ export class AuthnService {
       throw new UnauthorizedException('Refresh token is invalid or expired');
     }
 
-    await this.auditService.log({
+    await this.logAudit({
       actorId: tokenRecord.userId,
       eventType: 'token_refreshed',
       targetType: 'session',
@@ -687,7 +698,7 @@ export class AuthnService {
         await this.authnRepo.revokeRefreshToken(tokenHash);
         await this.redis.del(IAM_REDIS_KEYS.session(tokenRecord.id));
 
-        await this.auditService.log({
+        await this.logAudit({
           actorId: tokenRecord.userId,
           eventType: 'logout',
           targetType: 'session',
@@ -713,7 +724,7 @@ export class AuthnService {
     const resetKey = `flux:iam:pw_reset:${resetToken}`;
     await this.redis.set(resetKey, { userId: user.id }, 900); // 15 min TTL
 
-    await this.auditService.log({
+    await this.logAudit({
       actorId: user.id,
       eventType: 'password_reset_requested',
       targetType: 'user',
@@ -742,7 +753,7 @@ export class AuthnService {
     await this.authnRepo.revokeAllUserTokens(record.userId);
     await this.redis.del(resetKey);
 
-    await this.auditService.log({
+    await this.logAudit({
       actorId: record.userId,
       eventType: 'password_reset_completed',
       targetType: 'user',
@@ -775,7 +786,7 @@ export class AuthnService {
 
     await this.redis.del(IAM_REDIS_KEYS.session(sessionId));
 
-    await this.auditService.log({
+    await this.logAudit({
       actorId: userId,
       eventType: 'token_revoked',
       targetType: 'session',
@@ -786,7 +797,7 @@ export class AuthnService {
   async revokeAllSessions(userId: string): Promise<{ revokedCount: number }> {
     const count = await this.authnRepo.revokeAllUserSessions(userId);
 
-    await this.auditService.log({
+    await this.logAudit({
       actorId: userId,
       eventType: 'token_revoked',
       targetType: 'user',

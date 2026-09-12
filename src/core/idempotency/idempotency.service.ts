@@ -1,6 +1,6 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
-import { RedisCacheService } from '../cache/redis-cache.service';
+import { RedisCacheService } from '../cache/redis.service';
 import { Prisma } from '@prisma/client';
 import {
   IdempotencyCheckResult,

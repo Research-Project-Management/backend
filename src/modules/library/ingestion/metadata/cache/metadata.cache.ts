@@ -1,6 +1,6 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { createHash } from 'crypto';
-import { RedisCacheService } from '@/core/cache/redis-cache.service';
+import { RedisCacheService } from '@/core/cache/redis.service';
 import { QueryType, ResolvedMetadata } from '../types/metadata.types';
 import { METADATA_POLICY_VERSION } from '../policies/metadata.policy';
 

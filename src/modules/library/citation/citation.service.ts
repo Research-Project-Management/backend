@@ -315,7 +315,7 @@ export class CitationService {
   async resolveAcademicQuery(
     rawQuery: string,
     rawDoi?: string,
-    workspaceId?: string,
+    userId?: string,
   ): Promise<{
     found: boolean;
     work: ReferenceData | null;
@@ -349,7 +349,8 @@ export class CitationService {
       try {
         const resolved = await this.metadataPort.resolve({
           query: input,
-          workspaceId,
+          userId,
+          workspaceId: userId,
         });
 
         if (
@@ -467,20 +468,20 @@ export class CitationService {
   }
 
   /**
-   * Formats citation directly for a stored CatalogItem by ID.
+   * Formats citation directly for a stored Item by ID.
    */
   async formatItemById(
-    workspaceId: string,
+    userId: string,
     itemId: string,
     styleId: CitationStyleId = 'apa-7th',
     index: number = 1,
   ) {
     const item: any = this.itemsService
-      ? await this.itemsService.getItem(workspaceId, itemId)
-      : await this.prisma?.catalogItem.findFirst({
+      ? await this.itemsService.getItem(userId, itemId)
+      : await this.prisma?.item.findFirst({
           where: {
             id: itemId,
-            workspaceId,
+            userId,
             deletedAt: null,
           },
           include: {
@@ -491,7 +492,7 @@ export class CitationService {
         });
 
     if (!item) {
-      throw new NotFoundException('Paper not found in workspace');
+      throw new NotFoundException('Item not found in library');
     }
 
     // Tier 1: Official In-Process CSL Engine (Instant, Offline-capable, Consistent with library metadata)
@@ -574,16 +575,16 @@ export class CitationService {
    * Formats citations in batch for stored CatalogItems by IDs.
    */
   async formatItemBatch(
-    workspaceId: string,
+    userId: string,
     itemIds: string[],
     styleId: CitationStyleId = 'apa-7th',
   ) {
     const items = this.itemsService
-      ? await this.itemsService.findByIds(workspaceId, itemIds)
-      : (await this.prisma?.catalogItem.findMany({
+      ? await this.itemsService.findByIds(userId, itemIds)
+      : (await this.prisma?.item.findMany({
           where: {
             id: { in: itemIds },
-            workspaceId,
+            userId,
             deletedAt: null,
           },
           include: {

@@ -9,7 +9,7 @@ import {
 import { PrismaService } from '../../../../core/database/prisma.service';
 import { UrlCaptureProvider } from '../providers/url-capture.provider';
 import { TransactionService } from '../../outbox/transaction.service';
-import { CatalogService } from '../../items/items.service';
+import { ItemsService } from '../../items/items.service';
 import { Prisma } from '@prisma/client';
 import { createHash } from 'crypto';
 
@@ -23,7 +23,7 @@ export class UrlCaptureService {
     private readonly prisma: PrismaService,
     @Optional() private readonly urlCaptureProvider?: UrlCaptureProvider,
     @Optional() private readonly txService?: TransactionService,
-    @Optional() private readonly catalogService?: CatalogService,
+    @Optional() private readonly itemsService?: ItemsService,
     @Optional() private readonly webSnapshotService?: WebSnapshotService,
   ) {}
 
@@ -32,12 +32,16 @@ export class UrlCaptureService {
    */
   async captureUrl(
     url: string,
-    contextOrWorkspaceId: string | { workspaceId: string; userId?: string },
+    contextOrWorkspaceId:
+      | string
+      | { workspaceId?: string; projectId?: string; userId?: string },
   ): Promise<any> {
     const workspaceId =
       typeof contextOrWorkspaceId === 'string'
         ? contextOrWorkspaceId
-        : contextOrWorkspaceId.workspaceId;
+        : contextOrWorkspaceId.workspaceId ||
+          contextOrWorkspaceId.projectId ||
+          '';
     const userId =
       typeof contextOrWorkspaceId === 'object'
         ? contextOrWorkspaceId.userId
@@ -84,13 +88,14 @@ export class UrlCaptureService {
 
   /**
    * Confirms a previously captured URL by validating its token, claiming it atomically,
-   * and committing a CatalogItem to the catalog.
+   * and committing an Item to the library.
    */
   async confirmCapturedUrl(
     workspaceId: string,
     userId: string,
     dto: any,
   ): Promise<any> {
+    const targetUserId = userId || workspaceId;
     if (!dto?.previewToken) {
       throw new BadRequestException('previewToken is required');
     }
@@ -122,7 +127,7 @@ export class UrlCaptureService {
       const verifyRes = this.urlCaptureProvider.verifyPreviewToken(
         preview.canonicalMetadata as any,
         dto.previewToken,
-        { workspaceId, userId },
+        { workspaceId: targetUserId, userId: targetUserId },
       );
       if (!verifyRes.valid) {
         if (verifyRes.reason === 'token_expired') {
@@ -176,7 +181,7 @@ export class UrlCaptureService {
       collectionId: dto.collectionId,
       labels: dto.tags || canonical.keywords || [],
       keywords: dto.tags || canonical.keywords || [],
-      uploadedById: userId,
+      uploadedById: targetUserId,
     };
 
     let createdItem: any = null;
@@ -194,8 +199,8 @@ export class UrlCaptureService {
             );
           }
 
-          if (this.catalogService?.createItem) {
-            return this.catalogService.createItem(workspaceId, itemData, {
+          if (this.itemsService?.createItem) {
+            return this.itemsService.createItem(targetUserId, itemData, {
               tx,
               helpers,
               source: 'url',
@@ -203,7 +208,7 @@ export class UrlCaptureService {
           }
 
           throw new Error(
-            'CatalogService is required to confirm captured URL item',
+            'ItemsService is required to confirm captured URL item',
           );
         },
       );
@@ -219,9 +224,9 @@ export class UrlCaptureService {
         );
       }
 
-      if (this.catalogService?.createItem) {
-        createdItem = await this.catalogService.createItem(
-          workspaceId,
+      if (this.itemsService?.createItem) {
+        createdItem = await this.itemsService.createItem(
+          targetUserId,
           itemData,
           {
             source: 'url',
@@ -229,7 +234,7 @@ export class UrlCaptureService {
         );
       } else {
         throw new Error(
-          'CatalogService is required to confirm captured URL item',
+          'ItemsService is required to confirm captured URL item',
         );
       }
     }

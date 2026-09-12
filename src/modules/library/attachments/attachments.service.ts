@@ -7,7 +7,6 @@ import {
 } from '@nestjs/common';
 import { Prisma, AttachmentType } from '@prisma/client';
 import { PrismaService } from '../../../core/database/prisma.service';
-import { resolveTenantWorkspaceId } from '../../../core/utils/tenant.util';
 import { createHash } from 'crypto';
 import {
   TransactionService,
@@ -29,7 +28,7 @@ import type {
   UpsertSyncAttachmentCommand,
   DeleteSyncEntityCommand,
   UpsertSyncEntityResult,
-} from '../common/types/sync.types';
+} from '../sync/types/sync.types';
 import { Inject } from '@nestjs/common';
 
 import { calculateFileChecksum } from './utils/attachments.utils';
@@ -67,10 +66,13 @@ export class AttachmentsService {
       fileHash: input.fileHash,
     });
 
-    await this.itemExistencePort.assertExists(
-      input.workspaceId,
-      input.catalogItemId,
-    );
+    const targetItemId = input.itemId;
+    if (!targetItemId) {
+      throw new BadRequestException('Item ID is required');
+    }
+
+    const userId = input.userId || 'system';
+    await this.itemExistencePort.assertExists(userId, targetItemId);
 
     const resolvedFileId =
       input.fileId ||
@@ -78,9 +80,9 @@ export class AttachmentsService {
       null;
 
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const attachment = await tx.catalogAttachment.create({
+      const attachment = await tx.attachment.create({
         data: {
-          catalogItemId: input.catalogItemId,
+          itemId: targetItemId,
           filename: input.filename,
           url: input.url,
           mimeType: input.mimeType ?? 'application/pdf',
@@ -105,14 +107,10 @@ export class AttachmentsService {
       });
 
       if (resolvedFileId) {
-        await this.repo.updateLinkedFile(
-          resolvedFileId,
-          input.catalogItemId,
-          tx,
-        );
+        await this.repo.updateLinkedFile(resolvedFileId, targetItemId, tx);
       }
 
-      await helpers.appendChange(input.workspaceId, {
+      await helpers.appendChange(userId, {
         entityType: 'Attachment',
         entityId: attachment.id,
         action: 'create',
@@ -121,7 +119,7 @@ export class AttachmentsService {
       });
 
       await helpers.publishOutbox(
-        input.workspaceId,
+        userId,
         attachment.id,
         'library.attachment.created',
         attachment,
@@ -129,13 +127,13 @@ export class AttachmentsService {
 
       if (attachment.mimeType === 'application/pdf') {
         await helpers.publishOutbox(
-          input.workspaceId,
+          userId,
           attachment.id,
           'library.attachment.extraction_requested',
           {
             attachmentId: attachment.id,
-            catalogItemId: attachment.catalogItemId,
-            workspaceId: input.workspaceId,
+            itemId: attachment.itemId,
+            userId,
           },
         );
       }
@@ -148,7 +146,7 @@ export class AttachmentsService {
    * Replaces an attachment's current file by creating an immutable sequential revision.
    */
   async addRevision(
-    workspaceId: string,
+    userId: string,
     attachmentId: string,
     input: ReplaceAttachmentFileInput,
   ) {
@@ -159,11 +157,15 @@ export class AttachmentsService {
     });
 
     const attachment = await this.repo.findUnique(attachmentId, {
-      catalogItem: true,
+      item: true,
       revisions: { orderBy: { revisionNumber: 'desc' }, take: 1 },
     });
 
-    if (!attachment || attachment.catalogItem.workspaceId !== workspaceId) {
+    if (
+      !attachment ||
+      ((attachment.item as any).userId &&
+        (attachment.item as any).userId !== userId)
+    ) {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
@@ -171,40 +173,33 @@ export class AttachmentsService {
       (attachment.revisions[0]?.revisionNumber ?? 0) + 1;
 
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const updatedAttachment = await tx.catalogAttachment.update({
+      const updatedAttachment = await tx.attachment.update({
         where: { id: attachmentId },
         data: {
-          url: input.url,
-          fileHash: input.fileHash,
           size: input.sizeBytes,
+          fileHash: input.fileHash,
+          url: input.url,
         },
       });
 
-      const revision = await tx.attachmentRevision.create({
+      await tx.attachmentRevision.create({
         data: {
           attachmentId,
           revisionNumber: nextRevisionNumber,
-          url: input.url,
-          fileHash: input.fileHash,
+          fileHash: input.fileHash || '',
           sizeBytes: input.sizeBytes,
-          comment: input.comment ?? `Revision ${nextRevisionNumber}`,
+          url: input.url,
+          comment: input.comment || 'Revision upload',
         },
       });
 
-      await helpers.appendChange(attachment.catalogItem.workspaceId, {
+      await helpers.appendChange(userId, {
         entityType: 'Attachment',
         entityId: attachmentId,
         action: 'update',
         version: nextRevisionNumber,
-        data: { attachment: updatedAttachment, revision },
+        data: updatedAttachment,
       });
-
-      await helpers.publishOutbox(
-        attachment.catalogItem.workspaceId,
-        attachmentId,
-        'library.attachment.revision_added',
-        { attachmentId, revisionNumber: nextRevisionNumber },
-      );
 
       return updatedAttachment;
     });
@@ -213,10 +208,10 @@ export class AttachmentsService {
   /**
    * Retrieves revision history for an attachment.
    */
-  async getRevisions(workspaceId: string, attachmentId: string) {
+  async getRevisions(userId: string, attachmentId: string) {
     const attachment = await this.repo.findFirst({
       id: attachmentId,
-      catalogItem: { workspaceId, deletedAt: null },
+      item: { userId, deletedAt: null },
     });
 
     if (!attachment) {
@@ -227,10 +222,10 @@ export class AttachmentsService {
   }
 
   /**
-   * Retrieves all attachments for a catalog item in a workspace.
+   * Retrieves all attachments for an item.
    */
-  async getItemAttachments(workspaceId: string, itemId: string) {
-    await this.itemExistencePort.assertExists(workspaceId, itemId);
+  async getItemAttachments(userId: string, itemId: string) {
+    await this.itemExistencePort.assertExists(userId, itemId);
 
     const attachments = await this.repo.findManyByItemId(itemId);
 
@@ -238,19 +233,19 @@ export class AttachmentsService {
   }
 
   /**
-   * Retrieves a specific attachment for a catalog item in a workspace.
+   * Retrieves a specific attachment for an item.
    */
   async getItemAttachment(
-    workspaceId: string,
+    userId: string,
     itemId: string | undefined,
     attachmentId: string,
   ) {
     const where: any = {
       id: attachmentId,
-      catalogItem: { workspaceId, deletedAt: null },
+      item: { userId, deletedAt: null },
     };
     if (itemId) {
-      where.catalogItemId = itemId;
+      where.itemId = itemId;
     }
 
     const attachment = await this.repo.findFirst(where, {
@@ -267,7 +262,7 @@ export class AttachmentsService {
   /**
    * Deletes an attachment and records a tombstone.
    */
-  async deleteAttachment(workspaceId: string, attachmentId: string) {
+  async deleteAttachment(userId: string, attachmentId: string) {
     if (!attachmentId) {
       throw new BadRequestException('Attachment ID is required');
     }
@@ -275,22 +270,19 @@ export class AttachmentsService {
     const attachment = await this.repo.findFirst(
       {
         id: attachmentId,
-        ...(workspaceId ? { catalogItem: { workspaceId } } : {}),
+        item: { userId, deletedAt: null },
       },
-      { catalogItem: true },
+      { item: true },
     );
 
     if (!attachment) {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
-    const canonicalWorkspaceId =
-      workspaceId || attachment.catalogItem.workspaceId;
-
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      await tx.catalogAttachment.delete({ where: { id: attachment.id } });
+      await tx.attachment.delete({ where: { id: attachment.id } });
 
-      await helpers.appendChange(canonicalWorkspaceId, {
+      await helpers.appendChange(userId, {
         entityType: 'Attachment',
         entityId: attachment.id,
         action: 'delete',
@@ -299,7 +291,7 @@ export class AttachmentsService {
       });
 
       await helpers.publishOutbox(
-        canonicalWorkspaceId,
+        userId,
         attachment.id,
         'library.attachment.deleted',
         { attachmentId: attachment.id },
@@ -310,28 +302,32 @@ export class AttachmentsService {
   }
 
   /**
-   * Sync protocol adapter: transactional upsert for a CatalogAttachment from an external sync batch.
+   * Sync protocol adapter: transactional upsert for a Attachment from an external sync batch.
    */
   async upsertFromSync(
     command: UpsertSyncAttachmentCommand,
     tx: Prisma.TransactionClient,
     helpers: TransactionHelpers,
   ): Promise<UpsertSyncEntityResult> {
+    const userId = (command as any).userId || (command as any).projectId || 'system';
     if (command.existingId) {
-      const existing = await tx.catalogAttachment.findUnique({
+      const existing = await tx.attachment.findUnique({
         where: { id: command.existingId },
-        include: { catalogItem: true },
+        include: { item: true },
       });
 
       if (!existing) {
         throw new NotFoundException(
-          `Attachment ${command.existingId} not found in workspace ${command.workspaceId}`,
+          `Attachment ${command.existingId} not found`,
         );
       }
 
-      if (existing.catalogItem.workspaceId !== command.workspaceId) {
+      if (
+        (existing.item as any).userId &&
+        (existing.item as any).userId !== userId
+      ) {
         throw new ForbiddenException(
-          `Attachment ${command.existingId} does not belong to workspace ${command.workspaceId}`,
+          `Attachment ${command.existingId} does not belong to user ${userId}`,
         );
       }
 
@@ -340,7 +336,7 @@ export class AttachmentsService {
       });
       const nextRevisionNumber = revisionCount + 1;
 
-      const updated = await tx.catalogAttachment.update({
+      const updated = await tx.attachment.update({
         where: { id: command.existingId },
         data: {
           filename: command.filename,
@@ -362,8 +358,8 @@ export class AttachmentsService {
         },
       });
 
-      await helpers.appendChange(command.workspaceId, {
-        entityType: 'CatalogAttachment',
+      await helpers.appendChange(userId, {
+        entityType: 'Attachment',
         entityId: updated.id,
         action: 'update',
         version: nextRevisionNumber,
@@ -371,25 +367,30 @@ export class AttachmentsService {
 
       return { id: updated.id, isNew: false, version: nextRevisionNumber };
     } else {
-      if (!command.catalogItemId) {
+      const parentItemId = command.itemId;
+      if (!parentItemId) {
         throw new NotFoundException(
-          `Parent catalog item ID required for attachment ${command.filename}`,
+          `Parent item ID required for attachment ${command.filename}`,
         );
       }
 
-      const item = await tx.catalogItem.findUnique({
-        where: { id: command.catalogItemId },
+      const item = await tx.item.findUnique({
+        where: { id: parentItemId },
       });
 
-      if (!item || item.workspaceId !== command.workspaceId) {
+      if (
+        !item ||
+        ((item as any).userId &&
+          (item as any).userId !== userId)
+      ) {
         throw new NotFoundException(
-          `Catalog item ${command.catalogItemId} not found in workspace ${command.workspaceId}`,
+          `Item ${parentItemId} not found`,
         );
       }
 
-      const created = await tx.catalogAttachment.create({
+      const created = await tx.attachment.create({
         data: {
-          catalogItemId: command.catalogItemId,
+          itemId: parentItemId,
           filename: command.filename,
           url: command.url,
           mimeType: command.mimeType,
@@ -412,15 +413,15 @@ export class AttachmentsService {
         },
       });
 
-      await helpers.appendChange(command.workspaceId, {
-        entityType: 'CatalogAttachment',
+      await helpers.appendChange(userId, {
+        entityType: 'Attachment',
         entityId: created.id,
         action: 'create',
         version: 1,
       });
 
       await helpers.publishOutbox(
-        command.workspaceId,
+        userId,
         created.id,
         'library.attachment.created',
         { attachmentId: created.id },
@@ -431,13 +432,13 @@ export class AttachmentsService {
         command.filename?.toLowerCase().endsWith('.pdf')
       ) {
         await helpers.publishOutbox(
-          command.workspaceId,
+          userId,
           created.id,
           'library.attachment.extraction_requested',
           {
             attachmentId: created.id,
-            catalogItemId: command.catalogItemId,
-            workspaceId: command.workspaceId,
+            itemId: created.itemId,
+            userId,
           },
         );
       }
@@ -447,31 +448,27 @@ export class AttachmentsService {
   }
 
   /**
-   * Sync protocol adapter: transactional deletion for a CatalogAttachment from an external sync batch.
+   * Sync protocol adapter: transactional deletion for a Attachment from an external sync batch.
    */
   async deleteFromSync(
     command: DeleteSyncEntityCommand,
     tx: Prisma.TransactionClient,
     helpers: TransactionHelpers,
   ): Promise<void> {
-    const { workspaceId, entityId } = command;
-    const canonicalWorkspaceId = await resolveTenantWorkspaceId(
-      this.prisma,
-      workspaceId,
-    );
-    const existing = await tx.catalogAttachment.findFirst({
+    const userId = command.userId || (command as any).projectId || 'system';
+    const existing = await tx.attachment.findFirst({
       where: {
-        id: entityId,
-        catalogItem: { workspaceId: canonicalWorkspaceId },
+        id: command.entityId,
+        item: { userId },
       },
-      include: { catalogItem: true },
+      include: { item: true },
     });
     if (!existing) return;
 
-    await tx.catalogAttachment.delete({ where: { id: entityId } });
-    await helpers.appendChange(canonicalWorkspaceId, {
-      entityType: 'CatalogAttachment',
-      entityId,
+    await tx.attachment.delete({ where: { id: command.entityId } });
+    await helpers.appendChange(userId, {
+      entityType: 'Attachment',
+      entityId: command.entityId,
       action: 'delete',
       version: 1,
     });
@@ -489,22 +486,70 @@ export class AttachmentsService {
   }
 
   /**
-   * Domain boundary helper: asserts that an attachment belongs to the given workspace.
+   * Domain boundary helper: asserts that an attachment exists.
    */
-  async assertAttachmentInWorkspace(
+  async assertAttachmentExists(
     attachmentId: string,
-    workspaceId: string,
+    userId?: string,
     tx?: Prisma.TransactionClient,
   ): Promise<any> {
     const attachment = await this.repo.findUnique(
       attachmentId,
-      { catalogItem: true },
+      { item: true },
       tx,
     );
-    if (!attachment || attachment.catalogItem.workspaceId !== workspaceId) {
+    if (
+      !attachment ||
+      (userId &&
+        (attachment.item as any).userId &&
+        (attachment.item as any).userId !== userId)
+    ) {
       throw new NotFoundException(
-        `Attachment ${attachmentId} not found in workspace ${workspaceId}`,
+        `Attachment ${attachmentId} not found`,
       );
+    }
+    return attachment;
+  }
+
+  /**
+   * Sets an attachment as the primary attachment for an item.
+   */
+  async setPrimaryAttachment(
+    userId: string,
+    itemId: string,
+    attachmentId: string,
+  ) {
+    const attachment = await this.repo.findFirst({
+      id: attachmentId,
+      itemId,
+      item: { userId },
+    });
+    if (!attachment) {
+      throw new NotFoundException(`Attachment ${attachmentId} not found`);
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.attachment.updateMany({
+        where: { itemId, attachmentType: 'primary_pdf' },
+        data: { attachmentType: 'supplementary' },
+      });
+      await tx.attachment.update({
+        where: { id: attachmentId },
+        data: { attachmentType: 'primary_pdf' },
+      });
+    });
+
+    return { success: true };
+  }
+
+  async assertAttachmentInWorkspace(
+    attachmentId: string,
+    workspaceIdOrUserId?: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<any> {
+    const attachment = await this.repo.findUnique(attachmentId, undefined, tx);
+    if (!attachment) {
+      throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
     return attachment;
   }

@@ -1,19 +1,22 @@
+/**
+ * Authentication (Authn) Module
+ * Handles user authentication, credential verification, JWT lifecycle,
+ * refresh token rotation, OAuth provider exchange, and password reset flows.
+ */
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthnService } from './authn.service';
 import { AuthnController } from './authn.controller';
 import { AuthnRepository } from './authn.repository';
-import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { AuthGuard, JwtAuthGuard } from './guards/auth.guard';
 import { CacheModule } from '@/core/cache/cache.module';
 import { UserModule } from '../user/user.module';
-import { AuditModule } from '../audit/audit.module';
 
 @Module({
   imports: [
     CacheModule,
     UserModule,
-    AuditModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -34,11 +37,7 @@ import { AuditModule } from '../audit/audit.module';
     }),
   ],
   controllers: [AuthnController],
-  providers: [AuthnService, AuthnRepository, JwtAuthGuard],
-  exports: [AuthnService, JwtModule, JwtAuthGuard],
+  providers: [AuthnService, AuthnRepository, AuthGuard, JwtAuthGuard],
+  exports: [AuthnService, AuthnRepository, JwtModule, AuthGuard, JwtAuthGuard],
 })
 export class AuthnModule {}
-
-// Backward compatibility aliases
-export const AuthenticationModule = AuthnModule;
-export const AuthModule = AuthnModule;

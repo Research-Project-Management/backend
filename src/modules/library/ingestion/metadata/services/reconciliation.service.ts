@@ -77,7 +77,7 @@ export class ReconciliationService {
     issn: {
       UserOverride: 1.0,
       CrossRef: 0.98, // CrossRef ISSN data from publishers
-      PubMed: 0.97, // NLM journal catalog
+      PubMed: 0.97, // NLM journal registry
       OpenAlex: 0.9,
       BibTeX: 0.85,
       ZoteroSync: 0.9,
@@ -147,7 +147,7 @@ export class ReconciliationService {
     journal: {
       UserOverride: 1.0,
       CrossRef: 0.97,
-      PubMed: 0.97, // NLM journal catalog; very curated
+      PubMed: 0.97, // NLM journal registry; very curated
       ZoteroSync: 0.9,
       BibTeX: 0.88,
       RIS: 0.87,

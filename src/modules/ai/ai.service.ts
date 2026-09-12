@@ -11,7 +11,6 @@ import { FastifyReply } from 'fastify';
 import { EngineService } from './engine/engine.service';
 import { ThreadService } from './thread/thread.service';
 import { AiQueryDto } from './dto/ai.dto';
-import { CatalogService } from '../library/items/items.service';
 import { buildAiPayload, formatPaperContext } from './utils/ai.util';
 
 import { PrismaService } from '@/core/database/prisma.service';
@@ -24,7 +23,6 @@ export class AiService {
     private readonly engineService: EngineService,
     private readonly threadService: ThreadService,
     private readonly prisma: PrismaService,
-    @Optional() private readonly catalogService?: CatalogService,
   ) {}
 
   async health() {
@@ -33,41 +31,22 @@ export class AiService {
 
   private async validateAccess(
     userId: string,
-    workspaceId?: string,
     projectId?: string,
     chatId?: string,
   ): Promise<void> {
-    if (workspaceId) {
-      const member = await this.prisma.workspaceMember.findFirst({
-        where: { workspaceId, userId },
-      });
-      if (!member) {
-        throw new ForbiddenException(
-          'You do not have access to this workspace',
-        );
-      }
-    }
-
     if (projectId) {
       const project = await this.prisma.project.findFirst({
         where: {
           id: projectId,
-          workspace: {
-            members: {
-              some: { userId },
-            },
-          },
+          deletedAt: null,
+          OR: [
+            { members: { some: { userId } } },
+            { createdById: userId },
+          ],
         },
       });
       if (!project) {
-        throw new ForbiddenException(
-          'You do not have access to this project or its workspace',
-        );
-      }
-      if (workspaceId && project.workspaceId !== workspaceId) {
-        throw new BadRequestException(
-          'Project does not belong to the specified workspace',
-        );
+        throw new ForbiddenException('You do not have access to this project');
       }
     }
 
@@ -91,13 +70,11 @@ export class AiService {
     dto: AiQueryDto,
     reply: FastifyReply,
   ): Promise<void> {
-    const targetWsId = dto.workspaceId || dto.workspace_id;
     const targetProjectId = dto.projectId || dto.project_id;
     const targetChatId = dto.chatId || dto.chat_id;
 
     await this.validateAccess(
       userId,
-      targetWsId,
       targetProjectId,
       targetChatId,
     );
@@ -127,13 +104,11 @@ export class AiService {
    * Synchronous AI execution fallback handler
    */
   async execute(userId: string, dto: AiQueryDto) {
-    const targetWsId = dto.workspaceId || dto.workspace_id;
     const targetProjectId = dto.projectId || dto.project_id;
     const targetChatId = dto.chatId || dto.chat_id;
 
     await this.validateAccess(
       userId,
-      targetWsId,
       targetProjectId,
       targetChatId,
     );
@@ -151,7 +126,7 @@ export class AiService {
     dto: AiQueryDto,
     reply: FastifyReply,
   ): Promise<void> {
-    const paper = await this.prisma.catalogItem.findFirst({
+    const paper = await (this.prisma as any).item?.findFirst({
       where: { id: paperId, deletedAt: null },
       include: { contributors: { orderBy: { orderIndex: 'asc' } } },
     });
@@ -160,26 +135,23 @@ export class AiService {
       throw new NotFoundException(`Paper with ID ${paperId} not found`);
     }
 
-    // Verify workspace membership for the paper
-    const member = await this.prisma.workspaceMember.findFirst({
-      where: { workspaceId: paper.workspaceId, userId },
-    });
-    if (!member) {
+    // Verify access for the paper
+    const hasAccess =
+      paper.uploadedById === userId ||
+      (paper.projectId
+        ? (await this.prisma.projectMember.findFirst({
+            where: {
+              projectId: paper.projectId,
+              userId,
+            },
+          })) !== null
+        : false);
+
+    if (!hasAccess) {
       throw new ForbiddenException('You do not have access to this paper');
     }
 
-    // Disallow overriding paper workspace
-    if (dto.workspaceId && dto.workspaceId !== paper.workspaceId) {
-      throw new BadRequestException(
-        'Workspace ID mismatch with paper workspace',
-      );
-    }
-    if (dto.workspace_id && dto.workspace_id !== paper.workspaceId) {
-      throw new BadRequestException(
-        'Workspace ID mismatch with paper workspace',
-      );
-    }
-    const workspaceId = paper.workspaceId;
+    const scopeId = paper.projectId || userId;
 
     // Chat ID ownership verification if provided, or secure user-scoped default
     let chatId = dto.chatId || dto.chat_id;
@@ -199,14 +171,14 @@ export class AiService {
     const paperDocId = paper.ragDocId || null;
     const paperContext = formatPaperContext({
       title: paper.title,
-      authors: paper.contributors?.map((c) => c.fullName) || [],
+      authors: paper.contributors?.map((c: any) => c.fullName) || [],
       year: paper.year || undefined,
       doi: paper.doi || undefined,
       abstract: paper.abstract || undefined,
     });
 
     const payload = buildAiPayload(userId, dto);
-    payload.workspace_id = workspaceId;
+    payload.workspace_id = scopeId;
     // Strict paper document scope - prevent foreign injected document IDs
     payload.document_ids = paperDocId ? [paperDocId] : [];
     payload.chat_id = chatId;
@@ -226,7 +198,7 @@ export class AiService {
    * Paper-scoped synchronous RAG handler
    */
   async executePaper(userId: string, paperId: string, dto: AiQueryDto) {
-    const paper = await this.prisma.catalogItem.findFirst({
+    const paper = await (this.prisma as any).item.findFirst({
       where: { id: paperId, deletedAt: null },
       include: { contributors: { orderBy: { orderIndex: 'asc' } } },
     });
@@ -235,26 +207,23 @@ export class AiService {
       throw new NotFoundException(`Paper with ID ${paperId} not found`);
     }
 
-    // Verify workspace membership for the paper
-    const member = await this.prisma.workspaceMember.findFirst({
-      where: { workspaceId: paper.workspaceId, userId },
-    });
-    if (!member) {
+    // Verify access for the paper
+    const hasAccess =
+      paper.uploadedById === userId ||
+      (paper.projectId
+        ? (await this.prisma.projectMember.findFirst({
+            where: {
+              projectId: paper.projectId,
+              userId,
+            },
+          })) !== null
+        : false);
+
+    if (!hasAccess) {
       throw new ForbiddenException('You do not have access to this paper');
     }
 
-    // Disallow overriding paper workspace
-    if (dto.workspaceId && dto.workspaceId !== paper.workspaceId) {
-      throw new BadRequestException(
-        'Workspace ID mismatch with paper workspace',
-      );
-    }
-    if (dto.workspace_id && dto.workspace_id !== paper.workspaceId) {
-      throw new BadRequestException(
-        'Workspace ID mismatch with paper workspace',
-      );
-    }
-    const workspaceId = paper.workspaceId;
+    const scopeId = paper.projectId || userId;
 
     // Chat ID ownership verification if provided, or secure user-scoped default
     let chatId = dto.chatId || dto.chat_id;
@@ -274,14 +243,14 @@ export class AiService {
     const paperDocId = paper.ragDocId || null;
     const paperContext = formatPaperContext({
       title: paper.title,
-      authors: paper.contributors?.map((c) => c.fullName) || [],
+      authors: paper.contributors?.map((c: any) => c.fullName) || [],
       year: paper.year || undefined,
       doi: paper.doi || undefined,
       abstract: paper.abstract || undefined,
     });
 
     const payload = buildAiPayload(userId, dto);
-    payload.workspace_id = workspaceId;
+    payload.workspace_id = scopeId;
     payload.document_ids = paperDocId ? [paperDocId] : [];
     payload.chat_id = chatId;
     payload.intent_hint = 'paper_rag_qa';
@@ -299,23 +268,20 @@ export class AiService {
   // ── Document Vector Management with Strict Multi-Tenant Isolation ──
   async uploadDocument(
     userId: string,
-    workspaceId: string,
     fileBuffer: Buffer,
     contentType: string,
     filename: string,
     options?: {
+      scopeId?: string;
       projectId?: string;
       chatId?: string;
       title?: string;
       tags?: string;
     },
   ) {
-    if (!workspaceId) {
-      throw new BadRequestException('workspaceId is required');
-    }
+    const scopeId = options?.scopeId || options?.projectId || userId;
     await this.validateAccess(
       userId,
-      workspaceId,
       options?.projectId,
       options?.chatId,
     );
@@ -325,7 +291,7 @@ export class AiService {
       filename,
       {
         userId,
-        workspaceId,
+        scopeId,
         projectId: options?.projectId,
         chatId: options?.chatId,
         title: options?.title,
@@ -334,27 +300,21 @@ export class AiService {
     );
   }
 
-  async getDocumentsBulk(userId: string, workspaceId: string, ids: string[]) {
-    if (!workspaceId) {
-      throw new BadRequestException('workspaceId is required');
-    }
-    await this.validateAccess(userId, workspaceId);
-    return this.engineService.getDocumentsBulk(ids, { userId, workspaceId });
+  async getDocumentsBulk(userId: string, ids: string[], projectId?: string) {
+    await this.validateAccess(userId, projectId);
+    const scopeId = projectId || userId;
+    return this.engineService.getDocumentsBulk(ids, { userId, scopeId, projectId });
   }
 
-  async getDocument(userId: string, workspaceId: string, docId: string) {
-    if (!workspaceId) {
-      throw new BadRequestException('workspaceId is required');
-    }
-    await this.validateAccess(userId, workspaceId);
-    return this.engineService.getDocument(docId, { userId, workspaceId });
+  async getDocument(userId: string, docId: string, projectId?: string) {
+    await this.validateAccess(userId, projectId);
+    const scopeId = projectId || userId;
+    return this.engineService.getDocument(docId, { userId, scopeId, projectId });
   }
 
-  async getDocuments(userId: string, workspaceId: string) {
-    if (!workspaceId) {
-      throw new BadRequestException('workspaceId is required');
-    }
-    await this.validateAccess(userId, workspaceId);
-    return this.engineService.getDocuments({ userId, workspaceId });
+  async getDocuments(userId: string, projectId?: string) {
+    await this.validateAccess(userId, projectId);
+    const scopeId = projectId || userId;
+    return this.engineService.getDocuments({ userId, scopeId, projectId });
   }
 }

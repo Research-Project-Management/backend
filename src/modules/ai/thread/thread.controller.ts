@@ -18,8 +18,8 @@ import {
   AppendMessagesDto,
   RenameThreadDto,
 } from './dto/thread.dto';
-import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
-import { CurrentUser } from '@/modules/iam/authn/decorators/current-user.decorator';
+import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
+import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
 
 @ApiTags('AI - Threads')
 @ApiBearerAuth('JWT-auth')
@@ -29,14 +29,12 @@ export class ThreadController {
   constructor(private readonly threadService: ThreadService) {}
 
   @Get(['chats', 'ai/chats'])
-  @ApiOperation({ summary: 'Get all chat threads for user in workspace' })
+  @ApiOperation({ summary: 'Get all chat threads for user' })
   async getChats(
-    @Query('workspaceId') workspaceId: string,
-    @Query('projectId') projectId: string,
     @CurrentUser('id') userId: string,
+    @Query('projectId') projectId?: string,
   ) {
     const chats = await this.threadService.getChats(
-      workspaceId,
       userId,
       projectId,
     );
@@ -60,10 +58,9 @@ export class ThreadController {
   })
   async getPageChat(
     @Param('pageId') pageId: string,
-    @Query('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
   ) {
-    return this.threadService.getPageChat(pageId, workspaceId, userId);
+    return this.threadService.getPageChat(pageId, userId);
   }
 
   @Delete(['chats/page/:pageId', 'ai/page-chats/:pageId', 'page-chats/:pageId'])
@@ -72,19 +69,24 @@ export class ThreadController {
   })
   async clearPageChat(
     @Param('pageId') pageId: string,
-    @Query('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
   ) {
-    return this.threadService.clearPageChat(pageId, workspaceId, userId);
+    return this.threadService.clearPageChat(pageId, userId);
   }
 
-  @Delete(['ai/memory/:workspaceId', 'memory/:workspaceId', 'memory/clear'])
-  @ApiOperation({ summary: 'Clear AI chat memory for user in workspace' })
+  @Delete([
+    'ai/memory/:scopeId',
+    'memory/:scopeId',
+    'ai/memory',
+    'memory',
+    'memory/clear',
+  ])
+  @ApiOperation({ summary: 'Clear AI chat memory for user' })
   async clearMemory(
-    @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') userId: string,
+    @Param('scopeId') scopeId?: string,
   ) {
-    return this.threadService.clearMemory(workspaceId, userId);
+    return this.threadService.clearMemory(userId, scopeId);
   }
 
   @Get(['chats/:chatId', 'ai/chats/:chatId'])

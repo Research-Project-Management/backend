@@ -1,7 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { RedisCacheService } from './redis-cache.service';
-import { CacheInvalidationListener } from './cache-invalidation.listener';
+import { RedisCacheService } from './redis.service';
+import { CacheInvalidationListener } from './invalidation.listener';
 
 @Global()
 @Module({
@@ -10,3 +10,4 @@ import { CacheInvalidationListener } from './cache-invalidation.listener';
   exports: [RedisCacheService, CacheInvalidationListener],
 })
 export class CacheModule {}
+

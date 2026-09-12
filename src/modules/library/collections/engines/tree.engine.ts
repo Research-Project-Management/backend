@@ -84,7 +84,9 @@ export class TreeEngine {
     collectionId: string,
     candidateParentId: string,
   ): void {
-    if (this.detectCycle(existingCollections, collectionId, candidateParentId)) {
+    if (
+      this.detectCycle(existingCollections, collectionId, candidateParentId)
+    ) {
       throw new BadRequestException(
         `Circular collection hierarchy detected: collection ${collectionId} cannot be a descendant of itself`,
       );
@@ -94,10 +96,7 @@ export class TreeEngine {
   /**
    * Retrieves all descendant collection IDs for a given root collection ID.
    */
-  getDescendantIds(
-    collections: RawCollectionItem[],
-    rootId: string,
-  ): string[] {
+  getDescendantIds(collections: RawCollectionItem[], rootId: string): string[] {
     const childrenMap = new Map<string, string[]>();
     for (const c of collections) {
       if (c.parentId) {

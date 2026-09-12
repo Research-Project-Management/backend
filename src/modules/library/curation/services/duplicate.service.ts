@@ -6,13 +6,12 @@ import {
   Inject,
 } from '@nestjs/common';
 import { PrismaService } from '../../../../core/database/prisma.service';
-import { resolveTenantWorkspaceId } from '../../../../core/utils/tenant.util';
 import { TransactionService } from '../../outbox/transaction.service';
 import { TagsService } from '../../tags/tags.service';
 import { CollectionsService } from '../../collections/collections.service';
 import { AttachmentsService } from '../../attachments/attachments.service';
 import { NotesService } from '../../notes/notes.service';
-import { ReadingService } from '../../reading/reading.service';
+import { StateService } from '../../state/state.service';
 import { ITEM_READ_PORT, IItemReadPort } from '../../items/ports/items.ports';
 import { MergeDuplicatesDto } from '../dto/curation.dto';
 import {
@@ -39,25 +38,20 @@ export class DuplicateService {
     private readonly collectionsService: CollectionsService,
     private readonly attachmentsService: AttachmentsService,
     private readonly notesService: NotesService,
-    private readonly readingService: ReadingService,
+    private readonly stateService: StateService,
     @Inject(ITEM_READ_PORT) private readonly itemReadPort: IItemReadPort,
   ) {}
 
-  private resolveWorkspaceId(workspaceId: string): Promise<string> {
-    return resolveTenantWorkspaceId(this.prisma, workspaceId);
-  }
-
   /**
-   * Scans active items in workspace and clusters duplicate candidates.
+   * Scans active items and clusters duplicate candidates.
    * Tier 1: Exact normalized DOI.
    * Tier 2: Normalized title + publication year (+/- 1) + first author family name.
    */
   async detectDuplicates(
-    workspaceId: string,
+    userId: string,
   ): Promise<DuplicateClusterResult[]> {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
     const items = await this.itemReadPort.findDuplicateCandidateItems(
-      canonicalWorkspaceId,
+      userId,
       2000,
     );
 
@@ -166,8 +160,7 @@ export class DuplicateService {
   /**
    * Non-destructive, atomic merge of duplicate items into a primary item.
    */
-  async mergeDuplicates(workspaceId: string, dto: MergeDuplicatesDto) {
-    const canonicalWorkspaceId = await this.resolveWorkspaceId(workspaceId);
+  async mergeDuplicates(userId: string, dto: MergeDuplicatesDto) {
     if (!dto.primaryItemId) {
       throw new BadRequestException('primaryItemId is required');
     }
@@ -195,13 +188,13 @@ export class DuplicateService {
 
     const allItemIds = [dto.primaryItemId, ...uniqueDupIds];
     const items = await this.itemReadPort.findByIds(
-      canonicalWorkspaceId,
+      userId,
       allItemIds,
     );
 
     if (items.length !== allItemIds.length) {
       throw new NotFoundException(
-        `One or more items do not exist, are already deleted, or belong to another workspace`,
+        `One or more items do not exist, are already deleted, or belong to another user`,
       );
     }
 
@@ -267,8 +260,8 @@ export class DuplicateService {
         }
       }
 
-      // ── 6. Merge User States (Delegated to ReadingService) ────────────────────
-      await this.readingService.transferUserItemStates(
+      // ── 6. Merge User States (Delegated to StateService) ────────────────────
+      await this.stateService.transferUserItemStates(
         tx,
         uniqueDupIds,
         primary.id,
@@ -296,7 +289,7 @@ export class DuplicateService {
       );
 
       // ── 8. Update Primary Item ───────────────────────────────────────────────
-      const updatedPrimary = await tx.catalogItem.update({
+      const updatedPrimary = await tx.item.update({
         where: { id: primary.id },
         data: {
           ...(dto.fieldSelections || {}),
@@ -305,8 +298,8 @@ export class DuplicateService {
         },
       });
 
-      await helpers.appendChange(canonicalWorkspaceId, {
-        entityType: 'CatalogItem',
+      await helpers.appendChange(userId, {
+        entityType: 'Item',
         entityId: updatedPrimary.id,
         action: 'update',
         version: updatedPrimary.version,
@@ -314,7 +307,7 @@ export class DuplicateService {
       });
 
       await helpers.publishOutbox(
-        canonicalWorkspaceId,
+        userId,
         primary.id,
         LIBRARY_EVENT_TYPES.ITEM_MERGED,
         {
@@ -336,7 +329,7 @@ export class DuplicateService {
         dupExtra.mergedIntoId = primary.id;
         dupExtra.mergedAt = now.toISOString();
 
-        const softDeleted = await tx.catalogItem.update({
+        const softDeleted = await tx.item.update({
           where: { id: dup.id },
           data: {
             deletedAt: now,
@@ -345,13 +338,13 @@ export class DuplicateService {
           },
         });
 
-        await helpers.recordTombstone(canonicalWorkspaceId, {
-          entityType: 'CatalogItem',
+        await helpers.recordTombstone(userId, {
+          entityType: 'Item',
           entityId: dup.id,
         });
 
-        await helpers.appendChange(canonicalWorkspaceId, {
-          entityType: 'CatalogItem',
+        await helpers.appendChange(userId, {
+          entityType: 'Item',
           entityId: dup.id,
           action: 'delete',
           version: softDeleted.version,
@@ -359,19 +352,19 @@ export class DuplicateService {
         });
 
         await helpers.publishOutbox(
-          canonicalWorkspaceId,
+          userId,
           dup.id,
           'library.item.merged_into',
           {
             duplicateId: dup.id,
             primaryId: primary.id,
-            workspaceId: canonicalWorkspaceId,
+            userId,
           },
         );
       }
 
       // Reload primary item with full relations so response is complete & normalized
-      const reloadedPrimary = await tx.catalogItem.findUnique({
+      const reloadedPrimary = await tx.item.findUnique({
         where: { id: primary.id },
         include: {
           contributors: { orderBy: { orderIndex: 'asc' } },
@@ -391,6 +384,3 @@ export class DuplicateService {
     });
   }
 }
-
-export const CatalogDuplicateService = DuplicateService;
-export type CatalogDuplicateService = DuplicateService;

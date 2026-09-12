@@ -37,3 +37,36 @@ export function truncateStickyContent(
   if (!content || content.length <= maxLength) return content || '';
   return `${content.slice(0, maxLength).trim()}...`;
 }
+
+/**
+ * Strips HTML tags and collapses whitespace to plain text.
+ */
+export function stripStickyHtml(html: string): string {
+  if (!html) return '';
+  return html
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&#160;/g, ' ')
+    .replace(/&zwnj;/g, ' ')
+    .replace(/&zwj;/g, ' ')
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Derives a clean display name/preview for a sticky note.
+ * If title exists, use it. Otherwise, extract plain text preview from content.
+ */
+export function getStickyTitleOrPreview(
+  title?: string | null,
+  content?: string | null,
+  maxLength: number = 60,
+): string {
+  if (title && title.trim()) return title.trim();
+  const plainText = stripStickyHtml(content || '');
+  if (!plainText) return 'Sticky note';
+  if (plainText.length <= maxLength) return plainText;
+  return `${plainText.slice(0, maxLength).trim()}...`;
+}

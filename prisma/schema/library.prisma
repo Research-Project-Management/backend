@@ -1,331 +1,589 @@
-// ── 4. Library Context (Academic Research) ──────────────────────────────────
+// -- 7. Academic Library & Research Context (Library Microservice) -----------
 
-model CatalogItem {
-  id               String     @id @default(uuid()) @db.Uuid
-  title            String
-  year             Int?
-  doi              String?
-  abstract         String?
-  itemType         String?    @default("journalArticle") @map("item_type")
-  publicationTitle String?     @map("publication_title")
-  publicationDate  String?     @map("publication_date")
-  publisher        String?
-  place            String?
-  volume           String?
-  issue            String?
-  section          String?
-  partNumber       String?     @map("part_number")
-  partTitle        String?     @map("part_title")
-  pages            String?
-  series           String?
-  seriesTitle      String?     @map("series_title")
-  seriesText       String?     @map("series_text")
-  issn             String?
-  isbn             String?
-  pmid             String?
-  pmcid            String?
-  url              String?
-  language         String?
-  journalAbbr      String?     @map("journal_abbr")
-  shortTitle       String?     @map("short_title")
-  rights           String?
-  license          String?
-  citationKey      String?     @map("citation_key")
-  libraryCatalog   String?     @map("library_catalog")
-  archive          String?
-  archiveLocation  String?     @map("archive_location")
-  callNumber       String?     @map("call_number")
-  accessedAt       DateTime?  @map("accessed_at") @db.Timestamptz(6)
-  extra                String?    @default("")
-  arxivId              String?    @map("arxiv_id")
-  citationCount        Int?       @map("citation_count")
-  referenceCount       Int?       @map("reference_count")
-  openAccessPdfUrl     String?    @map("open_access_pdf_url")
-  seriesNumber         String?    @map("series_number")
-  ragDocId             String?    @map("rag_doc_id")
-  ragIndexedAt         DateTime?  @map("rag_indexed_at") @db.Timestamptz(6)
-  ragLastAttemptAt     DateTime?  @map("rag_last_attempt_at") @db.Timestamptz(6)
-  ragAttempts          Int        @default(0) @map("rag_attempts")
-  ragError             String?    @map("rag_error")
-  ragStatus            RagStatus? @map("rag_status")
-  workspaceId      String     @map("workspace_id") @db.Uuid
-  workspace        Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  uploadedById     String?    @map("uploaded_by_id") @db.Uuid
-  uploadedBy       User?      @relation("CatalogItemUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
-  deletedAt        DateTime?  @map("deleted_at") @db.Timestamptz(6)
-  version          Int        @default(1)
-  createdAt        DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt        DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+enum RagStatus {
+  pending
+  indexed
+  failed
+}
+
+enum AttachmentType {
+  primary_pdf
+  supplementary
+  dataset
+  slides
+  code
+  figure
+  other
+  preview
+}
+
+enum AnnotationType {
+  highlight
+  underline
+  note
+  rect
+  image
+}
+
+enum RelationType {
+  cites
+  cited_by
+  replicates
+  extends
+  is_preprint_of
+  is_published_version_of
+  is_translation_of
+  supplements
+}
+
+enum IngestionStatus {
+  RECEIVED
+  DETECTED
+  EXTRACTED
+  RESOLVED
+  NORMALIZED
+  MERGED
+  NEEDS_REVIEW
+  COMMITTED
+  ENRICHING
+  READY
+  FAILED_RETRYABLE
+  FAILED_FINAL
+}
+
+enum AttachmentExtractionStatus {
+  PENDING
+  PROCESSING
+  READY
+  COMPLETED
+  FAILED
+  FAILED_RETRYABLE
+  FAILED_FINAL
+}
+
+enum ReadStatus {
+  unread
+  reading
+  completed
+}
+
+enum OutboxStatus {
+  PENDING
+  PROCESSING
+  PUBLISHED
+  FAILED
+}
+
+model Item {
+  id                  String      @id @default(uuid()) @db.Uuid
+  title               String
+  year                Int?
+  doi                 String?
+  abstract            String?
+  itemType            String?     @default("journalArticle") @map("item_type")
+  publicationTitle    String?     @map("publication_title")
+  publicationDate     String?     @map("publication_date")
+  publisher           String?
+  place               String?
+  volume              String?
+  issue               String?
+  section             String?
+  partNumber          String?     @map("part_number")
+  partTitle           String?     @map("part_title")
+  pages               String?
+  series              String?
+  seriesTitle         String?     @map("series_title")
+  seriesText          String?     @map("series_text")
+  issn                String?
+  isbn                String?
+  pmid                String?
+  pmcid               String?
+  url                 String?
+  language            String?
+  journalAbbr         String?     @map("journal_abbr")
+  shortTitle          String?     @map("short_title")
+  rights              String?
+  license             String?
+  citationKey         String?     @map("citation_key")
+  libraryCatalog      String?     @map("library_catalog")
+  archive             String?
+  archiveLocation     String?     @map("archive_location")
+  callNumber          String?     @map("call_number")
+  accessedAt          DateTime?   @map("accessed_at") @db.Timestamptz(6)
+  extra               String?     @default("")
+  arxivId             String?     @map("arxiv_id")
+  citationCount       Int?        @map("citation_count")
+  referenceCount      Int?        @map("reference_count")
+  openAccessPdfUrl    String?     @map("open_access_pdf_url")
+  seriesNumber        String?     @map("series_number")
+  ragDocId            String?     @map("rag_doc_id")
+  ragIndexedAt        DateTime?   @map("rag_indexed_at") @db.Timestamptz(6)
+  ragLastAttemptAt    DateTime?   @map("rag_last_attempt_at") @db.Timestamptz(6)
+  ragAttempts         Int         @default(0) @map("rag_attempts")
+  ragError            String?     @map("rag_error")
+  ragStatus           RagStatus?  @map("rag_status")
+  isRetracted         Boolean     @default(false) @map("is_retracted")
+  retractionNature    String?     @map("retraction_nature")
+  retractionDetails   Json?       @map("retraction_details")
+  retractionCheckedAt DateTime?   @map("retraction_checked_at") @db.Timestamptz(6)
+  isMyPublication     Boolean     @default(false) @map("is_my_publication")
+  publicationConfirmedAt DateTime? @map("publication_confirmed_at") @db.Timestamptz(6)
+  userId              String      @map("user_id") @db.Uuid
+  user                User        @relation("UserItems", fields: [userId], references: [id], onDelete: Cascade)
+  uploadedById        String?     @default("system") @map("uploaded_by_id")
+  projectId           String?     @map("project_id") @db.Uuid
+  project             Project?    @relation("ProjectItems", fields: [projectId], references: [id], onDelete: Cascade)
+  deletedAt           DateTime?   @map("deleted_at") @db.Timestamptz(6)
+  version             Int         @default(1)
+  createdAt           DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   // Canonical Relations
-  attachments     CatalogAttachment[]
-  contributors    CatalogContributor[]
-  identifiers     CatalogIdentifier[]
-  collectionItems CollectionItem[]
-  itemTags        CatalogItemTag[]
-  revisions       CatalogItemRevision[]
-  notesList       Note[]
-  outgoingRel     ItemRelation[]        @relation("SourceCatalogItem")
-  incomingRel     ItemRelation[]        @relation("TargetCatalogItem")
-  userStates      UserItemState[]
-  ingestionRuns   IngestionRun[]
-  sourceRecords   MetadataSourceRecord[]
+  attachments         Attachment[]
+  contributors        Contributor[]
+  identifiers         Identifier[]
+  collectionItems     CollectionItem[]
+  itemTags            ItemTag[]
+  revisions           ItemRevision[]
+  notesList           Note[]
+  outgoingRel         ItemRelation[]         @relation("SourceItem")
+  incomingRel         ItemRelation[]         @relation("TargetItem")
+  states              State[]
+  ingestionRuns       IngestionRun[]
+  sourceRecords       MetadataSourceRecord[]
 
-  @@index([workspaceId, deletedAt])
-  @@index([workspaceId, deletedAt, year(sort: Desc), createdAt(sort: Desc)])
-  @@index([workspaceId, itemType])
-  @@index([workspaceId, ragStatus])
-  @@index([workspaceId, deletedAt, ragStatus])
+  @@index([userId, deletedAt])
+  @@index([projectId, deletedAt])
+  @@index([userId, deletedAt, year(sort: Desc), createdAt(sort: Desc)])
+  @@index([userId, itemType])
   @@index([doi])
   @@index([citationKey])
   @@index([arxivId])
   @@map("papers")
 }
 
-model CatalogContributor {
-  id            String      @id @default(uuid()) @db.Uuid
-  catalogItemId String      @map("catalog_item_id") @db.Uuid
-  catalogItem   CatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
-  creatorType   String      @default("author") @map("creator_type")
-  firstName     String?     @default("") @map("first_name")
-  lastName      String?     @default("") @map("last_name")
-  fullName      String      @map("full_name")
-  orderIndex    Int         @default(0) @map("order_index")
-  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+model Contributor {
+  id          String   @id @default(uuid()) @db.Uuid
+  itemId      String   @map("item_id") @db.Uuid
+  item        Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  creatorType String   @default("author") @map("creator_type")
+  firstName   String?  @default("") @map("first_name")
+  lastName    String?  @default("") @map("last_name")
+  fullName    String   @map("full_name")
+  orderIndex  Int      @default(0) @map("order_index")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  @@index([catalogItemId, orderIndex])
+  @@index([itemId, orderIndex])
   @@index([fullName])
-  @@map("catalog_contributors")
+  @@map("contributors")
 }
 
-model CatalogIdentifier {
-  id            String      @id @default(uuid()) @db.Uuid
-  catalogItemId String      @map("catalog_item_id") @db.Uuid
-  catalogItem   CatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
-  type          String
-  value         String
-  canonicalUri  String?     @map("canonical_uri")
-  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+model Identifier {
+  id           String   @id @default(uuid()) @db.Uuid
+  itemId       String   @map("item_id") @db.Uuid
+  item         Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  type         String
+  value        String
+  canonicalUri String?  @map("canonical_uri")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  @@index([catalogItemId, type])
+  @@unique([itemId, type, value])
   @@index([type, value])
-  @@index([canonicalUri])
-  @@map("catalog_identifiers")
+  @@map("identifiers")
+}
+
+model Collection {
+  id          String       @id @default(uuid()) @db.Uuid
+  name        String
+  description String?      @default("")
+  color       String?
+  icon        String?      @default("")
+  createdById String?      @map("created_by_id")
+  parentId    String?      @map("parent_id") @db.Uuid
+  parent      Collection?  @relation("CollectionHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children    Collection[] @relation("CollectionHierarchy")
+  userId      String       @map("user_id") @db.Uuid
+  user      User         @relation("UserCollections", fields: [userId], references: [id], onDelete: Cascade)
+  projectId String?      @map("project_id") @db.Uuid
+  project   Project?     @relation("ProjectCollections", fields: [projectId], references: [id], onDelete: Cascade)
+  deletedAt DateTime?    @map("deleted_at") @db.Timestamptz(6)
+  version   Int          @default(1)
+  createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  collectionItems CollectionItem[]
+
+  @@index([userId, parentId, createdAt])
+  @@index([projectId, parentId, createdAt])
+  @@map("collections")
 }
 
 model CollectionItem {
-  id            String      @id @default(uuid()) @db.Uuid
-  collectionId  String      @map("collection_id") @db.Uuid
-  collection    Collection  @relation(fields: [collectionId], references: [id], onDelete: Cascade)
-  catalogItemId String      @map("catalog_item_id") @db.Uuid
-  catalogItem   CatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
-  sortOrder     Int         @default(0) @map("sort_order")
-  addedAt       DateTime    @default(now()) @map("added_at") @db.Timestamptz(6)
+  id           String     @id @default(uuid()) @db.Uuid
+  collectionId String     @map("collection_id") @db.Uuid
+  collection   Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  itemId       String     @map("item_id") @db.Uuid
+  item         Item       @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  sortOrder    Int        @default(0) @map("sort_order")
+  addedAt      DateTime   @default(now()) @map("added_at") @db.Timestamptz(6)
 
-  @@unique([collectionId, catalogItemId])
-  @@index([collectionId])
-  @@index([catalogItemId])
+  @@unique([collectionId, itemId])
+  @@index([itemId])
   @@map("collection_items")
 }
 
-model CatalogTag {
-  id          String           @id @default(uuid()) @db.Uuid
-  name        String
-  color       String           @default("#3b82f6")
-  type        String           @default("manual")
-  workspaceId String           @map("workspace_id") @db.Uuid
-  workspace   Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
-  itemTags    CatalogItemTag[]
+model Tag {
+  id        String    @id @default(uuid()) @db.Uuid
+  name      String
+  color     String?
+  type      String?   @default("manual")
+  userId    String    @map("user_id") @db.Uuid
+  user      User      @relation("UserTags", fields: [userId], references: [id], onDelete: Cascade)
+  projectId String?   @map("project_id") @db.Uuid
+  project   Project?  @relation("ProjectTags", fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@unique([workspaceId, name])
-  @@index([workspaceId, name])
-  @@map("catalog_tags")
+  itemTags  ItemTag[]
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@index([projectId])
+  @@map("tags")
 }
 
-model CatalogItemTag {
-  id            String      @id @default(uuid()) @db.Uuid
-  tagId         String      @map("tag_id") @db.Uuid
-  tag           CatalogTag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
-  catalogItemId String      @map("catalog_item_id") @db.Uuid
-  catalogItem   CatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
-  addedAt       DateTime    @default(now()) @map("added_at") @db.Timestamptz(6)
+model ItemTag {
+  id         String   @id @default(uuid()) @db.Uuid
+  tagId      String   @map("tag_id") @db.Uuid
+  tag        Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  itemId     String   @map("item_id") @db.Uuid
+  item       Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  assignedAt DateTime @default(now()) @map("assigned_at") @db.Timestamptz(6)
 
-  @@unique([tagId, catalogItemId])
-  @@index([tagId])
-  @@index([catalogItemId])
-  @@map("catalog_item_tags")
+  @@unique([tagId, itemId])
+  @@index([itemId])
+  @@map("item_tags")
 }
 
+model Attachment {
+  id                 String                     @id @default(uuid()) @db.Uuid
+  itemId             String                     @map("item_id") @db.Uuid
+  item               Item                       @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  type               AttachmentType             @default(primary_pdf)
+  attachmentType     AttachmentType             @default(primary_pdf) @map("attachment_type")
+  name               String                     @default("document.pdf")
+  filename           String                     @default("document.pdf")
+  url                String                     @default("")
+  fileHash           String?                    @default("") @map("file_hash")
+  fileId             String?                    @map("file_id") @db.Uuid
+  file               File?                      @relation(fields: [fileId], references: [id], onDelete: SetNull)
+  storageKey         String?                    @map("storage_key")
+  mimeType           String                     @default("application/pdf") @map("mime_type")
+  size               Int                        @default(0)
+  extractedText      String?                    @map("extracted_text")
+  extractionStatus   AttachmentExtractionStatus @default(PENDING) @map("extraction_status")
+  extractionAttempts Int                        @default(0) @map("extraction_attempts")
+  extractionStartedAt DateTime?                 @map("extraction_started_at") @db.Timestamptz(6)
+  extractionCompletedAt DateTime?               @map("extraction_completed_at") @db.Timestamptz(6)
+  extractionLastError String?                   @map("extraction_last_error")
+  metadata           Json?                      @default("{}")
+  createdAt          DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt          DateTime?                  @map("deleted_at") @db.Timestamptz(6)
 
-model CatalogItemRevision {
-  id              String      @id @default(uuid()) @db.Uuid
-  catalogItemId   String      @map("catalog_item_id") @db.Uuid
-  catalogItem     CatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
-  version         Int
-  changesSnapshot Json        @map("changes_snapshot")
-  changedById     String?     @map("changed_by_id") @db.Uuid
-  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  revisions          AttachmentRevision[]
+  annotations        Annotation[]
+  fullTextIndexes    FullTextIndex[]
 
-  @@index([catalogItemId, version])
-  @@map("catalog_item_revisions")
-}
-
-model MetadataSourceRecord {
-  id              String      @id @default(uuid()) @db.Uuid
-  catalogItemId   String      @map("catalog_item_id") @db.Uuid
-  catalogItem     CatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
-  sourceProvider  String      @map("source_provider")
-  sourceRecordId  String?     @map("source_record_id")
-  rawPayload      Json        @map("raw_payload")
-  confidenceScore Float       @default(1.0) @map("confidence_score")
-  fetchedAt       DateTime    @default(now()) @map("fetched_at") @db.Timestamptz(6)
-
-  @@index([catalogItemId, sourceProvider])
-  @@map("metadata_source_records")
-}
-
-
-model CatalogAttachment {
-  id             String         @id @default(uuid()) @db.Uuid
-  catalogItemId  String         @map("paperId") @db.Uuid
-  catalogItem    CatalogItem    @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
-  fileId         String?        @map("file_id") @db.Uuid
-  file           File?          @relation(fields: [fileId], references: [id], onDelete: SetNull)
-  filename       String
-  url            String
-  fileHash       String?        @map("file_hash")
-  size           Int            @default(0)
-  mimeType       String         @default("application/octet-stream") @map("mime_type")
-  attachmentType AttachmentType @default(supplementary) @map("attachment_type")
-  uploadedAt     DateTime       @default(now()) @map("uploaded_at") @db.Timestamptz(6)
-
-  extractionStatus      AttachmentExtractionStatus @default(PENDING) @map("extraction_status")
-  extractionAttempts    Int                        @default(0) @map("extraction_attempts")
-  extractionStartedAt   DateTime?                  @map("extraction_started_at") @db.Timestamptz(6)
-  extractionCompletedAt DateTime?                  @map("extraction_completed_at") @db.Timestamptz(6)
-  extractionLastError   String?                    @map("extraction_last_error")
-
-  // Relations
-  revisions       AttachmentRevision[]
-  annotations     Annotation[]
-  fullTextIndexes FullTextIndex[]
-
-  @@index([catalogItemId])
+  @@index([itemId, type])
   @@index([fileId])
-  @@index([extractionStatus])
-  @@map("paper_attachments")
+  @@map("attachments")
 }
 
 model AttachmentRevision {
-  id             String            @id @default(uuid()) @db.Uuid
-  attachmentId   String            @map("attachment_id") @db.Uuid
-  attachment     CatalogAttachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
-  revisionNumber Int               @default(1) @map("revision_number")
-  fileHash       String            @map("file_hash")
-  sizeBytes      Int               @default(0) @map("size_bytes")
-  url            String
-  comment        String?           @default("")
-  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  id             String     @id @default(uuid()) @db.Uuid
+  attachmentId   String     @map("attachment_id") @db.Uuid
+  attachment     Attachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+  revisionNumber Int        @default(1) @map("revision_number")
+  fileHash       String?    @default("") @map("file_hash")
+  sizeBytes      Int        @default(0) @map("size_bytes")
+  url            String     @default("")
+  comment        String?    @default("")
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@unique([attachmentId, revisionNumber])
-  @@index([attachmentId, revisionNumber])
   @@map("attachment_revisions")
 }
 
 model Annotation {
-  id           String            @id @default(uuid()) @db.Uuid
-  attachmentId String            @map("attachment_id") @db.Uuid
-  attachment   CatalogAttachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
-  type         AnnotationType    @default(highlight)
-  pageIndex    Int               @map("page_index")
-  color        String            @default("#ffeb3b")
-  quoteText    String?           @map("quote_text")
-  comment      String?           @default("")
-  rectCoords   Json?             @map("rect_coords") // [x1, y1, x2, y2]
-  authorId     String            @map("author_id") @db.Uuid
-  author       User              @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  version      Int               @default(1)
-  deletedAt    DateTime?         @map("deleted_at") @db.Timestamptz(6)
-  createdAt    DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                  String         @id @default(uuid()) @db.Uuid
+  attachmentId        String         @map("attachment_id") @db.Uuid
+  attachment          Attachment     @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+  type                AnnotationType @default(highlight)
+  color               String         @default("#ffeb3b")
+  pageIndex           Int            @default(0) @map("page_index")
+  annotationSortIndex String         @default("") @map("annotation_sort_index")
+  rectCoords          Json?          @map("rect_coords")
+  quoteText           String?        @map("quote_text")
+  comment             String?        @default("")
+  authorId            String         @map("author_id") @db.Uuid
+  author              User           @relation("UserAnnotations", fields: [authorId], references: [id], onDelete: Cascade)
+  version             Int            @default(1)
+  createdAt           DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt           DateTime?      @map("deleted_at") @db.Timestamptz(6)
 
   @@index([attachmentId, pageIndex])
-  @@index([attachmentId, deletedAt])
+  @@index([authorId])
   @@map("annotations")
 }
 
-model Note {
-  id          String       @id @default(uuid()) @db.Uuid
-  workspaceId String       @map("workspace_id") @db.Uuid
-  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  itemId      String?      @map("item_id") @db.Uuid // Nullable: standalone note if null
-  item        CatalogItem? @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  title       String       @default("Untitled Note")
-  contentJson Json?        @map("content_json") // TipTap / ProseMirror Document JSON
-  contentMd   String       @default("") @map("content_md")
-  tags        String[]     @default([])
-  version     Int          @default(1)
-  createdById String       @map("created_by_id") @db.Uuid
-  createdBy   User         @relation(fields: [createdById], references: [id], onDelete: Cascade)
-  deletedAt   DateTime?    @map("deleted_at") @db.Timestamptz(6)
-  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+model FullTextIndex {
+  id           String     @id @default(uuid()) @db.Uuid
+  attachmentId String     @map("attachment_id") @db.Uuid
+  attachment   Attachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+  pageIndex    Int        @map("page_index")
+  textContent  String     @map("text_content")
+  charOffset   Int        @default(0) @map("char_offset")
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  @@index([workspaceId, itemId, createdAt])
-  @@index([workspaceId, deletedAt])
+  @@index([attachmentId, pageIndex])
+  @@map("full_text_indexes")
+}
+
+model Note {
+  id          String    @id @default(uuid()) @db.Uuid
+  itemId      String?   @map("item_id") @db.Uuid
+  item        Item?     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  title       String    @default("Untitled Note")
+  contentMd   String    @default("") @map("content_md")
+  contentJson Json?     @map("content_json")
+  tags        String[]  @default([])
+  userId      String    @map("user_id") @db.Uuid
+  user        User      @relation("UserNotes", fields: [userId], references: [id], onDelete: Cascade)
+  createdById String?   @map("created_by_id") @db.Uuid
+  projectId   String?   @map("project_id") @db.Uuid
+  project     Project?  @relation("ProjectNotes", fields: [projectId], references: [id], onDelete: Cascade)
+  version     Int       @default(1)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  @@index([itemId])
+  @@index([userId])
+  @@index([projectId])
   @@map("notes")
 }
 
 model ItemRelation {
   id           String       @id @default(uuid()) @db.Uuid
-  workspaceId  String       @map("workspace_id") @db.Uuid
-  workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   sourceItemId String       @map("source_item_id") @db.Uuid
-  sourceItem   CatalogItem  @relation("SourceCatalogItem", fields: [sourceItemId], references: [id], onDelete: Cascade)
+  sourceItem   Item         @relation("SourceItem", fields: [sourceItemId], references: [id], onDelete: Cascade)
   targetItemId String       @map("target_item_id") @db.Uuid
-  targetItem   CatalogItem  @relation("TargetCatalogItem", fields: [targetItemId], references: [id], onDelete: Cascade)
+  targetItem   Item         @relation("TargetItem", fields: [targetItemId], references: [id], onDelete: Cascade)
   relationType RelationType @default(cites) @map("relation_type")
   description  String?      @default("")
   createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@unique([sourceItemId, targetItemId, relationType])
-  @@index([workspaceId, sourceItemId])
   @@index([targetItemId])
   @@map("item_relations")
 }
 
-model IngestionRun {
-  id              String          @id @default(uuid()) @db.Uuid
-  workspaceId     String          @map("workspace_id") @db.Uuid
-  workspace       Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  requesterId     String?         @map("requester_id") @db.Uuid
-  itemId          String?         @map("item_id") @db.Uuid
-  item            CatalogItem?    @relation(fields: [itemId], references: [id], onDelete: SetNull)
-  status          IngestionStatus @default(RECEIVED)
-  idempotencyKey  String?         @map("idempotency_key")
-  inputParams     Json            @map("input_params") // { rawInput, inputType, options }
-  inputHash       String          @map("input_hash")
-  contractVersion String          @default("1.0.0") @map("contract_version")
-  pipelineVersion String          @default("1.0.0") @map("pipeline_version")
-  attempts        Int             @default(0)
-  maxRetries      Int             @default(3) @map("max_retries")
-  lastError       String?         @map("last_error")
-  executionLog    Json?           @map("execution_log") // Structured log trail
-  startedAt       DateTime        @default(now()) @map("started_at") @db.Timestamptz(6)
-  completedAt     DateTime?       @map("completed_at") @db.Timestamptz(6)
+model State {
+  id             String     @id @default(uuid()) @db.Uuid
+  userId         String     @map("user_id") @db.Uuid
+  user           User       @relation("UserItemStates", fields: [userId], references: [id], onDelete: Cascade)
+  itemId         String     @map("item_id") @db.Uuid
+  item           Item       @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  readStatus     ReadStatus @default(unread) @map("read_status")
+  rating         Int?
+  currentPage    Int?       @map("current_page")
+  scrollPosition Json?      @map("scroll_position")
+  lastOpenedAt   DateTime?  @map("last_opened_at") @db.Timestamptz(6)
+  lastReadAt     DateTime?  @map("last_read_at") @db.Timestamptz(6)
+  updatedAt      DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  // Relations
-  stages      IngestionStage[]
-  candidates  IngestionCandidate[]
-  decisions   IngestionDecision[]
-  reviewCases IngestionReviewCase[]
+  @@unique([userId, itemId])
+  @@index([userId, readStatus])
+  @@map("user_item_states")
+}
+
+model SavedSearch {
+  id              String    @id @default(uuid()) @db.Uuid
+  name            String
+  query           String?   @default("")
+  description     String?   @default("")
+  filters         Json?     @default("{}")
+  conditions      Json?     @default("{}")
+  conjunction     String?   @default("AND")
+  sortBy          String?   @default("dateAdded") @map("sort_by")
+  sortOrder       String?   @default("desc") @map("sort_order")
+  isPinned        Boolean   @default(false) @map("is_pinned")
+  icon            String?   @default("")
+  color           String?
+  cachedCount     Int       @default(0) @map("cached_count")
+  lastEvaluatedAt DateTime? @map("last_evaluated_at") @db.Timestamptz(6)
+  version         Int       @default(1)
+  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz(6)
+  userId          String    @map("user_id") @db.Uuid
+  user            User      @relation("UserSavedSearches", fields: [userId], references: [id], onDelete: Cascade)
+  projectId       String?   @map("project_id") @db.Uuid
+  project         Project?  @relation("ProjectSavedSearches", fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([userId])
+  @@index([projectId])
+  @@map("saved_searches")
+}
+
+model RetractionRecord {
+  id               String    @id @default(uuid()) @db.Uuid
+  doi              String    @unique
+  pmid             String?
+  isRetracted      Boolean   @default(true) @map("is_retracted")
+  retractionDate   DateTime? @map("retraction_date") @db.Timestamptz(6)
+  nature           String?
+  noticeUrl        String?   @map("notice_url")
+  reason           String?
+  source           String    @default("crossref")
+  rawMetadata      Json?     @map("raw_metadata")
+  checkedAt        DateTime  @default(now()) @map("checked_at") @db.Timestamptz(6)
+
+  @@index([doi])
+  @@index([pmid])
+  @@map("retraction_records")
+}
+
+model MetadataSourceRecord {
+  id             String   @id @default(uuid()) @db.Uuid
+  itemId         String   @map("item_id") @db.Uuid
+  item           Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  source         String?  @default("")
+  sourceProvider String   @default("arxiv") @map("source_provider")
+  rawJson        Json?    @map("raw_json")
+  rawPayload     Json?    @map("raw_payload")
+  fetchedAt      DateTime @default(now()) @map("fetched_at") @db.Timestamptz(6)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([itemId, sourceProvider])
+  @@map("metadata_source_records")
+}
+
+model ItemRevision {
+  id        String   @id @default(uuid()) @db.Uuid
+  itemId    String   @map("item_id") @db.Uuid
+  item      Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  version   Int
+  snapshot  Json
+  changeLog String?  @map("change_log")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([itemId, version])
+  @@map("item_revisions")
+}
+
+model IdempotencyRecord {
+  id             String    @id @default(uuid()) @db.Uuid
+  workspaceId    String    @map("workspace_id")
+  idempotencyKey String    @map("idempotency_key")
+  requestHash    String?   @map("request_hash")
+  statusCode     Int?      @map("status_code")
+  responseBody   Json?     @map("response_body")
+  status         String    @default("in_progress")
+  response       Json?
+  expiresAt      DateTime  @map("expires_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@unique([workspaceId, idempotencyKey])
-  @@index([idempotencyKey, workspaceId])
+  @@index([expiresAt])
+  @@map("idempotency_records")
+}
+
+model SyncSequence {
+  workspaceId     String @id @map("workspace_id")
+  currentSequence BigInt @default(0) @map("current_sequence")
+
+  @@map("sync_sequences")
+}
+
+model LibraryChange {
+  id          String   @id @default(uuid()) @db.Uuid
+  seq         BigInt
+  workspaceId String   @map("workspace_id")
+  entityType  String   @map("entity_type")
+  entityId    String   @map("entity_id")
+  action      String
+  version     Int
+  data        Json?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, seq])
+  @@map("library_changes")
+}
+
+model Tombstone {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id")
+  entityType  String   @map("entity_type")
+  entityId    String   @map("entity_id")
+  seq         BigInt
+  deletedById String?  @map("deleted_by_id")
+  deletedAt   DateTime @default(now()) @map("deleted_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, entityType, entityId])
+  @@map("tombstones")
+}
+
+model OutboxEvent {
+  id             String       @id @default(uuid()) @db.Uuid
+  workspaceId    String       @map("workspace_id")
+  aggregateId    String       @map("aggregate_id")
+  eventType      String       @map("event_type")
+  payload        Json
+  status         OutboxStatus @default(PENDING)
+  retryCount     Int          @default(0) @map("retry_count")
+  error          String?
+  scheduledAt    DateTime?    @map("scheduled_at") @db.Timestamptz(6)
+  claimedAt      DateTime?    @map("claimed_at") @db.Timestamptz(6)
+  leaseExpiresAt DateTime?    @map("lease_expires_at") @db.Timestamptz(6)
+  claimedBy      String?      @map("claimed_by")
+  dedupeKey      String?      @map("dedupe_key")
+  processedAt    DateTime?    @map("processed_at") @db.Timestamptz(6)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([status, createdAt])
+  @@map("outbox_events")
+}
+
+model IngestionRun {
+  id              String               @id @default(uuid()) @db.Uuid
+  workspaceId     String               @map("workspace_id")
+  requesterId     String?              @map("requester_id")
+  inputParams     Json                 @map("input_params")
+  inputHash       String               @map("input_hash")
+  idempotencyKey  String?              @map("idempotency_key")
+  contractVersion String               @default("1.0.0") @map("contract_version")
+  pipelineVersion String               @default("1.0.0") @map("pipeline_version")
+  status          IngestionStatus      @default(RECEIVED)
+  attempts        Int                  @default(0)
+  maxRetries      Int                  @default(3) @map("max_retries")
+  itemId          String?              @map("item_id") @db.Uuid
+  item            Item?                @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  lastError       String?              @map("last_error")
+  executionLog    Json?                @map("execution_log")
+  startedAt       DateTime             @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt     DateTime?            @map("completed_at") @db.Timestamptz(6)
+
+  stages          IngestionStage[]
+  candidates      IngestionCandidate[]
+  decisions       IngestionDecision[]
+  reviewCases     IngestionReviewCase[]
 
   @@index([workspaceId, status])
-  @@index([inputHash])
   @@map("ingestion_runs")
 }
 
@@ -333,7 +591,7 @@ model IngestionStage {
   id             String       @id @default(uuid()) @db.Uuid
   ingestionRunId String       @map("ingestion_run_id") @db.Uuid
   ingestionRun   IngestionRun @relation(fields: [ingestionRunId], references: [id], onDelete: Cascade)
-  stageName      String       @map("stage_name") // IDENTIFY, NORMALIZE, ENRICH, RECONCILE, MATCH, COMMIT
+  stageName      String       @map("stage_name")
   durationMs     Int          @default(0) @map("duration_ms")
   success        Boolean      @default(true)
   errorMessage   String?      @map("error_message")
@@ -342,7 +600,6 @@ model IngestionStage {
   leaseExpiresAt DateTime?    @map("lease_expires_at") @db.Timestamptz(6)
   executedAt     DateTime     @default(now()) @map("executed_at") @db.Timestamptz(6)
 
-  @@index([ingestionRunId, stageName])
   @@map("ingestion_stages")
 }
 
@@ -350,219 +607,66 @@ model IngestionCandidate {
   id              String       @id @default(uuid()) @db.Uuid
   ingestionRunId  String       @map("ingestion_run_id") @db.Uuid
   ingestionRun    IngestionRun @relation(fields: [ingestionRunId], references: [id], onDelete: Cascade)
-  sourceProvider  String       @map("source_provider") // Crossref, OpenAlex, PubMed, arXiv, BibTeX, RIS
+  sourceProvider  String       @map("source_provider")
   sourceRecordId  String?      @map("source_record_id")
   confidenceScore Float        @default(1.0) @map("confidence_score")
   metadataPayload Json         @map("metadata_payload")
   rawEvidenceRef  String?      @map("raw_evidence_ref")
   fetchedAt       DateTime     @default(now()) @map("fetched_at") @db.Timestamptz(6)
 
-  @@index([ingestionRunId, sourceProvider])
   @@map("ingestion_candidates")
 }
 
 model IngestionDecision {
-  id              String       @id @default(uuid()) @db.Uuid
-  ingestionRunId  String       @map("ingestion_run_id") @db.Uuid
-  ingestionRun    IngestionRun @relation(fields: [ingestionRunId], references: [id], onDelete: Cascade)
-  decisionType    String       @map("decision_type") // CREATE, UPDATE, MERGE, REVIEW, REJECT
-  decisionReason  String       @map("decision_reason")
-  proposedItem    Json         @map("proposed_item")
-  fieldDecisions  Json?        @map("field_decisions") // { field: { provider, confidence, value } }
-  duplicateMatch  Json?        @map("duplicate_match") // { targetItemId, matchScore, reason }
-  decidedAt       DateTime     @default(now()) @map("decided_at") @db.Timestamptz(6)
+  id             String       @id @default(uuid()) @db.Uuid
+  ingestionRunId String       @map("ingestion_run_id") @db.Uuid
+  ingestionRun   IngestionRun @relation(fields: [ingestionRunId], references: [id], onDelete: Cascade)
+  decisionType   String       @map("decision_type")
+  decisionReason String       @map("decision_reason")
+  proposedItem   Json         @map("proposed_item")
+  fieldDecisions Json?        @map("field_decisions")
+  duplicateMatch Json?        @map("duplicate_match")
+  decidedAt      DateTime     @default(now()) @map("decided_at") @db.Timestamptz(6)
 
-  @@index([ingestionRunId, decisionType])
   @@map("ingestion_decisions")
 }
 
 model IngestionReviewCase {
   id             String       @id @default(uuid()) @db.Uuid
-  workspaceId    String       @map("workspace_id") @db.Uuid
-  workspace      Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceId    String       @map("workspace_id")
   ingestionRunId String       @map("ingestion_run_id") @db.Uuid
   ingestionRun   IngestionRun @relation(fields: [ingestionRunId], references: [id], onDelete: Cascade)
   targetItemId   String?      @map("target_item_id") @db.Uuid
-  status         String       @default("PENDING") // PENDING, APPROVED, REJECTED, DISMISSED
   reason         String
-  evidence       Json
-  options        Json?
-  assignedToId   String?      @map("assigned_to_id") @db.Uuid
-  resolvedAt     DateTime?    @map("resolved_at") @db.Timestamptz(6)
+  evidence       Json?        @map("evidence")
+  options        Json?        @map("options")
+  assignedToId   String?      @map("assigned_to_id")
+  status         String       @default("PENDING")
+  resolution     String?
   createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  resolvedAt     DateTime?    @map("resolved_at") @db.Timestamptz(6)
 
-  @@index([workspaceId, status])
-  @@index([ingestionRunId])
   @@map("ingestion_review_cases")
 }
 
-model SyncSequence {
-  id              String    @id @default(uuid()) @db.Uuid
-  workspaceId     String    @unique @map("workspace_id") @db.Uuid
-  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  currentSequence BigInt    @default(0) @map("current_sequence")
-  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  @@map("sync_sequences")
-}
-
-model LibraryChange {
-  id          String    @id @default(uuid()) @db.Uuid
-  seq         BigInt    @map("seq")
-  workspaceId String    @map("workspace_id") @db.Uuid
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  entityType  String    @map("entity_type") // item, collection, tag, attachment, note, annotation
-  entityId    String    @map("entity_id")
-  action      String // create, update, delete
-  version     Int       @default(1)
-  data        Json?
-  timestamp   DateTime  @default(now()) @db.Timestamptz(6)
-
-  @@unique([workspaceId, seq])
-  @@index([workspaceId, seq])
-  @@index([workspaceId, entityType, entityId])
-  @@map("library_changes")
-}
-
-model Tombstone {
-  id          String    @id @default(uuid()) @db.Uuid
-  workspaceId String    @map("workspace_id") @db.Uuid
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  entityType  String    @map("entity_type")
-  entityId    String    @map("entity_id")
-  seq         BigInt?   @map("seq")
-  deletedAt   DateTime  @default(now()) @map("deleted_at") @db.Timestamptz(6)
-  deletedById String?   @map("deleted_by_id") @db.Uuid
-
-  @@unique([workspaceId, entityType, entityId])
-  @@index([workspaceId, deletedAt])
-  @@index([workspaceId, seq])
-  @@map("tombstones")
-}
-
-model UserItemState {
-  id         String      @id @default(uuid()) @db.Uuid
-  userId     String      @map("user_id") @db.Uuid
-  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  itemId     String      @map("item_id") @db.Uuid
-  item       CatalogItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  readStatus ReadStatus  @default(unread) @map("read_status")
-  rating     Int?        @default(0) // 1..5 stars
-  lastReadAt DateTime?   @map("last_read_at") @db.Timestamptz(6)
-  updatedAt  DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  @@unique([userId, itemId])
-  @@index([userId, readStatus])
-  @@index([itemId])
-  @@index([userId, lastReadAt])
-  @@map("user_item_states")
-}
-
-model OutboxEvent {
-  id             String       @id @default(uuid()) @db.Uuid
-  workspaceId    String?      @map("workspace_id") @db.Uuid
-  aggregateId    String       @map("aggregate_id")
-  eventType      String       @map("event_type") // library.item.created, metadata.reconciled...
-  payload        Json
-  status         OutboxStatus @default(PENDING)
-  retryCount     Int          @default(0) @map("retry_count")
-  error          String?
-  scheduledAt    DateTime?    @default(now()) @map("scheduled_at") @db.Timestamptz(6)
-  claimedAt      DateTime?    @map("claimed_at") @db.Timestamptz(6)
-  leaseExpiresAt DateTime?    @map("lease_expires_at") @db.Timestamptz(6)
-  claimedBy      String?      @map("claimed_by")
-  dedupeKey      String?      @unique @map("dedupe_key")
-  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  processedAt    DateTime?    @map("processed_at") @db.Timestamptz(6)
-
-  @@index([status, scheduledAt])
-  @@index([status, leaseExpiresAt])
-  @@index([status, createdAt])
-  @@index([workspaceId, status])
-  @@map("outbox_events")
-}
-
-model IdempotencyRecord {
-  id             String   @id @default(uuid()) @db.Uuid
-  idempotencyKey String   @map("idempotency_key")
-  workspaceId    String   @map("workspace_id") @db.Uuid
-  requestHash    String   @map("request_hash")
-  status         String   @default("in_progress") // in_progress, succeeded, failed
-  statusCode     Int?     @map("status_code")
-  responseBody   Json?    @map("response_body")
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  expiresAt      DateTime @map("expires_at") @db.Timestamptz(6)
-
-  @@unique([workspaceId, idempotencyKey])
-  @@index([idempotencyKey, workspaceId])
-  @@index([expiresAt])
-  @@map("idempotency_records")
-}
-
-
-model FullTextIndex {
-  id           String            @id @default(uuid()) @db.Uuid
-  attachmentId String            @map("attachment_id") @db.Uuid
-  attachment   CatalogAttachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
-  pageIndex    Int               @map("page_index")
-  textContent  String            @map("text_content") @db.Text
-  charOffset   Int               @default(0) @map("char_offset")
-  indexedAt    DateTime          @default(now()) @map("indexed_at") @db.Timestamptz(6)
-
-  @@unique([attachmentId, pageIndex])
-  @@index([attachmentId, pageIndex])
-  @@map("full_text_indexes")
-}
-
-
-model Collection {
-  id          String       @id @default(uuid()) @db.Uuid
-  name        String
-  description String?      @default("")
-  color       String?      @default("#3370ff")
-  icon        String?      @default("")
-  parentId    String?      @map("parent_id") @db.Uuid
-  parent      Collection?  @relation("CollectionHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
-  children    Collection[] @relation("CollectionHierarchy")
-  workspaceId String       @map("workspace_id") @db.Uuid
-  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdById String       @map("created_by_id") @db.Uuid
-  createdBy   User         @relation(fields: [createdById], references: [id], onDelete: Cascade)
-  deletedAt   DateTime?    @map("deleted_at") @db.Timestamptz(6)
-  version     Int          @default(1)
-  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  // Relations (accessed through CollectionItem junction table)
-  collectionItems CollectionItem[]
-
-  @@index([workspaceId, parentId, createdAt])
-  @@map("collections")
-}
-
-
-// ── 10. Library Integrations (Zotero & External Providers) ─────────────────
-
 model ZoteroConnection {
-  id              String    @id @default(uuid()) @db.Uuid
-  workspaceId     String    @map("workspace_id") @db.Uuid
-  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  userId          String    @map("user_id") @db.Uuid
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  provider        String    @default("zotero")
-  accountName     String?   @map("account_name")
-  accountType     String?   @default("user") @map("account_type") // user, group
-  zoteroUserId    String?   @map("zotero_user_id")
-  encryptedApiKey String    @map("encrypted_api_key")
-  keyIv           String    @map("key_iv")
-  keyTag          String    @map("key_tag")
-  scopes          Json?     @default("{}")
-  status          String    @default("active") // active, revoked, error
-  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id              String          @id @default(uuid()) @db.Uuid
+  workspaceId     String          @map("workspace_id")
+  userId          String          @map("user_id") @db.Uuid
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider        String          @default("zotero")
+  accountName     String?         @map("account_name")
+  accountType     String?         @default("user") @map("account_type")
+  zoteroUserId    String?         @map("zotero_user_id")
+  encryptedApiKey String          @map("encrypted_api_key")
+  keyIv           String          @map("key_iv")
+  keyTag          String          @map("key_tag")
+  scopes          Json?           @default("{}")
+  status          String          @default("active")
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  bindings ZoteroBinding[]
+  bindings        ZoteroBinding[]
 
   @@unique([workspaceId, zoteroUserId])
   @@index([workspaceId, status])
@@ -570,23 +674,22 @@ model ZoteroConnection {
 }
 
 model ZoteroBinding {
-  id                String           @id @default(uuid()) @db.Uuid
-  connectionId      String           @map("connection_id") @db.Uuid
-  connection        ZoteroConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-  workspaceId       String           @map("workspace_id") @db.Uuid
-  workspace         Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  remoteLibraryType String           @default("user") @map("remote_library_type") // user, group
-  remoteLibraryId   String           @map("remote_library_id")
-  lastSyncVersion   BigInt           @default(0) @map("last_sync_version")
-  lastSyncAt        DateTime?        @map("last_sync_at") @db.Timestamptz(6)
-  syncStatus        String           @default("idle") @map("sync_status") // idle, syncing, error
-  syncDirection     String           @default("read_only") @map("sync_direction") // read_only, two_way
-  createdAt         DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt         DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                String              @id @default(uuid()) @db.Uuid
+  connectionId      String              @map("connection_id") @db.Uuid
+  connection        ZoteroConnection    @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  workspaceId       String              @map("workspace_id")
+  remoteLibraryType String              @default("user") @map("remote_library_type")
+  remoteLibraryId   String              @map("remote_library_id")
+  lastSyncVersion   BigInt              @default(0) @map("last_sync_version")
+  lastSyncAt        DateTime?           @map("last_sync_at") @db.Timestamptz(6)
+  syncStatus        String              @default("idle") @map("sync_status")
+  syncDirection     String              @default("read_only") @map("sync_direction")
+  createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  itemBindings ZoteroItemBinding[]
-  syncRuns     ZoteroSyncRun[]
-  syncFailures ZoteroSyncFailure[]
+  itemBindings      ZoteroItemBinding[]
+  syncRuns          ZoteroSyncRun[]
+  syncFailures      ZoteroSyncFailure[]
 
   @@unique([workspaceId, remoteLibraryType, remoteLibraryId])
   @@index([connectionId])
@@ -597,15 +700,14 @@ model ZoteroItemBinding {
   id            String        @id @default(uuid()) @db.Uuid
   bindingId     String        @map("binding_id") @db.Uuid
   binding       ZoteroBinding @relation(fields: [bindingId], references: [id], onDelete: Cascade)
-  workspaceId   String        @map("workspace_id") @db.Uuid
-  workspace     Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  entityType    String        @map("entity_type") // item, collection, tag, attachment, note, annotation
+  workspaceId   String        @map("workspace_id")
+  entityType    String        @map("entity_type")
   entityId      String        @map("entity_id")
   remoteKey     String        @map("remote_key")
   remoteVersion BigInt        @default(0) @map("remote_version")
   baseSnapshot  Json?         @map("base_snapshot")
   rawPayload    Json?         @map("raw_payload")
-  syncState     String        @default("synced") @map("sync_state") // synced, pending_push, conflict, error
+  syncState     String        @default("synced") @map("sync_state")
   createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -616,23 +718,24 @@ model ZoteroItemBinding {
 }
 
 model ZoteroSyncRun {
-  id            String        @id @default(uuid()) @db.Uuid
-  bindingId     String        @map("binding_id") @db.Uuid
-  binding       ZoteroBinding @relation(fields: [bindingId], references: [id], onDelete: Cascade)
-  workspaceId   String        @map("workspace_id") @db.Uuid
-  workspace     Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  direction     String        @default("pull") // pull, push, reconcile
-  versionBefore BigInt        @default(0) @map("version_before")
-  versionAfter  BigInt        @default(0) @map("version_after")
-  itemsCreated  Int           @default(0) @map("items_created")
-  itemsUpdated  Int           @default(0) @map("items_updated")
-  itemsDeleted  Int           @default(0) @map("items_deleted")
-  status        String        @default("pending") // pending, running, completed, failed
-  errorMessage  String?       @map("error_message")
-  startedAt     DateTime      @default(now()) @map("started_at") @db.Timestamptz(6)
-  completedAt   DateTime?     @map("completed_at") @db.Timestamptz(6)
+  id            String              @id @default(uuid()) @db.Uuid
+  bindingId     String              @map("binding_id") @db.Uuid
+  binding       ZoteroBinding       @relation(fields: [bindingId], references: [id], onDelete: Cascade)
+  workspaceId   String              @map("workspace_id")
+  direction     String              @default("pull")
+  versionBefore BigInt              @default(0) @map("version_before")
+  versionAfter  BigInt              @default(0) @map("version_after")
+  itemsCreated  Int                 @default(0) @map("items_created")
+  itemsUpdated  Int                 @default(0) @map("items_updated")
+  itemsDeleted  Int                 @default(0) @map("items_deleted")
+  status        String              @default("pending")
+  errorMessage  String?             @map("error_message")
+  startedAt     DateTime            @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt   DateTime?           @map("completed_at") @db.Timestamptz(6)
+  createdAt     DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  failures ZoteroSyncFailure[]
+  failures      ZoteroSyncFailure[]
 
   @@index([bindingId, startedAt])
   @@map("zotero_sync_runs")
@@ -644,15 +747,14 @@ model ZoteroSyncFailure {
   syncRun      ZoteroSyncRun? @relation(fields: [syncRunId], references: [id], onDelete: SetNull)
   bindingId    String         @map("binding_id") @db.Uuid
   binding      ZoteroBinding  @relation(fields: [bindingId], references: [id], onDelete: Cascade)
-  workspaceId  String         @map("workspace_id") @db.Uuid
-  workspace    Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  operation    String // fetch_items, map_item, persist_item, push_item
+  workspaceId  String         @map("workspace_id")
+  operation    String
   remoteKey    String?        @map("remote_key")
   entityId     String?        @map("entity_id")
   errorMessage String         @map("error_message")
   errorDetails Json?          @map("error_details")
   attempts     Int            @default(1)
-  status       String         @default("retryable") // retryable, dead_letter, resolved
+  status       String         @default("retryable")
   createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -662,7 +764,7 @@ model ZoteroSyncFailure {
 
 model IntegrationPolicy {
   id        String   @id @default(uuid()) @db.Uuid
-  provider  String   @unique // e.g. "zotero"
+  provider  String   @unique
   isPaused  Boolean  @default(false) @map("is_paused")
   reason    String?
   changedBy String?  @map("changed_by")
@@ -675,8 +777,6 @@ model IntegrationPolicy {
 
 model CapturePreview {
   id                String    @id @default(uuid()) @db.Uuid
-  workspaceId       String    @map("workspace_id") @db.Uuid
-  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   userId            String    @map("user_id") @db.Uuid
   user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   sourceUrl         String    @map("source_url")
@@ -688,7 +788,7 @@ model CapturePreview {
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@index([workspaceId, expiresAt])
+  @@index([userId, expiresAt])
   @@index([tokenHash])
   @@map("capture_previews")
 }

@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { Prisma } from '@prisma/client';
-import { VersionMismatchException } from '../common/errors/version-mismatch.exception';
+import { VersionMismatchException } from '../core/errors/version-mismatch.exception';
 import { normalizeTags } from '../tags/utils/tags.utils';
 
 import { CreateNoteData, UpdateNoteData } from './types/notes.types';
@@ -17,14 +17,14 @@ export class NotesRepository {
   }
 
   async findMany(
-    workspaceId: string,
+    userId: string,
     itemId?: string,
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
     return client.note.findMany({
       where: {
-        workspaceId,
+        userId,
         ...(itemId !== undefined ? { itemId } : {}),
         deletedAt: null,
       },
@@ -33,38 +33,42 @@ export class NotesRepository {
   }
 
   async findById(
-    workspaceId: string,
+    userId: string,
     id: string,
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
     return client.note.findFirst({
-      where: { id, workspaceId, deletedAt: null },
+      where: { id, userId, deletedAt: null },
     });
   }
 
   async create(
-    workspaceId: string,
+    userId: string,
     data: CreateNoteData,
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
     return client.note.create({
       data: {
-        workspaceId,
+        userId,
+        projectId: data.projectId ?? null,
         itemId: data.itemId ?? null,
         title: data.title ?? 'Untitled Note',
-        contentJson: data.contentJson ?? null,
+        contentJson:
+          data.contentJson !== undefined && data.contentJson !== null
+            ? (data.contentJson as Prisma.InputJsonValue)
+            : Prisma.DbNull,
         contentMd: data.contentMd ?? '',
         tags: data.tags ? normalizeTags(data.tags) : [],
-        createdById: data.createdById,
+        createdById: data.createdById || userId,
         version: 1,
       },
     });
   }
 
   async update(
-    workspaceId: string,
+    userId: string,
     id: string,
     expectedVersion: number,
     data: UpdateNoteData,
@@ -72,12 +76,12 @@ export class NotesRepository {
   ) {
     const client = this.getClient(tx);
     const existing = await client.note.findFirst({
-      where: { id, workspaceId, deletedAt: null },
+      where: { id, userId, deletedAt: null },
     });
 
     if (!existing) {
       throw new NotFoundException(
-        `Note ${id} not found in workspace ${workspaceId}`,
+        `Note ${id} not found`,
       );
     }
 
@@ -96,8 +100,10 @@ export class NotesRepository {
         title: data.title ?? existing.title,
         contentJson:
           data.contentJson !== undefined
-            ? data.contentJson
-            : existing.contentJson,
+            ? data.contentJson !== null
+              ? (data.contentJson as Prisma.InputJsonValue)
+              : Prisma.DbNull
+            : undefined,
         contentMd:
           data.contentMd !== undefined ? data.contentMd : existing.contentMd,
         tags:
@@ -108,7 +114,7 @@ export class NotesRepository {
   }
 
   async softDelete(
-    workspaceId: string,
+    userId: string,
     id: string,
     expectedVersion?: number,
     tx?: Prisma.TransactionClient,
@@ -116,7 +122,7 @@ export class NotesRepository {
     const client = this.getClient(tx);
     if (expectedVersion !== undefined) {
       const existing = await client.note.findFirst({
-        where: { id, workspaceId, deletedAt: null },
+        where: { id, userId, deletedAt: null },
       });
       if (existing && existing.version !== expectedVersion) {
         throw new VersionMismatchException({
@@ -129,7 +135,7 @@ export class NotesRepository {
     }
 
     const result = await client.note.updateMany({
-      where: { id, workspaceId, deletedAt: null },
+      where: { id, userId, deletedAt: null },
       data: { deletedAt: new Date() },
     });
 

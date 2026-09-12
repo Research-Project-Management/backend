@@ -1,16 +1,16 @@
 import { Module } from '@nestjs/common';
 import { ItemsController } from './items.controller';
-import { ItemsService, CatalogService } from './items.service';
+import { ItemsService } from './items.service';
 import { QueryRepository } from './repositories/query.repository';
 import { CommandRepository } from './repositories/command.repository';
 import { ItemsMapper } from './mappers/items.mapper';
 import { ItemTransformer } from './transformers/item.transformer';
 import { CoreModule } from '../../../core/core.module';
-import { TypesModule } from '../types/types.module';
 import { OutboxModule } from '../outbox/outbox.module';
 import { TagsModule } from '../tags/tags.module';
 import { CollectionsModule } from '../collections/collections.module';
 import { SearchModule } from '../search/search.module';
+import { TypesModule } from '../types/types.module';
 import { ITEM_EXISTENCE_PORT, ITEM_READ_PORT } from './ports/items.ports';
 
 @Module({
@@ -18,9 +18,9 @@ import { ITEM_EXISTENCE_PORT, ITEM_READ_PORT } from './ports/items.ports';
     CoreModule,
     OutboxModule,
     TagsModule,
-    TypesModule,
     CollectionsModule,
     SearchModule,
+    TypesModule,
   ],
   controllers: [ItemsController],
   providers: [
@@ -40,7 +40,6 @@ import { ITEM_EXISTENCE_PORT, ITEM_READ_PORT } from './ports/items.ports';
   ],
   exports: [
     ItemsService,
-    CatalogService,
     QueryRepository,
     CommandRepository,
     ItemsMapper,
@@ -50,6 +49,3 @@ import { ITEM_EXISTENCE_PORT, ITEM_READ_PORT } from './ports/items.ports';
   ],
 })
 export class ItemsModule {}
-
-export const CatalogModule = ItemsModule;
-export type CatalogModule = ItemsModule;

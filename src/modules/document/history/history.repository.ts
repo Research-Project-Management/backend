@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { Prisma, PageVersion } from '@prisma/client';
-import { IHistoryRepository } from '../types/document-repository.interface';
+import { IHistoryRepository } from '../core/types/document-repository.interface';
 
 @Injectable()
 export class HistoryRepository implements IHistoryRepository {

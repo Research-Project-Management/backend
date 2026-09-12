@@ -11,7 +11,7 @@ import createDOMPurify from 'dompurify';
 import { MetadataRoutingPolicy } from '../../ingestion/metadata/policies/metadata.policy';
 import { AttachmentsService } from '../attachments.service';
 import { R2Service } from '../../../storage/r2/r2.service';
-import { SsrfGuardService } from '../../common/services/ssrf-guard.service';
+import { SsrfGuardService } from '../../core/services/ssrf-guard.service';
 
 export interface SnapshotResult {
   title: string;
@@ -390,17 +390,15 @@ export class WebSnapshotService {
   }
 
   /**
-   * Captures a web snapshot, uploads it to storage (S3/R2), and attaches it to the target CatalogItem.
+   * Captures a web snapshot, uploads it to storage (S3/R2), and attaches it to the target Item.
    */
   async captureAndAttach(
     url: string,
-    catalogItemId: string,
-    workspaceId: string,
+    itemId: string,
+    userId: string,
     options?: CaptureAndAttachOptions,
   ): Promise<{ attachment: any; snapshot: SnapshotResult }> {
-    this.logger.log(
-      `Capturing web snapshot for item ${catalogItemId} from ${url}`,
-    );
+    this.logger.log(`Capturing web snapshot for item ${itemId} from ${url}`);
 
     const snapshot = await this.captureHtmlSnapshot(url, {
       title: options?.title,
@@ -414,7 +412,7 @@ export class WebSnapshotService {
       .slice(0, 40);
 
     const timestamp = Date.now();
-    const fileKey = `${workspaceId}/library/snapshots/${catalogItemId}_snapshot_${timestamp}.html`;
+    const fileKey = `${userId}/library/snapshots/${itemId}_snapshot_${timestamp}.html`;
     const filename = `Snapshot_${sanitizedTitle}_${new Date().toISOString().slice(0, 10)}.html`;
 
     let fileUrl = `/api/files/snapshots/${fileKey}`;
@@ -433,10 +431,10 @@ export class WebSnapshotService {
       }
     }
 
-    // 2. Attach to catalog item
+    // 2. Attach to item
     const attachment = await this.attachmentsService.createAttachment({
-      workspaceId,
-      catalogItemId,
+      userId,
+      itemId,
       filename,
       url: fileUrl,
       mimeType: 'text/html',
@@ -445,7 +443,7 @@ export class WebSnapshotService {
     });
 
     this.logger.log(
-      `Snapshot successfully attached to item ${catalogItemId}: ${filename} (${(snapshot.sizeBytes / 1024).toFixed(1)} KB)`,
+      `Snapshot successfully attached to item ${itemId}: ${filename} (${(snapshot.sizeBytes / 1024).toFixed(1)} KB)`,
     );
 
     return { attachment, snapshot };

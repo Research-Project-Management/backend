@@ -4,12 +4,16 @@
 
 export interface NoteAnnotationSource {
   pageIndex: number;
+  annotationSortIndex?: string | null;
+  color?: string | null;
   quoteText?: string | null;
   comment?: string | null;
+  createdAt?: Date | null;
 }
 
 export interface NoteItemSource {
   title?: string | null;
+  citekey?: string | null;
   creators?: Array<{
     firstName?: string | null;
     lastName?: string | null;
@@ -23,6 +27,41 @@ export interface NoteItemSource {
   year?: number | null;
   doi?: string | null;
   identifiers?: Array<{ type: string; value: string }>;
+}
+
+/**
+ * Maps Zotero-standard annotation hex colors to semantic emoji + label strings.
+ * Colors follow the Zotero 7 palette (8 standard colors).
+ */
+const COLOR_LABEL_MAP: Record<string, string> = {
+  '#ffd400': '🟡 Key Points',
+  '#ff6666': '🔴 Critical',
+  '#5fb236': '🟢 Methods',
+  '#2ea8e5': '🔵 Questions',
+  '#a28ae5': '🟣 Background',
+  '#e56eee': '🩷 Interesting',
+  '#f19837': '🟠 Important',
+  '#aaaaaa': '⬜ Notes',
+};
+
+/**
+ * Parses an ``annotationSortIndex`` string (format: ``PPPP|YYYYY|XXXXX``)
+ * and returns numeric Y and X coordinates for spatial ordering.
+ * Returns { y: 0, x: 0 } if the format is invalid or the value is null.
+ */
+export function parseAnnotationSortIndex(sortIndex: string | null | undefined): {
+  y: number;
+  x: number;
+} {
+  if (!sortIndex) return { y: 0, x: 0 };
+  const parts = sortIndex.split('|');
+  if (parts.length < 3) return { y: 0, x: 0 };
+  const y = parseFloat(parts[1] ?? '0');
+  const x = parseFloat(parts[2] ?? '0');
+  return {
+    y: isNaN(y) ? 0 : y,
+    x: isNaN(x) ? 0 : x,
+  };
 }
 
 /**
@@ -60,6 +99,8 @@ export function buildTipTapDocFromText(text: string): Record<string, unknown> {
 
 /**
  * Formats annotations and highlights extracted from PDF attachments into structured Markdown.
+ * Annotations are sorted by page → Y coordinate → X coordinate (Zotero annotationSortIndex).
+ * Highlights are grouped by color with semantic labels within each page section.
  */
 export function formatLiteratureNoteMarkdown(
   item: NoteItemSource,
@@ -87,28 +128,57 @@ export function formatLiteratureNoteMarkdown(
     item.identifiers?.find((id) => id.type.toLowerCase() === 'doi')?.value ||
     'N/A';
 
-  const lines: string[] = [
+  const headerLines: string[] = [
     `# Literature Notes: ${item.title || 'Untitled'}`,
     '',
     `**Authors:** ${authorList}  `,
     `**Year:** ${item.year || 'N/A'} | **DOI:** ${doi}`,
-    '',
-    '---',
-    '',
-    '## Extracted Highlights & Annotations',
-    '',
   ];
 
+  if (item.citekey) {
+    headerLines.push(`**@citekey:** ${item.citekey}`);
+  }
+
+  headerLines.push('', '---', '', '## Extracted Highlights & Annotations', '');
+
+  const lines: string[] = headerLines;
+
+  // Sort annotations: pageIndex ASC → Y coord ASC → X coord ASC → createdAt ASC
+  const sorted = [...annotations].sort((a, b) => {
+    if (a.pageIndex !== b.pageIndex) return a.pageIndex - b.pageIndex;
+    const coordA = parseAnnotationSortIndex(a.annotationSortIndex);
+    const coordB = parseAnnotationSortIndex(b.annotationSortIndex);
+    if (coordA.y !== coordB.y) return coordA.y - coordB.y;
+    if (coordA.x !== coordB.x) return coordA.x - coordB.x;
+    const tA = a.createdAt ? a.createdAt.getTime() : 0;
+    const tB = b.createdAt ? b.createdAt.getTime() : 0;
+    return tA - tB;
+  });
+
+  // Group by page, then by color within each page
   let currentPage = -1;
-  for (const ann of annotations) {
+  let currentColor: string | null = null;
+
+  for (const ann of sorted) {
+    // New page heading
     if (ann.pageIndex !== currentPage) {
       currentPage = ann.pageIndex;
+      currentColor = null;
       lines.push(`### Page ${currentPage + 1}`);
       lines.push('');
     }
 
+    // Color group heading within page (only when color changes)
+    const annColor = (ann.color ?? '').toLowerCase();
+    const colorLabel = COLOR_LABEL_MAP[annColor] ?? '📌 General';
+    if (annColor !== currentColor) {
+      currentColor = annColor;
+      lines.push(`#### ${colorLabel}`);
+      lines.push('');
+    }
+
     if (ann.quoteText) {
-      lines.push(`> ${ann.quoteText.trim().replace(/\\n+/g, '\n> ')}`);
+      lines.push(`> ${ann.quoteText.trim().replace(/\n+/g, '\n> ')}`);
       lines.push('');
     }
 
@@ -120,3 +190,4 @@ export function formatLiteratureNoteMarkdown(
 
   return lines.join('\n');
 }
+

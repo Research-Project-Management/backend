@@ -7,15 +7,15 @@
 
 export const STORAGE_REDIS_KEYS = {
   /**
-   * Workspace folder files and subfolders by parent (JSON array, TTL 1h)
+   * Folder files and subfolders by parent (JSON array, TTL 1h)
    */
-  folderTree: (workspaceId: string, parentId?: string | null) =>
-    `flux:storage:tree:${workspaceId}:${parentId || 'root'}`,
+  folderTree: (scopeId: string, parentId?: string | null) =>
+    `flux:storage:tree:${scopeId}:${parentId || 'root'}`,
 
   /**
-   * Total storage usage in bytes for workspace (Number, TTL 30m)
+   * Total storage usage in bytes for scope (Number, TTL 30m)
    */
-  quota: (workspaceId: string) => `flux:storage:quota:${workspaceId}`,
+  quota: (scopeId: string) => `flux:storage:quota:${scopeId}`,
 
   /**
    * File metadata by ID (JSON object, TTL 30m)
@@ -23,7 +23,7 @@ export const STORAGE_REDIS_KEYS = {
   file: (fileId: string) => `flux:storage:file:${fileId}`,
 
   /**
-   * Workspace labels list (JSON array, TTL 1h)
+   * Scope labels list (JSON array, TTL 1h)
    */
-  labels: (workspaceId: string) => `flux:storage:labels:${workspaceId}`,
+  labels: (scopeId: string) => `flux:storage:labels:${scopeId}`,
 } as const;

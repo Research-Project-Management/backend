@@ -27,11 +27,11 @@ export function formatToPrefixTsQuery(query: string): string {
  * Builds Prisma WhereInput object for structured metadata filtering in search.
  */
 export function buildBaseSearchWhere(
-  workspaceId: string,
+  userId: string,
   options: SearchOptions,
-): Prisma.CatalogItemWhereInput {
+): Prisma.ItemWhereInput {
   return {
-    workspaceId,
+    OR: [{ projectId: userId }, { userId }],
     deletedAt: null,
     ...(options.itemType ? { itemType: options.itemType } : {}),
     ...(options.yearFrom || options.yearTo

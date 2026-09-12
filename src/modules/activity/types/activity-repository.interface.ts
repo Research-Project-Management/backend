@@ -23,8 +23,16 @@ export type ActivityEventWithActor = Prisma.ActivityEventGetPayload<{
 
 export interface IActivityRepository {
   create(event: DomainActivityEvent): Promise<ActivityEvent>;
-  findWorkspaceFeed(
-    workspaceId: string,
+  findProjectFeed(
+    projectId: string,
+    options?: {
+      entityType?: EntityType;
+      limit?: number;
+      offset?: number;
+    },
+  ): Promise<{ items: ActivityEventWithActor[]; total: number }>;
+  findUserFeed(
+    userId: string,
     options?: {
       projectId?: string;
       entityType?: EntityType;
@@ -38,7 +46,10 @@ export interface IActivityRepository {
     limit?: number,
   ): Promise<ActivityEventWithActor[]>;
   findRecentByActor(
-    workspaceId: string,
+    actorId: string,
+    limit?: number,
+  ): Promise<ActivityEvent[]>;
+  findUserRecentEvents(
     actorId: string,
     limit?: number,
   ): Promise<ActivityEvent[]>;
@@ -47,8 +58,7 @@ export interface IActivityRepository {
     paperIds: string[],
     pageIds: string[],
   ): Promise<Map<string, string>>;
-  findFallbackRecentItems(
-    workspaceId: string,
+  findUserRecentItems(
     userId: string,
     limit: number,
   ): Promise<{
@@ -66,4 +76,10 @@ export interface IActivityRepository {
       updatedAt: Date;
     }>;
   }>;
+  findTaskWithProject(taskId: string): Promise<any>;
+  findTaskComments(taskId: string, sort?: 'asc' | 'desc'): Promise<any[]>;
+  findTaskActivityEvents(
+    taskId: string,
+    sort?: 'asc' | 'desc',
+  ): Promise<ActivityEventWithActor[]>;
 }

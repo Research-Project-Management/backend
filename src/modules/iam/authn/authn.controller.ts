@@ -25,19 +25,19 @@ import {
 import { AuthnService } from './authn.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
-import { RefreshTokenDto } from './dto/refresh-token.dto';
-import { ForgotPasswordDto } from './dto/forgot-password.dto';
-import { OAuthExchangeDto } from './dto/oauth-exchange.dto';
-import { ResetPasswordDto } from './dto/reset-password.dto';
+import { RefreshTokenDto } from './dto/refresh.dto';
+import { ForgotPasswordDto } from './dto/forgot.dto';
+import { OAuthExchangeDto } from './dto/oauth.dto';
+import { ResetPasswordDto } from './dto/reset.dto';
 import {
   AuthnResponseDto,
   TokenRefreshResponseDto,
   MessageResponseDto,
-} from './dto/authn-response.dto';
+} from './dto/response.dto';
 import { Public } from './decorators/public.decorator';
-import { CurrentUser } from './decorators/current-user.decorator';
-import { JwtAuthGuard } from './guards/jwt-auth.guard';
-import { BypassEnvelope } from '@/core/decorators/bypass-envelope.decorator';
+import { CurrentUser } from './decorators/user.decorator';
+import { AuthGuard, JwtAuthGuard } from './guards/auth.guard';
+import { BypassEnvelope } from '@/core/decorators/bypass.decorator';
 
 function extractRefreshTokenFromCookie(cookieHeader?: string): string | null {
   if (!cookieHeader) return null;

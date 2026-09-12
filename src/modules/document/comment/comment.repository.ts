@@ -1,4 +1,4 @@
-﻿import { Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { CommentStatus, Prisma } from '@prisma/client';
 
@@ -10,7 +10,7 @@ const AUTHOR_SELECT = {
 } as const;
 
 @Injectable()
-export class PageCommentRepository {
+export class CommentRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async findAuthorById(userId: string) {
@@ -20,7 +20,7 @@ export class PageCommentRepository {
     });
   }
 
-  async findPageComments(pageId: string) {
+  async findComments(pageId: string) {
     return this.prisma.pageComment.findMany({
       where: { pageId },
       orderBy: { createdAt: 'asc' },
@@ -30,7 +30,7 @@ export class PageCommentRepository {
     });
   }
 
-  async findPageCommentById(commentId: string) {
+  async findCommentById(commentId: string) {
     return this.prisma.pageComment.findUnique({
       where: { id: commentId },
       include: {
@@ -39,7 +39,7 @@ export class PageCommentRepository {
     });
   }
 
-  async createPageComment(data: {
+  async createComment(data: {
     pageId: string;
     authorId: string;
     content: string;
@@ -62,7 +62,7 @@ export class PageCommentRepository {
     });
   }
 
-  async updatePageComment(
+  async updateComment(
     commentId: string,
     data: {
       content?: string;
@@ -80,9 +80,20 @@ export class PageCommentRepository {
     });
   }
 
-  async deletePageComment(commentId: string) {
+  async deleteComment(commentId: string) {
     return this.prisma.pageComment.delete({
       where: { id: commentId },
     });
   }
+
+  // Backward-compatible aliases
+  findPageComments = this.findComments.bind(this);
+  findPageCommentById = this.findCommentById.bind(this);
+  createPageComment = this.createComment.bind(this);
+  updatePageComment = this.updateComment.bind(this);
+  deletePageComment = this.deleteComment.bind(this);
 }
+
+export const PageCommentRepository = CommentRepository;
+export type PageCommentRepository = CommentRepository;
+

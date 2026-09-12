@@ -23,10 +23,6 @@ export class CompileLatexDto {
 
   @IsString()
   @IsOptional()
-  workspaceId?: string;
-
-  @IsString()
-  @IsOptional()
   page_id?: string;
 
   @IsString()
@@ -67,8 +63,4 @@ export class SyncIncrementalDto {
   @IsString()
   @IsOptional()
   projectId?: string;
-
-  @IsString()
-  @IsOptional()
-  workspaceId?: string;
 }

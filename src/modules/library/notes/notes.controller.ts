@@ -12,65 +12,80 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { NotesService } from './notes.service';
-import { JwtAuthGuard } from '../../../modules/iam/authn/guards/jwt-auth.guard';
-import { WorkspaceRoleGuard } from '../../../modules/iam/authz/guards/workspace-role.guard';
-import { WorkspaceRoles } from '../../../modules/iam/authz/decorators/workspace-roles.decorator';
-import { CurrentUser } from '../../../modules/iam/authn/decorators/current-user.decorator';
+import { JwtAuthGuard } from '../../../modules/iam/authn/guards/auth.guard';
+import { CurrentUser } from '../../../modules/iam/authn/decorators/user.decorator';
 
 import { CreateNoteDto, UpdateNoteDto } from './dto/notes.dto';
 
-@Controller([
-  'api/v1/workspaces/:workspaceId/library/notes',
-  'api/v1/workspace/:workspaceId/library/notes',
-  'workspace/:workspaceId/library/notes',
-])
-@UseGuards(JwtAuthGuard, WorkspaceRoleGuard)
+@ApiTags('Library Notes')
+@ApiBearerAuth('JWT-auth')
+@Controller('api/v1/library/notes')
+@UseGuards(JwtAuthGuard)
 export class NotesController {
   constructor(private readonly notesService: NotesService) {}
 
   @Get()
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'List library notes for user' })
   async listNotes(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') currentUserId: string,
     @Query('itemId') itemId?: string,
   ) {
-    return this.notesService.listNotes(workspaceId, itemId);
+    return this.notesService.listNotes(currentUserId, itemId);
   }
 
   @Get(':id')
-  @WorkspaceRoles('owner', 'admin', 'member', 'viewer')
+  @ApiOperation({ summary: 'Get a library note by ID' })
   async getNote(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') currentUserId: string,
     @Param('id') id: string,
   ) {
-    const note = await this.notesService.getNote(workspaceId, id);
+    const note = await this.notesService.getNote(currentUserId, id);
     if (!note) {
-      throw new NotFoundException(
-        `Note ${id} not found in workspace ${workspaceId}`,
-      );
+      throw new NotFoundException(`Note ${id} not found`);
     }
 
     return note;
   }
 
   @Post()
-  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Create a note in user library' })
   async createNote(
-    @Param('workspaceId') workspaceId: string,
     @CurrentUser('id') currentUserId: string,
     @Body() body: CreateNoteDto,
   ) {
-    return this.notesService.createNote(workspaceId, {
+    return this.notesService.createNote(currentUserId, {
       ...body,
       createdById: currentUserId || 'system',
     });
   }
 
+  @Get('items/:itemId')
+  @ApiOperation({ summary: 'List notes for an item' })
+  async listNotesByItem(
+    @CurrentUser('id') currentUserId: string,
+    @Param('itemId') itemId: string,
+  ) {
+    return this.notesService.listNotes(currentUserId, itemId);
+  }
+
+  @Post('items/:itemId/from-annotations')
+  @ApiOperation({ summary: 'Extract notes from annotations' })
+  async extractNotesFromAnnotations(
+    @CurrentUser('id') currentUserId: string,
+    @Param('itemId') itemId: string,
+  ) {
+    return this.notesService.extractNotesFromAnnotations(
+      currentUserId,
+      itemId,
+    );
+  }
+
   @Patch(':id')
-  @WorkspaceRoles('owner', 'admin', 'member')
+  @ApiOperation({ summary: 'Update a note' })
   async updateNote(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') currentUserId: string,
     @Param('id') id: string,
     @Headers('if-match') ifMatch: string | undefined,
     @Body() body: UpdateNoteDto,
@@ -86,7 +101,7 @@ export class NotesController {
 
     const { expectedVersion: _, ...updateData } = body;
     return this.notesService.updateNote(
-      workspaceId,
+      currentUserId,
       id,
       expectedVersion,
       updateData,
@@ -94,9 +109,9 @@ export class NotesController {
   }
 
   @Delete(':id')
-  @WorkspaceRoles('owner', 'admin')
+  @ApiOperation({ summary: 'Delete a note' })
   async deleteNote(
-    @Param('workspaceId') workspaceId: string,
+    @CurrentUser('id') currentUserId: string,
     @Param('id') id: string,
     @Query('expectedVersion') expectedVersionQuery?: string,
     @Headers('if-match') ifMatch?: string,
@@ -108,14 +123,12 @@ export class NotesController {
           ? parseInt(ifMatch.replace(/["']/g, ''), 10)
           : undefined;
     const deleted = await this.notesService.deleteNote(
-      workspaceId,
+      currentUserId,
       id,
       expectedVersion,
     );
     if (!deleted) {
-      throw new NotFoundException(
-        `Note ${id} not found in workspace ${workspaceId}`,
-      );
+      throw new NotFoundException(`Note ${id} not found`);
     }
 
     return { deleted, id };

@@ -1,7 +1,5 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { TypesService } from '../../types/types.service';
-import { PrismaService } from '../../../../core/database/prisma.service';
-import { resolveTenantWorkspaceId } from '../../../../core/utils/tenant.util';
 import { ITEM_READ_PORT, IItemReadPort } from '../../items/ports/items.ports';
 
 export interface CompletenessAnalysis {
@@ -18,7 +16,6 @@ export class QualityService {
 
   constructor(
     private readonly typesService: TypesService,
-    private readonly prisma: PrismaService,
     @Inject(ITEM_READ_PORT) private readonly itemReadPort: IItemReadPort,
   ) {}
 
@@ -129,12 +126,12 @@ export class QualityService {
     }
 
     const typeSpecificKeys = fields
-      .filter((f) => !['title', 'date', 'url', 'doi'].includes(f.key))
+      .filter((f: any) => !['title', 'date', 'url', 'doi'].includes(f.key))
       .slice(0, 5)
-      .map((f) => f.key);
+      .map((f: any) => f.key);
 
     const hasTypeSpecific = typeSpecificKeys.some(
-      (k) => Boolean(item[k]) || Boolean(extraFields[k]),
+      (k: string) => Boolean((item as any)[k]) || Boolean(extraFields[k]),
     );
     if (hasTypeSpecific) {
       totalScore += 5;
@@ -155,13 +152,9 @@ export class QualityService {
     };
   }
 
-  async getQualityAudit(rawWorkspaceId: string) {
-    const workspaceId = await resolveTenantWorkspaceId(
-      this.prisma,
-      rawWorkspaceId,
-    );
+  async getQualityAudit(userId: string) {
     const items = await this.itemReadPort.findQualityAuditItems(
-      workspaceId,
+      userId,
       2000,
     );
 

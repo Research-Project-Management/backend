@@ -68,7 +68,7 @@ export class ZoteroSyncPolicy implements OnModuleInit {
       }
 
       // 2. Hydrate workspace-level paused settings
-      const workspaces = await this.prisma.workspace.findMany({
+      const workspaces = await this.prisma.project.findMany({
         where: { deletedAt: null },
         select: { id: true, settings: true },
       });
@@ -204,7 +204,7 @@ export class ZoteroSyncPolicy implements OnModuleInit {
         this.prisma.integrationPolicy.findUnique({
           where: { provider: 'zotero' },
         }),
-        this.prisma.workspace.findUnique({
+        this.prisma.project.findUnique({
           where: { id: workspaceId },
           select: { settings: true },
         }),
@@ -347,11 +347,11 @@ export class ZoteroSyncPolicy implements OnModuleInit {
 
     if (this.prisma) {
       await this.prisma.$transaction(async (tx) => {
-        const workspace = await tx.workspace.findUnique({
+        const workspace = await tx.project.findUnique({
           where: { id: workspaceId },
         });
         if (!workspace) {
-          throw new NotFoundException(`Workspace ${workspaceId} not found`);
+          throw new NotFoundException(`Project ${workspaceId} not found`);
         }
 
         const settings = (workspace.settings as Record<string, any>) || {};
@@ -363,7 +363,7 @@ export class ZoteroSyncPolicy implements OnModuleInit {
           zoteroPushDisabledAt: now.toISOString(),
         };
 
-        await tx.workspace.update({
+        await tx.project.update({
           where: { id: workspaceId },
           data: { settings: updatedSettings },
         });

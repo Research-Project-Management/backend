@@ -18,7 +18,6 @@ export type GenericVerb = 'created' | 'updated' | 'deleted';
 export interface BaseActivityEvent {
   entityId: string;
   actorId: string;
-  workspaceId: string;
   projectId?: string | null;
   timestamp?: Date;
 }

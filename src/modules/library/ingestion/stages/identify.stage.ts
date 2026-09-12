@@ -206,6 +206,155 @@ export class IdentifyStage {
               confidenceScore: 0.95,
             });
           }
+        } else if (
+          payload.format === 'CSL_JSON' ||
+          (payload.format as string) === 'JSON' ||
+          (payload.format as string) === 'csl_json'
+        ) {
+          let items: any[] = [];
+          try {
+            const parsed =
+              typeof payload.content === 'string'
+                ? JSON.parse(payload.content)
+                : payload.content;
+            items = Array.isArray(parsed) ? parsed : [parsed];
+          } catch {
+            items = [];
+          }
+
+          for (const csl of items) {
+            if (!csl || typeof csl !== 'object') continue;
+
+            const authors = (csl.author || [])
+              .map((a: any) => {
+                if (a.literal) return a.literal.trim();
+                if (a.given && a.family) return `${a.given} ${a.family}`.trim();
+                return (a.family || a.given || '').trim();
+              })
+              .filter(Boolean);
+
+            const editors = (csl.editor || [])
+              .map((e: any) => {
+                if (e.literal) return e.literal.trim();
+                if (e.given && e.family) return `${e.given} ${e.family}`.trim();
+                return (e.family || e.given || '').trim();
+              })
+              .filter(Boolean);
+
+            const creators = [
+              ...(csl.author || []).map((a: any) => ({
+                name:
+                  a.literal ||
+                  (a.given && a.family
+                    ? `${a.given} ${a.family}`
+                    : a.family || a.given || ''),
+                firstName: a.given || undefined,
+                lastName: a.family || undefined,
+                creatorType: 'author',
+              })),
+              ...(csl.editor || []).map((e: any) => ({
+                name:
+                  e.literal ||
+                  (e.given && e.family
+                    ? `${e.given} ${e.family}`
+                    : e.family || e.given || ''),
+                firstName: e.given || undefined,
+                lastName: e.family || undefined,
+                creatorType: 'editor',
+              })),
+            ];
+
+            const year =
+              csl.issued?.['date-parts']?.[0]?.[0] != null
+                ? Number(csl.issued['date-parts'][0][0])
+                : undefined;
+
+            let keywords: string[] | undefined;
+            const rawKeywords = csl.keyword || csl.keywords || csl.subject;
+            if (Array.isArray(rawKeywords)) {
+              keywords = rawKeywords
+                .map((k: any) => String(k).trim())
+                .filter(Boolean);
+            } else if (typeof rawKeywords === 'string' && rawKeywords.trim()) {
+              keywords = rawKeywords
+                .split(/[,;\n]/)
+                .map((k: string) => k.trim())
+                .filter(Boolean);
+            }
+
+            const numPages =
+              csl['number-of-pages'] != null
+                ? String(csl['number-of-pages'])
+                : undefined;
+
+            const mapCslType = (cslType: string): string => {
+              const typeMap: Record<string, string> = {
+                'article-journal': 'journalArticle',
+                'paper-conference': 'conferencePaper',
+                book: 'book',
+                chapter: 'bookSection',
+                thesis: 'thesis',
+                report: 'report',
+                webpage: 'webpage',
+                patent: 'patent',
+                dataset: 'dataset',
+                software: 'computerProgram',
+              };
+              return typeMap[cslType] || cslType || 'journalArticle';
+            };
+
+            const rawMetadata = {
+              title: csl.title || 'Untitled Document',
+              itemType: mapCslType(csl.type),
+              authors: authors.length > 0 ? authors : undefined,
+              editors: editors.length > 0 ? editors : undefined,
+              creators: creators.length > 0 ? creators : undefined,
+              year,
+              publicationTitle:
+                csl['container-title'] || csl.publisher || undefined,
+              journal: csl['container-title'] || undefined,
+              publisher: csl.publisher || undefined,
+              place: csl['publisher-place'] || undefined,
+              volume: csl.volume ? String(csl.volume) : undefined,
+              issue: csl.issue ? String(csl.issue) : undefined,
+              pages: csl.page || numPages || undefined,
+              series: csl['collection-title'] || undefined,
+              edition: csl.edition ? String(csl.edition).trim() : undefined,
+              doi: csl.DOI || csl.doi || undefined,
+              isbn: csl.ISBN || csl.isbn || undefined,
+              issn: csl.ISSN || csl.issn || undefined,
+              url: csl.URL || csl.url || undefined,
+              abstract: csl.abstract || undefined,
+              citationKey: csl.id || csl['citation-key'] || undefined,
+              tags: keywords,
+              keywords,
+              language: csl.language ? String(csl.language).trim() : undefined,
+              rights: csl.rights ? String(csl.rights).trim() : undefined,
+              extraFields: numPages
+                ? {
+                    numberOfPages: Number(numPages) || numPages,
+                    numPages: Number(numPages) || numPages,
+                  }
+                : undefined,
+            };
+
+            const normalized = this.normalizer.normalize(rawMetadata);
+            candidates.push({
+              candidateId: randomUUID(),
+              sourceKind: 'RECORD',
+              sourceName: 'CSL_JSON',
+              sourceRecordId: rawMetadata.citationKey || rawMetadata.doi,
+              retrievedAt: new Date().toISOString(),
+              schemaVersion: '1.0.0',
+              fields: this.buildEvidenceFields(
+                rawMetadata,
+                normalized,
+                'CSL_JSON',
+              ),
+              normalizedMetadata: normalized,
+              confidenceScore: 0.95,
+            });
+          }
         }
         break;
       }
@@ -255,7 +404,6 @@ export class IdentifyStage {
         ) {
           try {
             const fileRecord = await this.storagePort.readOwnedFile({
-              workspaceId,
               fileId: payload.fileId,
             });
             if (fileRecord?.buffer) {
@@ -272,9 +420,7 @@ export class IdentifyStage {
                 this.pdf.extractMetadataFromBuffer
               ) {
                 extractedMetadata =
-                  this.pdf.extractMetadataFromBuffer(
-                    fileRecord.buffer,
-                  ) || {};
+                  this.pdf.extractMetadataFromBuffer(fileRecord.buffer) || {};
               }
             }
           } catch (caughtError: unknown) {
@@ -319,12 +465,28 @@ export class IdentifyStage {
         const rawFileMetadata = {
           ...extractedItemMetadata,
           doi: extractedMetadata.doi || filenameDoi,
+          isbn: extractedMetadata.isbn,
           arxivId: extractedMetadata.arxivId || filenameArxivId,
           title:
             extractedMetadata.title || payload.filename || 'Uploaded Document',
+          publisher: extractedMetadata.publisher,
+          pages:
+            extractedMetadata.pages ||
+            (extractedMetadata.numberOfPages
+              ? String(extractedMetadata.numberOfPages)
+              : undefined),
           tags: extractedMetadata.tags || extractedMetadata.keywords,
           fileId: payload.fileId,
           filename: payload.filename,
+          extraFields: {
+            ...(extractedMetadata.extraFields || {}),
+            ...(extractedMetadata.numberOfPages
+              ? {
+                  numberOfPages: extractedMetadata.numberOfPages,
+                  numPages: extractedMetadata.numberOfPages,
+                }
+              : {}),
+          },
         };
         const normalized = this.normalizer.normalize(rawFileMetadata);
 
@@ -341,7 +503,11 @@ export class IdentifyStage {
             'StagedPdf',
           ),
           normalizedMetadata: normalized,
-          confidenceScore: extractedMetadata.doi ? 0.95 : 0.7,
+          confidenceScore: extractedMetadata.doi
+            ? 0.95
+            : extractedMetadata.isbn
+              ? 0.9
+              : 0.75,
         });
         break;
       }

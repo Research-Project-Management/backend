@@ -3,10 +3,11 @@ import { Note as PrismaNote } from '@prisma/client';
 export type NoteEntity = PrismaNote;
 
 export interface CreateNoteData {
+  projectId?: string;
   workspaceId?: string;
   itemId?: string | null;
   title?: string;
-  contentJson?: any;
+  contentJson?: Record<string, unknown> | null;
   contentMd?: string;
   tags?: string[];
   createdById: string;
@@ -14,7 +15,7 @@ export interface CreateNoteData {
 
 export interface UpdateNoteData {
   title?: string;
-  contentJson?: any;
+  contentJson?: Record<string, unknown> | null;
   contentMd?: string;
   tags?: string[];
 }

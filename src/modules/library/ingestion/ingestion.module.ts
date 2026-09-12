@@ -24,13 +24,19 @@ import { MatchStage } from './stages/match.stage';
 import { CommitStage } from './stages/commit.stage';
 import { UrlCaptureProvider } from './providers/url-capture.provider';
 import { INGESTION_PORT } from './types/ingestion.types';
-import { WatchdogService, IngestionWatchdogService } from './services/watchdog.service';
+import {
+  WatchdogService,
+  IngestionWatchdogService,
+} from './services/watchdog.service';
 import { UrlCaptureService } from './services/url-capture.service';
-import { PipelineService, IngestionPipelineRunner } from './services/pipeline.service';
-import { QueueService, IngestionQueueService } from './services/queue.service';
-import { ZoteroTranslatorClient } from '../../../infra/zotero/zotero-translator.client';
+import {
+  PipelineService,
+  IngestionPipelineRunner,
+} from './services/pipeline.service';
+import { QueueService } from './services/queue.service';
+import { ZoteroTranslatorClient } from '../infra/zotero/zotero-translator.client';
 
-import { SsrfGuardService } from '../common/services/ssrf-guard.service';
+import { SsrfGuardService } from '../core/services/ssrf-guard.service';
 import { NotesModule } from '../notes/notes.module';
 
 @Module({
@@ -90,7 +96,6 @@ import { NotesModule } from '../notes/notes.module';
     UrlCaptureService,
     WatchdogService,
     IngestionPipelineRunner,
-    IngestionQueueService,
     IngestionWatchdogService,
     SsrfGuardService,
     DoiParser,

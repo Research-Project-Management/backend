@@ -1,10 +1,10 @@
 /**
  * Sticky Domain Repository Interface (Port)
  *
- * Implements Hexagonal / DDD-Lite Architecture decoupling Prisma models from services.
+ * Standardized for Project & Personal Scopes (no workspace).
  */
 
-import { Sticky, StickyScope, Prisma } from '@prisma/client';
+import { Sticky, Prisma } from '@prisma/client';
 
 export const USER_MINIMAL_SELECT = {
   id: true,
@@ -21,16 +21,10 @@ export type StickyWithUser = Prisma.StickyGetPayload<{
 
 export interface IStickyRepository {
   findStickyById(stickyId: string): Promise<StickyWithUser | null>;
-  findWorkspaceStickies(
-    workspaceId: string,
-    userId: string,
-  ): Promise<StickyWithUser[]>;
-  findProjectStickies(
-    projectId: string,
-    userId: string,
-  ): Promise<StickyWithUser[]>;
-  countWorkspaceStickies(workspaceId: string, userId: string): Promise<number>;
-  countProjectStickies(projectId: string, userId: string): Promise<number>;
+  findStickiesByUserId(userId: string): Promise<StickyWithUser[]>;
+  countStickiesByUserId(userId: string): Promise<number>;
+  findStickiesByProjectId(projectId: string): Promise<StickyWithUser[]>;
+  countStickiesByProjectId(projectId: string): Promise<number>;
   createSticky(
     data: Prisma.StickyCreateInput | Prisma.StickyUncheckedCreateInput,
   ): Promise<StickyWithUser>;
@@ -41,6 +35,4 @@ export interface IStickyRepository {
   deleteSticky(stickyId: string): Promise<Sticky>;
   findStickiesByIds(stickyIds: string[]): Promise<Sticky[]>;
   reorderStickies(stickyIds: string[]): Promise<Sticky[]>;
-  findProjectWorkspaceId(projectId: string): Promise<string | null>;
-  resolveWorkspace(workspaceIdOrSlug: string): Promise<{ id: string } | null>;
 }

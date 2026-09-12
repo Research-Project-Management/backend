@@ -4,7 +4,6 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { CoreModule } from './core/core.module';
 import { HealthModule } from './health/health.module';
 import { IamModule } from './modules/iam/iam.module';
-import { WorkspaceModule } from './modules/workspace/workspace.module';
 import { ProjectModule } from './modules/project/project.module';
 import { ActivityModule } from './modules/activity/activity.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
@@ -32,7 +31,6 @@ import { AppService } from './app.service';
     CoreModule,
     HealthModule,
     IamModule,
-    WorkspaceModule,
     ProjectModule,
     ActivityModule,
     AnalyticsModule,

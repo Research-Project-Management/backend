@@ -1,4 +1,4 @@
-﻿import { ExportsService } from '../../src/modules/library/exports/exports.service';
+import { ExportsService } from '../../src/modules/library/exports/exports.service';
 import { CitationService } from '../../src/modules/library/citation/citation.service';
 
 describe('ExportsService - exportByCitationKeys', () => {
@@ -12,7 +12,7 @@ describe('ExportsService - exportByCitationKeys', () => {
         findUnique: jest.fn().mockResolvedValue({ id: 'resolved-ws-uuid' }),
         findFirst: jest.fn().mockResolvedValue({ id: 'resolved-ws-uuid' }),
       },
-      catalogItem: {
+      item: {
         findMany: jest.fn(),
       },
     };
@@ -37,11 +37,11 @@ describe('ExportsService - exportByCitationKeys', () => {
       foundKeys: [],
       missingKeys: [],
     });
-    expect(mockPrisma.catalogItem.findMany).not.toHaveBeenCalled();
+    expect(mockPrisma.item.findMany).not.toHaveBeenCalled();
   });
 
   it('fetches items, formats BibTeX, and separates found from missing keys', async () => {
-    mockPrisma.catalogItem.findMany.mockResolvedValue([
+    mockPrisma.item.findMany.mockResolvedValue([
       {
         id: 'item-1',
         citationKey: 'vaswani2017attention',

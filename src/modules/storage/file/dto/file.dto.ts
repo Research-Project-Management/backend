@@ -22,10 +22,6 @@ export class PresignDto {
 
   @IsString()
   @IsOptional()
-  workspaceId?: string;
-
-  @IsString()
-  @IsOptional()
   projectId?: string;
 
   @IsString()
@@ -68,14 +64,6 @@ export class UploadFileDto {
 
   @IsString()
   @IsOptional()
-  workspaceId?: string;
-
-  @IsString()
-  @IsOptional()
-  projectId?: string;
-
-  @IsString()
-  @IsOptional()
   pageId?: string;
 }
 
@@ -94,26 +82,10 @@ export class CreateFolderDto {
 
   @IsString()
   @IsOptional()
-  workspaceId?: string;
-
-  @IsString()
-  @IsOptional()
-  projectId?: string;
-
-  @IsString()
-  @IsOptional()
   pageId?: string;
 }
 
 export class UpdateFileDto {
-  @IsString()
-  @IsOptional()
-  projectId?: string;
-
-  @IsString()
-  @IsOptional()
-  workspaceId?: string;
-
   @IsString()
   @IsOptional()
   filename?: string;
@@ -134,14 +106,6 @@ export class UpdateFileDto {
 export class RenameFileDto {
   @IsString()
   @IsOptional()
-  projectId?: string;
-
-  @IsString()
-  @IsOptional()
-  workspaceId?: string;
-
-  @IsString()
-  @IsOptional()
   filename?: string;
 
   @IsString()
@@ -150,14 +114,6 @@ export class RenameFileDto {
 }
 
 export class MoveFileDto {
-  @IsString()
-  @IsOptional()
-  projectId?: string;
-
-  @IsString()
-  @IsOptional()
-  workspaceId?: string;
-
   @IsString()
   @IsOptional()
   parentId?: string;

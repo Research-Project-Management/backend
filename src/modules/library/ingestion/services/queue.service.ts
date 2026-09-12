@@ -7,7 +7,8 @@ import { IngestionStatus } from '@prisma/client';
 
 export interface QueuedIngestionTask {
   runId: string;
-  workspaceId: string;
+  projectId: string;
+  workspaceId?: string;
   envelope: IngestionSubmissionEnvelope;
 }
 
@@ -49,17 +50,17 @@ export class QueueService implements OnModuleInit {
   async onModuleInit(): Promise<void> {
     try {
       const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
-      const orphanedRuns = await this.repo.findOrphanedRuns(
-        tenMinutesAgo,
-        { limit: 20 },
-      );
+      const orphanedRuns = await this.repo.findOrphanedRuns(tenMinutesAgo, {
+        limit: 20,
+      });
       if (orphanedRuns.length > 0) {
         this.logger.warn(
           `Found ${orphanedRuns.length} orphaned ingestion run(s) on startup. Marking as FAILED_RETRYABLE.`,
         );
         for (const run of orphanedRuns) {
+          const targetId = (run as any).projectId || (run as any).workspaceId || '';
           await this.repo.updateRunStatus(
-            run.workspaceId,
+            targetId,
             run.id,
             IngestionStatus.FAILED_RETRYABLE,
             {
@@ -82,7 +83,7 @@ export class QueueService implements OnModuleInit {
    */
   enqueue(
     runId: string,
-    workspaceId: string,
+    projectId: string,
     envelope: IngestionSubmissionEnvelope,
   ): boolean {
     if (this.runningRunIds.has(runId) || this.queuedRunIds.has(runId)) {
@@ -93,9 +94,9 @@ export class QueueService implements OnModuleInit {
     }
 
     this.queuedRunIds.add(runId);
-    this.queue.push({ runId, workspaceId, envelope });
+    this.queue.push({ runId, projectId, envelope });
     this.logger.log(
-      `Enqueued run ${runId} for workspace ${workspaceId} (queue length: ${this.queue.length}, active: ${this.activeCount}/${this.maxConcurrency})`,
+      `Enqueued run ${runId} for project ${projectId} (queue length: ${this.queue.length}, active: ${this.activeCount}/${this.maxConcurrency})`,
     );
 
     this.pump();
@@ -139,15 +140,15 @@ export class QueueService implements OnModuleInit {
   /**
    * Executes an individual ingestion run through PipelineService.
    */
-  private async executeTask(task: QueuedIngestionTask): Promise<void> {
-    const { runId, workspaceId, envelope } = task;
+  private async executeTask(workItem: QueuedIngestionTask): Promise<void> {
+    const { runId, projectId, envelope } = workItem;
     const startTime = Date.now();
 
     try {
       this.logger.log(
         `[QUEUE_START] Executing run ${runId} (active: ${this.activeCount}/${this.maxConcurrency}, remaining queued: ${this.queue.length})`,
       );
-      await this.pipeline.executePipeline(runId, workspaceId, envelope);
+      await this.pipeline.executePipeline(runId, projectId, envelope);
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       this.logger.log(
         `[QUEUE_DONE] Run ${runId} completed successfully in ${elapsed}s`,
@@ -158,7 +159,7 @@ export class QueueService implements OnModuleInit {
         `[QUEUE_ERROR] Run ${runId} failed after ${elapsed}s: ${err?.message || err}`,
       );
       await this.repo
-        .updateRunStatus(workspaceId, runId, IngestionStatus.FAILED_FINAL, {
+        .updateRunStatus(projectId, runId, IngestionStatus.FAILED_FINAL, {
           lastError: err?.message || 'Ingestion pipeline execution failed',
         })
         .catch((updateErr: any) => {
@@ -173,5 +174,3 @@ export class QueueService implements OnModuleInit {
     }
   }
 }
-
-export { QueueService as IngestionQueueService };

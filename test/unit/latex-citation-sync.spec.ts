@@ -1,4 +1,4 @@
-﻿import { LatexService } from '../../src/modules/document/latex/latex.service';
+import { LatexService } from '../../src/modules/document/latex/latex.service';
 
 describe('LatexService - Citation and references.bib auto-sync', () => {
   let service: LatexService;
@@ -27,10 +27,10 @@ describe('LatexService - Citation and references.bib auto-sync', () => {
     };
     mockPrisma = {
       page: {
-        findUnique: jest.fn().mockResolvedValue({ workspaceId: 'ws-123' }),
+        findUnique: jest.fn().mockResolvedValue({ authorId: 'ws-123', workspaceId: 'ws-123' }),
       },
       project: {
-        findUnique: jest.fn().mockResolvedValue({ workspaceId: 'ws-123' }),
+        findUnique: jest.fn().mockResolvedValue({ createdById: 'ws-123', workspaceId: 'ws-123' }),
       },
     };
 

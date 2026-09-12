@@ -4,6 +4,7 @@ import {
   IsArray,
   IsNumber,
   IsBoolean,
+  IsObject,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -34,7 +35,11 @@ export class CreatorDto {
   orderIndex?: number;
 }
 
-export class CreateCatalogItemDto {
+export class CreateItemDto {
+  @IsOptional()
+  @IsString()
+  projectId?: string;
+
   @IsString()
   title!: string;
 
@@ -377,13 +382,13 @@ export class CreateCatalogItemDto {
   @IsOptional() @IsString() history?: string;
 
   @IsOptional()
-  extraFields?: Record<string, any>;
+  extraFields?: Record<string, unknown>;
 
   @IsOptional()
-  provenance?: any;
+  provenance?: Record<string, unknown>;
 }
 
-export class UpdateCatalogItemDto {
+export class UpdateItemDto {
   @IsOptional()
   @IsString()
   title?: string;
@@ -707,10 +712,10 @@ export class UpdateCatalogItemDto {
   @IsOptional() @IsString() history?: string;
 
   @IsOptional()
-  extraFields?: Record<string, any>;
+  extraFields?: Record<string, unknown>;
 
   @IsOptional()
-  provenance?: any;
+  provenance?: Record<string, unknown>;
 
   @IsOptional()
   @IsNumber()
@@ -731,16 +736,17 @@ export class TypeConversionDto {
   expectedVersion?: number;
 
   @IsOptional()
-  customFieldOverrides?: Record<string, any>;
+  @IsObject()
+  customFieldOverrides?: Record<string, unknown>;
 }
 
-export class BulkDeleteCatalogItemsDto {
+export class BulkDeleteItemsDto {
   @IsArray()
   @IsString({ each: true })
   itemIds!: string[];
 }
 
-export class BulkMoveCatalogItemsDto {
+export class BulkMoveItemsDto {
   @IsArray()
   @IsString({ each: true })
   itemIds!: string[];
@@ -750,7 +756,7 @@ export class BulkMoveCatalogItemsDto {
   targetCollectionId?: string | null;
 }
 
-export class BulkTagCatalogItemsDto {
+export class BulkTagItemsDto {
   @IsArray()
   @IsString({ each: true })
   itemIds!: string[];
@@ -759,12 +765,6 @@ export class BulkTagCatalogItemsDto {
   @IsString({ each: true })
   tagIds!: string[];
 }
-
-export const CreateItemDto = CreateCatalogItemDto;
-export type CreateItemDto = CreateCatalogItemDto;
-
-export const UpdateItemDto = UpdateCatalogItemDto;
-export type UpdateItemDto = UpdateCatalogItemDto;
 
 export class CursorPaginationQueryDto {
   @IsOptional()

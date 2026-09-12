@@ -1,0 +1,58 @@
+// -- 3. Storage & Asset Bounded Context (Storage Microservice) ----------------
+
+enum FilePermission {
+  view
+  edit
+}
+
+model File {
+  id           String         @id @default(uuid()) @db.Uuid
+  filename     String
+  size         Int            @default(0)
+  mimeType     String         @default("application/octet-stream") @map("mime_type")
+  url          String
+  key          String?
+  hash         String?
+  thumbnail    String?
+  isFolder     Boolean        @default(false) @map("is_folder")
+  starred      Boolean        @default(false)
+  metaData     Json?          @default("{}") @map("meta_data")
+  parentId     String?        @map("parent_id") @db.Uuid
+  parent       File?          @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children     File[]         @relation("FolderHierarchy")
+
+  // Storage Isolation (Two-Tier Scope: Personal Drive vs Project / Page Scope)
+  linkedToType String?        @map("linked_to_type")
+  linkedToId   String?        @map("linked_to_id")
+
+  // Ownership & Sharing (100% Personal Scope - Zero Workspace)
+  authorId     String         @map("author_id") @db.Uuid
+  author       User           @relation("UserFiles", fields: [authorId], references: [id], onDelete: Cascade)
+  sharedWith   FileShare[]
+  attachments  Attachment[]
+
+  trashedAt    DateTime?      @map("trashed_at") @db.Timestamptz(6)
+  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([authorId])
+  @@index([parentId])
+  @@index([url])
+  @@index([linkedToType, linkedToId])
+  @@index([trashedAt])
+  @@map("files")
+}
+
+model FileShare {
+  id         String         @id @default(uuid()) @db.Uuid
+  fileId     String         @map("file_id") @db.Uuid
+  file       File           @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  userId     String         @map("user_id") @db.Uuid
+  user       User           @relation("UserSharedFiles", fields: [userId], references: [id], onDelete: Cascade)
+  permission FilePermission @default(view)
+  createdAt  DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([fileId, userId])
+  @@index([userId])
+  @@map("file_shares")
+}

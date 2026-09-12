@@ -34,19 +34,17 @@ export function buildAiPayload(
 ): AiEnginePayload {
   const messages = normalizeMessages(dto);
   const documentIds = extractDocIds(dto);
-  const workspaceId =
-    dto.workspace_id ||
-    dto.workspaceId ||
+  const scopeId =
     dto.project_id ||
     dto.projectId ||
-    '';
+    userId;
   const projectId = dto.project_id || dto.projectId || '';
   const chatId = dto.chat_id || dto.chatId || '';
 
   return {
     messages,
     user_id: userId,
-    workspace_id: workspaceId,
+    workspace_id: scopeId,
     project_id: projectId,
     chat_id: chatId,
     document_ids: documentIds,

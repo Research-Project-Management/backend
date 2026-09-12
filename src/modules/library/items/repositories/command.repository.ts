@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { Prisma, RagStatus } from '@prisma/client';
 import { PrismaService } from '../../../../core/database/prisma.service';
-import { VersionMismatchException } from '../../common/errors/version-mismatch.exception';
+import { VersionMismatchException } from '../../core/errors/version-mismatch.exception';
 import { normalizeTags } from '../../tags/utils/tags.utils';
 import { TagInput } from '../../tags/types/tags.types';
 import {
@@ -22,14 +22,11 @@ import {
 } from '../utils/items.utils';
 import { getFileContentPath } from '@/modules/storage/storage.port';
 import {
-  CATALOG_COLUMN_METADATA_FIELDS,
+  ITEM_COLUMN_METADATA_FIELDS,
   TYPE_SPECIFIC_EXTRA_FIELDS,
   parseAccessDate,
 } from '../constants/items.constants';
-import {
-  CreateCatalogItemData,
-  UpdateCatalogItemData,
-} from '../types/items.types';
+import { CreateItemData, UpdateItemData } from '../types/items.types';
 
 function formatExtraMetadataEntries(parsed: Record<string, unknown>): string {
   const lines: string[] = [];
@@ -38,7 +35,7 @@ function formatExtraMetadataEntries(parsed: Record<string, unknown>): string {
       v !== null &&
       v !== undefined &&
       v !== '' &&
-      !CATALOG_COLUMN_METADATA_FIELDS.has(k)
+      !ITEM_COLUMN_METADATA_FIELDS.has(k)
     ) {
       let formatted: string;
       if (typeof v === 'string') {
@@ -104,6 +101,7 @@ export function normalizeItemIdentifiers(data: {
 export function resolveExtraPlainText(
   extraInput?: string | null,
   existingExtra?: string | null,
+  extraFields?: Record<string, unknown> | null,
 ): string | undefined {
   const parseCandidate = (raw: string): string => {
     const trimmed = raw.trim();
@@ -123,24 +121,56 @@ export function resolveExtraPlainText(
     return trimmed;
   };
 
-  if (extraInput !== undefined) {
+  let base: string | undefined = undefined;
+  if (extraInput !== undefined && extraInput !== null) {
     if (typeof extraInput === 'string' && extraInput.trim()) {
-      return parseCandidate(extraInput);
+      base = parseCandidate(extraInput);
+    } else {
+      base = '';
     }
-    return '';
+  } else if (existingExtra !== undefined && existingExtra !== null) {
+    base = parseCandidate(existingExtra);
   }
 
-  if (existingExtra !== undefined && existingExtra !== null) {
-    return parseCandidate(existingExtra);
+  if (
+    extraFields &&
+    typeof extraFields === 'object' &&
+    Object.keys(extraFields).length > 0
+  ) {
+    const formattedFields = formatExtraMetadataEntries(extraFields);
+    if (formattedFields) {
+      if (base) {
+        const baseLines = new Set(
+          base
+            .split(/\r?\n/)
+            .map((l) => l.trim())
+            .filter(Boolean),
+        );
+        const extraLines = formattedFields
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean);
+        for (const line of extraLines) {
+          const key = line.split(':')[0]?.trim()?.toLowerCase();
+          const hasKey = Array.from(baseLines).some((l) =>
+            l.toLowerCase().startsWith(key + ':'),
+          );
+          if (!hasKey) baseLines.add(line);
+        }
+        base = Array.from(baseLines).join('\n');
+      } else {
+        base = formattedFields;
+      }
+    }
   }
 
-  return undefined;
+  return base;
 }
 
 export function prepareNotesToCreate(
   notes: unknown,
-  workspaceId: string,
   userId: string,
+  createdById: string,
   existingNotesList?: Array<{ contentMd: string }>,
 ) {
   if (!Array.isArray(notes)) return [];
@@ -165,8 +195,8 @@ export function prepareNotesToCreate(
 
       const sourceName = typeof source === 'string' ? source.trim() : '';
       return {
-        workspaceId,
-        createdById: userId || 'system',
+        userId,
+        createdById: createdById || userId || 'system',
         title: sourceName ? `Imported Note (${sourceName})` : 'Imported Note',
         contentMd,
         contentJson: {
@@ -187,23 +217,23 @@ export function prepareNotesToCreate(
 
 async function resolveOrCreateTags(
   client: Prisma.TransactionClient | PrismaService,
-  workspaceId: string,
+  userId: string,
   rawTagList: (TagInput | null | undefined)[],
 ): Promise<string[]> {
   const normalizedTagNames = normalizeTags(rawTagList).slice(0, 30);
   if (normalizedTagNames.length === 0) return [];
 
-  await client.catalogTag.createMany({
+  await client.tag.createMany({
     data: normalizedTagNames.map((name) => ({
-      workspaceId,
+      userId,
       name,
     })),
     skipDuplicates: true,
   });
 
-  const existingTags = await client.catalogTag.findMany({
+  const existingTags = await client.tag.findMany({
     where: {
-      workspaceId,
+      userId,
       name: { in: normalizedTagNames },
     },
     select: { id: true },
@@ -213,21 +243,21 @@ async function resolveOrCreateTags(
 
 async function syncTagsForCatalogItem(
   client: Prisma.TransactionClient | PrismaService,
-  workspaceId: string,
-  catalogItemId: string,
+  userId: string,
+  itemId: string,
   rawTags: (TagInput | null | undefined)[],
 ): Promise<void> {
   const normalizedTagsList = normalizeTags(rawTags);
   if (normalizedTagsList.length === 0) {
-    await client.catalogItemTag.deleteMany({
-      where: { catalogItemId },
+    await client.itemTag.deleteMany({
+      where: { itemId },
     });
     return;
   }
 
-  await client.catalogItemTag.deleteMany({
+  await client.itemTag.deleteMany({
     where: {
-      catalogItemId,
+      itemId,
       tag: {
         name: { notIn: normalizedTagsList },
       },
@@ -235,29 +265,29 @@ async function syncTagsForCatalogItem(
   });
 
   for (const tagName of normalizedTagsList) {
-    const tag = await client.catalogTag.upsert({
+    const tag = await client.tag.upsert({
       where: {
-        workspaceId_name: {
-          workspaceId,
+        userId_name: {
+          userId,
           name: tagName,
         },
       },
       create: {
-        workspaceId,
+        userId,
         name: tagName,
       },
       update: {},
     });
-    await client.catalogItemTag.upsert({
+    await client.itemTag.upsert({
       where: {
-        tagId_catalogItemId: {
+        tagId_itemId: {
           tagId: tag.id,
-          catalogItemId,
+          itemId,
         },
       },
       create: {
         tagId: tag.id,
-        catalogItemId,
+        itemId,
       },
       update: {},
     });
@@ -275,8 +305,8 @@ export class CommandRepository {
   }
 
   async create(
-    workspaceId: string,
-    data: CreateCatalogItemData,
+    userId: string,
+    data: CreateItemData,
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
@@ -287,7 +317,7 @@ export class CommandRepository {
 
     const notes = prepareNotesToCreate(
       data.notes,
-      workspaceId,
+      userId,
       data.uploadedById || 'system',
     );
 
@@ -307,12 +337,12 @@ export class CommandRepository {
     ];
     const resolvedTagIds = await resolveOrCreateTags(
       client,
-      workspaceId,
+      userId,
       rawTagList,
     );
 
-    const createData: Prisma.CatalogItemUncheckedCreateInput = {
-      workspaceId,
+    const createData: any = {
+      userId,
       title: data.title,
       year: data.year ?? null,
       doi: cleanDoi,
@@ -355,8 +385,10 @@ export class CommandRepository {
       referenceCount: data.referenceCount ?? null,
       openAccessPdfUrl: data.openAccessPdfUrl ?? null,
       seriesNumber: data.seriesNumber ?? null,
-      extra: resolveExtraPlainText(data.extra) ?? '',
+      extra:
+        resolveExtraPlainText(data.extra, undefined, data.extraFields) ?? '',
       uploadedById: data.uploadedById || 'system',
+      projectId: data.projectId || null,
       version: 1,
       ...(() => {
         const rawCollectionIds = [
@@ -381,33 +413,54 @@ export class CommandRepository {
       ...(data.contributors && data.contributors.length > 0
         ? {
             contributors: {
-              create: data.contributors.map((c: any, index: number) => ({
-                creatorType: c.creatorType || 'author',
-                firstName: c.firstName || '',
-                lastName: c.lastName || '',
-                fullName:
+              create: data.contributors.map((c: any, index: number) => {
+                const fullName =
                   c.fullName ||
                   [c.firstName, c.lastName].filter(Boolean).join(' ') ||
                   c.name ||
-                  '',
-                orderIndex: c.orderIndex !== undefined ? c.orderIndex : index,
-              })),
+                  '';
+                let first = c.firstName || '';
+                let last = c.lastName || '';
+                if (!first && !last && fullName) {
+                  const parsed = parseCreatorString(fullName, index);
+                  first = parsed.firstName;
+                  last = parsed.lastName;
+                }
+                return {
+                  creatorType: c.creatorType || 'author',
+                  firstName: first,
+                  lastName: last,
+                  fullName,
+                  orderIndex: c.orderIndex !== undefined ? c.orderIndex : index,
+                };
+              }),
             },
           }
         : data.creators && data.creators.length > 0
           ? {
               contributors: {
-                create: data.creators.map((c: any, index: number) => ({
-                  creatorType: c.creatorType || 'author',
-                  firstName: c.firstName || '',
-                  lastName: c.lastName || '',
-                  fullName:
+                create: data.creators.map((c: any, index: number) => {
+                  const fullName =
                     c.fullName ||
                     [c.firstName, c.lastName].filter(Boolean).join(' ') ||
                     c.name ||
-                    '',
-                  orderIndex: c.orderIndex !== undefined ? c.orderIndex : index,
-                })),
+                    '';
+                  let first = c.firstName || '';
+                  let last = c.lastName || '';
+                  if (!first && !last && fullName) {
+                    const parsed = parseCreatorString(fullName, index);
+                    first = parsed.firstName;
+                    last = parsed.lastName;
+                  }
+                  return {
+                    creatorType: c.creatorType || 'author',
+                    firstName: first,
+                    lastName: last,
+                    fullName,
+                    orderIndex:
+                      c.orderIndex !== undefined ? c.orderIndex : index,
+                  };
+                }),
               },
             }
           : data.authors && data.authors.length > 0
@@ -545,7 +598,7 @@ export class CommandRepository {
         : {}),
     };
 
-    const item = await client.catalogItem.create({
+    const item = await client.item.create({
       data: createData,
       include: {
         collectionItems: {
@@ -575,15 +628,19 @@ export class CommandRepository {
   }
 
   async update(
-    workspaceId: string,
+    userId: string,
     id: string,
     expectedVersion: number | undefined,
-    data: UpdateCatalogItemData,
+    data: UpdateItemData,
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    const existing = await client.catalogItem.findFirst({
-      where: { id, workspaceId, deletedAt: null },
+    const existing = await client.item.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        OR: [{ userId }, { projectId: { not: null } }],
+      } as any,
       include: {
         identifiers: true,
         notesList: { where: { deletedAt: null } },
@@ -592,7 +649,7 @@ export class CommandRepository {
 
     if (!existing) {
       throw new NotFoundException(
-        `CatalogItem ${id} not found in workspace ${workspaceId}`,
+        `CatalogItem ${id} not found`,
       );
     }
 
@@ -635,12 +692,12 @@ export class CommandRepository {
 
     const newNotesToCreate = prepareNotesToCreate(
       data.notes,
-      workspaceId,
+      userId,
       data.userId || existing.uploadedById || 'system',
       existing.notesList,
     );
 
-    const updated = await client.catalogItem.update({
+    const updated = await client.item.update({
       where: { id },
       data: {
         title: data.title ?? existing.title,
@@ -710,8 +767,9 @@ export class CommandRepository {
             ? data.seriesNumber
             : existing.seriesNumber,
         extra:
-          resolveExtraPlainText(data.extra, existing.extra) ??
-          (existing.extra ?? ''),
+          resolveExtraPlainText(data.extra, existing.extra, data.extraFields) ??
+          existing.extra ??
+          '',
 
         ...(data.collectionIds !== undefined
           ? {
@@ -722,7 +780,7 @@ export class CommandRepository {
                 const unique = Array.from(
                   new Set(
                     raw.filter(
-                      (cid): cid is string =>
+                      (cid: string): cid is string =>
                         typeof cid === 'string' && cid.trim().length > 0,
                     ),
                   ),
@@ -731,7 +789,7 @@ export class CommandRepository {
                   ? {
                       deleteMany: {},
                       create: unique.map((cid, idx) => ({
-                        collectionId: cid,
+                        collection: { connect: { id: cid } },
                         sortOrder: idx,
                       })),
                     }
@@ -749,7 +807,9 @@ export class CommandRepository {
                     ? {
                         deleteMany: {},
                         create: {
-                          collectionId: data.collectionId.trim(),
+                          collection: {
+                            connect: { id: data.collectionId.trim() },
+                          },
                           sortOrder: 0,
                         },
                       }
@@ -837,7 +897,7 @@ export class CommandRepository {
       });
     }
     const existingArxivIdentifier = existing.identifiers?.find(
-      (identifierItem) => identifierItem.type === 'arxiv',
+      (identifierItem: any) => identifierItem.type === 'arxiv',
     )?.value;
     if (
       cleanArxivId !== undefined &&
@@ -884,13 +944,13 @@ export class CommandRepository {
       });
     }
     for (const ident of identifierChanges) {
-      await client.catalogIdentifier.deleteMany({
-        where: { catalogItemId: updated.id, type: ident.type },
+      await client.identifier.deleteMany({
+        where: { itemId: updated.id, type: ident.type },
       });
       if (ident.value) {
-        await client.catalogIdentifier.create({
+        await client.identifier.create({
           data: {
-            catalogItemId: updated.id,
+            itemId: updated.id,
             type: ident.type,
             value: ident.value,
             canonicalUri: ident.canonicalUri || undefined,
@@ -901,9 +961,9 @@ export class CommandRepository {
 
     const rawTags = data.tags || data.keywords || data.labels;
     if (rawTags && Array.isArray(rawTags)) {
-      await syncTagsForCatalogItem(client, workspaceId, updated.id, rawTags);
+      await syncTagsForCatalogItem(client, userId, updated.id, rawTags);
 
-      const reloaded = await client.catalogItem.findUnique({
+      const reloaded = await client.item.findUnique({
         where: { id: updated.id },
         include: {
           collectionItems: {
@@ -916,7 +976,9 @@ export class CommandRepository {
             orderBy: { orderIndex: 'asc' },
           },
           identifiers: true,
-          attachments: true,
+          attachments: {
+            include: { revisions: true },
+          },
           notesList: {
             where: { deletedAt: null },
           },
@@ -929,15 +991,20 @@ export class CommandRepository {
   }
 
   async softDelete(
-    workspaceId: string,
+    userId: string,
     id: string,
     expectedVersion?: number,
     tx?: Prisma.TransactionClient,
   ): Promise<boolean> {
     const client = this.getClient(tx);
+    const whereCondition: any = {
+      id,
+      deletedAt: null,
+      OR: [{ userId }, { projectId: { not: null } }],
+    };
     if (expectedVersion !== undefined) {
-      const existing = await client.catalogItem.findFirst({
-        where: { id, workspaceId, deletedAt: null },
+      const existing = await client.item.findFirst({
+        where: whereCondition,
       });
       if (existing && existing.version !== expectedVersion) {
         throw new VersionMismatchException({
@@ -949,8 +1016,8 @@ export class CommandRepository {
       }
     }
 
-    const result = await client.catalogItem.updateMany({
-      where: { id, workspaceId, deletedAt: null },
+    const result = await client.item.updateMany({
+      where: whereCondition,
       data: { deletedAt: new Date() },
     });
 
@@ -958,19 +1025,19 @@ export class CommandRepository {
   }
 
   async restore(
-    workspaceId: string,
+    userId: string,
     id: string,
     expectedVersion?: number,
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    const existing = await client.catalogItem.findFirst({
-      where: { id, workspaceId, deletedAt: { not: null } },
+    const existing = await client.item.findFirst({
+      where: { id, userId, deletedAt: { not: null } },
     });
 
     if (!existing) {
       throw new NotFoundException(
-        `Trashed item ${id} not found in workspace ${workspaceId}`,
+        `Trashed item ${id} not found`,
       );
     }
 
@@ -997,7 +1064,7 @@ export class CommandRepository {
       });
     }
 
-    return client.catalogItem.update({
+    return client.item.update({
       where: { id },
       data: {
         deletedAt: null,
@@ -1015,18 +1082,18 @@ export class CommandRepository {
   }
 
   async purge(
-    workspaceId: string,
+    userId: string,
     id: string,
     tx?: Prisma.TransactionClient,
   ): Promise<boolean> {
     const client = this.getClient(tx);
-    const existing = await client.catalogItem.findFirst({
-      where: { id, workspaceId },
+    const existing = await client.item.findFirst({
+      where: { id, userId },
     });
 
     if (!existing) {
       throw new NotFoundException(
-        `Item ${id} not found in workspace ${workspaceId}`,
+        `Item ${id} not found`,
       );
     }
 
@@ -1036,7 +1103,7 @@ export class CommandRepository {
       );
     }
 
-    await client.catalogItem.delete({
+    await client.item.delete({
       where: { id },
     });
 
@@ -1052,9 +1119,9 @@ export class CommandRepository {
     const targetItemId = relation.targetItemId || relation.targetId;
     if (!targetItemId) return;
 
-    const source = await client.catalogItem.findUnique({
+    const source = await client.item.findUnique({
       where: { id: itemId },
-      select: { workspaceId: true },
+      select: { userId: true },
     });
     if (!source) return;
 
@@ -1067,7 +1134,6 @@ export class CommandRepository {
         },
       },
       create: {
-        workspaceId: source.workspaceId,
         sourceItemId: itemId,
         targetItemId,
         relationType: relation.relationType || 'cites',
@@ -1092,7 +1158,7 @@ export class CommandRepository {
       },
     });
 
-    const item = await client.catalogItem.findUnique({
+    const item = await client.item.findUnique({
       where: { id: itemId },
       select: { extra: true },
     });
@@ -1103,7 +1169,7 @@ export class CommandRepository {
           extraObj.relations = extraObj.relations.filter(
             (r: any) => (r.targetItemId || r.targetId) !== targetItemId,
           );
-          await client.catalogItem.update({
+          await client.item.update({
             where: { id: itemId },
             data: { extra: JSON.stringify(extraObj) },
           });
@@ -1114,6 +1180,46 @@ export class CommandRepository {
         );
       }
     }
+  }
+
+  async setMyPublication(
+    userId: string,
+    id: string,
+    isMyPublication: boolean,
+    tx?: Prisma.TransactionClient,
+  ) {
+    const client = this.getClient(tx);
+    const existing = await client.item.findFirst({
+      where: { id, userId, deletedAt: null },
+    });
+
+    if (!existing) {
+      throw new NotFoundException(
+        `CatalogItem ${id} not found`,
+      );
+    }
+
+    return client.item.update({
+      where: { id },
+      data: {
+        isMyPublication,
+        publicationConfirmedAt: isMyPublication ? new Date() : null,
+        version: { increment: 1 },
+      },
+      include: {
+        collectionItems: {
+          include: { collection: true },
+        },
+        itemTags: {
+          include: { tag: true },
+        },
+        contributors: {
+          orderBy: { orderIndex: 'asc' },
+        },
+        identifiers: true,
+        attachments: true,
+      },
+    });
   }
 
   async updateRagStatus(
@@ -1128,7 +1234,7 @@ export class CommandRepository {
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    return client.catalogItem.update({
+    return client.item.update({
       where: { id },
       data,
     });

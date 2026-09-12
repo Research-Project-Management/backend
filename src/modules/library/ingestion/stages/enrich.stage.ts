@@ -102,6 +102,7 @@ export class EnrichStage {
             sourceKind: 'PROVIDER',
             sourceName: 'EnrichedProvider',
             sourceRecordId: resolved.canonicalId,
+            rawEvidenceRef: candidate.candidateId,
             retrievedAt: resolved.resolvedAt,
             schemaVersion: '1.0.0',
             fields,

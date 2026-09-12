@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
-import { isUuid } from '@/core/utils/tenant.util';
+import { isUUID as isUuid } from 'class-validator';
 import { Prisma, FilePermission, File, FileShare } from '@prisma/client';
 import {
   IFileRepository,
@@ -85,52 +85,7 @@ export class FileRepository implements IFileRepository {
     });
   }
 
-  async findWorkspaceFiles(
-    workspaceId: string,
-    parentId?: string | null,
-    trashed = false,
-  ): Promise<FileWithAuthor[]> {
-    if (!isUuid(workspaceId)) return [];
-    return this.prisma.file.findMany({
-      where: {
-        workspaceId,
-        parentId: parentId === undefined ? undefined : parentId,
-        trashedAt: trashed ? { not: null } : null,
-        NOT: [
-          { linkedToType: { in: ['Project', 'Page', 'Library', 'Paper'] } },
-          { metaData: { path: ['source'], equals: 'library' } },
-          { metaData: { path: ['source'], equals: 'paper' } },
-          { attachments: { some: {} } },
-        ],
-      },
-      include: {
-        author: { select: USER_MINIMAL_SELECT },
-        sharedWith: {
-          include: {
-            user: { select: USER_MINIMAL_SELECT },
-          },
-        },
-      },
-      orderBy: [{ isFolder: 'desc' }, { filename: 'asc' }],
-    });
-  }
 
-  async findFolderTree(workspaceId: string): Promise<File[]> {
-    if (!isUuid(workspaceId)) return [];
-    return this.prisma.file.findMany({
-      where: {
-        workspaceId,
-        isFolder: true,
-        trashedAt: null,
-        NOT: [
-          { linkedToType: { in: ['Project', 'Page', 'Library', 'Paper'] } },
-          { metaData: { path: ['source'], equals: 'library' } },
-          { metaData: { path: ['source'], equals: 'paper' } },
-        ],
-      },
-      orderBy: { filename: 'asc' },
-    });
-  }
 
   async updateFile(
     fileId: string,
@@ -172,12 +127,9 @@ export class FileRepository implements IFileRepository {
 
   async findUserStarredFiles(
     userId: string,
-    workspaceId: string,
   ): Promise<FileWithAuthor[]> {
-    if (!isUuid(workspaceId)) return [];
     return this.prisma.file.findMany({
       where: {
-        workspaceId,
         authorId: userId,
         starred: true,
         trashedAt: null,
@@ -194,19 +146,12 @@ export class FileRepository implements IFileRepository {
     });
   }
 
-  async calculateWorkspaceStorageUsage(workspaceId: string): Promise<number> {
-    if (!isUuid(workspaceId)) return 0;
+  async calculateUserStorageUsage(userId: string): Promise<number> {
     const aggregate = await this.prisma.file.aggregate({
       where: {
-        workspaceId,
+        authorId: userId,
         isFolder: false,
         trashedAt: null,
-        NOT: [
-          { linkedToType: { in: ['Project', 'Page', 'Library', 'Paper'] } },
-          { metaData: { path: ['source'], equals: 'library' } },
-          { metaData: { path: ['source'], equals: 'paper' } },
-          { attachments: { some: {} } },
-        ],
       },
       _sum: {
         size: true,
@@ -306,7 +251,7 @@ export class FileRepository implements IFileRepository {
   }
 
   async findFilesByIds(fileIds: string[]): Promise<FileWithAuthor[]> {
-    const validIds = fileIds.filter(isUuid);
+    const validIds = fileIds.filter((id) => isUuid(id));
     if (validIds.length === 0) return [];
     return this.prisma.file.findMany({
       where: { id: { in: validIds } },
@@ -325,7 +270,7 @@ export class FileRepository implements IFileRepository {
     fileIds: string[],
     data: Prisma.FileUpdateManyMutationInput,
   ) {
-    const validIds = fileIds.filter(isUuid);
+    const validIds = fileIds.filter((id) => isUuid(id));
     if (validIds.length === 0) return { count: 0 };
     return this.prisma.file.updateMany({
       where: { id: { in: validIds } },
@@ -334,7 +279,7 @@ export class FileRepository implements IFileRepository {
   }
 
   async batchDeleteFiles(fileIds: string[]) {
-    const validIds = fileIds.filter(isUuid);
+    const validIds = fileIds.filter((id) => isUuid(id));
     if (validIds.length === 0) return { count: 0 };
     return this.prisma.file.deleteMany({
       where: { id: { in: validIds } },
@@ -345,18 +290,18 @@ export class FileRepository implements IFileRepository {
 
   async findPageScope(
     pageId: string,
-  ): Promise<{ projectId: string | null; workspaceId: string } | null> {
+  ): Promise<{ id: string; projectId: string | null } | null> {
     if (!isUuid(pageId)) return null;
     const page = await this.prisma.page.findUnique({
       where: { id: pageId },
-      select: { projectId: true, workspaceId: true },
+      select: { id: true, projectId: true },
     });
     return page ?? null;
   }
 
   async findProjectScope(
     projectId: string,
-  ): Promise<{ workspaceId: string } | null> {
+  ): Promise<{ id: string; createdById: string } | null> {
     if (!isUuid(projectId)) {
       const project = await this.prisma.project
         .findFirst({
@@ -364,28 +309,16 @@ export class FileRepository implements IFileRepository {
             identifier: { equals: projectId, mode: 'insensitive' },
             deletedAt: null,
           },
-          select: { workspaceId: true },
+          select: { id: true, createdById: true },
         })
         .catch(() => null);
       return project ?? null;
     }
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { workspaceId: true },
+      select: { id: true, createdById: true },
     });
     return project ?? null;
-  }
-
-  async findWorkspaceMemberRole(
-    workspaceId: string,
-    userId: string,
-  ): Promise<string | null> {
-    if (!isUuid(workspaceId)) return null;
-    const member = await this.prisma.workspaceMember.findFirst({
-      where: { workspaceId, userId },
-      select: { role: true },
-    });
-    return member?.role ?? null;
   }
 
   async findProjectMemberRole(
@@ -410,5 +343,76 @@ export class FileRepository implements IFileRepository {
       select: { role: true },
     });
     return member?.role ?? null;
+  }
+
+  async calculateProjectStorageUsage(projectId: string): Promise<number> {
+    let targetProjectId = projectId;
+    if (!isUuid(projectId)) {
+      const proj = await this.prisma.project
+        .findFirst({
+          where: {
+            identifier: { equals: projectId, mode: 'insensitive' },
+            deletedAt: null,
+          },
+          select: { id: true },
+        })
+        .catch(() => null);
+      if (!proj) return 0;
+      targetProjectId = proj.id;
+    }
+
+    const projectPages = await this.prisma.page.findMany({
+      where: { projectId: targetProjectId, deletedAt: null },
+      select: { id: true },
+    });
+    const pageIds = projectPages.map((p) => p.id);
+
+    const conditions: Prisma.FileWhereInput[] = [
+      { linkedToType: 'Project', linkedToId: targetProjectId },
+    ];
+    if (pageIds.length > 0) {
+      conditions.push({ linkedToType: 'Page', linkedToId: { in: pageIds } });
+    }
+
+    const aggregate = await this.prisma.file.aggregate({
+      where: {
+        isFolder: false,
+        trashedAt: null,
+        OR: conditions,
+      },
+      _sum: {
+        size: true,
+      },
+    });
+
+    return aggregate._sum.size || 0;
+  }
+
+  async getProjectWithHierarchy(projectId: string) {
+    if (!isUuid(projectId)) {
+      return this.prisma.project
+        .findFirst({
+          where: {
+            identifier: { equals: projectId, mode: 'insensitive' },
+            deletedAt: null,
+          },
+          include: {
+            createdBy: {
+              select: { id: true, name: true, email: true, avatar: true },
+            },
+          },
+        })
+        .catch(() => null);
+    }
+    return this.prisma.project
+      .findUnique({
+        where: { id: projectId },
+        include: {
+          createdBy: {
+            select: { id: true, name: true, email: true, avatar: true },
+          },
+        },
+      })
+      .catch(() => null);
   }
 }

@@ -111,9 +111,9 @@ export class PipelineService {
     });
 
     // ── Multi-Record Ingestion Handling (BibTeX / RIS batches) ────────────────
-    if (envelope.payload.kind === 'RECORD' && enrichedCandidates.length > 1) {
+    if (envelope.payload.kind === 'RECORD' && normalizedCandidates.length > 1) {
       const createdItemIds: string[] = [];
-      const total = enrichedCandidates.length;
+      const total = normalizedCandidates.length;
       let processed = 0;
       let succeeded = 0;
       let duplicates = 0;
@@ -125,14 +125,29 @@ export class PipelineService {
         error?: string;
       }> = [];
 
-      for (const candidate of enrichedCandidates) {
+      for (const initialCand of normalizedCandidates) {
         const itemTitle =
-          candidate.normalizedMetadata?.title ||
-          candidate.normalizedMetadata?.shortTitle ||
+          initialCand.normalizedMetadata?.title ||
+          initialCand.normalizedMetadata?.shortTitle ||
           'Untitled Record';
 
         try {
-          const itemDecision = await this.reconcile.execute([candidate]);
+          const matchingEnriched = enrichedCandidates.filter(
+            (ec) =>
+              ec.sourceKind === 'PROVIDER' &&
+              (ec.rawEvidenceRef === initialCand.candidateId ||
+                (ec.normalizedMetadata?.doi &&
+                  initialCand.normalizedMetadata?.doi &&
+                  ec.normalizedMetadata.doi.toLowerCase() ===
+                    initialCand.normalizedMetadata.doi.toLowerCase()) ||
+                (ec.normalizedMetadata?.title &&
+                  initialCand.normalizedMetadata?.title &&
+                  ec.normalizedMetadata.title.toLowerCase() ===
+                    initialCand.normalizedMetadata.title.toLowerCase())),
+          );
+          const candidatesForRecord = [initialCand, ...matchingEnriched];
+          const itemDecision =
+            await this.reconcile.execute(candidatesForRecord);
           const matchRes = await this.match.execute(
             workspaceId,
             itemDecision.proposedItem,
@@ -371,7 +386,7 @@ export class PipelineService {
           try {
             await this.attachments.createAttachment({
               workspaceId,
-              catalogItemId: matchResult.targetItemId,
+              itemId: matchResult.targetItemId,
               fileId: uploadedFileIdentifier,
               filename: uploadedFilename,
               url: getFileContentPath(uploadedFileIdentifier),
@@ -414,9 +429,8 @@ export class PipelineService {
                   : undefined
                 : undefined;
             await this.notes.createLiteratureNote(
-              workspaceId,
-              matchResult.targetItemId,
               envelope.userId || 'system',
+              matchResult.targetItemId,
               noteContent.trim(),
               noteSource,
             );
@@ -506,7 +520,7 @@ export class PipelineService {
       return;
     }
 
-    // Stage 6: COMMIT (create new CatalogItem via CommitStage)
+    // Stage 6: COMMIT (create new Item via CommitStage)
     const commitStart = Date.now();
     const createdItem = await this.commit.execute(
       workspaceId,
@@ -534,32 +548,27 @@ export class PipelineService {
       outputSnapshot: { itemId: createdItem?.id },
     });
 
-    await this.repo.updateRunStatus(
-      workspaceId,
-      runId,
-      IngestionStatus.READY,
-      {
-        itemId: createdItem?.id,
-        completedAt: new Date(),
-        executionLog: {
-          total: 1,
-          processed: 1,
-          succeeded: 1,
-          duplicates: 0,
-          failed: 0,
-          percentage: 100,
-          status: 'COMPLETED',
-          currentTitle: createdItem?.title || 'Document',
-          items: [
-            {
-              title: createdItem?.title || 'Document',
-              status: 'SUCCEEDED',
-              itemId: createdItem?.id,
-            },
-          ],
-        } as unknown as Prisma.InputJsonValue,
-      },
-    );
+    await this.repo.updateRunStatus(workspaceId, runId, IngestionStatus.READY, {
+      itemId: createdItem?.id,
+      completedAt: new Date(),
+      executionLog: {
+        total: 1,
+        processed: 1,
+        succeeded: 1,
+        duplicates: 0,
+        failed: 0,
+        percentage: 100,
+        status: 'COMPLETED',
+        currentTitle: createdItem?.title || 'Document',
+        items: [
+          {
+            title: createdItem?.title || 'Document',
+            status: 'SUCCEEDED',
+            itemId: createdItem?.id,
+          },
+        ],
+      } as unknown as Prisma.InputJsonValue,
+    });
   }
 
   private mapPayloadToSource(kind: string): LibraryItemSource {

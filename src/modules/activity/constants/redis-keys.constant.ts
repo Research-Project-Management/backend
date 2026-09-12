@@ -7,10 +7,9 @@
 
 export const ACTIVITY_REDIS_KEYS = {
   /**
-   * Workspace activity feed (JSON array, TTL 5m)
+   * User activity feed (JSON array, TTL 5m)
    */
-  workspaceFeed: (workspaceId: string) =>
-    `flux:activity:ws:${workspaceId}:feed`,
+  userFeed: (userId: string) => `flux:activity:user:${userId}:feed`,
 
   /**
    * Project activity feed (JSON array, TTL 5m)

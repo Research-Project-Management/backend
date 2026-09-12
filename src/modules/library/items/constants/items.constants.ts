@@ -3,7 +3,7 @@ import { SCHEMA_V42_DATA } from '../../types/constants/types.constants';
 // The registry is the Library domain's source of truth for metadata. Keeping
 // this derived prevents newly added type-specific fields from being accepted by
 // the API but silently discarded by the persistence layer.
-export const CATALOG_COLUMN_METADATA_FIELDS = new Set([
+export const ITEM_COLUMN_METADATA_FIELDS = new Set([
   'title',
   'year',
   'doi',
@@ -170,7 +170,7 @@ export const TYPE_SPECIFIC_EXTRA_FIELDS = [
     ...ACADEMIC_METRICS_EXTRA_FIELDS,
     ...Object.values(SCHEMA_V42_DATA.itemTypes)
       .flatMap((itemType) => itemType.fields.map((field) => field.key))
-      .filter((field) => !CATALOG_COLUMN_METADATA_FIELDS.has(field)),
+      .filter((field) => !ITEM_COLUMN_METADATA_FIELDS.has(field)),
   ]),
 ];
 
@@ -180,7 +180,4 @@ export function parseAccessDate(value?: string): Date | undefined {
   return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 }
 
-export type {
-  CreateCatalogItemData,
-  UpdateCatalogItemData,
-} from '../types/items.types';
+export type { CreateItemData, UpdateItemData } from '../types/items.types';

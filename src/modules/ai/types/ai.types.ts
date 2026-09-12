@@ -7,8 +7,7 @@ export interface AiMessage {
   [key: string]: unknown;
 }
 
-export interface WorkspaceSessionContext {
-  workspaceId?: string;
+export interface ProjectSessionContext {
   projectId?: string;
   chatId?: string;
   pageId?: string;

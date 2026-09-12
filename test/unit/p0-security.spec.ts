@@ -7,7 +7,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { JwtAuthGuard } from '@/modules/iam/authn/guards/jwt-auth.guard';
+import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
 import { AiService } from '@/modules/ai/ai.service';
 import { EngineService } from '@/modules/ai/engine/engine.service';
 import { ThreadService } from '@/modules/ai/thread/thread.service';
@@ -178,24 +178,7 @@ describe('P0 Security Regression Tests', () => {
       );
     });
 
-    it('rejects access if user is not a member of the requested workspace', async () => {
-      mockPrisma.workspaceMember.findFirst.mockResolvedValue(null);
-
-      await expect(
-        aiService.stream(
-          'user-1',
-          { message: 'hi', workspaceId: 'ws-unauthorized' } as any,
-          {} as any,
-        ),
-      ).rejects.toThrow(ForbiddenException);
-
-      expect(mockEngine.streamChat).not.toHaveBeenCalled();
-    });
-
     it('rejects access if requested project does not belong to user', async () => {
-      mockPrisma.workspaceMember.findFirst.mockResolvedValue({
-        id: 'member-1',
-      });
       mockPrisma.project.findFirst.mockResolvedValue(null);
 
       await expect(
@@ -203,7 +186,6 @@ describe('P0 Security Regression Tests', () => {
           'user-1',
           {
             message: 'hi',
-            workspaceId: 'ws-1',
             projectId: 'proj-unauthorized',
           } as any,
           {} as any,
@@ -213,24 +195,22 @@ describe('P0 Security Regression Tests', () => {
       expect(mockEngine.streamChat).not.toHaveBeenCalled();
     });
 
-    it('rejects access if requested project does not belong to specified workspace', async () => {
-      mockPrisma.workspaceMember.findFirst.mockResolvedValue({
-        id: 'member-1',
-      });
+    it('allows access if user has valid access to requested project', async () => {
       mockPrisma.project.findFirst.mockResolvedValue({
         id: 'proj-1',
-        workspaceId: 'ws-other',
+        name: 'Valid Project',
       });
 
-      await expect(
-        aiService.stream(
-          'user-1',
-          { message: 'hi', workspaceId: 'ws-1', projectId: 'proj-1' } as any,
-          {} as any,
-        ),
-      ).rejects.toThrow(BadRequestException);
+      await aiService.stream(
+        'user-1',
+        {
+          message: 'hi',
+          projectId: 'proj-1',
+        } as any,
+        {} as any,
+      );
 
-      expect(mockEngine.streamChat).not.toHaveBeenCalled();
+      expect(mockEngine.streamChat).toHaveBeenCalled();
     });
 
     it('rejects access if user tries to hijack another user chat session', async () => {
@@ -284,16 +264,12 @@ describe('P0 Security Regression Tests', () => {
     });
   });
 
-  describe('UserRepository — Multi-Tenant User Search Isolation', () => {
+  describe('UserRepository — User Search Scoping', () => {
     let userRepo: any;
     let mockPrismaForUser: any;
 
     beforeEach(() => {
       mockPrismaForUser = {
-        workspaceMember: {
-          findFirst: jest.fn(),
-          findMany: jest.fn(),
-        },
         user: {
           findMany: jest.fn(),
         },
@@ -303,43 +279,73 @@ describe('P0 Security Regression Tests', () => {
       userRepo = new UserRepository(mockPrismaForUser);
     });
 
-    it('rejects cross-tenant enumeration by returning [] when user is not a member of the requested workspaceId', async () => {
-      mockPrismaForUser.workspaceMember.findFirst.mockResolvedValue(null);
-
-      const result = await userRepo.searchUsers(
-        'alice',
-        'attacker-user-id',
-        'foreign-workspace-id',
-      );
-
-      expect(result).toEqual([]);
-      expect(mockPrismaForUser.workspaceMember.findFirst).toHaveBeenCalledWith({
-        where: {
-          workspaceId: 'foreign-workspace-id',
-          userId: 'attacker-user-id',
-        },
-        select: { id: true },
-      });
-      expect(mockPrismaForUser.user.findMany).not.toHaveBeenCalled();
-    });
-
-    it('allows searching within workspaceId when user is a confirmed member', async () => {
-      mockPrismaForUser.workspaceMember.findFirst.mockResolvedValue({
-        id: 'membership-1',
-      });
+    it('scopes user search to projectId when provided', async () => {
       mockPrismaForUser.user.findMany.mockResolvedValue([
         { id: 'user-2', name: 'Alice', email: 'alice@example.com' },
       ]);
 
       const result = await userRepo.searchUsers(
         'alice',
-        'member-user-id',
-        'my-workspace-id',
+        'exclude-user-id',
+        'proj-123',
       );
 
       expect(result).toHaveLength(1);
-      expect(result[0].name).toBe('Alice');
-      expect(mockPrismaForUser.user.findMany).toHaveBeenCalled();
+      expect(mockPrismaForUser.user.findMany).toHaveBeenCalledWith({
+        where: {
+          deletedAt: null,
+          projectMembers: { some: { projectId: 'proj-123' } },
+          AND: [
+            { id: { not: 'exclude-user-id' } },
+            {
+              OR: [
+                { name: { contains: 'alice', mode: 'insensitive' } },
+                { email: { contains: 'alice', mode: 'insensitive' } },
+              ],
+            },
+          ],
+        },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          avatar: true,
+          status: true,
+        },
+        take: 20,
+      });
+    });
+
+    it('searches globally without projectMembers filter when projectId is omitted', async () => {
+      mockPrismaForUser.user.findMany.mockResolvedValue([
+        { id: 'user-2', name: 'Alice', email: 'alice@example.com' },
+      ]);
+
+      const result = await userRepo.searchUsers('alice', 'exclude-user-id');
+
+      expect(result).toHaveLength(1);
+      expect(mockPrismaForUser.user.findMany).toHaveBeenCalledWith({
+        where: {
+          deletedAt: null,
+          AND: [
+            { id: { not: 'exclude-user-id' } },
+            {
+              OR: [
+                { name: { contains: 'alice', mode: 'insensitive' } },
+                { email: { contains: 'alice', mode: 'insensitive' } },
+              ],
+            },
+          ],
+        },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          avatar: true,
+          status: true,
+        },
+        take: 20,
+      });
     });
   });
 });

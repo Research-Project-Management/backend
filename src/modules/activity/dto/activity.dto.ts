@@ -14,9 +14,6 @@ export class RecentItemResponse {
   @ApiProperty()
   title!: string;
 
-  @ApiProperty()
-  workspaceId!: string;
-
   @ApiPropertyOptional()
   projectId?: string | null;
 
@@ -48,9 +45,6 @@ export class ActivityFeedItemResponse {
 
   @ApiProperty()
   actorId!: string;
-
-  @ApiProperty()
-  workspaceId!: string;
 
   @ApiPropertyOptional()
   projectId?: string | null;
