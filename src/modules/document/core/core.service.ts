@@ -120,11 +120,7 @@ export class CoreService {
     return { page };
   }
 
-  async createPage(
-    projectId: string,
-    userId: string,
-    dto: CreatePageDto,
-  ) {
+  async createPage(projectId: string, userId: string, dto: CreatePageDto) {
     const resolvedProjectId = projectId || dto.projectId;
 
     if (!resolvedProjectId) {

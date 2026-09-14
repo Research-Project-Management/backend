@@ -97,10 +97,7 @@ export class CoreController {
     return this.projectService.findById(projectId, userId);
   }
 
-  @Get([
-    'project/:projectId/overview',
-    'projects/:projectId/overview',
-  ])
+  @Get(['project/:projectId/overview', 'projects/:projectId/overview'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get project overview and statistics' })

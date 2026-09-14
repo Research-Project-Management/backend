@@ -4,15 +4,19 @@ import {
   CanActivate,
   ExecutionContext,
   UnauthorizedException,
+  Optional,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { RedisCacheService } from '@/core/cache/redis.service';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+import { IAM_REDIS_KEYS } from '../../core/constants/redis.constant';
 
 /**
  * Enterprise Authentication Guard.
- * Validates JWT Bearer tokens and supports @Public() route bypass via Reflector.
+ * Validates JWT Bearer tokens, enforces real-time Redis token revocation,
+ * and supports @Public() route bypass via Reflector.
  */
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -20,6 +24,7 @@ export class AuthGuard implements CanActivate {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly reflector: Reflector,
+    @Optional() private readonly redis?: RedisCacheService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -113,8 +118,16 @@ export class AuthGuard implements CanActivate {
         ? authHeader.split(' ')[1]
         : null;
 
+    // Security: Query parameter token is restricted to streaming/SSE endpoints to prevent token leakage in access logs
     if (!token && request.query?.token) {
-      token = String(request.query.token);
+      const url = request.raw?.url || request.url || '';
+      const isAllowedStreamingPath =
+        url.includes('/stream') ||
+        url.includes('/events') ||
+        url.includes('/sse');
+      if (isAllowedStreamingPath) {
+        token = String(request.query.token);
+      }
     }
 
     if (!token) {
@@ -132,9 +145,34 @@ export class AuthGuard implements CanActivate {
         );
       }
       const payload = await this.jwtService.verifyAsync(token, { secret });
+
+      // Real-time Token Revocation check via Redis
+      const userId = payload.sub || payload.id;
+      if (userId && this.redis) {
+        try {
+          const revokedAt = await this.redis.get<number>(
+            IAM_REDIS_KEYS.revoked(userId),
+          );
+          if (revokedAt) {
+            const tokenIatMs = (payload.iat || 0) * 1000;
+            if (tokenIatMs <= revokedAt) {
+              throw new UnauthorizedException(
+                'Session has been revoked or expired. Please log in again.',
+              );
+            }
+          }
+        } catch (err: any) {
+          if (err instanceof UnauthorizedException) throw err;
+          // Non-blocking if Redis is down/bypassed
+        }
+      }
+
       request.user = payload;
       return true;
-    } catch {
+    } catch (err: any) {
+      if (err instanceof UnauthorizedException) {
+        throw err;
+      }
       throw new UnauthorizedException('Token is invalid or expired');
     }
   }

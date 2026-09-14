@@ -1,5 +1,4 @@
-export type FeedItemType =
-  'comment' | 'activity' | 'transition' | 'history';
+export type FeedItemType = 'comment' | 'activity' | 'transition' | 'history';
 
 export interface FeedActor {
   id: string;

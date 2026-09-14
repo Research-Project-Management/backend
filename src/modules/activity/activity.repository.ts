@@ -83,10 +83,7 @@ export class ActivityRepository implements IActivityRepository {
     const offset = options?.offset ?? 0;
 
     const where: any = {
-      OR: [
-        { actorId: userId },
-        { project: { members: { some: { userId } } } },
-      ],
+      OR: [{ actorId: userId }, { project: { members: { some: { userId } } } }],
     };
     if (options?.entityType) {
       where.entityType = options.entityType;
@@ -191,10 +188,7 @@ export class ActivityRepository implements IActivityRepository {
     return map;
   }
 
-  async findUserRecentItems(
-    userId: string,
-    limit: number,
-  ) {
+  async findUserRecentItems(userId: string, limit: number) {
     if (!isUUID(userId)) {
       return { workItems: [], papers: [], pages: [] };
     }
@@ -246,7 +240,7 @@ export class ActivityRepository implements IActivityRepository {
           select: {
             id: true,
             name: true,
-            workItemColumns: true,
+            states: true,
           },
         },
       },
@@ -263,7 +257,10 @@ export class ActivityRepository implements IActivityRepository {
     });
   }
 
-  async findWorkItemActivityEvents(workItemId: string, sort: 'asc' | 'desc' = 'asc') {
+  async findWorkItemActivityEvents(
+    workItemId: string,
+    sort: 'asc' | 'desc' = 'asc',
+  ) {
     return this.prisma.activityEvent.findMany({
       where: {
         entityType: EntityType.work_item,

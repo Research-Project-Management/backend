@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
   InternalServerErrorException,
   Logger,
 } from '@nestjs/common';
@@ -20,6 +21,10 @@ import {
   assertFileNotTrashed,
   resolveFileStorageKey,
 } from './file/utils/storage-key.util';
+import {
+  validateMagicBytes,
+  sanitizeFilename,
+} from './file/utils/file-validator.util';
 import { Readable } from 'stream';
 
 @Injectable()
@@ -32,7 +37,7 @@ export class StorageAdapter implements IStoragePort {
   ) {}
 
   async readOwnedFile(input: ReadOwnedFileInput): Promise<ReadOwnedFileOutput> {
-    const { fileId, projectId } = input;
+    const { fileId, projectId, userId } = input;
 
     if (!fileId || typeof fileId !== 'string') {
       throw new NotFoundException('fileId is required');
@@ -40,13 +45,34 @@ export class StorageAdapter implements IStoragePort {
 
     const file = await this.prisma.file.findUnique({
       where: { id: fileId },
+      include: {
+        sharedWith: true,
+      },
     });
 
     if (!file) {
       throw new NotFoundException(`File ${fileId} not found`);
     }
 
-    // projectId ownership check removed (workspace cleanup — File.projectId no longer exists)
+    // Security: Enforce ownership & authorization check (BOLA/IDOR prevention)
+    if (userId) {
+      const isOwner = file.authorId === userId;
+      const isShared = (file as any).sharedWith?.some(
+        (share: any) => share.userId === userId,
+      );
+      const isProjectFile =
+        projectId &&
+        file.linkedToType === 'Project' &&
+        file.linkedToId === projectId;
+      const isLibraryFile =
+        file.linkedToType === 'Library' || file.linkedToType === 'Paper';
+
+      if (!isOwner && !isShared && !isProjectFile && !isLibraryFile) {
+        throw new ForbiddenException(
+          'Access denied: You do not have permission to read this file',
+        );
+      }
+    }
 
     assertFileNotTrashed(file, fileId);
     const storageKey = resolveFileStorageKey(file, fileId);
@@ -61,8 +87,18 @@ export class StorageAdapter implements IStoragePort {
       }
 
       const chunks: Buffer[] = [];
+      let totalBytes = 0;
+      const MAX_SAFE_BUFFER_BYTES = 100 * 1024 * 1024; // 100MB limit to prevent Heap Exhaustion
+
       for await (const chunk of stream) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        totalBytes += buf.length;
+        if (totalBytes > MAX_SAFE_BUFFER_BYTES) {
+          throw new BadRequestException(
+            'File size exceeds safe maximum in-memory buffer limit (100MB)',
+          );
+        }
+        chunks.push(buf);
       }
       const buffer = Buffer.concat(chunks);
       const contentUrl = getFileContentPath(file.id);
@@ -120,16 +156,13 @@ export class StorageAdapter implements IStoragePort {
   }
 
   async uploadFile(input: UploadFileInput): Promise<UploadFileOutput> {
-    const {
-      projectId,
-      userId,
-      filename,
-      buffer,
-      mimeType,
-      source,
-      parentId,
-    } = input;
-    const cleanName = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const { projectId, userId, filename, buffer, mimeType, source, parentId } =
+      input;
+
+    // Security: Validate file signatures (magic bytes) and sanitize filename
+    validateMagicBytes(buffer, mimeType, filename);
+    const cleanName = sanitizeFilename(filename);
+
     const key = projectId
       ? `projects/${projectId}/uploads/${Date.now()}-${cleanName}`
       : `users/${userId}/uploads/${Date.now()}-${cleanName}`;

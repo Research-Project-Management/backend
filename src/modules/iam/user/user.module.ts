@@ -11,15 +11,7 @@ import { IdentityRepository } from './identity.repository';
 
 @Module({
   controllers: [UserController],
-  providers: [
-    UserService,
-    UserRepository,
-    IdentityRepository,
-  ],
-  exports: [
-    UserService,
-    UserRepository,
-    IdentityRepository,
-  ],
+  providers: [UserService, UserRepository, IdentityRepository],
+  exports: [UserService, UserRepository, IdentityRepository],
 })
 export class UserModule {}

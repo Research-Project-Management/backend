@@ -18,4 +18,3 @@ export interface WorkItemHistoryResponse {
   total: number;
   histories: PropertyHistoryItem[];
 }
-

@@ -1,8 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
-import { Prisma } from '@prisma/client';
-import { IStateRepository, WorkItemState } from './types/state.types';
-import { parseWorkItemStates } from './utils/state.util';
+import { IStateRepository, StateGroup, WorkItemState, DEFAULT_WORK_ITEM_STATES } from './types/state.types';
 
 @Injectable()
 export class StateRepository implements IStateRepository {
@@ -14,31 +12,90 @@ export class StateRepository implements IStateRepository {
       select: {
         id: true,
         name: true,
-        workItemColumns: true,
       },
     });
   }
 
   async findProjectStates(projectId: string): Promise<WorkItemState[]> {
-    const project = await this.findProjectById(projectId);
-    if (!project) return [];
-    return parseWorkItemStates(project.workItemColumns);
+    let states = await this.prismaService.workItemState.findMany({
+      where: { projectId },
+      orderBy: { sequence: 'asc' },
+    });
+
+    if (states.length === 0) {
+      await this.seedDefaultStates(projectId);
+      states = await this.prismaService.workItemState.findMany({
+        where: { projectId },
+        orderBy: { sequence: 'asc' },
+      });
+    }
+
+    return states.map((s) => ({
+      id: s.id,
+      name: s.name,
+      title: s.name,
+      color: s.color,
+      accentColor: s.color,
+      group: s.group as StateGroup,
+      sequence: s.sequence,
+      isDefault: s.isDefault,
+      description: s.description || undefined,
+    }));
+  }
+
+  async seedDefaultStates(projectId: string): Promise<void> {
+    for (const s of DEFAULT_WORK_ITEM_STATES) {
+      await this.prismaService.workItemState.create({
+        data: {
+          name: s.name,
+          color: s.color,
+          group: s.group,
+          sequence: s.sequence,
+          isDefault: s.isDefault,
+          description: s.description || '',
+          projectId,
+        },
+      });
+    }
   }
 
   async saveProjectStates(
     projectId: string,
     states: WorkItemState[],
   ): Promise<WorkItemState[]> {
-    await this.prismaService.project.update({
-      where: { id: projectId },
-      data: {
-        workItemColumns: states as unknown as Prisma.InputJsonValue,
-      },
-    });
+    await this.prismaService.$transaction(
+      states.map((s) =>
+        this.prismaService.workItemState.upsert({
+          where: {
+            id: s.id,
+          },
+          update: {
+            name: s.name,
+            color: s.color,
+            group: s.group,
+            sequence: s.sequence,
+            isDefault: s.isDefault ?? false,
+            description: s.description || '',
+          },
+          create: {
+            id: s.id,
+            name: s.name,
+            color: s.color,
+            group: s.group,
+            sequence: s.sequence,
+            isDefault: s.isDefault ?? false,
+            description: s.description || '',
+            projectId,
+          },
+        }),
+      ),
+    );
     return states;
   }
 
-  async countWorkItemsByState(projectId: string): Promise<Record<string, number>> {
+  async countWorkItemsByState(
+    projectId: string,
+  ): Promise<Record<string, number>> {
     const counts = await this.prismaService.workItem.groupBy({
       by: ['columnId'],
       where: {
@@ -57,7 +114,10 @@ export class StateRepository implements IStateRepository {
     return result;
   }
 
-  async countWorkItemsInState(projectId: string, stateId: string): Promise<number> {
+  async countWorkItemsInState(
+    projectId: string,
+    stateId: string,
+  ): Promise<number> {
     return this.prismaService.workItem.count({
       where: {
         projectId,
@@ -110,14 +170,24 @@ export class StateRepository implements IStateRepository {
         });
       }
 
-      // 2. Persist updated states to project workItemColumns
-      await transaction.project.update({
-        where: { id: projectId },
-        data: {
-          workItemColumns: updatedStates as unknown as Prisma.InputJsonValue,
+      // 2. Delete state record directly from work_item_states
+      await transaction.workItemState.deleteMany({
+        where: {
+          id: deletedStateId,
+          projectId,
         },
       });
+
+      // 3. Update sequences of remaining states if necessary
+      for (const state of updatedStates) {
+        await transaction.workItemState.updateMany({
+          where: { id: state.id, projectId },
+          data: {
+            sequence: state.sequence,
+            isDefault: state.isDefault,
+          },
+        });
+      }
     });
   }
 }
-

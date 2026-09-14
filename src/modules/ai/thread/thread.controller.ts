@@ -34,10 +34,7 @@ export class ThreadController {
     @CurrentUser('id') userId: string,
     @Query('projectId') projectId?: string,
   ) {
-    const chats = await this.threadService.getChats(
-      userId,
-      projectId,
-    );
+    const chats = await this.threadService.getChats(userId, projectId);
     return { chats };
   }
 

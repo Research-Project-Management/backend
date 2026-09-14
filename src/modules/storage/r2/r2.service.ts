@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   S3Client,
@@ -87,12 +87,36 @@ export class R2Service {
     return getSignedUrl(this.s3Client, command, { expiresIn });
   }
 
-  private getLocalFilePath(key: string): string {
-    const cleanKey = key.startsWith('/') ? key.slice(1) : key;
-    if (cleanKey.startsWith('uploads/') || cleanKey.startsWith('uploads\\')) {
-      return path.join(process.cwd(), cleanKey);
+  /**
+   * Resolves safe absolute path on local disk fallback.
+   * Strictly enforces containment within cwd/uploads to prevent Path Traversal.
+   */
+  public getLocalFilePath(key: string): string {
+    const uploadsBaseDir = path.resolve(process.cwd(), 'uploads');
+    const normalizedKey = key.replace(/\\/g, '/').replace(/^\/+/, '');
+
+    if (normalizedKey.includes('..')) {
+      throw new BadRequestException(
+        'Invalid storage key: Path traversal sequences (..) are strictly prohibited',
+      );
     }
-    return path.join(process.cwd(), 'uploads', cleanKey);
+
+    const strippedKey = normalizedKey.startsWith('uploads/')
+      ? normalizedKey.slice('uploads/'.length)
+      : normalizedKey;
+
+    const resolvedPath = path.resolve(uploadsBaseDir, strippedKey);
+
+    if (
+      resolvedPath !== uploadsBaseDir &&
+      !resolvedPath.startsWith(uploadsBaseDir + path.sep)
+    ) {
+      throw new BadRequestException(
+        'Access denied: Storage key escapes base uploads directory',
+      );
+    }
+
+    return resolvedPath;
   }
 
   async uploadBuffer(

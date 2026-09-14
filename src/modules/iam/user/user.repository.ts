@@ -175,9 +175,9 @@ export class UserRepository implements IUserRepository {
       theme: (settings.theme as 'light' | 'dark' | 'system') || 'system',
       citationStyle: settings.citationStyle,
       locale: settings.locale,
-      editorConfig: (settings.editorConfig as Record<string, unknown>) ?? {},
+      editorConfig: settings.editorConfig ?? {},
       notifications: (settings.notifications as Record<string, unknown>) ?? {},
-      aiPreferences: (settings.aiPreferences as Record<string, unknown>) ?? {},
+      aiPreferences: settings.aiPreferences ?? {},
     };
   }
 
@@ -200,17 +200,19 @@ export class UserRepository implements IUserRepository {
           citationStyle: (settings.citationStyle as string) || 'apa',
           locale: (settings.locale as string) || 'en',
           editorConfig: (settings.editorConfig as Prisma.InputJsonValue) ?? {},
-          notifications: (settings.notifications as Prisma.InputJsonValue) ?? {},
-          aiPreferences: (settings.aiPreferences as Prisma.InputJsonValue) ?? {},
+          notifications:
+            (settings.notifications as Prisma.InputJsonValue) ?? {},
+          aiPreferences:
+            (settings.aiPreferences as Prisma.InputJsonValue) ?? {},
         },
       });
       return {
         theme: (created.theme as 'light' | 'dark' | 'system') || 'system',
         citationStyle: created.citationStyle,
         locale: created.locale,
-        editorConfig: (created.editorConfig as Record<string, unknown>) ?? {},
+        editorConfig: created.editorConfig ?? {},
         notifications: (created.notifications as Record<string, unknown>) ?? {},
-        aiPreferences: (created.aiPreferences as Record<string, unknown>) ?? {},
+        aiPreferences: created.aiPreferences ?? {},
       };
     }
 
@@ -218,11 +220,19 @@ export class UserRepository implements IUserRepository {
       where: { userId },
       data: {
         ...(settings.theme ? { theme: settings.theme } : {}),
-        ...(settings.citationStyle ? { citationStyle: settings.citationStyle as string } : {}),
+        ...(settings.citationStyle
+          ? { citationStyle: settings.citationStyle as string }
+          : {}),
         ...(settings.locale ? { locale: settings.locale as string } : {}),
-        ...(settings.editorConfig ? { editorConfig: settings.editorConfig as Prisma.InputJsonValue } : {}),
-        ...(settings.notifications ? { notifications: settings.notifications as Prisma.InputJsonValue } : {}),
-        ...(settings.aiPreferences ? { aiPreferences: settings.aiPreferences as Prisma.InputJsonValue } : {}),
+        ...(settings.editorConfig
+          ? { editorConfig: settings.editorConfig }
+          : {}),
+        ...(settings.notifications
+          ? { notifications: settings.notifications }
+          : {}),
+        ...(settings.aiPreferences
+          ? { aiPreferences: settings.aiPreferences }
+          : {}),
       },
     });
 
@@ -230,35 +240,89 @@ export class UserRepository implements IUserRepository {
       theme: (updated.theme as 'light' | 'dark' | 'system') || 'system',
       citationStyle: updated.citationStyle,
       locale: updated.locale,
-      editorConfig: (updated.editorConfig as Record<string, unknown>) ?? {},
+      editorConfig: updated.editorConfig ?? {},
       notifications: (updated.notifications as Record<string, unknown>) ?? {},
-      aiPreferences: (updated.aiPreferences as Record<string, unknown>) ?? {},
+      aiPreferences: updated.aiPreferences ?? {},
     };
   }
 
   // ─── 3. Cross-Resource Entity Search (Stubs for Microservice Isolation) ──────
 
-  async searchProjects(_userId: string, _query: string): Promise<Array<{ id: string; name: string; avatar: string | null; updatedAt: Date }>> {
+  async searchProjects(
+    _userId: string,
+    _query: string,
+  ): Promise<
+    Array<{ id: string; name: string; avatar: string | null; updatedAt: Date }>
+  > {
     return [];
   }
 
-  async searchWorkItems(_userId: string, _query: string): Promise<Array<{ id: string; title: string; identifier: string; projectId: string; project?: { name: string }; updatedAt: Date }>> {
+  async searchWorkItems(
+    _userId: string,
+    _query: string,
+  ): Promise<
+    Array<{
+      id: string;
+      title: string;
+      identifier: string;
+      projectId: string;
+      project?: { name: string };
+      updatedAt: Date;
+    }>
+  > {
     return [];
   }
 
-  async searchPapers(_userId: string, _query: string): Promise<Array<{ id: string; title: string; updatedAt: Date }>> {
+  async searchPapers(
+    _userId: string,
+    _query: string,
+  ): Promise<Array<{ id: string; title: string; updatedAt: Date }>> {
     return [];
   }
 
-  async searchPages(_userId: string, _query: string): Promise<Array<{ id: string; title: string; projectId: string; project?: { name: string }; updatedAt: Date }>> {
+  async searchPages(
+    _userId: string,
+    _query: string,
+  ): Promise<
+    Array<{
+      id: string;
+      title: string;
+      projectId: string;
+      project?: { name: string };
+      updatedAt: Date;
+    }>
+  > {
     return [];
   }
 
-  async searchFiles(_userId: string, _query: string): Promise<Array<{ id: string; filename: string; mimeType: string; size: number; isFolder: boolean; updatedAt: Date }>> {
+  async searchFiles(
+    _userId: string,
+    _query: string,
+  ): Promise<
+    Array<{
+      id: string;
+      filename: string;
+      mimeType: string;
+      size: number;
+      isFolder: boolean;
+      updatedAt: Date;
+    }>
+  > {
     return [];
   }
 
-  async searchStickies(_userId: string, _query: string): Promise<Array<{ id: string; title: string; content: string; color: string; updatedAt: Date }>> {
+  async searchStickies(
+    _userId: string,
+    _query: string,
+  ): Promise<
+    Array<{
+      id: string;
+      title: string;
+      content: string;
+      color: string;
+      updatedAt: Date;
+    }>
+  > {
     return [];
   }
 

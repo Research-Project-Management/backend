@@ -24,7 +24,7 @@ describe('YourWorkService', () => {
         name: 'Project Alpha',
         identifier: 'PRJ',
         avatar: null,
-        workItemColumns: [{ id: 'todo', name: 'To Do' }],
+        states: [{ id: 'todo', name: 'To Do', group: 'unstarted' }],
       },
     },
     {
@@ -42,7 +42,7 @@ describe('YourWorkService', () => {
         name: 'Project Alpha',
         identifier: 'PRJ',
         avatar: null,
-        workItemColumns: [{ id: 'done', name: 'Done' }],
+        states: [{ id: 'done', name: 'Done', group: 'completed' }],
       },
     },
   ] as any;

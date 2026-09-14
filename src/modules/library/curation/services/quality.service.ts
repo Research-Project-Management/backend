@@ -153,10 +153,7 @@ export class QualityService {
   }
 
   async getQualityAudit(userId: string) {
-    const items = await this.itemReadPort.findQualityAuditItems(
-      userId,
-      2000,
-    );
+    const items = await this.itemReadPort.findQualityAuditItems(userId, 2000);
 
     let totalScore = 0;
     let missingDoi = 0;

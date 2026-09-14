@@ -13,8 +13,8 @@
 
 /** Maximum value for coordinate component (1.0 * 10000) */
 const COORD_SCALE = 10_000;
-const PAGE_PAD    = 4;
-const COORD_PAD   = 5;
+const PAGE_PAD = 4;
+const COORD_PAD = 5;
 
 /**
  * Build a Zotero-compatible annotation sort index string.
@@ -28,18 +28,24 @@ export function buildAnnotationSortIndex(
   y = 0,
   x = 0,
 ): string {
-  const p  = String(Math.max(0, Math.round(pageIndex))).padStart(PAGE_PAD, '0');
-  const yy = String(Math.max(0, Math.round(y * COORD_SCALE))).padStart(COORD_PAD, '0');
-  const xx = String(Math.max(0, Math.round(x * COORD_SCALE))).padStart(COORD_PAD, '0');
+  const p = String(Math.max(0, Math.round(pageIndex))).padStart(PAGE_PAD, '0');
+  const yy = String(Math.max(0, Math.round(y * COORD_SCALE))).padStart(
+    COORD_PAD,
+    '0',
+  );
+  const xx = String(Math.max(0, Math.round(x * COORD_SCALE))).padStart(
+    COORD_PAD,
+    '0',
+  );
   return `${p}|${yy}|${xx}`;
 }
 
 // ─── Parsed shape ─────────────────────────────────────────────────────────────
 
 export interface ParsedSortIndex {
-  page:  number;
-  y:     number;
-  x:     number;
+  page: number;
+  y: number;
+  x: number;
 }
 
 /**
@@ -57,8 +63,8 @@ export function parseAnnotationSortIndex(
 
   return {
     page: p,
-    y:    yy / COORD_SCALE,
-    x:    xx / COORD_SCALE,
+    y: yy / COORD_SCALE,
+    x: xx / COORD_SCALE,
   };
 }
 

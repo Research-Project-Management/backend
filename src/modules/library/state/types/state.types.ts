@@ -5,8 +5,8 @@ declare const _brand: unique symbol;
 export type Brand<T, TBrand extends string> = T & { readonly [_brand]: TBrand };
 
 export type StateId = Brand<string, 'StateId'>;
-export type UserId  = Brand<string, 'UserId'>;
-export type ItemId  = Brand<string, 'ItemId'>;
+export type UserId = Brand<string, 'UserId'>;
+export type ItemId = Brand<string, 'ItemId'>;
 
 // ─── Reading Status Enum & Const ─────────────────────────────────────────────
 export enum ReadingStatus {
@@ -29,16 +29,16 @@ export const StateStatus = ReadingStatus;
 
 // ─── StateEntity — Prisma-Inferred (Matt Pocock Pattern) ─────────────────────
 const stateSelect = {
-  id:             true,
-  userId:         true,
-  itemId:         true,
-  readStatus:     true,
-  rating:         true,
-  currentPage:    true,
+  id: true,
+  userId: true,
+  itemId: true,
+  readStatus: true,
+  rating: true,
+  currentPage: true,
   scrollPosition: true,
-  lastOpenedAt:   true,
-  lastReadAt:     true,
-  updatedAt:      true,
+  lastOpenedAt: true,
+  lastReadAt: true,
+  updatedAt: true,
 } satisfies Prisma.StateSelect;
 
 export type StateEntity = Prisma.StateGetPayload<{

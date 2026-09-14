@@ -45,7 +45,7 @@ export class YourWorkRepository implements IYourWorkRepository {
             name: true,
             avatar: true,
             identifier: true,
-            workItemColumns: true,
+            states: true,
           },
         },
         comments: { select: { id: true } },
@@ -83,7 +83,7 @@ export class YourWorkRepository implements IYourWorkRepository {
         name: true,
         identifier: true,
         avatar: true,
-        workItemColumns: true,
+        states: true,
       },
       orderBy: { createdAt: 'desc' },
     });

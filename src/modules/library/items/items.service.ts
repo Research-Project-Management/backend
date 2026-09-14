@@ -123,9 +123,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       nextCursor = rawItems[rawItems.length - 1]?.id;
     }
 
-    const items = rawItems.map((it) =>
-      this.mapFlattenedState(it, userId),
-    );
+    const items = rawItems.map((it) => this.mapFlattenedState(it, userId));
 
     return {
       items,
@@ -146,12 +144,18 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     },
     projectId?: string,
   ): Promise<any> {
-    const effectiveProjectId = (projectId || context?.projectId || data.projectId) || undefined;
+    const effectiveProjectId =
+      projectId || context?.projectId || data.projectId || undefined;
     const execute = async (
       tx: Prisma.TransactionClient,
       helpers: TransactionHelpers,
     ) => {
-      const item = await this.command.create(userId, data, tx, effectiveProjectId);
+      const item = await this.command.create(
+        userId,
+        data,
+        tx,
+        effectiveProjectId,
+      );
 
       await helpers.appendChange(userId, {
         entityType: 'Item',
@@ -225,10 +229,17 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     }
 
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      return this.updateItem(userId, id, expectedVersion, data, {
-        tx,
-        helpers,
-      }, projectId);
+      return this.updateItem(
+        userId,
+        id,
+        expectedVersion,
+        data,
+        {
+          tx,
+          helpers,
+        },
+        projectId,
+      );
     });
   }
 
@@ -292,22 +303,15 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
   async reindexItem(userId: string, id: string, projectId?: string) {
     const item = await this.query.findById(userId, id, projectId);
     if (!item) {
-      throw new NotFoundException(
-        `Item ${id} not found in user library`,
-      );
+      throw new NotFoundException(`Item ${id} not found in user library`);
     }
 
     await this.libraryTx.executeInTransaction(async (_tx, helpers) => {
-      await helpers.publishOutbox(
+      await helpers.publishOutbox(userId, id, 'library.item.reindexed', {
+        itemId: id,
+        workspaceId: projectId || userId,
         userId,
-        id,
-        'library.item.reindexed',
-        {
-          itemId: id,
-          workspaceId: projectId || userId,
-          userId,
-        },
-      );
+      });
     });
 
     this.executePaperRagIndexing(item).catch((err) => {
@@ -373,7 +377,12 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     });
   }
 
-  async restoreItem(userId: string, id: string, expectedVersion?: number, projectId?: string) {
+  async restoreItem(
+    userId: string,
+    id: string,
+    expectedVersion?: number,
+    projectId?: string,
+  ) {
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
       const restored = await this.command.restore(
         userId,
@@ -391,15 +400,10 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         data: restored,
       });
 
-      await helpers.publishOutbox(
-        userId,
+      await helpers.publishOutbox(userId, id, 'library.item.restored', {
         id,
-        'library.item.restored',
-        {
-          id,
-          restoredAt: new Date(),
-        },
-      );
+        restoredAt: new Date(),
+      });
 
       await this.tagsService.invalidateTagsCache(userId, projectId);
 
@@ -407,7 +411,11 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     });
   }
 
-  async purgeItem(userId: string, id: string, projectId?: string): Promise<boolean> {
+  async purgeItem(
+    userId: string,
+    id: string,
+    projectId?: string,
+  ): Promise<boolean> {
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
       const purged = await this.command.purge(userId, id, tx, projectId);
 
@@ -416,15 +424,10 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         entityId: id,
       });
 
-      await helpers.publishOutbox(
-        userId,
+      await helpers.publishOutbox(userId, id, 'library.item.purged', {
         id,
-        'library.item.purged',
-        {
-          id,
-          purgedAt: new Date(),
-        },
-      );
+        purgedAt: new Date(),
+      });
 
       await this.tagsService.invalidateTagsCache(userId, projectId);
 
@@ -559,11 +562,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     return this.query.findByDoi(userId, doi);
   }
 
-  async findSummaryById(
-    userId: string,
-    itemId: string,
-    projectId?: string,
-  ) {
+  async findSummaryById(userId: string, itemId: string, projectId?: string) {
     return this.query.findSummaryById(userId, itemId, undefined, projectId);
   }
 
@@ -607,9 +606,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       });
 
       if (!existing) {
-        throw new NotFoundException(
-          `Item ${command.existingId} not found`,
-        );
+        throw new NotFoundException(`Item ${command.existingId} not found`);
       }
 
       if (existing.userId && existing.userId !== userId) {
@@ -690,23 +687,18 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     helpers: TransactionHelpers,
   ): Promise<void> {
     const targetUserId =
-      command.userId || (command as any).projectId || (command as any).workspaceId || '';
-    const {
-      entityId,
-      reason,
-      publishOutboxEventType,
-      publishOutboxPayload,
-    } = command;
+      command.userId ||
+      (command as any).projectId ||
+      (command as any).workspaceId ||
+      '';
+    const { entityId, reason, publishOutboxEventType, publishOutboxPayload } =
+      command;
     const existing = await tx.item.findUnique({
       where: { id: entityId },
     });
     if (!existing) return;
 
-    if (
-      targetUserId &&
-      existing.userId &&
-      existing.userId !== targetUserId
-    ) {
+    if (targetUserId && existing.userId && existing.userId !== targetUserId) {
       throw new ForbiddenException(
         `Item ${entityId} does not belong to user ${targetUserId}`,
       );
@@ -763,9 +755,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       tx,
     );
     if (!rawExisting) {
-      throw new NotFoundException(
-        `Item ${itemId} not found in user library`,
-      );
+      throw new NotFoundException(`Item ${itemId} not found in user library`);
     }
     const existing = ItemsMapper.toDomain<ItemDetail>(rawExisting);
 
@@ -873,7 +863,9 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
           deletedAt: null,
           OR: [
             ...(source.doi ? [{ doi: source.doi }] : []),
-            ...(source.citationKey ? [{ citationKey: source.citationKey }] : []),
+            ...(source.citationKey
+              ? [{ citationKey: source.citationKey }]
+              : []),
             { title: source.title },
           ],
         },

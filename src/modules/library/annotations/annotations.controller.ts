@@ -43,25 +43,31 @@ export class AnnotationsController {
   // ─── GET / ─────────────────────────────────────────────────────────────────
 
   @Get()
-  @ApiOperation({ summary: 'List annotations for an attachment, sorted by position' })
+  @ApiOperation({
+    summary: 'List annotations for an attachment, sorted by position',
+  })
   @ApiQuery({ name: 'pageIndex', required: false, type: Number })
-  @ApiQuery({ name: 'type',      required: false, enum: AnnotationType })
+  @ApiQuery({ name: 'type', required: false, enum: AnnotationType })
   async listAnnotations(
-    @CurrentUser('id')     userId:       string,
+    @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
-    @Query('pageIndex')    pageIndexRaw?: string,
-    @Query('type')         type?: AnnotationType,
+    @Query('pageIndex') pageIndexRaw?: string,
+    @Query('type') type?: AnnotationType,
   ) {
     let pageIndex: number | undefined;
     if (pageIndexRaw !== undefined) {
       pageIndex = parseInt(pageIndexRaw, 10);
       if (isNaN(pageIndex) || pageIndex < 0) {
-        throw new BadRequestException('pageIndex must be a non-negative integer');
+        throw new BadRequestException(
+          'pageIndex must be a non-negative integer',
+        );
       }
     }
 
     if (type !== undefined && !Object.values(AnnotationType).includes(type)) {
-      throw new BadRequestException(`type must be one of: ${Object.values(AnnotationType).join(', ')}`);
+      throw new BadRequestException(
+        `type must be one of: ${Object.values(AnnotationType).join(', ')}`,
+      );
     }
 
     return this.annotationsService.getAnnotationsByAttachment(
@@ -78,38 +84,43 @@ export class AnnotationsController {
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create an annotation' })
   async createAnnotation(
-    @CurrentUser('id')     userId:        string,
-    @Param('attachmentId') attachmentId:  string,
-    @Body()                body:          CreateAnnotationDto,
+    @CurrentUser('id') userId: string,
+    @Param('attachmentId') attachmentId: string,
+    @Body() body: CreateAnnotationDto,
   ) {
     if (!userId) {
-      throw new UnauthorizedException('Authentication required to create annotations');
+      throw new UnauthorizedException(
+        'Authentication required to create annotations',
+      );
     }
     return this.annotationsService.createAnnotation(userId, {
       attachmentId,
-      type:      body.type,
+      type: body.type,
       pageIndex: body.pageIndex,
-      y:         body.y,
-      x:         body.x,
-      color:     body.color,
+      y: body.y,
+      x: body.x,
+      color: body.color,
       quoteText: body.quoteText,
-      comment:   body.comment,
+      comment: body.comment,
       rectCoords: body.rectCoords,
-      authorId:  userId,
+      authorId: userId,
     });
   }
 
   // ─── PATCH /:id ────────────────────────────────────────────────────────────
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update an annotation (optimistic lock via If-Match or expectedVersion)' })
+  @ApiOperation({
+    summary:
+      'Update an annotation (optimistic lock via If-Match or expectedVersion)',
+  })
   @ApiParam({ name: 'id', description: 'Annotation UUID' })
   async updateAnnotation(
-    @CurrentUser('id')     userId:        string,
-    @Param('attachmentId') attachmentId:  string,
-    @Param('id')           id:            string,
-    @Headers('if-match')   ifMatch:       string | undefined,
-    @Body()                body:          UpdateAnnotationDto,
+    @CurrentUser('id') userId: string,
+    @Param('attachmentId') attachmentId: string,
+    @Param('id') id: string,
+    @Headers('if-match') ifMatch: string | undefined,
+    @Body() body: UpdateAnnotationDto,
   ) {
     const rawVersion =
       body.expectedVersion ??
@@ -136,22 +147,26 @@ export class AnnotationsController {
   @ApiOperation({ summary: 'Soft-delete an annotation' })
   @ApiParam({ name: 'id', description: 'Annotation UUID' })
   async deleteAnnotation(
-    @CurrentUser('id')            userId:               string,
-    @Param('attachmentId')        attachmentId:         string,
-    @Param('id')                  id:                   string,
-    @Query('expectedVersion')     expectedVersionQuery?: string,
-    @Headers('if-match')          ifMatch?:             string,
+    @CurrentUser('id') userId: string,
+    @Param('attachmentId') attachmentId: string,
+    @Param('id') id: string,
+    @Query('expectedVersion') expectedVersionQuery?: string,
+    @Headers('if-match') ifMatch?: string,
   ) {
     let expectedVersion: number | undefined;
     if (expectedVersionQuery !== undefined) {
       expectedVersion = parseInt(expectedVersionQuery, 10);
       if (isNaN(expectedVersion) || expectedVersion < 1) {
-        throw new BadRequestException('expectedVersion must be a positive integer');
+        throw new BadRequestException(
+          'expectedVersion must be a positive integer',
+        );
       }
     } else if (ifMatch) {
       expectedVersion = parseInt(ifMatch.replace(/['"]/g, ''), 10);
       if (isNaN(expectedVersion) || expectedVersion < 1) {
-        throw new BadRequestException('If-Match header must be a positive integer');
+        throw new BadRequestException(
+          'If-Match header must be a positive integer',
+        );
       }
     }
 
@@ -169,12 +184,13 @@ export class AnnotationsController {
 
   @Put('batch')
   @ApiOperation({
-    summary: 'Batch upsert/delete annotations (max 200 items, single transaction)',
+    summary:
+      'Batch upsert/delete annotations (max 200 items, single transaction)',
   })
   async batchUpsertAnnotations(
-    @CurrentUser('id')     userId:        string,
-    @Param('attachmentId') attachmentId:  string,
-    @Body()                body:          BatchAnnotationsDto,
+    @CurrentUser('id') userId: string,
+    @Param('attachmentId') attachmentId: string,
+    @Body() body: BatchAnnotationsDto,
   ) {
     if (!userId) {
       throw new UnauthorizedException('Authentication required');
@@ -186,4 +202,3 @@ export class AnnotationsController {
     );
   }
 }
-

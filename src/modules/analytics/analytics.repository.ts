@@ -188,7 +188,11 @@ export class AnalyticsRepository {
   }
 
   /** Time-series: work items created and completed per day within a date range */
-  async findProjectWorkItemsTimeSeries(projectId: string, from: Date, to: Date) {
+  async findProjectWorkItemsTimeSeries(
+    projectId: string,
+    from: Date,
+    to: Date,
+  ) {
     if (!isUUID(projectId)) return [];
     return this.prisma.workItem.findMany({
       where: {

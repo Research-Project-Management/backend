@@ -63,13 +63,17 @@ export class CacheInvalidationListener {
 
   @OnEvent('paper.*', { async: true })
   async handlePaperChanged(event: EntityChangeEvent) {
-    if (event.workspaceId) {
-      await this.redisCache.delPattern(`papers:${event.workspaceId}:*`);
-      await this.redisCache.delPattern(`library:${event.workspaceId}:*`);
+    if (event.projectId) {
+      await this.redisCache.delPattern(`papers:${event.projectId}:*`);
+      await this.redisCache.delPattern(`library:${event.projectId}:*`);
     }
     if (event.userId) {
       await this.redisCache.delPattern(`papers:${event.userId}:*`);
       await this.redisCache.delPattern(`library:${event.userId}:*`);
+    }
+    if (event.workspaceId) {
+      await this.redisCache.delPattern(`papers:${event.workspaceId}:*`);
+      await this.redisCache.delPattern(`library:${event.workspaceId}:*`);
     }
     if (event.entityId) {
       await this.redisCache.del(`paper:${event.entityId}`);
@@ -93,6 +97,10 @@ export class CacheInvalidationListener {
       await this.redisCache.delPattern(`files:${event.userId}:*`);
       await this.redisCache.delPattern(`storage:${event.userId}:*`);
     }
+    if (event.projectId) {
+      await this.redisCache.delPattern(`files:${event.projectId}:*`);
+      await this.redisCache.delPattern(`storage:${event.projectId}:*`);
+    }
     if (event.workspaceId) {
       await this.redisCache.delPattern(`files:${event.workspaceId}:*`);
       await this.redisCache.delPattern(`storage:${event.workspaceId}:*`);
@@ -114,6 +122,10 @@ export class CacheInvalidationListener {
       await this.redisCache.del(`project:${pid}`);
       await this.redisCache.delPattern(`work-items:${pid}:*`);
       await this.redisCache.delPattern(`analytics:project:${pid}:*`);
+    }
+    if (event.userId) {
+      await this.redisCache.delPattern(`projects:${event.userId}:*`);
+      await this.redisCache.delPattern(`analytics:user:${event.userId}:*`);
     }
     if (event.workspaceId) {
       await this.redisCache.delPattern(`projects:${event.workspaceId}:*`);

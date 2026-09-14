@@ -132,11 +132,7 @@ export interface IItemReadPort {
 export const ITEM_READ_PORT = Symbol('ITEM_READ_PORT');
 
 export interface IItemExistencePort {
-  exists(
-    userId: string,
-    itemId: string,
-    projectId?: string,
-  ): Promise<boolean>;
+  exists(userId: string, itemId: string, projectId?: string): Promise<boolean>;
   assertExists(
     userId: string,
     itemId: string,
@@ -154,8 +150,5 @@ export const ITEM_EXISTENCE_PORT = Symbol('ITEM_EXISTENCE_PORT');
 export const ITEM_NOTES_EXTRACTOR_PORT = Symbol('ITEM_NOTES_EXTRACTOR_PORT');
 
 export interface IItemNotesExtractorPort {
-  extractNotesFromAnnotations(
-    userId: string,
-    itemId: string,
-  ): Promise<unknown>;
+  extractNotesFromAnnotations(userId: string, itemId: string): Promise<unknown>;
 }

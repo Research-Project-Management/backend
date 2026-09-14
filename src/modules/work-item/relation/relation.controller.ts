@@ -70,7 +70,11 @@ export class RelationController {
     @Param('targetWorkItemId') targetWorkItemId: string,
     @CurrentUser('id') userId: string,
   ) {
-    return this.relationService.removeRelation(workItemId, targetWorkItemId, userId);
+    return this.relationService.removeRelation(
+      workItemId,
+      targetWorkItemId,
+      userId,
+    );
   }
 
   @Get('work-items/:workItemId/relations/violations')

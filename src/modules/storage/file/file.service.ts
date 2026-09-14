@@ -34,6 +34,11 @@ import {
   ShareFileDto,
 } from './dto/file.dto';
 import { FileWithAuthor } from './types/storage-repository.interface';
+import {
+  validateMagicBytes,
+  isBlockedExtension,
+  sanitizeFilename,
+} from './utils/file-validator.util';
 
 export type FormattedFile<
   T extends {
@@ -96,9 +101,7 @@ export class FileService implements OnModuleInit {
     if (!this.cache) return;
     const promises: Promise<any>[] = [];
     if (scopeId) {
-      promises.push(
-        this.cache.delPattern(`flux:storage:tree:${scopeId}:*`),
-      );
+      promises.push(this.cache.delPattern(`flux:storage:tree:${scopeId}:*`));
       promises.push(this.cache.del(STORAGE_REDIS_KEYS.quota(scopeId)));
     }
     if (fileId) {
@@ -241,8 +244,6 @@ export class FileService implements OnModuleInit {
     throw new ForbiddenException('You do not have access to this file');
   }
 
-
-
   private formatFile<
     T extends {
       id: string;
@@ -279,9 +280,15 @@ export class FileService implements OnModuleInit {
       pageId: dto.pageId,
     });
 
-    // 2. Validate size & mimeType
+    // 2. Validate size, extension & mimeType
     if (dto.size && dto.size > 100 * 1024 * 1024) {
       throw new BadRequestException('File size exceeds maximum 100MB limit');
+    }
+
+    if (isBlockedExtension(dto.filename)) {
+      throw new BadRequestException(
+        'Disallowed file extension: Executables and scripts are prohibited for security reasons',
+      );
     }
 
     const contentType =
@@ -299,7 +306,7 @@ export class FileService implements OnModuleInit {
       );
     }
 
-    const cleanName = dto.filename.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const cleanName = sanitizeFilename(dto.filename);
     const key = `users/${userId}/uploads/${Date.now()}-${cleanName}`;
 
     const presigned = await this.r2Service.getPresignedUploadUrl(
@@ -330,7 +337,7 @@ export class FileService implements OnModuleInit {
 
     for await (const part of parts) {
       if (part.type === 'file') {
-        filename = part.filename;
+        filename = sanitizeFilename(part.filename || 'unnamed-file');
         mimeType = part.mimetype;
         buffer = await part.toBuffer();
       } else {
@@ -343,6 +350,9 @@ export class FileService implements OnModuleInit {
         'No file payload found in multipart request',
       );
     }
+
+    // Security: Verify file signature (magic bytes) against MIME type and block dangerous extensions
+    validateMagicBytes(buffer, mimeType, filename);
 
     const getFieldValue = (val: unknown): string | undefined => {
       if (!val) return undefined;
@@ -385,7 +395,10 @@ export class FileService implements OnModuleInit {
       createRecord?: boolean;
     } = {},
   ) {
-    const cleanName = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
+    // Security: Enforce binary signature validation
+    validateMagicBytes(buffer, mimeType, filename);
+
+    const cleanName = sanitizeFilename(filename);
     const key = `users/${userId}/uploads/${Date.now()}-${cleanName}`;
     const uploadRes = await this.r2Service.uploadBuffer(key, buffer, mimeType);
 
@@ -407,8 +420,7 @@ export class FileService implements OnModuleInit {
       : isLibrary
         ? 'Library'
         : 'Personal';
-    const linkedToId =
-      scope.pageId || userId || null;
+    const linkedToId = scope.pageId || userId || null;
 
     let file = null;
     try {
@@ -691,7 +703,10 @@ export class FileService implements OnModuleInit {
       }),
     });
 
-    await this.invalidateStorageCache(existing.linkedToId || existing.authorId, fileId);
+    await this.invalidateStorageCache(
+      existing.linkedToId || existing.authorId,
+      fileId,
+    );
 
     return { file: this.formatFile(file) };
   }
@@ -908,7 +923,9 @@ export class FileService implements OnModuleInit {
     }
 
     const limitBytes = 5 * 1024 * 1024 * 1024; // 5 GB default quota
-    const percentage = Number(Math.min(100, (usage / limitBytes) * 100).toFixed(1));
+    const percentage = Number(
+      Math.min(100, (usage / limitBytes) * 100).toFixed(1),
+    );
 
     return {
       scope: 'personal' as const,
@@ -929,7 +946,10 @@ export class FileService implements OnModuleInit {
 
     // Authorization: User must be creator, member, or project must be public
     if (project.createdById !== userId && project.network !== 'public') {
-      const role = await this.fileRepo.findProjectMemberRole(project.id, userId);
+      const role = await this.fileRepo.findProjectMemberRole(
+        project.id,
+        userId,
+      );
       if (!role) {
         throw new ForbiddenException('You do not have access to this project');
       }
@@ -946,10 +966,14 @@ export class FileService implements OnModuleInit {
     const ownerUsage = await this.fileRepo.calculateUserStorageUsage(owner.id);
 
     // Calculate this specific project's storage usage
-    const projectUsage = await this.fileRepo.calculateProjectStorageUsage(project.id);
+    const projectUsage = await this.fileRepo.calculateProjectStorageUsage(
+      project.id,
+    );
 
     const limitBytes = 5 * 1024 * 1024 * 1024; // 5 GB
-    const percentage = Number(Math.min(100, (ownerUsage / limitBytes) * 100).toFixed(1));
+    const percentage = Number(
+      Math.min(100, (ownerUsage / limitBytes) * 100).toFixed(1),
+    );
 
     return {
       scope: 'project' as const,
@@ -977,11 +1001,13 @@ export class FileService implements OnModuleInit {
 
   // ── Scoped Queries ──────────────────────────────────────────────────────────
 
-  async getFiles(scope: {
-    pageId?: string;
-    parentId?: string;
-    userId?: string;
-  } = {}) {
+  async getFiles(
+    scope: {
+      pageId?: string;
+      parentId?: string;
+      userId?: string;
+    } = {},
+  ) {
     const contextId = scope.pageId || scope.userId || null;
     const targetParentId =
       scope.parentId === 'null' ||
@@ -1067,10 +1093,9 @@ export class FileService implements OnModuleInit {
         if (!f || f.trashedAt) return false;
         if (
           ['Library', 'Paper'].includes(f.linkedToType || '') ||
-          (f.metaData as any)?.source === 'library' ||
-          (f.metaData as any)?.source === 'paper' ||
-          (Array.isArray((f as any).attachments) &&
-            (f as any).attachments.length > 0)
+          f.metaData?.source === 'library' ||
+          f.metaData?.source === 'paper' ||
+          (Array.isArray(f.attachments) && f.attachments.length > 0)
         ) {
           return false;
         }

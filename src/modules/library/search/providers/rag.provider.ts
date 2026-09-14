@@ -51,7 +51,8 @@ export class RagProvider {
     formData.append('file', blob, `${item.id}.md`);
     formData.append('title', item.title);
     formData.append('tags', 'academic-paper,library');
-    const targetScopeId = item.userId || item.projectId || (item as any).workspaceId;
+    const targetScopeId =
+      item.userId || item.projectId || (item as any).workspaceId;
     if (targetScopeId) {
       formData.append('project_id', targetScopeId);
     }

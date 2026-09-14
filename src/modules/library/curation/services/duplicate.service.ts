@@ -189,10 +189,7 @@ export class DuplicateService {
     }
 
     const allItemIds = [dto.primaryItemId, ...uniqueDupIds];
-    const items = await this.itemReadPort.findByIds(
-      userId,
-      allItemIds,
-    );
+    const items = await this.itemReadPort.findByIds(userId, allItemIds);
 
     if (items.length !== allItemIds.length) {
       throw new NotFoundException(

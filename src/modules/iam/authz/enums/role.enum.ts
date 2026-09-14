@@ -42,7 +42,8 @@ export const ROLE_DESCRIPTIONS: Record<
   },
   [Role.VIEWER]: {
     label: 'Hội đồng phản biện / Khách / Viewer',
-    description: 'Chỉ có quyền xem dữ liệu đề tài nghiên cứu, không thể chỉnh sửa.',
+    description:
+      'Chỉ có quyền xem dữ liệu đề tài nghiên cứu, không thể chỉnh sửa.',
   },
 };
 
@@ -53,4 +54,3 @@ export const ProjectRoleHierarchy = RoleHierarchy;
 export const WorkspaceRole = Role;
 export type WorkspaceRole = Role;
 export const WorkspaceRoleHierarchy = RoleHierarchy;
-

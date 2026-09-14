@@ -242,7 +242,11 @@ export class TemplateService {
       createWorkItemDto,
     );
 
-    const createdWorkItem = (result as any)?.workItem || (result as any)?.item || (result as any)?.WorkItem || result;
+    const createdWorkItem =
+      (result as any)?.workItem ||
+      (result as any)?.item ||
+      (result as any)?.WorkItem ||
+      result;
 
     if (this.eventEmitter) {
       this.eventEmitter.emit('template.instantiated', {

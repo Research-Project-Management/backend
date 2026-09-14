@@ -9,14 +9,11 @@ import { UserRepository } from '../user/user.repository';
 import { AuthzService } from '../authz/authz.service';
 import { Role } from '../authz/enums/role.enum';
 import { Permission } from '../authz/enums/permission.enum';
-import {
-  IamAuthResult,
-  IamUserSession,
-} from './types/iam.type';
+import { IamAuthResult, IamUserSession } from './types/iam.type';
 
 /**
  * IAM Gateway & Unified Facade Service
- * 
+ *
  * Acts as the single entry/exit point (cổng ra) of the entire IAM context.
  * Designed to decouple consumer modules from internal IAM implementations,
  * allowing effortless transition to a dedicated gRPC / HTTP microservice.

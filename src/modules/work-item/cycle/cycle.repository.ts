@@ -160,7 +160,10 @@ export class CycleRepository implements ICycleRepository {
     });
   }
 
-  async addWorkItemToCycle(workItemId: string, cycleId: string): Promise<WorkItem> {
+  async addWorkItemToCycle(
+    workItemId: string,
+    cycleId: string,
+  ): Promise<WorkItem> {
     return this.prisma.workItem.update({
       where: { id: workItemId },
       data: { cycleId },
@@ -252,4 +255,3 @@ export class CycleRepository implements ICycleRepository {
     return count > 0;
   }
 }
-

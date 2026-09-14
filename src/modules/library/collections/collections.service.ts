@@ -143,10 +143,7 @@ export class CollectionsService {
     );
 
     if (rawParentId) {
-      const parent = await this.repo.findById(
-        userId,
-        rawParentId,
-      );
+      const parent = await this.repo.findById(userId, rawParentId);
       if (!parent) {
         throw new BadRequestException(
           `Parent collection not found: ${rawParentId}`,
@@ -240,7 +237,13 @@ export class CollectionsService {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
     }
 
-    await this.repo.delete(userId, collectionId, strategy, undefined, projectId);
+    await this.repo.delete(
+      userId,
+      collectionId,
+      strategy,
+      undefined,
+      projectId,
+    );
     await this.invalidateCollectionsCache(userId, projectId);
     return { success: true };
   }
@@ -265,11 +268,7 @@ export class CollectionsService {
 
     const destinationCollectionId =
       collectionId === 'unfiled' ? null : collectionId;
-    await this.repo.moveItems(
-      userId,
-      destinationCollectionId,
-      itemIds,
-    );
+    await this.repo.moveItems(userId, destinationCollectionId, itemIds);
 
     await this.invalidateCollectionsCache(userId, projectId);
     return {
@@ -317,9 +316,7 @@ export class CollectionsService {
 
     // 1. Verify all itemIds belong to this user or project scope
     const scopeWhere =
-      projectId && projectId !== 'user'
-        ? { projectId }
-        : { userId };
+      projectId && projectId !== 'user' ? { projectId } : { userId };
 
     const validItems = await this.prisma.item.findMany({
       where: {
@@ -363,9 +360,7 @@ export class CollectionsService {
 
     // Assert item belongs to scope
     const scopeWhere =
-      projectId && projectId !== 'user'
-        ? { projectId }
-        : { userId };
+      projectId && projectId !== 'user' ? { projectId } : { userId };
 
     const item = await this.prisma.item.findFirst({
       where: {

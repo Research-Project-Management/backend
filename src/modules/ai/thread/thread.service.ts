@@ -105,15 +105,14 @@ export class ThreadService {
         where: {
           id: projectId,
           deletedAt: null,
-          OR: [
-            { createdById: userId },
-            { members: { some: { userId } } },
-          ],
+          OR: [{ createdById: userId }, { members: { some: { userId } } }],
         },
         select: { id: true },
       });
       if (!project) {
-        throw new ForbiddenException('User does not have access to this project');
+        throw new ForbiddenException(
+          'User does not have access to this project',
+        );
       }
     }
 
@@ -124,10 +123,7 @@ export class ThreadService {
       if (cached) return cached;
     }
 
-    const rawChats = await this.threadRepo.findUserChats(
-      userId,
-      projectId,
-    );
+    const rawChats = await this.threadRepo.findUserChats(userId, projectId);
     const result = rawChats.map(formatChat);
 
     if (this.cache) {
@@ -187,15 +183,14 @@ export class ThreadService {
         where: {
           id: dto.projectId,
           deletedAt: null,
-          OR: [
-            { createdById: userId },
-            { members: { some: { userId } } },
-          ],
+          OR: [{ createdById: userId }, { members: { some: { userId } } }],
         },
         select: { id: true, identifier: true },
       });
       if (!project) {
-        throw new ForbiddenException('User does not have access to this project');
+        throw new ForbiddenException(
+          'User does not have access to this project',
+        );
       }
     }
 
@@ -251,20 +246,12 @@ export class ThreadService {
         dto.documentIds,
       );
       const result = formatChat(updated);
-      await this.invalidateThreadCache(
-        userId,
-        created.id,
-        dto.projectId,
-      );
+      await this.invalidateThreadCache(userId, created.id, dto.projectId);
       return result;
     }
 
     const result = formatChat(created);
-    await this.invalidateThreadCache(
-      userId,
-      created.id,
-      dto.projectId,
-    );
+    await this.invalidateThreadCache(userId, created.id, dto.projectId);
     return result;
   }
 
@@ -293,11 +280,7 @@ export class ThreadService {
     );
     const result = formatChat(updated);
 
-    await this.invalidateThreadCache(
-      chat.userId,
-      chatId,
-      chat.projectId,
-    );
+    await this.invalidateThreadCache(chat.userId, chatId, chat.projectId);
 
     return result;
   }
@@ -315,11 +298,7 @@ export class ThreadService {
     const updated = await this.threadRepo.updateChatTitle(chatId, dto.title);
     const result = formatChat(updated);
 
-    await this.invalidateThreadCache(
-      chat.userId,
-      chatId,
-      chat.projectId,
-    );
+    await this.invalidateThreadCache(chat.userId, chatId, chat.projectId);
 
     return result;
   }
@@ -331,17 +310,14 @@ export class ThreadService {
     }
     await this.threadRepo.deleteChat(chatId);
 
-    await this.invalidateThreadCache(
-      chat.userId,
-      chatId,
-      chat.projectId,
-    );
+    await this.invalidateThreadCache(chat.userId, chatId, chat.projectId);
 
     return { success: true };
   }
 
   async clearMemory(userId: string, scopeId?: string) {
-    const targetProject = scopeId && scopeId !== 'clear' && scopeId !== userId ? scopeId : null;
+    const targetProject =
+      scopeId && scopeId !== 'clear' && scopeId !== userId ? scopeId : null;
     await this.threadRepo.clearUserChats(userId, targetProject);
     await this.invalidateThreadCache(userId, undefined, targetProject);
     return { success: true };

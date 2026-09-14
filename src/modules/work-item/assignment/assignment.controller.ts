@@ -88,7 +88,11 @@ export class AssignmentController {
     @Param('workItemId') workItemId: string,
     @CurrentUser('id') userId: string,
   ) {
-    return this.assignmentService.unassignWorkItem(projectId, workItemId, userId);
+    return this.assignmentService.unassignWorkItem(
+      projectId,
+      workItemId,
+      userId,
+    );
   }
 
   @Post('projects/:projectId/work-items/:workItemId/join')

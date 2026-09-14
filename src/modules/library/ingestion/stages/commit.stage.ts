@@ -206,12 +206,12 @@ export function toItemData(
       (metadata.extraFields?.numberOfPages !== undefined &&
       metadata.extraFields?.numberOfPages !== null &&
       typeof metadata.extraFields.numberOfPages !== 'object'
-        ? String(metadata.extraFields.numberOfPages as string | number | boolean)
+        ? String(metadata.extraFields.numberOfPages)
         : undefined) ||
       (metadata.extraFields?.numPages !== undefined &&
       metadata.extraFields?.numPages !== null &&
       typeof metadata.extraFields.numPages !== 'object'
-        ? String(metadata.extraFields.numPages as string | number | boolean)
+        ? String(metadata.extraFields.numPages)
         : undefined),
     series: metadata.series,
     seriesTitle: metadata.seriesTitle,

@@ -67,7 +67,9 @@ export class WorkItemFacade implements IWorkItemFacade {
     };
   }
 
-  async getWorkItemById(idOrIdentifier: string): Promise<WorkItemSummary | null> {
+  async getWorkItemById(
+    idOrIdentifier: string,
+  ): Promise<WorkItemSummary | null> {
     const item = await this.workItemRepository.findWorkItemById(idOrIdentifier);
     return item ? this.toSummary(item) : null;
   }

@@ -3,7 +3,10 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ProjectMemberRole } from '@prisma/client';
 
 export class CreateProjectInvitationDto {
-  @ApiProperty({ description: 'Email address of the invited user', example: 'colleague@example.com' })
+  @ApiProperty({
+    description: 'Email address of the invited user',
+    example: 'colleague@example.com',
+  })
   @IsEmail()
   @IsNotEmpty()
   email!: string;

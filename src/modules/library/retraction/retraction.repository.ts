@@ -78,9 +78,7 @@ export class RetractionRepository {
     });
   }
 
-  async getStats(
-    userId: string,
-  ): Promise<RetractionStats> {
+  async getStats(userId: string): Promise<RetractionStats> {
     const baseWhere = {
       userId,
       deletedAt: null,
@@ -128,4 +126,3 @@ export class RetractionRepository {
     };
   }
 }
-

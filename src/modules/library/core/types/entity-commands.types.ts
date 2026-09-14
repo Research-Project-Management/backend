@@ -1,5 +1,5 @@
 export type SyncEntityType =
-  | 'Item' | 'Collection' | 'Attachment' | 'Note' | 'Annotation';
+  'Item' | 'Collection' | 'Attachment' | 'Note' | 'Annotation';
 
 export interface UpsertSyncCollectionCommand {
   userId: string;

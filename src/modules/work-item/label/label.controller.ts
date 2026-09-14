@@ -177,11 +177,7 @@ export class LabelController {
     if (query?.projectId) {
       return this.labelService.getProjectLabels(query.projectId);
     }
-    return this.labelService.getLabels(
-      userId,
-      query?.type,
-      undefined,
-    );
+    return this.labelService.getLabels(userId, query?.type, undefined);
   }
 
   @Post('labels')
@@ -226,9 +222,6 @@ export class LabelController {
     @CurrentUser('id') userId: string,
     @Body() dto: ImportLabelsDto,
   ) {
-    return this.labelService.importUserLabels(
-      userId,
-      dto,
-    );
+    return this.labelService.importUserLabels(userId, dto);
   }
 }

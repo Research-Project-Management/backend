@@ -30,10 +30,7 @@ import { ProjectRoleGuard } from '../../../modules/iam/authz/guards/role.guard';
 import { ProjectRoles } from '../../../modules/iam/authz/decorators/role.decorator';
 import { IStoragePort, STORAGE_PORT } from '../../storage/storage.port';
 
-@Controller([
-  'api/v1/library',
-  'api/v1/projects/:projectId/library',
-])
+@Controller(['api/v1/library', 'api/v1/projects/:projectId/library'])
 @UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class AttachmentsController {
   constructor(
@@ -330,9 +327,7 @@ export class AttachmentsController {
         select: { url: true, title: true },
       });
       if (!item) {
-        throw new NotFoundException(
-          `Item ${itemId} not found`,
-        );
+        throw new NotFoundException(`Item ${itemId} not found`);
       }
       if (!item.url) {
         throw new BadRequestException(
@@ -342,12 +337,9 @@ export class AttachmentsController {
       targetUrl = item.url;
     }
 
-    return this.webSnapshotService.captureAndAttach(
-      targetUrl,
-      itemId,
-      userId,
-      { title: body?.title },
-    );
+    return this.webSnapshotService.captureAndAttach(targetUrl, itemId, userId, {
+      title: body?.title,
+    });
   }
 
   private async resolveAttachmentItemId(attachmentId: string): Promise<string> {

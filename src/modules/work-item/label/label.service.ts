@@ -390,11 +390,7 @@ export class LabelService {
 
   // ── 2. User-Scoped Personal Labels ──────────────────────────────────────────
 
-  async getLabels(
-    userId: string,
-    type?: LabelType,
-    projectId?: string | null,
-  ) {
+  async getLabels(userId: string, type?: LabelType, projectId?: string | null) {
     const cacheKey = WORK_ITEM_REDIS_KEYS.labels(userId);
 
     if (this.cache && !type && projectId === undefined) {
@@ -416,10 +412,7 @@ export class LabelService {
     return result;
   }
 
-  async createLabel(
-    userId: string,
-    dto: CreateLabelDto,
-  ) {
+  async createLabel(userId: string, dto: CreateLabelDto) {
     if (dto.projectId) {
       return this.createProjectLabel(dto.projectId, userId, {
         name: dto.name,
@@ -456,11 +449,7 @@ export class LabelService {
     return { label };
   }
 
-  async updateLabel(
-    labelId: string,
-    dto: UpdateLabelDto,
-    userId: string,
-  ) {
+  async updateLabel(labelId: string, dto: UpdateLabelDto, userId: string) {
     const existing = await this.labelRepository.findById(labelId);
     if (!existing) {
       throw new NotFoundException('Label not found');
@@ -502,10 +491,7 @@ export class LabelService {
       ...(dto.sortOrder !== undefined && { sortOrder: dto.sortOrder }),
     });
 
-    await this.invalidateLabelCache(
-      userId,
-      label.projectId || undefined,
-    );
+    await this.invalidateLabelCache(userId, label.projectId || undefined);
     return { label };
   }
 
@@ -524,10 +510,7 @@ export class LabelService {
     }
 
     await this.labelRepository.delete(labelId);
-    await this.invalidateLabelCache(
-      userId,
-      label.projectId || undefined,
-    );
+    await this.invalidateLabelCache(userId, label.projectId || undefined);
     return { message: 'Label deleted successfully' };
   }
 

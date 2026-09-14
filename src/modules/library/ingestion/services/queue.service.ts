@@ -58,7 +58,8 @@ export class QueueService implements OnModuleInit {
           `Found ${orphanedRuns.length} orphaned ingestion run(s) on startup. Marking as FAILED_RETRYABLE.`,
         );
         for (const run of orphanedRuns) {
-          const targetId = (run as any).projectId || (run as any).workspaceId || '';
+          const targetId =
+            (run as any).projectId || (run as any).workspaceId || '';
           await this.repo.updateRunStatus(
             targetId,
             run.id,

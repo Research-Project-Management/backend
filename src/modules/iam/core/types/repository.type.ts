@@ -1,10 +1,7 @@
 import { User } from '@prisma/client';
 
 export type UserStatus =
-  | 'active'
-  | 'suspended'
-  | 'pending_verification'
-  | 'deactivated';
+  'active' | 'suspended' | 'pending_verification' | 'deactivated';
 
 export type AuthProvider = 'google' | 'github' | 'orcid' | 'saml' | 'local';
 

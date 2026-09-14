@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  UnprocessableEntityException,
   Optional,
   Logger,
 } from '@nestjs/common';
@@ -10,6 +11,12 @@ import { CreateStickyDto, UpdateStickyDto } from './dto/sticky.dto';
 import { RedisCacheService } from '@/core/cache/redis.service';
 import { STICKY_REDIS_KEYS } from './constants/redis-keys.constant';
 import { PrismaService } from '@/core/database/prisma.service';
+import {
+  getNextStickyColor,
+  isStickyContentEmpty,
+  normalizeStickyColor,
+  sanitizeStickyHtml,
+} from './utils/sticky.utils';
 
 @Injectable()
 export class StickyService {
@@ -49,10 +56,7 @@ export class StickyService {
       where: {
         id: projectId,
         deletedAt: null,
-        OR: [
-          { createdById: userId },
-          { members: { some: { userId } } },
-        ],
+        OR: [{ createdById: userId }, { members: { some: { userId } } }],
       },
       select: { id: true },
     });
@@ -71,13 +75,32 @@ export class StickyService {
     };
   }
 
-  async getStickies(userId: string, projectId?: string) {
+  async getStickies(userId: string, projectId?: string, search?: string) {
     if (projectId) {
       await this.validateProjectAccess(userId, projectId);
+      if (search && search.trim()) {
+        const stickies = await this.stickyRepo.findStickiesByProjectId(
+          projectId,
+          search,
+        );
+        return {
+          stickies: stickies.map((sticky) => this.formatSticky(sticky)),
+        };
+      }
       const cacheKey = STICKY_REDIS_KEYS.projectStickies(projectId);
       return this.getStickiesWithCache(cacheKey, async () => {
         return this.stickyRepo.findStickiesByProjectId(projectId);
       });
+    }
+
+    if (search && search.trim()) {
+      const stickies = await this.stickyRepo.findStickiesByUserId(
+        userId,
+        search,
+      );
+      return {
+        stickies: stickies.map((sticky) => this.formatSticky(sticky)),
+      };
     }
 
     const cacheKey = STICKY_REDIS_KEYS.userStickies(userId);
@@ -86,8 +109,8 @@ export class StickyService {
     });
   }
 
-  async getPersonalStickies(userId: string) {
-    return this.getStickies(userId);
+  async getPersonalStickies(userId: string, search?: string) {
+    return this.getStickies(userId, undefined, search);
   }
 
   private async getStickiesWithCache(
@@ -123,10 +146,40 @@ export class StickyService {
       order = await this.stickyRepo.countStickiesByUserId(userId);
     }
 
+    // 1. Authoritative Server Check: Find the latest note in this scope
+    const latestSticky = await this.prisma.sticky.findFirst({
+      where: {
+        ...(dto.projectId
+          ? { projectId: dto.projectId }
+          : { userId, projectId: null }),
+        deletedAt: null,
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, title: true, content: true, color: true },
+    });
+
+    // 2. Reject creating a new note if the latest one is still blank
+    if (
+      latestSticky &&
+      isStickyContentEmpty(latestSticky.title, latestSticky.content)
+    ) {
+      throw new UnprocessableEntityException(
+        'Please add content to your existing draft note before creating a new one',
+      );
+    }
+
+    // 3. Authoritative Color Rotation: If client didn't supply color, auto-rotate based on latest note
+    const resolvedColor = dto.color
+      ? normalizeStickyColor(dto.color)
+      : getNextStickyColor(latestSticky?.color);
+
+    // 4. Server-side HTML Sanitization against Stored XSS
+    const sanitizedContent = sanitizeStickyHtml(dto.content || '<p></p>');
+
     const sticky = await this.stickyRepo.createSticky({
-      title: dto.title || '',
-      content: dto.content,
-      color: dto.color || 'yellow-1',
+      title: dto.title ? dto.title.trim() : '',
+      content: sanitizedContent,
+      color: resolvedColor,
       scope,
       positionX: dto.position?.x ?? 0,
       positionY: dto.position?.y ?? 0,
@@ -153,15 +206,17 @@ export class StickyService {
     if (existingSticky.projectId) {
       await this.validateProjectAccess(userId, existingSticky.projectId);
     } else if (existingSticky.userId !== userId) {
-      throw new ForbiddenException(
-        'You can only update your own sticky notes',
-      );
+      throw new ForbiddenException('You can only update your own sticky notes');
     }
 
     const updateData: any = {};
-    if (dto.title !== undefined) updateData.title = dto.title;
-    if (dto.content !== undefined) updateData.content = dto.content;
-    if (dto.color !== undefined) updateData.color = dto.color;
+    if (dto.title !== undefined) updateData.title = dto.title.trim();
+    if (dto.content !== undefined) {
+      updateData.content = sanitizeStickyHtml(dto.content);
+    }
+    if (dto.color !== undefined) {
+      updateData.color = normalizeStickyColor(dto.color);
+    }
     if (dto.position) {
       updateData.positionX = dto.position.x;
       updateData.positionY = dto.position.y;
@@ -186,9 +241,7 @@ export class StickyService {
     if (existingSticky.projectId) {
       await this.validateProjectAccess(userId, existingSticky.projectId);
     } else if (existingSticky.userId !== userId) {
-      throw new ForbiddenException(
-        'You can only delete your own sticky notes',
-      );
+      throw new ForbiddenException('You can only delete your own sticky notes');
     }
 
     await this.stickyRepo.deleteSticky(stickyId);

@@ -19,4 +19,3 @@ export class DomainActivityEvent {
     this.timestamp = this.timestamp || new Date();
   }
 }
-

@@ -18,10 +18,7 @@ import {
   BulkAddProjectMembersResult,
   ProjectMemberWithUser,
 } from './types/member.type';
-import {
-  isOwner,
-  canDemoteOrRemoveOwner,
-} from './utils/role.util';
+import { isOwner, canDemoteOrRemoveOwner } from './utils/role.util';
 import { CACHE_KEYS } from '../core/constants/cache.constant';
 import { IAM_REDIS_KEYS } from '@/modules/iam/core/constants/redis.constant';
 

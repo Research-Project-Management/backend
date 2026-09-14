@@ -11,10 +11,7 @@ import { ExecuteSavedSearchOptions } from './types/saved-search.types';
 export class SavedSearchesRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(
-    userId: string,
-    dto: CreateSavedSearchDto,
-  ) {
+  async create(userId: string, dto: CreateSavedSearchDto) {
     return this.prisma.savedSearch.create({
       data: {
         userId,

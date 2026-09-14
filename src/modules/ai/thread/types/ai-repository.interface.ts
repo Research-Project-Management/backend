@@ -34,10 +34,7 @@ export interface IAiRepository {
     data: Prisma.AiChatUpdateInput | Prisma.AiChatUncheckedUpdateInput,
   ): Promise<ChatWithMessages>;
   deleteChat(chatId: string): Promise<AiChat>;
-  deletePageChat(
-    pageId: string,
-    userId: string,
-  ): Promise<{ count: number }>;
+  deletePageChat(pageId: string, userId: string): Promise<{ count: number }>;
   clearUserChats(
     userId: string,
     projectId?: string | null,

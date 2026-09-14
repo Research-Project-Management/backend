@@ -1,13 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export type UserEntityType =
-  | 'project'
-  | 'work_item'
-  | 'paper'
-  | 'page'
-  | 'file'
-  | 'folder'
-  | 'sticky';
+  'project' | 'work_item' | 'paper' | 'page' | 'file' | 'folder' | 'sticky';
 
 export class UserSearchResultItem {
   @ApiProperty({

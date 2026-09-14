@@ -74,6 +74,12 @@ export class AnnotationNormalizer {
       return AnnotationType.highlight;
     }
     const normalized = type.trim().toLowerCase();
+    if (normalized === 'box' || normalized === 'area') {
+      return AnnotationType.rect;
+    }
+    if (normalized === 'strike') {
+      return AnnotationType.underline;
+    }
     const validTypes = Object.values(AnnotationType) as string[];
     if (validTypes.includes(normalized)) {
       return normalized as AnnotationType;

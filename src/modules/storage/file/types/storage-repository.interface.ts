@@ -39,9 +39,7 @@ export interface IFileRepository {
   trashFile(fileId: string): Promise<File>;
   restoreFile(fileId: string): Promise<File>;
   deleteFile(fileId: string): Promise<File>;
-  findUserStarredFiles(
-    userId: string,
-  ): Promise<FileWithAuthor[]>;
+  findUserStarredFiles(userId: string): Promise<FileWithAuthor[]>;
   calculateUserStorageUsage(userId: string): Promise<number>;
   shareFile(
     fileId: string,
@@ -69,4 +67,3 @@ export interface IFileRepository {
   calculateProjectStorageUsage(projectId: string): Promise<number>;
   getProjectWithHierarchy(projectId: string): Promise<any>;
 }
-

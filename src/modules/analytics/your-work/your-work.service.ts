@@ -74,17 +74,18 @@ export class YourWorkService {
       };
     });
 
-    const resolveWorkItemStateGroup = (
-      item: UserWorkItem,
-    ): StateGroup => {
+    const resolveWorkItemStateGroup = (item: UserWorkItem): StateGroup => {
       let colName = item.columnId;
-      const cols = item.project?.workItemColumns;
-      if (Array.isArray(cols)) {
-        const matched = (
-          cols as Array<Record<string, unknown>>
-        ).find((c) => c.id === item.columnId);
-        if (matched?.title || matched?.name) {
-          colName = String(matched.title || matched.name);
+      const states = item.project?.states;
+      if (Array.isArray(states)) {
+        const matched = (states as Array<Record<string, unknown>>).find(
+          (c) => c.id === item.columnId,
+        );
+        if (matched?.group && typeof matched.group === 'string') {
+          return matched.group as StateGroup;
+        }
+        if (matched?.name) {
+          colName = String(matched.name);
         }
       }
       return inferStateGroup(item.columnId, colName);
@@ -136,7 +137,7 @@ export class YourWorkService {
         name: string;
         identifier: string | null;
         avatar: string | null;
-        workItemColumns?: unknown;
+        states?: unknown;
         assigned: UserWorkItem[];
         created: UserWorkItem[];
         subscribed: UserWorkItem[];
@@ -150,7 +151,7 @@ export class YourWorkService {
         name: p.name,
         identifier: p.identifier,
         avatar: p.avatar,
-        workItemColumns: p.workItemColumns,
+        states: p.states,
         assigned: [],
         created: [],
         subscribed: [],
@@ -168,7 +169,7 @@ export class YourWorkService {
           name: item.project?.name || 'Untitled Project',
           identifier: item.project?.identifier || null,
           avatar: item.project?.avatar || null,
-          workItemColumns: item.project?.workItemColumns,
+          states: item.project?.states,
           assigned: [],
           created: [],
           subscribed: [],

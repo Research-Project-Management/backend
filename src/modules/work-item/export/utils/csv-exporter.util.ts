@@ -13,7 +13,7 @@ function escapeCsvField(val: unknown): string {
   } else if (typeof val === 'object') {
     text = JSON.stringify(val);
   } else {
-    text = String(val as string | number | boolean | bigint);
+    text = String(val);
   }
 
   // Check if escaping is required: contains comma, quote, or newline
@@ -57,7 +57,9 @@ export function exportWorkItemsToCsv(workItems: any[]): string {
   rows.push(headers.map(escapeCsvField).join(','));
 
   for (const workItem of workItems) {
-    const labelsStr = Array.isArray(workItem.labels) ? workItem.labels.join('; ') : '';
+    const labelsStr = Array.isArray(workItem.labels)
+      ? workItem.labels.join('; ')
+      : '';
 
     const row = [
       workItem.id,
@@ -85,5 +87,3 @@ export function exportWorkItemsToCsv(workItems: any[]): string {
   // Prefix with UTF-8 BOM (\uFEFF) for Excel compatibility
   return '\uFEFF' + rows.join('\r\n');
 }
-
-

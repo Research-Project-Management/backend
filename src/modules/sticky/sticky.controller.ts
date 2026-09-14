@@ -17,6 +17,7 @@ import {
   CreateStickyDto,
   UpdateStickyDto,
   ReorderStickiesDto,
+  GetStickiesQueryDto,
 } from './dto/sticky.dto';
 import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
 import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
@@ -28,26 +29,18 @@ import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
 export class StickyController {
   constructor(private readonly stickyService: StickyService) {}
 
-  @Get([
-    'me/stickies',
-    'stickies',
-    'projects/:projectId/stickies',
-  ])
+  @Get(['me/stickies', 'stickies', 'projects/:projectId/stickies'])
   @ApiOperation({ summary: 'Get stickies (personal or project-scoped)' })
   async getStickies(
     @CurrentUser('id') userId: string,
-    @Query('projectId') queryProjectId?: string,
+    @Query() query: GetStickiesQueryDto,
     @Param('projectId') paramProjectId?: string,
   ) {
-    const projectId = paramProjectId || queryProjectId;
-    return this.stickyService.getStickies(userId, projectId);
+    const projectId = paramProjectId || query.projectId;
+    return this.stickyService.getStickies(userId, projectId, query.search);
   }
 
-  @Post([
-    'me/stickies',
-    'stickies',
-    'projects/:projectId/stickies',
-  ])
+  @Post(['me/stickies', 'stickies', 'projects/:projectId/stickies'])
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create sticky (personal or project-scoped)' })
   async createSticky(

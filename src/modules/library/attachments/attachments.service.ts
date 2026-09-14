@@ -165,8 +165,8 @@ export class AttachmentsService {
     const isAuthorized =
       attachment &&
       (projectId && projectId !== 'user'
-        ? (attachment.item as any).projectId === projectId
-        : (attachment.item as any).userId === userId);
+        ? attachment.item.projectId === projectId
+        : attachment.item.userId === userId);
 
     if (!isAuthorized) {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
@@ -211,11 +211,7 @@ export class AttachmentsService {
   /**
    * Retrieves revision history for an attachment.
    */
-  async getRevisions(
-    userId: string,
-    attachmentId: string,
-    projectId?: string,
-  ) {
+  async getRevisions(userId: string, attachmentId: string, projectId?: string) {
     const scopeItemWhere =
       projectId && projectId !== 'user'
         ? { projectId, deletedAt: null }
@@ -235,11 +231,7 @@ export class AttachmentsService {
   /**
    * Retrieves all attachments for an item.
    */
-  async getItemAttachments(
-    userId: string,
-    itemId: string,
-    projectId?: string,
-  ) {
+  async getItemAttachments(userId: string, itemId: string, projectId?: string) {
     await this.itemExistencePort.assertExists(userId, itemId, projectId);
 
     const attachments = await this.repo.findManyByItemId(itemId);
@@ -338,7 +330,8 @@ export class AttachmentsService {
     tx: Prisma.TransactionClient,
     helpers: TransactionHelpers,
   ): Promise<UpsertSyncEntityResult> {
-    const userId = (command as any).userId || (command as any).projectId || 'system';
+    const userId =
+      (command as any).userId || (command as any).projectId || 'system';
     if (command.existingId) {
       const existing = await tx.attachment.findUnique({
         where: { id: command.existingId },
@@ -407,14 +400,8 @@ export class AttachmentsService {
         where: { id: parentItemId },
       });
 
-      if (
-        !item ||
-        ((item as any).userId &&
-          (item as any).userId !== userId)
-      ) {
-        throw new NotFoundException(
-          `Item ${parentItemId} not found`,
-        );
+      if (!item || ((item as any).userId && (item as any).userId !== userId)) {
+        throw new NotFoundException(`Item ${parentItemId} not found`);
       }
 
       const created = await tx.attachment.create({
@@ -529,13 +516,9 @@ export class AttachmentsService {
     );
     if (
       !attachment ||
-      (userId &&
-        (attachment.item as any).userId &&
-        (attachment.item as any).userId !== userId)
+      (userId && attachment.item.userId && attachment.item.userId !== userId)
     ) {
-      throw new NotFoundException(
-        `Attachment ${attachmentId} not found`,
-      );
+      throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
     return attachment;
   }

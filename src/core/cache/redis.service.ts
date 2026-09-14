@@ -281,8 +281,6 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
     return [domain, ...validSegments].join(':');
   }
 
-
-
   /**
    * Invalidate all keys matching a workspace scope
    */

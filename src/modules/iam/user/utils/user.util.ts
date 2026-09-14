@@ -1,7 +1,9 @@
 import { User } from '@prisma/client';
 import { SanitizedUser } from '../types/user.type';
 
-export function sanitizeUser(user: User | null | undefined): SanitizedUser | null {
+export function sanitizeUser(
+  user: User | null | undefined,
+): SanitizedUser | null {
   if (!user) return null;
   const { password, ...rest } = user;
   return rest;

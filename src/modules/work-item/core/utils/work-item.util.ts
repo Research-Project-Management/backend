@@ -14,10 +14,7 @@ export const mapPriority = (priority?: string): WorkItemPriority => {
     : WorkItemPriority.none;
 };
 
-import {
-  WorkItemResponse,
-  LabelMinimal,
-} from '../types/work-item.types';
+import { WorkItemResponse, LabelMinimal } from '../types/work-item.types';
 
 export { WorkItemResponse };
 
@@ -73,8 +70,7 @@ export const formatWorkItem = (record: any): WorkItemResponse | null => {
     ? record.childWorkItems.map((child: any) => ({
         ...child,
         id: child.id,
-        completed:
-          child.columnId === 'done' || Boolean(child.completed),
+        completed: child.columnId === 'done' || Boolean(child.completed),
       }))
     : [];
 
@@ -100,9 +96,7 @@ export const formatWorkItem = (record: any): WorkItemResponse | null => {
         : [],
     cycle,
     completed:
-      record.completed !== undefined
-        ? Boolean(record.completed)
-        : isCompleted,
+      record.completed !== undefined ? Boolean(record.completed) : isCompleted,
     relations: record.relations || [],
     labels,
     childWorkItems,
@@ -114,30 +108,39 @@ export const formatWorkItem = (record: any): WorkItemResponse | null => {
       ? record.subscriberIds
       : [],
     attachments:
-      record.attachments && typeof record.attachments === 'object' && !Array.isArray(record.attachments)
+      record.attachments &&
+      typeof record.attachments === 'object' &&
+      !Array.isArray(record.attachments)
         ? {
-            pages: Array.isArray(record.attachments.pages) ? record.attachments.pages : [],
-            papers: Array.isArray(record.attachments.papers) ? record.attachments.papers : [],
-            files: Array.isArray(record.attachments.files) ? record.attachments.files : [],
-            links: Array.isArray(record.attachments.links) ? record.attachments.links : [],
+            pages: Array.isArray(record.attachments.pages)
+              ? record.attachments.pages
+              : [],
+            papers: Array.isArray(record.attachments.papers)
+              ? record.attachments.papers
+              : [],
+            files: Array.isArray(record.attachments.files)
+              ? record.attachments.files
+              : [],
+            links: Array.isArray(record.attachments.links)
+              ? record.attachments.links
+              : [],
           }
         : Array.isArray(record.attachments)
-        ? {
-            pages: [],
-            papers: [],
-            files: record.attachments,
-            links: [],
-          }
-        : {
-            pages: [],
-            papers: [],
-            files: [],
-            links: [],
-          },
+          ? {
+              pages: [],
+              papers: [],
+              files: record.attachments,
+              links: [],
+            }
+          : {
+              pages: [],
+              papers: [],
+              files: [],
+              links: [],
+            },
     createdAt: record.createdAt?.toISOString?.() || record.createdAt,
     updatedAt: record.updatedAt?.toISOString?.() || record.updatedAt,
-    startDate:
-      record.startDate?.toISOString?.() || record.startDate || null,
+    startDate: record.startDate?.toISOString?.() || record.startDate || null,
     dueDate: record.dueDate?.toISOString?.() || record.dueDate || null,
   };
 };

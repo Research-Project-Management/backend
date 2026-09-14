@@ -45,10 +45,7 @@ export interface IActivityRepository {
     entityId: string,
     limit?: number,
   ): Promise<ActivityEventWithActor[]>;
-  findRecentByActor(
-    actorId: string,
-    limit?: number,
-  ): Promise<ActivityEvent[]>;
+  findRecentByActor(actorId: string, limit?: number): Promise<ActivityEvent[]>;
   findUserRecentEvents(
     actorId: string,
     limit?: number,
@@ -77,7 +74,10 @@ export interface IActivityRepository {
     }>;
   }>;
   findWorkItemWithProject(workItemId: string): Promise<any>;
-  findWorkItemComments(workItemId: string, sort?: 'asc' | 'desc'): Promise<any[]>;
+  findWorkItemComments(
+    workItemId: string,
+    sort?: 'asc' | 'desc',
+  ): Promise<any[]>;
   findWorkItemActivityEvents(
     workItemId: string,
     sort?: 'asc' | 'desc',

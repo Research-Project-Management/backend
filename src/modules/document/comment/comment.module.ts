@@ -12,4 +12,3 @@ export class CommentModule {}
 
 export const PageCommentModule = CommentModule;
 export type PageCommentModule = CommentModule;
-

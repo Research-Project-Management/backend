@@ -122,7 +122,10 @@ export class CoreRepository implements IWorkItemRepository {
         }
       }
       if (filter.parentWorkItemId !== undefined) {
-        if (filter.parentWorkItemId === 'none' || filter.parentWorkItemId === 'null') {
+        if (
+          filter.parentWorkItemId === 'none' ||
+          filter.parentWorkItemId === 'null'
+        ) {
           where.parentWorkItemId = null;
         } else if (
           filter.parentWorkItemId === null ||
@@ -217,18 +220,28 @@ export class CoreRepository implements IWorkItemRepository {
   async findProjectWithColumns(projectId: string) {
     return this.prismaService.project.findFirst({
       where: { id: projectId, deletedAt: null },
-      select: { id: true, name: true, workItemColumns: true },
+      select: {
+        id: true,
+        name: true,
+        states: {
+          orderBy: { sequence: 'asc' },
+        },
+      },
     });
   }
 
-  async findWorkItemById(workItemId: string): Promise<WorkItemWithRelations | null> {
+  async findWorkItemById(
+    workItemId: string,
+  ): Promise<WorkItemWithRelations | null> {
     if (!isUuid(workItemId)) {
       return this.prismaService.workItem.findFirst({
         where: { identifier: workItemId, deletedAt: null },
         include: {
           assignee: { select: USER_MINIMAL_SELECT },
           cycle: { select: CYCLE_SELECT },
-          parentWorkItem: { select: { id: true, title: true, identifier: true } },
+          parentWorkItem: {
+            select: { id: true, title: true, identifier: true },
+          },
           childWorkItems: {
             where: { deletedAt: null },
             select: CHILD_WORK_ITEM_SELECT,
@@ -275,7 +288,10 @@ export class CoreRepository implements IWorkItemRepository {
     });
   }
 
-  async countColumnWorkItems(projectId: string, columnId: string): Promise<number> {
+  async countColumnWorkItems(
+    projectId: string,
+    columnId: string,
+  ): Promise<number> {
     return this.prismaService.workItem.count({
       where: { projectId, columnId, deletedAt: null, archivedAt: null },
     });
@@ -467,7 +483,9 @@ export class CoreRepository implements IWorkItemRepository {
     });
   }
 
-  async disconnectParentWorkItem(workItemId: string): Promise<WorkItemWithRelations> {
+  async disconnectParentWorkItem(
+    workItemId: string,
+  ): Promise<WorkItemWithRelations> {
     return this.prismaService.workItem.update({
       where: { id: workItemId },
       data: { parentWorkItem: { disconnect: true } },

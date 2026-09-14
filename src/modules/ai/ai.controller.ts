@@ -162,19 +162,13 @@ export class AiController {
     const tags = fields.tags;
     const chatId = fields.chatId || fields.chat_id;
 
-    return this.aiService.uploadDocument(
-      userId,
-      buffer,
-      mimeType,
-      filename,
-      {
-        scopeId: String(scopeId),
-        projectId: projectId ? String(projectId) : undefined,
-        chatId: chatId ? String(chatId) : undefined,
-        title: title ? String(title) : undefined,
-        tags: tags ? String(tags) : undefined,
-      },
-    );
+    return this.aiService.uploadDocument(userId, buffer, mimeType, filename, {
+      scopeId: String(scopeId),
+      projectId: projectId ? String(projectId) : undefined,
+      chatId: chatId ? String(chatId) : undefined,
+      title: title ? String(title) : undefined,
+      tags: tags ? String(tags) : undefined,
+    });
   }
 
   @Post('documents/bulk')

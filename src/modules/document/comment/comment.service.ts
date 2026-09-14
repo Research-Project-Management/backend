@@ -83,11 +83,7 @@ export class CommentService {
     return { comments };
   }
 
-  async createComment(
-    pageId: string,
-    userId: string,
-    dto: CreateCommentDto,
-  ) {
+  async createComment(pageId: string, userId: string, dto: CreateCommentDto) {
     const comment = await this.commentRepo.createComment({
       pageId,
       authorId: userId,
@@ -196,4 +192,3 @@ export class CommentService {
 
 export const PageCommentService = CommentService;
 export type PageCommentService = CommentService;
-

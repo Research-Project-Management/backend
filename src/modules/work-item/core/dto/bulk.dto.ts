@@ -73,7 +73,9 @@ export class ReorderWorkItemDto {
   @IsOptional()
   workItemId?: string;
 
-  @ApiPropertyOptional({ description: 'Work item ID to reorder (alias for workItemId)' })
+  @ApiPropertyOptional({
+    description: 'Work item ID to reorder (alias for workItemId)',
+  })
   @IsString()
   @IsOptional()
   id?: string;

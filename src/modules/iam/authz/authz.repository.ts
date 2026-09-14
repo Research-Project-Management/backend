@@ -2,10 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { isUUID } from 'class-validator';
 import { Role } from './enums/role.enum';
-import {
-  IAuthzRepository,
-  AuthzProjectContext,
-} from './types/authz.type';
+import { IAuthzRepository, AuthzProjectContext } from './types/authz.type';
 
 @Injectable()
 export class AuthzRepository implements IAuthzRepository {
@@ -62,7 +59,7 @@ export class AuthzRepository implements IAuthzRepository {
       select: { role: true },
     });
 
-    return member ? (member.role as unknown as Role) : null;
+    return member ? member.role : null;
   }
 
   /**

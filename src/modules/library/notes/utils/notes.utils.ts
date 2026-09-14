@@ -49,7 +49,9 @@ const COLOR_LABEL_MAP: Record<string, string> = {
  * and returns numeric Y and X coordinates for spatial ordering.
  * Returns { y: 0, x: 0 } if the format is invalid or the value is null.
  */
-export function parseAnnotationSortIndex(sortIndex: string | null | undefined): {
+export function parseAnnotationSortIndex(
+  sortIndex: string | null | undefined,
+): {
   y: number;
   x: number;
 } {
@@ -190,4 +192,3 @@ export function formatLiteratureNoteMarkdown(
 
   return lines.join('\n');
 }
-

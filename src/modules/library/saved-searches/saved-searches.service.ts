@@ -22,16 +22,10 @@ export class SavedSearchesService {
     private readonly evaluator: ConditionEvaluatorEngine,
   ) {}
 
-  async create(
-    userId: string,
-    dto: CreateSavedSearchDto,
-  ) {
+  async create(userId: string, dto: CreateSavedSearchDto) {
     let initialCount = 0;
     try {
-      const where = this.evaluator.compile(
-        userId,
-        dto.conditions,
-      );
+      const where = this.evaluator.compile(userId, dto.conditions);
       initialCount = await this.repo.countMatchingItems(where);
     } catch (err: any) {
       this.logger.warn(`Failed to evaluate initial count: ${err?.message}`);
@@ -81,10 +75,7 @@ export class SavedSearchesService {
     return { success: true, id };
   }
 
-  async preview(
-    userId: string,
-    dto: PreviewSavedSearchDto,
-  ) {
+  async preview(userId: string, dto: PreviewSavedSearchDto) {
     if (!dto.conditions) {
       throw new BadRequestException('Conditions must be provided for preview');
     }
@@ -101,11 +92,7 @@ export class SavedSearchesService {
     };
   }
 
-  async execute(
-    userId: string,
-    id: string,
-    dto: ExecuteSavedSearchQueryDto,
-  ) {
+  async execute(userId: string, id: string, dto: ExecuteSavedSearchQueryDto) {
     const savedSearch = await this.findById(userId, id);
     const conditions = savedSearch.conditions as any;
 

@@ -15,12 +15,7 @@ import { DocumentFacade, DOCUMENT_FACADE } from './document.facade';
       useClass: DocumentFacade,
     },
   ],
-  exports: [
-    CoreService,
-    CoreRepository,
-    DocumentFacade,
-    DOCUMENT_FACADE,
-  ],
+  exports: [CoreService, CoreRepository, DocumentFacade, DOCUMENT_FACADE],
 })
 export class CoreModule {}
 

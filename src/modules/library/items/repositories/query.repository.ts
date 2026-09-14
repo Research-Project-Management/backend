@@ -109,7 +109,11 @@ export class QueryRepository {
       },
     });
 
-    if (!item || ((item as any).userId && (item as any).userId !== userId) || item.deletedAt) {
+    if (
+      !item ||
+      ((item as any).userId && (item as any).userId !== userId) ||
+      item.deletedAt
+    ) {
       return null;
     }
 
@@ -161,11 +165,7 @@ export class QueryRepository {
     });
   }
 
-  async findByDoi(
-    userId: string,
-    doi: string,
-    tx?: Prisma.TransactionClient,
-  ) {
+  async findByDoi(userId: string, doi: string, tx?: Prisma.TransactionClient) {
     if (!isUuid(userId)) return null;
     const client = this.getClient(tx);
     return client.item.findFirst({
@@ -407,7 +407,9 @@ export class QueryRepository {
         { citationKey: { contains: options.search, mode: 'insensitive' } },
         {
           contributors: {
-            some: { fullName: { contains: options.search, mode: 'insensitive' } },
+            some: {
+              fullName: { contains: options.search, mode: 'insensitive' },
+            },
           },
         },
       ];
@@ -537,9 +539,7 @@ export class QueryRepository {
   ): Promise<void> {
     const isPresent = await this.exists(userId, itemId, tx, projectId);
     if (!isPresent) {
-      throw new NotFoundException(
-        `Item ${itemId} not found`,
-      );
+      throw new NotFoundException(`Item ${itemId} not found`);
     }
   }
 

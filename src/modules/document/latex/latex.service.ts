@@ -215,14 +215,14 @@ export class LatexService {
           where: { id: pageId },
           select: { authorId: true },
         });
-        tenantId = page?.authorId || (page as any)?.workspaceId;
+        tenantId = page?.authorId;
       }
       if (!tenantId && projectId && this.prisma) {
         const project = await this.prisma.project.findUnique({
           where: { id: projectId },
           select: { createdById: true },
         });
-        tenantId = project?.createdById || (project as any)?.workspaceId;
+        tenantId = project?.createdById;
       }
 
       if (tenantId) {

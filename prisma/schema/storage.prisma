@@ -1,16 +1,49 @@
-// -- 3. Storage & Asset Bounded Context (Storage Microservice) ----------------
+// -- 3. Storage & Asset Bounded Context (Enterprise Storage Platform) ------------
 
 enum FilePermission {
   view
   edit
 }
 
+enum BlobStatus {
+  PENDING
+  READY
+  DELETED
+}
+
+enum UploadSessionStatus {
+  INITIALIZED
+  UPLOADING
+  COMPLETED
+  ABORTED
+  EXPIRED
+}
+
+enum FileAuditAction {
+  VIEW
+  STREAM
+  DOWNLOAD
+  UPLOAD
+  REVISE
+  MOVE
+  RENAME
+  SHARE
+  SHARE_REVOKE
+  TRASH
+  RESTORE
+  PURGE
+}
+
+// -------------------------
+// Logical File Node (Drive / Project / Page / Library)
+// -------------------------
+
 model File {
   id           String         @id @default(uuid()) @db.Uuid
   filename     String
-  size         Int            @default(0)
+  size         BigInt         @default(0)
   mimeType     String         @default("application/octet-stream") @map("mime_type")
-  url          String
+  url          String         @default("")
   key          String?
   hash         String?
   thumbnail    String?
@@ -25,11 +58,16 @@ model File {
   linkedToType String?        @map("linked_to_type")
   linkedToId   String?        @map("linked_to_id")
 
-  // Ownership & Sharing (100% Personal Scope - Zero Workspace)
+  // CAS Physical Blob Link
+  blobId       String?        @map("blob_id") @db.Uuid
+  blob         StorageBlob?   @relation(fields: [blobId], references: [id], onDelete: Restrict)
+
+  // Ownership & Sharing
   authorId     String         @map("author_id") @db.Uuid
   author       User           @relation("UserFiles", fields: [authorId], references: [id], onDelete: Cascade)
   sharedWith   FileShare[]
   attachments  Attachment[]
+  versions     FileVersion[]
 
   trashedAt    DateTime?      @map("trashed_at") @db.Timestamptz(6)
   createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -40,6 +78,7 @@ model File {
   @@index([url])
   @@index([linkedToType, linkedToId])
   @@index([trashedAt])
+  @@index([blobId])
   @@map("files")
 }
 
@@ -55,4 +94,135 @@ model FileShare {
   @@unique([fileId, userId])
   @@index([userId])
   @@map("file_shares")
+}
+
+// -------------------------
+// Physical Storage Blob (CAS - Content-Addressable Storage)
+// -------------------------
+
+model StorageBlob {
+  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId      String         @map("tenant_id") @db.Uuid
+  contentHash   Bytes          @map("content_hash")
+  hashAlgorithm String         @default("SHA256") @map("hash_algorithm") @db.VarChar(16)
+  sizeBytes     BigInt         @map("size_bytes")
+  s3Key         String         @map("s3_key") @db.VarChar(512)
+  s3Bucket      String         @map("s3_bucket") @db.VarChar(63)
+  storageClass  String         @default("STANDARD") @map("storage_class") @db.VarChar(32)
+  refCount      Int            @default(1) @map("ref_count")
+  status        BlobStatus     @default(PENDING)
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  tombstoneAt   DateTime?      @map("tombstone_at") @db.Timestamptz(6)
+
+  files         File[]
+  versions      FileVersion[]
+
+  @@unique([tenantId, contentHash], map: "uq_blobs_tenant_hash")
+  @@index([tombstoneAt], map: "idx_blobs_tombstone")
+  @@index([status], map: "idx_blobs_status")
+  @@map("storage_blobs")
+}
+
+// -------------------------
+// File Revisions / Versioning (Scientific Reproducibility)
+// -------------------------
+
+model FileVersion {
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fileId        String       @map("file_id") @db.Uuid
+  blobId        String       @map("blob_id") @db.Uuid
+  versionNumber Int          @map("version_number")
+  changeComment String?      @map("change_comment") @db.VarChar(500)
+  createdById   String       @map("created_by_id") @db.Uuid
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  file          File         @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  blob          StorageBlob  @relation(fields: [blobId], references: [id], onDelete: Restrict)
+
+  @@unique([fileId, versionNumber], map: "uq_file_version")
+  @@map("file_versions")
+}
+
+// -------------------------
+// S3 Multipart Upload Sessions
+// -------------------------
+
+model UploadSession {
+  id           String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String              @map("tenant_id") @db.Uuid
+  projectId    String?             @map("project_id") @db.Uuid
+  userId       String              @map("user_id") @db.Uuid
+  s3UploadId   String              @map("s3_upload_id") @db.VarChar(255)
+  s3Key        String              @map("s3_key") @db.VarChar(512)
+  filename     String              @db.VarChar(255)
+  mimeType     String              @default("application/octet-stream") @map("mime_type") @db.VarChar(127)
+  totalSize    BigInt              @map("total_size")
+  partSize     Int                 @map("part_size")
+  totalParts   Int                 @map("total_parts")
+  expectedHash Bytes?              @map("expected_hash")
+  parentId     String?             @map("parent_id") @db.Uuid
+  linkedToType String?             @map("linked_to_type")
+  linkedToId   String?             @map("linked_to_id")
+  status       UploadSessionStatus @default(INITIALIZED)
+  expiresAt    DateTime            @map("expires_at") @db.Timestamptz(6)
+  createdAt    DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  parts        UploadPart[]
+
+  @@index([status, expiresAt], map: "idx_upload_sessions_cleanup")
+  @@index([tenantId, userId], map: "idx_upload_sessions_user")
+  @@map("upload_sessions")
+}
+
+model UploadPart {
+  sessionId  String        @map("session_id") @db.Uuid
+  partNumber Int           @map("part_number")
+  etag       String        @db.VarChar(64)
+  sizeBytes  Int           @map("size_bytes")
+  uploadedAt DateTime      @default(now()) @map("uploaded_at") @db.Timestamptz(6)
+
+  session    UploadSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@id([sessionId, partNumber])
+  @@map("upload_parts")
+}
+
+// -------------------------
+// Quota Ledger
+// -------------------------
+
+model StorageQuota {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  projectId String?  @map("project_id") @db.Uuid
+  usedBytes BigInt   @default(0) @map("used_bytes")
+  maxBytes  BigInt   @map("max_bytes")
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([tenantId, projectId], map: "uq_quota_scope")
+  @@map("storage_quotas")
+}
+
+// -------------------------
+// Tamper-Evident Audit Log
+// -------------------------
+
+model FileAuditLog {
+  id          String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String          @map("tenant_id") @db.Uuid
+  projectId   String?         @map("project_id") @db.Uuid
+  fileId      String          @map("file_id") @db.Uuid
+  actorId     String          @map("actor_id") @db.Uuid
+  action      FileAuditAction
+  ipAddress   String          @map("ip_address") @db.VarChar(45)
+  userAgent   String          @map("user_agent") @db.VarChar(512)
+  details     Json            @default("{}") @db.JsonB
+  prevRowHash String?         @map("prev_row_hash") @db.VarChar(64)
+  rowHash     String          @map("row_hash") @db.VarChar(64)
+  timestamp   DateTime        @default(now()) @db.Timestamptz(6)
+
+  @@index([fileId, timestamp(sort: Desc)], map: "idx_audit_log_file_time")
+  @@index([tenantId, action], map: "idx_audit_log_tenant_action")
+  @@map("file_audit_logs")
 }

@@ -134,7 +134,8 @@ export class ViewService {
     const filters = updateViewDto.filters ?? updateViewDto.query;
 
     const mergedDisplayFilters =
-      updateViewDto.displayFilters !== undefined || updateViewDto.layout !== undefined
+      updateViewDto.displayFilters !== undefined ||
+      updateViewDto.layout !== undefined
         ? {
             ...(existing.displayFilters || {}),
             ...(updateViewDto.displayFilters || {}),
@@ -271,7 +272,8 @@ export class ViewService {
     // Merge view filters with any runtime override filters
     const mergedQuery: QueryWorkItemDto = {
       ...(viewFilters.columnId && { columnId: viewFilters.columnId }),
-      ...(viewFilters.status && !viewFilters.columnId && { columnId: viewFilters.status }),
+      ...(viewFilters.status &&
+        !viewFilters.columnId && { columnId: viewFilters.status }),
       ...(viewFilters.assigneeId && { assigneeId: viewFilters.assigneeId }),
       ...(viewFilters.priority && { priority: viewFilters.priority }),
       ...(viewFilters.labels && {

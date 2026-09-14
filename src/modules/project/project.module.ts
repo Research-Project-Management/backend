@@ -8,4 +8,3 @@ import { InvitationModule } from './invitation/invitation.module';
   exports: [CoreModule, MemberModule, InvitationModule],
 })
 export class ProjectModule {}
-

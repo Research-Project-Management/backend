@@ -138,7 +138,9 @@ export class LabelRepository implements ILabelRepository {
       const targetSet = new Set(targets);
       await this.prisma.$transaction(
         workItems.map((item) => {
-          const cleaned = item.labels.filter((label: string) => !targetSet.has(label));
+          const cleaned = item.labels.filter(
+            (label: string) => !targetSet.has(label),
+          );
           return this.prisma.workItem.update({
             where: { id: item.id },
             data: { labels: cleaned },
@@ -176,12 +178,10 @@ export class LabelRepository implements ILabelRepository {
     labelId: string,
     data: Prisma.LabelUpdateInput | Prisma.LabelUncheckedUpdateInput,
   ): Promise<Label> {
-    return this.update(labelId, data as Prisma.LabelUncheckedUpdateInput);
+    return this.update(labelId, data);
   }
 
   async deleteLabel(labelId: string): Promise<Label> {
     return this.delete(labelId);
   }
 }
-
-

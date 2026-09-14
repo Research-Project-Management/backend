@@ -184,10 +184,10 @@ export class AttachmentService {
         (r.mimeType === 'application/x-page'
           ? 'page'
           : r.mimeType === 'application/x-paper'
-          ? 'paper'
-          : r.mimeType === 'text/uri-list'
-          ? 'link'
-          : 'file');
+            ? 'paper'
+            : r.mimeType === 'text/uri-list'
+              ? 'link'
+              : 'file');
 
       if (category === 'page') {
         pages.push({
@@ -195,7 +195,9 @@ export class AttachmentService {
           pageId: meta.pageId || r.id,
           title: meta.title || r.filename,
           slug: meta.slug || null,
-          addedAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
+          addedAt: r.createdAt
+            ? new Date(r.createdAt).toISOString()
+            : new Date().toISOString(),
         });
       } else if (category === 'paper') {
         papers.push({
@@ -204,14 +206,18 @@ export class AttachmentService {
           title: meta.title || r.filename,
           doi: meta.doi || null,
           citationKey: meta.citationKey || null,
-          addedAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
+          addedAt: r.createdAt
+            ? new Date(r.createdAt).toISOString()
+            : new Date().toISOString(),
         });
       } else if (category === 'link') {
         links.push({
           id: r.id,
           title: meta.title || r.filename,
           url: r.url,
-          addedAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
+          addedAt: r.createdAt
+            ? new Date(r.createdAt).toISOString()
+            : new Date().toISOString(),
         });
       } else {
         files.push({
@@ -220,8 +226,12 @@ export class AttachmentService {
           url: r.url,
           size: r.size ? `${Math.round(r.size / 1024)} KB` : undefined,
           type: r.mimeType,
-          createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
-          uploadedAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
+          createdAt: r.createdAt
+            ? new Date(r.createdAt).toISOString()
+            : new Date().toISOString(),
+          uploadedAt: r.createdAt
+            ? new Date(r.createdAt).toISOString()
+            : new Date().toISOString(),
         });
       }
     }
@@ -237,7 +247,9 @@ export class AttachmentService {
     const workItem = await this.prismaService.workItem.findUnique({
       where: { id: basic.id },
       include: {
-        assignee: { select: { id: true, name: true, email: true, avatar: true } },
+        assignee: {
+          select: { id: true, name: true, email: true, avatar: true },
+        },
         cycle: { select: { id: true, name: true } },
         parentWorkItem: { select: { id: true, title: true, identifier: true } },
         childWorkItems: {
@@ -249,7 +261,9 @@ export class AttachmentService {
             completed: true,
             rank: true,
             assigneeId: true,
-            assignee: { select: { id: true, name: true, email: true, avatar: true } },
+            assignee: {
+              select: { id: true, name: true, email: true, avatar: true },
+            },
             dueDate: true,
           },
         },
@@ -259,7 +273,10 @@ export class AttachmentService {
     if (!workItem) {
       throw new NotFoundException(`Work item ${workItemId} not found`);
     }
-    const records = await this.repository.findByEntity(EntityType.work_item, basic.id);
+    const records = await this.repository.findByEntity(
+      EntityType.work_item,
+      basic.id,
+    );
     const center = this.formatAttachments(records);
     return formatWorkItem({
       ...workItem,
@@ -276,7 +293,10 @@ export class AttachmentService {
       throw new NotFoundException(`Work item ${workItemId} not found`);
     }
 
-    const records = await this.repository.findByEntity(EntityType.work_item, workItem.id);
+    const records = await this.repository.findByEntity(
+      EntityType.work_item,
+      workItem.id,
+    );
     const center = this.formatAttachments(records);
 
     return {
@@ -395,7 +415,10 @@ export class AttachmentService {
       throw new NotFoundException(`Work item ${workItemId} not found`);
     }
 
-    const records = await this.repository.findByEntity(EntityType.work_item, workItem.id);
+    const records = await this.repository.findByEntity(
+      EntityType.work_item,
+      workItem.id,
+    );
     const target = records.find(
       (r) => r.id === pageId || (r.metadata as any)?.pageId === pageId,
     );
@@ -463,7 +486,10 @@ export class AttachmentService {
       throw new NotFoundException(`Work item ${workItemId} not found`);
     }
 
-    const records = await this.repository.findByEntity(EntityType.work_item, workItem.id);
+    const records = await this.repository.findByEntity(
+      EntityType.work_item,
+      workItem.id,
+    );
     const target = records.find(
       (r) => r.id === paperId || (r.metadata as any)?.paperId === paperId,
     );
@@ -485,7 +511,10 @@ export class AttachmentService {
       throw new NotFoundException(`Work item ${workItemId} not found`);
     }
 
-    const parsedSize = typeof dto.size === 'string' ? parseInt(dto.size, 10) || 0 : dto.size || 0;
+    const parsedSize =
+      typeof dto.size === 'string'
+        ? parseInt(dto.size, 10) || 0
+        : dto.size || 0;
     const attachment = await this.repository.create(
       {
         entityType: EntityType.work_item,
@@ -573,15 +602,24 @@ export class AttachmentService {
     };
   }
 
-  async detachLink(workItemId: string, linkIndexOrId: string | number, _authorId?: string) {
+  async detachLink(
+    workItemId: string,
+    linkIndexOrId: string | number,
+    _authorId?: string,
+  ) {
     const workItem = await this.findWorkItem(workItemId);
     if (!workItem) {
       throw new NotFoundException(`Work item ${workItemId} not found`);
     }
 
-    const records = await this.repository.findByEntity(EntityType.work_item, workItem.id);
+    const records = await this.repository.findByEntity(
+      EntityType.work_item,
+      workItem.id,
+    );
     const linkRecords = records.filter(
-      (r) => (r.metadata as any)?.category === 'link' || r.mimeType === 'text/uri-list',
+      (r) =>
+        (r.metadata as any)?.category === 'link' ||
+        r.mimeType === 'text/uri-list',
     );
 
     let target = linkRecords.find((r) => r.id === String(linkIndexOrId));

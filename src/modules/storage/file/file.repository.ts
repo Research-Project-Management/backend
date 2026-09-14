@@ -85,8 +85,6 @@ export class FileRepository implements IFileRepository {
     });
   }
 
-
-
   async updateFile(
     fileId: string,
     data: Prisma.FileUpdateInput | Prisma.FileUncheckedUpdateInput,
@@ -125,9 +123,7 @@ export class FileRepository implements IFileRepository {
     });
   }
 
-  async findUserStarredFiles(
-    userId: string,
-  ): Promise<FileWithAuthor[]> {
+  async findUserStarredFiles(userId: string): Promise<FileWithAuthor[]> {
     return this.prisma.file.findMany({
       where: {
         authorId: userId,

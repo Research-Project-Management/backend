@@ -157,15 +157,10 @@ export class NotesService implements IItemNotesExtractorPort {
           entityId: id,
         });
 
-        await helpers.publishOutbox(
-          userId,
+        await helpers.publishOutbox(userId, id, 'library.note.deleted', {
           id,
-          'library.note.deleted',
-          {
-            id,
-            deletedAt: new Date(),
-          },
-        );
+          deletedAt: new Date(),
+        });
       }
 
       return deleted;
@@ -187,9 +182,7 @@ export class NotesService implements IItemNotesExtractorPort {
       });
 
       if (!existing) {
-        throw new NotFoundException(
-          `Note ${command.existingId} not found`,
-        );
+        throw new NotFoundException(`Note ${command.existingId} not found`);
       }
 
       const mergedNoteTags =
@@ -342,15 +335,10 @@ export class NotesService implements IItemNotesExtractorPort {
     }
   }
 
-  async extractNotesFromAnnotations(
-    userId: string,
-    itemId: string,
-  ) {
+  async extractNotesFromAnnotations(userId: string, itemId: string) {
     const item = await this.itemReadPort.findById(userId, itemId);
     if (!item) {
-      throw new NotFoundException(
-        `Item ${itemId} not found`,
-      );
+      throw new NotFoundException(`Item ${itemId} not found`);
     }
 
     const attachments = await this.prisma.attachment.findMany({

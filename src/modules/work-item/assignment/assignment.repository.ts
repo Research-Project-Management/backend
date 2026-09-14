@@ -9,7 +9,6 @@ import {
 } from './types/assignment.types';
 import { isUuid } from '@/core/utils/uuid.util';
 
-
 export type WorkItemWithProject = WorkItem & {
   /** JSON array of all assignee user IDs (multi-assignee). Prisma v6 field. */
   assigneeIds?: unknown;

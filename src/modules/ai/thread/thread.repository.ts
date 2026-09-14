@@ -200,7 +200,10 @@ export class ThreadRepository implements IAiRepository {
     });
   }
 
-  async clearUserChats(userId: string, projectId?: string | null): Promise<{ count: number }> {
+  async clearUserChats(
+    userId: string,
+    projectId?: string | null,
+  ): Promise<{ count: number }> {
     const where: Prisma.AiChatWhereInput = {
       userId,
     };

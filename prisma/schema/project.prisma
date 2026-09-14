@@ -31,7 +31,6 @@ model Project {
 
   // WorkItem & Board extensions
   workItemSequence   Int                   @default(0) @map("work_item_sequence")
-  workItemColumns    Json?                 @default("[]") @map("work_item_columns")
 
   createdAt      DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)

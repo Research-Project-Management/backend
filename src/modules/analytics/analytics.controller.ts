@@ -55,7 +55,9 @@ export class AnalyticsController {
   @Get(['projects/:projectId/labels', 'project/:projectId/labels'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
-  @ApiOperation({ summary: 'Get WorkItem count grouped by label for a project' })
+  @ApiOperation({
+    summary: 'Get WorkItem count grouped by label for a project',
+  })
   async getLabelDistribution(@Param('projectId') projectId: string) {
     return this.analyticsService.getLabelDistribution(projectId);
   }

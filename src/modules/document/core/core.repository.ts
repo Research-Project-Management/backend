@@ -204,9 +204,7 @@ export class CoreRepository implements IPageRepository {
     });
   }
 
-  async findProjectContext(
-    projectId: string,
-  ): Promise<{ id: string } | null> {
+  async findProjectContext(projectId: string): Promise<{ id: string } | null> {
     if (!isUuid(projectId)) {
       return this.prisma.project
         .findFirst({

@@ -5,7 +5,10 @@
 /**
  * Formats a project prefix identifier (e.g., 'RES' -> 'RES-101').
  */
-export function formatWorkItemCode(prefix: string, sequenceNumber: number): string {
+export function formatWorkItemCode(
+  prefix: string,
+  sequenceNumber: number,
+): string {
   const cleanPrefix = (prefix || 'WI').trim().toUpperCase();
   return `${cleanPrefix}-${sequenceNumber}`;
 }

@@ -48,10 +48,7 @@ export class AnnotationsService {
     pageIndex?: number,
     type?: AnnotationType,
   ) {
-    await this.attachmentsService.assertAttachmentExists(
-      attachmentId,
-      userId,
-    );
+    await this.attachmentsService.assertAttachmentExists(attachmentId, userId);
     return this.annotationsRepo.findByAttachment(attachmentId, pageIndex, type);
   }
 
@@ -79,10 +76,10 @@ export class AnnotationsService {
 
       await helpers.appendChange(userId, {
         entityType: 'Annotation',
-        entityId:   annotation.id,
-        action:     'create',
-        version:    annotation.version,
-        data:       annotation,
+        entityId: annotation.id,
+        action: 'create',
+        version: annotation.version,
+        data: annotation,
       });
 
       await helpers.publishOutbox(
@@ -125,10 +122,10 @@ export class AnnotationsService {
 
       await helpers.appendChange(userId, {
         entityType: 'Annotation',
-        entityId:   updated.id,
-        action:     'update',
-        version:    updated.version,
-        data:       updated,
+        entityId: updated.id,
+        action: 'update',
+        version: updated.version,
+        data: updated,
       });
 
       await helpers.publishOutbox(
@@ -142,11 +139,7 @@ export class AnnotationsService {
     });
   }
 
-  async deleteAnnotation(
-    userId: string,
-    id: string,
-    expectedVersion?: number,
-  ) {
+  async deleteAnnotation(userId: string, id: string, expectedVersion?: number) {
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
       const existing = await this.annotationsRepo.findById(id, tx);
       if (!existing) throw new NotFoundException(`Annotation ${id} not found`);
@@ -169,15 +162,13 @@ export class AnnotationsService {
       if (deleted) {
         await helpers.recordTombstone(userId, {
           entityType: 'Annotation',
-          entityId:   id,
+          entityId: id,
         });
 
-        await helpers.publishOutbox(
-          userId,
+        await helpers.publishOutbox(userId, id, 'library.annotation.deleted', {
           id,
-          'library.annotation.deleted',
-          { id, deletedAt: new Date() },
-        );
+          deletedAt: new Date(),
+        });
       }
 
       return deleted;
@@ -187,9 +178,9 @@ export class AnnotationsService {
   // ─── Batch ─────────────────────────────────────────────────────────────────
 
   async batchUpsertAnnotations(
-    userId:       string,
+    userId: string,
     attachmentId: string,
-    data:         BatchAnnotationsData,
+    data: BatchAnnotationsData,
   ): Promise<BatchAnnotationsResult> {
     if (data.upserts.length === 0 && data.deletes.length === 0) {
       return { created: [], updated: [], deleted: [] };
@@ -214,9 +205,9 @@ export class AnnotationsService {
       for (const annotation of result.created) {
         await helpers.appendChange(userId, {
           entityType: 'Annotation',
-          entityId:   annotation.id,
-          action:     'create',
-          version:    annotation.version,
+          entityId: annotation.id,
+          action: 'create',
+          version: annotation.version,
         });
         await helpers.publishOutbox(
           userId,
@@ -230,9 +221,9 @@ export class AnnotationsService {
       for (const annotation of result.updated) {
         await helpers.appendChange(userId, {
           entityType: 'Annotation',
-          entityId:   annotation.id,
-          action:     'update',
-          version:    annotation.version,
+          entityId: annotation.id,
+          action: 'update',
+          version: annotation.version,
         });
         await helpers.publishOutbox(
           userId,
@@ -246,14 +237,12 @@ export class AnnotationsService {
       for (const id of result.deleted) {
         await helpers.recordTombstone(userId, {
           entityType: 'Annotation',
-          entityId:   id,
+          entityId: id,
         });
-        await helpers.publishOutbox(
-          userId,
+        await helpers.publishOutbox(userId, id, 'library.annotation.deleted', {
           id,
-          'library.annotation.deleted',
-          { id, deletedAt: new Date() },
-        );
+          deletedAt: new Date(),
+        });
       }
 
       return result;
@@ -289,18 +278,18 @@ export class AnnotationsService {
         where: { id: command.existingId },
         data: {
           quoteText: this.normalizer.normalizeQuote(command.quoteText),
-          comment:   this.normalizer.normalizeComment(command.comment),
-          color:     this.normalizer.normalizeColor(command.color),
+          comment: this.normalizer.normalizeComment(command.comment),
+          color: this.normalizer.normalizeColor(command.color),
           pageIndex: command.pageIndex,
-          version:   { increment: 1 },
+          version: { increment: 1 },
         },
       });
 
       await helpers.appendChange(userId, {
         entityType: 'Annotation',
-        entityId:   updated.id,
-        action:     'update',
-        version:    updated.version,
+        entityId: updated.id,
+        action: 'update',
+        version: updated.version,
       });
 
       return { id: updated.id, isNew: false, version: updated.version };
@@ -319,23 +308,23 @@ export class AnnotationsService {
 
       const created = await tx.annotation.create({
         data: {
-          attachmentId:        command.attachmentId,
-          authorId:            userId,
-          pageIndex:           command.pageIndex,
+          attachmentId: command.attachmentId,
+          authorId: userId,
+          pageIndex: command.pageIndex,
           annotationSortIndex: buildAnnotationSortIndex(command.pageIndex),
-          quoteText:           this.normalizer.normalizeQuote(command.quoteText),
-          comment:             this.normalizer.normalizeComment(command.comment),
-          color:               this.normalizer.normalizeColor(command.color),
-          type:                this.normalizer.parseType(command.type),
-          version:             1,
+          quoteText: this.normalizer.normalizeQuote(command.quoteText),
+          comment: this.normalizer.normalizeComment(command.comment),
+          color: this.normalizer.normalizeColor(command.color),
+          type: this.normalizer.parseType(command.type),
+          version: 1,
         },
       });
 
       await helpers.appendChange(userId, {
         entityType: 'Annotation',
-        entityId:   created.id,
-        action:     'create',
-        version:    1,
+        entityId: created.id,
+        action: 'create',
+        version: 1,
       });
 
       await helpers.publishOutbox(
@@ -356,7 +345,9 @@ export class AnnotationsService {
   ): Promise<void> {
     const userId = command.userId || (command as any).workspaceId || 'system';
     const { entityId } = command;
-    const existing = await tx.annotation.findUnique({ where: { id: entityId } });
+    const existing = await tx.annotation.findUnique({
+      where: { id: entityId },
+    });
     if (!existing) return;
 
     await this.attachmentsService.assertAttachmentExists(
@@ -367,14 +358,14 @@ export class AnnotationsService {
 
     await tx.annotation.update({
       where: { id: entityId },
-      data:  { deletedAt: new Date() },
+      data: { deletedAt: new Date() },
     });
 
     await helpers.appendChange(userId, {
       entityType: 'Annotation',
       entityId,
-      action:     'delete',
-      version:    existing.version + 1,
+      action: 'delete',
+      version: existing.version + 1,
     });
   }
 
@@ -391,4 +382,3 @@ export class AnnotationsService {
     }
   }
 }
-

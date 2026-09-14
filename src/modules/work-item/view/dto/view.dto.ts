@@ -50,7 +50,8 @@ export class CreateViewDto {
   displayFilters?: Record<string, any>;
 
   @ApiPropertyOptional({
-    description: 'Direct layout property (e.g. board, list, table, calendar, timeline)',
+    description:
+      'Direct layout property (e.g. board, list, table, calendar, timeline)',
     example: 'board',
   })
   @IsOptional()
@@ -135,7 +136,8 @@ export class UpdateViewDto {
   displayFilters?: Record<string, any>;
 
   @ApiPropertyOptional({
-    description: 'Direct layout property (e.g. board, list, table, calendar, timeline)',
+    description:
+      'Direct layout property (e.g. board, list, table, calendar, timeline)',
     example: 'board',
   })
   @IsOptional()

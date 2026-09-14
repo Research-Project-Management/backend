@@ -4,7 +4,6 @@ import { WorkItem, Prisma } from '@prisma/client';
 import { IRelationRepository } from './types/relation.types';
 import { isUuid } from '@/core/utils/uuid.util';
 
-
 @Injectable()
 export class RelationRepository implements IRelationRepository {
   constructor(private readonly prismaService: PrismaService) {}

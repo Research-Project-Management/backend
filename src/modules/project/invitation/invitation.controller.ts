@@ -36,7 +36,8 @@ export class InvitationController {
   @Get(['project/invitations/me', 'projects/invitations/me'])
   @ApiOperation({
     summary: 'Get all pending invitations received by current user',
-    description: 'Returns list of projects where other users invited the current user to join.',
+    description:
+      'Returns list of projects where other users invited the current user to join.',
   })
   @ApiResponse({ status: 200, description: 'List of received invitations' })
   async getMyInvitations(@CurrentUser() user: AuthenticatedUser) {
@@ -49,7 +50,10 @@ export class InvitationController {
   ])
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Accept a project invitation' })
-  @ApiResponse({ status: 200, description: 'Invitation accepted and joined project' })
+  @ApiResponse({
+    status: 200,
+    description: 'Invitation accepted and joined project',
+  })
   async acceptInvitation(
     @Param('invitationId') invitationId: string,
     @CurrentUser() user: AuthenticatedUser,
@@ -73,7 +77,9 @@ export class InvitationController {
 
   @Post(['project/invitations/join', 'projects/invitations/join'])
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Join a project using an invite code, token, or identifier' })
+  @ApiOperation({
+    summary: 'Join a project using an invite code, token, or identifier',
+  })
   @ApiResponse({ status: 200, description: 'Joined project successfully' })
   async joinByCode(
     @Body() dto: JoinByCodeDto,

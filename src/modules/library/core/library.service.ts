@@ -13,7 +13,8 @@ export class LibraryService {
   constructor(private readonly prisma: PrismaService) {}
 
   private buildScopeFilter(scopeId: string, userId?: string) {
-    const isProject = Boolean(scopeId) && scopeId !== 'user' && scopeId !== userId;
+    const isProject =
+      Boolean(scopeId) && scopeId !== 'user' && scopeId !== userId;
     if (isProject) {
       return { projectId: scopeId };
     }
@@ -21,7 +22,10 @@ export class LibraryService {
     return { userId: effectiveUserId, projectId: null };
   }
 
-  async getLibraryStats(scopeId: string, userId?: string): Promise<LibraryStats> {
+  async getLibraryStats(
+    scopeId: string,
+    userId?: string,
+  ): Promise<LibraryStats> {
     const scopeFilter = this.buildScopeFilter(scopeId, userId);
     const [itemsCount, collectionsCount, tagsCount, notesCount, attachments] =
       await Promise.all([
@@ -66,7 +70,8 @@ export class LibraryService {
     scopeId: string,
     userId?: string,
   ): Promise<LibraryOverview> {
-    const isProject = Boolean(scopeId) && scopeId !== 'user' && scopeId !== userId;
+    const isProject =
+      Boolean(scopeId) && scopeId !== 'user' && scopeId !== userId;
     const scopeFilter = this.buildScopeFilter(scopeId, userId);
     const [
       recentItems,
@@ -147,7 +152,10 @@ export class LibraryService {
         doiMap.set(cleanDoi, list);
       }
       if (item.title) {
-        const cleanTitle = item.title.toLowerCase().trim().replace(/[^\w\s]/g, '');
+        const cleanTitle = item.title
+          .toLowerCase()
+          .trim()
+          .replace(/[^\w\s]/g, '');
         const key = `${cleanTitle}:${item.year || ''}`;
         const list = titleMap.get(key) || [];
         list.push(item.id);
@@ -194,7 +202,10 @@ export class LibraryService {
           canDelete: false,
           canManageCollections: false,
         };
-      } else if (member.role === 'viewer' || (member.role as string) === 'commenter') {
+      } else if (
+        member.role === 'viewer' ||
+        (member.role as string) === 'commenter'
+      ) {
         permissions = {
           canCreate: false,
           canEdit: false,

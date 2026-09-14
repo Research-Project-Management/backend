@@ -108,10 +108,7 @@ export const INGESTION_PORT = Symbol('INGESTION_PORT');
 
 export interface IngestionPort {
   ingest(command: IngestionCommand): Promise<IngestionResult>;
-  getRunStatus(
-    projectId: string,
-    runId: string,
-  ): Promise<IngestionRunSnapshot>;
+  getRunStatus(projectId: string, runId: string): Promise<IngestionRunSnapshot>;
 }
 
 export type {

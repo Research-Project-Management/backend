@@ -58,7 +58,10 @@ export class CollectionsController {
     @Param('projectId') paramProjectId?: string,
   ) {
     const effectiveProjectId = paramProjectId || queryProjectId;
-    return this.collectionsService.getCollectionTree(userId, effectiveProjectId);
+    return this.collectionsService.getCollectionTree(
+      userId,
+      effectiveProjectId,
+    );
   }
 
   @Patch('reorder')
@@ -89,7 +92,8 @@ export class CollectionsController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    const effectiveProjectId = paramProjectId || queryProjectId || dto.projectId;
+    const effectiveProjectId =
+      paramProjectId || queryProjectId || dto.projectId;
     return this.collectionsService.createCollection(
       userId,
       dto,

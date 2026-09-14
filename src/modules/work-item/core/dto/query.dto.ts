@@ -52,7 +52,8 @@ export class QueryWorkItemDto {
   completed?: boolean;
 
   @ApiPropertyOptional({
-    description: 'Filter by archived status (default false: only active work items)',
+    description:
+      'Filter by archived status (default false: only active work items)',
   })
   @IsOptional()
   @Transform(({ value }) => value === 'true' || value === true)

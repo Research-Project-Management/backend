@@ -9,7 +9,11 @@ import { Reflector } from '@nestjs/core';
 import { PrismaService } from '@/core/database/prisma.service';
 import { RedisCacheService } from '@/core/cache/redis.service';
 import { isUUID } from 'class-validator';
-import { ROLES_KEY, MIN_ROLE_KEY, RoleInput } from '../decorators/role.decorator';
+import {
+  ROLES_KEY,
+  MIN_ROLE_KEY,
+  RoleInput,
+} from '../decorators/role.decorator';
 import { Role, RoleHierarchy } from '../enums/role.enum';
 import { IAM_REDIS_KEYS } from '../../core/constants/redis.constant';
 
@@ -29,10 +33,10 @@ export class RoleGuard implements CanActivate {
       ROLES_KEY,
       [context.getHandler(), context.getClass()],
     );
-    const minRole = this.reflector.getAllAndOverride<Role>(
-      MIN_ROLE_KEY,
-      [context.getHandler(), context.getClass()],
-    );
+    const minRole = this.reflector.getAllAndOverride<Role>(MIN_ROLE_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
 
     // If no roles are specified, allow access (authentication handled by JwtAuthGuard)
     if (!requiredRoles && !minRole) {
@@ -103,106 +107,131 @@ export class RoleGuard implements CanActivate {
   }
 
   /**
-   * Resolves the projectId from request params, headers, query, body,
-   * or by looking up child resources (cycle, WorkItem, page, sticky).
+   * Resolves the projectId securely from request params, sub-resources, or headers.
+   * Prevents BOLA/IDOR by prioritizing URL resource context and cross-verifying
+   * against any client-supplied header/body/query projectId.
    */
   private async resolveProjectId(request: any): Promise<string | undefined> {
+    const prismaAny = this.prisma as any;
+    let resolvedProjectId: string | undefined;
+
+    // 1. Explicit project route parameter (/projects/:projectId or /project/:id)
     const explicitProjectId =
       request.params?.projectId ||
       (request.params?.id && request.url?.includes('/project')
         ? request.params.id
         : undefined);
 
-    const prismaAny = this.prisma as any;
-
     if (explicitProjectId) {
       if (isUUID(explicitProjectId)) {
-        return explicitProjectId;
-      }
-      if (prismaAny.project) {
-        const project = await prismaAny.project
-          .findFirst({
+        resolvedProjectId = explicitProjectId;
+      } else if (prismaAny.project?.findFirst) {
+        const project = await Promise.resolve(
+          prismaAny.project.findFirst({
             where: {
               identifier: { equals: explicitProjectId, mode: 'insensitive' },
               deletedAt: null,
             },
             select: { id: true },
-          })
-          .catch(() => null);
-        if (project?.id) return project.id;
+          }),
+        ).catch(() => null);
+        if (project?.id) resolvedProjectId = project.id;
       }
     }
 
-    const headerProjectId =
+    // 2. Sub-resource lookup from URL parameters (cycleId, workItemId, commentId, pageId)
+    if (!resolvedProjectId) {
+      if (
+        request.params?.cycleId &&
+        isUUID(request.params.cycleId) &&
+        prismaAny.cycle?.findUnique
+      ) {
+        const cycle = await Promise.resolve(
+          prismaAny.cycle.findUnique({
+            where: { id: request.params.cycleId },
+            select: { projectId: true },
+          }),
+        ).catch(() => null);
+        if (cycle?.projectId) resolvedProjectId = cycle.projectId;
+      } else if (request.params?.workItemId && prismaAny.workItem?.findFirst) {
+        const workItemId = request.params.workItemId;
+        const where = isUUID(workItemId)
+          ? { id: workItemId }
+          : { identifier: { equals: workItemId, mode: 'insensitive' } };
+        const workItem = await Promise.resolve(
+          prismaAny.workItem.findFirst({
+            where,
+            select: { projectId: true },
+          }),
+        ).catch(() => null);
+        if (workItem?.projectId) resolvedProjectId = workItem.projectId;
+      } else if (
+        request.params?.commentId &&
+        isUUID(request.params.commentId) &&
+        prismaAny.workItemComment?.findUnique
+      ) {
+        const comment = await Promise.resolve(
+          prismaAny.workItemComment.findUnique({
+            where: { id: request.params.commentId },
+            select: { workItem: { select: { projectId: true } } },
+          }),
+        ).catch(() => null);
+        if (comment?.workItem?.projectId)
+          resolvedProjectId = comment.workItem.projectId;
+      } else if (
+        request.params?.pageId &&
+        isUUID(request.params.pageId) &&
+        prismaAny.page?.findUnique
+      ) {
+        const page = await Promise.resolve(
+          prismaAny.page.findUnique({
+            where: { id: request.params.pageId },
+            select: { projectId: true },
+          }),
+        ).catch(() => null);
+        if (page?.projectId) resolvedProjectId = page.projectId;
+      }
+    }
+
+    // 3. Extract any client-supplied header, query, or body projectId
+    const rawHeaderProjectId =
       request.headers?.['x-project-id'] ||
       request.query?.projectId ||
       request.body?.projectId;
 
-    if (headerProjectId) {
-      if (isUUID(headerProjectId)) {
-        return headerProjectId;
-      }
-      if (prismaAny.project) {
-        const project = await prismaAny.project
-          .findFirst({
+    let normalizedHeaderProjectId: string | undefined;
+    if (rawHeaderProjectId) {
+      if (isUUID(rawHeaderProjectId)) {
+        normalizedHeaderProjectId = rawHeaderProjectId;
+      } else if (prismaAny.project?.findFirst) {
+        const project = await Promise.resolve(
+          prismaAny.project.findFirst({
             where: {
-              identifier: { equals: headerProjectId, mode: 'insensitive' },
+              identifier: { equals: rawHeaderProjectId, mode: 'insensitive' },
               deletedAt: null,
             },
             select: { id: true },
-          })
-          .catch(() => null);
-        if (project?.id) return project.id;
+          }),
+        ).catch(() => null);
+        if (project?.id) normalizedHeaderProjectId = project.id;
       }
     }
 
-    // Lookup through sub-resources
-    if (request.params?.cycleId && isUUID(request.params.cycleId) && prismaAny.cycle) {
-      const cycle = await prismaAny.cycle
-        .findUnique({
-          where: { id: request.params.cycleId },
-          select: { projectId: true },
-        })
-        .catch(() => null);
-      if (cycle?.projectId) return cycle.projectId;
+    // 4. Anti-BOLA / IDOR cross-verification
+    // If the resource belongs to a resolved project, any client-specified projectId MUST match!
+    if (resolvedProjectId && normalizedHeaderProjectId) {
+      if (
+        resolvedProjectId.toLowerCase() !==
+        normalizedHeaderProjectId.toLowerCase()
+      ) {
+        throw new ForbiddenException(
+          'Access denied: Resource does not belong to the specified project context (Cross-tenant violation)',
+        );
+      }
     }
 
-    const workItemId = request.params?.workItemId;
-    if (workItemId && prismaAny.workItem) {
-      const where = isUUID(workItemId)
-        ? { id: workItemId }
-        : { identifier: { equals: workItemId, mode: 'insensitive' } };
-      const workItem = await prismaAny.workItem
-        .findFirst({
-          where,
-          select: { projectId: true },
-        })
-        .catch(() => null);
-      if (workItem?.projectId) return workItem.projectId;
-    }
-
-    const commentId = request.params?.commentId;
-    if (commentId && isUUID(commentId) && prismaAny.workItemComment) {
-      const comment = await prismaAny.workItemComment
-        .findUnique({
-          where: { id: commentId },
-          select: { workItem: { select: { projectId: true } } },
-        })
-        .catch(() => null);
-      if (comment?.workItem?.projectId) return comment.workItem.projectId;
-    }
-
-    if (request.params?.pageId && isUUID(request.params.pageId) && prismaAny.page) {
-      const page = await prismaAny.page
-        .findUnique({
-          where: { id: request.params.pageId },
-          select: { projectId: true },
-        })
-        .catch(() => null);
-      if (page?.projectId) return page.projectId;
-    }
-
-    return undefined;
+    // Return the verified resolved project, or fallback to header/body project if creating new resource
+    return resolvedProjectId || normalizedHeaderProjectId;
   }
 
   /**

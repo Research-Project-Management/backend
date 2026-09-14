@@ -106,11 +106,7 @@ export class RetractionService {
     };
   }
 
-  async setManualFlag(
-    userId: string,
-    itemId: string,
-    dto: FlagRetractionDto,
-  ) {
+  async setManualFlag(userId: string, itemId: string, dto: FlagRetractionDto) {
     const item = await this.repo.findItemById(userId, itemId);
     if (!item) {
       throw new NotFoundException(`Item ${itemId} not found`);
@@ -153,10 +149,7 @@ export class RetractionService {
     return this.repo.findRetractedItems(userId);
   }
 
-  async getStats(
-    userId: string,
-  ): Promise<RetractionStats> {
+  async getStats(userId: string): Promise<RetractionStats> {
     return this.repo.getStats(userId);
   }
 }
-

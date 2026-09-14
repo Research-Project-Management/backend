@@ -7,7 +7,9 @@ import { isUuid } from '@/core/utils/uuid.util';
 export class HistoryRepository {
   constructor(private readonly prismaService: PrismaService) {}
 
-  async resolveWorkItemUuid(workItemIdOrIdentifier: string): Promise<string | null> {
+  async resolveWorkItemUuid(
+    workItemIdOrIdentifier: string,
+  ): Promise<string | null> {
     if (isUuid(workItemIdOrIdentifier)) {
       return workItemIdOrIdentifier;
     }
@@ -36,14 +38,17 @@ export class HistoryRepository {
           select: {
             id: true,
             identifier: true,
-            workItemColumns: true,
+            states: true,
           },
         },
       },
     });
   }
 
-  async findWorkItemComments(workItemId: string, sort: 'asc' | 'desc' = 'desc') {
+  async findWorkItemComments(
+    workItemId: string,
+    sort: 'asc' | 'desc' = 'desc',
+  ) {
     const itemUuid = await this.resolveWorkItemUuid(workItemId);
     if (!itemUuid) return [];
     return this.prismaService.workItemComment.findMany({
@@ -62,7 +67,10 @@ export class HistoryRepository {
     });
   }
 
-  async findWorkItemActivityEvents(workItemId: string, sort: 'asc' | 'desc' = 'desc') {
+  async findWorkItemActivityEvents(
+    workItemId: string,
+    sort: 'asc' | 'desc' = 'desc',
+  ) {
     const itemUuid = await this.resolveWorkItemUuid(workItemId);
     if (!itemUuid) return [];
     return this.prismaService.activityEvent.findMany({

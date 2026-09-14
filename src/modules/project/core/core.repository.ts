@@ -7,8 +7,8 @@ import {
   AllocatedIdentifier,
 } from './types/project.type';
 import { isUuid } from '@/core/utils/uuid.util';
-import { deriveProjectPrefix } from './utils/identifier.util';
 import { DEFAULT_WORK_ITEM_STATES } from '@/modules/work-item/state/types/state.types';
+import { deriveProjectPrefix } from './utils/identifier.util';
 import { parseWorkItemStates } from '@/modules/work-item/state/utils/state.util';
 
 export const USER_SELECT = {
@@ -156,6 +156,16 @@ export class CoreRepository {
             role: ProjectMemberRole.owner,
           },
         },
+        states: {
+          create: DEFAULT_WORK_ITEM_STATES.map((s) => ({
+            name: s.name,
+            color: s.color,
+            group: s.group,
+            sequence: s.sequence,
+            isDefault: s.isDefault ?? false,
+            description: s.description || '',
+          })),
+        },
       },
       include: {
         members: {
@@ -302,17 +312,7 @@ export class CoreRepository {
       select: { id: true, group: true },
     });
 
-    let stateList: { id: string; group: string }[] = states;
-    if (stateList.length === 0) {
-      const project = await this.prisma.project.findUnique({
-        where: { id: projectId },
-        select: { workItemColumns: true },
-      });
-      if (project?.workItemColumns && Array.isArray(project.workItemColumns) && project.workItemColumns.length > 0) {
-        const parsed = parseWorkItemStates(project.workItemColumns);
-        stateList = parsed.map((s) => ({ id: s.id, group: s.group }));
-      }
-    }
+    const stateList: { id: string; group: string }[] = states;
 
     const completedStateIds = stateList
       .filter((s) => s.group === 'completed')
@@ -350,7 +350,12 @@ export class CoreRepository {
           ...(startedStateIds.length > 0
             ? { columnId: { in: startedStateIds } }
             : backlogStateIds.length > 0
-              ? { columnId: { notIn: [...backlogStateIds, ...completedStateIds] }, completed: false }
+              ? {
+                  columnId: {
+                    notIn: [...backlogStateIds, ...completedStateIds],
+                  },
+                  completed: false,
+                }
               : { completed: false }),
         },
       }),
@@ -361,7 +366,12 @@ export class CoreRepository {
           ...(backlogStateIds.length > 0
             ? { columnId: { in: backlogStateIds } }
             : startedStateIds.length > 0 || completedStateIds.length > 0
-              ? { columnId: { notIn: [...startedStateIds, ...completedStateIds] }, completed: false }
+              ? {
+                  columnId: {
+                    notIn: [...startedStateIds, ...completedStateIds],
+                  },
+                  completed: false,
+                }
               : { completed: false, columnId: 'backlog' }),
         },
       }),

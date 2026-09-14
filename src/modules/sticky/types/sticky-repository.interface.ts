@@ -21,9 +21,15 @@ export type StickyWithUser = Prisma.StickyGetPayload<{
 
 export interface IStickyRepository {
   findStickyById(stickyId: string): Promise<StickyWithUser | null>;
-  findStickiesByUserId(userId: string): Promise<StickyWithUser[]>;
+  findStickiesByUserId(
+    userId: string,
+    search?: string,
+  ): Promise<StickyWithUser[]>;
   countStickiesByUserId(userId: string): Promise<number>;
-  findStickiesByProjectId(projectId: string): Promise<StickyWithUser[]>;
+  findStickiesByProjectId(
+    projectId: string,
+    search?: string,
+  ): Promise<StickyWithUser[]>;
   countStickiesByProjectId(projectId: string): Promise<number>;
   createSticky(
     data: Prisma.StickyCreateInput | Prisma.StickyUncheckedCreateInput,

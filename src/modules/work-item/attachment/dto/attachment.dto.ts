@@ -1,8 +1,4 @@
-import {
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-} from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { BaseAttachmentMetadataDto } from './create-attachment.dto';
 
@@ -38,34 +34,52 @@ export const CreateWorkItemAttachmentDto = CreateAttachmentDto;
 export type CreateWorkItemAttachmentDto = CreateAttachmentDto;
 
 export class AttachPageDto {
-  @ApiProperty({ description: 'Page ID', example: 'd3b07384-d113-4603-a417-cc2349e5d7a6' })
+  @ApiProperty({
+    description: 'Page ID',
+    example: 'd3b07384-d113-4603-a417-cc2349e5d7a6',
+  })
   @IsNotEmpty()
   @IsString()
   pageId!: string;
 
-  @ApiPropertyOptional({ description: 'Page Title', example: 'Research Methodology Notes' })
+  @ApiPropertyOptional({
+    description: 'Page Title',
+    example: 'Research Methodology Notes',
+  })
   @IsOptional()
   @IsString()
   title?: string;
 }
 
 export class AttachPaperDto {
-  @ApiProperty({ description: 'Paper ID', example: 'p-10.1103/PhysRevLett.116.061102' })
+  @ApiProperty({
+    description: 'Paper ID',
+    example: 'p-10.1103/PhysRevLett.116.061102',
+  })
   @IsNotEmpty()
   @IsString()
   paperId!: string;
 
-  @ApiPropertyOptional({ description: 'Paper Title', example: 'Observation of Gravitational Waves' })
+  @ApiPropertyOptional({
+    description: 'Paper Title',
+    example: 'Observation of Gravitational Waves',
+  })
   @IsOptional()
   @IsString()
   title?: string;
 
-  @ApiPropertyOptional({ description: 'Paper DOI', example: '10.1103/PhysRevLett.116.061102' })
+  @ApiPropertyOptional({
+    description: 'Paper DOI',
+    example: '10.1103/PhysRevLett.116.061102',
+  })
   @IsOptional()
   @IsString()
   doi?: string;
 
-  @ApiPropertyOptional({ description: 'BibTeX Citation Key', example: 'Abbott2016' })
+  @ApiPropertyOptional({
+    description: 'BibTeX Citation Key',
+    example: 'Abbott2016',
+  })
   @IsOptional()
   @IsString()
   citationKey?: string;
@@ -77,7 +91,10 @@ export class AttachFileDto {
   @IsString()
   name!: string;
 
-  @ApiProperty({ description: 'File URL', example: 'https://r2.flux.internal/attachments/...' })
+  @ApiProperty({
+    description: 'File URL',
+    example: 'https://r2.flux.internal/attachments/...',
+  })
   @IsNotEmpty()
   @IsString()
   url!: string;
@@ -98,7 +115,10 @@ export class AttachLinkDto {
   @IsString()
   title!: string;
 
-  @ApiProperty({ description: 'Link URL', example: 'https://arxiv.org/abs/2106.12345' })
+  @ApiProperty({
+    description: 'Link URL',
+    example: 'https://arxiv.org/abs/2106.12345',
+  })
   @IsNotEmpty()
   @IsString()
   url!: string;

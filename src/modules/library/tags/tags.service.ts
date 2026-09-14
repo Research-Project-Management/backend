@@ -74,12 +74,7 @@ export class TagsService {
           data: tag,
         });
 
-        await helpers.publishOutbox(
-          userId,
-          tag.id,
-          'library.tag.created',
-          tag,
-        );
+        await helpers.publishOutbox(userId, tag.id, 'library.tag.created', tag);
 
         return tag;
       },
@@ -99,15 +94,10 @@ export class TagsService {
             entityId: tagId,
           });
 
-          await helpers.publishOutbox(
-            userId,
-            tagId,
-            'library.tag.deleted',
-            {
-              id: tagId,
-              deletedAt: new Date(),
-            },
-          );
+          await helpers.publishOutbox(userId, tagId, 'library.tag.deleted', {
+            id: tagId,
+            deletedAt: new Date(),
+          });
         }
         return deleted;
       },
@@ -126,12 +116,10 @@ export class TagsService {
             entityType: 'Tag',
             entityId: tagId,
           });
-          await helpers.publishOutbox(
-            userId,
-            tagId,
-            'library.tag.deleted',
-            { id: tagId, deletedAt: new Date() },
-          );
+          await helpers.publishOutbox(userId, tagId, 'library.tag.deleted', {
+            id: tagId,
+            deletedAt: new Date(),
+          });
         }
         return { count: deletedTagIds.length };
       },
@@ -205,12 +193,10 @@ export class TagsService {
         entityId: `${tagId}:${itemId}`,
       });
 
-      await helpers.publishOutbox(
-        userId,
+      await helpers.publishOutbox(userId, itemId, 'library.item.untagged', {
+        tagId,
         itemId,
-        'library.item.untagged',
-        { tagId, itemId },
-      );
+      });
     });
   }
 

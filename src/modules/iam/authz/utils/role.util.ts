@@ -13,7 +13,10 @@ export function getRoleWeight(role: Role | string): number {
  * Compares two roles by hierarchy level.
  * Returns > 0 if roleA > roleB, 0 if equal, < 0 if roleA < roleB.
  */
-export function compareRoles(roleA: Role | string, roleB: Role | string): number {
+export function compareRoles(
+  roleA: Role | string,
+  roleB: Role | string,
+): number {
   return getRoleWeight(roleA) - getRoleWeight(roleB);
 }
 
@@ -28,10 +31,12 @@ export function isRoleAtLeast(userRole: Role | string, minRole: Role): boolean {
  * Returns user-friendly metadata for a given role.
  */
 export function getRoleMetadata(role: Role) {
-  return ROLE_DESCRIPTIONS[role] || {
-    label: role,
-    description: '',
-  };
+  return (
+    ROLE_DESCRIPTIONS[role] || {
+      label: role,
+      description: '',
+    }
+  );
 }
 
 /**

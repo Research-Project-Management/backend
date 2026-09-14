@@ -85,7 +85,10 @@ export class EventDispatcher {
       rank: params.rank,
     };
     this.eventEmitter.emit('work-item.reordered', payload);
-    this.eventEmitter.emit('work-item.updated', { ...payload, verb: 'updated' });
+    this.eventEmitter.emit('work-item.updated', {
+      ...payload,
+      verb: 'updated',
+    });
   }
 
   dispatchUpdateEvents(
@@ -128,10 +131,7 @@ export class EventDispatcher {
       }
     }
 
-    if (
-      updateDto.title !== undefined &&
-      updateDto.title !== existing.title
-    ) {
+    if (updateDto.title !== undefined && updateDto.title !== existing.title) {
       this.eventEmitter.emit('work-item.title.changed', {
         ...baseEvent,
         verb: 'updated',
@@ -141,12 +141,8 @@ export class EventDispatcher {
       });
     }
 
-    const newContent =
-      updateDto.description ?? updateDto.content;
-    if (
-      newContent !== undefined &&
-      newContent !== (existing.content || '')
-    ) {
+    const newContent = updateDto.description ?? updateDto.content;
+    if (newContent !== undefined && newContent !== (existing.content || '')) {
       this.eventEmitter.emit('work-item.content.changed', {
         ...baseEvent,
         verb: 'updated',

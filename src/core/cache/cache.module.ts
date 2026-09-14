@@ -10,4 +10,3 @@ import { CacheInvalidationListener } from './invalidation.listener';
   exports: [RedisCacheService, CacheInvalidationListener],
 })
 export class CacheModule {}
-

@@ -73,9 +73,7 @@ export class SearchService {
     });
 
     if (!attachment) {
-      throw new NotFoundException(
-        `Attachment ${attachmentId} not found`,
-      );
+      throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
     return this.fullText.searchPageAnchors(attachmentId, term, pageIndex);

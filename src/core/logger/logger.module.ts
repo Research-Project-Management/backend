@@ -15,4 +15,3 @@ import { LoggerInterceptor, LoggingInterceptor } from './logger.interceptor';
   exports: [LoggerService, LoggerInterceptor, LoggingInterceptor],
 })
 export class LoggerModule {}
-

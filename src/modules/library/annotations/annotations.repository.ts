@@ -16,20 +16,20 @@ export { AnnotationEntity, CreateAnnotationData, UpdateAnnotationData };
 // ─── Select shape ─────────────────────────────────────────────────────────────
 
 const ANNOTATION_SELECT = {
-  id:                  true,
-  attachmentId:        true,
-  type:                true,
-  pageIndex:           true,
+  id: true,
+  attachmentId: true,
+  type: true,
+  pageIndex: true,
   annotationSortIndex: true,
-  color:               true,
-  quoteText:           true,
-  comment:             true,
-  rectCoords:          true,
-  authorId:            true,
-  version:             true,
-  deletedAt:           true,
-  createdAt:           true,
-  updatedAt:           true,
+  color: true,
+  quoteText: true,
+  comment: true,
+  rectCoords: true,
+  authorId: true,
+  version: true,
+  deletedAt: true,
+  createdAt: true,
+  updatedAt: true,
 } satisfies Prisma.AnnotationSelect;
 
 @Injectable()
@@ -87,19 +87,23 @@ export class AnnotationsRepository {
     const client = this.getClient(tx);
     return client.annotation.create({
       data: {
-        attachmentId:        data.attachmentId,
-        type:                data.type ?? AnnotationType.highlight,
-        pageIndex:           data.pageIndex,
-        annotationSortIndex: buildAnnotationSortIndex(data.pageIndex, data.y, data.x),
-        color:               data.color ?? '#ffeb3b',
-        quoteText:           data.quoteText ?? '',
-        comment:             data.comment ?? '',
+        attachmentId: data.attachmentId,
+        type: data.type ?? AnnotationType.highlight,
+        pageIndex: data.pageIndex,
+        annotationSortIndex: buildAnnotationSortIndex(
+          data.pageIndex,
+          data.y,
+          data.x,
+        ),
+        color: data.color ?? '#ffeb3b',
+        quoteText: data.quoteText ?? '',
+        comment: data.comment ?? '',
         rectCoords:
           data.rectCoords != null
             ? (data.rectCoords as Prisma.InputJsonValue)
             : Prisma.JsonNull,
         authorId: data.authorId,
-        version:  1,
+        version: 1,
       },
       select: ANNOTATION_SELECT,
     });
@@ -112,15 +116,15 @@ export class AnnotationsRepository {
     tx?: Prisma.TransactionClient,
     existing?: AnnotationEntity,
   ): Promise<AnnotationEntity> {
-    const client  = this.getClient(tx);
+    const client = this.getClient(tx);
     const current = existing ?? (await this.findById(id, tx));
     if (!current) throw new NotFoundException(`Annotation ${id} not found`);
 
     if (current.version !== expectedVersion) {
       throw new VersionMismatchException({
-        aggregateType:   'Annotation',
-        entityId:        id,
-        currentVersion:  current.version,
+        aggregateType: 'Annotation',
+        entityId: id,
+        currentVersion: current.version,
         providedVersion: expectedVersion,
       });
     }
@@ -128,17 +132,18 @@ export class AnnotationsRepository {
     return client.annotation.update({
       where: { id },
       data: {
-        color:      data.color      ?? current.color,
-        quoteText:  data.quoteText  !== undefined ? data.quoteText  : current.quoteText,
-        comment:    data.comment    !== undefined ? data.comment    : current.comment,
+        color: data.color ?? current.color,
+        quoteText:
+          data.quoteText !== undefined ? data.quoteText : current.quoteText,
+        comment: data.comment !== undefined ? data.comment : current.comment,
         rectCoords:
           data.rectCoords !== undefined
-            ? (data.rectCoords != null
-                ? (data.rectCoords as Prisma.InputJsonValue)
-                : Prisma.JsonNull)
-            : (current.rectCoords != null
-                ? (current.rectCoords as Prisma.InputJsonValue)
-                : Prisma.JsonNull),
+            ? data.rectCoords != null
+              ? (data.rectCoords as Prisma.InputJsonValue)
+              : Prisma.JsonNull
+            : current.rectCoords != null
+              ? (current.rectCoords as Prisma.InputJsonValue)
+              : Prisma.JsonNull,
         version: { increment: 1 },
       },
       select: ANNOTATION_SELECT,
@@ -151,22 +156,22 @@ export class AnnotationsRepository {
     tx?: Prisma.TransactionClient,
     existing?: AnnotationEntity,
   ): Promise<boolean> {
-    const client  = this.getClient(tx);
+    const client = this.getClient(tx);
     const current = existing ?? (await this.findById(id, tx));
     if (!current) return false;
 
     if (expectedVersion !== undefined && current.version !== expectedVersion) {
       throw new VersionMismatchException({
-        aggregateType:   'Annotation',
-        entityId:        id,
-        currentVersion:  current.version,
+        aggregateType: 'Annotation',
+        entityId: id,
+        currentVersion: current.version,
         providedVersion: expectedVersion,
       });
     }
 
     const result = await client.annotation.updateMany({
       where: { id, deletedAt: null },
-      data:  { deletedAt: new Date() },
+      data: { deletedAt: new Date() },
     });
 
     return result.count > 0;
@@ -176,30 +181,34 @@ export class AnnotationsRepository {
 
   async batchUpsert(
     attachmentId: string,
-    authorId:     string,
-    upserts:      UpsertAnnotationItem[],
-    deletes:      string[],
-    tx:           Prisma.TransactionClient,
+    authorId: string,
+    upserts: UpsertAnnotationItem[],
+    deletes: string[],
+    tx: Prisma.TransactionClient,
   ): Promise<BatchAnnotationsResult> {
     const created: AnnotationEntity[] = [];
     const updated: AnnotationEntity[] = [];
-    const deleted: string[]           = [];
+    const deleted: string[] = [];
 
     // ── Upserts ────────────────────────────────────────────────────────────
     for (const item of upserts) {
       if (item.id) {
         // Update path
         const current = await tx.annotation.findFirst({
-          where:  { id: item.id, deletedAt: null },
+          where: { id: item.id, deletedAt: null },
           select: ANNOTATION_SELECT,
         });
-        if (!current) throw new NotFoundException(`Annotation ${item.id} not found`);
+        if (!current)
+          throw new NotFoundException(`Annotation ${item.id} not found`);
 
-        if (item.expectedVersion !== undefined && current.version !== item.expectedVersion) {
+        if (
+          item.expectedVersion !== undefined &&
+          current.version !== item.expectedVersion
+        ) {
           throw new VersionMismatchException({
-            aggregateType:   'Annotation',
-            entityId:        item.id,
-            currentVersion:  current.version,
+            aggregateType: 'Annotation',
+            entityId: item.id,
+            currentVersion: current.version,
             providedVersion: item.expectedVersion,
           });
         }
@@ -207,17 +216,19 @@ export class AnnotationsRepository {
         const result = await tx.annotation.update({
           where: { id: item.id },
           data: {
-            color:      item.color      ?? current.color,
-            quoteText:  item.quoteText  !== undefined ? item.quoteText  : current.quoteText,
-            comment:    item.comment    !== undefined ? item.comment    : current.comment,
+            color: item.color ?? current.color,
+            quoteText:
+              item.quoteText !== undefined ? item.quoteText : current.quoteText,
+            comment:
+              item.comment !== undefined ? item.comment : current.comment,
             rectCoords:
               item.rectCoords !== undefined
-                ? (item.rectCoords != null
-                    ? (item.rectCoords as Prisma.InputJsonValue)
-                    : Prisma.JsonNull)
-                : (current.rectCoords != null
-                    ? (current.rectCoords as Prisma.InputJsonValue)
-                    : Prisma.JsonNull),
+                ? item.rectCoords != null
+                  ? (item.rectCoords as Prisma.InputJsonValue)
+                  : Prisma.JsonNull
+                : current.rectCoords != null
+                  ? (current.rectCoords as Prisma.InputJsonValue)
+                  : Prisma.JsonNull,
             annotationSortIndex:
               item.y !== undefined || item.x !== undefined
                 ? buildAnnotationSortIndex(item.pageIndex, item.y, item.x)
@@ -232,12 +243,16 @@ export class AnnotationsRepository {
         const result = await tx.annotation.create({
           data: {
             attachmentId,
-            type:                item.type ?? AnnotationType.highlight,
-            pageIndex:           item.pageIndex,
-            annotationSortIndex: buildAnnotationSortIndex(item.pageIndex, item.y, item.x),
-            color:               item.color    ?? '#ffeb3b',
-            quoteText:           item.quoteText ?? '',
-            comment:             item.comment   ?? '',
+            type: item.type ?? AnnotationType.highlight,
+            pageIndex: item.pageIndex,
+            annotationSortIndex: buildAnnotationSortIndex(
+              item.pageIndex,
+              item.y,
+              item.x,
+            ),
+            color: item.color ?? '#ffeb3b',
+            quoteText: item.quoteText ?? '',
+            comment: item.comment ?? '',
             rectCoords:
               item.rectCoords != null
                 ? (item.rectCoords as Prisma.InputJsonValue)
@@ -255,7 +270,7 @@ export class AnnotationsRepository {
     for (const id of deletes) {
       const result = await tx.annotation.updateMany({
         where: { id, deletedAt: null },
-        data:  { deletedAt: new Date() },
+        data: { deletedAt: new Date() },
       });
       if (result.count > 0) deleted.push(id);
     }

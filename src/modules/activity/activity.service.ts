@@ -31,13 +31,13 @@ function formatDuration(ms: number): string {
 
 function resolveStateInfo(
   stateId: string | null | undefined,
-  workItemColumns: any,
+  states: any,
 ): { id: string; name: string; color: string; group: string } {
   if (!stateId) {
     return { id: '', name: 'None', color: '#94a3b8', group: 'backlog' };
   }
 
-  const columns = Array.isArray(workItemColumns) ? workItemColumns : [];
+  const columns = Array.isArray(states) ? states : [];
   const found = columns.find(
     (c: any) => c.id === stateId || c.slug === stateId,
   );
@@ -341,12 +341,13 @@ export class ActivityService {
    * Tracks full state transition flow and time-in-state calculation (Plane.so Transition tab).
    */
   async getWorkItemTransitions(workItemId: string) {
-    const workItem = await this.activityRepo.findWorkItemWithProject(workItemId);
+    const workItem =
+      await this.activityRepo.findWorkItemWithProject(workItemId);
     if (!workItem) {
       throw new NotFoundException(`Work item '${workItemId}' not found`);
     }
 
-    const workItemColumns = (workItem.project as any)?.workItemColumns || [];
+    const states = (workItem.project as any)?.states || [];
 
     // Find state transition events in chronological order
     const events = await this.activityRepo.findWorkItemActivityEvents(
@@ -378,8 +379,8 @@ export class ActivityService {
         const transitionTime = evt.createdAt.getTime();
         const durationMs = Math.max(0, transitionTime - prevTimestamp);
 
-        const fromState = resolveStateInfo(evt.oldValue, workItemColumns);
-        const toState = resolveStateInfo(evt.newValue, workItemColumns);
+        const fromState = resolveStateInfo(evt.oldValue, states);
+        const toState = resolveStateInfo(evt.newValue, states);
 
         transitions.push({
           id: evt.id,
@@ -401,7 +402,7 @@ export class ActivityService {
     // Current state duration
     const now = Date.now();
     const currentDurationMs = Math.max(0, now - prevTimestamp);
-    const currentState = resolveStateInfo(currentStateId, workItemColumns);
+    const currentState = resolveStateInfo(currentStateId, states);
 
     const totalCycleTimeMs = workItem.completed
       ? Math.max(0, workItem.updatedAt.getTime() - workItem.createdAt.getTime())
@@ -422,9 +423,15 @@ export class ActivityService {
   /**
    * Tracks title and description revisions with oldValue and newValue diffs (Plane.so History tab).
    */
-  async getWorkItemHistory(workItemId: string, options?: { sort?: 'asc' | 'desc' }) {
+  async getWorkItemHistory(
+    workItemId: string,
+    options?: { sort?: 'asc' | 'desc' },
+  ) {
     const sort = options?.sort || 'desc';
-    const events = await this.activityRepo.findWorkItemActivityEvents(workItemId, sort);
+    const events = await this.activityRepo.findWorkItemActivityEvents(
+      workItemId,
+      sort,
+    );
 
     const historyEvents = events.filter(
       (e) =>
@@ -474,7 +481,10 @@ export class ActivityService {
     }
 
     if (tab === 'comments') {
-      const comments = await this.activityRepo.findWorkItemComments(workItemId, sort);
+      const comments = await this.activityRepo.findWorkItemComments(
+        workItemId,
+        sort,
+      );
       const feed = comments.map((c) => ({
         id: c.id,
         type: 'comment' as const,
@@ -534,7 +544,7 @@ export class ActivityService {
       this.activityRepo.findWorkItemWithProject(workItemId),
     ]);
 
-    const workItemColumns = (workItem as any)?.project?.workItemColumns || [];
+    const states = (workItem as any)?.project?.states || [];
 
     const unifiedItems: Array<{
       id: string;
@@ -579,8 +589,8 @@ export class ActivityService {
           actor: a.actor,
           transition: {
             id: a.id,
-            fromState: resolveStateInfo(a.oldValue, workItemColumns),
-            toState: resolveStateInfo(a.newValue, workItemColumns),
+            fromState: resolveStateInfo(a.oldValue, states),
+            toState: resolveStateInfo(a.newValue, states),
             transitionedAt: a.createdAt,
           },
         });
@@ -662,10 +672,7 @@ export class ActivityService {
       if (cached) return cached;
     }
 
-    const recentEvents = await this.activityRepo.findRecentByActor(
-      userId,
-      50,
-    );
+    const recentEvents = await this.activityRepo.findRecentByActor(userId, 50);
 
     const seen = new Set<string>();
     const uniqueTargets: Array<{
@@ -695,13 +702,14 @@ export class ActivityService {
     let items: RecentItemResponse[];
 
     if (uniqueTargets.length === 0) {
-      items = await this.fetchFallbackRecent(
-        userId,
-        limit,
-      );
+      items = await this.fetchFallbackRecent(userId, limit);
     } else {
       const workItemIds = uniqueTargets
-        .filter((target) => (target.entityType as any) === 'work_item' || (target.entityType as any) === 'item')
+        .filter(
+          (target) =>
+            (target.entityType as any) === 'work_item' ||
+            (target.entityType as any) === 'item',
+        )
         .map((target) => target.entityId);
       const paperIds = uniqueTargets
         .filter((target) => target.entityType === 'paper')

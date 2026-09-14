@@ -82,10 +82,11 @@ export class TagsRepository {
     projectIdOrTx?: string | null | Prisma.TransactionClient,
     tx?: Prisma.TransactionClient,
   ) {
-    const projectId = typeof projectIdOrTx === 'string' ? projectIdOrTx : undefined;
+    const projectId =
+      typeof projectIdOrTx === 'string' ? projectIdOrTx : undefined;
     const client = this.getClient(
       typeof projectIdOrTx === 'object' && projectIdOrTx !== null
-        ? (projectIdOrTx as Prisma.TransactionClient)
+        ? projectIdOrTx
         : tx,
     );
     const existing = await client.tag.findFirst({

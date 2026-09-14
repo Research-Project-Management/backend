@@ -34,7 +34,9 @@ export class UserService {
   async getMe(userId: string) {
     const user = await this.userRepo.findById(userId);
     if (!user) {
-      throw new UnauthorizedException('User no longer exists. Please sign in again.');
+      throw new UnauthorizedException(
+        'User no longer exists. Please sign in again.',
+      );
     }
     const settings = await this.userRepo.getUserSettings(userId);
     return {
@@ -152,63 +154,105 @@ export class UserService {
     if (!query || !query.trim()) return [];
     const cleanQuery = query.trim();
 
-    const [projects, workItems, papers, pages, files, stickies] = await Promise.all(
-      [
+    const [projects, workItems, papers, pages, files, stickies] =
+      await Promise.all([
         this.userRepo.searchProjects(userId, cleanQuery),
         this.userRepo.searchWorkItems(userId, cleanQuery),
         this.userRepo.searchPapers(userId, cleanQuery),
         this.userRepo.searchPages(userId, cleanQuery),
         this.userRepo.searchFiles(userId, cleanQuery),
         this.userRepo.searchStickies(userId, cleanQuery),
-      ],
-    );
+      ]);
 
     const results: UserSearchResultItem[] = [
-      ...projects.map((project: { id: string; name: string; avatar: string | null; updatedAt: Date }) => ({
-        type: 'project' as const,
-        id: project.id,
-        name: project.name,
-        icon: project.avatar || null,
-        updatedAt: project.updatedAt,
-      })),
-      ...workItems.map((workItem: { id: string; title: string; identifier: string; projectId: string; project?: { name: string }; updatedAt: Date }) => ({
-        type: 'work_item' as const,
-        id: workItem.id,
-        name: workItem.title,
-        identifier: workItem.identifier,
-        projectId: workItem.projectId,
-        projectName: workItem.project?.name,
-        updatedAt: workItem.updatedAt,
-      })),
-      ...papers.map((paper: { id: string; title: string; updatedAt: Date }) => ({
-        type: 'paper' as const,
-        id: paper.id,
-        name: paper.title,
-        updatedAt: paper.updatedAt,
-      })),
-      ...pages.map((page: { id: string; title: string; projectId: string; project?: { name: string }; updatedAt: Date }) => ({
-        type: 'page' as const,
-        id: page.id,
-        name: page.title,
-        projectId: page.projectId,
-        projectName: page.project?.name,
-        updatedAt: page.updatedAt,
-      })),
-      ...files.map((file: { id: string; filename: string; mimeType: string; size: number; isFolder: boolean; updatedAt: Date }) => ({
-        type: file.isFolder ? ('folder' as const) : ('file' as const),
-        id: file.id,
-        name: file.filename,
-        mimeType: file.mimeType,
-        size: file.size,
-        updatedAt: file.updatedAt,
-      })),
-      ...stickies.map((sticky: { id: string; title: string; content: string; color: string; updatedAt: Date }) => ({
-        type: 'sticky' as const,
-        id: sticky.id,
-        name: sticky.title || 'Untitled Sticky',
-        color: sticky.color,
-        updatedAt: sticky.updatedAt,
-      })),
+      ...projects.map(
+        (project: {
+          id: string;
+          name: string;
+          avatar: string | null;
+          updatedAt: Date;
+        }) => ({
+          type: 'project' as const,
+          id: project.id,
+          name: project.name,
+          icon: project.avatar || null,
+          updatedAt: project.updatedAt,
+        }),
+      ),
+      ...workItems.map(
+        (workItem: {
+          id: string;
+          title: string;
+          identifier: string;
+          projectId: string;
+          project?: { name: string };
+          updatedAt: Date;
+        }) => ({
+          type: 'work_item' as const,
+          id: workItem.id,
+          name: workItem.title,
+          identifier: workItem.identifier,
+          projectId: workItem.projectId,
+          projectName: workItem.project?.name,
+          updatedAt: workItem.updatedAt,
+        }),
+      ),
+      ...papers.map(
+        (paper: { id: string; title: string; updatedAt: Date }) => ({
+          type: 'paper' as const,
+          id: paper.id,
+          name: paper.title,
+          updatedAt: paper.updatedAt,
+        }),
+      ),
+      ...pages.map(
+        (page: {
+          id: string;
+          title: string;
+          projectId: string;
+          project?: { name: string };
+          updatedAt: Date;
+        }) => ({
+          type: 'page' as const,
+          id: page.id,
+          name: page.title,
+          projectId: page.projectId,
+          projectName: page.project?.name,
+          updatedAt: page.updatedAt,
+        }),
+      ),
+      ...files.map(
+        (file: {
+          id: string;
+          filename: string;
+          mimeType: string;
+          size: number;
+          isFolder: boolean;
+          updatedAt: Date;
+        }) => ({
+          type: file.isFolder ? ('folder' as const) : ('file' as const),
+          id: file.id,
+          name: file.filename,
+          mimeType: file.mimeType,
+          size: file.size,
+          updatedAt: file.updatedAt,
+        }),
+      ),
+      ...stickies.map(
+        (sticky: {
+          id: string;
+          title: string;
+          content: string;
+          color: string;
+          updatedAt: Date;
+        }) => ({
+          type: 'sticky' as const,
+          id: sticky.id,
+          name: sticky.title || 'Untitled Sticky',
+          color: sticky.color,
+          updatedAt: sticky.updatedAt,
+        }),
+      ),
     ];
 
     return results.sort(

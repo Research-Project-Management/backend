@@ -30,7 +30,8 @@ export class AnalyticsService {
     return this.cache.wrap(
       cacheKey,
       async () => {
-        const items = await this.analyticsRepo.findProjectWorkItemsWithAssignees(projectId);
+        const items =
+          await this.analyticsRepo.findProjectWorkItemsWithAssignees(projectId);
         return aggregateProjectDistributions(items);
       },
       300, // 5 min TTL
@@ -66,9 +67,7 @@ export class AnalyticsService {
   /**
    * User Personal Aggregation Overview
    */
-  async getUserOverview(
-    userId: string,
-  ): Promise<{ stats: UserOverviewDto }> {
+  async getUserOverview(userId: string): Promise<{ stats: UserOverviewDto }> {
     const cacheKey = `flux:analytics:user:${userId}:overview`;
 
     return this.cache.wrap(
@@ -85,7 +84,8 @@ export class AnalyticsService {
   async getLabelDistribution(
     projectId: string,
   ): Promise<{ labels: { label: string; count: number }[] }> {
-    const items = await this.analyticsRepo.findProjectWorkItemsByLabel(projectId);
+    const items =
+      await this.analyticsRepo.findProjectWorkItemsByLabel(projectId);
     const labelCount: Record<string, number> = {};
     for (const item of items) {
       const labels: string[] = Array.isArray(item.labels) ? item.labels : [];
@@ -190,7 +190,9 @@ export class AnalyticsService {
     const completedWorkItems = items.filter((t) => t.completed).length;
     const pendingWorkItems = totalWorkItems - completedWorkItems;
     const velocityRate =
-      totalWorkItems > 0 ? Math.round((completedWorkItems / totalWorkItems) * 100) : 0;
+      totalWorkItems > 0
+        ? Math.round((completedWorkItems / totalWorkItems) * 100)
+        : 0;
 
     return {
       cycleId,

@@ -34,6 +34,10 @@ enum RelationType {
   is_published_version_of
   is_translation_of
   supplements
+  related
+  rebuts
+  uses_dataset
+  survey_of
 }
 
 enum IngestionStatus {
@@ -381,7 +385,7 @@ model ItemRelation {
   sourceItem   Item         @relation("SourceItem", fields: [sourceItemId], references: [id], onDelete: Cascade)
   targetItemId String       @map("target_item_id") @db.Uuid
   targetItem   Item         @relation("TargetItem", fields: [targetItemId], references: [id], onDelete: Cascade)
-  relationType RelationType @default(cites) @map("relation_type")
+  relationType RelationType @default(related) @map("relation_type")
   description  String?      @default("")
   createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
 

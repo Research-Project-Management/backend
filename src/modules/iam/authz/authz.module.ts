@@ -17,17 +17,7 @@ import { PermissionGuard, PermissionsGuard } from './guards/permission.guard';
 
 @Module({
   controllers: [AuthzController],
-  providers: [
-    AuthzService,
-    AuthzRepository,
-    RoleGuard,
-    PermissionGuard,
-  ],
-  exports: [
-    AuthzService,
-    AuthzRepository,
-    RoleGuard,
-    PermissionGuard,
-  ],
+  providers: [AuthzService, AuthzRepository, RoleGuard, PermissionGuard],
+  exports: [AuthzService, AuthzRepository, RoleGuard, PermissionGuard],
 })
 export class AuthzModule {}

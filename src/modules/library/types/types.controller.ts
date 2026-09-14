@@ -8,9 +8,7 @@ import {
 import { TypesService } from './types.service';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/auth.guard';
 
-@Controller([
-  'api/v1/library/item-types',
-])
+@Controller(['api/v1/library/item-types'])
 @UseGuards(JwtAuthGuard)
 export class TypesController {
   constructor(private readonly typesService: TypesService) {}

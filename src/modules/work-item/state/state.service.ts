@@ -63,7 +63,9 @@ export class StateService {
   /**
    * Returns a map of WorkItem counts grouped by stateId for a project.
    */
-  async getStateWorkItemCounts(projectId: string): Promise<Record<string, number>> {
+  async getStateWorkItemCounts(
+    projectId: string,
+  ): Promise<Record<string, number>> {
     const project = await this.stateRepository.findProjectById(projectId);
     if (!project) {
       throw new NotFoundException('Project not found');
@@ -357,7 +359,9 @@ export class StateService {
       );
     }
 
-    const remainingStates = currentStates.filter((state) => state.id !== stateId);
+    const remainingStates = currentStates.filter(
+      (state) => state.id !== stateId,
+    );
 
     const workItemCount = await this.stateRepository.countWorkItemsInState(
       projectId,
@@ -529,9 +533,7 @@ export class StateService {
     return { states: defaultStates, columns: defaultStates };
   }
 
-  private async invalidateProjectStateCache(
-    projectId: string,
-  ): Promise<void> {
+  private async invalidateProjectStateCache(projectId: string): Promise<void> {
     if (!this.cache) return;
     await Promise.allSettled([
       this.cache.del(WORK_ITEM_REDIS_KEYS.projectWorkItems(projectId)),

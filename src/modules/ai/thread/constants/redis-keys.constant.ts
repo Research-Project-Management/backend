@@ -9,11 +9,7 @@ export const AI_REDIS_KEYS = {
   /**
    * User AI chat sessions list in scope (project or personal) (JSON array, TTL 30m)
    */
-  userChats: (
-    scopeId: string,
-    userId: string,
-    projectId?: string | null,
-  ) =>
+  userChats: (scopeId: string, userId: string, projectId?: string | null) =>
     `flux:ai:chats:${scopeId}:user:${userId}${projectId ? `:proj:${projectId}` : ''}`,
 
   /**

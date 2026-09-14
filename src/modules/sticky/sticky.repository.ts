@@ -16,18 +16,36 @@ export class StickyRepository implements IStickyRepository {
 
   async findStickyById(stickyId: string): Promise<StickyWithUser | null> {
     if (!isUUID(stickyId)) return null;
-    return this.prisma.sticky.findUnique({
-      where: { id: stickyId },
+    return this.prisma.sticky.findFirst({
+      where: { id: stickyId, deletedAt: null },
       include: {
         user: { select: USER_MINIMAL_SELECT },
       },
     });
   }
 
-  async findStickiesByUserId(userId: string): Promise<StickyWithUser[]> {
+  async findStickiesByUserId(
+    userId: string,
+    search?: string,
+  ): Promise<StickyWithUser[]> {
     if (!isUUID(userId)) return [];
+
+    const where: Prisma.StickyWhereInput = {
+      userId,
+      projectId: null,
+      deletedAt: null,
+    };
+
+    if (search && search.trim()) {
+      const q = search.trim();
+      where.OR = [
+        { title: { contains: q, mode: 'insensitive' } },
+        { content: { contains: q, mode: 'insensitive' } },
+      ];
+    }
+
     return this.prisma.sticky.findMany({
-      where: { userId },
+      where,
       include: {
         user: { select: USER_MINIMAL_SELECT },
       },
@@ -35,14 +53,21 @@ export class StickyRepository implements IStickyRepository {
     });
   }
 
-  async findPersonalStickies(userId: string): Promise<StickyWithUser[]> {
-    return this.findStickiesByUserId(userId);
+  async findPersonalStickies(
+    userId: string,
+    search?: string,
+  ): Promise<StickyWithUser[]> {
+    return this.findStickiesByUserId(userId, search);
   }
 
   async countStickiesByUserId(userId: string): Promise<number> {
     if (!isUUID(userId)) return 0;
     return this.prisma.sticky.count({
-      where: { userId },
+      where: {
+        userId,
+        projectId: null,
+        deletedAt: null,
+      },
     });
   }
 
@@ -50,10 +75,27 @@ export class StickyRepository implements IStickyRepository {
     return this.countStickiesByUserId(userId);
   }
 
-  async findStickiesByProjectId(projectId: string): Promise<StickyWithUser[]> {
+  async findStickiesByProjectId(
+    projectId: string,
+    search?: string,
+  ): Promise<StickyWithUser[]> {
     if (!isUUID(projectId)) return [];
+
+    const where: Prisma.StickyWhereInput = {
+      projectId,
+      deletedAt: null,
+    };
+
+    if (search && search.trim()) {
+      const q = search.trim();
+      where.OR = [
+        { title: { contains: q, mode: 'insensitive' } },
+        { content: { contains: q, mode: 'insensitive' } },
+      ];
+    }
+
     return this.prisma.sticky.findMany({
-      where: { projectId },
+      where,
       include: {
         user: { select: USER_MINIMAL_SELECT },
       },
@@ -64,7 +106,10 @@ export class StickyRepository implements IStickyRepository {
   async countStickiesByProjectId(projectId: string): Promise<number> {
     if (!isUUID(projectId)) return 0;
     return this.prisma.sticky.count({
-      where: { projectId },
+      where: {
+        projectId,
+        deletedAt: null,
+      },
     });
   }
 
@@ -85,7 +130,7 @@ export class StickyRepository implements IStickyRepository {
   ): Promise<StickyWithUser> {
     return this.prisma.sticky.update({
       where: { id: stickyId },
-      data: data,
+      data,
       include: {
         user: { select: USER_MINIMAL_SELECT },
       },
@@ -93,8 +138,9 @@ export class StickyRepository implements IStickyRepository {
   }
 
   async deleteSticky(stickyId: string): Promise<Sticky> {
-    return this.prisma.sticky.delete({
+    return this.prisma.sticky.update({
       where: { id: stickyId },
+      data: { deletedAt: new Date() },
     });
   }
 
@@ -102,7 +148,7 @@ export class StickyRepository implements IStickyRepository {
     const validIds = stickyIds.filter((id) => isUUID(id));
     if (validIds.length === 0) return [];
     return this.prisma.sticky.findMany({
-      where: { id: { in: validIds } },
+      where: { id: { in: validIds }, deletedAt: null },
     });
   }
 

@@ -17,7 +17,7 @@ export class CloneHandler {
     const { identifier, sequenceNumber } =
       await this.idHandler.nextIdentifier(targetProjectId);
 
-    const cloneData: Prisma.WorkItemCreateInput = {
+    const cloneData: Prisma.WorkItemUncheckedCreateInput = {
       title: `${sourceWorkItem.title} (Copy)`,
       content: sourceWorkItem.content || sourceWorkItem.description || '',
       columnId: sourceWorkItem.columnId,
@@ -29,17 +29,11 @@ export class CloneHandler {
       completed: sourceWorkItem.completed,
       startDate: sourceWorkItem.startDate,
       dueDate: sourceWorkItem.dueDate,
-      project: { connect: { id: targetProjectId } },
-      author: { connect: { id: authorId } },
-      ...(sourceWorkItem.assigneeId
-        ? { assignee: { connect: { id: sourceWorkItem.assigneeId } } }
-        : {}),
-      ...(isSameProject && sourceWorkItem.cycleId
-        ? { cycle: { connect: { id: sourceWorkItem.cycleId } } }
-        : {}),
-      ...(isSameProject && sourceWorkItem.parentWorkItemId
-        ? { parentWorkItem: { connect: { id: sourceWorkItem.parentWorkItemId } } }
-        : {}),
+      projectId: targetProjectId,
+      authorId: authorId,
+      assigneeId: sourceWorkItem.assigneeId || null,
+      cycleId: isSameProject && sourceWorkItem.cycleId ? sourceWorkItem.cycleId : null,
+      parentWorkItemId: isSameProject && sourceWorkItem.parentWorkItemId ? sourceWorkItem.parentWorkItemId : null,
     };
 
     return { cloneData, targetProjectId, isSameProject, identifier };

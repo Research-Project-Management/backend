@@ -33,8 +33,7 @@ export class UrlCaptureService {
   async captureUrl(
     url: string,
     contextOrWorkspaceId:
-      | string
-      | { workspaceId?: string; projectId?: string; userId?: string },
+      string | { workspaceId?: string; projectId?: string; userId?: string },
   ): Promise<any> {
     const workspaceId =
       typeof contextOrWorkspaceId === 'string'

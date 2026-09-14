@@ -638,6 +638,11 @@ export class AuthnService {
       } else {
         await this.authnRepo.revokeAllUserTokens(tokenRecord.userId);
       }
+      await this.redis.set(
+        IAM_REDIS_KEYS.revoked(tokenRecord.userId),
+        Date.now(),
+        7 * 86400,
+      );
 
       await this.logAudit({
         actorId: tokenRecord.userId,
@@ -697,6 +702,11 @@ export class AuthnService {
       if (tokenRecord) {
         await this.authnRepo.revokeRefreshToken(tokenHash);
         await this.redis.del(IAM_REDIS_KEYS.session(tokenRecord.id));
+        await this.redis.set(
+          IAM_REDIS_KEYS.revoked(tokenRecord.userId),
+          Date.now(),
+          7 * 86400,
+        );
 
         await this.logAudit({
           actorId: tokenRecord.userId,
@@ -751,6 +761,11 @@ export class AuthnService {
     const hashedPassword = await bcrypt.hash(newPass, 10);
     await this.authnRepo.updateUserPassword(record.userId, hashedPassword);
     await this.authnRepo.revokeAllUserTokens(record.userId);
+    await this.redis.set(
+      IAM_REDIS_KEYS.revoked(record.userId),
+      Date.now(),
+      7 * 86400,
+    );
     await this.redis.del(resetKey);
 
     await this.logAudit({
@@ -785,6 +800,7 @@ export class AuthnService {
     }
 
     await this.redis.del(IAM_REDIS_KEYS.session(sessionId));
+    await this.redis.set(IAM_REDIS_KEYS.revoked(userId), Date.now(), 7 * 86400);
 
     await this.logAudit({
       actorId: userId,
@@ -796,6 +812,7 @@ export class AuthnService {
 
   async revokeAllSessions(userId: string): Promise<{ revokedCount: number }> {
     const count = await this.authnRepo.revokeAllUserSessions(userId);
+    await this.redis.set(IAM_REDIS_KEYS.revoked(userId), Date.now(), 7 * 86400);
 
     await this.logAudit({
       actorId: userId,

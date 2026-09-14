@@ -4,16 +4,16 @@ import { Prisma, ReadStatus } from '@prisma/client';
 import { StateEntity, UpsertStateData } from './types/state.types';
 
 const STATE_SELECT = {
-  id:             true,
-  userId:         true,
-  itemId:         true,
-  readStatus:     true,
-  rating:         true,
-  currentPage:    true,
+  id: true,
+  userId: true,
+  itemId: true,
+  readStatus: true,
+  rating: true,
+  currentPage: true,
   scrollPosition: true,
-  lastOpenedAt:   true,
-  lastReadAt:     true,
-  updatedAt:      true,
+  lastOpenedAt: true,
+  lastReadAt: true,
+  updatedAt: true,
 } satisfies Prisma.StateSelect;
 
 @Injectable()
@@ -117,4 +117,3 @@ export class StateRepository {
     });
   }
 }
-

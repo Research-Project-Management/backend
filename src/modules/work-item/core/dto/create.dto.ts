@@ -77,7 +77,10 @@ export class CreateWorkItemDto {
   @IsOptional()
   dueDate?: string | Date;
 
-  @ApiPropertyOptional({ enum: WorkItemPriority, default: WorkItemPriority.none })
+  @ApiPropertyOptional({
+    enum: WorkItemPriority,
+    default: WorkItemPriority.none,
+  })
   @IsEnum(WorkItemPriority)
   @IsOptional()
   priority?: WorkItemPriority;

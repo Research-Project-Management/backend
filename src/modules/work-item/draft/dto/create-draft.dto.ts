@@ -41,7 +41,10 @@ export class CreateDraftDto {
   @IsString()
   columnId?: string;
 
-  @ApiPropertyOptional({ enum: WorkItemPriority, default: WorkItemPriority.none })
+  @ApiPropertyOptional({
+    enum: WorkItemPriority,
+    default: WorkItemPriority.none,
+  })
   @IsOptional()
   @IsEnum(WorkItemPriority)
   priority?: WorkItemPriority;

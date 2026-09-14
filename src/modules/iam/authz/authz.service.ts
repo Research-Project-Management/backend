@@ -147,10 +147,7 @@ export class AuthzService {
     return this.getRole(projectId, userId);
   }
 
-  hasProjectPermission(
-    role: Role | string,
-    permission: Permission,
-  ): boolean {
+  hasProjectPermission(role: Role | string, permission: Permission): boolean {
     return this.hasPermission(role, permission);
   }
 

@@ -131,4 +131,3 @@ export class CommentController {
 
 export const PageCommentController = CommentController;
 export type PageCommentController = CommentController;
-

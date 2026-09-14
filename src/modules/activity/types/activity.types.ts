@@ -12,17 +12,9 @@ export type WorkItemVerb =
   | 'restored';
 
 export type PaperVerb =
-  | 'created'
-  | 'updated'
-  | 'deleted'
-  | 'imported'
-  | 'analyzed';
+  'created' | 'updated' | 'deleted' | 'imported' | 'analyzed';
 
-export type PageVerb =
-  | 'created'
-  | 'updated'
-  | 'deleted'
-  | 'published';
+export type PageVerb = 'created' | 'updated' | 'deleted' | 'published';
 
 export interface BaseActivityEvent {
   entityId: string;
@@ -34,7 +26,14 @@ export interface BaseActivityEvent {
 export interface WorkItemActivityEvent extends BaseActivityEvent {
   entityType: 'work_item' | 'item';
   verb: WorkItemVerb;
-  field?: 'columnId' | 'priority' | 'assigneeId' | 'title' | 'description' | 'state' | string;
+  field?:
+    | 'columnId'
+    | 'priority'
+    | 'assigneeId'
+    | 'title'
+    | 'description'
+    | 'state'
+    | string;
   oldValue?: string;
   newValue?: string;
   oldIdentifier?: string;

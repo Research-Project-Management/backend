@@ -1,4 +1,4 @@
-﻿import {
+import {
   IsEnum,
   IsInt,
   IsOptional,
@@ -14,19 +14,26 @@
   ArrayMaxSize,
   ArrayMinSize,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 import { AnnotationType } from '@prisma/client';
 
 // ─── Shared color validator ───────────────────────────────────────────────────
 
 const COLOR_REGEX = /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/;
-const COLOR_MSG   = 'color must be a valid hex color (e.g. #ffd400 or #fff)';
+const COLOR_MSG = 'color must be a valid hex color (e.g. #ffd400 or #fff)';
 
 // ─── Create ──────────────────────────────────────────────────────────────────
 
 export class CreateAnnotationDto {
   @IsEnum(AnnotationType)
   @IsOptional()
+  @Transform(({ value }) => {
+    if (typeof value !== 'string') return value;
+    const lower = value.trim().toLowerCase();
+    if (lower === 'box' || lower === 'area') return AnnotationType.rect;
+    if (lower === 'strike') return AnnotationType.underline;
+    return lower as AnnotationType;
+  })
   type?: AnnotationType;
 
   @IsInt()

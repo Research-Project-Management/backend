@@ -46,10 +46,7 @@ export class SavedSearchesController {
   }
 
   @Get(':id')
-  async findById(
-    @CurrentUser('id') userId: string,
-    @Param('id') id: string,
-  ) {
+  async findById(@CurrentUser('id') userId: string, @Param('id') id: string) {
     return this.service.findById(userId, id);
   }
 
@@ -63,10 +60,7 @@ export class SavedSearchesController {
   }
 
   @Delete(':id')
-  async delete(
-    @CurrentUser('id') userId: string,
-    @Param('id') id: string,
-  ) {
+  async delete(@CurrentUser('id') userId: string, @Param('id') id: string) {
     return this.service.delete(userId, id);
   }
 
@@ -79,4 +73,3 @@ export class SavedSearchesController {
     return this.service.execute(userId, id, query);
   }
 }
-

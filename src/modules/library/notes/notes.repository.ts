@@ -54,9 +54,7 @@ export class NotesRepository {
   ) {
     const client = this.getClient(tx);
     const scopeWhere =
-      projectId && projectId !== 'user'
-        ? { projectId }
-        : { userId };
+      projectId && projectId !== 'user' ? { projectId } : { userId };
     return client.note.findFirst({
       where: { id, ...scopeWhere, deletedAt: null },
     });
@@ -96,17 +94,13 @@ export class NotesRepository {
   ) {
     const client = this.getClient(tx);
     const scopeWhere =
-      projectId && projectId !== 'user'
-        ? { projectId }
-        : { userId };
+      projectId && projectId !== 'user' ? { projectId } : { userId };
     const existing = await client.note.findFirst({
       where: { id, ...scopeWhere, deletedAt: null },
     });
 
     if (!existing) {
-      throw new NotFoundException(
-        `Note ${id} not found`,
-      );
+      throw new NotFoundException(`Note ${id} not found`);
     }
 
     if (existing.version !== expectedVersion) {
@@ -146,9 +140,7 @@ export class NotesRepository {
   ): Promise<boolean> {
     const client = this.getClient(tx);
     const scopeWhere =
-      projectId && projectId !== 'user'
-        ? { projectId }
-        : { userId };
+      projectId && projectId !== 'user' ? { projectId } : { userId };
     if (expectedVersion !== undefined) {
       const existing = await client.note.findFirst({
         where: { id, ...scopeWhere, deletedAt: null },

@@ -20,10 +20,7 @@ import {
   ReorderWorkItemDto,
 } from './dto/bulk.dto';
 import { formatWorkItem, mapPriority } from './utils/work-item.util';
-import {
-  parseWorkItemStates,
-  isStateCompleted,
-} from '../state/utils/state.util';
+import { isStateCompleted } from '../state/utils/state.util';
 import { isUuid } from '@/core/utils/uuid.util';
 import { WORK_ITEM_REDIS_KEYS } from './constants/redis-keys.constant';
 
@@ -62,7 +59,10 @@ export class CoreService {
 
   // ── Queries ─────────────────────────────────────────────────────────────────
 
-  async getProjectWorkItems(projectId: string, filter?: string | QueryWorkItemDto) {
+  async getProjectWorkItems(
+    projectId: string,
+    filter?: string | QueryWorkItemDto,
+  ) {
     const isSimpleCycle = typeof filter === 'string';
     const isUnfiltered =
       !filter ||
@@ -120,7 +120,11 @@ export class CoreService {
     const item = await this.workItemRepository.findWorkItemById(workItemId);
     if (!item) throw new NotFoundException('WorkItem not found');
     if (this.cache)
-      await this.cache.set(WORK_ITEM_REDIS_KEYS.workItem(workItemId), item, 600);
+      await this.cache.set(
+        WORK_ITEM_REDIS_KEYS.workItem(workItemId),
+        item,
+        600,
+      );
     const formatted = formatWorkItem(item);
     return { workItem: formatted, item: formatted };
   }
@@ -136,12 +140,11 @@ export class CoreService {
       await this.workItemRepository.findProjectWithColumns(projectId);
     if (!rawProject) throw new NotFoundException('Project not found');
 
-    const columns = parseWorkItemStates(
-      (rawProject as any).workItemColumns,
-    );
+    const defaultState =
+      rawProject.states?.find((s) => s.isDefault) || rawProject.states?.[0];
     const targetColumn =
       createWorkItemDto.columnId ||
-      (columns.length > 0 ? columns[0].id : 'backlog');
+      (defaultState ? defaultState.id : 'backlog');
     const columnCount = await this.workItemRepository.countColumnWorkItems(
       projectId,
       targetColumn,
@@ -173,7 +176,8 @@ export class CoreService {
         : null,
       timeSpent: createWorkItemDto.timeSpent || 0,
       assigneeIds:
-        createWorkItemDto.assigneeIds && Array.isArray(createWorkItemDto.assigneeIds)
+        createWorkItemDto.assigneeIds &&
+        Array.isArray(createWorkItemDto.assigneeIds)
           ? createWorkItemDto.assigneeIds
           : createWorkItemDto.assigneeId
             ? [createWorkItemDto.assigneeId]
@@ -186,9 +190,7 @@ export class CoreService {
       ...(createWorkItemDto.cycleId
         ? { cycle: { connect: { id: createWorkItemDto.cycleId } } }
         : {}),
-      ...(parentId
-        ? { parentWorkItem: { connect: { id: parentId } } }
-        : {}),
+      ...(parentId ? { parentWorkItem: { connect: { id: parentId } } } : {}),
     });
 
     await this.invalidateWorkItemCache(
@@ -214,7 +216,8 @@ export class CoreService {
     authorId: string,
     createWorkItemDto: CreateWorkItemDto,
   ) {
-    const parent = await this.workItemRepository.findWorkItemById(parentWorkItemId);
+    const parent =
+      await this.workItemRepository.findWorkItemById(parentWorkItemId);
     if (!parent) throw new NotFoundException('Parent work item not found');
 
     return this.createWorkItem(parent.projectId, authorId, {
@@ -305,7 +308,11 @@ export class CoreService {
       existing.cycleId,
     );
 
-    this.eventDispatcher.dispatchUpdateEvents(existing, updateWorkItemDto, userId);
+    this.eventDispatcher.dispatchUpdateEvents(
+      existing,
+      updateWorkItemDto,
+      userId,
+    );
     const formatted = formatWorkItem(updated);
     return { workItem: formatted, item: formatted };
   }
@@ -324,7 +331,10 @@ export class CoreService {
     return { message: 'WorkItem deleted successfully' };
   }
 
-  async reorderWorkItem(workItemId: string, reorderWorkItemDto: ReorderWorkItemDto) {
+  async reorderWorkItem(
+    workItemId: string,
+    reorderWorkItemDto: ReorderWorkItemDto,
+  ) {
     const item = await this.workItemRepository.findWorkItemById(workItemId);
     if (!item) throw new NotFoundException('WorkItem not found');
 
@@ -364,15 +374,17 @@ export class CoreService {
       bulkUpdateWorkItemDto.data || (bulkUpdateWorkItemDto as any);
 
     const rawIds =
-      bulkUpdateWorkItemDto.workItemIds ||
-      bulkUpdateWorkItemDto.ids ||
-      [];
+      bulkUpdateWorkItemDto.workItemIds || bulkUpdateWorkItemDto.ids || [];
 
     // Support bulk add single label to all selected items
-    if (payload.addLabel !== undefined && typeof payload.addLabel === 'string') {
+    if (
+      payload.addLabel !== undefined &&
+      typeof payload.addLabel === 'string'
+    ) {
       const labelId = payload.addLabel;
       const validIds = rawIds.filter(isUuid);
-      const allItems = await this.workItemRepository.findWorkItemsByIds(validIds);
+      const allItems =
+        await this.workItemRepository.findWorkItemsByIds(validIds);
       const items = allItems.filter((t) => t.projectId === projectId);
       await Promise.all(
         items.map((t) => {
@@ -390,10 +402,14 @@ export class CoreService {
     }
 
     // Support bulk remove single label from all selected items
-    if (payload.removeLabel !== undefined && typeof payload.removeLabel === 'string') {
+    if (
+      payload.removeLabel !== undefined &&
+      typeof payload.removeLabel === 'string'
+    ) {
       const labelId = payload.removeLabel;
       const validIds = rawIds.filter(isUuid);
-      const allItems = await this.workItemRepository.findWorkItemsByIds(validIds);
+      const allItems =
+        await this.workItemRepository.findWorkItemsByIds(validIds);
       const items = allItems.filter((t) => t.projectId === projectId);
       await Promise.all(
         items.map((t) => {
@@ -446,9 +462,7 @@ export class CoreService {
     userId?: string,
   ) {
     const rawIds =
-      bulkDeleteWorkItemDto.workItemIds ||
-      bulkDeleteWorkItemDto.ids ||
-      [];
+      bulkDeleteWorkItemDto.workItemIds || bulkDeleteWorkItemDto.ids || [];
     const result = await this.workItemRepository.bulkDeleteWorkItems(
       projectId,
       rawIds,
@@ -486,7 +500,11 @@ export class CoreService {
         destinationProjectId,
       );
     const cloned = await this.workItemRepository.createWorkItem(cloneData);
-    await this.invalidateWorkItemCache(targetProjectId, cloned.id, cloned.cycleId);
+    await this.invalidateWorkItemCache(
+      targetProjectId,
+      cloned.id,
+      cloned.cycleId,
+    );
 
     this.eventDispatcher.emitWorkItemDuplicated({
       workItemId: cloned.id,
@@ -506,7 +524,9 @@ export class CoreService {
     const item = await this.workItemRepository.findWorkItemById(workItemId);
     if (!item) throw new NotFoundException('WorkItem not found');
 
-    const updated = await this.workItemRepository.disconnectParentWorkItem(item.id);
+    const updated = await this.workItemRepository.disconnectParentWorkItem(
+      item.id,
+    );
 
     await this.invalidateWorkItemCache(item.projectId, item.id, item.cycleId);
     const formatted = formatWorkItem(updated);

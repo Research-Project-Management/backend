@@ -39,7 +39,7 @@ export interface ProjectMinimal {
   name: string;
   avatar: string | null;
   identifier: string | null;
-  workItemColumns?: unknown;
+  states?: unknown;
 }
 
 export interface WorkItemCommentMinimal {

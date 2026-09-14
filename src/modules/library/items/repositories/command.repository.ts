@@ -644,9 +644,7 @@ export class CommandRepository {
       where: {
         id,
         deletedAt: null,
-        ...(projectId && projectId !== 'user'
-          ? { projectId }
-          : { userId }),
+        ...(projectId && projectId !== 'user' ? { projectId } : { userId }),
       } as any,
       include: {
         identifiers: true,
@@ -655,9 +653,7 @@ export class CommandRepository {
     });
 
     if (!existing) {
-      throw new NotFoundException(
-        `CatalogItem ${id} not found`,
-      );
+      throw new NotFoundException(`CatalogItem ${id} not found`);
     }
 
     if (expectedVersion !== undefined && existing.version !== expectedVersion) {
@@ -1008,9 +1004,7 @@ export class CommandRepository {
     const whereCondition: any = {
       id,
       deletedAt: null,
-      ...(projectId && projectId !== 'user'
-        ? { projectId }
-        : { userId }),
+      ...(projectId && projectId !== 'user' ? { projectId } : { userId }),
     };
     if (expectedVersion !== undefined) {
       const existing = await client.item.findFirst({
@@ -1046,16 +1040,12 @@ export class CommandRepository {
       where: {
         id,
         deletedAt: { not: null },
-        ...(projectId && projectId !== 'user'
-          ? { projectId }
-          : { userId }),
+        ...(projectId && projectId !== 'user' ? { projectId } : { userId }),
       },
     });
 
     if (!existing) {
-      throw new NotFoundException(
-        `Trashed item ${id} not found`,
-      );
+      throw new NotFoundException(`Trashed item ${id} not found`);
     }
 
     // Protection against restoring merged items
@@ -1108,16 +1098,12 @@ export class CommandRepository {
     const existing = await client.item.findFirst({
       where: {
         id,
-        ...(projectId && projectId !== 'user'
-          ? { projectId }
-          : { userId }),
+        ...(projectId && projectId !== 'user' ? { projectId } : { userId }),
       },
     });
 
     if (!existing) {
-      throw new NotFoundException(
-        `Item ${id} not found`,
-      );
+      throw new NotFoundException(`Item ${id} not found`);
     }
 
     if (!existing.deletedAt) {
@@ -1148,18 +1134,35 @@ export class CommandRepository {
     });
     if (!source) return;
 
+    const rawType = String(relation.relationType || '').trim().toLowerCase();
+    const validRelationTypes = new Set([
+      'cites',
+      'cited_by',
+      'replicates',
+      'extends',
+      'is_preprint_of',
+      'is_published_version_of',
+      'is_translation_of',
+      'supplements',
+      'related',
+      'rebuts',
+      'uses_dataset',
+      'survey_of',
+    ]);
+    const relationType = validRelationTypes.has(rawType) ? (rawType as any) : 'related';
+
     await client.itemRelation.upsert({
       where: {
         sourceItemId_targetItemId_relationType: {
           sourceItemId: itemId,
           targetItemId,
-          relationType: relation.relationType || 'cites',
+          relationType,
         },
       },
       create: {
         sourceItemId: itemId,
         targetItemId,
-        relationType: relation.relationType || 'cites',
+        relationType,
         description: relation.description || '',
       },
       update: {
@@ -1217,9 +1220,7 @@ export class CommandRepository {
     });
 
     if (!existing) {
-      throw new NotFoundException(
-        `CatalogItem ${id} not found`,
-      );
+      throw new NotFoundException(`CatalogItem ${id} not found`);
     }
 
     return client.item.update({

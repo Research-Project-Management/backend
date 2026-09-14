@@ -178,7 +178,9 @@ export class FileController {
   }
 
   @Get(['projects/:projectId/usage', 'project/:projectId/usage'])
-  @ApiOperation({ summary: 'Get project storage usage (charged to project owner)' })
+  @ApiOperation({
+    summary: 'Get project storage usage (charged to project owner)',
+  })
   async getProjectUsage(
     @CurrentUser('id') userId: string,
     @Param('projectId') projectId: string,

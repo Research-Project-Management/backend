@@ -15,13 +15,7 @@ import {
   CompleteCycleDto,
   IncompleteWorkItemAction,
 } from './dto/cycle.dto';
-import {
-  Cycle,
-  CycleStatus,
-  CyclePhase,
-  Prisma,
-  EntityType,
-} from '@prisma/client';
+import { Cycle, CycleStatus, Prisma, EntityType } from '@prisma/client';
 import { RedisCacheService } from '@/core/cache/redis.service';
 import { WORK_ITEM_REDIS_KEYS } from '../core/constants/redis-keys.constant';
 import { calculateCycleStats } from './utils/cycle.util';
@@ -179,7 +173,6 @@ export class CycleService implements OnModuleInit, OnModuleDestroy {
       startDate,
       endDate,
       status,
-      phase: dto.phase || CyclePhase.custom,
       project: { connect: { id: projectId } },
       author: { connect: { id: userId } },
     });
@@ -253,7 +246,6 @@ export class CycleService implements OnModuleInit, OnModuleDestroy {
       ...(dto.startDate !== undefined && { startDate }),
       ...(dto.endDate !== undefined && { endDate }),
       ...(dto.status !== undefined && { status: dto.status }),
-      ...(dto.phase !== undefined && { phase: dto.phase }),
       ...(statsAtCompletion !== undefined && {
         statsAtCompletion:
           statsAtCompletion as unknown as Prisma.InputJsonValue,
@@ -313,9 +305,14 @@ export class CycleService implements OnModuleInit, OnModuleDestroy {
       throw new NotFoundException('WorkItem not found');
     }
     if (item.projectId !== cycle.projectId) {
-      throw new BadRequestException('Cannot add work item from a different project to this cycle');
+      throw new BadRequestException(
+        'Cannot add work item from a different project to this cycle',
+      );
     }
-    const updated = await this.cycleRepository.addWorkItemToCycle(workItemId, cycleId);
+    const updated = await this.cycleRepository.addWorkItemToCycle(
+      workItemId,
+      cycleId,
+    );
     await this.invalidateCycleCache(cycle.projectId, cycleId);
     return { message: 'WorkItem added to cycle', workItem: updated };
   }
@@ -342,7 +339,8 @@ export class CycleService implements OnModuleInit, OnModuleDestroy {
     if (!cycle) {
       throw new NotFoundException('Cycle not found');
     }
-    const updated = await this.cycleRepository.removeWorkItemFromCycle(workItemId);
+    const updated =
+      await this.cycleRepository.removeWorkItemFromCycle(workItemId);
     await this.invalidateCycleCache(cycle.projectId, cycleId);
     return {
       message: 'WorkItem removed from cycle',
@@ -374,7 +372,11 @@ export class CycleService implements OnModuleInit, OnModuleDestroy {
 
     // Identify incomplete work items using state groups
     const incompleteWorkItemIds = workItems
-      .filter((workItem: any) => !workItem.completed && inferStateGroup(workItem.columnId, workItem.columnId) !== 'completed')
+      .filter(
+        (workItem: any) =>
+          !workItem.completed &&
+          inferStateGroup(workItem.columnId, workItem.columnId) !== 'completed',
+      )
       .map((workItem: any) => workItem.id);
 
     let transferredCount = 0;
@@ -578,5 +580,3 @@ export class CycleService implements OnModuleInit, OnModuleDestroy {
     };
   }
 }
-
-

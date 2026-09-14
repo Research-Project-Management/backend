@@ -31,7 +31,7 @@ export class ActivityListener {
     const entityId = event?.entityId || event?.workItemId;
     if (entityId) {
       const activityEvent = new DomainActivityEvent({
-        entityType: 'work_item' as any,
+        entityType: 'work_item',
         entityId,
         verb: event.verb || 'updated',
         actorId: event.actorId || event.authorId || '',
@@ -45,7 +45,7 @@ export class ActivityListener {
       // Record initial state if WorkItem was created with a column
       if (event.verb === 'created' && event.columnId) {
         const stateInitEvent = new DomainActivityEvent({
-          entityType: 'work_item' as any,
+          entityType: 'work_item',
           entityId,
           verb: 'transitioned',
           actorId: event.actorId || event.authorId || '',
@@ -108,7 +108,7 @@ export class ActivityListener {
     const entityId = event?.entityId || event?.projectId;
     if (entityId) {
       const activityEvent = new DomainActivityEvent({
-        entityType: 'project' as any,
+        entityType: 'project',
         entityId,
         verb: event.verb || 'updated',
         actorId: event.actorId || '',

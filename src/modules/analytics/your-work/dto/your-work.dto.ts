@@ -24,7 +24,9 @@ export class YourWorkSummaryDto {
   @IsArray()
   created!: UserWorkItem[];
 
-  @ApiProperty({ description: 'Work items subscribed by the user (commented on)' })
+  @ApiProperty({
+    description: 'Work items subscribed by the user (commented on)',
+  })
   @IsArray()
   subscribed!: UserWorkItem[];
 

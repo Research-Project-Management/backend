@@ -46,9 +46,7 @@ export class CollectionsRepository {
     const where: Prisma.CollectionWhereInput = {
       id,
       deletedAt: null,
-      ...(projectId && projectId !== 'user'
-        ? { projectId }
-        : { userId }),
+      ...(projectId && projectId !== 'user' ? { projectId } : { userId }),
     };
     return client.collection.findFirst({
       where,
@@ -173,9 +171,7 @@ export class CollectionsRepository {
     const client = this.getClient(clientTx);
     const existing = await this.findById(userId, id, clientTx, projectId);
     if (!existing) {
-      throw new NotFoundException(
-        `Collection ${id} not found`,
-      );
+      throw new NotFoundException(`Collection ${id} not found`);
     }
 
     if (expectedVersion !== undefined && existing.version !== expectedVersion) {
@@ -217,9 +213,7 @@ export class CollectionsRepository {
 
     const client = this.getClient(clientTx);
     const scopeWhere =
-      projectId && projectId !== 'user'
-        ? { projectId }
-        : { userId };
+      projectId && projectId !== 'user' ? { projectId } : { userId };
 
     if (strategy === 'cascade') {
       // Find all child collections and delete recursively
@@ -342,12 +336,7 @@ export class CollectionsRepository {
       });
     } else {
       for (const itemId of itemIds) {
-        await this.addItemToCollection(
-          userId,
-          targetCollectionId,
-          itemId,
-          tx,
-        );
+        await this.addItemToCollection(userId, targetCollectionId, itemId, tx);
       }
     }
   }

@@ -161,7 +161,11 @@ export class ItemsController {
     const expectedVersion =
       body.expectedVersion ??
       (!isNaN(parsedHeaderVersion as number) ? parsedHeaderVersion : undefined);
-    if (expectedVersion === undefined || isNaN(expectedVersion) || expectedVersion < 0) {
+    if (
+      expectedVersion === undefined ||
+      isNaN(expectedVersion) ||
+      expectedVersion < 0
+    ) {
       throw new BadRequestException(
         'Optimistic locking requirement: expectedVersion or If-Match header is required',
       );
@@ -187,13 +191,7 @@ export class ItemsController {
     @Body() body: UpdateItemDto,
     @Param('projectId') projectId?: string,
   ) {
-    return this.updateItem(
-      id,
-      userId,
-      ifMatch,
-      body,
-      projectId,
-    );
+    return this.updateItem(id, userId, ifMatch, body, projectId);
   }
 
   @Post(':id/reindex')
@@ -370,11 +368,7 @@ export class ItemsController {
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
   ) {
-    const item = await this.itemsService.setMyPublication(
-      userId,
-      id,
-      true,
-    );
+    const item = await this.itemsService.setMyPublication(userId, id, true);
     return { success: true, data: item, item };
   }
 
@@ -384,11 +378,7 @@ export class ItemsController {
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
   ) {
-    const item = await this.itemsService.setMyPublication(
-      userId,
-      id,
-      false,
-    );
+    const item = await this.itemsService.setMyPublication(userId, id, false);
     return { success: true, data: item, item };
   }
 }

@@ -20,7 +20,10 @@ export class ArchiveService {
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
-  private async invalidateWorkItemCache(workItemId: string, projectId?: string) {
+  private async invalidateWorkItemCache(
+    workItemId: string,
+    projectId?: string,
+  ) {
     if (!this.cache) return;
     const promises: Promise<any>[] = [
       this.cache.del(WORK_ITEM_REDIS_KEYS.workItem(workItemId)),
@@ -34,7 +37,8 @@ export class ArchiveService {
   }
 
   async archiveWorkItem(workItemId: string, userId: string) {
-    const workItem = await this.archiveRepository.findWorkItemWithProject(workItemId);
+    const workItem =
+      await this.archiveRepository.findWorkItemWithProject(workItemId);
     if (!workItem) {
       throw new NotFoundException(`Work item "${workItemId}" not found`);
     }
@@ -76,7 +80,8 @@ export class ArchiveService {
   }
 
   async restoreWorkItem(workItemId: string, userId: string) {
-    const workItem = await this.archiveRepository.findWorkItemWithProject(workItemId);
+    const workItem =
+      await this.archiveRepository.findWorkItemWithProject(workItemId);
     if (!workItem) {
       throw new NotFoundException(`Work item "${workItemId}" not found`);
     }

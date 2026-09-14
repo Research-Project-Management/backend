@@ -68,7 +68,9 @@ export class RelationService {
       throw new NotFoundException('WorkItem not found');
     }
 
-    const rawRelations: WorkItemRelationItem[] = Array.isArray(workItem.relations)
+    const rawRelations: WorkItemRelationItem[] = Array.isArray(
+      workItem.relations,
+    )
       ? (workItem.relations as unknown as WorkItemRelationItem[])
       : [];
 
@@ -79,7 +81,8 @@ export class RelationService {
     const targetIds = rawRelations
       .map((relation) => relation.targetWorkItemId)
       .filter(Boolean);
-    const targetWorkItems = await this.relationRepository.findWorkItemsByIds(targetIds);
+    const targetWorkItems =
+      await this.relationRepository.findWorkItemsByIds(targetIds);
     const itemMap = new Map(
       targetWorkItems.map((targetItem) => [targetItem.id, targetItem]),
     );
@@ -210,20 +213,26 @@ export class RelationService {
     };
   }
 
-  async removeRelation(workItemId: string, targetWorkItemId: string, actorId?: string) {
+  async removeRelation(
+    workItemId: string,
+    targetWorkItemId: string,
+    actorId?: string,
+  ) {
     const sourceItem = await this.relationRepository.findWorkItem(workItemId);
     if (!sourceItem) {
       throw new NotFoundException('Source WorkItem not found');
     }
 
-    const targetItem = await this.relationRepository.findWorkItem(targetWorkItemId);
+    const targetItem =
+      await this.relationRepository.findWorkItem(targetWorkItemId);
 
     const sourceRelations = (
       Array.isArray(sourceItem.relations)
         ? (sourceItem.relations as unknown as WorkItemRelationItem[])
         : []
     ).filter(
-      (relation) => relation.targetWorkItemId !== (targetItem?.id || targetWorkItemId),
+      (relation) =>
+        relation.targetWorkItemId !== (targetItem?.id || targetWorkItemId),
     );
 
     const updates: Promise<any>[] = [
@@ -330,7 +339,8 @@ export class RelationService {
     const targetIds = timelineRelations.map(
       (relation) => relation.targetWorkItemId,
     );
-    const targetWorkItems = await this.relationRepository.findWorkItemsByIds(targetIds);
+    const targetWorkItems =
+      await this.relationRepository.findWorkItemsByIds(targetIds);
     const itemMap = new Map(
       targetWorkItems.map((targetItem) => [targetItem.id, targetItem]),
     );

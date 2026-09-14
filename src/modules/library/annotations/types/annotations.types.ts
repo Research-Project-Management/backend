@@ -6,14 +6,14 @@ export { AnnotationType };
 // Const object pattern (Matt Pocock) — avoids TypeScript enum pitfalls
 
 export const ANNOTATION_COLORS = {
-  yellow:  '#ffd400',
-  red:     '#ff6666',
-  green:   '#5fb236',
-  blue:    '#2ea8e5',
-  purple:  '#a28ae5',
+  yellow: '#ffd400',
+  red: '#ff6666',
+  green: '#5fb236',
+  blue: '#2ea8e5',
+  purple: '#a28ae5',
   magenta: '#e56eee',
-  orange:  '#f19837',
-  gray:    '#aaaaaa',
+  orange: '#f19837',
+  gray: '#aaaaaa',
 } as const;
 
 export type AnnotationColor =
@@ -23,20 +23,20 @@ export type AnnotationColor =
 // Using `satisfies` to get full Prisma type inference without re-declaring
 
 const annotationSelect = {
-  id:                  true,
-  attachmentId:        true,
-  type:                true,
-  pageIndex:           true,
+  id: true,
+  attachmentId: true,
+  type: true,
+  pageIndex: true,
   annotationSortIndex: true,
-  color:               true,
-  quoteText:           true,
-  comment:             true,
-  rectCoords:          true,
-  authorId:            true,
-  version:             true,
-  deletedAt:           true,
-  createdAt:           true,
-  updatedAt:           true,
+  color: true,
+  quoteText: true,
+  comment: true,
+  rectCoords: true,
+  authorId: true,
+  version: true,
+  deletedAt: true,
+  createdAt: true,
+  updatedAt: true,
 } satisfies Prisma.AnnotationSelect;
 
 export type AnnotationEntity = Prisma.AnnotationGetPayload<{
@@ -46,7 +46,7 @@ export type AnnotationEntity = Prisma.AnnotationGetPayload<{
 // ─── Service result — discriminated union ───────────────────────────────────
 
 export type AnnotationResult =
-  | { success: true;  data: AnnotationEntity }
+  | { success: true; data: AnnotationEntity }
   | {
       success: false;
       code: 'NOT_FOUND' | 'VERSION_MISMATCH' | 'FORBIDDEN';

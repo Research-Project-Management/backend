@@ -4,7 +4,7 @@
  * Hexagonal / DDD-Lite ports and domain model definitions for Sprint Cycles.
  */
 
-import { Cycle, CyclePhase, CycleStatus, Prisma, WorkItem } from '@prisma/client';
+import { Cycle, CycleStatus, Prisma, WorkItem } from '@prisma/client';
 
 export enum IncompleteWorkItemAction {
   transfer = 'transfer',
@@ -21,26 +21,6 @@ export interface CycleStats {
   cancelledWorkItems: number;
   completionPercentage: number;
 }
-
-export interface CyclePhaseInfo {
-  label: string;
-  order: number;
-}
-
-export const CYCLE_PHASE_CONFIG: Record<CyclePhase, CyclePhaseInfo> = {
-  [CyclePhase.topic_selection]: { label: 'Topic Selection', order: 1 },
-  [CyclePhase.literature_review]: { label: 'Literature Review', order: 2 },
-  [CyclePhase.methodology]: { label: 'Methodology & Design', order: 3 },
-  [CyclePhase.data_collection]: { label: 'Data Collection', order: 4 },
-  [CyclePhase.data_analysis]: {
-    label: 'Data Analysis & Experiments',
-    order: 5,
-  },
-  [CyclePhase.writing]: { label: 'Manuscript Writing', order: 6 },
-  [CyclePhase.review_revision]: { label: 'Peer Review & Revision', order: 7 },
-  [CyclePhase.submission]: { label: 'Camera-Ready Submission', order: 8 },
-  [CyclePhase.custom]: { label: 'Custom Milestone', order: 9 },
-};
 
 export interface CycleWorkItemItem {
   id: string;
@@ -76,7 +56,9 @@ export interface ICycleRepository {
     targetCycleId: string | null,
     incompleteWorkItemIds?: string[],
   ): Promise<Prisma.BatchPayload>;
-  findWorkItemById(workItemId: string): Promise<{ id: string; projectId: string } | null>;
+  findWorkItemById(
+    workItemId: string,
+  ): Promise<{ id: string; projectId: string } | null>;
   addWorkItemToCycle(workItemId: string, cycleId: string): Promise<WorkItem>;
   removeWorkItemFromCycle(workItemId: string): Promise<WorkItem>;
   addWorkItemsBatch(

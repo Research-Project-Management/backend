@@ -37,10 +37,7 @@ import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
 export class CycleController {
   constructor(private readonly cycleService: CycleService) {}
 
-  @Get([
-    'projects/:projectId/cycles',
-    'project/:projectId/cycles',
-  ])
+  @Get(['projects/:projectId/cycles', 'project/:projectId/cycles'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get all cycles for a project' })
@@ -52,10 +49,7 @@ export class CycleController {
     return this.cycleService.getCycles(projectId);
   }
 
-  @Post([
-    'projects/:projectId/cycles',
-    'project/:projectId/cycles',
-  ])
+  @Post(['projects/:projectId/cycles', 'project/:projectId/cycles'])
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
@@ -69,10 +63,7 @@ export class CycleController {
     return this.cycleService.createCycle(projectId, userId, createCycleDto);
   }
 
-  @Get([
-    'projects/:projectId/cycles/:cycleId',
-    'cycles/:cycleId',
-  ])
+  @Get(['projects/:projectId/cycles/:cycleId', 'cycles/:cycleId'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get a cycle by ID with progress stats' })
@@ -93,10 +84,7 @@ export class CycleController {
     return this.cycleService.getCycleProgress(cycleId);
   }
 
-  @Patch([
-    'projects/:projectId/cycles/:cycleId',
-    'cycles/:cycleId',
-  ])
+  @Patch(['projects/:projectId/cycles/:cycleId', 'cycles/:cycleId'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Update a cycle partially' })
@@ -108,10 +96,7 @@ export class CycleController {
     return this.cycleService.updateCycle(cycleId, updateCycleDto);
   }
 
-  @Put([
-    'projects/:projectId/cycles/:cycleId',
-    'cycles/:cycleId',
-  ])
+  @Put(['projects/:projectId/cycles/:cycleId', 'cycles/:cycleId'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Update a cycle completely' })
@@ -123,10 +108,7 @@ export class CycleController {
     return this.cycleService.updateCycle(cycleId, updateCycleDto);
   }
 
-  @Delete([
-    'projects/:projectId/cycles/:cycleId',
-    'cycles/:cycleId',
-  ])
+  @Delete(['projects/:projectId/cycles/:cycleId', 'cycles/:cycleId'])
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')

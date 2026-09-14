@@ -96,4 +96,3 @@ export class CommentRepository {
 
 export const PageCommentRepository = CommentRepository;
 export type PageCommentRepository = CommentRepository;
-

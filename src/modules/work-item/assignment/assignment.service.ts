@@ -41,7 +41,8 @@ export class AssignmentService {
     assigneeId: string | null | undefined,
     actorId?: string,
   ): Promise<AssignWorkItemResult> {
-    const item = await this.assignmentRepository.findWorkItemWithProject(workItemId);
+    const item =
+      await this.assignmentRepository.findWorkItemWithProject(workItemId);
     if (!item || item.projectId !== projectId) {
       throw new NotFoundException('Work item not found in this project');
     }
@@ -143,13 +144,16 @@ export class AssignmentService {
     workItemId: string,
     userId: string,
   ): Promise<AssignWorkItemResult> {
-    const item = await this.assignmentRepository.findWorkItemWithProject(workItemId);
+    const item =
+      await this.assignmentRepository.findWorkItemWithProject(workItemId);
     if (!item || item.projectId !== projectId) {
       throw new NotFoundException('Work item not found in this project');
     }
 
     if (item.assigneeId === userId) {
-      throw new BadRequestException('You are already assigned to this work item');
+      throw new BadRequestException(
+        'You are already assigned to this work item',
+      );
     }
 
     const member = await this.assignmentRepository.findProjectMember(
@@ -173,7 +177,8 @@ export class AssignmentService {
     workItemId: string,
     userId: string,
   ): Promise<AssignWorkItemResult> {
-    const item = await this.assignmentRepository.findWorkItemWithProject(workItemId);
+    const item =
+      await this.assignmentRepository.findWorkItemWithProject(workItemId);
     if (!item || item.projectId !== projectId) {
       throw new NotFoundException('Work item not found in this project');
     }
@@ -223,7 +228,9 @@ export class AssignmentService {
     const rawItemIds = bulkAssignWorkItemDto.workItemIds || [];
 
     if (rawItemIds.length === 0) {
-      throw new BadRequestException('At least one WorkItem ID must be provided');
+      throw new BadRequestException(
+        'At least one WorkItem ID must be provided',
+      );
     }
 
     const updatedCount = await this.assignmentRepository.bulkAssignWorkItems(
@@ -325,7 +332,8 @@ export class AssignmentService {
       avatar: string | null;
     }[];
   }> {
-    const item = await this.assignmentRepository.findWorkItemWithProject(workItemId);
+    const item =
+      await this.assignmentRepository.findWorkItemWithProject(workItemId);
     if (!item || item.projectId !== projectId) {
       throw new NotFoundException('Work item not found in this project');
     }
@@ -354,7 +362,8 @@ export class AssignmentService {
     setAssigneesDto: SetAssigneesDto,
     actorId?: string,
   ): Promise<{ assignees: string[]; primaryAssigneeId: string | null }> {
-    const item = await this.assignmentRepository.findWorkItemWithProject(workItemId);
+    const item =
+      await this.assignmentRepository.findWorkItemWithProject(workItemId);
     if (!item || item.projectId !== projectId) {
       throw new NotFoundException('Work item not found in this project');
     }
@@ -413,7 +422,8 @@ export class AssignmentService {
     addAssigneeDto: AddAssigneeDto,
     actorId?: string,
   ): Promise<{ assignees: string[]; primaryAssigneeId: string | null }> {
-    const item = await this.assignmentRepository.findWorkItemWithProject(workItemId);
+    const item =
+      await this.assignmentRepository.findWorkItemWithProject(workItemId);
     if (!item || item.projectId !== projectId) {
       throw new NotFoundException('Work item not found in this project');
     }
@@ -477,7 +487,8 @@ export class AssignmentService {
     targetUserId: string,
     actorId?: string,
   ): Promise<{ assignees: string[]; primaryAssigneeId: string | null }> {
-    const item = await this.assignmentRepository.findWorkItemWithProject(workItemId);
+    const item =
+      await this.assignmentRepository.findWorkItemWithProject(workItemId);
     if (!item || item.projectId !== projectId) {
       throw new NotFoundException('Work item not found in this project');
     }
@@ -513,4 +524,3 @@ export class AssignmentService {
     return { assignees: updated, primaryAssigneeId };
   }
 }
-

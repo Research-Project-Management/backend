@@ -19,8 +19,14 @@ export class RankHandler {
       isStateCompleted(columnId),
     movingWorkItem?: { id: string; columnId: string; rank: number },
   ): RankUpdateItem[] {
-    let currentWorkItem = columnWorkItems.find((item) => item.id === workItemId);
-    if (!currentWorkItem && movingWorkItem && movingWorkItem.id === workItemId) {
+    let currentWorkItem = columnWorkItems.find(
+      (item) => item.id === workItemId,
+    );
+    if (
+      !currentWorkItem &&
+      movingWorkItem &&
+      movingWorkItem.id === workItemId
+    ) {
       currentWorkItem = movingWorkItem;
     }
 
@@ -28,9 +34,17 @@ export class RankHandler {
       throw new Error(`WorkItem with ID ${workItemId} not found`);
     }
 
-    const otherWorkItems = columnWorkItems.filter((item) => item.id !== workItemId);
-    const clampedRank = Math.max(0, Math.min(targetRank, otherWorkItems.length));
-    otherWorkItems.splice(clampedRank, 0, { ...currentWorkItem, columnId: targetColumn });
+    const otherWorkItems = columnWorkItems.filter(
+      (item) => item.id !== workItemId,
+    );
+    const clampedRank = Math.max(
+      0,
+      Math.min(targetRank, otherWorkItems.length),
+    );
+    otherWorkItems.splice(clampedRank, 0, {
+      ...currentWorkItem,
+      columnId: targetColumn,
+    });
 
     return otherWorkItems.map((item, index) => ({
       id: item.id,

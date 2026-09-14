@@ -14,12 +14,7 @@ import { EntityType } from '@prisma/client';
 export class ActivityController {
   constructor(private readonly activityService: ActivityService) {}
 
-  @Get([
-    'api/activity/feed',
-    'activity/feed',
-    'api/me/feed',
-    'me/feed',
-  ])
+  @Get(['api/activity/feed', 'activity/feed', 'api/me/feed', 'me/feed'])
   @ApiOperation({ summary: 'Get collaboration activity feed' })
   async getActivityFeed(
     @CurrentUser('id') userId: string,
@@ -34,12 +29,7 @@ export class ActivityController {
     });
   }
 
-  @Get([
-    'api/activity/recent',
-    'activity/recent',
-    'api/me/recent',
-    'me/recent',
-  ])
+  @Get(['api/activity/recent', 'activity/recent', 'api/me/recent', 'me/recent'])
   @ApiOperation({ summary: 'Get user recent interacted items' })
   async getRecentItems(
     @CurrentUser('id') userId: string,
@@ -74,4 +64,3 @@ export class ActivityController {
     });
   }
 }
-

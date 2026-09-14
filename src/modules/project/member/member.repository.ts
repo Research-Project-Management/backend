@@ -2,10 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { ProjectMemberRole, Prisma } from '@prisma/client';
 import { MinimalUser } from '../core/types/project.type';
-import {
-  ProjectMemberWithUser,
-  FindMembersOptions,
-} from './types/member.type';
+import { ProjectMemberWithUser, FindMembersOptions } from './types/member.type';
 import { isUuid } from '@/core/utils/uuid.util';
 
 const USER_SELECT = {

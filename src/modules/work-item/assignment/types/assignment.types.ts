@@ -30,7 +30,10 @@ export interface IAssignmentRepository {
     projectId: string,
     userId: string,
   ): Promise<ProjectMember | null>;
-  assignWorkItem(workItemId: string, assigneeId: string | null): Promise<WorkItem>;
+  assignWorkItem(
+    workItemId: string,
+    assigneeId: string | null,
+  ): Promise<WorkItem>;
   bulkAssignWorkItems(
     projectId: string,
     workItemIds: string[],

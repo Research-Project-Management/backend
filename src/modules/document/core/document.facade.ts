@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { CoreRepository } from './core.repository';
-import { PageListItem, PageWithDetails } from './types/document-repository.interface';
+import {
+  PageListItem,
+  PageWithDetails,
+} from './types/document-repository.interface';
 import { PrismaService } from '@/core/database/prisma.service';
 
 export interface DocumentSummary {
@@ -16,7 +19,10 @@ export interface DocumentSummary {
 }
 
 export interface IDocumentFacade {
-  getPageById(pageId: string, projectId?: string): Promise<PageWithDetails | null>;
+  getPageById(
+    pageId: string,
+    projectId?: string,
+  ): Promise<PageWithDetails | null>;
   getProjectPages(projectId: string): Promise<PageListItem[]>;
   getProjectPageTree(projectId: string): Promise<PageListItem[]>;
   countProjectPages(projectId: string): Promise<number>;
@@ -32,7 +38,10 @@ export class DocumentFacade implements IDocumentFacade {
     private readonly prisma: PrismaService,
   ) {}
 
-  async getPageById(pageId: string, projectId?: string): Promise<PageWithDetails | null> {
+  async getPageById(
+    pageId: string,
+    projectId?: string,
+  ): Promise<PageWithDetails | null> {
     const page = await this.coreRepository.findPageById(pageId);
     if (!page) return null;
     if (projectId && page.projectId !== projectId) return null;
@@ -56,7 +65,10 @@ export class DocumentFacade implements IDocumentFacade {
     });
   }
 
-  async searchPages(projectId: string, query: string): Promise<DocumentSummary[]> {
+  async searchPages(
+    projectId: string,
+    query: string,
+  ): Promise<DocumentSummary[]> {
     const pages = await this.prisma.page.findMany({
       where: {
         projectId,

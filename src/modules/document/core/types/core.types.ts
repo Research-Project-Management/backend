@@ -9,4 +9,10 @@ export type FormattedPage<
   mainFile?: string | null;
 };
 
-export type FormattedDocument<T extends { id: string; parentPageId?: string | null; mainFileId?: string | null }> = FormattedPage<T>;
+export type FormattedDocument<
+  T extends {
+    id: string;
+    parentPageId?: string | null;
+    mainFileId?: string | null;
+  },
+> = FormattedPage<T>;

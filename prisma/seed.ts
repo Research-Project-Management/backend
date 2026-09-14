@@ -6,7 +6,6 @@ import {
   AttachmentType,
   WorkItemPriority,
   CycleStatus,
-  CyclePhase,
   StickyScope,
   PageStatus,
 } from '@prisma/client';
@@ -69,21 +68,12 @@ async function main() {
   console.log(`👤 Created users: ${adminUser.email}, ${researcherUser.email}`);
 
   // 3. Create Project (User -> Project model)
-  const defaultColumns = [
-    { id: 'backlog', title: 'Backlog', accentColor: 'gray' },
-    { id: 'todo', title: 'To Do', accentColor: 'blue' },
-    { id: 'in_progress', title: 'In Progress', accentColor: 'amber' },
-    { id: 'review', title: 'Under Review', accentColor: 'purple' },
-    { id: 'done', title: 'Completed', accentColor: 'emerald' },
-  ];
-
   const project = await prisma.project.create({
     data: {
       name: 'Physics-Informed Deep Learning for Navier-Stokes',
       identifier: 'PIDL',
       description: 'Accelerating computational fluid dynamics solvers using neural operator architectures and transformer attention.',
       createdById: adminUser.id,
-      workItemColumns: defaultColumns,
       members: {
         create: [
           { userId: adminUser.id, role: ProjectMemberRole.owner },
@@ -93,7 +83,18 @@ async function main() {
     },
   });
 
-  console.log(`📁 Created project: ${project.name} (${project.id})`);
+  // Seed default WorkItemState workflow states
+  await prisma.workItemState.createMany({
+    data: [
+      { id: 'backlog', name: 'Backlog', color: '#6366F1', group: 'backlog', sequence: 1000, isDefault: false, projectId: project.id },
+      { id: 'todo', name: 'To Do', color: '#0EA5E9', group: 'unstarted', sequence: 2000, isDefault: true, projectId: project.id },
+      { id: 'in_progress', name: 'In Progress', color: '#F59E0B', group: 'started', sequence: 3000, isDefault: false, projectId: project.id },
+      { id: 'review', name: 'Under Review', color: '#8B5CF6', group: 'started', sequence: 4000, isDefault: false, projectId: project.id },
+      { id: 'done', name: 'Completed', color: '#10B981', group: 'completed', sequence: 5000, isDefault: false, projectId: project.id },
+    ],
+  });
+
+  console.log(`📁 Created project: ${project.name} (${project.id}) with default workflow states`);
 
   // 4. Create Library Collections & Papers
   const collection = await prisma.collection.create({
@@ -195,7 +196,6 @@ async function main() {
       name: 'Sprint 1: Architecture & Loss Formulation',
       description: 'Implement Sobolev loss penalty and setup baseline FNO vs U-Net benchmarks.',
       status: CycleStatus.active,
-      phase: CyclePhase.methodology,
       startDate: new Date(),
       endDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
       projectId: project.id,

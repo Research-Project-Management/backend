@@ -112,10 +112,7 @@ export class NotesController {
     @CurrentUser('id') currentUserId: string,
     @Param('itemId') itemId: string,
   ) {
-    return this.notesService.extractNotesFromAnnotations(
-      currentUserId,
-      itemId,
-    );
+    return this.notesService.extractNotesFromAnnotations(currentUserId, itemId);
   }
 
   @Patch(':id')

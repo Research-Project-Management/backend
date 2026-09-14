@@ -7,18 +7,10 @@ import {
   MaxLength,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { CycleStatus, CyclePhase } from '@prisma/client';
-import {
-  IncompleteWorkItemAction,
-  CyclePhaseInfo,
-  CYCLE_PHASE_CONFIG,
-} from '../types/cycle.types';
+import { CycleStatus } from '@prisma/client';
+import { IncompleteWorkItemAction } from '../types/cycle.types';
 
-export {
-  IncompleteWorkItemAction,
-  CyclePhaseInfo,
-  CYCLE_PHASE_CONFIG,
-};
+export { IncompleteWorkItemAction };
 
 export class CreateCycleDto {
   @ApiProperty({
@@ -55,11 +47,6 @@ export class CreateCycleDto {
   @IsOptional()
   status?: CycleStatus;
 
-  @ApiPropertyOptional({ enum: CyclePhase, default: CyclePhase.custom })
-  @IsEnum(CyclePhase)
-  @IsOptional()
-  phase?: CyclePhase;
-
   @ApiPropertyOptional({ description: 'Project ID' })
   @IsString()
   @IsOptional()
@@ -91,11 +78,6 @@ export class UpdateCycleDto {
   @IsEnum(CycleStatus)
   @IsOptional()
   status?: CycleStatus;
-
-  @ApiPropertyOptional({ enum: CyclePhase })
-  @IsEnum(CyclePhase)
-  @IsOptional()
-  phase?: CyclePhase;
 
   @ApiPropertyOptional({ description: 'Project ID' })
   @IsString()

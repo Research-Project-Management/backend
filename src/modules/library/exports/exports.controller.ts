@@ -46,10 +46,7 @@ export class ExportsController {
     @CurrentUser('id') userId: string,
     @Body() body: { keys: string[] },
   ) {
-    return this.exportsService.exportByCitationKeys(
-      userId,
-      body.keys || [],
-    );
+    return this.exportsService.exportByCitationKeys(userId, body.keys || []);
   }
 
   @Get()

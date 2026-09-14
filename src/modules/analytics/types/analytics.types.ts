@@ -2,7 +2,6 @@
  * Analytics Domain Types & Interfaces
  */
 
-
 export interface AssigneeDistributionItem {
   userId: string;
   name: string;

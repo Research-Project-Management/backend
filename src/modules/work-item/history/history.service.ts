@@ -30,14 +30,18 @@ export class HistoryService {
   /**
    * Calculates state transitions and time-in-state badges (Plane.so Transition Tab).
    */
-  async getTransitions(workItemId: string): Promise<WorkItemTransitionsResponse> {
-    const workItem = await this.historyRepository.findWorkItemWithProject(workItemId);
+  async getTransitions(
+    workItemId: string,
+  ): Promise<WorkItemTransitionsResponse> {
+    const workItem =
+      await this.historyRepository.findWorkItemWithProject(workItemId);
     if (!workItem) {
       throw new NotFoundException(`Work item ${workItemId} not found`);
     }
 
-    const workItemColumns = workItem.project?.workItemColumns;
-    const rawEvents = await this.historyRepository.findStateTransitions(workItemId);
+    const states = workItem.project?.states || [];
+    const rawEvents =
+      await this.historyRepository.findStateTransitions(workItemId);
 
     const transitions: StateTransitionItem[] = [];
     let previousTimestamp = new Date(workItem.createdAt).getTime();
@@ -49,11 +53,11 @@ export class HistoryService {
 
       const fromState: StateBadge = resolveStateBadge(
         event.oldValue,
-        workItemColumns,
+        states,
       );
       const toState: StateBadge = resolveStateBadge(
         event.newValue,
-        workItemColumns,
+        states,
       );
 
       transitions.push({
@@ -81,7 +85,7 @@ export class HistoryService {
 
     const currentState: StateBadge = resolveStateBadge(
       workItem.columnId,
-      workItemColumns,
+      states,
     );
 
     return {
@@ -103,7 +107,10 @@ export class HistoryService {
     workItemId: string,
     sort: 'asc' | 'desc' = 'desc',
   ): Promise<WorkItemHistoryResponse> {
-    const events = await this.historyRepository.findHistoryEvents(workItemId, sort);
+    const events = await this.historyRepository.findHistoryEvents(
+      workItemId,
+      sort,
+    );
 
     const histories: PropertyHistoryItem[] = events.map((historyEvent) => ({
       id: historyEvent.id,

@@ -47,16 +47,10 @@ export class StateService {
     return toStateResponse(state);
   }
 
-  async getState(
-    userId: string,
-    itemId: string,
-  ): Promise<StateData> {
+  async getState(userId: string, itemId: string): Promise<StateData> {
     await this.assertItemExists(userId, itemId);
 
-    const state = await this.stateRepository.findState(
-      userId,
-      itemId,
-    );
+    const state = await this.stateRepository.findState(userId, itemId);
 
     return this.toResponse(state);
   }
@@ -69,24 +63,28 @@ export class StateService {
     await this.assertItemExists(userId, itemId);
 
     if (dto.rating !== undefined && !isValidRating(dto.rating)) {
-      throw new BadRequestException('rating must be an integer between 0 and 5');
+      throw new BadRequestException(
+        'rating must be an integer between 0 and 5',
+      );
     }
     if (dto.currentPage !== undefined && !isValidCurrentPage(dto.currentPage)) {
       throw new BadRequestException('currentPage must be an integer >= 1');
     }
 
-    const existing = await this.stateRepository.findState(
-      userId,
-      itemId,
-    );
+    const existing = await this.stateRepository.findState(userId, itemId);
 
-    const currentStatus = (existing?.readStatus as ReadingStatus) ?? ReadingStatus.UNREAD;
+    const currentStatus =
+      (existing?.readStatus as ReadingStatus) ?? ReadingStatus.UNREAD;
     let targetStatus = dto.readStatus ?? currentStatus;
 
     // Domain rule: auto-advance to reading if unread and moved forward in document
     if (
       dto.readStatus === undefined &&
-      shouldAutoAdvanceToReading(currentStatus, dto.currentPage, dto.scrollPosition)
+      shouldAutoAdvanceToReading(
+        currentStatus,
+        dto.currentPage,
+        dto.scrollPosition,
+      )
     ) {
       targetStatus = ReadingStatus.READING;
     }
@@ -102,15 +100,18 @@ export class StateService {
 
     const now = new Date();
     const isNowReadingOrCompleted =
-      targetStatus === ReadingStatus.READING || targetStatus === ReadingStatus.COMPLETED;
+      targetStatus === ReadingStatus.READING ||
+      targetStatus === ReadingStatus.COMPLETED;
 
     const upsertData: UpsertStateData = {
-      readStatus:     targetStatus,
-      rating:         dto.rating,
-      currentPage:    dto.currentPage,
+      readStatus: targetStatus,
+      rating: dto.rating,
+      currentPage: dto.currentPage,
       scrollPosition: dto.scrollPosition,
-      lastOpenedAt:   now,
-      lastReadAt:     isNowReadingOrCompleted ? (existing?.lastReadAt ?? now) : undefined,
+      lastOpenedAt: now,
+      lastReadAt: isNowReadingOrCompleted
+        ? (existing?.lastReadAt ?? now)
+        : undefined,
     };
 
     const execute = async (
@@ -126,10 +127,10 @@ export class StateService {
 
       await helpers.appendChange(userId, {
         entityType: 'State',
-        entityId:   `${userId}:${itemId}`,
-        action:     'update',
-        version:    1,
-        data:       updated,
+        entityId: `${userId}:${itemId}`,
+        action: 'update',
+        version: 1,
+        data: updated,
       });
 
       await helpers.publishOutbox(
@@ -139,12 +140,12 @@ export class StateService {
         {
           itemId,
           userId,
-          readStatus:     updated.readStatus,
-          rating:         updated.rating,
-          currentPage:    updated.currentPage,
+          readStatus: updated.readStatus,
+          rating: updated.rating,
+          currentPage: updated.currentPage,
           scrollPosition: updated.scrollPosition,
-          lastOpenedAt:   updated.lastOpenedAt,
-          lastReadAt:     updated.lastReadAt,
+          lastOpenedAt: updated.lastOpenedAt,
+          lastReadAt: updated.lastReadAt,
         },
       );
 
@@ -164,15 +165,9 @@ export class StateService {
     return this.toResponse(updated);
   }
 
-  async markAsRead(
-    userId: string,
-    itemId: string,
-  ): Promise<StateData> {
+  async markAsRead(userId: string, itemId: string): Promise<StateData> {
     await this.assertItemExists(userId, itemId);
-    const existing = await this.stateRepository.findState(
-      userId,
-      itemId,
-    );
+    const existing = await this.stateRepository.findState(userId, itemId);
 
     const nextStatus =
       existing?.readStatus === ReadingStatus.COMPLETED
@@ -188,8 +183,8 @@ export class StateService {
         userId,
         itemId,
         {
-          readStatus:   nextStatus,
-          lastReadAt:   now,
+          readStatus: nextStatus,
+          lastReadAt: now,
           lastOpenedAt: now,
         },
         tx,
@@ -197,10 +192,10 @@ export class StateService {
 
       await helpers.appendChange(userId, {
         entityType: 'State',
-        entityId:   `${userId}:${itemId}`,
-        action:     'update',
-        version:    1,
-        data:       updated,
+        entityId: `${userId}:${itemId}`,
+        action: 'update',
+        version: 1,
+        data: updated,
       });
 
       await helpers.publishOutbox(
@@ -210,12 +205,12 @@ export class StateService {
         {
           itemId,
           userId,
-          readStatus:     updated.readStatus,
-          rating:         updated.rating,
-          currentPage:    updated.currentPage,
+          readStatus: updated.readStatus,
+          rating: updated.rating,
+          currentPage: updated.currentPage,
           scrollPosition: updated.scrollPosition,
-          lastOpenedAt:   updated.lastOpenedAt,
-          lastReadAt:     updated.lastReadAt,
+          lastOpenedAt: updated.lastOpenedAt,
+          lastReadAt: updated.lastReadAt,
         },
       );
 
@@ -226,15 +221,11 @@ export class StateService {
       return this.libraryTx.executeInTransaction(execute);
     }
 
-    const updated = await this.stateRepository.upsertState(
-      userId,
-      itemId,
-      {
-        readStatus:   nextStatus,
-        lastReadAt:   now,
-        lastOpenedAt: now,
-      },
-    );
+    const updated = await this.stateRepository.upsertState(userId, itemId, {
+      readStatus: nextStatus,
+      lastReadAt: now,
+      lastOpenedAt: now,
+    });
 
     return this.toResponse(updated);
   }
@@ -257,9 +248,7 @@ export class StateService {
         select: { id: true },
       });
       if (!item) {
-        throw new NotFoundException(
-          `Item not found: ${itemId}`,
-        );
+        throw new NotFoundException(`Item not found: ${itemId}`);
       }
       return;
     }
@@ -332,7 +321,9 @@ export class StateService {
         .sort((a, b) => b.getTime() - a.getTime())[0];
 
       const maxCurrentPage = Math.max(...states.map((s) => s.currentPage || 1));
-      const latestScroll = states.find((s) => s.scrollPosition !== null)?.scrollPosition;
+      const latestScroll = states.find(
+        (s) => s.scrollPosition !== null,
+      )?.scrollPosition;
 
       await tx.state.upsert({
         where: {
@@ -343,21 +334,21 @@ export class StateService {
         },
         create: {
           userId,
-          itemId:         targetItemId,
-          rating:         maxRating,
+          itemId: targetItemId,
+          rating: maxRating,
           readStatus,
-          currentPage:    maxCurrentPage,
+          currentPage: maxCurrentPage,
           scrollPosition: latestScroll ?? Prisma.JsonNull,
-          lastOpenedAt:   latestOpenedAt || null,
-          lastReadAt:     latestReadAt || null,
+          lastOpenedAt: latestOpenedAt || null,
+          lastReadAt: latestReadAt || null,
         },
         update: {
-          rating:         maxRating,
+          rating: maxRating,
           readStatus,
-          currentPage:    maxCurrentPage,
+          currentPage: maxCurrentPage,
           scrollPosition: latestScroll ?? undefined,
-          lastOpenedAt:   latestOpenedAt || undefined,
-          lastReadAt:     latestReadAt || undefined,
+          lastOpenedAt: latestOpenedAt || undefined,
+          lastReadAt: latestReadAt || undefined,
         },
       });
     }

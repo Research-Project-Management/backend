@@ -69,13 +69,34 @@ export class CoreController {
     const reordered$ = fromEvent(this.eventEmitter, 'work-item.reordered');
     const assigned$ = fromEvent(this.eventEmitter, 'work-item.assigned');
     const unassigned$ = fromEvent(this.eventEmitter, 'work-item.unassigned');
-    const relationAdded$ = fromEvent(this.eventEmitter, 'work-item.relation.added');
-    const relationRemoved$ = fromEvent(this.eventEmitter, 'work-item.relation.removed');
-    const stateChanged$ = fromEvent(this.eventEmitter, 'work-item.state.changed');
-    const priorityChanged$ = fromEvent(this.eventEmitter, 'work-item.priority.changed');
-    const titleChanged$ = fromEvent(this.eventEmitter, 'work-item.title.changed');
-    const contentChanged$ = fromEvent(this.eventEmitter, 'work-item.content.changed');
-    const cycleChanged$ = fromEvent(this.eventEmitter, 'work-item.cycle.changed');
+    const relationAdded$ = fromEvent(
+      this.eventEmitter,
+      'work-item.relation.added',
+    );
+    const relationRemoved$ = fromEvent(
+      this.eventEmitter,
+      'work-item.relation.removed',
+    );
+    const stateChanged$ = fromEvent(
+      this.eventEmitter,
+      'work-item.state.changed',
+    );
+    const priorityChanged$ = fromEvent(
+      this.eventEmitter,
+      'work-item.priority.changed',
+    );
+    const titleChanged$ = fromEvent(
+      this.eventEmitter,
+      'work-item.title.changed',
+    );
+    const contentChanged$ = fromEvent(
+      this.eventEmitter,
+      'work-item.content.changed',
+    );
+    const cycleChanged$ = fromEvent(
+      this.eventEmitter,
+      'work-item.cycle.changed',
+    );
     const duplicated$ = fromEvent(this.eventEmitter, 'work-item.duplicated');
     const archived$ = fromEvent(this.eventEmitter, 'work-item.archived');
     const restored$ = fromEvent(this.eventEmitter, 'work-item.restored');
@@ -99,12 +120,9 @@ export class CoreController {
       restored$,
     ).pipe(
       filter((event: any) => event?.projectId === projectId),
-      map(
-        (event: any) =>
-          ({
-            data: event,
-          }) as MessageEvent,
-      ),
+      map((event: any) => ({
+        data: event,
+      })),
     );
   }
 
@@ -118,19 +136,17 @@ export class CoreController {
     @Param('projectId') projectId: string,
     @Query() queryWorkItemDto: QueryWorkItemDto,
   ) {
-    return this.workItemService.getProjectWorkItems(projectId, queryWorkItemDto);
+    return this.workItemService.getProjectWorkItems(
+      projectId,
+      queryWorkItemDto,
+    );
   }
 
-  @Get([
-    'work-items/:workItemId',
-    'projects/:projectId/work-items/:workItemId',
-  ])
+  @Get(['work-items/:workItemId', 'projects/:projectId/work-items/:workItemId'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get a single work item by ID or identifier' })
-  async getWorkItemById(
-    @Param('workItemId') workItemId: string,
-  ) {
+  async getWorkItemById(@Param('workItemId') workItemId: string) {
     return this.workItemService.getWorkItemById(workItemId);
   }
 
@@ -151,10 +167,7 @@ export class CoreController {
     );
   }
 
-  @Put([
-    'work-items/:workItemId',
-    'projects/:projectId/work-items/:workItemId',
-  ])
+  @Put(['work-items/:workItemId', 'projects/:projectId/work-items/:workItemId'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Update a work item' })
@@ -163,7 +176,11 @@ export class CoreController {
     @CurrentUser('id') userId: string,
     @Body() updateWorkItemDto: UpdateWorkItemDto,
   ) {
-    return this.workItemService.updateWorkItem(workItemId, updateWorkItemDto, userId);
+    return this.workItemService.updateWorkItem(
+      workItemId,
+      updateWorkItemDto,
+      userId,
+    );
   }
 
   @Delete([
@@ -200,14 +217,13 @@ export class CoreController {
     );
   }
 
-  @Post([
-    'work-items/:workItemId/children',
-    'work-items/:workItemId/sub-items',
-  ])
+  @Post(['work-items/:workItemId/children', 'work-items/:workItemId/sub-items'])
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
-  @ApiOperation({ summary: 'Create a child work item under a parent work item' })
+  @ApiOperation({
+    summary: 'Create a child work item under a parent work item',
+  })
   async createChildWorkItem(
     @Param('workItemId') workItemId: string,
     @CurrentUser('id') userId: string,
@@ -239,13 +255,13 @@ export class CoreController {
       workItemIdFromParam ||
       reorderWorkItemDto?.workItemId ||
       '';
-    return this.workItemService.reorderWorkItem(targetWorkItemId, reorderWorkItemDto);
+    return this.workItemService.reorderWorkItem(
+      targetWorkItemId,
+      reorderWorkItemDto,
+    );
   }
 
-  @Put([
-    'projects/:projectId/work-items/bulk',
-    'work-items/bulk',
-  ])
+  @Put(['projects/:projectId/work-items/bulk', 'work-items/bulk'])
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
@@ -310,9 +326,7 @@ export class CoreController {
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Convert a child work item to a root work item' })
-  async convertToRootWorkItem(
-    @Param('workItemId') workItemId: string,
-  ) {
+  async convertToRootWorkItem(@Param('workItemId') workItemId: string) {
     return this.workItemService.convertToRootWorkItem(workItemId);
   }
 }

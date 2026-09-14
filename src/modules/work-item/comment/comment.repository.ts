@@ -14,7 +14,9 @@ const AUTHOR_SELECT = {
 export class CommentRepository {
   constructor(private readonly prismaService: PrismaService) {}
 
-  async resolveWorkItemUuid(workItemIdOrIdentifier: string): Promise<string | null> {
+  async resolveWorkItemUuid(
+    workItemIdOrIdentifier: string,
+  ): Promise<string | null> {
     if (isUuid(workItemIdOrIdentifier)) {
       return workItemIdOrIdentifier;
     }
@@ -131,5 +133,3 @@ export class CommentRepository {
     return member?.role ?? null;
   }
 }
-
-

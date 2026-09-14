@@ -21,16 +21,12 @@ export class RetractionController {
   constructor(private readonly service: RetractionService) {}
 
   @Get('items')
-  async getRetractedItems(
-    @CurrentUser('id') userId: string,
-  ) {
+  async getRetractedItems(@CurrentUser('id') userId: string) {
     return this.service.getRetractedItems(userId);
   }
 
   @Get('stats')
-  async getStats(
-    @CurrentUser('id') userId: string,
-  ) {
+  async getStats(@CurrentUser('id') userId: string) {
     return this.service.getStats(userId);
   }
 
@@ -67,4 +63,3 @@ export class RetractionController {
     return this.service.removeManualFlag(userId, itemId);
   }
 }
-

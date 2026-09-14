@@ -34,10 +34,7 @@ export function buildAiPayload(
 ): AiEnginePayload {
   const messages = normalizeMessages(dto);
   const documentIds = extractDocIds(dto);
-  const scopeId =
-    dto.project_id ||
-    dto.projectId ||
-    userId;
+  const scopeId = dto.project_id || dto.projectId || userId;
   const projectId = dto.project_id || dto.projectId || '';
   const chatId = dto.chat_id || dto.chatId || '';
 

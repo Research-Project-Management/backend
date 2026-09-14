@@ -93,7 +93,9 @@ export class UpdateService {
     if (this.cache) {
       await Promise.all([
         this.cache.del(WORK_ITEM_REDIS_KEYS.workItem(workItem.id)),
-        this.cache.del(WORK_ITEM_REDIS_KEYS.projectWorkItems(workItem.projectId)),
+        this.cache.del(
+          WORK_ITEM_REDIS_KEYS.projectWorkItems(workItem.projectId),
+        ),
       ]).catch(() => null);
     }
 
@@ -143,7 +145,9 @@ export class UpdateService {
     if (this.cache) {
       await Promise.all([
         this.cache.del(WORK_ITEM_REDIS_KEYS.workItem(workItem.id)),
-        this.cache.del(WORK_ITEM_REDIS_KEYS.projectWorkItems(workItem.projectId)),
+        this.cache.del(
+          WORK_ITEM_REDIS_KEYS.projectWorkItems(workItem.projectId),
+        ),
       ]).catch(() => null);
     }
 

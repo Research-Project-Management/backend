@@ -37,8 +37,7 @@ export function aggregateProjectDistributions(
   for (const item of workItems) {
     // State / Column distribution
     const columnId = item.columnId || 'unassigned';
-    stateDistribution[columnId] =
-      (stateDistribution[columnId] || 0) + 1;
+    stateDistribution[columnId] = (stateDistribution[columnId] || 0) + 1;
 
     // Priority level distribution
     const priorityLevel = item.priority || 'none';
@@ -75,7 +74,8 @@ export function calculateCycleMetrics(
   const totalWorkItems = workItems.length;
   const completedWorkItems = workItems.filter((item) => item.completed).length;
   const inProgressWorkItems = workItems.filter(
-    (item) => item.columnId === 'doing' ||
+    (item) =>
+      item.columnId === 'doing' ||
       item.columnId === 'in_progress' ||
       item.columnId === 'review' ||
       item.columnId === 'in_review',
@@ -85,7 +85,9 @@ export function calculateCycleMetrics(
     totalWorkItems - completedWorkItems - inProgressWorkItems,
   );
   const completionRate =
-    totalWorkItems > 0 ? Math.round((completedWorkItems / totalWorkItems) * 100) : 0;
+    totalWorkItems > 0
+      ? Math.round((completedWorkItems / totalWorkItems) * 100)
+      : 0;
 
   return {
     cycleId,

@@ -44,7 +44,8 @@ export function shouldAutoAdvanceToReading(
   scrollPosition?: unknown,
 ): boolean {
   if (currentStatus !== ReadingStatus.UNREAD) return false;
-  const advancedPage = targetPage !== undefined && targetPage !== null && targetPage > 1;
+  const advancedPage =
+    targetPage !== undefined && targetPage !== null && targetPage > 1;
   const hasScroll = scrollPosition !== undefined && scrollPosition !== null;
   return advancedPage || hasScroll;
 }

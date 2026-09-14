@@ -19,10 +19,7 @@ export interface ILibraryFacade {
     itemId: string,
   ): Promise<LibraryItemSummary | null>;
   countItems(projectId: string): Promise<number>;
-  searchItems(
-    projectId: string,
-    query: string,
-  ): Promise<LibraryItemSummary[]>;
+  searchItems(projectId: string, query: string): Promise<LibraryItemSummary[]>;
 }
 
 export const LIBRARY_FACADE = 'LIBRARY_FACADE';
@@ -66,7 +63,9 @@ export class LibraryFacade implements ILibraryFacade {
       abstract: item.abstract,
       year: item.year,
       itemType: item.itemType || 'journalArticle',
-      authors: (item.contributors || []).map((c: any) => c.fullName || '').filter(Boolean),
+      authors: (item.contributors || [])
+        .map((c: any) => c.fullName || '')
+        .filter(Boolean),
     };
   }
 
@@ -107,7 +106,9 @@ export class LibraryFacade implements ILibraryFacade {
       abstract: item.abstract,
       year: item.year,
       itemType: item.itemType || 'journalArticle',
-      authors: (item.contributors || []).map((c: any) => c.fullName || '').filter(Boolean),
+      authors: (item.contributors || [])
+        .map((c: any) => c.fullName || '')
+        .filter(Boolean),
     }));
   }
 }

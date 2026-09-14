@@ -31,7 +31,9 @@ export class InvitationService {
     }
 
     const invitations = await this.repository.findPendingByEmail(user.email);
-    const inviterIds = Array.from(new Set(invitations.map((inv) => inv.invitedById)));
+    const inviterIds = Array.from(
+      new Set(invitations.map((inv) => inv.invitedById)),
+    );
     const inviters = await this.repository.findUsersByIds(inviterIds);
     const inviterMap = new Map(inviters.map((u) => [u.id, u]));
 
@@ -51,11 +53,16 @@ export class InvitationService {
     }
 
     if (invitation.status !== InvitationStatus.pending) {
-      throw new BadRequestException(`Invitation is already ${invitation.status}`);
+      throw new BadRequestException(
+        `Invitation is already ${invitation.status}`,
+      );
     }
 
     if (new Date() > invitation.expiresAt) {
-      await this.repository.updateStatus(invitation.id, InvitationStatus.expired);
+      await this.repository.updateStatus(
+        invitation.id,
+        InvitationStatus.expired,
+      );
       throw new BadRequestException('Invitation has expired');
     }
 
@@ -83,7 +90,10 @@ export class InvitationService {
       );
     }
 
-    await this.repository.updateStatus(invitation.id, InvitationStatus.accepted);
+    await this.repository.updateStatus(
+      invitation.id,
+      InvitationStatus.accepted,
+    );
 
     return {
       message: 'Successfully joined project',
@@ -108,7 +118,10 @@ export class InvitationService {
       throw new ForbiddenException('You cannot decline this invitation');
     }
 
-    await this.repository.updateStatus(invitation.id, InvitationStatus.declined);
+    await this.repository.updateStatus(
+      invitation.id,
+      InvitationStatus.declined,
+    );
 
     return {
       message: 'Invitation declined',
@@ -180,7 +193,8 @@ export class InvitationService {
     dto: CreateProjectInvitationDto,
     inviterId: string,
   ) {
-    const project = await this.repository.findProjectByIdOrIdentifier(projectId);
+    const project =
+      await this.repository.findProjectByIdOrIdentifier(projectId);
     if (!project) {
       throw new NotFoundException('Project not found');
     }
@@ -189,7 +203,11 @@ export class InvitationService {
 
     // Check if user already exists and is already a member
     const targetUser = await this.repository.findUserById(inviterId);
-    if (targetUser && targetUser.email && targetUser.email.toLowerCase() === email) {
+    if (
+      targetUser &&
+      targetUser.email &&
+      targetUser.email.toLowerCase() === email
+    ) {
       throw new BadRequestException('You cannot invite yourself');
     }
 
@@ -231,7 +249,9 @@ export class InvitationService {
    */
   async getProjectInvitations(projectId: string) {
     const invitations = await this.repository.findByProjectId(projectId);
-    const inviterIds = Array.from(new Set(invitations.map((inv) => inv.invitedById)));
+    const inviterIds = Array.from(
+      new Set(invitations.map((inv) => inv.invitedById)),
+    );
     const inviters = await this.repository.findUsersByIds(inviterIds);
     const inviterMap = new Map(inviters.map((u) => [u.id, u]));
 

@@ -77,9 +77,7 @@ export interface IPageRepository {
   restorePage(pageId: string): Promise<Page>;
   deletePage(pageId: string): Promise<Page>;
   incrementPageView(pageId: string): Promise<Page>;
-  findProjectContext(
-    projectId: string,
-  ): Promise<{ id: string } | null>;
+  findProjectContext(projectId: string): Promise<{ id: string } | null>;
   findProjectMember(
     projectId: string,
     userId: string,

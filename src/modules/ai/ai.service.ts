@@ -39,10 +39,7 @@ export class AiService {
         where: {
           id: projectId,
           deletedAt: null,
-          OR: [
-            { members: { some: { userId } } },
-            { createdById: userId },
-          ],
+          OR: [{ members: { some: { userId } } }, { createdById: userId }],
         },
       });
       if (!project) {
@@ -73,11 +70,7 @@ export class AiService {
     const targetProjectId = dto.projectId || dto.project_id;
     const targetChatId = dto.chatId || dto.chat_id;
 
-    await this.validateAccess(
-      userId,
-      targetProjectId,
-      targetChatId,
-    );
+    await this.validateAccess(userId, targetProjectId, targetChatId);
 
     const payload = buildAiPayload(userId, dto);
 
@@ -107,11 +100,7 @@ export class AiService {
     const targetProjectId = dto.projectId || dto.project_id;
     const targetChatId = dto.chatId || dto.chat_id;
 
-    await this.validateAccess(
-      userId,
-      targetProjectId,
-      targetChatId,
-    );
+    await this.validateAccess(userId, targetProjectId, targetChatId);
 
     const payload = buildAiPayload(userId, dto);
     return this.engineService.syncChat(payload);
@@ -280,11 +269,7 @@ export class AiService {
     },
   ) {
     const scopeId = options?.scopeId || options?.projectId || userId;
-    await this.validateAccess(
-      userId,
-      options?.projectId,
-      options?.chatId,
-    );
+    await this.validateAccess(userId, options?.projectId, options?.chatId);
     return this.engineService.uploadDocument(
       fileBuffer,
       contentType,
@@ -303,13 +288,21 @@ export class AiService {
   async getDocumentsBulk(userId: string, ids: string[], projectId?: string) {
     await this.validateAccess(userId, projectId);
     const scopeId = projectId || userId;
-    return this.engineService.getDocumentsBulk(ids, { userId, scopeId, projectId });
+    return this.engineService.getDocumentsBulk(ids, {
+      userId,
+      scopeId,
+      projectId,
+    });
   }
 
   async getDocument(userId: string, docId: string, projectId?: string) {
     await this.validateAccess(userId, projectId);
     const scopeId = projectId || userId;
-    return this.engineService.getDocument(docId, { userId, scopeId, projectId });
+    return this.engineService.getDocument(docId, {
+      userId,
+      scopeId,
+      projectId,
+    });
   }
 
   async getDocuments(userId: string, projectId?: string) {

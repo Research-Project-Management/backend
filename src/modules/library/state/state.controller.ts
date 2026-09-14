@@ -60,4 +60,3 @@ export class StateBatchController {
     return this.stateService.getBatchStates(userId, body.itemIds || []);
   }
 }
-

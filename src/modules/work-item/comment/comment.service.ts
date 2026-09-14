@@ -53,7 +53,8 @@ export class CommentService {
     userId: string,
     action: string,
   ) {
-    const comment = await this.commentRepository.findCommentWithProject(commentId);
+    const comment =
+      await this.commentRepository.findCommentWithProject(commentId);
 
     if (!comment) {
       throw new NotFoundException('Comment not found');
@@ -98,7 +99,8 @@ export class CommentService {
   }
 
   async getWorkItemComments(workItemId: string) {
-    const comments = await this.commentRepository.findWorkItemComments(workItemId);
+    const comments =
+      await this.commentRepository.findWorkItemComments(workItemId);
     return { comments };
   }
 
@@ -237,5 +239,3 @@ export class CommentService {
   addReply = this.addWorkItemReply.bind(this);
   reactComment = this.reactToWorkItemComment.bind(this);
 }
-
-
