@@ -1,23 +1,23 @@
-import { CycleStats, CycleTaskItem } from '../types/cycle.types';
+import { CycleStats, CycleWorkItemItem } from '../types/cycle.types';
 import { inferStateGroup } from '../../state/utils/state.util';
 
 export const calculateCycleStats = (
-  tasks: Array<
-    Partial<CycleTaskItem> & {
+  workItems: Array<
+    Partial<CycleWorkItemItem> & {
       columnId?: string;
       completed?: boolean;
     }
   >,
 ): CycleStats => {
-  const safeTasks = Array.isArray(tasks) ? tasks : [];
-  const total = safeTasks.length;
+  const safeItems = Array.isArray(workItems) ? workItems : [];
+  const total = safeItems.length;
   let completed = 0;
   let started = 0;
   let unstarted = 0;
   let backlog = 0;
   let cancelled = 0;
 
-  for (const workItem of safeTasks) {
+  for (const workItem of safeItems) {
     const group = inferStateGroup(workItem.columnId, workItem.columnId);
     const isCompleted = workItem.completed === true || group === 'completed';
 
@@ -37,12 +37,12 @@ export const calculateCycleStats = (
   const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
 
   return {
-    totalTasks: total,
-    completedTasks: completed,
-    startedTasks: started,
-    unstartedTasks: unstarted,
-    backlogTasks: backlog,
-    cancelledTasks: cancelled,
+    totalWorkItems: total,
+    completedWorkItems: completed,
+    startedWorkItems: started,
+    unstartedWorkItems: unstarted,
+    backlogWorkItems: backlog,
+    cancelledWorkItems: cancelled,
     completionPercentage: percentage,
   };
 };

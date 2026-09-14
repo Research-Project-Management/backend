@@ -39,18 +39,18 @@ export class CoreService {
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
-  private async invalidateTaskCache(
+  private async invalidateWorkItemCache(
     projectId: string,
-    taskId?: string,
+    workItemId?: string,
     cycleId?: string | null,
   ) {
     if (!this.cache) return;
     const deletions: Promise<any>[] = [
-      this.cache.del(WORK_ITEM_REDIS_KEYS.projectTasks(projectId)),
+      this.cache.del(WORK_ITEM_REDIS_KEYS.projectWorkItems(projectId)),
       this.cache.del(`flux:proj:overview:${projectId}`),
     ];
-    if (taskId)
-      deletions.push(this.cache.del(WORK_ITEM_REDIS_KEYS.WorkItem(taskId)));
+    if (workItemId)
+      deletions.push(this.cache.del(WORK_ITEM_REDIS_KEYS.workItem(workItemId)));
     if (cycleId) {
       deletions.push(
         this.cache.del(WORK_ITEM_REDIS_KEYS.cycle(cycleId)),
@@ -62,16 +62,16 @@ export class CoreService {
 
   // ── Queries ─────────────────────────────────────────────────────────────────
 
-  async getProjectTasks(projectId: string, filter?: string | QueryWorkItemDto) {
+  async getProjectWorkItems(projectId: string, filter?: string | QueryWorkItemDto) {
     const isSimpleCycle = typeof filter === 'string';
     const isUnfiltered =
       !filter ||
       (typeof filter === 'object' && Object.keys(filter).length === 0);
     const cacheKey = isSimpleCycle
-      ? `${WORK_ITEM_REDIS_KEYS.projectTasks(projectId)}:cycle:${filter}`
-      : WORK_ITEM_REDIS_KEYS.projectTasks(projectId);
+      ? `${WORK_ITEM_REDIS_KEYS.projectWorkItems(projectId)}:cycle:${filter}`
+      : WORK_ITEM_REDIS_KEYS.projectWorkItems(projectId);
 
-    const fetchTasks = async () => {
+    const fetchWorkItems = async () => {
       const filterOptions =
         typeof filter === 'string'
           ? filter
@@ -81,7 +81,7 @@ export class CoreService {
                 columnId: filter.columnId,
                 priority: filter.priority,
                 assigneeId: filter.assigneeId,
-                parentTaskId: filter.parentTaskId,
+                parentWorkItemId: filter.parentWorkItemId,
                 completed: filter.completed,
                 search: filter.search,
                 limit: filter.limit,
@@ -92,42 +92,42 @@ export class CoreService {
               }
             : undefined;
 
-      const taskRecords = await this.workItemRepository.findProjectTasks(
+      const records = await this.workItemRepository.findProjectWorkItems(
         projectId,
         filterOptions,
       );
-      return taskRecords.map(formatWorkItem).filter(Boolean);
+      return records.map(formatWorkItem).filter(Boolean);
     };
 
     if (this.cache && (isUnfiltered || isSimpleCycle)) {
-      const tasks = await this.cache.wrap(cacheKey, fetchTasks, 300);
-      return { tasks };
+      const workItems = await this.cache.wrap(cacheKey, fetchWorkItems, 300);
+      return { workItems };
     }
-    const tasks = await fetchTasks();
-    return { tasks };
+    const workItems = await fetchWorkItems();
+    return { workItems };
   }
 
-  async getTaskById(taskId: string) {
+  async getWorkItemById(workItemId: string) {
     if (this.cache) {
       const cached = await this.cache.get<any>(
-        WORK_ITEM_REDIS_KEYS.WorkItem(taskId),
+        WORK_ITEM_REDIS_KEYS.workItem(workItemId),
       );
       if (cached) {
         const formatted = formatWorkItem(cached);
-        return { task: formatted, workItem: formatted, WorkItem: formatted, item: formatted };
+        return { workItem: formatted, item: formatted };
       }
     }
-    const task = await this.workItemRepository.findTaskById(taskId);
-    if (!task) throw new NotFoundException('WorkItem not found');
+    const item = await this.workItemRepository.findWorkItemById(workItemId);
+    if (!item) throw new NotFoundException('WorkItem not found');
     if (this.cache)
-      await this.cache.set(WORK_ITEM_REDIS_KEYS.WorkItem(taskId), task, 600);
-    const formatted = formatWorkItem(task);
-    return { task: formatted, workItem: formatted, WorkItem: formatted, item: formatted };
+      await this.cache.set(WORK_ITEM_REDIS_KEYS.workItem(workItemId), item, 600);
+    const formatted = formatWorkItem(item);
+    return { workItem: formatted, item: formatted };
   }
 
   // ── Mutations ───────────────────────────────────────────────────────────────
 
-  async createTask(
+  async createWorkItem(
     projectId: string,
     authorId: string,
     createWorkItemDto: CreateWorkItemDto,
@@ -136,18 +136,22 @@ export class CoreService {
       await this.workItemRepository.findProjectWithColumns(projectId);
     if (!rawProject) throw new NotFoundException('Project not found');
 
-    const columns = parseWorkItemStates(rawProject.taskColumns);
+    const columns = parseWorkItemStates(
+      (rawProject as any).workItemColumns,
+    );
     const targetColumn =
       createWorkItemDto.columnId ||
       (columns.length > 0 ? columns[0].id : 'backlog');
-    const columnCount = await this.workItemRepository.countColumnTasks(
+    const columnCount = await this.workItemRepository.countColumnWorkItems(
       projectId,
       targetColumn,
     );
     const { identifier, sequenceNumber } =
       await this.idHandler.nextIdentifier(projectId);
 
-    const task = await this.workItemRepository.createTask({
+    const parentId = createWorkItemDto.parentWorkItemId;
+
+    const workItem = await this.workItemRepository.createWorkItem({
       title: createWorkItemDto.title,
       content: createWorkItemDto.content || createWorkItemDto.description || '',
       columnId: targetColumn,
@@ -182,53 +186,55 @@ export class CoreService {
       ...(createWorkItemDto.cycleId
         ? { cycle: { connect: { id: createWorkItemDto.cycleId } } }
         : {}),
-      ...(createWorkItemDto.parentTaskId
-        ? { parentTask: { connect: { id: createWorkItemDto.parentTaskId } } }
+      ...(parentId
+        ? { parentWorkItem: { connect: { id: parentId } } }
         : {}),
     });
 
-    await this.invalidateTaskCache(
+    await this.invalidateWorkItemCache(
       projectId,
-      task.id,
+      workItem.id,
       createWorkItemDto.cycleId,
     );
-    this.eventDispatcher.emitTaskCreated({
-      taskId: task.id,
+    this.eventDispatcher.emitWorkItemCreated({
+      workItemId: workItem.id,
       actorId: authorId,
       projectId,
       columnId: targetColumn,
-      title: task.title,
-      identifier: task.identifier,
-      sequenceNumber: task.sequenceNumber,
+      title: workItem.title,
+      identifier: workItem.identifier,
+      sequenceNumber: workItem.sequenceNumber,
     });
-    const formatted = formatWorkItem(task);
-    return { task: formatted, workItem: formatted, WorkItem: formatted, item: formatted };
+    const formatted = formatWorkItem(workItem);
+    return { workItem: formatted, item: formatted };
   }
 
-  async createSubtask(
-    parentTaskId: string,
+  async createChildWorkItem(
+    parentWorkItemId: string,
     authorId: string,
     createWorkItemDto: CreateWorkItemDto,
   ) {
-    const parent = await this.workItemRepository.findTaskById(parentTaskId);
+    const parent = await this.workItemRepository.findWorkItemById(parentWorkItemId);
     if (!parent) throw new NotFoundException('Parent work item not found');
 
-    return this.createTask(parent.projectId, authorId, {
+    return this.createWorkItem(parent.projectId, authorId, {
       ...createWorkItemDto,
-      parentTaskId,
+      parentWorkItemId,
       cycleId: createWorkItemDto.cycleId || parent.cycleId || undefined,
     });
   }
 
-  async updateTask(
-    taskId: string,
+  async updateWorkItem(
+    workItemId: string,
     updateWorkItemDto: UpdateWorkItemDto,
     userId?: string,
   ) {
-    const existing = await this.workItemRepository.findTaskById(taskId);
+    const existing = await this.workItemRepository.findWorkItemById(workItemId);
     if (!existing) throw new NotFoundException('WorkItem not found');
 
-    const updated = await this.workItemRepository.updateTask(taskId, {
+    const parentId = updateWorkItemDto.parentWorkItemId;
+
+    const updated = await this.workItemRepository.updateWorkItem(existing.id, {
       ...(updateWorkItemDto.title !== undefined && {
         title: updateWorkItemDto.title,
       }),
@@ -283,9 +289,9 @@ export class CoreService {
           ? { connect: { id: updateWorkItemDto.cycleId } }
           : { disconnect: true },
       }),
-      ...(updateWorkItemDto.parentTaskId !== undefined && {
-        parentTask: updateWorkItemDto.parentTaskId
-          ? { connect: { id: updateWorkItemDto.parentTaskId } }
+      ...(parentId !== undefined && {
+        parentWorkItem: parentId
+          ? { connect: { id: parentId } }
           : { disconnect: true },
       }),
       ...(updateWorkItemDto.assigneeIds !== undefined && {
@@ -293,54 +299,56 @@ export class CoreService {
       }),
     });
 
-    await this.invalidateTaskCache(
+    await this.invalidateWorkItemCache(
       existing.projectId,
-      taskId,
+      existing.id,
       existing.cycleId,
     );
 
     this.eventDispatcher.dispatchUpdateEvents(existing, updateWorkItemDto, userId);
     const formatted = formatWorkItem(updated);
-    return { task: formatted, workItem: formatted, WorkItem: formatted, item: formatted };
+    return { workItem: formatted, item: formatted };
   }
 
-  async deleteTask(taskId: string, userId?: string) {
-    const task = await this.workItemRepository.findTaskById(taskId);
-    if (!task) throw new NotFoundException('WorkItem not found');
+  async deleteWorkItem(workItemId: string, userId?: string) {
+    const item = await this.workItemRepository.findWorkItemById(workItemId);
+    if (!item) throw new NotFoundException('WorkItem not found');
 
-    await this.workItemRepository.deleteTask(taskId);
-    await this.invalidateTaskCache(task.projectId, taskId, task.cycleId);
-    this.eventDispatcher.emitTaskDeleted({
-      taskId,
+    await this.workItemRepository.softDeleteWorkItem(item.id);
+    await this.invalidateWorkItemCache(item.projectId, item.id, item.cycleId);
+    this.eventDispatcher.emitWorkItemDeleted({
+      workItemId: item.id,
       actorId: userId,
-      projectId: task.projectId,
+      projectId: item.projectId,
     });
     return { message: 'WorkItem deleted successfully' };
   }
 
-  async reorderTask(taskId: string, reorderWorkItemDto: ReorderWorkItemDto) {
-    const task = await this.workItemRepository.findTaskById(taskId);
-    if (!task) throw new NotFoundException('WorkItem not found');
+  async reorderWorkItem(workItemId: string, reorderWorkItemDto: ReorderWorkItemDto) {
+    const item = await this.workItemRepository.findWorkItemById(workItemId);
+    if (!item) throw new NotFoundException('WorkItem not found');
 
-    const targetColumn = reorderWorkItemDto.columnId || task.columnId;
+    const targetColumn = reorderWorkItemDto.columnId || item.columnId;
     const targetRank = reorderWorkItemDto.rank ?? 0;
-    const columnTasks = await this.workItemRepository.findColumnTasks(
-      task.projectId,
+    const columnItems = await this.workItemRepository.findColumnWorkItems(
+      item.projectId,
       targetColumn,
     );
 
     const updates = this.rankHandler.calculateReorder(
-      columnTasks,
-      taskId,
+      columnItems,
+      item.id,
       targetColumn,
       targetRank,
+      undefined,
+      item,
     );
 
-    await this.workItemRepository.updateTasksRank(updates);
-    await this.invalidateTaskCache(task.projectId, taskId, task.cycleId);
-    this.eventDispatcher.emitTaskReordered({
-      taskId,
-      projectId: task.projectId,
+    await this.workItemRepository.updateWorkItemsRank(updates);
+    await this.invalidateWorkItemCache(item.projectId, item.id, item.cycleId);
+    this.eventDispatcher.emitWorkItemReordered({
+      workItemId: item.id,
+      projectId: item.projectId,
       columnId: targetColumn,
       rank: targetRank,
     });
@@ -355,45 +363,50 @@ export class CoreService {
     const payload =
       bulkUpdateWorkItemDto.data || (bulkUpdateWorkItemDto as any);
 
-    const rawIds = bulkUpdateWorkItemDto.workItemIds || bulkUpdateWorkItemDto.taskIds || [];
+    const rawIds =
+      bulkUpdateWorkItemDto.workItemIds ||
+      bulkUpdateWorkItemDto.ids ||
+      [];
 
-    // Support bulk add single label to all selected tasks
+    // Support bulk add single label to all selected items
     if (payload.addLabel !== undefined && typeof payload.addLabel === 'string') {
       const labelId = payload.addLabel;
       const validIds = rawIds.filter(isUuid);
-      const tasks = await this.workItemRepository.findTasksByIds(validIds);
+      const allItems = await this.workItemRepository.findWorkItemsByIds(validIds);
+      const items = allItems.filter((t) => t.projectId === projectId);
       await Promise.all(
-        tasks.map((t) => {
+        items.map((t) => {
           const current = Array.isArray(t.labels) ? t.labels : [];
           if (current.includes(labelId)) return Promise.resolve();
           const next = [...current, labelId];
-          return this.workItemRepository.updateTask(t.id, { labels: next });
+          return this.workItemRepository.updateWorkItem(t.id, { labels: next });
         }),
       );
-      await this.invalidateTaskCache(projectId);
+      await this.invalidateWorkItemCache(projectId);
       return {
-        message: `Label added to ${tasks.length} work items`,
-        count: tasks.length,
+        message: `Label added to ${items.length} work items`,
+        count: items.length,
       };
     }
 
-    // Support bulk remove single label from all selected tasks
+    // Support bulk remove single label from all selected items
     if (payload.removeLabel !== undefined && typeof payload.removeLabel === 'string') {
       const labelId = payload.removeLabel;
       const validIds = rawIds.filter(isUuid);
-      const tasks = await this.workItemRepository.findTasksByIds(validIds);
+      const allItems = await this.workItemRepository.findWorkItemsByIds(validIds);
+      const items = allItems.filter((t) => t.projectId === projectId);
       await Promise.all(
-        tasks.map((t) => {
+        items.map((t) => {
           const current = Array.isArray(t.labels) ? t.labels : [];
           if (!current.includes(labelId)) return Promise.resolve();
           const next = current.filter((l) => l !== labelId);
-          return this.workItemRepository.updateTask(t.id, { labels: next });
+          return this.workItemRepository.updateWorkItem(t.id, { labels: next });
         }),
       );
-      await this.invalidateTaskCache(projectId);
+      await this.invalidateWorkItemCache(projectId);
       return {
-        message: `Label removed from ${tasks.length} work items`,
-        count: tasks.length,
+        message: `Label removed from ${items.length} work items`,
+        count: items.length,
       };
     }
 
@@ -414,19 +427,13 @@ export class CoreService {
       data.labels = payload.labels;
     }
 
-    const result = await this.workItemRepository.bulkUpdateTasks(
+    const result = await this.workItemRepository.bulkUpdateWorkItems(
       projectId,
       rawIds,
       data,
     );
-    await this.invalidateTaskCache(projectId, undefined, payload.cycleId);
-    this.eventEmitter?.emit('task.updated', {
-      entityType: 'task',
-      entityId: projectId,
-      verb: 'updated',
-      actorId: userId || '',
-      projectId,
-    });
+    await this.invalidateWorkItemCache(projectId, undefined, payload.cycleId);
+    this.eventDispatcher.emitBulkUpdated(projectId, userId);
     return {
       message: `${result.count} work items updated successfully`,
       count: result.count,
@@ -438,31 +445,28 @@ export class CoreService {
     bulkDeleteWorkItemDto: BulkDeleteWorkItemDto,
     userId?: string,
   ) {
-    const rawIds = bulkDeleteWorkItemDto.workItemIds || bulkDeleteWorkItemDto.taskIds || [];
-    const result = await this.workItemRepository.bulkDeleteTasks(
+    const rawIds =
+      bulkDeleteWorkItemDto.workItemIds ||
+      bulkDeleteWorkItemDto.ids ||
+      [];
+    const result = await this.workItemRepository.bulkDeleteWorkItems(
       projectId,
       rawIds,
     );
-    await this.invalidateTaskCache(projectId);
-    this.eventEmitter?.emit('task.deleted', {
-      entityType: 'task',
-      entityId: projectId,
-      verb: 'deleted',
-      actorId: userId || '',
-      projectId,
-    });
+    await this.invalidateWorkItemCache(projectId);
+    this.eventDispatcher.emitBulkDeleted(projectId, userId);
     return {
       message: `${result.count} work items deleted successfully`,
       count: result.count,
     };
   }
 
-  async duplicateTask(
-    taskId: string,
+  async duplicateWorkItem(
+    workItemId: string,
     userId: string,
     destinationProjectId?: string,
   ) {
-    const source = await this.workItemRepository.findTaskById(taskId);
+    const source = await this.workItemRepository.findWorkItemById(workItemId);
     if (!source) throw new NotFoundException('WorkItem not found');
 
     const sourceMemberRole =
@@ -472,7 +476,7 @@ export class CoreService {
       );
     if (!sourceMemberRole)
       throw new ForbiddenException(
-        'Insufficient permissions to access source task',
+        'Insufficient permissions to access source work item',
       );
 
     const { cloneData, targetProjectId } =
@@ -481,46 +485,41 @@ export class CoreService {
         userId,
         destinationProjectId,
       );
-    const cloned = await this.workItemRepository.createTask(cloneData);
-    await this.invalidateTaskCache(targetProjectId, cloned.id, cloned.cycleId);
+    const cloned = await this.workItemRepository.createWorkItem(cloneData);
+    await this.invalidateWorkItemCache(targetProjectId, cloned.id, cloned.cycleId);
 
-    this.eventEmitter?.emit('task.duplicated', {
-      entityType: 'task',
-      entityId: cloned.id,
-      verb: 'created',
+    this.eventDispatcher.emitWorkItemDuplicated({
+      workItemId: cloned.id,
       actorId: userId,
       projectId: targetProjectId,
     });
 
     const formatted = formatWorkItem(cloned);
     return {
-      task: formatted,
       workItem: formatted,
-      WorkItem: formatted,
       item: formatted,
       message: 'WorkItem duplicated successfully',
     };
   }
 
-  async convertToRootTask(taskId: string) {
-    const task = await this.workItemRepository.findTaskById(taskId);
-    if (!task) throw new NotFoundException('WorkItem not found');
+  async convertToRootWorkItem(workItemId: string) {
+    const item = await this.workItemRepository.findWorkItemById(workItemId);
+    if (!item) throw new NotFoundException('WorkItem not found');
 
-    const updated = await this.workItemRepository.disconnectParentTask(taskId);
+    const updated = await this.workItemRepository.disconnectParentWorkItem(item.id);
 
-    await this.invalidateTaskCache(task.projectId, taskId, task.cycleId);
+    await this.invalidateWorkItemCache(item.projectId, item.id, item.cycleId);
     const formatted = formatWorkItem(updated);
     return {
       message: 'WorkItem converted to root work item successfully',
-      task: formatted,
       workItem: formatted,
-      WorkItem: formatted,
-      item: formatted,
     };
   }
+
+  getWorkItem = this.getWorkItemById.bind(this);
+  bulkUpdateWorkItems = this.bulkUpdate.bind(this);
+  bulkDeleteWorkItems = this.bulkDelete.bind(this);
 }
 
 export const WorkItemService = CoreService;
 export type WorkItemService = CoreService;
-export const TaskService = CoreService;
-export type TaskService = CoreService;

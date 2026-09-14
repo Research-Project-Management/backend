@@ -19,7 +19,7 @@ import { CurrentUser } from '../../../modules/iam/authn/decorators/user.decorato
 
 @ApiTags('Library Tags')
 @ApiBearerAuth('JWT-auth')
-@Controller('api/v1/library/tags')
+@Controller(['api/v1/library/tags', 'api/v1/projects/:projectId/library/tags'])
 @UseGuards(JwtAuthGuard)
 export class TagsController {
   constructor(private readonly tagsService: TagsService) {}
@@ -28,10 +28,14 @@ export class TagsController {
   @ApiOperation({ summary: 'List library tags' })
   async getTags(
     @CurrentUser('id') userId: string,
+    @Param('projectId') routeProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
     @Query('includeInactive') includeInactive?: string,
   ) {
+    const projectId = routeProjectId ?? queryProjectId;
     return this.tagsService.getTags(userId, {
       includeInactive: includeInactive === 'true',
+      projectId,
     });
   }
 
@@ -41,12 +45,15 @@ export class TagsController {
   async createTag(
     @CurrentUser('id') userId: string,
     @Body() body: CreateTagDto,
+    @Param('projectId') routeProjectId?: string,
   ) {
+    const projectId = routeProjectId ?? body.projectId;
     return this.tagsService.createOrGetTag(
       userId,
       body.name,
       body.color,
       body.type,
+      projectId,
     );
   }
 

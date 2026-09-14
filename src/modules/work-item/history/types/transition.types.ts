@@ -21,7 +21,7 @@ export interface StateTransitionItem {
 }
 
 export interface WorkItemTransitionsResponse {
-  taskId: string;
+  workItemId: string;
   currentState: StateBadge;
   currentDurationMs: number;
   currentDurationBadge: string;

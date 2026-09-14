@@ -10,7 +10,6 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { StickyModule } from './modules/sticky/sticky.module';
 import { StorageModule } from './modules/storage/storage.module';
 import { LibraryModule } from './modules/library/library.module';
-import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { DocumentModule } from './modules/document/document.module';
 import { WorkItemModule } from './modules/work-item/work-item.module';
 import { AiModule } from './modules/ai/ai.module';
@@ -38,7 +37,6 @@ import { AppService } from './app.service';
     WorkItemModule,
     DocumentModule,
     LibraryModule,
-    IntegrationsModule,
     StorageModule,
     AiModule,
   ],

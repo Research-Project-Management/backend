@@ -6,8 +6,8 @@ import { CurrentMemberContext } from '../../core/types/iam.type';
  * Attached to request by RoleGuard / RolesGuard.
  *
  * Usage:
- *   @Get(':projectId/tasks')
- *   getTasks(@CurrentMember() member: CurrentMemberContext)
+ *   @Get(':projectId/work-items')
+ *   getWorkItems(@CurrentMember() member: CurrentMemberContext)
  */
 export const CurrentMember = createParamDecorator(
   (_data: unknown, ctx: ExecutionContext): CurrentMemberContext | null => {

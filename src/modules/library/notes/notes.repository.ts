@@ -19,15 +19,29 @@ export class NotesRepository {
   async findMany(
     userId: string,
     itemId?: string,
+    projectIdOrTx?: string | Prisma.TransactionClient,
     tx?: Prisma.TransactionClient,
   ) {
-    const client = this.getClient(tx);
+    const projectId =
+      typeof projectIdOrTx === 'string' ? projectIdOrTx : undefined;
+    const client = this.getClient(
+      typeof projectIdOrTx === 'object' ? projectIdOrTx : tx,
+    );
+    const where: Prisma.NoteWhereInput =
+      projectId && projectId !== 'user'
+        ? {
+            projectId,
+            ...(itemId !== undefined ? { itemId } : {}),
+            deletedAt: null,
+          }
+        : {
+            userId,
+            ...(itemId !== undefined ? { itemId } : {}),
+            deletedAt: null,
+          };
+
     return client.note.findMany({
-      where: {
-        userId,
-        ...(itemId !== undefined ? { itemId } : {}),
-        deletedAt: null,
-      },
+      where,
       orderBy: { updatedAt: 'desc' },
     });
   }
@@ -36,10 +50,15 @@ export class NotesRepository {
     userId: string,
     id: string,
     tx?: Prisma.TransactionClient,
+    projectId?: string,
   ) {
     const client = this.getClient(tx);
+    const scopeWhere =
+      projectId && projectId !== 'user'
+        ? { projectId }
+        : { userId };
     return client.note.findFirst({
-      where: { id, userId, deletedAt: null },
+      where: { id, ...scopeWhere, deletedAt: null },
     });
   }
 
@@ -73,10 +92,15 @@ export class NotesRepository {
     expectedVersion: number,
     data: UpdateNoteData,
     tx?: Prisma.TransactionClient,
+    projectId?: string,
   ) {
     const client = this.getClient(tx);
+    const scopeWhere =
+      projectId && projectId !== 'user'
+        ? { projectId }
+        : { userId };
     const existing = await client.note.findFirst({
-      where: { id, userId, deletedAt: null },
+      where: { id, ...scopeWhere, deletedAt: null },
     });
 
     if (!existing) {
@@ -118,11 +142,16 @@ export class NotesRepository {
     id: string,
     expectedVersion?: number,
     tx?: Prisma.TransactionClient,
+    projectId?: string,
   ): Promise<boolean> {
     const client = this.getClient(tx);
+    const scopeWhere =
+      projectId && projectId !== 'user'
+        ? { projectId }
+        : { userId };
     if (expectedVersion !== undefined) {
       const existing = await client.note.findFirst({
-        where: { id, userId, deletedAt: null },
+        where: { id, ...scopeWhere, deletedAt: null },
       });
       if (existing && existing.version !== expectedVersion) {
         throw new VersionMismatchException({
@@ -135,7 +164,7 @@ export class NotesRepository {
     }
 
     const result = await client.note.updateMany({
-      where: { id, userId, deletedAt: null },
+      where: { id, ...scopeWhere, deletedAt: null },
       data: { deletedAt: new Date() },
     });
 

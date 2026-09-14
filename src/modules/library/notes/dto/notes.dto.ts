@@ -28,6 +28,10 @@ export class CreateNoteDto {
   @IsString({ each: true })
   @IsOptional()
   tags?: string[];
+
+  @IsString()
+  @IsOptional()
+  projectId?: string | null;
 }
 
 export class UpdateNoteDto {

@@ -40,7 +40,7 @@ import type {
   UpsertSyncItemCommand,
   DeleteSyncEntityCommand,
   UpsertSyncEntityResult,
-} from '../sync/types/sync.types';
+} from '../core/types/entity-commands.types';
 
 /** Transaction context passed to write methods for composing operations within a parent transaction. */
 export interface ItemTransactionContext {
@@ -142,13 +142,16 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     data: CreateItemData,
     context?: Partial<ItemTransactionContext> & {
       source?: LibraryItemSource;
+      projectId?: string;
     },
+    projectId?: string,
   ): Promise<any> {
+    const effectiveProjectId = (projectId || context?.projectId || data.projectId) || undefined;
     const execute = async (
       tx: Prisma.TransactionClient,
       helpers: TransactionHelpers,
     ) => {
-      const item = await this.command.create(userId, data, tx);
+      const item = await this.command.create(userId, data, tx, effectiveProjectId);
 
       await helpers.appendChange(userId, {
         entityType: 'Item',
@@ -160,7 +163,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
 
       const payload = buildItemCreatedOutboxPayload({
         itemId: item.id,
-        workspaceId: userId,
+        workspaceId: effectiveProjectId || userId,
         title: item.title,
         source: context?.source ?? 'manual',
         doi: item.doi,
@@ -172,6 +175,8 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         LIBRARY_EVENT_TYPES.ITEM_CREATED,
         payload,
       );
+
+      await this.tagsService.invalidateTagsCache(userId, effectiveProjectId);
 
       return ItemsMapper.toDomain(item);
     };
@@ -189,6 +194,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     expectedVersion: number | undefined,
     data: UpdateItemData,
     context?: ItemTransactionContext,
+    projectId?: string,
   ): Promise<any> {
     if (context) {
       const updated = await this.command.update(
@@ -197,6 +203,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         expectedVersion,
         data,
         context.tx,
+        projectId,
       );
 
       await context.helpers.appendChange(userId, {
@@ -221,7 +228,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       return this.updateItem(userId, id, expectedVersion, data, {
         tx,
         helpers,
-      });
+      }, projectId);
     });
   }
 
@@ -282,8 +289,8 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     }
   }
 
-  async reindexItem(userId: string, id: string) {
-    const item = await this.query.findById(userId, id);
+  async reindexItem(userId: string, id: string, projectId?: string) {
+    const item = await this.query.findById(userId, id, projectId);
     if (!item) {
       throw new NotFoundException(
         `Item ${id} not found in user library`,
@@ -297,7 +304,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         'library.item.reindexed',
         {
           itemId: id,
-          workspaceId: userId,
+          workspaceId: projectId || userId,
           userId,
         },
       );
@@ -319,6 +326,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     id: string,
     expectedVersion?: number,
     context?: ItemTransactionContext,
+    projectId?: string,
   ): Promise<boolean> {
     if (context) {
       const deleted = await this.command.softDelete(
@@ -326,6 +334,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         id,
         expectedVersion,
         context.tx,
+        projectId,
       );
 
       if (deleted) {
@@ -357,19 +366,21 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
           tx,
           helpers,
         },
+        projectId,
       );
-      await this.tagsService.invalidateTagsCache(userId);
+      await this.tagsService.invalidateTagsCache(userId, projectId);
       return deleted;
     });
   }
 
-  async restoreItem(userId: string, id: string, expectedVersion?: number) {
+  async restoreItem(userId: string, id: string, expectedVersion?: number, projectId?: string) {
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
       const restored = await this.command.restore(
         userId,
         id,
         expectedVersion,
         tx,
+        projectId,
       );
 
       await helpers.appendChange(userId, {
@@ -390,15 +401,15 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         },
       );
 
-      await this.tagsService.invalidateTagsCache(userId);
+      await this.tagsService.invalidateTagsCache(userId, projectId);
 
       return ItemsMapper.toDomain(restored);
     });
   }
 
-  async purgeItem(userId: string, id: string): Promise<boolean> {
+  async purgeItem(userId: string, id: string, projectId?: string): Promise<boolean> {
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const purged = await this.command.purge(userId, id, tx);
+      const purged = await this.command.purge(userId, id, tx, projectId);
 
       await helpers.recordTombstone(userId, {
         entityType: 'Item',
@@ -415,14 +426,14 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         },
       );
 
-      await this.tagsService.invalidateTagsCache(userId);
+      await this.tagsService.invalidateTagsCache(userId, projectId);
 
       return purged;
     });
   }
 
-  async getRelatedItems(userId: string, itemId: string) {
-    const item = await this.query.findById(userId, itemId);
+  async getRelatedItems(userId: string, itemId: string, projectId?: string) {
+    const item = await this.query.findById(userId, itemId, projectId);
     if (!item) {
       throw new NotFoundException(`Item ${itemId} not found`);
     }
@@ -438,10 +449,12 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     userId: string,
     sourceItemId: string,
     data: { targetItemId: string; relationType?: string; note?: string },
+    projectId?: string,
   ) {
     const sourceItem = await this.query.findById(
       userId,
       sourceItemId,
+      projectId,
     );
     if (!sourceItem) {
       throw new NotFoundException(`Source item ${sourceItemId} not found`);
@@ -450,6 +463,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     const targetItem = await this.query.findById(
       userId,
       data.targetItemId,
+      projectId,
     );
     if (!targetItem) {
       throw new NotFoundException(`Target item ${data.targetItemId} not found`);
@@ -479,10 +493,12 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     userId: string,
     sourceItemId: string,
     targetItemId: string,
+    projectId?: string,
   ) {
     const sourceItem = await this.query.findById(
       userId,
       sourceItemId,
+      projectId,
     );
     if (!sourceItem) {
       throw new NotFoundException(`Source item ${sourceItemId} not found`);
@@ -507,46 +523,71 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
 
   // ── Port Implementations (IItemExistencePort & IItemReadPort) ────────────
 
-  async exists(userId: string, itemId: string): Promise<boolean> {
-    return this.query.exists(userId, itemId);
+  async exists(
+    userId: string,
+    itemId: string,
+    projectId?: string,
+  ): Promise<boolean> {
+    return this.query.exists(userId, itemId, undefined, projectId);
   }
 
-  async assertExists(userId: string, itemId: string): Promise<void> {
-    return this.query.assertExists(userId, itemId);
+  async assertExists(
+    userId: string,
+    itemId: string,
+    projectId?: string,
+  ): Promise<void> {
+    return this.query.assertExists(userId, itemId, undefined, projectId);
   }
 
   async existMany(
     userId: string,
     itemIds: string[],
+    projectId?: string,
   ): Promise<Map<string, boolean>> {
-    return this.query.existMany(userId, itemIds);
+    return this.query.existMany(userId, itemIds, undefined, projectId);
   }
 
-  async findById(userId: string, itemId: string) {
-    return this.query.findById(userId, itemId);
+  async findById(userId: string, itemId: string, projectId?: string) {
+    return this.query.findById(userId, itemId, projectId);
   }
 
-  async findByIds(userId: string, itemIds: string[]) {
+  async findByIds(userId: string, itemIds: string[], projectId?: string) {
     return this.query.findByIds(userId, itemIds);
   }
 
-  async findByDoi(userId: string, doi: string) {
+  async findByDoi(userId: string, doi: string, projectId?: string) {
     return this.query.findByDoi(userId, doi);
   }
 
-  async findSummaryById(userId: string, itemId: string) {
-    return this.query.findSummaryById(userId, itemId);
+  async findSummaryById(
+    userId: string,
+    itemId: string,
+    projectId?: string,
+  ) {
+    return this.query.findSummaryById(userId, itemId, undefined, projectId);
   }
 
-  async findSummariesByIds(userId: string, itemIds: string[]) {
+  async findSummariesByIds(
+    userId: string,
+    itemIds: string[],
+    projectId?: string,
+  ) {
     return this.query.findSummariesByIds(userId, itemIds);
   }
 
-  async findQualityAuditItems(userId: string, limit?: number) {
+  async findQualityAuditItems(
+    userId: string,
+    limit?: number,
+    projectId?: string,
+  ) {
     return this.query.findQualityAuditItems(userId, limit);
   }
 
-  async findDuplicateCandidateItems(userId: string, limit?: number) {
+  async findDuplicateCandidateItems(
+    userId: string,
+    limit?: number,
+    projectId?: string,
+  ) {
     return this.query.findDuplicateCandidateItems(userId, limit);
   }
 

@@ -5,8 +5,8 @@
 /**
  * Formats a project prefix identifier (e.g., 'RES' -> 'RES-101').
  */
-export function formatTaskCode(prefix: string, sequenceNumber: number): string {
-  const cleanPrefix = (prefix || 'TASK').trim().toUpperCase();
+export function formatWorkItemCode(prefix: string, sequenceNumber: number): string {
+  const cleanPrefix = (prefix || 'WI').trim().toUpperCase();
   return `${cleanPrefix}-${sequenceNumber}`;
 }
 
@@ -43,5 +43,4 @@ export function deriveProjectPrefix(
   return 'PROJ';
 }
 
-export const formatProjectTaskIdentifier = formatTaskCode;
 export const isValidProjectPrefix = isValidPrefix;

@@ -14,7 +14,8 @@ export interface PropertyHistoryItem {
 }
 
 export interface WorkItemHistoryResponse {
-  taskId: string;
+  workItemId: string;
   total: number;
   histories: PropertyHistoryItem[];
 }
+

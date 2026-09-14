@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Param,
+  Query,
   Body,
   Headers,
   UseGuards,
@@ -12,14 +13,19 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/auth.guard';
 import { CurrentUser } from '../../../modules/iam/authn/decorators/user.decorator';
+import { ProjectRoleGuard } from '../../../modules/iam/authz/guards/role.guard';
+import { ProjectRoles } from '../../../modules/iam/authz/decorators/role.decorator';
 import { IngestionPort, INGESTION_PORT } from './types/ingestion.types';
 import { IngestionService } from './ingestion.service';
 import { IngestionSubmissionDto } from './dto/submission.dto';
 import { UnifiedIngestionDto } from './dto/ingestion.dto';
 import { CaptureUrlDto, ConfirmCapturedUrlDto } from './dto/capture-url.dto';
 
-@Controller('api/v1/library/ingestion')
-@UseGuards(JwtAuthGuard)
+@Controller([
+  'api/v1/library/ingestion',
+  'api/v1/projects/:projectId/library/ingestion',
+])
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class IngestionController {
   constructor(
     @Inject(INGESTION_PORT)
@@ -31,13 +37,18 @@ export class IngestionController {
    * Primary Fast-Path Submission Endpoint (202 Accepted)
    */
   @Post('submit')
+  @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.ACCEPTED)
   async submit(
     @CurrentUser('id') userId: string,
     @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
     @Body() dto: IngestionSubmissionDto,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
   ) {
     const effectiveIdempotencyKey = idempotencyKeyHeader || dto.idempotencyKey;
+    const effectiveProjectId =
+      paramProjectId || queryProjectId || dto.projectId || userId;
 
     let payload: any;
     switch (dto.kind) {
@@ -88,8 +99,8 @@ export class IngestionController {
     }
 
     return this.ingestionService.submit({
-      projectId: userId,
-      workspaceId: userId,
+      projectId: effectiveProjectId,
+      workspaceId: effectiveProjectId,
       userId,
       idempotencyKey: effectiveIdempotencyKey,
       payload,
@@ -104,6 +115,7 @@ export class IngestionController {
    * Ingestion Run Status Endpoint
    */
   @Get('status/:runId')
+  @ProjectRoles('owner', 'contributor', 'viewer')
   async getStatus(
     @CurrentUser('id') userId: string,
     @Param('runId') runId: string,
@@ -115,6 +127,7 @@ export class IngestionController {
    * Ingestion Run Real-time Progress Endpoint (Zotero-style progress modal)
    */
   @Get('status/:runId/progress')
+  @ProjectRoles('owner', 'contributor', 'viewer')
   async getProgress(
     @CurrentUser('id') userId: string,
     @Param('runId') runId: string,
@@ -126,6 +139,7 @@ export class IngestionController {
    * Ingestion Run Retry Endpoint
    */
   @Post('retry/:runId')
+  @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.ACCEPTED)
   async retry(
     @CurrentUser('id') userId: string,
@@ -135,21 +149,26 @@ export class IngestionController {
   }
 
   @Post()
+  @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.OK)
   async ingestUnified(
     @CurrentUser('id') userId: string,
     @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
     @Body() dto: UnifiedIngestionDto,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
   ) {
     const effectiveIdempotencyKey = idempotencyKeyHeader || dto.idempotencyKey;
+    const effectiveProjectId =
+      paramProjectId || queryProjectId || (dto as any).projectId || userId;
     let command: any;
 
     switch (dto.source) {
       case 'doi':
         command = {
           source: 'doi',
-          workspaceId: userId,
-          projectId: userId,
+          workspaceId: effectiveProjectId,
+          projectId: effectiveProjectId,
           userId,
           doi: dto.doi || '',
           collectionId: dto.collectionId,
@@ -160,8 +179,8 @@ export class IngestionController {
       case 'url':
         command = {
           source: 'url',
-          workspaceId: userId,
-          projectId: userId,
+          workspaceId: effectiveProjectId,
+          projectId: effectiveProjectId,
           userId,
           url: dto.url || '',
           previewToken: dto.previewToken,
@@ -174,8 +193,8 @@ export class IngestionController {
       case 'bibtex':
         command = {
           source: 'bibtex',
-          workspaceId: userId,
-          projectId: userId,
+          workspaceId: effectiveProjectId,
+          projectId: effectiveProjectId,
           userId,
           content: dto.content || dto.bibtex || '',
           collectionId: dto.collectionId,
@@ -186,8 +205,8 @@ export class IngestionController {
       case 'pdf':
         command = {
           source: 'pdf',
-          workspaceId: userId,
-          projectId: userId,
+          workspaceId: effectiveProjectId,
+          projectId: effectiveProjectId,
           userId,
           fileId: dto.fileId,
           filename: dto.filename,
@@ -200,8 +219,8 @@ export class IngestionController {
       default:
         command = {
           source: dto.source,
-          workspaceId: userId,
-          projectId: userId,
+          workspaceId: effectiveProjectId,
+          projectId: effectiveProjectId,
           userId,
           idempotencyKey: effectiveIdempotencyKey,
         };
@@ -211,20 +230,33 @@ export class IngestionController {
   }
 
   @Post('capture-url')
+  @ProjectRoles('owner', 'contributor')
   async captureUrl(
     @CurrentUser('id') userId: string,
     @Body() dto: CaptureUrlDto,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
   ) {
-    return this.ingestionService.captureUrl(dto.url, { workspaceId: userId, projectId: userId, userId });
+    const effectiveProjectId = paramProjectId || queryProjectId || userId;
+    return this.ingestionService.captureUrl(dto.url, {
+      workspaceId: effectiveProjectId,
+      projectId: effectiveProjectId,
+      userId,
+    });
   }
 
   @Post('confirm-url')
+  @ProjectRoles('owner', 'contributor')
   async confirmUrl(
     @CurrentUser('id') userId: string,
     @Body() dto: ConfirmCapturedUrlDto,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
   ) {
+    const effectiveProjectId =
+      paramProjectId || queryProjectId || dto.projectId || userId;
     return this.ingestionService.confirmCapturedUrl(
-      userId,
+      effectiveProjectId,
       userId,
       dto,
     );

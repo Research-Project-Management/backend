@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { AnalyticsRepository } from './analytics.repository';
 import { RedisCacheService } from '@/core/cache/redis.service';
 import {
-  ProjectTaskDistributionDto,
+  ProjectWorkItemDistributionDto,
   CycleAnalyticsDto,
   ProjectOverviewDto,
   UserOverviewDto,
@@ -24,15 +24,14 @@ export class AnalyticsService {
    */
   async getProjectAnalytics(
     projectId: string,
-  ): Promise<ProjectTaskDistributionDto> {
+  ): Promise<ProjectWorkItemDistributionDto> {
     const cacheKey = `flux:analytics:proj:${projectId}:insights`;
 
     return this.cache.wrap(
       cacheKey,
       async () => {
-        const tasks =
-          await this.analyticsRepo.findProjectTasksWithAssignees(projectId);
-        return aggregateProjectDistributions(tasks);
+        const items = await this.analyticsRepo.findProjectWorkItemsWithAssignees(projectId);
+        return aggregateProjectDistributions(items);
       },
       300, // 5 min TTL
     );
@@ -42,12 +41,12 @@ export class AnalyticsService {
    * Cycle / Sprint Analytics (Burndown rate & progress)
    */
   async getCycleAnalytics(cycleId: string): Promise<CycleAnalyticsDto> {
-    const tasks = await this.analyticsRepo.findCycleTasks(cycleId);
-    return calculateCycleMetrics(cycleId, tasks);
+    const items = await this.analyticsRepo.findCycleWorkItems(cycleId);
+    return calculateCycleMetrics(cycleId, items);
   }
 
   /**
-   * Project Dimensional Overview (members, tasks, pages, files, stickies, cycles)
+   * Project Dimensional Overview (members, workItems, pages, files, stickies, cycles)
    */
   async getProjectOverview(
     projectId: string,
@@ -86,10 +85,10 @@ export class AnalyticsService {
   async getLabelDistribution(
     projectId: string,
   ): Promise<{ labels: { label: string; count: number }[] }> {
-    const tasks = await this.analyticsRepo.findProjectTasksByLabel(projectId);
+    const items = await this.analyticsRepo.findProjectWorkItemsByLabel(projectId);
     const labelCount: Record<string, number> = {};
-    for (const task of tasks) {
-      const labels: string[] = Array.isArray(task.labels) ? task.labels : [];
+    for (const item of items) {
+      const labels: string[] = Array.isArray(item.labels) ? item.labels : [];
       for (const label of labels) {
         if (label) labelCount[label] = (labelCount[label] || 0) + 1;
       }
@@ -101,7 +100,7 @@ export class AnalyticsService {
   }
 
   /**
-   * Time-series: tasks created and completed per day.
+   * Time-series: work items created and completed per day.
    * @param from  ISO date string (inclusive)
    * @param to    ISO date string (inclusive)
    */
@@ -116,7 +115,7 @@ export class AnalyticsService {
     const toDate = new Date(to);
     toDate.setHours(23, 59, 59, 999);
 
-    const tasks = await this.analyticsRepo.findProjectTasksTimeSeries(
+    const items = await this.analyticsRepo.findProjectWorkItemsTimeSeries(
       projectId,
       fromDate,
       toDate,
@@ -129,11 +128,11 @@ export class AnalyticsService {
       cursor.setDate(cursor.getDate() + 1);
     }
 
-    for (const task of tasks) {
-      const createdKey = task.createdAt.toISOString().slice(0, 10);
+    for (const item of items) {
+      const createdKey = item.createdAt.toISOString().slice(0, 10);
       if (dateMap[createdKey]) dateMap[createdKey].created += 1;
-      if (task.completed) {
-        const completedKey = task.updatedAt.toISOString().slice(0, 10);
+      if (item.completed) {
+        const completedKey = item.updatedAt.toISOString().slice(0, 10);
         if (dateMap[completedKey]) dateMap[completedKey].completed += 1;
       }
     }
@@ -142,15 +141,15 @@ export class AnalyticsService {
     return { series };
   }
 
-  /** Burn-down chart: remaining tasks per day from cycle start to today/end */
+  /** Burn-down chart: remaining work items per day from cycle start to today/end */
   async getCycleBurndown(cycleId: string): Promise<{
     cycleId: string;
     burndown: { date: string; remaining: number; completed: number }[];
   }> {
     const cycle = await this.analyticsRepo.findCycleById(cycleId);
-    const tasks = await this.analyticsRepo.findCycleTasksWithDates(cycleId);
+    const items = await this.analyticsRepo.findCycleWorkItemsWithDates(cycleId);
 
-    const total = tasks.length;
+    const total = items.length;
     const startDate = cycle?.startDate ? new Date(cycle.startDate) : new Date();
     const endDate = cycle?.endDate ? new Date(cycle.endDate) : new Date();
     const today = new Date();
@@ -162,7 +161,7 @@ export class AnalyticsService {
 
     while (cursor <= chartEnd) {
       const dateStr = cursor.toISOString().slice(0, 10);
-      const completedByDay = tasks.filter(
+      const completedByDay = items.filter(
         (t) =>
           t.completed &&
           new Date(t.updatedAt) <= new Date(dateStr + 'T23:59:59Z'),
@@ -178,26 +177,26 @@ export class AnalyticsService {
     return { cycleId, burndown };
   }
 
-  /** Velocity: tasks completed vs total in a cycle */
+  /** Velocity: work items completed vs total in a cycle */
   async getCycleVelocity(cycleId: string): Promise<{
     cycleId: string;
-    totalTasks: number;
-    completedTasks: number;
-    pendingTasks: number;
+    totalWorkItems: number;
+    completedWorkItems: number;
+    pendingWorkItems: number;
     velocityRate: number;
   }> {
-    const tasks = await this.analyticsRepo.findCycleTasks(cycleId);
-    const totalTasks = tasks.length;
-    const completedTasks = tasks.filter((t) => t.completed).length;
-    const pendingTasks = totalTasks - completedTasks;
+    const items = await this.analyticsRepo.findCycleWorkItems(cycleId);
+    const totalWorkItems = items.length;
+    const completedWorkItems = items.filter((t) => t.completed).length;
+    const pendingWorkItems = totalWorkItems - completedWorkItems;
     const velocityRate =
-      totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+      totalWorkItems > 0 ? Math.round((completedWorkItems / totalWorkItems) * 100) : 0;
 
     return {
       cycleId,
-      totalTasks,
-      completedTasks,
-      pendingTasks,
+      totalWorkItems,
+      completedWorkItems,
+      pendingWorkItems,
       velocityRate,
     };
   }

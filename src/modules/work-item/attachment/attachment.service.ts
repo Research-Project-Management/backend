@@ -11,7 +11,7 @@ import { AttachmentRepository } from './attachment.repository';
 import { R2Service } from '@/modules/storage/r2/r2.service';
 import { PrismaService } from '@/core/database/prisma.service';
 import {
-  CreateAttachmentDto as TaskCreateAttachmentDto,
+  CreateAttachmentDto as BaseAttachmentDto,
   AttachPageDto,
   AttachPaperDto,
   AttachFileDto,
@@ -22,6 +22,7 @@ import { PresignAttachmentDto } from './dto/presign-attachment.dto';
 import { QueryAttachmentDto } from './dto/query-attachment.dto';
 import { PresignedAttachmentResponse } from './types/attachment.types';
 import { EntityType } from '@prisma/client';
+import { isUuid } from '@/core/utils/uuid.util';
 import { formatWorkItem } from '../core/utils/work-item.util';
 
 @Injectable()
@@ -34,6 +35,22 @@ export class AttachmentService {
     private readonly prismaService: PrismaService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
   ) {}
+
+  private async findWorkItem(workItemId: string) {
+    if (isUuid(workItemId) || !this.prismaService.workItem?.findFirst) {
+      return this.prismaService.workItem.findUnique({
+        where: { id: workItemId },
+        select: { id: true, projectId: true },
+      });
+    }
+    return this.prismaService.workItem.findFirst({
+      where: {
+        identifier: { equals: workItemId, mode: 'insensitive' },
+        deletedAt: null,
+      },
+      select: { id: true, projectId: true },
+    });
+  }
 
   /**
    * Generates a presigned upload URL for direct cloud upload (R2/S3).
@@ -96,7 +113,7 @@ export class AttachmentService {
       );
     }
 
-    const rawEntityType = fields.entityType || 'task';
+    const rawEntityType = fields.entityType || 'work_item';
     const entityId = fields.entityId;
     if (!entityId) {
       throw new BadRequestException(
@@ -212,14 +229,18 @@ export class AttachmentService {
     return { pages, papers, files, links };
   }
 
-  private async getFormattedTask(taskId: string) {
-    const task = await this.prismaService.workItem.findUnique({
-      where: { id: taskId },
+  private async getFormattedWorkItem(workItemId: string) {
+    const basic = await this.findWorkItem(workItemId);
+    if (!basic) {
+      throw new NotFoundException(`Work item ${workItemId} not found`);
+    }
+    const workItem = await this.prismaService.workItem.findUnique({
+      where: { id: basic.id },
       include: {
         assignee: { select: { id: true, name: true, email: true, avatar: true } },
         cycle: { select: { id: true, name: true } },
-        parentTask: { select: { id: true, title: true, identifier: true } },
-        subtasks: {
+        parentWorkItem: { select: { id: true, title: true, identifier: true } },
+        childWorkItems: {
           select: {
             id: true,
             title: true,
@@ -235,34 +256,31 @@ export class AttachmentService {
         project: { select: { id: true } },
       },
     });
-    if (!task) {
-      throw new NotFoundException(`Work item ${taskId} not found`);
+    if (!workItem) {
+      throw new NotFoundException(`Work item ${workItemId} not found`);
     }
-    const records = await this.repository.findByEntity(EntityType.task, taskId);
+    const records = await this.repository.findByEntity(EntityType.work_item, basic.id);
     const center = this.formatAttachments(records);
     return formatWorkItem({
-      ...task,
+      ...workItem,
       attachments: center,
     });
   }
 
   /**
-   * Retrieves all attachments for a work item / task.
+   * Retrieves all attachments for a work item.
    */
-  async getAttachments(taskId: string) {
-    const task = await this.prismaService.workItem.findUnique({
-      where: { id: taskId },
-      select: { id: true },
-    });
-    if (!task) {
-      throw new NotFoundException(`Work item ${taskId} not found`);
+  async getAttachments(workItemId: string) {
+    const workItem = await this.findWorkItem(workItemId);
+    if (!workItem) {
+      throw new NotFoundException(`Work item ${workItemId} not found`);
     }
 
-    const records = await this.repository.findByEntity(EntityType.task, taskId);
+    const records = await this.repository.findByEntity(EntityType.work_item, workItem.id);
     const center = this.formatAttachments(records);
 
     return {
-      taskId,
+      workItemId: workItem.id,
       total: records.length,
       attachments: records,
       center,
@@ -274,25 +292,22 @@ export class AttachmentService {
   }
 
   /**
-   * Adds an attachment to a work item / task.
+   * Adds an attachment to a work item.
    */
   async addAttachment(
-    taskId: string,
-    createAttachmentDto: TaskCreateAttachmentDto,
+    workItemId: string,
+    createAttachmentDto: BaseAttachmentDto,
     authorId: string,
   ) {
-    const task = await this.prismaService.workItem.findUnique({
-      where: { id: taskId },
-      select: { id: true, projectId: true },
-    });
-    if (!task) {
-      throw new NotFoundException(`Work item ${taskId} not found`);
+    const workItem = await this.findWorkItem(workItemId);
+    if (!workItem) {
+      throw new NotFoundException(`Work item ${workItemId} not found`);
     }
 
     const attachment = await this.repository.create(
       {
-        entityType: EntityType.task,
-        entityId: taskId,
+        entityType: EntityType.work_item,
+        entityId: workItem.id,
         filename:
           createAttachmentDto.filename ||
           createAttachmentDto.name ||
@@ -301,7 +316,7 @@ export class AttachmentService {
         storageKey: createAttachmentDto.storageKey,
         size: createAttachmentDto.size || 0,
         mimeType: createAttachmentDto.mimeType || 'application/octet-stream',
-        projectId: task.projectId,
+        projectId: workItem.projectId,
         metadata: createAttachmentDto.metadata,
       },
       authorId,
@@ -309,8 +324,8 @@ export class AttachmentService {
 
     this.eventEmitter?.emit('attachment.created', {
       attachmentId: attachment.id,
-      entityType: EntityType.task,
-      entityId: taskId,
+      entityType: EntityType.work_item,
+      entityId: workItem.id,
       authorId,
     });
 
@@ -318,31 +333,25 @@ export class AttachmentService {
   }
 
   /**
-   * Removes an attachment from a work item / task.
+   * Removes an attachment from a work item.
    */
   async removeAttachment(
-    taskId: string,
+    workItemId: string,
     attachmentId: string,
     authorId: string,
   ) {
-    const task = await this.prismaService.workItem.findUnique({
-      where: { id: taskId },
-      select: { id: true },
-    });
-    if (!task) {
-      throw new NotFoundException(`Work item ${taskId} not found`);
+    const workItem = await this.findWorkItem(workItemId);
+    if (!workItem) {
+      throw new NotFoundException(`Work item ${workItemId} not found`);
     }
 
     return this.deleteAttachment(attachmentId, authorId);
   }
 
-  async attachPage(taskId: string, dto: AttachPageDto, authorId: string) {
-    const task = await this.prismaService.workItem.findUnique({
-      where: { id: taskId },
-      select: { id: true, projectId: true },
-    });
-    if (!task) {
-      throw new NotFoundException(`Work item ${taskId} not found`);
+  async attachPage(workItemId: string, dto: AttachPageDto, authorId: string) {
+    const workItem = await this.findWorkItem(workItemId);
+    if (!workItem) {
+      throw new NotFoundException(`Work item ${workItemId} not found`);
     }
 
     const title = dto.title?.trim() || 'Untitled Page';
@@ -350,13 +359,13 @@ export class AttachmentService {
 
     const attachment = await this.repository.create(
       {
-        entityType: EntityType.task,
-        entityId: taskId,
+        entityType: EntityType.work_item,
+        entityId: workItem.id,
         filename: title,
         url: `/pages/${pageId}`,
         mimeType: 'application/x-page',
         size: 0,
-        projectId: task.projectId,
+        projectId: workItem.projectId,
         metadata: {
           category: 'page',
           pageId,
@@ -366,11 +375,11 @@ export class AttachmentService {
       authorId,
     );
 
-    const formattedTask = await this.getFormattedTask(taskId);
+    const formattedWorkItem = await this.getFormattedWorkItem(workItem.id);
     return {
       message: 'Page attached successfully',
-      task: formattedTask,
-      item: formattedTask,
+      workItem: formattedWorkItem,
+      item: formattedWorkItem,
       page: {
         id: attachment.id,
         pageId,
@@ -380,16 +389,13 @@ export class AttachmentService {
     };
   }
 
-  async detachPage(taskId: string, pageId: string, _authorId?: string) {
-    const task = await this.prismaService.workItem.findUnique({
-      where: { id: taskId },
-      select: { id: true },
-    });
-    if (!task) {
-      throw new NotFoundException(`Work item ${taskId} not found`);
+  async detachPage(workItemId: string, pageId: string, _authorId?: string) {
+    const workItem = await this.findWorkItem(workItemId);
+    if (!workItem) {
+      throw new NotFoundException(`Work item ${workItemId} not found`);
     }
 
-    const records = await this.repository.findByEntity(EntityType.task, taskId);
+    const records = await this.repository.findByEntity(EntityType.work_item, workItem.id);
     const target = records.find(
       (r) => r.id === pageId || (r.metadata as any)?.pageId === pageId,
     );
@@ -397,21 +403,18 @@ export class AttachmentService {
       await this.repository.delete(target.id);
     }
 
-    const formattedTask = await this.getFormattedTask(taskId);
+    const formattedWorkItem = await this.getFormattedWorkItem(workItem.id);
     return {
       message: 'Page detached successfully',
-      task: formattedTask,
-      item: formattedTask,
+      workItem: formattedWorkItem,
+      item: formattedWorkItem,
     };
   }
 
-  async attachPaper(taskId: string, dto: AttachPaperDto, authorId: string) {
-    const task = await this.prismaService.workItem.findUnique({
-      where: { id: taskId },
-      select: { id: true, projectId: true },
-    });
-    if (!task) {
-      throw new NotFoundException(`Work item ${taskId} not found`);
+  async attachPaper(workItemId: string, dto: AttachPaperDto, authorId: string) {
+    const workItem = await this.findWorkItem(workItemId);
+    if (!workItem) {
+      throw new NotFoundException(`Work item ${workItemId} not found`);
     }
 
     const title = dto.title?.trim() || 'Untitled Paper';
@@ -420,13 +423,13 @@ export class AttachmentService {
 
     const attachment = await this.repository.create(
       {
-        entityType: EntityType.task,
-        entityId: taskId,
+        entityType: EntityType.work_item,
+        entityId: workItem.id,
         filename: title,
         url,
         mimeType: 'application/x-paper',
         size: 0,
-        projectId: task.projectId,
+        projectId: workItem.projectId,
         metadata: {
           category: 'paper',
           paperId,
@@ -438,11 +441,11 @@ export class AttachmentService {
       authorId,
     );
 
-    const formattedTask = await this.getFormattedTask(taskId);
+    const formattedWorkItem = await this.getFormattedWorkItem(workItem.id);
     return {
       message: 'Paper attached successfully',
-      task: formattedTask,
-      item: formattedTask,
+      workItem: formattedWorkItem,
+      item: formattedWorkItem,
       paper: {
         id: attachment.id,
         paperId,
@@ -454,16 +457,13 @@ export class AttachmentService {
     };
   }
 
-  async detachPaper(taskId: string, paperId: string, _authorId?: string) {
-    const task = await this.prismaService.workItem.findUnique({
-      where: { id: taskId },
-      select: { id: true },
-    });
-    if (!task) {
-      throw new NotFoundException(`Work item ${taskId} not found`);
+  async detachPaper(workItemId: string, paperId: string, _authorId?: string) {
+    const workItem = await this.findWorkItem(workItemId);
+    if (!workItem) {
+      throw new NotFoundException(`Work item ${workItemId} not found`);
     }
 
-    const records = await this.repository.findByEntity(EntityType.task, taskId);
+    const records = await this.repository.findByEntity(EntityType.work_item, workItem.id);
     const target = records.find(
       (r) => r.id === paperId || (r.metadata as any)?.paperId === paperId,
     );
@@ -471,33 +471,30 @@ export class AttachmentService {
       await this.repository.delete(target.id);
     }
 
-    const formattedTask = await this.getFormattedTask(taskId);
+    const formattedWorkItem = await this.getFormattedWorkItem(workItem.id);
     return {
       message: 'Paper detached successfully',
-      task: formattedTask,
-      item: formattedTask,
+      workItem: formattedWorkItem,
+      item: formattedWorkItem,
     };
   }
 
-  async attachFile(taskId: string, dto: AttachFileDto, authorId: string) {
-    const task = await this.prismaService.workItem.findUnique({
-      where: { id: taskId },
-      select: { id: true, projectId: true },
-    });
-    if (!task) {
-      throw new NotFoundException(`Work item ${taskId} not found`);
+  async attachFile(workItemId: string, dto: AttachFileDto, authorId: string) {
+    const workItem = await this.findWorkItem(workItemId);
+    if (!workItem) {
+      throw new NotFoundException(`Work item ${workItemId} not found`);
     }
 
     const parsedSize = typeof dto.size === 'string' ? parseInt(dto.size, 10) || 0 : dto.size || 0;
     const attachment = await this.repository.create(
       {
-        entityType: EntityType.task,
-        entityId: taskId,
+        entityType: EntityType.work_item,
+        entityId: workItem.id,
         filename: dto.name,
         url: dto.url,
         mimeType: dto.type || 'application/octet-stream',
         size: parsedSize,
-        projectId: task.projectId,
+        projectId: workItem.projectId,
         metadata: {
           category: 'file',
           name: dto.name,
@@ -506,11 +503,11 @@ export class AttachmentService {
       authorId,
     );
 
-    const formattedTask = await this.getFormattedTask(taskId);
+    const formattedWorkItem = await this.getFormattedWorkItem(workItem.id);
     return {
       message: 'File attached successfully',
-      task: formattedTask,
-      item: formattedTask,
+      workItem: formattedWorkItem,
+      item: formattedWorkItem,
       file: {
         id: attachment.id,
         name: dto.name,
@@ -522,44 +519,38 @@ export class AttachmentService {
     };
   }
 
-  async detachFile(taskId: string, fileId: string, _authorId?: string) {
-    const task = await this.prismaService.workItem.findUnique({
-      where: { id: taskId },
-      select: { id: true },
-    });
-    if (!task) {
-      throw new NotFoundException(`Work item ${taskId} not found`);
+  async detachFile(workItemId: string, fileId: string, _authorId?: string) {
+    const workItem = await this.findWorkItem(workItemId);
+    if (!workItem) {
+      throw new NotFoundException(`Work item ${workItemId} not found`);
     }
 
     await this.repository.delete(fileId);
 
-    const formattedTask = await this.getFormattedTask(taskId);
+    const formattedWorkItem = await this.getFormattedWorkItem(workItem.id);
     return {
       message: 'File detached successfully',
-      task: formattedTask,
-      item: formattedTask,
+      workItem: formattedWorkItem,
+      item: formattedWorkItem,
     };
   }
 
-  async attachLink(taskId: string, dto: AttachLinkDto, authorId: string) {
-    const task = await this.prismaService.workItem.findUnique({
-      where: { id: taskId },
-      select: { id: true, projectId: true },
-    });
-    if (!task) {
-      throw new NotFoundException(`Work item ${taskId} not found`);
+  async attachLink(workItemId: string, dto: AttachLinkDto, authorId: string) {
+    const workItem = await this.findWorkItem(workItemId);
+    if (!workItem) {
+      throw new NotFoundException(`Work item ${workItemId} not found`);
     }
 
     const title = dto.title?.trim() || dto.url;
     const attachment = await this.repository.create(
       {
-        entityType: EntityType.task,
-        entityId: taskId,
+        entityType: EntityType.work_item,
+        entityId: workItem.id,
         filename: title,
         url: dto.url,
         mimeType: 'text/uri-list',
         size: 0,
-        projectId: task.projectId,
+        projectId: workItem.projectId,
         metadata: {
           category: 'link',
           title,
@@ -569,11 +560,11 @@ export class AttachmentService {
       authorId,
     );
 
-    const formattedTask = await this.getFormattedTask(taskId);
+    const formattedWorkItem = await this.getFormattedWorkItem(workItem.id);
     return {
       message: 'Link attached successfully',
-      task: formattedTask,
-      item: formattedTask,
+      workItem: formattedWorkItem,
+      item: formattedWorkItem,
       link: {
         title,
         url: dto.url,
@@ -582,16 +573,13 @@ export class AttachmentService {
     };
   }
 
-  async detachLink(taskId: string, linkIndexOrId: string | number, _authorId?: string) {
-    const task = await this.prismaService.workItem.findUnique({
-      where: { id: taskId },
-      select: { id: true },
-    });
-    if (!task) {
-      throw new NotFoundException(`Work item ${taskId} not found`);
+  async detachLink(workItemId: string, linkIndexOrId: string | number, _authorId?: string) {
+    const workItem = await this.findWorkItem(workItemId);
+    if (!workItem) {
+      throw new NotFoundException(`Work item ${workItemId} not found`);
     }
 
-    const records = await this.repository.findByEntity(EntityType.task, taskId);
+    const records = await this.repository.findByEntity(EntityType.work_item, workItem.id);
     const linkRecords = records.filter(
       (r) => (r.metadata as any)?.category === 'link' || r.mimeType === 'text/uri-list',
     );
@@ -608,11 +596,11 @@ export class AttachmentService {
       await this.repository.delete(target.id);
     }
 
-    const formattedTask = await this.getFormattedTask(taskId);
+    const formattedWorkItem = await this.getFormattedWorkItem(workItem.id);
     return {
       message: 'Link detached successfully',
-      task: formattedTask,
-      item: formattedTask,
+      workItem: formattedWorkItem,
+      item: formattedWorkItem,
     };
   }
 

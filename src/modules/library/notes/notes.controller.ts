@@ -16,32 +16,53 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { NotesService } from './notes.service';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/auth.guard';
 import { CurrentUser } from '../../../modules/iam/authn/decorators/user.decorator';
+import { ProjectRoleGuard } from '../../../modules/iam/authz/guards/role.guard';
+import { ProjectRoles } from '../../../modules/iam/authz/decorators/role.decorator';
 
 import { CreateNoteDto, UpdateNoteDto } from './dto/notes.dto';
 
 @ApiTags('Library Notes')
 @ApiBearerAuth('JWT-auth')
-@Controller('api/v1/library/notes')
-@UseGuards(JwtAuthGuard)
+@Controller([
+  'api/v1/library/notes',
+  'api/v1/projects/:projectId/library/notes',
+])
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class NotesController {
   constructor(private readonly notesService: NotesService) {}
 
   @Get()
-  @ApiOperation({ summary: 'List library notes for user' })
+  @ProjectRoles('owner', 'contributor', 'viewer')
+  @ApiOperation({ summary: 'List library notes for user or project' })
   async listNotes(
     @CurrentUser('id') currentUserId: string,
     @Query('itemId') itemId?: string,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
   ) {
-    return this.notesService.listNotes(currentUserId, itemId);
+    const effectiveProjectId = paramProjectId || queryProjectId;
+    return this.notesService.listNotes(
+      currentUserId,
+      itemId,
+      effectiveProjectId,
+    );
   }
 
   @Get(':id')
+  @ProjectRoles('owner', 'contributor', 'viewer')
   @ApiOperation({ summary: 'Get a library note by ID' })
   async getNote(
     @CurrentUser('id') currentUserId: string,
     @Param('id') id: string,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
   ) {
-    const note = await this.notesService.getNote(currentUserId, id);
+    const effectiveProjectId = paramProjectId || queryProjectId;
+    const note = await this.notesService.getNote(
+      currentUserId,
+      id,
+      effectiveProjectId,
+    );
     if (!note) {
       throw new NotFoundException(`Note ${id} not found`);
     }
@@ -50,27 +71,42 @@ export class NotesController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create a note in user library' })
+  @ProjectRoles('owner', 'contributor')
+  @ApiOperation({ summary: 'Create a note in user or project library' })
   async createNote(
     @CurrentUser('id') currentUserId: string,
     @Body() body: CreateNoteDto,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
   ) {
+    const effectiveProjectId =
+      paramProjectId || queryProjectId || body.projectId;
     return this.notesService.createNote(currentUserId, {
       ...body,
+      projectId: effectiveProjectId || undefined,
       createdById: currentUserId || 'system',
     });
   }
 
   @Get('items/:itemId')
+  @ProjectRoles('owner', 'contributor', 'viewer')
   @ApiOperation({ summary: 'List notes for an item' })
   async listNotesByItem(
     @CurrentUser('id') currentUserId: string,
     @Param('itemId') itemId: string,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
   ) {
-    return this.notesService.listNotes(currentUserId, itemId);
+    const effectiveProjectId = paramProjectId || queryProjectId;
+    return this.notesService.listNotes(
+      currentUserId,
+      itemId,
+      effectiveProjectId,
+    );
   }
 
   @Post('items/:itemId/from-annotations')
+  @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Extract notes from annotations' })
   async extractNotesFromAnnotations(
     @CurrentUser('id') currentUserId: string,
@@ -83,13 +119,17 @@ export class NotesController {
   }
 
   @Patch(':id')
+  @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Update a note' })
   async updateNote(
     @CurrentUser('id') currentUserId: string,
     @Param('id') id: string,
     @Headers('if-match') ifMatch: string | undefined,
     @Body() body: UpdateNoteDto,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
   ) {
+    const effectiveProjectId = paramProjectId || queryProjectId;
     const expectedVersion =
       body.expectedVersion ??
       (ifMatch ? parseInt(ifMatch.replace(/["']/g, ''), 10) : undefined);
@@ -105,17 +145,22 @@ export class NotesController {
       id,
       expectedVersion,
       updateData,
+      effectiveProjectId,
     );
   }
 
   @Delete(':id')
+  @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Delete a note' })
   async deleteNote(
     @CurrentUser('id') currentUserId: string,
     @Param('id') id: string,
     @Query('expectedVersion') expectedVersionQuery?: string,
     @Headers('if-match') ifMatch?: string,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
   ) {
+    const effectiveProjectId = paramProjectId || queryProjectId;
     const expectedVersion =
       expectedVersionQuery !== undefined
         ? parseInt(expectedVersionQuery, 10)
@@ -126,6 +171,7 @@ export class NotesController {
       currentUserId,
       id,
       expectedVersion,
+      effectiveProjectId,
     );
     if (!deleted) {
       throw new NotFoundException(`Note ${id} not found`);

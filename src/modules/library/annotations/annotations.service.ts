@@ -24,7 +24,7 @@ import type {
   UpsertSyncAnnotationCommand,
   DeleteSyncEntityCommand,
   UpsertSyncEntityResult,
-} from '../sync/types/sync.types';
+} from '../core/types/entity-commands.types';
 import { AnnotationType } from '@prisma/client';
 import { buildAnnotationSortIndex } from './utils/sort-index.util';
 

@@ -1,6 +1,5 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { LibraryController } from './library.controller';
 import { LibraryService } from './library.service';
 import { LibraryFacade, LIBRARY_FACADE } from './library.facade';
 import { SsrfGuardService } from './services/ssrf-guard.service';
@@ -8,7 +7,7 @@ import { ItemsModule } from '../items/items.module';
 
 @Module({
   imports: [ConfigModule, forwardRef(() => ItemsModule)],
-  controllers: [LibraryController],
+  controllers: [],
   providers: [
     LibraryService,
     LibraryFacade,

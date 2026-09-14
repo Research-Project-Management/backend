@@ -23,11 +23,21 @@ export interface LibraryStats {
   storageBytes?: number;
 }
 
+export interface LibraryPermissions {
+  canCreate: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+  canManageCollections: boolean;
+}
+
 export interface LibraryOverview {
   recentItems: RecentLibraryItem[];
   unfiledCount: number;
   trashCount: number;
   starredCount: number;
+  duplicateCount: number;
+  myPublicationsCount: number;
+  permissions: LibraryPermissions;
   topTags: Array<{
     id: string;
     name: string;

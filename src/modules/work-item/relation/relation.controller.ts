@@ -29,16 +29,16 @@ import { AddRelationDto, RelationResponseDto } from './dto/relation.dto';
 export class RelationController {
   constructor(private readonly relationService: RelationService) {}
 
-  @Get('work-items/:taskId/relations')
+  @Get('work-items/:workItemId/relations')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get all relations and blockers for a work item' })
   @ApiResponse({ status: 200, description: 'List of enriched relations' })
-  async getRelations(@Param('taskId') taskId: string) {
-    return this.relationService.getTaskRelations(taskId);
+  async getRelations(@Param('workItemId') workItemId: string) {
+    return this.relationService.getWorkItemRelations(workItemId);
   }
 
-  @Post('work-items/:taskId/relations')
+  @Post('work-items/:workItemId/relations')
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
@@ -49,14 +49,14 @@ export class RelationController {
     type: RelationResponseDto,
   })
   async addRelation(
-    @Param('taskId') taskId: string,
+    @Param('workItemId') workItemId: string,
     @Body() addRelationDto: AddRelationDto,
     @CurrentUser('id') userId: string,
   ) {
-    return this.relationService.addRelation(taskId, addRelationDto, userId);
+    return this.relationService.addRelation(workItemId, addRelationDto, userId);
   }
 
-  @Delete('work-items/:taskId/relations/:targetTaskId')
+  @Delete('work-items/:workItemId/relations/:targetWorkItemId')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Remove a bidirectional relation from a work item' })
@@ -66,14 +66,14 @@ export class RelationController {
     type: RelationResponseDto,
   })
   async removeRelation(
-    @Param('taskId') taskId: string,
-    @Param('targetTaskId') targetTaskId: string,
+    @Param('workItemId') workItemId: string,
+    @Param('targetWorkItemId') targetWorkItemId: string,
     @CurrentUser('id') userId: string,
   ) {
-    return this.relationService.removeRelation(taskId, targetTaskId, userId);
+    return this.relationService.removeRelation(workItemId, targetWorkItemId, userId);
   }
 
-  @Get('work-items/:taskId/relations/violations')
+  @Get('work-items/:workItemId/relations/violations')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({
@@ -83,7 +83,7 @@ export class RelationController {
     status: 200,
     description: 'List of relations with violation status and reason',
   })
-  async getViolations(@Param('taskId') taskId: string) {
-    return this.relationService.getViolatedRelations(taskId);
+  async getViolations(@Param('workItemId') workItemId: string) {
+    return this.relationService.getViolatedRelations(workItemId);
   }
 }

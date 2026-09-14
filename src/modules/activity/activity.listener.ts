@@ -23,15 +23,15 @@ export class ActivityListener {
     await this.invalidateAnalyticsCache(event.projectId, event.actorId);
   }
 
-  @OnEvent('task.*', { async: true })
-  async handleTaskEvents(event: any) {
+  @OnEvent('work-item.*', { async: true })
+  async handleWorkItemEvents(event: any) {
     if (event instanceof DomainActivityEvent) {
       return this.handleGenericActivity(event);
     }
-    const entityId = event?.entityId || event?.taskId;
+    const entityId = event?.entityId || event?.workItemId;
     if (entityId) {
       const activityEvent = new DomainActivityEvent({
-        entityType: 'task',
+        entityType: 'work_item' as any,
         entityId,
         verb: event.verb || 'updated',
         actorId: event.actorId || event.authorId || '',
@@ -45,7 +45,7 @@ export class ActivityListener {
       // Record initial state if WorkItem was created with a column
       if (event.verb === 'created' && event.columnId) {
         const stateInitEvent = new DomainActivityEvent({
-          entityType: 'task',
+          entityType: 'work_item' as any,
           entityId,
           verb: 'transitioned',
           actorId: event.actorId || event.authorId || '',
@@ -61,12 +61,12 @@ export class ActivityListener {
 
   @OnEvent('comment.*', { async: true })
   async handleCommentEvents(event: any) {
-    const taskId = event.taskId;
-    if (!taskId) return;
+    const targetId = event.workItemId;
+    if (!targetId) return;
 
     const activityEvent = new DomainActivityEvent({
       entityType: 'comment',
-      entityId: event.commentId || taskId,
+      entityId: event.commentId || targetId,
       verb: event.content !== undefined ? 'commented' : 'updated_comment',
       actorId: event.authorId || '',
       projectId: event.projectId,

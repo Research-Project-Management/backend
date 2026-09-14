@@ -38,18 +38,18 @@ export class RelationService {
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
-  private async invalidateTaskCache(
+  private async invalidateWorkItemCache(
     projectId: string,
-    taskId?: string,
+    workItemId?: string,
     cycleId?: string | null,
   ) {
     if (!this.cache) return;
     const deletions: Promise<any>[] = [
-      this.cache.del(WORK_ITEM_REDIS_KEYS.projectTasks(projectId)),
+      this.cache.del(WORK_ITEM_REDIS_KEYS.projectWorkItems(projectId)),
       this.cache.del(`flux:proj:overview:${projectId}`),
     ];
-    if (taskId) {
-      deletions.push(this.cache.del(WORK_ITEM_REDIS_KEYS.WorkItem(taskId)));
+    if (workItemId) {
+      deletions.push(this.cache.del(WORK_ITEM_REDIS_KEYS.workItem(workItemId)));
     }
     if (cycleId) {
       deletions.push(
@@ -60,16 +60,16 @@ export class RelationService {
     await Promise.all(deletions).catch(() => null);
   }
 
-  async getTaskRelations(
-    taskId: string,
+  async getWorkItemRelations(
+    workItemId: string,
   ): Promise<{ relations: EnrichedRelationItem[] }> {
-    const task = await this.relationRepository.findTask(taskId);
-    if (!task) {
+    const workItem = await this.relationRepository.findWorkItem(workItemId);
+    if (!workItem) {
       throw new NotFoundException('WorkItem not found');
     }
 
-    const rawRelations: WorkItemRelationItem[] = Array.isArray(task.relations)
-      ? (task.relations as unknown as WorkItemRelationItem[])
+    const rawRelations: WorkItemRelationItem[] = Array.isArray(workItem.relations)
+      ? (workItem.relations as unknown as WorkItemRelationItem[])
       : [];
 
     if (rawRelations.length === 0) {
@@ -77,18 +77,18 @@ export class RelationService {
     }
 
     const targetIds = rawRelations
-      .map((relation) => relation.targetTaskId)
+      .map((relation) => relation.targetWorkItemId)
       .filter(Boolean);
-    const targetTasks = await this.relationRepository.findTasksByIds(targetIds);
-    const taskMap = new Map(
-      targetTasks.map((targetTask) => [targetTask.id, targetTask]),
+    const targetWorkItems = await this.relationRepository.findWorkItemsByIds(targetIds);
+    const itemMap = new Map(
+      targetWorkItems.map((targetItem) => [targetItem.id, targetItem]),
     );
 
     const enriched: EnrichedRelationItem[] = rawRelations.map((relation) => {
-      const target = taskMap.get(relation.targetTaskId);
+      const target = itemMap.get(relation.targetWorkItemId);
       return {
         ...relation,
-        targetTask: target
+        targetWorkItem: target
           ? {
               id: target.id,
               title: target.title,
@@ -105,24 +105,30 @@ export class RelationService {
   }
 
   async addRelation(
-    taskId: string,
+    workItemId: string,
     addRelationDto: AddRelationDto,
     actorId?: string,
   ) {
-    const sourceTask = await this.relationRepository.findTask(taskId);
-    if (!sourceTask) {
+    const sourceItem = await this.relationRepository.findWorkItem(workItemId);
+    if (!sourceItem) {
       throw new NotFoundException('Source WorkItem not found');
     }
 
-    const targetTask = await this.relationRepository.findTask(
-      addRelationDto.targetTaskId,
+    const targetItem = await this.relationRepository.findWorkItem(
+      addRelationDto.targetWorkItemId,
     );
-    if (!targetTask) {
+    if (!targetItem) {
       throw new NotFoundException('Target WorkItem not found');
     }
 
-    if (sourceTask.id === targetTask.id) {
+    if (sourceItem.id === targetItem.id) {
       throw new BadRequestException('Cannot link WorkItem to itself');
+    }
+
+    if (sourceItem.projectId !== targetItem.projectId) {
+      throw new BadRequestException(
+        'Cannot link work items across different projects',
+      );
     }
 
     const targetType =
@@ -130,65 +136,71 @@ export class RelationService {
     const now = new Date().toISOString();
 
     const sourceRelations: WorkItemRelationItem[] = (
-      Array.isArray(sourceTask.relations)
-        ? (sourceTask.relations as unknown as WorkItemRelationItem[])
+      Array.isArray(sourceItem.relations)
+        ? (sourceItem.relations as unknown as WorkItemRelationItem[])
         : []
-    ).filter((relation) => relation.targetTaskId !== targetTask.id);
+    ).filter((relation) => relation.targetWorkItemId !== targetItem.id);
 
     sourceRelations.push({
       id: crypto.randomUUID(),
-      targetTaskId: targetTask.id,
+      targetWorkItemId: targetItem.id,
       type: addRelationDto.type,
       createdAt: now,
     });
 
     const targetRelations: WorkItemRelationItem[] = (
-      Array.isArray(targetTask.relations)
-        ? (targetTask.relations as unknown as WorkItemRelationItem[])
+      Array.isArray(targetItem.relations)
+        ? (targetItem.relations as unknown as WorkItemRelationItem[])
         : []
-    ).filter((relation) => relation.targetTaskId !== sourceTask.id);
+    ).filter((relation) => relation.targetWorkItemId !== sourceItem.id);
 
     targetRelations.push({
       id: crypto.randomUUID(),
-      targetTaskId: sourceTask.id,
+      targetWorkItemId: sourceItem.id,
       type: targetType,
       createdAt: now,
     });
 
     await this.relationRepository.executeTransaction([
       this.relationRepository.prisma.workItem.update({
-        where: { id: sourceTask.id },
+        where: { id: sourceItem.id },
         data: {
           relations: sourceRelations as unknown as Prisma.InputJsonValue,
         },
       }),
       this.relationRepository.prisma.workItem.update({
-        where: { id: targetTask.id },
+        where: { id: targetItem.id },
         data: {
           relations: targetRelations as unknown as Prisma.InputJsonValue,
         },
       }),
     ]);
 
-    await this.invalidateTaskCache(
-      sourceTask.projectId,
-      sourceTask.id,
-      sourceTask.cycleId,
+    await this.invalidateWorkItemCache(
+      sourceItem.projectId,
+      sourceItem.id,
+      sourceItem.cycleId,
     );
-    await this.invalidateTaskCache(
-      targetTask.projectId,
-      targetTask.id,
-      targetTask.cycleId,
+    await this.invalidateWorkItemCache(
+      targetItem.projectId,
+      targetItem.id,
+      targetItem.cycleId,
     );
 
     if (this.eventEmitter) {
-      this.eventEmitter.emit('task.relation.added', {
-        sourceTaskId: sourceTask.id,
-        targetTaskId: targetTask.id,
+      const relationPayload = {
+        entityType: 'work_item',
+        entityId: sourceItem.id,
+        workItemId: sourceItem.id,
+        sourceWorkItemId: sourceItem.id,
+        targetWorkItemId: targetItem.id,
         type: addRelationDto.type,
         actorId,
-        projectId: sourceTask.projectId,
-      });
+        projectId: sourceItem.projectId,
+        verb: 'updated',
+      };
+      this.eventEmitter.emit('work-item.relation.added', relationPayload);
+      this.eventEmitter.emit('work-item.updated', relationPayload);
     }
 
     return {
@@ -198,41 +210,41 @@ export class RelationService {
     };
   }
 
-  async removeRelation(taskId: string, targetTaskId: string, actorId?: string) {
-    const sourceTask = await this.relationRepository.findTask(taskId);
-    if (!sourceTask) {
+  async removeRelation(workItemId: string, targetWorkItemId: string, actorId?: string) {
+    const sourceItem = await this.relationRepository.findWorkItem(workItemId);
+    if (!sourceItem) {
       throw new NotFoundException('Source WorkItem not found');
     }
 
-    const targetTask = await this.relationRepository.findTask(targetTaskId);
+    const targetItem = await this.relationRepository.findWorkItem(targetWorkItemId);
 
     const sourceRelations = (
-      Array.isArray(sourceTask.relations)
-        ? (sourceTask.relations as unknown as WorkItemRelationItem[])
+      Array.isArray(sourceItem.relations)
+        ? (sourceItem.relations as unknown as WorkItemRelationItem[])
         : []
     ).filter(
-      (relation) => relation.targetTaskId !== (targetTask?.id || targetTaskId),
+      (relation) => relation.targetWorkItemId !== (targetItem?.id || targetWorkItemId),
     );
 
     const updates: Promise<any>[] = [
       this.relationRepository.prisma.workItem.update({
-        where: { id: sourceTask.id },
+        where: { id: sourceItem.id },
         data: {
           relations: sourceRelations as unknown as Prisma.InputJsonValue,
         },
       }),
     ];
 
-    if (targetTask) {
+    if (targetItem) {
       const targetRelations = (
-        Array.isArray(targetTask.relations)
-          ? (targetTask.relations as unknown as WorkItemRelationItem[])
+        Array.isArray(targetItem.relations)
+          ? (targetItem.relations as unknown as WorkItemRelationItem[])
           : []
-      ).filter((relation) => relation.targetTaskId !== sourceTask.id);
+      ).filter((relation) => relation.targetWorkItemId !== sourceItem.id);
 
       updates.push(
         this.relationRepository.prisma.workItem.update({
-          where: { id: targetTask.id },
+          where: { id: targetItem.id },
           data: {
             relations: targetRelations as unknown as Prisma.InputJsonValue,
           },
@@ -242,26 +254,32 @@ export class RelationService {
 
     await this.relationRepository.executeTransaction(updates as any);
 
-    await this.invalidateTaskCache(
-      sourceTask.projectId,
-      sourceTask.id,
-      sourceTask.cycleId,
+    await this.invalidateWorkItemCache(
+      sourceItem.projectId,
+      sourceItem.id,
+      sourceItem.cycleId,
     );
-    if (targetTask) {
-      await this.invalidateTaskCache(
-        targetTask.projectId,
-        targetTask.id,
-        targetTask.cycleId,
+    if (targetItem) {
+      await this.invalidateWorkItemCache(
+        targetItem.projectId,
+        targetItem.id,
+        targetItem.cycleId,
       );
     }
 
     if (this.eventEmitter) {
-      this.eventEmitter.emit('task.relation.removed', {
-        sourceTaskId: sourceTask.id,
-        targetTaskId,
+      const relationPayload = {
+        entityType: 'work_item',
+        entityId: sourceItem.id,
+        workItemId: sourceItem.id,
+        sourceWorkItemId: sourceItem.id,
+        targetWorkItemId,
         actorId,
-        projectId: sourceTask.projectId,
-      });
+        projectId: sourceItem.projectId,
+        verb: 'updated',
+      };
+      this.eventEmitter.emit('work-item.relation.removed', relationPayload);
+      this.eventEmitter.emit('work-item.updated', relationPayload);
     }
 
     return { success: true, message: 'Relation removed successfully' };
@@ -269,28 +287,28 @@ export class RelationService {
 
   /**
    * Returns all timeline-dependency relations for a WorkItem that violate date constraints.
-   * A violation occurs when the dates of the two tasks conflict with the relation type:
+   * A violation occurs when the dates of the two work items conflict with the relation type:
    *   - blocks/blocked_by: source dueDate > target startDate
    *   - starts_before: source startDate >= target startDate
    *   - starts_after:  source startDate <= target startDate
    *   - finishes_before: source dueDate >= target dueDate
    *   - finishes_after:  source dueDate <= target dueDate
    */
-  async getViolatedRelations(taskId: string): Promise<{
+  async getViolatedRelations(workItemId: string): Promise<{
     violations: Array<{
       relationId: string;
       type: RelationType;
-      targetTaskId: string;
+      targetWorkItemId: string;
       targetTitle: string;
       reason: string;
       isViolated: boolean;
     }>;
   }> {
-    const task = await this.relationRepository.findTask(taskId);
-    if (!task) throw new NotFoundException('WorkItem not found');
+    const item = await this.relationRepository.findWorkItem(workItemId);
+    if (!item) throw new NotFoundException('WorkItem not found');
 
-    const rawRelations: WorkItemRelationItem[] = Array.isArray(task.relations)
-      ? (task.relations as unknown as WorkItemRelationItem[])
+    const rawRelations: WorkItemRelationItem[] = Array.isArray(item.relations)
+      ? (item.relations as unknown as WorkItemRelationItem[])
       : [];
 
     if (rawRelations.length === 0) return { violations: [] };
@@ -310,18 +328,18 @@ export class RelationService {
     if (timelineRelations.length === 0) return { violations: [] };
 
     const targetIds = timelineRelations.map(
-      (relation) => relation.targetTaskId,
+      (relation) => relation.targetWorkItemId,
     );
-    const targetTasks = await this.relationRepository.findTasksByIds(targetIds);
-    const taskMap = new Map(
-      targetTasks.map((targetTask) => [targetTask.id, targetTask]),
+    const targetWorkItems = await this.relationRepository.findWorkItemsByIds(targetIds);
+    const itemMap = new Map(
+      targetWorkItems.map((targetItem) => [targetItem.id, targetItem]),
     );
 
-    const sourceStart = task.startDate ? new Date(task.startDate) : null;
-    const sourceDue = task.dueDate ? new Date(task.dueDate) : null;
+    const sourceStart = item.startDate ? new Date(item.startDate) : null;
+    const sourceDue = item.dueDate ? new Date(item.dueDate) : null;
 
     const violations = timelineRelations.map((relation) => {
-      const target = taskMap.get(relation.targetTaskId);
+      const target = itemMap.get(relation.targetWorkItemId);
       const targetStart = target?.startDate ? new Date(target.startDate) : null;
       const targetDue = target?.dueDate ? new Date(target.dueDate) : null;
 
@@ -367,7 +385,7 @@ export class RelationService {
       return {
         relationId: relation.id || '',
         type: relation.type,
-        targetTaskId: relation.targetTaskId,
+        targetWorkItemId: relation.targetWorkItemId,
         targetTitle: target?.title || 'Unknown',
         reason,
         isViolated,

@@ -29,13 +29,13 @@ export function formatTimeInStateBadge(ms: number): string {
  */
 export function resolveStateBadge(
   stateId: string | null | undefined,
-  taskColumns: any,
+  workItemColumns: any,
 ): StateBadge {
   if (!stateId) {
     return { id: '', name: 'None', color: '#94a3b8', group: 'backlog' };
   }
 
-  const columns = Array.isArray(taskColumns) ? taskColumns : [];
+  const columns = Array.isArray(workItemColumns) ? workItemColumns : [];
   const found = columns.find(
     (c: any) => c.id === stateId || c.slug === stateId,
   );

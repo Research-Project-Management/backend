@@ -28,10 +28,10 @@ export class ArchiveRepository {
     return project?.id || null;
   }
 
-  async findTaskWithProject(taskId: string) {
-    const where: Prisma.WorkItemWhereInput = isUuid(taskId)
-      ? { id: taskId, deletedAt: null }
-      : { identifier: taskId, deletedAt: null };
+  async findWorkItemWithProject(workItemId: string) {
+    const where: Prisma.WorkItemWhereInput = isUuid(workItemId)
+      ? { id: workItemId, deletedAt: null }
+      : { identifier: workItemId, deletedAt: null };
 
     return this.prisma.workItem.findFirst({
       where,
@@ -49,8 +49,8 @@ export class ArchiveRepository {
     });
   }
 
-  async findTasksByIds(taskIds: string[]) {
-    const validIds = taskIds.filter(isUuid);
+  async findWorkItemsByIds(workItemIds: string[]) {
+    const validIds = workItemIds.filter(isUuid);
     if (validIds.length === 0) return [];
 
     return this.prisma.workItem.findMany({
@@ -68,9 +68,9 @@ export class ArchiveRepository {
     });
   }
 
-  async archiveTask(taskId: string) {
+  async archiveWorkItem(workItemId: string) {
     return this.prisma.workItem.update({
-      where: { id: taskId },
+      where: { id: workItemId },
       data: { archivedAt: new Date() },
       include: {
         project: { select: { id: true } },
@@ -78,9 +78,9 @@ export class ArchiveRepository {
     });
   }
 
-  async restoreTask(taskId: string) {
+  async restoreWorkItem(workItemId: string) {
     return this.prisma.workItem.update({
-      where: { id: taskId },
+      where: { id: workItemId },
       data: { archivedAt: null },
       include: {
         project: { select: { id: true } },
@@ -88,8 +88,8 @@ export class ArchiveRepository {
     });
   }
 
-  async bulkArchive(taskIds: string[]) {
-    const validIds = taskIds.filter(isUuid);
+  async bulkArchive(workItemIds: string[]) {
+    const validIds = workItemIds.filter(isUuid);
     if (validIds.length === 0) return { count: 0 };
 
     return this.prisma.workItem.updateMany({
@@ -101,8 +101,8 @@ export class ArchiveRepository {
     });
   }
 
-  async bulkRestore(taskIds: string[]) {
-    const validIds = taskIds.filter(isUuid);
+  async bulkRestore(workItemIds: string[]) {
+    const validIds = workItemIds.filter(isUuid);
     if (validIds.length === 0) return { count: 0 };
 
     return this.prisma.workItem.updateMany({
@@ -114,13 +114,13 @@ export class ArchiveRepository {
     });
   }
 
-  async findArchivedTasks(
+  async findArchivedWorkItems(
     projectId: string,
     options: { page?: number; limit?: number; search?: string },
   ) {
     const canonicalProjectId = await this.resolveProjectId(projectId);
     if (!canonicalProjectId) {
-      return { tasks: [], total: 0, page: 1, limit: options.limit || 50 };
+      return { workItems: [], total: 0, page: 1, limit: options.limit || 50 };
     }
 
     const page = Math.max(1, options.page || 1);
@@ -141,7 +141,7 @@ export class ArchiveRepository {
       ];
     }
 
-    const [total, tasks] = await Promise.all([
+    const [total, workItems] = await Promise.all([
       this.prisma.workItem.count({ where }),
       this.prisma.workItem.findMany({
         where,
@@ -159,7 +159,7 @@ export class ArchiveRepository {
     ]);
 
     return {
-      tasks,
+      workItems,
       total,
       page,
       limit,

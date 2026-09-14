@@ -20,132 +20,131 @@ export class ArchiveService {
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
-  private async invalidateTaskCache(taskId: string, projectId?: string) {
+  private async invalidateWorkItemCache(workItemId: string, projectId?: string) {
     if (!this.cache) return;
     const promises: Promise<any>[] = [
-      this.cache.del(WORK_ITEM_REDIS_KEYS.WorkItem(taskId)),
+      this.cache.del(WORK_ITEM_REDIS_KEYS.workItem(workItemId)),
     ];
     if (projectId) {
       promises.push(
-        this.cache.del(WORK_ITEM_REDIS_KEYS.projectTasks(projectId)),
+        this.cache.del(WORK_ITEM_REDIS_KEYS.projectWorkItems(projectId)),
       );
     }
     await Promise.all(promises).catch(() => {});
   }
 
-  async archiveWorkItem(taskId: string, userId: string) {
-    const task = await this.archiveRepository.findTaskWithProject(taskId);
-    if (!task) {
-      throw new NotFoundException(`Work item "${taskId}" not found`);
+  async archiveWorkItem(workItemId: string, userId: string) {
+    const workItem = await this.archiveRepository.findWorkItemWithProject(workItemId);
+    if (!workItem) {
+      throw new NotFoundException(`Work item "${workItemId}" not found`);
     }
-    if (task.archivedAt) {
+    if (workItem.archivedAt) {
       throw new BadRequestException(
-        `Work item "${task.identifier || task.id}" is already archived`,
+        `Work item "${workItem.identifier || workItem.id}" is already archived`,
       );
     }
 
-    const updated = await this.archiveRepository.archiveTask(task.id);
-    await this.invalidateTaskCache(task.id, task.projectId);
+    const updated = await this.archiveRepository.archiveWorkItem(workItem.id);
+    await this.invalidateWorkItemCache(workItem.id, workItem.projectId);
 
     if (this.eventEmitter) {
       this.eventEmitter.emit('work-item.archived', {
-        taskId: task.id,
-        identifier: task.identifier,
-        projectId: task.projectId,
+        workItemId: workItem.id,
+        identifier: workItem.identifier,
+        projectId: workItem.projectId,
         userId,
       });
 
       this.eventEmitter.emit(
         'activity.log',
         new DomainActivityEvent({
-          entityType: EntityType.task,
-          entityId: task.id,
+          entityType: EntityType.work_item,
+          entityId: workItem.id,
           verb: 'archived',
           actorId: userId,
-          projectId: task.projectId,
+          projectId: workItem.projectId,
         }),
       );
     }
 
     return {
       success: true,
-      message: `Work item "${task.identifier || task.id}" has been archived`,
-      WorkItem: updated,
+      message: `Work item "${workItem.identifier || workItem.id}" has been archived`,
+      workItem: updated,
+      item: updated,
     };
   }
 
-  async restoreWorkItem(taskId: string, userId: string) {
-    const task = await this.archiveRepository.findTaskWithProject(taskId);
-    if (!task) {
-      throw new NotFoundException(`Work item "${taskId}" not found`);
+  async restoreWorkItem(workItemId: string, userId: string) {
+    const workItem = await this.archiveRepository.findWorkItemWithProject(workItemId);
+    if (!workItem) {
+      throw new NotFoundException(`Work item "${workItemId}" not found`);
     }
-    if (!task.archivedAt) {
+    if (!workItem.archivedAt) {
       throw new BadRequestException(
-        `Work item "${task.identifier || task.id}" is not archived`,
+        `Work item "${workItem.identifier || workItem.id}" is not archived`,
       );
     }
 
-    const updated = await this.archiveRepository.restoreTask(task.id);
-    await this.invalidateTaskCache(task.id, task.projectId);
+    const updated = await this.archiveRepository.restoreWorkItem(workItem.id);
+    await this.invalidateWorkItemCache(workItem.id, workItem.projectId);
 
     if (this.eventEmitter) {
       this.eventEmitter.emit('work-item.restored', {
-        taskId: task.id,
-        identifier: task.identifier,
-        projectId: task.projectId,
+        workItemId: workItem.id,
+        identifier: workItem.identifier,
+        projectId: workItem.projectId,
         userId,
       });
 
       this.eventEmitter.emit(
         'activity.log',
         new DomainActivityEvent({
-          entityType: EntityType.task,
-          entityId: task.id,
+          entityType: EntityType.work_item,
+          entityId: workItem.id,
           verb: 'restored',
           actorId: userId,
-          projectId: task.projectId,
+          projectId: workItem.projectId,
         }),
       );
     }
 
     return {
       success: true,
-      message: `Work item "${task.identifier || task.id}" has been restored to active boards`,
-      WorkItem: updated,
+      message: `Work item "${workItem.identifier || workItem.id}" has been restored to active boards`,
+      workItem: updated,
+      item: updated,
     };
   }
 
   async bulkArchiveWorkItems(bulkArchiveDto: BulkArchiveDto, userId: string) {
-    const tasks = await this.archiveRepository.findTasksByIds(
-      bulkArchiveDto.taskIds,
-    );
-    if (tasks.length === 0) {
+    const ids = bulkArchiveDto.workItemIds;
+    const workItems = await this.archiveRepository.findWorkItemsByIds(ids);
+    if (workItems.length === 0) {
       throw new BadRequestException('No valid work items found to archive');
     }
 
-    const archiveResult = await this.archiveRepository.bulkArchive(
-      bulkArchiveDto.taskIds,
-    );
+    const archiveResult = await this.archiveRepository.bulkArchive(ids);
 
     const projectIds = new Set<string>();
-    for (const workItem of tasks) {
+    for (const workItem of workItems) {
       if (workItem.projectId) projectIds.add(workItem.projectId);
-      await this.invalidateTaskCache(workItem.id, workItem.projectId);
+      await this.invalidateWorkItemCache(workItem.id, workItem.projectId);
     }
 
     if (this.eventEmitter) {
       this.eventEmitter.emit('work-item.bulk-archived', {
-        taskIds: bulkArchiveDto.taskIds,
+        workItemIds: ids,
         count: archiveResult.count,
         userId,
         reason: bulkArchiveDto.reason,
       });
 
-      for (const workItem of tasks) {
+      for (const workItem of workItems) {
         this.eventEmitter.emit(
           'activity.log',
           new DomainActivityEvent({
-            entityType: EntityType.task,
+            entityType: EntityType.work_item,
             entityId: workItem.id,
             verb: 'archived',
             actorId: userId,
@@ -163,33 +162,30 @@ export class ArchiveService {
   }
 
   async bulkRestoreWorkItems(bulkArchiveDto: BulkArchiveDto, userId: string) {
-    const tasks = await this.archiveRepository.findTasksByIds(
-      bulkArchiveDto.taskIds,
-    );
-    if (tasks.length === 0) {
+    const ids = bulkArchiveDto.workItemIds;
+    const workItems = await this.archiveRepository.findWorkItemsByIds(ids);
+    if (workItems.length === 0) {
       throw new BadRequestException('No valid work items found to restore');
     }
 
-    const restoreResult = await this.archiveRepository.bulkRestore(
-      bulkArchiveDto.taskIds,
-    );
+    const restoreResult = await this.archiveRepository.bulkRestore(ids);
 
-    for (const workItem of tasks) {
-      await this.invalidateTaskCache(workItem.id, workItem.projectId);
+    for (const workItem of workItems) {
+      await this.invalidateWorkItemCache(workItem.id, workItem.projectId);
     }
 
     if (this.eventEmitter) {
       this.eventEmitter.emit('work-item.bulk-restored', {
-        taskIds: bulkArchiveDto.taskIds,
+        workItemIds: ids,
         count: restoreResult.count,
         userId,
       });
 
-      for (const workItem of tasks) {
+      for (const workItem of workItems) {
         this.eventEmitter.emit(
           'activity.log',
           new DomainActivityEvent({
-            entityType: EntityType.task,
+            entityType: EntityType.work_item,
             entityId: workItem.id,
             verb: 'restored',
             actorId: userId,
@@ -210,6 +206,6 @@ export class ArchiveService {
     projectId: string,
     query: { page?: number; limit?: number; search?: string },
   ) {
-    return this.archiveRepository.findArchivedTasks(projectId, query);
+    return this.archiveRepository.findArchivedWorkItems(projectId, query);
   }
 }

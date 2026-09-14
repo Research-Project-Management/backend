@@ -63,12 +63,12 @@ export class StateService {
   /**
    * Returns a map of WorkItem counts grouped by stateId for a project.
    */
-  async getStateTaskCounts(projectId: string): Promise<Record<string, number>> {
+  async getStateWorkItemCounts(projectId: string): Promise<Record<string, number>> {
     const project = await this.stateRepository.findProjectById(projectId);
     if (!project) {
       throw new NotFoundException('Project not found');
     }
-    return this.stateRepository.countTasksByState(projectId);
+    return this.stateRepository.countWorkItemsByState(projectId);
   }
 
   /**
@@ -186,7 +186,7 @@ export class StateService {
    * Updates an existing state:
    * - Cannot unset default state without setting another
    * - Name uniqueness
-   * - If group changes to/from completed, synchronizes tasks
+   * - If group changes to/from completed, synchronizes work items
    */
   async updateState(
     projectId: string,
@@ -284,11 +284,11 @@ export class StateService {
       (firstState, secondState) => firstState.sequence - secondState.sequence,
     );
 
-    // If group changed to or from completed, synchronize completion on existing tasks in this state
+    // If group changed to or from completed, synchronize completion on existing work items in this state
     const previousWasCompleted = current.group === 'completed';
     const nowIsCompleted = newGroup === 'completed';
     if (previousWasCompleted !== nowIsCompleted) {
-      await this.stateRepository.migrateTasksToState(
+      await this.stateRepository.migrateWorkItemsToState(
         projectId,
         stateId,
         stateId,
@@ -320,8 +320,8 @@ export class StateService {
    * Deletes a state following safe deletion rules:
    * 1. Cannot delete the only remaining state in a project.
    * 2. Cannot delete the default state.
-   * 3. Cannot delete a state containing tasks without specifying a fallback target state.
-   * 4. Atomic migration of tasks to fallback state with completion status synchronization.
+   * 3. Cannot delete a state containing work items without specifying a fallback target state.
+   * 4. Atomic migration of work items to fallback state with completion status synchronization.
    */
   async deleteState(
     projectId: string,
@@ -359,7 +359,7 @@ export class StateService {
 
     const remainingStates = currentStates.filter((state) => state.id !== stateId);
 
-    const taskCount = await this.stateRepository.countTasksInState(
+    const workItemCount = await this.stateRepository.countWorkItemsInState(
       projectId,
       stateId,
     );
@@ -367,10 +367,10 @@ export class StateService {
     let targetFallbackId: string;
     let isFallbackCompleted = false;
 
-    if (taskCount > 0) {
+    if (workItemCount > 0) {
       if (!fallbackStateId) {
         throw new BadRequestException(
-          `State "${stateToDelete.name}" has ${taskCount} WorkItem(s). You must specify a fallback state to reassign them to.`,
+          `State "${stateToDelete.name}" has ${workItemCount} WorkItem(s). You must specify a fallback state to reassign them to.`,
         );
       }
       const fallbackTarget = remainingStates.find(
@@ -388,7 +388,7 @@ export class StateService {
       isFallbackCompleted = remainingStates[0].group === 'completed';
     }
 
-    await this.stateRepository.deleteStateWithTaskMigration(
+    await this.stateRepository.deleteStateWithWorkItemMigration(
       projectId,
       stateId,
       targetFallbackId,
@@ -409,7 +409,7 @@ export class StateService {
     return {
       states: remainingStates,
       columns: remainingStates,
-      migratedTo: taskCount > 0 ? targetFallbackId : undefined,
+      migratedTo: workItemCount > 0 ? targetFallbackId : undefined,
     };
   }
 
@@ -507,8 +507,8 @@ export class StateService {
     const defaultStates = [...DEFAULT_WORK_ITEM_STATES];
     const defaultIds = new Set(defaultStates.map((state) => state.id));
 
-    // Migrate any orphan tasks whose columnId does not match any default state to 'backlog'
-    await this.stateRepository.deleteStateWithTaskMigration(
+    // Migrate any orphan work items whose columnId does not match any default state to 'backlog'
+    await this.stateRepository.deleteStateWithWorkItemMigration(
       projectId,
       '__orphan_migration__',
       'backlog',
@@ -534,7 +534,7 @@ export class StateService {
   ): Promise<void> {
     if (!this.cache) return;
     await Promise.allSettled([
-      this.cache.del(WORK_ITEM_REDIS_KEYS.projectTasks(projectId)),
+      this.cache.del(WORK_ITEM_REDIS_KEYS.projectWorkItems(projectId)),
       this.cache.del(`flux:project:${projectId}`),
       this.cache.del(`flux:project:overview:${projectId}`),
     ]);

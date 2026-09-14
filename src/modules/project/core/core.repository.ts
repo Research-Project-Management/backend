@@ -9,6 +9,7 @@ import {
 import { isUuid } from '@/core/utils/uuid.util';
 import { deriveProjectPrefix } from './utils/identifier.util';
 import { DEFAULT_WORK_ITEM_STATES } from '@/modules/work-item/state/types/state.types';
+import { parseWorkItemStates } from '@/modules/work-item/state/utils/state.util';
 
 export const USER_SELECT = {
   id: true,
@@ -140,7 +141,7 @@ export class CoreRepository {
         coverImage: data.coverImage || '',
         description: data.description || '',
         modules: data.modules || [
-          'tasks',
+          'work_items',
           'cycles',
           'views',
           'pages',
@@ -300,21 +301,34 @@ export class CoreRepository {
       where: { projectId },
       select: { id: true, group: true },
     });
-    const completedStateIds = states
+
+    let stateList: { id: string; group: string }[] = states;
+    if (stateList.length === 0) {
+      const project = await this.prisma.project.findUnique({
+        where: { id: projectId },
+        select: { workItemColumns: true },
+      });
+      if (project?.workItemColumns && Array.isArray(project.workItemColumns) && project.workItemColumns.length > 0) {
+        const parsed = parseWorkItemStates(project.workItemColumns);
+        stateList = parsed.map((s) => ({ id: s.id, group: s.group }));
+      }
+    }
+
+    const completedStateIds = stateList
       .filter((s) => s.group === 'completed')
       .map((s) => s.id);
-    const startedStateIds = states
+    const startedStateIds = stateList
       .filter((s) => s.group === 'started')
       .map((s) => s.id);
-    const backlogStateIds = states
+    const backlogStateIds = stateList
       .filter((s) => ['backlog', 'unstarted'].includes(s.group))
       .map((s) => s.id);
 
     const [
-      taskTotal,
-      completedTasks,
-      inProgressTasks,
-      backlogTasks,
+      workItemTotal,
+      completedWorkItems,
+      inProgressWorkItems,
+      backlogWorkItems,
       membersCount,
     ] = await Promise.all([
       this.prisma.workItem.count({
@@ -335,7 +349,9 @@ export class CoreRepository {
           deletedAt: null,
           ...(startedStateIds.length > 0
             ? { columnId: { in: startedStateIds } }
-            : { completed: false }),
+            : backlogStateIds.length > 0
+              ? { columnId: { notIn: [...backlogStateIds, ...completedStateIds] }, completed: false }
+              : { completed: false }),
         },
       }),
       this.prisma.workItem.count({
@@ -344,7 +360,9 @@ export class CoreRepository {
           deletedAt: null,
           ...(backlogStateIds.length > 0
             ? { columnId: { in: backlogStateIds } }
-            : { completed: false }),
+            : startedStateIds.length > 0 || completedStateIds.length > 0
+              ? { columnId: { notIn: [...startedStateIds, ...completedStateIds] }, completed: false }
+              : { completed: false, columnId: 'backlog' }),
         },
       }),
       this.prisma.projectMember.count({
@@ -353,10 +371,10 @@ export class CoreRepository {
     ]);
 
     return {
-      totalTasks: taskTotal,
-      completedTasks,
-      inProgressTasks,
-      backlogTasks,
+      totalWorkItems: workItemTotal,
+      completedWorkItems,
+      inProgressWorkItems,
+      backlogWorkItems,
       totalMembers: membersCount,
       totalCycles: 0,
       activeCycle: null,
@@ -364,9 +382,9 @@ export class CoreRepository {
   }
 
   /**
-   * Atomic WorkItem state deletion with reassignment of active tasks to a fallback state.
+   * Atomic WorkItem state deletion with reassignment of active work items to a fallback state.
    */
-  async deleteColumnWithTaskMigration(
+  async deleteColumnWithWorkItemMigration(
     projectId: string,
     stateId: string,
     fallbackStateId: string,
@@ -417,7 +435,7 @@ export class CoreRepository {
   /**
    * Allocate the next sequential WorkItem identifier (e.g. 'BIO-1', 'BIO-2').
    */
-  async allocateTaskIdentifier(
+  async allocateWorkItemIdentifier(
     projectId: string,
   ): Promise<AllocatedIdentifier> {
     const project = await this.prisma.project.findFirst({
@@ -433,7 +451,7 @@ export class CoreRepository {
     const prefix = deriveProjectPrefix(project?.identifier, project?.name);
     const resolvedProjectId = project?.id || projectId;
 
-    // Count existing tasks in this project to derive next sequence
+    // Count existing work items in this project to derive next sequence
     const currentCount = await this.prisma.workItem.count({
       where: { projectId: resolvedProjectId },
     });

@@ -9,7 +9,7 @@ import { StorageModule } from '../../storage/storage.module';
 import { IngestionService } from './ingestion.service';
 import { IngestionController } from './ingestion.controller';
 import { IngestionRepository } from './ingestion.repository';
-import { IdempotencyRepository } from '../sync/repositories/idempotency.repository';
+import { IdempotencyRepository } from './repositories/idempotency.repository';
 import { DoiParser } from './parsers/doi.parser';
 import { BibtexParser } from './parsers/bibtex.parser';
 import { RisParser } from './parsers/ris.parser';

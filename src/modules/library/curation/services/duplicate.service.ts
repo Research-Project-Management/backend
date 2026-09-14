@@ -49,10 +49,12 @@ export class DuplicateService {
    */
   async detectDuplicates(
     userId: string,
+    projectId?: string,
   ): Promise<DuplicateClusterResult[]> {
     const items = await this.itemReadPort.findDuplicateCandidateItems(
       userId,
       2000,
+      projectId,
     );
 
     const getItemAuthors = (item: any): string[] =>

@@ -18,8 +18,8 @@ import {
 } from '@nestjs/swagger';
 import { AssignmentService } from './assignment.service';
 import {
-  AssignTaskDto,
-  BulkAssignTaskDto,
+  AssignWorkItemDto,
+  BulkAssignWorkItemDto,
   SetAssigneesDto,
   AddAssigneeDto,
 } from './dto/assignment.dto';
@@ -50,7 +50,7 @@ export class AssignmentController {
     return this.assignmentService.getEligibleAssignees(projectId);
   }
 
-  @Post('projects/:projectId/work-items/:taskId/assign')
+  @Post('projects/:projectId/work-items/:workItemId/assign')
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
@@ -61,25 +61,21 @@ export class AssignmentController {
     status: 200,
     description: 'WorkItem assignment updated successfully',
   })
-  async assignTask(
+  async assignWorkItem(
     @Param('projectId') projectId: string,
-    @Param('taskId') taskId: string,
+    @Param('workItemId') workItemId: string,
     @CurrentUser('id') userId: string,
-    @Body() assignTaskDto: AssignTaskDto,
+    @Body() assignWorkItemDto: AssignWorkItemDto,
   ) {
-    const targetAssignee =
-      assignTaskDto.assigneeId !== undefined
-        ? assignTaskDto.assigneeId
-        : assignTaskDto.assignee;
-    return this.assignmentService.assignTask(
+    return this.assignmentService.assignWorkItem(
       projectId,
-      taskId,
-      targetAssignee,
+      workItemId,
+      assignWorkItemDto.assigneeId ?? null,
       userId,
     );
   }
 
-  @Post('projects/:projectId/work-items/:taskId/unassign')
+  @Post('projects/:projectId/work-items/:workItemId/unassign')
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
@@ -87,15 +83,15 @@ export class AssignmentController {
     summary: 'Unassign a work item',
   })
   @ApiResponse({ status: 200, description: 'WorkItem unassigned successfully' })
-  async unassignTask(
+  async unassignWorkItem(
     @Param('projectId') projectId: string,
-    @Param('taskId') taskId: string,
+    @Param('workItemId') workItemId: string,
     @CurrentUser('id') userId: string,
   ) {
-    return this.assignmentService.unassignTask(projectId, taskId, userId);
+    return this.assignmentService.unassignWorkItem(projectId, workItemId, userId);
   }
 
-  @Post('projects/:projectId/work-items/:taskId/join')
+  @Post('projects/:projectId/work-items/:workItemId/join')
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
@@ -103,15 +99,15 @@ export class AssignmentController {
     summary: 'Join a work item (self-assign by current user)',
   })
   @ApiResponse({ status: 200, description: 'WorkItem assigned to caller' })
-  async joinTask(
+  async joinWorkItem(
     @Param('projectId') projectId: string,
-    @Param('taskId') taskId: string,
+    @Param('workItemId') workItemId: string,
     @CurrentUser('id') userId: string,
   ) {
-    return this.assignmentService.joinTask(projectId, taskId, userId);
+    return this.assignmentService.joinWorkItem(projectId, workItemId, userId);
   }
 
-  @Post('projects/:projectId/work-items/:taskId/leave')
+  @Post('projects/:projectId/work-items/:workItemId/leave')
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
@@ -119,12 +115,12 @@ export class AssignmentController {
     summary: 'Leave a work item (remove self-assignment)',
   })
   @ApiResponse({ status: 200, description: 'WorkItem unassigned from caller' })
-  async leaveTask(
+  async leaveWorkItem(
     @Param('projectId') projectId: string,
-    @Param('taskId') taskId: string,
+    @Param('workItemId') workItemId: string,
     @CurrentUser('id') userId: string,
   ) {
-    return this.assignmentService.leaveTask(projectId, taskId, userId);
+    return this.assignmentService.leaveWorkItem(projectId, workItemId, userId);
   }
 
   @Post('projects/:projectId/work-items/bulk-assign')
@@ -134,22 +130,22 @@ export class AssignmentController {
   @ApiOperation({
     summary: 'Bulk assign multiple work items to a member',
   })
-  @ApiResponse({ status: 200, description: 'Tasks updated count' })
+  @ApiResponse({ status: 200, description: 'Work items updated count' })
   async bulkAssign(
     @Param('projectId') projectId: string,
     @CurrentUser('id') userId: string,
-    @Body() bulkAssignTaskDto: BulkAssignTaskDto,
+    @Body() bulkAssignWorkItemDto: BulkAssignWorkItemDto,
   ) {
     return this.assignmentService.bulkAssign(
       projectId,
-      bulkAssignTaskDto,
+      bulkAssignWorkItemDto,
       userId,
     );
   }
 
   // ── MULTI-ASSIGNEE ENDPOINTS ────────────────────────────────────────────────
 
-  @Get('projects/:projectId/work-items/:taskId/assignees')
+  @Get('projects/:projectId/work-items/:workItemId/assignees')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({
@@ -161,12 +157,12 @@ export class AssignmentController {
   })
   async getAssignees(
     @Param('projectId') projectId: string,
-    @Param('taskId') taskId: string,
+    @Param('workItemId') workItemId: string,
   ) {
-    return this.assignmentService.getAssignees(projectId, taskId);
+    return this.assignmentService.getAssignees(projectId, workItemId);
   }
 
-  @Put('projects/:projectId/work-items/:taskId/assignees')
+  @Put('projects/:projectId/work-items/:workItemId/assignees')
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
@@ -180,19 +176,19 @@ export class AssignmentController {
   })
   async setAssignees(
     @Param('projectId') projectId: string,
-    @Param('taskId') taskId: string,
+    @Param('workItemId') workItemId: string,
     @CurrentUser('id') userId: string,
     @Body() setAssigneesDto: SetAssigneesDto,
   ) {
     return this.assignmentService.setAssignees(
       projectId,
-      taskId,
+      workItemId,
       setAssigneesDto,
       userId,
     );
   }
 
-  @Post('projects/:projectId/work-items/:taskId/assignees')
+  @Post('projects/:projectId/work-items/:workItemId/assignees')
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
@@ -202,19 +198,19 @@ export class AssignmentController {
   @ApiResponse({ status: 200, description: 'Updated assignee list' })
   async addAssignee(
     @Param('projectId') projectId: string,
-    @Param('taskId') taskId: string,
+    @Param('workItemId') workItemId: string,
     @CurrentUser('id') userId: string,
     @Body() addAssigneeDto: AddAssigneeDto,
   ) {
     return this.assignmentService.addAssignee(
       projectId,
-      taskId,
+      workItemId,
       addAssigneeDto,
       userId,
     );
   }
 
-  @Delete('projects/:projectId/work-items/:taskId/assignees/:targetUserId')
+  @Delete('projects/:projectId/work-items/:workItemId/assignees/:targetUserId')
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
@@ -225,13 +221,13 @@ export class AssignmentController {
   })
   async removeAssignee(
     @Param('projectId') projectId: string,
-    @Param('taskId') taskId: string,
+    @Param('workItemId') workItemId: string,
     @Param('targetUserId') targetUserId: string,
     @CurrentUser('id') userId: string,
   ) {
     return this.assignmentService.removeAssignee(
       projectId,
-      taskId,
+      workItemId,
       targetUserId,
       userId,
     );

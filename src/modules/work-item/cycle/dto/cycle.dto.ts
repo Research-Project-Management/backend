@@ -9,12 +9,16 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { CycleStatus, CyclePhase } from '@prisma/client';
 import {
-  IncompleteTaskAction,
+  IncompleteWorkItemAction,
   CyclePhaseInfo,
   CYCLE_PHASE_CONFIG,
 } from '../types/cycle.types';
 
-export { IncompleteTaskAction, CyclePhaseInfo, CYCLE_PHASE_CONFIG };
+export {
+  IncompleteWorkItemAction,
+  CyclePhaseInfo,
+  CYCLE_PHASE_CONFIG,
+};
 
 export class CreateCycleDto {
   @ApiProperty({
@@ -99,14 +103,14 @@ export class UpdateCycleDto {
   projectId?: string;
 }
 
-export class AddCycleTaskDto {
+export class AddCycleWorkItemDto {
   @ApiProperty({
-    description: 'Task / Work item ID to add to cycle',
-    example: 'task-123',
+    description: 'Work item ID to add to cycle',
+    example: 'wi-123',
   })
   @IsString()
   @IsNotEmpty({ message: 'WorkItem ID is required' })
-  taskId!: string;
+  workItemId!: string;
 
   @ApiPropertyOptional({ description: 'Project ID' })
   @IsString()
@@ -114,25 +118,25 @@ export class AddCycleTaskDto {
   projectId?: string;
 }
 
-export class AddCycleTasksBatchDto {
+export class AddCycleWorkItemsBatchDto {
   @ApiProperty({
     description: 'Array of WorkItem IDs to add to cycle',
     type: [String],
   })
   @IsArray()
-  @IsNotEmpty({ message: 'WorkItem IDs array is required' })
-  taskIds!: string[];
+  @IsNotEmpty({ message: 'WorkItem IDs are required' })
+  workItemIds!: string[];
 }
 
 export class CompleteCycleDto {
   @ApiProperty({
-    enum: IncompleteTaskAction,
-    description: 'Action to handle remaining incomplete tasks',
-    example: IncompleteTaskAction.transfer,
+    enum: IncompleteWorkItemAction,
+    description: 'Action to handle remaining incomplete work items',
+    example: IncompleteWorkItemAction.transfer,
   })
-  @IsEnum(IncompleteTaskAction)
+  @IsEnum(IncompleteWorkItemAction)
   @IsNotEmpty({ message: 'Incomplete WorkItem action is required' })
-  action!: IncompleteTaskAction;
+  action!: IncompleteWorkItemAction;
 
   @ApiPropertyOptional({
     description: 'Target cycle ID when action is transfer',

@@ -1,5 +1,5 @@
 export interface WorkItemCreatedPayload {
-  taskId: string;
+  workItemId: string;
   projectId: string;
   authorId: string;
   identifier?: string | null;
@@ -9,14 +9,14 @@ export interface WorkItemCreatedPayload {
 }
 
 export interface WorkItemUpdatedPayload {
-  taskId: string;
+  workItemId: string;
   projectId: string;
   actorId?: string;
   changes?: Record<string, unknown>;
 }
 
 export interface WorkItemStateChangedPayload {
-  taskId: string;
+  workItemId: string;
   projectId: string;
   oldColumnId: string;
   newColumnId: string;
@@ -24,20 +24,20 @@ export interface WorkItemStateChangedPayload {
 }
 
 export interface WorkItemDeletedPayload {
-  taskId: string;
+  workItemId: string;
   projectId: string;
   actorId?: string;
 }
 
 export interface WorkItemAssignedPayload {
-  taskId: string;
+  workItemId: string;
   projectId: string;
   assigneeId: string | null;
   actorId?: string;
 }
 
 export interface WorkItemVotedPayload {
-  taskId: string;
+  workItemId: string;
   projectId: string;
   userId: string;
   type: 'up' | 'down';

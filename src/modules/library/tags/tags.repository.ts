@@ -12,23 +12,39 @@ export class TagsRepository {
 
   async findMany(
     userId: string,
-    options?: { includeInactive?: boolean },
+    options?: { includeInactive?: boolean; projectId?: string },
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
+    const where: Prisma.TagWhereInput =
+      options?.projectId && options.projectId !== 'user'
+        ? {
+            projectId: options.projectId,
+            ...(options?.includeInactive
+              ? {}
+              : {
+                  itemTags: {
+                    some: {
+                      item: { deletedAt: null },
+                    },
+                  },
+                }),
+          }
+        : {
+            userId,
+            ...(options?.includeInactive
+              ? {}
+              : {
+                  itemTags: {
+                    some: {
+                      item: { deletedAt: null },
+                    },
+                  },
+                }),
+          };
+
     return client.tag.findMany({
-      where: {
-        userId,
-        ...(options?.includeInactive
-          ? {}
-          : {
-              itemTags: {
-                some: {
-                  item: { deletedAt: null },
-                },
-              },
-            }),
-      },
+      where,
       orderBy: { name: 'asc' },
       include: {
         _count: {
@@ -63,9 +79,15 @@ export class TagsRepository {
     name: string,
     color = '#3b82f6',
     type = 'manual',
+    projectIdOrTx?: string | null | Prisma.TransactionClient,
     tx?: Prisma.TransactionClient,
   ) {
-    const client = this.getClient(tx);
+    const projectId = typeof projectIdOrTx === 'string' ? projectIdOrTx : undefined;
+    const client = this.getClient(
+      typeof projectIdOrTx === 'object' && projectIdOrTx !== null
+        ? (projectIdOrTx as Prisma.TransactionClient)
+        : tx,
+    );
     const existing = await client.tag.findFirst({
       where: {
         userId,
@@ -84,6 +106,7 @@ export class TagsRepository {
         name,
         color,
         type,
+        ...(projectId && projectId !== 'user' ? { projectId } : {}),
       },
     });
   }

@@ -1,6 +1,6 @@
 import { IsString, IsOptional, IsEnum, IsArray } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { TaskPriority } from '@prisma/client';
+import { WorkItemPriority } from '@prisma/client';
 
 export class InstantiateTemplateDto {
   @ApiPropertyOptional({
@@ -50,10 +50,10 @@ export class InstantiateTemplateDto {
   assigneeIds?: string[];
 
   @ApiPropertyOptional({
-    enum: TaskPriority,
+    enum: WorkItemPriority,
     description: 'Override priority',
   })
   @IsOptional()
-  @IsEnum(TaskPriority)
-  priority?: TaskPriority;
+  @IsEnum(WorkItemPriority)
+  priority?: WorkItemPriority;
 }

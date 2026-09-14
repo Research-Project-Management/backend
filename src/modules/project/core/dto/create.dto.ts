@@ -90,8 +90,8 @@ export class CreateProjectDto {
 
   @ApiPropertyOptional({
     description: 'List of enabled feature modules in this project',
-    example: ['overview', 'tasks', 'pages'],
-    default: ['overview', 'tasks', 'pages'],
+    example: ['overview', 'work_items', 'pages'],
+    default: ['overview', 'work_items', 'pages'],
   })
   @IsArray()
   @IsString({ each: true })

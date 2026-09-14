@@ -7,7 +7,7 @@ import {
   IsObject,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { TaskPriority } from '@prisma/client';
+import { WorkItemPriority } from '@prisma/client';
 
 export class CreateDraftDto {
   @ApiPropertyOptional({
@@ -41,10 +41,10 @@ export class CreateDraftDto {
   @IsString()
   columnId?: string;
 
-  @ApiPropertyOptional({ enum: TaskPriority, default: TaskPriority.none })
+  @ApiPropertyOptional({ enum: WorkItemPriority, default: WorkItemPriority.none })
   @IsOptional()
-  @IsEnum(TaskPriority)
-  priority?: TaskPriority;
+  @IsEnum(WorkItemPriority)
+  priority?: WorkItemPriority;
 
   @ApiPropertyOptional({ description: 'Start date' })
   @IsOptional()

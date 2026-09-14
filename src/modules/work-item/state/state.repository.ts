@@ -14,7 +14,7 @@ export class StateRepository implements IStateRepository {
       select: {
         id: true,
         name: true,
-        taskColumns: true,
+        workItemColumns: true,
       },
     });
   }
@@ -22,7 +22,7 @@ export class StateRepository implements IStateRepository {
   async findProjectStates(projectId: string): Promise<WorkItemState[]> {
     const project = await this.findProjectById(projectId);
     if (!project) return [];
-    return parseWorkItemStates(project.taskColumns);
+    return parseWorkItemStates(project.workItemColumns);
   }
 
   async saveProjectStates(
@@ -32,13 +32,13 @@ export class StateRepository implements IStateRepository {
     await this.prismaService.project.update({
       where: { id: projectId },
       data: {
-        taskColumns: states as unknown as Prisma.InputJsonValue,
+        workItemColumns: states as unknown as Prisma.InputJsonValue,
       },
     });
     return states;
   }
 
-  async countTasksByState(projectId: string): Promise<Record<string, number>> {
+  async countWorkItemsByState(projectId: string): Promise<Record<string, number>> {
     const counts = await this.prismaService.workItem.groupBy({
       by: ['columnId'],
       where: {
@@ -57,7 +57,7 @@ export class StateRepository implements IStateRepository {
     return result;
   }
 
-  async countTasksInState(projectId: string, stateId: string): Promise<number> {
+  async countWorkItemsInState(projectId: string, stateId: string): Promise<number> {
     return this.prismaService.workItem.count({
       where: {
         projectId,
@@ -67,7 +67,7 @@ export class StateRepository implements IStateRepository {
     });
   }
 
-  async migrateTasksToState(
+  async migrateWorkItemsToState(
     projectId: string,
     fromStateId: string,
     toStateId: string,
@@ -87,7 +87,7 @@ export class StateRepository implements IStateRepository {
     return result.count;
   }
 
-  async deleteStateWithTaskMigration(
+  async deleteStateWithWorkItemMigration(
     projectId: string,
     deletedStateId: string,
     fallbackStateId: string,
@@ -95,7 +95,7 @@ export class StateRepository implements IStateRepository {
     isFallbackCompleted: boolean,
   ): Promise<void> {
     await this.prismaService.$transaction(async (transaction) => {
-      // 1. Migrate tasks if deleting a state with tasks
+      // 1. Migrate work items if deleting a state with work items
       if (deletedStateId !== fallbackStateId) {
         await transaction.workItem.updateMany({
           where: {
@@ -110,13 +110,14 @@ export class StateRepository implements IStateRepository {
         });
       }
 
-      // 2. Persist updated states to project taskColumns
+      // 2. Persist updated states to project workItemColumns
       await transaction.project.update({
         where: { id: projectId },
         data: {
-          taskColumns: updatedStates as unknown as Prisma.InputJsonValue,
+          workItemColumns: updatedStates as unknown as Prisma.InputJsonValue,
         },
       });
     });
   }
 }
+

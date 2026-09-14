@@ -1,48 +1,45 @@
-import { TaskPriority } from '@prisma/client';
+import { WorkItemPriority } from '@prisma/client';
 
-export const PRIORITY_MAP: Record<string, TaskPriority> = {
-  none: TaskPriority.none,
-  low: TaskPriority.low,
-  medium: TaskPriority.medium,
-  high: TaskPriority.high,
-  urgent: TaskPriority.urgent,
+export const PRIORITY_MAP: Record<string, WorkItemPriority> = {
+  none: WorkItemPriority.none,
+  low: WorkItemPriority.low,
+  medium: WorkItemPriority.medium,
+  high: WorkItemPriority.high,
+  urgent: WorkItemPriority.urgent,
 };
 
-export const mapPriority = (priority?: string): TaskPriority => {
+export const mapPriority = (priority?: string): WorkItemPriority => {
   return priority
-    ? PRIORITY_MAP[priority] || TaskPriority.none
-    : TaskPriority.none;
+    ? PRIORITY_MAP[priority] || WorkItemPriority.none
+    : WorkItemPriority.none;
 };
 
 import {
   WorkItemResponse,
-  TaskResponse,
   LabelMinimal,
 } from '../types/work-item.types';
 
-export { WorkItemResponse, TaskResponse };
+export { WorkItemResponse };
 
-const resolveLabels = (taskRecord: any): LabelMinimal[] => {
+const resolveLabels = (record: any): LabelMinimal[] => {
   if (
-    Array.isArray(taskRecord.resolvedLabels) &&
-    taskRecord.resolvedLabels.length > 0
+    Array.isArray(record.resolvedLabels) &&
+    record.resolvedLabels.length > 0
   ) {
-    return taskRecord.resolvedLabels.map((labelItem: any) => ({
+    return record.resolvedLabels.map((labelItem: any) => ({
       id: labelItem.id || labelItem,
       name: labelItem.name || labelItem,
       color: labelItem.color || '#64748b',
     }));
   }
 
-  const raw = taskRecord.labels;
+  const raw = record.labels;
   if (!Array.isArray(raw) || raw.length === 0) return [];
 
   return raw.map((labelItem: any) => {
     if (typeof labelItem === 'string') {
-      // Legacy: plain string (name or ID)
       return { id: labelItem, name: labelItem, color: '#64748b' };
     }
-    // Already an object with id/name/color
     return {
       id: labelItem.id || labelItem.name || '',
       name: labelItem.name || labelItem.id || '',
@@ -51,82 +48,84 @@ const resolveLabels = (taskRecord: any): LabelMinimal[] => {
   });
 };
 
-export const formatWorkItem = (taskRecord: any): WorkItemResponse | null => {
-  if (!taskRecord) return null;
+export const formatWorkItem = (record: any): WorkItemResponse | null => {
+  if (!record) return null;
 
-  const assignee = taskRecord.assignee
+  const assignee = record.assignee
     ? {
-        id: taskRecord.assignee.id,
-        name: taskRecord.assignee.name,
-        email: taskRecord.assignee.email,
-        avatar: taskRecord.assignee.avatar,
+        id: record.assignee.id,
+        name: record.assignee.name,
+        email: record.assignee.email,
+        avatar: record.assignee.avatar,
       }
     : null;
 
-  const cycle = taskRecord.cycle
+  const cycle = record.cycle
     ? {
-        id: taskRecord.cycle.id,
-        name: taskRecord.cycle.name,
+        id: record.cycle.id,
+        name: record.cycle.name,
       }
-    : taskRecord.cycleId || null;
+    : record.cycleId || null;
 
-  const isCompleted = taskRecord.columnId === 'done';
+  const isCompleted = record.columnId === 'done';
 
-  const subtasks = Array.isArray(taskRecord.subtasks)
-    ? taskRecord.subtasks.map((subtaskRecord: any) => ({
-        ...subtaskRecord,
-        id: subtaskRecord.id,
+  const childWorkItems = Array.isArray(record.childWorkItems)
+    ? record.childWorkItems.map((child: any) => ({
+        ...child,
+        id: child.id,
         completed:
-          subtaskRecord.columnId === 'done' || Boolean(subtaskRecord.completed),
+          child.columnId === 'done' || Boolean(child.completed),
       }))
     : [];
 
-  const subtaskCount = subtasks.length;
-  const subtaskCompletedCount = subtasks.filter(
-    (subtaskRecord: any) => subtaskRecord.completed,
+  const childWorkItemCount = childWorkItems.length;
+  const childWorkItemCompletedCount = childWorkItems.filter(
+    (child: any) => child.completed,
   ).length;
 
-  const labels = resolveLabels(taskRecord);
+  const labels = resolveLabels(record);
 
   return {
-    ...taskRecord,
-    id: taskRecord.id,
-    identifier: taskRecord.identifier || null,
-    sequenceNumber: taskRecord.sequenceNumber || null,
-    description: taskRecord.content || '',
-    content: taskRecord.content || '',
+    ...record,
+    id: record.id,
+    identifier: record.identifier || null,
+    sequenceNumber: record.sequenceNumber || null,
+    description: record.content || '',
+    content: record.content || '',
     assignee,
-    assigneeIds: Array.isArray(taskRecord.assigneeIds)
-      ? taskRecord.assigneeIds
-      : taskRecord.assigneeId
-        ? [taskRecord.assigneeId]
+    assigneeIds: Array.isArray(record.assigneeIds)
+      ? record.assigneeIds
+      : record.assigneeId
+        ? [record.assigneeId]
         : [],
     cycle,
     completed:
-      taskRecord.completed !== undefined
-        ? Boolean(taskRecord.completed)
+      record.completed !== undefined
+        ? Boolean(record.completed)
         : isCompleted,
-    relations: taskRecord.relations || [],
+    relations: record.relations || [],
     labels,
-    subtasks,
-    subtaskCount,
-    subtaskCompletedCount,
-    subscriberIds: Array.isArray(taskRecord.subscriberIds)
-      ? taskRecord.subscriberIds
+    childWorkItems,
+    childWorkItemCount,
+    childWorkItemCompletedCount,
+    parentWorkItemId: record.parentWorkItemId || null,
+    parentWorkItem: record.parentWorkItem || null,
+    subscriberIds: Array.isArray(record.subscriberIds)
+      ? record.subscriberIds
       : [],
     attachments:
-      taskRecord.attachments && typeof taskRecord.attachments === 'object' && !Array.isArray(taskRecord.attachments)
+      record.attachments && typeof record.attachments === 'object' && !Array.isArray(record.attachments)
         ? {
-            pages: Array.isArray(taskRecord.attachments.pages) ? taskRecord.attachments.pages : [],
-            papers: Array.isArray(taskRecord.attachments.papers) ? taskRecord.attachments.papers : [],
-            files: Array.isArray(taskRecord.attachments.files) ? taskRecord.attachments.files : [],
-            links: Array.isArray(taskRecord.attachments.links) ? taskRecord.attachments.links : [],
+            pages: Array.isArray(record.attachments.pages) ? record.attachments.pages : [],
+            papers: Array.isArray(record.attachments.papers) ? record.attachments.papers : [],
+            files: Array.isArray(record.attachments.files) ? record.attachments.files : [],
+            links: Array.isArray(record.attachments.links) ? record.attachments.links : [],
           }
-        : Array.isArray(taskRecord.attachments)
+        : Array.isArray(record.attachments)
         ? {
             pages: [],
             papers: [],
-            files: taskRecord.attachments,
+            files: record.attachments,
             links: [],
           }
         : {
@@ -135,15 +134,13 @@ export const formatWorkItem = (taskRecord: any): WorkItemResponse | null => {
             files: [],
             links: [],
           },
-    createdAt: taskRecord.createdAt?.toISOString?.() || taskRecord.createdAt,
-    updatedAt: taskRecord.updatedAt?.toISOString?.() || taskRecord.updatedAt,
+    createdAt: record.createdAt?.toISOString?.() || record.createdAt,
+    updatedAt: record.updatedAt?.toISOString?.() || record.updatedAt,
     startDate:
-      taskRecord.startDate?.toISOString?.() || taskRecord.startDate || null,
-    dueDate: taskRecord.dueDate?.toISOString?.() || taskRecord.dueDate || null,
+      record.startDate?.toISOString?.() || record.startDate || null,
+    dueDate: record.dueDate?.toISOString?.() || record.dueDate || null,
   };
 };
-
-export const formatTask = formatWorkItem;
 
 export const deriveProjectIdentifierPrefix = (
   rawIdentifier?: string | null,
@@ -152,7 +149,7 @@ export const deriveProjectIdentifierPrefix = (
   const prefix = rawIdentifier?.trim().toUpperCase();
   if (prefix) return prefix;
 
-  const name = rawName || 'TASK';
+  const name = rawName || 'PROJ';
   const normalized = name
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -171,5 +168,5 @@ export const deriveProjectIdentifierPrefix = (
       .join('')
       .toUpperCase();
   }
-  return 'TASK';
+  return 'PROJ';
 };

@@ -78,7 +78,7 @@ export class ProjectResponseDto {
   timezone?: string | null;
 
   @ApiProperty({
-    example: ['overview', 'tasks', 'pages'],
+    example: ['overview', 'work_items', 'pages'],
   })
   modules!: string[];
 

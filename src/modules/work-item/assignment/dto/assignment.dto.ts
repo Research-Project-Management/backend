@@ -7,7 +7,7 @@ import {
   IsUUID,
 } from 'class-validator';
 
-export class AssignTaskDto {
+export class AssignWorkItemDto {
   @ApiPropertyOptional({
     description: 'User ID of the eligible project member, or null to unassign',
     example: 'd3b07384-d113-4678-831e-4eeea6608930',
@@ -17,23 +17,22 @@ export class AssignTaskDto {
   assigneeId?: string | null;
 
   @ApiPropertyOptional({
-    description: 'Backwards-compatible alias for assigneeId',
-    example: 'd3b07384-d113-4678-831e-4eeea6608930',
+    description: 'Alias for assigneeId',
   })
   @IsOptional()
   @IsString()
   assignee?: string | null;
 }
 
-export class BulkAssignTaskDto {
-  @ApiProperty({
+export class BulkAssignWorkItemDto {
+  @ApiPropertyOptional({
     description: 'List of WorkItem IDs to reassign',
     example: ['d3b07384-d113-4678-831e-4eeea6608930'],
   })
+  @IsOptional()
   @IsArray()
   @IsString({ each: true })
-  @ArrayMinSize(1, { message: 'At least one WorkItem ID must be provided' })
-  taskIds!: string[];
+  workItemIds?: string[];
 
   @ApiPropertyOptional({
     description: 'Target assignee user ID (or null to unassign in bulk)',
@@ -44,7 +43,7 @@ export class BulkAssignTaskDto {
   assigneeId?: string | null;
 
   @ApiPropertyOptional({
-    description: 'Backwards-compatible alias for assigneeId',
+    description: 'Alias for assigneeId',
   })
   @IsOptional()
   @IsString()

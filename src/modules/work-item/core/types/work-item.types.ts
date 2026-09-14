@@ -2,14 +2,13 @@
  * WorkItem Domain Types & Interfaces
  *
  * Hexagonal / DDD-Lite ports and domain model definitions.
- * Integrated with Attach Center (Pages, Papers, Files, Links) replacing Modules.
+ * Integrated with Attach Center (Pages, Papers, Files, Links).
  */
 
-import { WorkItem, TaskPriority, Prisma } from '@prisma/client';
+import { WorkItem, WorkItemPriority, Prisma } from '@prisma/client';
 import type { WorkItemUpdate } from '../../update/types/update.types';
 
-export type WorkItemPriority = TaskPriority;
-export const WorkItemPriority = TaskPriority;
+export { WorkItemPriority };
 
 export const USER_MINIMAL_SELECT = {
   id: true,
@@ -23,7 +22,7 @@ export const CYCLE_SELECT = {
   name: true,
 } as const;
 
-export const SUBTASK_SELECT = {
+export const CHILD_WORK_ITEM_SELECT = {
   id: true,
   title: true,
   identifier: true,
@@ -47,7 +46,7 @@ export interface CycleMinimal {
   name: string;
 }
 
-export interface SubtaskMinimal {
+export interface ChildWorkItemMinimal {
   id: string;
   title: string;
   identifier: string | null;
@@ -59,7 +58,7 @@ export interface SubtaskMinimal {
   dueDate?: Date | string | null;
 }
 
-export interface ParentTaskMinimal {
+export interface ParentWorkItemMinimal {
   id: string;
   title: string;
   identifier: string | null;
@@ -118,9 +117,9 @@ export type WorkItemWithRelations = Prisma.WorkItemGetPayload<{
   include: {
     assignee: { select: typeof USER_MINIMAL_SELECT };
     cycle: { select: typeof CYCLE_SELECT };
-    parentTask: { select: { id: true; title: true; identifier: true } };
-    subtasks: {
-      select: typeof SUBTASK_SELECT;
+    parentWorkItem: { select: { id: true; title: true; identifier: true } };
+    childWorkItems: {
+      select: typeof CHILD_WORK_ITEM_SELECT;
     };
     project: { select: { id: true } };
   };
@@ -151,11 +150,11 @@ export interface WorkItemResponse {
   assignees?: UserMinimal[];
   subscriberIds?: string[];
   cycleId?: string | null;
-  parentTaskId?: string | null;
-  parentTask?: ParentTaskMinimal | null;
-  subtasks?: SubtaskMinimal[];
-  subtaskCount?: number;
-  subtaskCompletedCount?: number;
+  parentWorkItemId?: string | null;
+  parentWorkItem?: ParentWorkItemMinimal | null;
+  childWorkItems?: ChildWorkItemMinimal[];
+  childWorkItemCount?: number;
+  childWorkItemCompletedCount?: number;
   assignee?: UserMinimal | null;
   cycle?: CycleMinimal | string | null;
   updates?: WorkItemUpdate[];
@@ -163,14 +162,12 @@ export interface WorkItemResponse {
   updatedAt: string;
 }
 
-export type TaskResponse = WorkItemResponse;
-
 export interface WorkItemFilterOptions {
   cycleId?: string | null;
   columnId?: string;
   priority?: WorkItemPriority;
   assigneeId?: string | null;
-  parentTaskId?: string | null;
+  parentWorkItemId?: string | null;
   completed?: boolean;
   archived?: boolean;
   search?: string;
@@ -179,38 +176,38 @@ export interface WorkItemFilterOptions {
 }
 
 export interface IWorkItemRepository {
-  findProjectTasks(
+  findProjectWorkItems(
     projectId: string,
     filter?: string | WorkItemFilterOptions,
   ): Promise<WorkItemWithRelations[]>;
-  findTaskById(taskId: string): Promise<WorkItemWithRelations | null>;
-  findTaskByIdentifier(
+  findWorkItemById(workItemId: string): Promise<WorkItemWithRelations | null>;
+  findWorkItemByIdentifier(
     projectId: string,
     identifier: string,
   ): Promise<WorkItemWithRelations | null>;
-  nextProjectTaskIdentifier(
+  nextProjectWorkItemIdentifier(
     projectId: string,
   ): Promise<{ identifier: string; sequenceNumber: number }>;
-  createTask(
+  createWorkItem(
     data: Prisma.WorkItemCreateInput | Prisma.WorkItemUncheckedCreateInput,
   ): Promise<WorkItemWithRelations>;
-  updateTask(
-    taskId: string,
+  updateWorkItem(
+    workItemId: string,
     data: Prisma.WorkItemUpdateInput | Prisma.WorkItemUncheckedUpdateInput,
   ): Promise<WorkItemWithRelations>;
-  softDeleteTask(taskId: string): Promise<WorkItem>;
-  restoreTask(taskId: string): Promise<WorkItem>;
-  deleteTask(taskId: string): Promise<WorkItem>;
-  findTasksByIds(taskIds: string[]): Promise<WorkItem[]>;
-  bulkUpdateTasks(
+  softDeleteWorkItem(workItemId: string): Promise<WorkItem>;
+  restoreWorkItem(workItemId: string): Promise<WorkItem>;
+  deleteWorkItem(workItemId: string): Promise<WorkItem>;
+  findWorkItemsByIds(workItemIds: string[]): Promise<WorkItem[]>;
+  bulkUpdateWorkItems(
     projectId: string,
-    taskIds: string[],
+    workItemIds: string[],
     data: Prisma.WorkItemUpdateManyMutationInput & {
       assigneeId?: string | null;
       cycleId?: string | null;
     },
   ): Promise<{ count: number }>;
-  updateTasksRank(
+  updateWorkItemsRank(
     updates: Array<{
       id: string;
       rank: number;
@@ -223,9 +220,9 @@ export interface IWorkItemRepository {
     userId: string,
   ): Promise<string | null>;
   updateAttachments(
-    taskId: string,
+    workItemId: string,
     attachments: WorkItemAttachments,
   ): Promise<WorkItem>;
-  countProjectTasks(projectId: string): Promise<number>;
-  disconnectParentTask(taskId: string): Promise<WorkItemWithRelations>;
+  countProjectWorkItems(projectId: string): Promise<number>;
+  disconnectParentWorkItem(workItemId: string): Promise<WorkItemWithRelations>;
 }

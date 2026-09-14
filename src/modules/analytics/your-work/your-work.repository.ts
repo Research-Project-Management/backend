@@ -3,7 +3,7 @@ import { PrismaService } from '@/core/database/prisma.service';
 import {
   IYourWorkRepository,
   ProjectMinimal,
-  UserTaskItem,
+  UserWorkItem,
   UserProfileData,
 } from './types/your-work.types';
 
@@ -18,10 +18,10 @@ const USER_SELECT = {
 export class YourWorkRepository implements IYourWorkRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findUserTasks(
+  async findUserWorkItems(
     projectId: string | undefined,
     userId: string,
-  ): Promise<UserTaskItem[]> {
+  ): Promise<UserWorkItem[]> {
     const projectFilter = projectId
       ? { id: projectId, deletedAt: null }
       : { members: { some: { userId } }, deletedAt: null };
@@ -45,7 +45,7 @@ export class YourWorkRepository implements IYourWorkRepository {
             name: true,
             avatar: true,
             identifier: true,
-            taskColumns: true,
+            workItemColumns: true,
           },
         },
         comments: { select: { id: true } },
@@ -83,7 +83,7 @@ export class YourWorkRepository implements IYourWorkRepository {
         name: true,
         identifier: true,
         avatar: true,
-        taskColumns: true,
+        workItemColumns: true,
       },
       orderBy: { createdAt: 'desc' },
     });

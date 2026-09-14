@@ -30,17 +30,17 @@ export class HistoryService {
   /**
    * Calculates state transitions and time-in-state badges (Plane.so Transition Tab).
    */
-  async getTransitions(taskId: string): Promise<WorkItemTransitionsResponse> {
-    const task = await this.historyRepository.findTaskWithProject(taskId);
-    if (!task) {
-      throw new NotFoundException(`Work item ${taskId} not found`);
+  async getTransitions(workItemId: string): Promise<WorkItemTransitionsResponse> {
+    const workItem = await this.historyRepository.findWorkItemWithProject(workItemId);
+    if (!workItem) {
+      throw new NotFoundException(`Work item ${workItemId} not found`);
     }
 
-    const taskColumns = task.project?.taskColumns;
-    const rawEvents = await this.historyRepository.findStateTransitions(taskId);
+    const workItemColumns = workItem.project?.workItemColumns;
+    const rawEvents = await this.historyRepository.findStateTransitions(workItemId);
 
     const transitions: StateTransitionItem[] = [];
-    let previousTimestamp = new Date(task.createdAt).getTime();
+    let previousTimestamp = new Date(workItem.createdAt).getTime();
 
     for (const event of rawEvents) {
       const currentTimestamp = new Date(event.createdAt).getTime();
@@ -49,11 +49,11 @@ export class HistoryService {
 
       const fromState: StateBadge = resolveStateBadge(
         event.oldValue,
-        taskColumns,
+        workItemColumns,
       );
       const toState: StateBadge = resolveStateBadge(
         event.newValue,
-        taskColumns,
+        workItemColumns,
       );
 
       transitions.push({
@@ -75,23 +75,23 @@ export class HistoryService {
 
     const totalCycleTimeMs = Math.max(
       0,
-      now - new Date(task.createdAt).getTime(),
+      now - new Date(workItem.createdAt).getTime(),
     );
     const totalCycleTimeBadge = formatTimeInStateBadge(totalCycleTimeMs);
 
     const currentState: StateBadge = resolveStateBadge(
-      task.columnId,
-      taskColumns,
+      workItem.columnId,
+      workItemColumns,
     );
 
     return {
-      taskId,
+      workItemId,
       currentState,
       currentDurationMs,
       currentDurationBadge,
       totalCycleTimeMs,
       totalCycleTimeBadge,
-      completed: Boolean(task.completed),
+      completed: Boolean(workItem.completed),
       transitions,
     };
   }
@@ -100,10 +100,10 @@ export class HistoryService {
    * Returns property changelog history with structured before/after diffs (Plane.so History Tab).
    */
   async getHistory(
-    taskId: string,
+    workItemId: string,
     sort: 'asc' | 'desc' = 'desc',
   ): Promise<WorkItemHistoryResponse> {
-    const events = await this.historyRepository.findHistoryEvents(taskId, sort);
+    const events = await this.historyRepository.findHistoryEvents(workItemId, sort);
 
     const histories: PropertyHistoryItem[] = events.map((historyEvent) => ({
       id: historyEvent.id,
@@ -120,7 +120,7 @@ export class HistoryService {
     }));
 
     return {
-      taskId,
+      workItemId,
       total: histories.length,
       histories,
     };
@@ -129,13 +129,13 @@ export class HistoryService {
   /**
    * Returns activity events for the work item (Plane.so Activity Tab).
    */
-  async getActivity(taskId: string, sort: 'asc' | 'desc' = 'desc') {
-    const events = await this.historyRepository.findTaskActivityEvents(
-      taskId,
+  async getActivity(workItemId: string, sort: 'asc' | 'desc' = 'desc') {
+    const events = await this.historyRepository.findWorkItemActivityEvents(
+      workItemId,
       sort,
     );
     return {
-      taskId,
+      workItemId,
       total: events.length,
       activities: events,
     };
@@ -145,7 +145,7 @@ export class HistoryService {
    * Unified collaboration feed combining comments, activity, transitions, history.
    */
   async getUnifiedFeed(
-    taskId: string,
+    workItemId: string,
     feedQueryDto: FeedQueryDto,
   ): Promise<UnifiedFeedResponse> {
     const tab = feedQueryDto.tab || CollaborationTab.ALL;
@@ -156,8 +156,8 @@ export class HistoryService {
     let feedItems: UnifiedFeedItem[] = [];
 
     if (tab === CollaborationTab.COMMENTS) {
-      const comments = await this.historyRepository.findTaskComments(
-        taskId,
+      const comments = await this.historyRepository.findWorkItemComments(
+        workItemId,
         sort,
       );
       feedItems = comments.map((comment) => ({
@@ -168,8 +168,8 @@ export class HistoryService {
         comment: comment,
       }));
     } else if (tab === CollaborationTab.ACTIVITY) {
-      const events = await this.historyRepository.findTaskActivityEvents(
-        taskId,
+      const events = await this.historyRepository.findWorkItemActivityEvents(
+        workItemId,
         sort,
       );
       feedItems = events.map((activity) => ({
@@ -185,7 +185,7 @@ export class HistoryService {
         activity: activity,
       }));
     } else if (tab === CollaborationTab.TRANSITION) {
-      const transitionData = await this.getTransitions(taskId);
+      const transitionData = await this.getTransitions(workItemId);
       const items: UnifiedFeedItem[] = transitionData.transitions.map(
         (transition) => ({
           id: transition.id,
@@ -208,7 +208,7 @@ export class HistoryService {
       }
       feedItems = items;
     } else if (tab === CollaborationTab.HISTORY) {
-      const historyData = await this.getHistory(taskId, sort);
+      const historyData = await this.getHistory(workItemId, sort);
       feedItems = historyData.histories.map((history) => ({
         id: history.id,
         type: 'history',
@@ -219,8 +219,8 @@ export class HistoryService {
     } else {
       // Tab === 'all': Fetch comments and activities in parallel
       const [comments, activities] = await Promise.all([
-        this.historyRepository.findTaskComments(taskId, sort),
-        this.historyRepository.findTaskActivityEvents(taskId, sort),
+        this.historyRepository.findWorkItemComments(workItemId, sort),
+        this.historyRepository.findWorkItemActivityEvents(workItemId, sort),
       ]);
 
       const commentItems: UnifiedFeedItem[] = comments.map((comment) => ({
@@ -264,7 +264,7 @@ export class HistoryService {
     const paginated = feedItems.slice(startIndex, startIndex + limit);
 
     return {
-      taskId,
+      workItemId,
       tab,
       sort,
       total,

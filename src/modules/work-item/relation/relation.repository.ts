@@ -13,33 +13,33 @@ export class RelationRepository implements IRelationRepository {
     return this.prismaService;
   }
 
-  async findTask(taskId: string): Promise<WorkItem | null> {
-    if (isUuid(taskId)) {
+  async findWorkItem(workItemId: string): Promise<WorkItem | null> {
+    if (isUuid(workItemId)) {
       return this.prismaService.workItem.findFirst({
-        where: { id: taskId, deletedAt: null },
+        where: { id: workItemId, deletedAt: null },
       });
     }
     return this.prismaService.workItem.findFirst({
-      where: { identifier: taskId, deletedAt: null },
+      where: { identifier: workItemId, deletedAt: null },
     });
   }
 
-  async findTasksByIds(taskIds: string[]): Promise<WorkItem[]> {
-    if (!taskIds || taskIds.length === 0) return [];
+  async findWorkItemsByIds(workItemIds: string[]): Promise<WorkItem[]> {
+    if (!workItemIds || workItemIds.length === 0) return [];
     return this.prismaService.workItem.findMany({
       where: {
-        id: { in: taskIds },
+        id: { in: workItemIds },
         deletedAt: null,
       },
     });
   }
 
-  async updateTaskRelations(
-    taskId: string,
+  async updateWorkItemRelations(
+    workItemId: string,
     relations: Prisma.InputJsonValue,
   ): Promise<WorkItem> {
     return this.prismaService.workItem.update({
-      where: { id: taskId },
+      where: { id: workItemId },
       data: { relations },
     });
   }

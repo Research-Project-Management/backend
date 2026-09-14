@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { Prisma, Cycle, CycleStatus, WorkItem } from '@prisma/client';
-import { ICycleRepository, CycleTaskItem } from './types/cycle.types';
+import { ICycleRepository, CycleWorkItemItem } from './types/cycle.types';
 import { USER_MINIMAL_SELECT } from '../core/types/work-item.types';
 
 @Injectable()
@@ -119,7 +119,7 @@ export class CycleRepository implements ICycleRepository {
     });
   }
 
-  async findCycleTasks(cycleId: string): Promise<CycleTaskItem[]> {
+  async findCycleWorkItems(cycleId: string): Promise<CycleWorkItemItem[]> {
     return this.prisma.workItem.findMany({
       where: { cycleId, deletedAt: null },
       select: {
@@ -132,16 +132,16 @@ export class CycleRepository implements ICycleRepository {
     });
   }
 
-  async transferIncompleteTasks(
+  async transferIncompleteWorkItems(
     fromCycleId: string,
     targetCycleId: string | null,
-    incompleteTaskIds?: string[],
+    incompleteWorkItemIds?: string[],
   ): Promise<Prisma.BatchPayload> {
     const whereClause: Prisma.WorkItemWhereInput = {
       cycleId: fromCycleId,
       deletedAt: null,
-      ...(incompleteTaskIds && incompleteTaskIds.length > 0
-        ? { id: { in: incompleteTaskIds } }
+      ...(incompleteWorkItemIds && incompleteWorkItemIds.length > 0
+        ? { id: { in: incompleteWorkItemIds } }
         : { completed: false, columnId: { not: 'done' } }),
     };
 
@@ -153,26 +153,38 @@ export class CycleRepository implements ICycleRepository {
     });
   }
 
-  async addTaskToCycle(taskId: string, cycleId: string): Promise<WorkItem> {
+  async findWorkItemById(workItemId: string) {
+    return this.prisma.workItem.findUnique({
+      where: { id: workItemId },
+      select: { id: true, projectId: true },
+    });
+  }
+
+  async addWorkItemToCycle(workItemId: string, cycleId: string): Promise<WorkItem> {
     return this.prisma.workItem.update({
-      where: { id: taskId },
+      where: { id: workItemId },
       data: { cycleId },
     });
   }
 
-  async removeTaskFromCycle(taskId: string): Promise<WorkItem> {
+  async removeWorkItemFromCycle(workItemId: string): Promise<WorkItem> {
     return this.prisma.workItem.update({
-      where: { id: taskId },
+      where: { id: workItemId },
       data: { cycleId: null },
     });
   }
 
-  async addTasksBatch(
-    taskIds: string[],
+  async addWorkItemsBatch(
+    workItemIds: string[],
     cycleId: string,
+    projectId?: string,
   ): Promise<Prisma.BatchPayload> {
     return this.prisma.workItem.updateMany({
-      where: { id: { in: taskIds }, deletedAt: null },
+      where: {
+        id: { in: workItemIds },
+        deletedAt: null,
+        ...(projectId ? { projectId } : {}),
+      },
       data: { cycleId },
     });
   }
@@ -240,3 +252,4 @@ export class CycleRepository implements ICycleRepository {
     return count > 0;
   }
 }
+

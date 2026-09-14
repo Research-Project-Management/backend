@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { ExportFormat, ExportWorkItemsQueryDto } from './dto/export-query.dto';
-import { exportTasksToCsv } from './utils/csv-exporter.util';
+import { exportWorkItemsToCsv } from './utils/csv-exporter.util';
 
 export interface ExportResult {
   data: string;
@@ -49,11 +49,11 @@ export class ExportService {
     if (query.search) {
       where.OR = [
         { title: { contains: query.search, mode: 'insensitive' } },
-        { description: { contains: query.search, mode: 'insensitive' } },
+        { content: { contains: query.search, mode: 'insensitive' } },
       ];
     }
 
-    const tasks = await this.prisma.workItem.findMany({
+    const workItems = await this.prisma.workItem.findMany({
       where,
       include: {
         author: {
@@ -73,13 +73,13 @@ export class ExportService {
 
     if (query.format === ExportFormat.JSON) {
       return {
-        data: JSON.stringify(tasks, null, 2),
+        data: JSON.stringify(workItems, null, 2),
         contentType: 'application/json; charset=utf-8',
         filename: `${safeKey}-export-${timestamp}.json`,
       };
     }
 
-    const csvData = exportTasksToCsv(tasks);
+    const csvData = exportWorkItemsToCsv(workItems);
     return {
       data: csvData,
       contentType: 'text/csv; charset=utf-8',

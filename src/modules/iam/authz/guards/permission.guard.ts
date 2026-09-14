@@ -114,15 +114,15 @@ export class PermissionGuard implements CanActivate {
       if (cycle?.projectId) return cycle.projectId;
     }
 
-    const taskId = request.params?.taskId;
-    if (taskId && isUUID(taskId) && prismaAny.workItem) {
-      const task = await prismaAny.workItem
+    const workItemId = request.params?.workItemId;
+    if (workItemId && isUUID(workItemId) && prismaAny.workItem) {
+      const workItem = await prismaAny.workItem
         .findUnique({
-          where: { id: taskId },
+          where: { id: workItemId },
           select: { projectId: true },
         })
         .catch(() => null);
-      if (task?.projectId) return task.projectId;
+      if (workItem?.projectId) return workItem.projectId;
     }
 
     if (request.params?.pageId && isUUID(request.params.pageId) && prismaAny.page) {

@@ -10,6 +10,7 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  Req,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -19,6 +20,8 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
 import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
+import { ProjectRoleGuard } from '@/modules/iam/authz/guards/role.guard';
+import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
 import { TemplateService } from './template.service';
 import { CreateTemplateDto } from './dto/create-template.dto';
 import { UpdateTemplateDto } from './dto/update-template.dto';
@@ -28,11 +31,12 @@ import { InstantiateTemplateDto } from './dto/instantiate-template.dto';
 @ApiTags('work-items')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/work-items/projects/:projectId/templates')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class TemplateController {
   constructor(private readonly templateService: TemplateService) {}
 
   @Post()
+  @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create a new work item template for a project' })
   @ApiParam({ name: 'projectId', description: 'Project UUID or identifier' })
@@ -49,6 +53,7 @@ export class TemplateController {
   }
 
   @Get()
+  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'List all work item templates for a project' })
   @ApiParam({ name: 'projectId', description: 'Project UUID or identifier' })
   async getProjectTemplates(
@@ -62,6 +67,7 @@ export class TemplateController {
   }
 
   @Get(':templateId')
+  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get details of a work item template' })
   @ApiParam({ name: 'projectId', description: 'Project UUID or identifier' })
   @ApiParam({ name: 'templateId', description: 'Template UUID' })
@@ -73,6 +79,7 @@ export class TemplateController {
   }
 
   @Put(':templateId')
+  @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Update an existing work item template' })
   @ApiParam({ name: 'projectId', description: 'Project UUID or identifier' })
   @ApiParam({ name: 'templateId', description: 'Template UUID' })
@@ -81,9 +88,10 @@ export class TemplateController {
     @Param('templateId') templateId: string,
     @CurrentUser('id') userId: string,
     @CurrentUser() user: any,
+    @Req() req: any,
     @Body() updateTemplateDto: UpdateTemplateDto,
   ) {
-    const isOwner = user?.role === 'owner';
+    const isOwner = req?.role === 'owner' || user?.role === 'owner';
     return this.templateService.updateTemplate(
       projectId,
       templateId,
@@ -94,6 +102,7 @@ export class TemplateController {
   }
 
   @Delete(':templateId')
+  @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Soft-delete a work item template' })
   @ApiParam({ name: 'projectId', description: 'Project UUID or identifier' })
   @ApiParam({ name: 'templateId', description: 'Template UUID' })
@@ -102,8 +111,9 @@ export class TemplateController {
     @Param('templateId') templateId: string,
     @CurrentUser('id') userId: string,
     @CurrentUser() user: any,
+    @Req() req: any,
   ) {
-    const isOwner = user?.role === 'owner';
+    const isOwner = req?.role === 'owner' || user?.role === 'owner';
     return this.templateService.deleteTemplate(
       projectId,
       templateId,
@@ -113,6 +123,7 @@ export class TemplateController {
   }
 
   @Post(':templateId/instantiate')
+  @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary:

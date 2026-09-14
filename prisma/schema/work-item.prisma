@@ -1,6 +1,6 @@
 // -- 4. Work-Item & Issue Tracking Context (WorkItem Microservice) -----------
 
-enum TaskPriority {
+enum WorkItemPriority {
   urgent
   high
   medium
@@ -35,7 +35,7 @@ enum ViewAccess {
 enum LabelType {
   sticky
   cycle
-  task
+  work_item
 }
 
 model WorkItemState {
@@ -68,7 +68,7 @@ model Cycle {
   order             Int         @default(0)
   startedAt         DateTime?   @map("started_at") @db.Timestamptz(6)
   endedAt           DateTime?   @map("ended_at") @db.Timestamptz(6)
-  statsAtCompletion Json?       @default("{\"totalTasks\":0,\"completedTasks\":0,\"completionPercentage\":0}") @map("stats_at_completion")
+  statsAtCompletion Json?       @default("{\"totalWorkItems\":0,\"completedWorkItems\":0,\"completionPercentage\":0}") @map("stats_at_completion")
   projectId         String      @map("project_id") @db.Uuid
   project           Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
   authorId          String      @map("author_id") @db.Uuid
@@ -87,45 +87,45 @@ model Cycle {
 }
 
 model WorkItem {
-  id             String         @id @default(uuid()) @db.Uuid
+  id             String            @id @default(uuid()) @db.Uuid
   title          String
-  content        String?        @default("")
-  columnId       String         @map("column_id")
-  startDate      DateTime?      @map("start_date") @db.Timestamptz(6)
-  dueDate        DateTime?      @map("due_date") @db.Timestamptz(6)
-  labels         String[]       @default([])
-  rank           Float          @default(0)
-  priority       TaskPriority   @default(none)
-  relations      Json?          @default("[]")
-  identifier     String?        @map("identifier")
-  sequenceNumber Int?           @map("sequence_number")
-  timeSpent      Float?         @default(0) @map("time_spent")
-  completed      Boolean        @default(false)
-  archivedAt     DateTime?      @map("archived_at") @db.Timestamptz(6)
-  projectId      String         @map("project_id") @db.Uuid
-  project        Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  authorId       String         @map("author_id") @db.Uuid
-  author         User           @relation("WorkItemAuthor", fields: [authorId], references: [id], onDelete: Cascade)
-  assigneeId     String?        @map("assignee_id") @db.Uuid
-  assignee       User?          @relation("WorkItemAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
-  assigneeIds    Json           @default("[]") @map("assignee_ids")
-  subscriberIds  Json           @default("[]") @map("subscriber_ids")
-  cycleId        String?        @map("cycle_id") @db.Uuid
-  cycle          Cycle?         @relation(fields: [cycleId], references: [id], onDelete: SetNull)
-  parentTaskId   String?        @map("parent_task_id") @db.Uuid
-  parentTask     WorkItem?      @relation("WorkItemSubtasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
-  subtasks       WorkItem[]     @relation("WorkItemSubtasks")
-  updates        Json           @default("[]")
-  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
-  deletedAt      DateTime?      @map("deleted_at") @db.Timestamptz(6)
+  content        String?           @default("")
+  columnId       String            @map("column_id")
+  startDate      DateTime?         @map("start_date") @db.Timestamptz(6)
+  dueDate        DateTime?         @map("due_date") @db.Timestamptz(6)
+  labels         String[]          @default([])
+  rank           Float             @default(0)
+  priority       WorkItemPriority  @default(none)
+  relations      Json?             @default("[]")
+  identifier     String?           @map("identifier")
+  sequenceNumber Int?              @map("sequence_number")
+  timeSpent      Float?            @default(0) @map("time_spent")
+  completed      Boolean           @default(false)
+  archivedAt     DateTime?         @map("archived_at") @db.Timestamptz(6)
+  projectId      String            @map("project_id") @db.Uuid
+  project        Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  authorId       String            @map("author_id") @db.Uuid
+  author         User              @relation("WorkItemAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  assigneeId     String?           @map("assignee_id") @db.Uuid
+  assignee       User?             @relation("WorkItemAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  assigneeIds    Json              @default("[]") @map("assignee_ids")
+  subscriberIds  Json              @default("[]") @map("subscriber_ids")
+  cycleId        String?           @map("cycle_id") @db.Uuid
+  cycle          Cycle?            @relation(fields: [cycleId], references: [id], onDelete: SetNull)
+  parentWorkItemId String?         @map("parent_work_item_id") @db.Uuid
+  parentWorkItem WorkItem?         @relation("WorkItemHierarchy", fields: [parentWorkItemId], references: [id], onDelete: Cascade)
+  childWorkItems WorkItem[]        @relation("WorkItemHierarchy")
+  updates        Json              @default("[]")
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt      DateTime?         @map("deleted_at") @db.Timestamptz(6)
 
   // Relations
   comments       WorkItemComment[]
 
   @@index([projectId, columnId, rank])
   @@index([projectId, columnId, deletedAt, rank])
-  @@index([projectId, parentTaskId, rank])
+  @@index([projectId, parentWorkItemId, rank])
   @@index([projectId, completed, deletedAt])
   @@index([projectId, identifier])
   @@index([assigneeId, deletedAt])
@@ -135,8 +135,8 @@ model WorkItem {
 
 model WorkItemComment {
   id          String    @id @default(uuid()) @db.Uuid
-  taskId      String    @map("task_id") @db.Uuid
-  task        WorkItem  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  workItemId  String    @map("work_item_id") @db.Uuid
+  workItem    WorkItem  @relation(fields: [workItemId], references: [id], onDelete: Cascade)
   authorId    String    @map("author_id") @db.Uuid
   author      User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
   content     String
@@ -147,31 +147,31 @@ model WorkItemComment {
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@index([taskId])
-  @@index([taskId, createdAt])
+  @@index([workItemId])
+  @@index([workItemId, createdAt])
   @@index([authorId])
   @@map("work_item_comments")
 }
 
 model WorkItemDraft {
-  id          String        @id @default(uuid()) @db.Uuid
-  title       String        @default("")
-  content     String?       @default("")
-  description String?       @default("")
-  columnId    String?       @map("column_id")
-  priority    TaskPriority  @default(none)
-  startDate   DateTime?     @map("start_date") @db.Timestamptz(6)
-  dueDate     DateTime?     @map("due_date") @db.Timestamptz(6)
-  labels      String[]      @default([])
-  assigneeId  String?       @map("assignee_id") @db.Uuid
-  assigneeIds Json          @default("[]") @map("assignee_ids")
-  metadata    Json?         @default("{}")
-  projectId   String?       @map("project_id") @db.Uuid
-  project     Project?      @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  authorId    String        @map("author_id") @db.Uuid
-  author      User          @relation("UserDrafts", fields: [authorId], references: [id], onDelete: Cascade)
-  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id          String            @id @default(uuid()) @db.Uuid
+  title       String            @default("")
+  content     String?           @default("")
+  description String?           @default("")
+  columnId    String?           @map("column_id")
+  priority    WorkItemPriority  @default(none)
+  startDate   DateTime?         @map("start_date") @db.Timestamptz(6)
+  dueDate     DateTime?         @map("due_date") @db.Timestamptz(6)
+  labels      String[]          @default([])
+  assigneeId  String?           @map("assignee_id") @db.Uuid
+  assigneeIds Json              @default("[]") @map("assignee_ids")
+  metadata    Json?             @default("{}")
+  projectId   String?           @map("project_id") @db.Uuid
+  project     Project?          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  authorId    String            @map("author_id") @db.Uuid
+  author      User              @relation("UserDrafts", fields: [authorId], references: [id], onDelete: Cascade)
+  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([authorId, createdAt])
   @@index([projectId, authorId])
@@ -179,24 +179,24 @@ model WorkItemDraft {
 }
 
 model WorkItemTemplate {
-  id          String        @id @default(uuid()) @db.Uuid
+  id          String            @id @default(uuid()) @db.Uuid
   name        String
-  description String?       @default("")
-  title       String?       @default("")
-  content     String?       @default("")
-  priority    TaskPriority  @default(none)
-  labels      String[]      @default([])
-  labelIds    Json          @default("[]") @map("label_ids")
-  assigneeIds Json          @default("[]") @map("assignee_ids")
-  checklists  Json          @default("[]")
-  isDefault   Boolean       @default(false) @map("is_default")
-  projectId   String        @map("project_id") @db.Uuid
-  project     Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  authorId    String        @map("author_id") @db.Uuid
-  author      User          @relation("UserTemplates", fields: [authorId], references: [id], onDelete: Cascade)
-  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
-  deletedAt   DateTime?     @map("deleted_at") @db.Timestamptz(6)
+  description String?           @default("")
+  title       String?           @default("")
+  content     String?           @default("")
+  priority    WorkItemPriority  @default(none)
+  labels      String[]          @default([])
+  labelIds    Json              @default("[]") @map("label_ids")
+  assigneeIds Json              @default("[]") @map("assignee_ids")
+  checklists  Json              @default("[]")
+  isDefault   Boolean           @default(false) @map("is_default")
+  projectId   String            @map("project_id") @db.Uuid
+  project     Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  authorId    String            @map("author_id") @db.Uuid
+  author      User              @relation("UserTemplates", fields: [authorId], references: [id], onDelete: Cascade)
+  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt   DateTime?         @map("deleted_at") @db.Timestamptz(6)
 
   @@index([projectId, isDefault])
   @@index([projectId, deletedAt])
@@ -291,7 +291,7 @@ model Label {
   name        String
   color       String    @default("#3b82f6")
   description String?
-  type        LabelType @default(task)
+  type        LabelType @default(work_item)
   sortOrder   Float     @default(65535) @map("sort_order")
   parentId    String?   @map("parent_id") @db.Uuid
   parent      Label?    @relation("LabelHierarchy", fields: [parentId], references: [id], onDelete: Cascade)

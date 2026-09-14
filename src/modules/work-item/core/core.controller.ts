@@ -13,6 +13,7 @@ import {
   Sse,
   MessageEvent,
   Optional,
+  BadRequestException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -39,7 +40,7 @@ import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
 import { ProjectRoleGuard } from '@/modules/iam/authz/guards/role.guard';
 import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
 
-@ApiTags('Planning Tasks & Work Items')
+@ApiTags('Planning Work Items')
 @ApiBearerAuth('JWT-auth')
 @Controller('api')
 @UseGuards(JwtAuthGuard)
@@ -62,12 +63,41 @@ export class CoreController {
       return new Observable<MessageEvent>();
     }
 
-    const created$ = fromEvent(this.eventEmitter, 'task.created');
-    const updated$ = fromEvent(this.eventEmitter, 'task.updated');
-    const deleted$ = fromEvent(this.eventEmitter, 'task.deleted');
-    const reordered$ = fromEvent(this.eventEmitter, 'task.reordered');
+    const created$ = fromEvent(this.eventEmitter, 'work-item.created');
+    const updated$ = fromEvent(this.eventEmitter, 'work-item.updated');
+    const deleted$ = fromEvent(this.eventEmitter, 'work-item.deleted');
+    const reordered$ = fromEvent(this.eventEmitter, 'work-item.reordered');
+    const assigned$ = fromEvent(this.eventEmitter, 'work-item.assigned');
+    const unassigned$ = fromEvent(this.eventEmitter, 'work-item.unassigned');
+    const relationAdded$ = fromEvent(this.eventEmitter, 'work-item.relation.added');
+    const relationRemoved$ = fromEvent(this.eventEmitter, 'work-item.relation.removed');
+    const stateChanged$ = fromEvent(this.eventEmitter, 'work-item.state.changed');
+    const priorityChanged$ = fromEvent(this.eventEmitter, 'work-item.priority.changed');
+    const titleChanged$ = fromEvent(this.eventEmitter, 'work-item.title.changed');
+    const contentChanged$ = fromEvent(this.eventEmitter, 'work-item.content.changed');
+    const cycleChanged$ = fromEvent(this.eventEmitter, 'work-item.cycle.changed');
+    const duplicated$ = fromEvent(this.eventEmitter, 'work-item.duplicated');
+    const archived$ = fromEvent(this.eventEmitter, 'work-item.archived');
+    const restored$ = fromEvent(this.eventEmitter, 'work-item.restored');
 
-    return merge(created$, updated$, deleted$, reordered$).pipe(
+    return merge(
+      created$,
+      updated$,
+      deleted$,
+      reordered$,
+      assigned$,
+      unassigned$,
+      relationAdded$,
+      relationRemoved$,
+      stateChanged$,
+      priorityChanged$,
+      titleChanged$,
+      contentChanged$,
+      cycleChanged$,
+      duplicated$,
+      archived$,
+      restored$,
+    ).pipe(
       filter((event: any) => event?.projectId === projectId),
       map(
         (event: any) =>
@@ -84,19 +114,24 @@ export class CoreController {
   @ApiOperation({
     summary: 'Get all work items in a project with optional filters',
   })
-  async getProjectTasks(
+  async getProjectWorkItems(
     @Param('projectId') projectId: string,
     @Query() queryWorkItemDto: QueryWorkItemDto,
   ) {
-    return this.workItemService.getProjectTasks(projectId, queryWorkItemDto);
+    return this.workItemService.getProjectWorkItems(projectId, queryWorkItemDto);
   }
 
-  @Get(['work-items/:taskId', 'projects/:projectId/work-items/:taskId'])
+  @Get([
+    'work-items/:workItemId',
+    'projects/:projectId/work-items/:workItemId',
+  ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get a single work item by ID or identifier' })
-  async getTaskById(@Param('taskId') taskId: string) {
-    return this.workItemService.getTaskById(taskId);
+  async getWorkItemById(
+    @Param('workItemId') workItemId: string,
+  ) {
+    return this.workItemService.getWorkItemById(workItemId);
   }
 
   @Post('projects/:projectId/work-items')
@@ -104,70 +139,82 @@ export class CoreController {
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Create a new work item in a project' })
-  async createTask(
+  async createWorkItem(
     @Param('projectId') projectId: string,
     @CurrentUser('id') userId: string,
     @Body() createWorkItemDto: CreateWorkItemDto,
   ) {
-    return this.workItemService.createTask(
+    return this.workItemService.createWorkItem(
       projectId,
       userId,
       createWorkItemDto,
     );
   }
 
-  @Put('work-items/:taskId')
+  @Put([
+    'work-items/:workItemId',
+    'projects/:projectId/work-items/:workItemId',
+  ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Update a work item' })
-  async updateTask(
-    @Param('taskId') taskId: string,
+  async updateWorkItem(
+    @Param('workItemId') workItemId: string,
     @CurrentUser('id') userId: string,
     @Body() updateWorkItemDto: UpdateWorkItemDto,
   ) {
-    return this.workItemService.updateTask(taskId, updateWorkItemDto, userId);
+    return this.workItemService.updateWorkItem(workItemId, updateWorkItemDto, userId);
   }
 
-  @Delete('work-items/:taskId')
+  @Delete([
+    'work-items/:workItemId',
+    'projects/:projectId/work-items/:workItemId',
+  ])
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Delete a work item' })
-  async deleteTask(
-    @Param('taskId') taskId: string,
+  async deleteWorkItem(
+    @Param('workItemId') workItemId: string,
     @CurrentUser('id') userId: string,
   ) {
-    return this.workItemService.deleteTask(taskId, userId);
+    return this.workItemService.deleteWorkItem(workItemId, userId);
   }
 
-  @Put('work-items/:taskId/assign')
+  @Put([
+    'work-items/:workItemId/assign',
+    'projects/:projectId/work-items/:workItemId/assign',
+  ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Assign a work item to a user (or unassign)' })
-  async assignTask(
-    @Param('taskId') taskId: string,
+  async assignWorkItem(
+    @Param('workItemId') workItemId: string,
     @CurrentUser('id') userId: string,
     @Body() assignWorkItemDto: AssignWorkItemDto,
   ) {
-    return this.workItemService.updateTask(
-      taskId,
+    return this.workItemService.updateWorkItem(
+      workItemId,
       { assigneeId: assignWorkItemDto.assigneeId ?? null },
       userId,
     );
   }
 
-  @Post('work-items/:taskId/subtasks')
+  @Post([
+    'work-items/:workItemId/children',
+    'work-items/:workItemId/sub-items',
+  ])
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
-  @ApiOperation({ summary: 'Create a subtask under a parent work item' })
-  async createSubtask(
-    @Param('taskId') taskId: string,
+  @ApiOperation({ summary: 'Create a child work item under a parent work item' })
+  async createChildWorkItem(
+    @Param('workItemId') workItemId: string,
     @CurrentUser('id') userId: string,
     @Body() createWorkItemDto: CreateWorkItemDto,
   ) {
-    return this.workItemService.createSubtask(
-      taskId,
+    return this.workItemService.createChildWorkItem(
+      workItemId,
       userId,
       createWorkItemDto,
     );
@@ -176,26 +223,23 @@ export class CoreController {
   @Put([
     'projects/:projectId/work-items/reorder',
     'work-items/reorder',
-    'work-items/:taskId/reorder',
+    'work-items/:workItemId/reorder',
   ])
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Reorder a work item in Kanban or List view' })
-  async reorderTask(
+  async reorderWorkItem(
     @Body('workItemId') workItemIdFromBody: string | undefined,
-    @Body('taskId') taskIdFromBody: string | undefined,
-    @Param('taskId') taskIdFromParam: string | undefined,
+    @Param('workItemId') workItemIdFromParam: string | undefined,
     @Body() reorderWorkItemDto: ReorderWorkItemDto,
   ) {
-    const targetTaskId =
+    const targetWorkItemId =
       workItemIdFromBody ||
-      taskIdFromBody ||
-      taskIdFromParam ||
+      workItemIdFromParam ||
       reorderWorkItemDto?.workItemId ||
-      reorderWorkItemDto?.taskId ||
       '';
-    return this.workItemService.reorderTask(targetTaskId, reorderWorkItemDto);
+    return this.workItemService.reorderWorkItem(targetWorkItemId, reorderWorkItemDto);
   }
 
   @Put([
@@ -235,6 +279,9 @@ export class CoreController {
   ) {
     const effectiveProjectId =
       projectId || bulkDeleteWorkItemDto.projectId || '';
+    if (!effectiveProjectId) {
+      throw new BadRequestException('Project ID is required for bulk deletion');
+    }
     return this.workItemService.bulkDelete(
       effectiveProjectId,
       bulkDeleteWorkItemDto,
@@ -242,33 +289,33 @@ export class CoreController {
     );
   }
 
-  @Post('work-items/:taskId/duplicate')
+  @Post('work-items/:workItemId/duplicate')
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Duplicate a work item' })
-  async duplicateTask(
-    @Param('taskId') taskId: string,
+  async duplicateWorkItem(
+    @Param('workItemId') workItemId: string,
     @CurrentUser('id') userId: string,
     @Body() duplicateWorkItemDto: DuplicateWorkItemDto,
   ) {
-    return this.workItemService.duplicateTask(
-      taskId,
+    return this.workItemService.duplicateWorkItem(
+      workItemId,
       userId,
       duplicateWorkItemDto?.destinationProjectId,
     );
   }
 
-  @Post('work-items/:taskId/convert-to-root')
+  @Post('work-items/:workItemId/convert-to-root')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
-  @ApiOperation({ summary: 'Convert a subtask to a root work item' })
-  async convertToRootTask(@Param('taskId') taskId: string) {
-    return this.workItemService.convertToRootTask(taskId);
+  @ApiOperation({ summary: 'Convert a child work item to a root work item' })
+  async convertToRootWorkItem(
+    @Param('workItemId') workItemId: string,
+  ) {
+    return this.workItemService.convertToRootWorkItem(workItemId);
   }
 }
 
 export const WorkItemController = CoreController;
 export type WorkItemController = CoreController;
-export const TaskController = CoreController;
-export type TaskController = CoreController;

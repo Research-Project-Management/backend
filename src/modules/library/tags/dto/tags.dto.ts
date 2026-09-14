@@ -15,6 +15,10 @@ export class CreateTagDto {
   @IsOptional()
   @MaxLength(50)
   type?: string;
+
+  @IsString()
+  @IsOptional()
+  projectId?: string;
 }
 
 export class UpdateTagDto {

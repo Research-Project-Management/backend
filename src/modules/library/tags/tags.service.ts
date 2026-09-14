@@ -16,17 +16,29 @@ export class TagsService {
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
-  async invalidateTagsCache(userId: string): Promise<void> {
+  async invalidateTagsCache(userId: string, projectId?: string): Promise<void> {
     if (this.cache) {
       await this.cache.delPattern(LIBRARY_REDIS_KEYS.tagsPattern(userId));
+      if (projectId && projectId !== 'user') {
+        await this.cache.delPattern(
+          LIBRARY_REDIS_KEYS.tagsPattern(`proj:${projectId}`),
+        );
+      }
     }
   }
 
-  async getTags(userId: string, options?: { includeInactive?: boolean }) {
+  async getTags(
+    userId: string,
+    options?: { includeInactive?: boolean; projectId?: string },
+  ) {
     if (this.cache) {
+      const scopeKey =
+        options?.projectId && options.projectId !== 'user'
+          ? `proj:${options.projectId}`
+          : userId;
       const cacheKey = options?.includeInactive
-        ? `${LIBRARY_REDIS_KEYS.tags(userId)}:all`
-        : LIBRARY_REDIS_KEYS.tags(userId);
+        ? `${LIBRARY_REDIS_KEYS.tags(scopeKey)}:all`
+        : LIBRARY_REDIS_KEYS.tags(scopeKey);
       return this.cache.wrap(
         cacheKey,
         () => this.repo.findMany(userId, options),
@@ -41,6 +53,7 @@ export class TagsService {
     name: string,
     color?: string,
     type?: string,
+    projectId?: string | null,
   ) {
     const result = await this.libraryTx.executeInTransaction(
       async (tx, helpers) => {
@@ -49,6 +62,7 @@ export class TagsService {
           name.trim(),
           color,
           type,
+          projectId,
           tx,
         );
 
@@ -71,7 +85,7 @@ export class TagsService {
       },
     );
 
-    await this.invalidateTagsCache(userId);
+    await this.invalidateTagsCache(userId, projectId ?? undefined);
     return result;
   }
 

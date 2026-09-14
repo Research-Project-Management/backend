@@ -228,7 +228,7 @@ async function bootstrap() {
       'System health checks, database liveness & readiness probes',
     )
     .addTag('Identity', 'Authentication, OAuth2, JWT Refresh, Profile')
-    .addTag('Organization', 'Workspaces, Projects, Members, and Roles')
+    .addTag('Organization', 'Projects, Members, and Roles')
     .addTag(
       'Storage',
       'Cloudflare R2 Files, Presigned URLs, Virtual Tree, Labels',
@@ -238,7 +238,7 @@ async function bootstrap() {
       'Manuscript',
       'LaTeX Editor Pages, Hierarchies, Snapshots, Versions',
     )
-    .addTag('Planning', 'Kanban Tasks, Priorities, Relations, Cycles')
+    .addTag('Planning', 'Work Items, Priorities, Relations, Cycles')
     .addTag(
       'Collaboration',
       'Page Line Comments, WorkItem Reactions, Sticky Canvas',

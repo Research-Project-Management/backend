@@ -22,6 +22,8 @@ import {
   IItemNotesExtractorPort,
 } from './ports/items.ports';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/auth.guard';
+import { ProjectRoleGuard } from '../../../modules/iam/authz/guards/role.guard';
+import { ProjectRoles } from '../../../modules/iam/authz/decorators/role.decorator';
 import { CurrentUser } from '../../../modules/iam/authn/decorators/user.decorator';
 import {
   CursorPaginationQueryDto,
@@ -36,7 +38,7 @@ import {
   'api/v1/me/library/items',
   'api/v1/projects/:projectId/library/items',
 ])
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class ItemsController {
   constructor(
     private readonly itemsService: ItemsService,
@@ -78,6 +80,7 @@ export class ItemsController {
   }
 
   @Post('import')
+  @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Import items from personal library into project' })
   async importItems(
     @CurrentUser('id') userId: string,
@@ -97,6 +100,7 @@ export class ItemsController {
   }
 
   @Get(':id')
+  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get a library item by ID' })
   async getItem(
     @Param('id') id: string,
@@ -111,6 +115,7 @@ export class ItemsController {
   }
 
   @Get(':id/fulltext')
+  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get fulltext of an item' })
   async getFulltext(
     @Param('id') id: string,
@@ -126,6 +131,7 @@ export class ItemsController {
   }
 
   @Post()
+  @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Create a new library item' })
   async createItem(
     @CurrentUser('id') userId: string,
@@ -140,12 +146,14 @@ export class ItemsController {
   }
 
   @Patch(':id')
+  @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Update a library item' })
   async updateItem(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
     @Headers('if-match') ifMatch: string | undefined,
     @Body() body: UpdateItemDto,
+    @Param('projectId') projectId?: string,
   ) {
     const parsedHeaderVersion = ifMatch
       ? parseInt(ifMatch.replace(/["']/g, ''), 10)
@@ -153,7 +161,7 @@ export class ItemsController {
     const expectedVersion =
       body.expectedVersion ??
       (!isNaN(parsedHeaderVersion as number) ? parsedHeaderVersion : undefined);
-    if (!expectedVersion || isNaN(expectedVersion)) {
+    if (expectedVersion === undefined || isNaN(expectedVersion) || expectedVersion < 0) {
       throw new BadRequestException(
         'Optimistic locking requirement: expectedVersion or If-Match header is required',
       );
@@ -164,42 +172,51 @@ export class ItemsController {
       id,
       expectedVersion,
       updateData,
+      undefined,
+      projectId,
     );
   }
 
   @Put(':id')
+  @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Replace a library item' })
   async replaceItem(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
     @Headers('if-match') ifMatch: string | undefined,
     @Body() body: UpdateItemDto,
+    @Param('projectId') projectId?: string,
   ) {
     return this.updateItem(
       id,
       userId,
       ifMatch,
       body,
+      projectId,
     );
   }
 
   @Post(':id/reindex')
+  @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Reindex a library item' })
   async reindexItem(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
+    @Param('projectId') projectId?: string,
   ) {
-    return this.itemsService.reindexItem(userId, id);
+    return this.itemsService.reindexItem(userId, id, projectId);
   }
 
   @Post(':id/convert-type/preview')
+  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Preview type conversion of an item' })
   async previewTypeConversion(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
     @Body() body: { targetType: string; retainUnmappedInExtra?: boolean },
+    @Param('projectId') projectId?: string,
   ) {
-    const item = await this.itemsService.getItem(userId, id);
+    const item = await this.itemsService.getItem(userId, id, projectId);
     if (!item) {
       throw new NotFoundException(`Item ${id} not found in library`);
     }
@@ -214,6 +231,7 @@ export class ItemsController {
   }
 
   @Post(':id/convert-type')
+  @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Convert item type' })
   async convertItemType(
     @Param('id') id: string,
@@ -225,6 +243,7 @@ export class ItemsController {
       expectedVersion?: number;
       retainUnmappedInExtra?: boolean;
     },
+    @Param('projectId') projectId?: string,
   ) {
     const expectedVersion =
       body?.expectedVersion !== undefined
@@ -251,11 +270,13 @@ export class ItemsController {
   }
 
   @Delete(':id')
+  @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Delete an item (soft delete)' })
   async deleteItem(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
     @Headers('if-match') ifMatch?: string,
+    @Param('projectId') projectId?: string,
   ) {
     const expectedVersion = ifMatch
       ? parseInt(ifMatch.replace(/["']/g, ''), 10)
@@ -264,17 +285,21 @@ export class ItemsController {
       userId,
       id,
       expectedVersion,
+      undefined,
+      projectId,
     );
     return { success: true, deleted, id };
   }
 
   @Post(':id/restore')
+  @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Restore a deleted item' })
   async restoreItem(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
     @Query('expectedVersion') expectedVersionQuery?: string,
     @Headers('if-match') ifMatch?: string,
+    @Param('projectId') projectId?: string,
   ) {
     const expectedVersion =
       expectedVersionQuery !== undefined
@@ -286,63 +311,57 @@ export class ItemsController {
       userId,
       id,
       expectedVersion,
+      projectId,
     );
     return { success: true, data: item, item };
   }
 
   @Delete(':id/purge')
+  @ProjectRoles('owner')
   @ApiOperation({ summary: 'Permanently purge a deleted item' })
   async purgeItem(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
+    @Param('projectId') projectId?: string,
   ) {
-    const purged = await this.itemsService.purgeItem(userId, id);
+    const purged = await this.itemsService.purgeItem(userId, id, projectId);
     return { success: true, purged, id };
   }
 
   @Get(':id/relations')
+  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get related items' })
   async getRelatedItems(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
+    @Param('projectId') projectId?: string,
   ) {
-    return this.itemsService.getRelatedItems(userId, id);
+    return this.itemsService.getRelatedItems(userId, id, projectId);
   }
 
   @Post([':id/relations', ':id/link'])
+  @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Link two items together' })
   async linkItems(
     @Param('id') id: string,
     @Body()
     body: { targetItemId: string; relationType?: string; note?: string },
     @CurrentUser('id') userId: string,
+    @Param('projectId') projectId?: string,
   ) {
-    return this.itemsService.linkItems(userId, id, body);
+    return this.itemsService.linkItems(userId, id, body, projectId);
   }
 
   @Delete([':id/relations/:targetId', ':id/link/:targetId'])
+  @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Unlink items' })
   async unlinkItems(
     @Param('id') id: string,
     @Param('targetId') targetItemId: string,
     @CurrentUser('id') userId: string,
+    @Param('projectId') projectId?: string,
   ) {
-    return this.itemsService.unlinkItems(userId, id, targetItemId);
-  }
-
-  @Post(':id/extract-notes')
-  @ApiOperation({ summary: 'Extract notes from annotations' })
-  async extractNotes(
-    @Param('id') id: string,
-    @CurrentUser('id') userId: string,
-  ) {
-    if (!this.notesExtractor) {
-      throw new BadRequestException('NotesService is not available');
-    }
-    return this.notesExtractor.extractNotesFromAnnotations(
-      userId,
-      id,
-    );
+    return this.itemsService.unlinkItems(userId, id, targetItemId, projectId);
   }
 
   @Post(':id/my-publication')

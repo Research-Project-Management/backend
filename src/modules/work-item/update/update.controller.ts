@@ -31,24 +31,24 @@ export class UpdateController {
   constructor(private readonly updateService: UpdateService) {}
 
   @Get([
-    'projects/:projectId/work-items/:taskId/updates',
-    'work-items/:taskId/updates',
+    'projects/:projectId/work-items/:workItemId/updates',
+    'work-items/:workItemId/updates',
   ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get all status updates for a work item' })
-  @ApiParam({ name: 'taskId', description: 'Work item ID' })
+  @ApiParam({ name: 'workItemId', description: 'Work item ID' })
   @ApiResponse({
     status: 200,
     description: 'List of status updates, newest first',
   })
-  async getUpdates(@Param('taskId') taskId: string) {
-    return this.updateService.getUpdates(taskId);
+  async getUpdates(@Param('workItemId') workItemId: string) {
+    return this.updateService.getUpdates(workItemId);
   }
 
   @Get([
-    'projects/:projectId/work-items/:taskId/updates/latest',
-    'work-items/:taskId/updates/latest',
+    'projects/:projectId/work-items/:workItemId/updates/latest',
+    'work-items/:workItemId/updates/latest',
   ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
@@ -56,13 +56,13 @@ export class UpdateController {
     summary: 'Get the most recent status update for a work item',
   })
   @ApiResponse({ status: 200, description: 'Latest status update or null' })
-  async getLatestUpdate(@Param('taskId') taskId: string) {
-    return this.updateService.getLatestUpdate(taskId);
+  async getLatestUpdate(@Param('workItemId') workItemId: string) {
+    return this.updateService.getLatestUpdate(workItemId);
   }
 
   @Post([
-    'projects/:projectId/work-items/:taskId/updates',
-    'work-items/:taskId/updates',
+    'projects/:projectId/work-items/:workItemId/updates',
+    'work-items/:workItemId/updates',
   ])
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
@@ -73,16 +73,16 @@ export class UpdateController {
   })
   @ApiResponse({ status: 201, description: 'Update created successfully' })
   async addUpdate(
-    @Param('taskId') taskId: string,
+    @Param('workItemId') workItemId: string,
     @CurrentUser('id') userId: string,
     @Body() dto: CreateWorkItemUpdateDto,
   ) {
-    return this.updateService.addUpdate(taskId, userId, dto);
+    return this.updateService.addUpdate(workItemId, userId, dto);
   }
 
   @Delete([
-    'projects/:projectId/work-items/:taskId/updates/:updateId',
-    'work-items/:taskId/updates/:updateId',
+    'projects/:projectId/work-items/:workItemId/updates/:updateId',
+    'work-items/:workItemId/updates/:updateId',
   ])
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
@@ -90,10 +90,10 @@ export class UpdateController {
   @ApiOperation({ summary: 'Delete a specific status update from a work item' })
   @ApiResponse({ status: 200, description: 'Update deleted successfully' })
   async deleteUpdate(
-    @Param('taskId') taskId: string,
+    @Param('workItemId') workItemId: string,
     @Param('updateId') updateId: string,
     @CurrentUser('id') userId: string,
   ) {
-    return this.updateService.deleteUpdate(taskId, updateId, userId);
+    return this.updateService.deleteUpdate(workItemId, updateId, userId);
   }
 }

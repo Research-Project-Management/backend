@@ -2,7 +2,7 @@
  * Label Domain Types & Repository Port (Hexagonal / DDD-Lite)
  *
  * Scoped to Project or User,
- * parent-child nesting hierarchy, and safe task detachment.
+ * parent-child nesting hierarchy, and safe work item detachment.
  */
 
 import { Label, LabelType, Prisma } from '@prisma/client';
@@ -53,12 +53,12 @@ export interface ILabelRepository {
   ): Promise<Label>;
   delete(labelId: string): Promise<Label>;
   reorder(projectId: string, updates: ReorderLabelItem[]): Promise<void>;
-  detachFromTasks(
+  detachFromWorkItems(
     projectId: string,
     labelId: string,
     labelName?: string,
   ): Promise<number>;
-  detachMultipleFromTasks(
+  detachMultipleFromWorkItems(
     projectId: string,
     labelIds: string[],
     labelNames?: string[],

@@ -34,7 +34,7 @@ export class YourWorkController {
   @ApiResponse({
     status: 200,
     description:
-      'Returns workload tasks, activity feed, and recent items for user',
+      'Returns workload work items, activity feed, and recent items for user',
     type: YourWorkSummaryDto,
   })
   async getYourWork(

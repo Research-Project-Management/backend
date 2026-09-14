@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { Prisma } from '@prisma/client';
+import { isUuid } from '@/core/utils/uuid.util';
 
 const AUTHOR_SELECT = {
   id: true,
@@ -10,8 +11,22 @@ const AUTHOR_SELECT = {
 } as const;
 
 @Injectable()
-export class TaskCommentRepository {
+export class CommentRepository {
   constructor(private readonly prismaService: PrismaService) {}
+
+  async resolveWorkItemUuid(workItemIdOrIdentifier: string): Promise<string | null> {
+    if (isUuid(workItemIdOrIdentifier)) {
+      return workItemIdOrIdentifier;
+    }
+    const item = await this.prismaService.workItem.findFirst({
+      where: {
+        identifier: { equals: workItemIdOrIdentifier, mode: 'insensitive' },
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    return item?.id || null;
+  }
 
   async findAuthorById(userId: string) {
     return this.prismaService.user.findUnique({
@@ -20,9 +35,11 @@ export class TaskCommentRepository {
     });
   }
 
-  async findTaskComments(taskId: string) {
+  async findWorkItemComments(workItemId: string) {
+    const itemUuid = await this.resolveWorkItemUuid(workItemId);
+    if (!itemUuid) return [];
     return this.prismaService.workItemComment.findMany({
-      where: { taskId },
+      where: { workItemId: itemUuid },
       orderBy: { createdAt: 'asc' },
       include: {
         author: { select: AUTHOR_SELECT },
@@ -30,7 +47,7 @@ export class TaskCommentRepository {
     });
   }
 
-  async findTaskCommentById(commentId: string) {
+  async findCommentById(commentId: string) {
     return this.prismaService.workItemComment.findUnique({
       where: { id: commentId },
       include: {
@@ -39,11 +56,11 @@ export class TaskCommentRepository {
     });
   }
 
-  async findTaskCommentWithProject(commentId: string) {
+  async findCommentWithProject(commentId: string) {
     return this.prismaService.workItemComment.findUnique({
       where: { id: commentId },
       include: {
-        task: {
+        workItem: {
           select: {
             projectId: true,
             project: { select: { id: true, createdById: true } },
@@ -53,15 +70,19 @@ export class TaskCommentRepository {
     });
   }
 
-  async createTaskComment(data: {
-    taskId: string;
+  async createComment(data: {
+    workItemId: string;
     authorId: string;
     content: string;
     attachments?: any;
   }) {
+    const itemUuid = await this.resolveWorkItemUuid(data.workItemId);
+    if (!itemUuid) {
+      throw new Error(`Work item "${data.workItemId}" not found`);
+    }
     return this.prismaService.workItemComment.create({
       data: {
-        taskId: data.taskId,
+        workItemId: itemUuid,
         authorId: data.authorId,
         content: data.content,
         attachments: data.attachments ?? [],
@@ -72,7 +93,7 @@ export class TaskCommentRepository {
     });
   }
 
-  async updateTaskComment(
+  async updateComment(
     commentId: string,
     data: {
       content?: string;
@@ -91,7 +112,7 @@ export class TaskCommentRepository {
     });
   }
 
-  async deleteTaskComment(commentId: string) {
+  async deleteComment(commentId: string) {
     return this.prismaService.workItemComment.delete({
       where: { id: commentId },
     });
@@ -110,3 +131,5 @@ export class TaskCommentRepository {
     return member?.role ?? null;
   }
 }
+
+

@@ -11,6 +11,7 @@ export interface CreateCollectionInput {
   icon?: string;
   parentId?: string | null;
   createdById?: string;
+  projectId?: string | null;
 }
 
 export interface UpdateCollectionInput {
@@ -39,10 +40,18 @@ export class CollectionsRepository {
     userId: string,
     id: string,
     tx?: Prisma.TransactionClient,
+    projectId?: string,
   ) {
     const client = this.getClient(tx);
+    const where: Prisma.CollectionWhereInput = {
+      id,
+      deletedAt: null,
+      ...(projectId && projectId !== 'user'
+        ? { projectId }
+        : { userId }),
+    };
     return client.collection.findFirst({
-      where: { id, userId, deletedAt: null },
+      where,
       include: {
         children: {
           where: { deletedAt: null },
@@ -55,12 +64,25 @@ export class CollectionsRepository {
   }
 
   /**
-   * Retrieves all collections for a user.
+   * Retrieves all collections for a user or project.
    */
-  async findAll(userId: string, tx?: Prisma.TransactionClient) {
-    const client = this.getClient(tx);
+  async findAll(
+    userId: string,
+    projectIdOrTx?: string | Prisma.TransactionClient,
+    tx?: Prisma.TransactionClient,
+  ) {
+    const projectId =
+      typeof projectIdOrTx === 'string' ? projectIdOrTx : undefined;
+    const client = this.getClient(
+      typeof projectIdOrTx === 'object' ? projectIdOrTx : tx,
+    );
+    const where: Prisma.CollectionWhereInput =
+      projectId && projectId !== 'user'
+        ? { projectId, deletedAt: null }
+        : { userId, deletedAt: null };
+
     return client.collection.findMany({
-      where: { userId, deletedAt: null },
+      where,
       include: {
         _count: {
           select: { collectionItems: true },
@@ -73,8 +95,12 @@ export class CollectionsRepository {
   /**
    * Alias for findTree / findAll.
    */
-  async findTree(userId: string, tx?: Prisma.TransactionClient) {
-    return this.findAll(userId, tx);
+  async findTree(
+    userId: string,
+    projectIdOrTx?: string | Prisma.TransactionClient,
+    tx?: Prisma.TransactionClient,
+  ) {
+    return this.findAll(userId, projectIdOrTx, tx);
   }
 
   /**
@@ -100,10 +126,14 @@ export class CollectionsRepository {
       clientTx = inputOrTx as Prisma.TransactionClient | undefined;
     }
 
+    const effectiveProjectId =
+      input.projectId && input.projectId !== 'user' ? input.projectId : null;
+
     const client = this.getClient(clientTx);
     return client.collection.create({
       data: {
         userId,
+        projectId: effectiveProjectId,
         name: input.name,
         description: input.description ?? '',
         color: input.color ?? '#3370ff',
@@ -124,6 +154,7 @@ export class CollectionsRepository {
     inputOrVersion: UpdateCollectionInput | number,
     inputOrTx?: UpdateCollectionInput | Prisma.TransactionClient,
     tx?: Prisma.TransactionClient,
+    projectId?: string,
   ) {
     let expectedVersion: number | undefined;
     let input: UpdateCollectionInput;
@@ -140,7 +171,7 @@ export class CollectionsRepository {
     }
 
     const client = this.getClient(clientTx);
-    const existing = await this.findById(userId, id, clientTx);
+    const existing = await this.findById(userId, id, clientTx, projectId);
     if (!existing) {
       throw new NotFoundException(
         `Collection ${id} not found`,
@@ -179,30 +210,35 @@ export class CollectionsRepository {
     id: string,
     strategyOrTx?: CollectionDeleteStrategy | Prisma.TransactionClient,
     tx?: Prisma.TransactionClient,
+    projectId?: string,
   ): Promise<boolean> {
     const clientTx = typeof strategyOrTx === 'string' ? tx : strategyOrTx;
     const strategy = typeof strategyOrTx === 'string' ? strategyOrTx : 'orphan';
 
     const client = this.getClient(clientTx);
+    const scopeWhere =
+      projectId && projectId !== 'user'
+        ? { projectId }
+        : { userId };
 
     if (strategy === 'cascade') {
       // Find all child collections and delete recursively
       const children = await client.collection.findMany({
-        where: { userId, parentId: id, deletedAt: null },
+        where: { ...scopeWhere, parentId: id, deletedAt: null },
       });
       for (const child of children) {
-        await this.delete(userId, child.id, 'cascade', clientTx);
+        await this.delete(userId, child.id, 'cascade', clientTx, projectId);
       }
     } else {
       // Orphan child collections by resetting parentId to null
       await client.collection.updateMany({
-        where: { userId, parentId: id, deletedAt: null },
+        where: { ...scopeWhere, parentId: id, deletedAt: null },
         data: { parentId: null },
       });
     }
 
     const result = await client.collection.updateMany({
-      where: { id, userId, deletedAt: null },
+      where: { id, ...scopeWhere, deletedAt: null },
       data: { deletedAt: new Date() },
     });
     return result.count > 0;
@@ -326,12 +362,13 @@ export class CollectionsRepository {
       parentId?: string | null;
       orderIndex?: number;
     }>,
+    projectId?: string,
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
     const client = this.getClient(tx);
     for (const c of collections) {
       await client.collection.updateMany({
-        where: { id: c.id, userId },
+        where: projectId ? { id: c.id, projectId } : { id: c.id, userId },
         data: {
           ...(c.parentId !== undefined ? { parentId: c.parentId } : {}),
         },

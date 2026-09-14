@@ -149,22 +149,22 @@ export class ActivityRepository implements IActivityRepository {
   }
 
   /**
-   * Batch-resolve titles for recent entities (task / paper / page).
+   * Batch-resolve titles for recent entities (work_item / paper / page).
    * Returns a Map<"type:id", title>.
    */
   async findEntitiesTitleMap(
-    taskIds: string[],
+    workItemIds: string[],
     paperIds: string[],
     pageIds: string[],
   ): Promise<Map<string, string>> {
-    const validTaskIds = taskIds.filter((id) => isUUID(id));
+    const validWorkItemIds = workItemIds.filter((id) => isUUID(id));
     const validPaperIds = paperIds.filter((id) => isUUID(id));
     const validPageIds = pageIds.filter((id) => isUUID(id));
 
-    const [tasks, papers, pages] = await Promise.all([
-      validTaskIds.length
+    const [workItems, papers, pages] = await Promise.all([
+      validWorkItemIds.length
         ? this.prisma.workItem.findMany({
-            where: { id: { in: validTaskIds }, deletedAt: null },
+            where: { id: { in: validWorkItemIds }, deletedAt: null },
             select: { id: true, title: true },
           })
         : [],
@@ -183,7 +183,9 @@ export class ActivityRepository implements IActivityRepository {
     ]);
 
     const map = new Map<string, string>();
-    tasks.forEach((t) => map.set(`task:${t.id}`, t.title));
+    workItems.forEach((t) => {
+      map.set(`work_item:${t.id}`, t.title);
+    });
     papers.forEach((p) => map.set(`paper:${p.id}`, p.title));
     pages.forEach((pg) => map.set(`page:${pg.id}`, pg.title));
     return map;
@@ -194,10 +196,10 @@ export class ActivityRepository implements IActivityRepository {
     limit: number,
   ) {
     if (!isUUID(userId)) {
-      return { tasks: [], papers: [], pages: [] };
+      return { workItems: [], papers: [], pages: [] };
     }
 
-    const [tasks, papers, pages] = await Promise.all([
+    const [workItems, papers, pages] = await Promise.all([
       this.prisma.workItem.findMany({
         where: {
           deletedAt: null,
@@ -226,12 +228,12 @@ export class ActivityRepository implements IActivityRepository {
         select: { id: true, title: true, projectId: true, updatedAt: true },
       }),
     ]);
-    return { tasks, papers, pages };
+    return { workItems, papers, pages };
   }
 
-  async findTaskWithProject(taskId: string) {
+  async findWorkItemWithProject(workItemId: string) {
     return this.prisma.workItem.findUnique({
-      where: { id: taskId },
+      where: { id: workItemId },
       select: {
         id: true,
         title: true,
@@ -244,16 +246,16 @@ export class ActivityRepository implements IActivityRepository {
           select: {
             id: true,
             name: true,
-            taskColumns: true,
+            workItemColumns: true,
           },
         },
       },
     });
   }
 
-  async findTaskComments(taskId: string, sort: 'asc' | 'desc' = 'asc') {
+  async findWorkItemComments(workItemId: string, sort: 'asc' | 'desc' = 'asc') {
     return this.prisma.workItemComment.findMany({
-      where: { taskId },
+      where: { workItemId },
       orderBy: { createdAt: sort },
       include: {
         author: { select: ACTOR_MINIMAL_SELECT },
@@ -261,11 +263,11 @@ export class ActivityRepository implements IActivityRepository {
     });
   }
 
-  async findTaskActivityEvents(taskId: string, sort: 'asc' | 'desc' = 'asc') {
+  async findWorkItemActivityEvents(workItemId: string, sort: 'asc' | 'desc' = 'asc') {
     return this.prisma.activityEvent.findMany({
       where: {
-        entityType: EntityType.task,
-        entityId: taskId,
+        entityType: EntityType.work_item,
+        entityId: workItemId,
       },
       orderBy: { createdAt: sort },
       include: {

@@ -88,7 +88,7 @@ export class DraftService {
     const targetColumn =
       publishDraftDto.columnId || draft.columnId || 'backlog';
 
-    const result = await this.workItemService.createTask(
+    const result = await this.workItemService.createWorkItem(
       targetProjectId,
       authorId,
       {
@@ -101,17 +101,20 @@ export class DraftService {
         dueDate: draft.dueDate ? draft.dueDate.toISOString() : undefined,
         labels: draft.labels,
         assigneeId: draft.assigneeId || undefined,
+        assigneeIds: Array.isArray(draft.assigneeIds)
+          ? (draft.assigneeIds as string[])
+          : undefined,
         cycleId: publishDraftDto.cycleId || undefined,
       },
     );
 
     await this.draftRepository.delete(id, authorId);
 
-    const publishedTask = result?.WorkItem;
+    const publishedWorkItem = result?.workItem || result?.item;
 
     this.eventEmitter?.emit('draft.published', {
       draftId: id,
-      taskId: publishedTask?.id,
+      workItemId: publishedWorkItem?.id,
       projectId: targetProjectId,
       authorId,
     });

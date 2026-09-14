@@ -81,24 +81,24 @@ export class IdHandler {
   }
 
   private async getMaxSequenceFromDb(projectId: string): Promise<number> {
-    const lastTask = await this.prisma.workItem.findFirst({
+    const lastWorkItem = await this.prisma.workItem.findFirst({
       where: { projectId },
       orderBy: { sequenceNumber: 'desc' },
       select: { sequenceNumber: true },
     });
 
-    if (lastTask?.sequenceNumber) {
-      return lastTask.sequenceNumber;
+    if (lastWorkItem?.sequenceNumber) {
+      return lastWorkItem.sequenceNumber;
     }
 
     const project = await this.prisma.project
       .findUnique({
         where: { id: projectId },
-        select: { taskSequence: true },
+        select: { workItemSequence: true },
       })
       .catch(() => null);
 
-    return project?.taskSequence ?? 0;
+    return project?.workItemSequence ?? 0;
   }
 }
 

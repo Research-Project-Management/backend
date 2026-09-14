@@ -270,8 +270,8 @@ export class ViewService {
 
     // Merge view filters with any runtime override filters
     const mergedQuery: QueryWorkItemDto = {
-      ...(viewFilters.status && { status: viewFilters.status }),
-      ...(viewFilters.columnId && { status: viewFilters.columnId }),
+      ...(viewFilters.columnId && { columnId: viewFilters.columnId }),
+      ...(viewFilters.status && !viewFilters.columnId && { columnId: viewFilters.status }),
       ...(viewFilters.assigneeId && { assigneeId: viewFilters.assigneeId }),
       ...(viewFilters.priority && { priority: viewFilters.priority }),
       ...(viewFilters.labels && {
@@ -281,8 +281,8 @@ export class ViewService {
       }),
       ...(viewFilters.cycleId && { cycleId: viewFilters.cycleId }),
       ...(viewFilters.search && { search: viewFilters.search }),
-      ...(viewFilters.parentTaskId && {
-        parentTaskId: viewFilters.parentTaskId,
+      ...(viewFilters.parentWorkItemId && {
+        parentWorkItemId: viewFilters.parentWorkItemId,
       }),
       ...(viewFilters.archived !== undefined && {
         archived: viewFilters.archived,
@@ -290,6 +290,6 @@ export class ViewService {
       ...extraQuery,
     };
 
-    return this.workItemService.getProjectTasks(projectId, mergedQuery);
+    return this.workItemService.getProjectWorkItems(projectId, mergedQuery);
   }
 }

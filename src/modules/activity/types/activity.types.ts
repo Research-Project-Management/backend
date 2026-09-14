@@ -1,19 +1,28 @@
 import { EntityType } from '@prisma/client';
 
-export type TaskVerb =
+export type WorkItemVerb =
   | 'created'
   | 'updated'
   | 'status_changed'
   | 'assigned'
   | 'unassigned'
-  | 'deleted';
+  | 'deleted'
+  | 'transitioned'
+  | 'archived'
+  | 'restored';
 
 export type PaperVerb =
-  'uploaded' | 'metadata_extracted' | 'updated' | 'deleted';
+  | 'created'
+  | 'updated'
+  | 'deleted'
+  | 'imported'
+  | 'analyzed';
 
-export type PageVerb = 'created' | 'saved' | 'version_created' | 'deleted';
-
-export type GenericVerb = 'created' | 'updated' | 'deleted';
+export type PageVerb =
+  | 'created'
+  | 'updated'
+  | 'deleted'
+  | 'published';
 
 export interface BaseActivityEvent {
   entityId: string;
@@ -22,10 +31,10 @@ export interface BaseActivityEvent {
   timestamp?: Date;
 }
 
-export interface TaskActivityEvent extends BaseActivityEvent {
-  entityType: 'task';
-  verb: TaskVerb;
-  field?: 'columnId' | 'priority' | 'assigneeId' | 'title' | 'description';
+export interface WorkItemActivityEvent extends BaseActivityEvent {
+  entityType: 'work_item' | 'item';
+  verb: WorkItemVerb;
+  field?: 'columnId' | 'priority' | 'assigneeId' | 'title' | 'description' | 'state' | string;
   oldValue?: string;
   newValue?: string;
   oldIdentifier?: string;
@@ -59,7 +68,7 @@ export interface GenericActivityEvent extends BaseActivityEvent {
 }
 
 export type DomainActivityEvent =
-  | TaskActivityEvent
+  | WorkItemActivityEvent
   | PaperActivityEvent
   | PageActivityEvent
   | GenericActivityEvent;

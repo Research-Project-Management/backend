@@ -54,7 +54,7 @@ export interface IActivityRepository {
     limit?: number,
   ): Promise<ActivityEvent[]>;
   findEntitiesTitleMap(
-    taskIds: string[],
+    workItemIds: string[],
     paperIds: string[],
     pageIds: string[],
   ): Promise<Map<string, string>>;
@@ -62,7 +62,7 @@ export interface IActivityRepository {
     userId: string,
     limit: number,
   ): Promise<{
-    tasks: Array<{
+    workItems: Array<{
       id: string;
       title: string;
       projectId: string;
@@ -76,10 +76,10 @@ export interface IActivityRepository {
       updatedAt: Date;
     }>;
   }>;
-  findTaskWithProject(taskId: string): Promise<any>;
-  findTaskComments(taskId: string, sort?: 'asc' | 'desc'): Promise<any[]>;
-  findTaskActivityEvents(
-    taskId: string,
+  findWorkItemWithProject(workItemId: string): Promise<any>;
+  findWorkItemComments(workItemId: string, sort?: 'asc' | 'desc'): Promise<any[]>;
+  findWorkItemActivityEvents(
+    workItemId: string,
     sort?: 'asc' | 'desc',
   ): Promise<ActivityEventWithActor[]>;
 }

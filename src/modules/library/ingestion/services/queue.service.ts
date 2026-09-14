@@ -5,7 +5,7 @@ import { PipelineService } from './pipeline.service';
 import { IngestionRepository } from '../ingestion.repository';
 import { IngestionStatus } from '@prisma/client';
 
-export interface QueuedIngestionTask {
+export interface QueuedIngestionJob {
   runId: string;
   projectId: string;
   workspaceId?: string;
@@ -21,7 +21,7 @@ export interface IngestionQueueStats {
 @Injectable()
 export class QueueService implements OnModuleInit {
   private readonly logger = new Logger(QueueService.name);
-  private readonly queue: QueuedIngestionTask[] = [];
+  private readonly queue: QueuedIngestionJob[] = [];
   private activeCount = 0;
   private readonly runningRunIds = new Set<string>();
   private readonly queuedRunIds = new Set<string>();
@@ -122,26 +122,26 @@ export class QueueService implements OnModuleInit {
   }
 
   /**
-   * Dispatches tasks from the queue up to maxConcurrency.
+   * Dispatches jobs from the queue up to maxConcurrency.
    */
   private pump(): void {
     while (this.activeCount < this.maxConcurrency && this.queue.length > 0) {
-      const task = this.queue.shift();
-      if (!task) break;
+      const job = this.queue.shift();
+      if (!job) break;
 
-      this.queuedRunIds.delete(task.runId);
-      this.runningRunIds.add(task.runId);
+      this.queuedRunIds.delete(job.runId);
+      this.runningRunIds.add(job.runId);
       this.activeCount++;
 
-      void this.executeTask(task);
+      void this.executeJob(job);
     }
   }
 
   /**
    * Executes an individual ingestion run through PipelineService.
    */
-  private async executeTask(workItem: QueuedIngestionTask): Promise<void> {
-    const { runId, projectId, envelope } = workItem;
+  private async executeJob(job: QueuedIngestionJob): Promise<void> {
+    const { runId, projectId, envelope } = job;
     const startTime = Date.now();
 
     try {

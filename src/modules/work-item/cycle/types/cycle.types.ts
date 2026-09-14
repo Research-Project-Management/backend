@@ -6,19 +6,19 @@
 
 import { Cycle, CyclePhase, CycleStatus, Prisma, WorkItem } from '@prisma/client';
 
-export enum IncompleteTaskAction {
+export enum IncompleteWorkItemAction {
   transfer = 'transfer',
   backlog = 'backlog',
   leave = 'leave',
 }
 
 export interface CycleStats {
-  totalTasks: number;
-  completedTasks: number;
-  startedTasks: number;
-  unstartedTasks: number;
-  backlogTasks: number;
-  cancelledTasks: number;
+  totalWorkItems: number;
+  completedWorkItems: number;
+  startedWorkItems: number;
+  unstartedWorkItems: number;
+  backlogWorkItems: number;
+  cancelledWorkItems: number;
   completionPercentage: number;
 }
 
@@ -42,7 +42,7 @@ export const CYCLE_PHASE_CONFIG: Record<CyclePhase, CyclePhaseInfo> = {
   [CyclePhase.custom]: { label: 'Custom Milestone', order: 9 },
 };
 
-export interface CycleTaskItem {
+export interface CycleWorkItemItem {
   id: string;
   title: string;
   columnId: string;
@@ -70,17 +70,19 @@ export interface ICycleRepository {
   softDeleteCycle(cycleId: string): Promise<Cycle>;
   restoreCycle(cycleId: string): Promise<Cycle>;
   deleteCycle(cycleId: string): Promise<Cycle>;
-  findCycleTasks(cycleId: string): Promise<CycleTaskItem[]>;
-  transferIncompleteTasks(
+  findCycleWorkItems(cycleId: string): Promise<CycleWorkItemItem[]>;
+  transferIncompleteWorkItems(
     fromCycleId: string,
     targetCycleId: string | null,
-    incompleteTaskIds?: string[],
+    incompleteWorkItemIds?: string[],
   ): Promise<Prisma.BatchPayload>;
-  addTaskToCycle(taskId: string, cycleId: string): Promise<WorkItem>;
-  removeTaskFromCycle(taskId: string): Promise<WorkItem>;
-  addTasksBatch(
-    taskIds: string[],
+  findWorkItemById(workItemId: string): Promise<{ id: string; projectId: string } | null>;
+  addWorkItemToCycle(workItemId: string, cycleId: string): Promise<WorkItem>;
+  removeWorkItemFromCycle(workItemId: string): Promise<WorkItem>;
+  addWorkItemsBatch(
+    workItemIds: string[],
     cycleId: string,
+    projectId?: string,
   ): Promise<Prisma.BatchPayload>;
   findCyclesEligibleForAutoStart(
     now?: Date,

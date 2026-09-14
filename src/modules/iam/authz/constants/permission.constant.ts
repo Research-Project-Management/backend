@@ -5,7 +5,7 @@ import { Role } from '../enums/role.enum';
  * Role-to-Permission Mapping Matrix
  * Mapped strictly across 4 project-level roles:
  * - OWNER: Project Leader / Principal Investigator (full control)
- * - CONTRIBUTOR: Research Member (tasks, documents, library, stickies, AI)
+ * - CONTRIBUTOR: Research Member (work items, documents, library, stickies, AI)
  * - COMMENTER: Advisor / Reviewer (read, comment, annotate, cite)
  * - VIEWER: Guest / Evaluator (read-only)
  */
@@ -22,17 +22,17 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     Permission.PROJECT_MANAGE_SETTINGS,
     Permission.PROJECT_MANAGE_MEMBERS,
 
-    // Work Items & Tasks
-    Permission.TASK_VIEW,
-    Permission.TASK_READ,
-    Permission.TASK_CREATE,
-    Permission.TASK_UPDATE,
-    Permission.TASK_EDIT,
-    Permission.TASK_DELETE,
-    Permission.TASK_ASSIGN,
-    Permission.TASK_CHANGE_STATE,
-    Permission.TASK_MANAGE_LABELS,
-    Permission.TASK_MANAGE_CYCLES,
+    // Work Items
+    Permission.WORK_ITEM_VIEW,
+    Permission.WORK_ITEM_READ,
+    Permission.WORK_ITEM_CREATE,
+    Permission.WORK_ITEM_UPDATE,
+    Permission.WORK_ITEM_EDIT,
+    Permission.WORK_ITEM_DELETE,
+    Permission.WORK_ITEM_ASSIGN,
+    Permission.WORK_ITEM_CHANGE_STATE,
+    Permission.WORK_ITEM_MANAGE_LABELS,
+    Permission.WORK_ITEM_MANAGE_CYCLES,
 
     // Manuscripts & LaTeX Documents
     Permission.DOCUMENT_VIEW,
@@ -89,16 +89,16 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     Permission.PROJECT_VIEW,
     Permission.PROJECT_READ,
 
-    // Work Items & Tasks (Create, edit, assign, progress)
-    Permission.TASK_VIEW,
-    Permission.TASK_READ,
-    Permission.TASK_CREATE,
-    Permission.TASK_UPDATE,
-    Permission.TASK_EDIT,
-    Permission.TASK_DELETE,
-    Permission.TASK_ASSIGN,
-    Permission.TASK_CHANGE_STATE,
-    Permission.TASK_MANAGE_LABELS,
+    // Work Items (Create, edit, assign, progress)
+    Permission.WORK_ITEM_VIEW,
+    Permission.WORK_ITEM_READ,
+    Permission.WORK_ITEM_CREATE,
+    Permission.WORK_ITEM_UPDATE,
+    Permission.WORK_ITEM_EDIT,
+    Permission.WORK_ITEM_DELETE,
+    Permission.WORK_ITEM_ASSIGN,
+    Permission.WORK_ITEM_CHANGE_STATE,
+    Permission.WORK_ITEM_MANAGE_LABELS,
 
     // Manuscripts & LaTeX Documents (Full authoring)
     Permission.DOCUMENT_VIEW,
@@ -150,9 +150,9 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     Permission.PROJECT_VIEW,
     Permission.PROJECT_READ,
 
-    // Work Items & Tasks (Read-only)
-    Permission.TASK_VIEW,
-    Permission.TASK_READ,
+    // Work Items (Read-only)
+    Permission.WORK_ITEM_VIEW,
+    Permission.WORK_ITEM_READ,
 
     // Manuscripts & Documents (Read & Comment)
     Permission.DOCUMENT_VIEW,
@@ -192,9 +192,9 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     Permission.PROJECT_VIEW,
     Permission.PROJECT_READ,
 
-    // Work Items & Tasks (Read-only)
-    Permission.TASK_VIEW,
-    Permission.TASK_READ,
+    // Work Items (Read-only)
+    Permission.WORK_ITEM_VIEW,
+    Permission.WORK_ITEM_READ,
 
     // Manuscripts & Documents (Read-only)
     Permission.DOCUMENT_VIEW,

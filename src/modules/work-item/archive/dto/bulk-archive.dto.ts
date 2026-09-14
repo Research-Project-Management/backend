@@ -13,7 +13,7 @@ export class BulkArchiveDto {
   @IsArray()
   @ArrayNotEmpty()
   @IsString({ each: true })
-  taskIds!: string[];
+  workItemIds!: string[];
 
   @ApiPropertyOptional({
     description: 'Optional note or reason for archiving/restoring',

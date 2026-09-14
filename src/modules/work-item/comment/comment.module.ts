@@ -1,13 +1,13 @@
 import { Module } from '@nestjs/common';
 import { EventEmitterModule } from '@nestjs/event-emitter';
-import { TaskCommentController } from './comment.controller';
-import { TaskCommentService } from './comment.service';
-import { TaskCommentRepository } from './comment.repository';
+import { CommentController } from './comment.controller';
+import { CommentService } from './comment.service';
+import { CommentRepository } from './comment.repository';
 
 @Module({
   imports: [EventEmitterModule],
-  controllers: [TaskCommentController],
-  providers: [TaskCommentService, TaskCommentRepository],
-  exports: [TaskCommentService],
+  controllers: [CommentController],
+  providers: [CommentService, CommentRepository],
+  exports: [CommentService],
 })
 export class CommentModule {}

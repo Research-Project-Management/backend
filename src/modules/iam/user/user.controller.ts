@@ -110,7 +110,7 @@ export class UserController {
   @Get(['api/search', 'api/users/me/search'])
   @ApiOperation({
     summary:
-      'Global search across user entities (projects, tasks, papers, pages, files, stickies)',
+      'Global search across user entities (projects, work items, papers, pages, files, stickies)',
   })
   async searchUserEntities(
     @CurrentUser('id') userId: string,

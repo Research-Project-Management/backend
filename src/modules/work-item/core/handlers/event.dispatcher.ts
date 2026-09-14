@@ -7,8 +7,8 @@ import { mapPriority } from '../utils/work-item.util';
 export class EventDispatcher {
   constructor(@Optional() private readonly eventEmitter?: EventEmitter2) {}
 
-  emitTaskCreated(params: {
-    taskId: string;
+  emitWorkItemCreated(params: {
+    workItemId: string;
     actorId: string;
     projectId: string;
     columnId: string;
@@ -18,9 +18,9 @@ export class EventDispatcher {
   }) {
     if (!this.eventEmitter) return;
 
-    this.eventEmitter.emit('task.created', {
-      entityType: 'task',
-      entityId: params.taskId,
+    const payload = {
+      entityType: 'work_item',
+      entityId: params.workItemId,
       verb: 'created',
       actorId: params.actorId,
       projectId: params.projectId,
@@ -28,43 +28,46 @@ export class EventDispatcher {
       title: params.title,
       identifier: params.identifier,
       sequenceNumber: params.sequenceNumber,
-    });
+    };
+    this.eventEmitter.emit('work-item.created', payload);
   }
 
-  emitTaskDeleted(params: {
-    taskId: string;
+  emitWorkItemDeleted(params: {
+    workItemId: string;
     actorId?: string;
     projectId: string;
   }) {
     if (!this.eventEmitter) return;
 
-    this.eventEmitter.emit('task.deleted', {
-      entityType: 'task',
-      entityId: params.taskId,
+    const payload = {
+      entityType: 'work_item',
+      entityId: params.workItemId,
       verb: 'deleted',
       actorId: params.actorId || '',
       projectId: params.projectId,
-    });
+    };
+    this.eventEmitter.emit('work-item.deleted', payload);
   }
 
-  emitTaskDuplicated(params: {
-    taskId: string;
+  emitWorkItemDuplicated(params: {
+    workItemId: string;
     actorId: string;
     projectId: string;
   }) {
     if (!this.eventEmitter) return;
 
-    this.eventEmitter.emit('task.duplicated', {
-      entityType: 'task',
-      entityId: params.taskId,
+    const payload = {
+      entityType: 'work_item',
+      entityId: params.workItemId,
       verb: 'created',
       actorId: params.actorId,
       projectId: params.projectId,
-    });
+    };
+    this.eventEmitter.emit('work-item.duplicated', payload);
   }
 
-  emitTaskReordered(params: {
-    taskId: string;
+  emitWorkItemReordered(params: {
+    workItemId: string;
     projectId: string;
     columnId: string;
     rank: number;
@@ -72,22 +75,17 @@ export class EventDispatcher {
   }) {
     if (!this.eventEmitter) return;
 
-    this.eventEmitter.emit('task.reordered', {
-      entityType: 'task',
-      entityId: params.taskId,
+    const payload = {
+      entityType: 'work_item',
+      entityId: params.workItemId,
       verb: 'reordered',
       actorId: params.actorId || '',
       projectId: params.projectId,
       columnId: params.columnId,
       rank: params.rank,
-    });
-    this.eventEmitter.emit('task.updated', {
-      entityType: 'task',
-      entityId: params.taskId,
-      verb: 'updated',
-      actorId: params.actorId || '',
-      projectId: params.projectId,
-    });
+    };
+    this.eventEmitter.emit('work-item.reordered', payload);
+    this.eventEmitter.emit('work-item.updated', { ...payload, verb: 'updated' });
   }
 
   dispatchUpdateEvents(
@@ -98,7 +96,7 @@ export class EventDispatcher {
     if (!this.eventEmitter) return;
 
     const baseEvent = {
-      entityType: 'task',
+      entityType: 'work_item',
       entityId: existing.id,
       actorId: userId || '',
       projectId: existing.projectId,
@@ -108,7 +106,7 @@ export class EventDispatcher {
       updateDto.columnId !== undefined &&
       updateDto.columnId !== existing.columnId
     ) {
-      this.eventEmitter.emit('task.state.changed', {
+      this.eventEmitter.emit('work-item.state.changed', {
         ...baseEvent,
         verb: 'transitioned',
         field: 'state',
@@ -120,7 +118,7 @@ export class EventDispatcher {
     if (updateDto.priority !== undefined) {
       const newPriority = mapPriority(updateDto.priority);
       if (newPriority !== existing.priority) {
-        this.eventEmitter.emit('task.priority.changed', {
+        this.eventEmitter.emit('work-item.priority.changed', {
           ...baseEvent,
           verb: 'updated',
           field: 'priority',
@@ -134,7 +132,7 @@ export class EventDispatcher {
       updateDto.title !== undefined &&
       updateDto.title !== existing.title
     ) {
-      this.eventEmitter.emit('task.title.changed', {
+      this.eventEmitter.emit('work-item.title.changed', {
         ...baseEvent,
         verb: 'updated',
         field: 'title',
@@ -149,7 +147,7 @@ export class EventDispatcher {
       newContent !== undefined &&
       newContent !== (existing.content || '')
     ) {
-      this.eventEmitter.emit('task.content.changed', {
+      this.eventEmitter.emit('work-item.content.changed', {
         ...baseEvent,
         verb: 'updated',
         field: 'description',
@@ -162,7 +160,7 @@ export class EventDispatcher {
       updateDto.cycleId !== undefined &&
       updateDto.cycleId !== existing.cycleId
     ) {
-      this.eventEmitter.emit('task.cycle.changed', {
+      this.eventEmitter.emit('work-item.cycle.changed', {
         ...baseEvent,
         verb: 'updated',
         field: 'cycle',
@@ -171,15 +169,15 @@ export class EventDispatcher {
       });
     }
 
-    this.eventEmitter.emit('task.updated', {
+    this.eventEmitter.emit('work-item.updated', {
       ...baseEvent,
       verb: 'updated',
     });
   }
 
   emitBulkUpdated(projectId: string, userId?: string) {
-    this.eventEmitter?.emit('task.updated', {
-      entityType: 'task',
+    this.eventEmitter?.emit('work-item.updated', {
+      entityType: 'work_item',
       entityId: projectId,
       verb: 'updated',
       actorId: userId || '',
@@ -188,8 +186,8 @@ export class EventDispatcher {
   }
 
   emitBulkDeleted(projectId: string, userId?: string) {
-    this.eventEmitter?.emit('task.deleted', {
-      entityType: 'task',
+    this.eventEmitter?.emit('work-item.deleted', {
+      entityType: 'work_item',
       entityId: projectId,
       verb: 'deleted',
       actorId: userId || '',

@@ -21,7 +21,7 @@ export class PresignAttachmentDto {
   @ApiProperty({
     enum: EntityType,
     description: 'Entity type: WorkItem, comment, page, sticky, project',
-    example: 'task',
+    example: 'work_item',
   })
   @IsNotEmpty()
   @IsEnum(EntityType)

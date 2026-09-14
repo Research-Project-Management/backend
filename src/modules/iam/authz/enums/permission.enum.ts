@@ -14,17 +14,17 @@ export enum Permission {
   PROJECT_MANAGE_SETTINGS = 'project:manage_settings',
   PROJECT_MANAGE_MEMBERS = 'project:manage_members',
 
-  // ─── 2. Work Items & Tasks ──────────────────────────────────────────────────
-  TASK_VIEW = 'WorkItem:view',
-  TASK_READ = 'WorkItem:read',
-  TASK_CREATE = 'WorkItem:create',
-  TASK_UPDATE = 'WorkItem:update',
-  TASK_EDIT = 'WorkItem:edit',
-  TASK_DELETE = 'WorkItem:delete',
-  TASK_ASSIGN = 'WorkItem:assign',
-  TASK_CHANGE_STATE = 'WorkItem:change_state',
-  TASK_MANAGE_LABELS = 'WorkItem:manage_labels',
-  TASK_MANAGE_CYCLES = 'WorkItem:manage_cycles',
+  // ─── 2. Work Items ──────────────────────────────────────────────────────────
+  WORK_ITEM_VIEW = 'WorkItem:view',
+  WORK_ITEM_READ = 'WorkItem:read',
+  WORK_ITEM_CREATE = 'WorkItem:create',
+  WORK_ITEM_UPDATE = 'WorkItem:update',
+  WORK_ITEM_EDIT = 'WorkItem:edit',
+  WORK_ITEM_DELETE = 'WorkItem:delete',
+  WORK_ITEM_ASSIGN = 'WorkItem:assign',
+  WORK_ITEM_CHANGE_STATE = 'WorkItem:change_state',
+  WORK_ITEM_MANAGE_LABELS = 'WorkItem:manage_labels',
+  WORK_ITEM_MANAGE_CYCLES = 'WorkItem:manage_cycles',
 
   // ─── 3. Documents & Manuscripts (LaTeX) ────────────────────────────────────
   DOCUMENT_VIEW = 'document:view',

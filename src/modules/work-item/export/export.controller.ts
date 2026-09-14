@@ -5,7 +5,6 @@ import {
   Query,
   UseGuards,
   Res,
-  ParseUUIDPipe,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -31,7 +30,6 @@ export class ExportController {
   @Get([
     'projects/:projectId/work-items/export',
     'project/:projectId/work-items/export',
-    'projects/:projectId/tasks/export',
   ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
@@ -43,8 +41,8 @@ export class ExportController {
     status: 200,
     description: 'File download stream (CSV or JSON)',
   })
-  async exportProjectTasks(
-    @Param('projectId', ParseUUIDPipe) projectId: string,
+  async exportProjectWorkItems(
+    @Param('projectId') projectId: string,
     @Query() query: ExportWorkItemsQueryDto,
     @Res() reply: FastifyReply,
   ) {

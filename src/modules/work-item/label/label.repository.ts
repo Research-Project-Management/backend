@@ -102,19 +102,19 @@ export class LabelRepository implements ILabelRepository {
     );
   }
 
-  async detachFromTasks(
+  async detachFromWorkItems(
     projectId: string,
     labelId: string,
     labelName?: string,
   ): Promise<number> {
-    return this.detachMultipleFromTasks(
+    return this.detachMultipleFromWorkItems(
       projectId,
       [labelId],
       labelName ? [labelName] : [],
     );
   }
 
-  async detachMultipleFromTasks(
+  async detachMultipleFromWorkItems(
     projectId: string,
     labelIds: string[],
     labelNames?: string[],
@@ -125,7 +125,7 @@ export class LabelRepository implements ILabelRepository {
     if (!targets.length) return 0;
 
     try {
-      const tasks = await this.prisma.workItem.findMany({
+      const workItems = await this.prisma.workItem.findMany({
         where: {
           projectId,
           labels: { hasSome: targets },
@@ -133,11 +133,11 @@ export class LabelRepository implements ILabelRepository {
         select: { id: true, labels: true },
       });
 
-      if (!tasks.length) return 0;
+      if (!workItems.length) return 0;
 
       const targetSet = new Set(targets);
       await this.prisma.$transaction(
-        tasks.map((item) => {
+        workItems.map((item) => {
           const cleaned = item.labels.filter((label: string) => !targetSet.has(label));
           return this.prisma.workItem.update({
             where: { id: item.id },
@@ -146,7 +146,7 @@ export class LabelRepository implements ILabelRepository {
         }),
       );
 
-      return tasks.length;
+      return workItems.length;
     } catch {
       return 0;
     }
@@ -183,3 +183,5 @@ export class LabelRepository implements ILabelRepository {
     return this.delete(labelId);
   }
 }
+
+

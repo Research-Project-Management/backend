@@ -39,18 +39,18 @@ export interface ProjectMinimal {
   name: string;
   avatar: string | null;
   identifier: string | null;
-  taskColumns?: unknown;
+  workItemColumns?: unknown;
 }
 
-export interface TaskCommentMinimal {
+export interface WorkItemCommentMinimal {
   id: string;
 }
 
-export interface UserTaskItem extends WorkItem {
+export interface UserWorkItem extends WorkItem {
   author: UserMinimal;
   assignee: UserMinimal | null;
   project: ProjectMinimal;
-  comments: TaskCommentMinimal[];
+  comments: WorkItemCommentMinimal[];
 }
 
 export interface ActivityFeedActor {
@@ -99,10 +99,10 @@ export interface YourWorkActivityItem {
 }
 
 export interface IYourWorkRepository {
-  findUserTasks(
+  findUserWorkItems(
     projectId: string | undefined,
     userId: string,
-  ): Promise<UserTaskItem[]>;
+  ): Promise<UserWorkItem[]>;
   findUserProfile(userId: string): Promise<UserProfileData | null>;
   findUserProjects(
     projectId: string | undefined,

@@ -169,4 +169,8 @@ export class IngestionSubmissionDto {
   @IsOptional()
   @IsString()
   contractVersion?: string;
+
+  @IsOptional()
+  @IsUUID('4')
+  projectId?: string;
 }

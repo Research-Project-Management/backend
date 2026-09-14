@@ -8,9 +8,9 @@ describe('YourWorkService', () => {
   let repo: jest.Mocked<YourWorkRepository>;
   let activityService: jest.Mocked<ActivityService>;
 
-  const mockTasks = [
+  const mockWorkItems = [
     {
-      id: 'task-1',
+      id: 'wi-1',
       title: 'WorkItem 1',
       identifier: 'PRJ-1',
       priority: 'high',
@@ -24,11 +24,11 @@ describe('YourWorkService', () => {
         name: 'Project Alpha',
         identifier: 'PRJ',
         avatar: null,
-        taskColumns: [{ id: 'todo', name: 'To Do' }],
+        workItemColumns: [{ id: 'todo', name: 'To Do' }],
       },
     },
     {
-      id: 'task-2',
+      id: 'wi-2',
       title: 'WorkItem 2',
       identifier: 'PRJ-2',
       priority: 'urgent',
@@ -42,7 +42,7 @@ describe('YourWorkService', () => {
         name: 'Project Alpha',
         identifier: 'PRJ',
         avatar: null,
-        taskColumns: [{ id: 'done', name: 'Done' }],
+        workItemColumns: [{ id: 'done', name: 'Done' }],
       },
     },
   ] as any;
@@ -54,7 +54,7 @@ describe('YourWorkService', () => {
         {
           provide: YourWorkRepository,
           useValue: {
-            findUserTasks: jest.fn().mockResolvedValue(mockTasks),
+            findUserWorkItems: jest.fn().mockResolvedValue(mockWorkItems),
             findUserProjects: jest.fn().mockResolvedValue([]),
             findUserProfile: jest.fn().mockResolvedValue({
               id: 'user-1',
@@ -85,14 +85,14 @@ describe('YourWorkService', () => {
     expect(service).toBeDefined();
   });
 
-  it('should aggregate tasks and return profile metadata', async () => {
+  it('should aggregate work items and return profile metadata', async () => {
     const result = await service.getYourWork('prj-1', 'user-1');
 
     expect(result.success).toBe(true);
     expect(result.assigned.length).toBe(1);
-    expect(result.assigned[0].id).toBe('task-1');
+    expect(result.assigned[0].id).toBe('wi-1');
     expect(result.created.length).toBe(1);
-    expect(result.created[0].id).toBe('task-2');
+    expect(result.created[0].id).toBe('wi-2');
     expect(result.userData).toBeDefined();
     expect(result.userData?.name).toBe('Test User');
     expect(result.userData?.email).toBe('test@example.com');

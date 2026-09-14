@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { TaskPriority } from '@prisma/client';
+import { WorkItemPriority } from '@prisma/client';
 import { WorkItemRepository } from './core/core.repository';
 import {
   WorkItemWithRelations,
@@ -14,7 +14,7 @@ export interface WorkItemSummary {
   sequenceNumber: number | null;
   title: string;
   columnId: string;
-  priority: TaskPriority;
+  priority: WorkItemPriority;
   projectId: string;
   authorId: string;
   assigneeId: string | null;
@@ -28,17 +28,17 @@ export interface WorkItemSummary {
 export type WorkItemFilter = WorkItemFilterOptions;
 
 export interface IWorkItemFacade {
-  getTaskById(idOrIdentifier: string): Promise<WorkItemSummary | null>;
-  getProjectTasks(
+  getWorkItemById(idOrIdentifier: string): Promise<WorkItemSummary | null>;
+  getProjectWorkItems(
     projectId: string,
     filter?: WorkItemFilter,
   ): Promise<WorkItemSummary[]>;
-  getUserAssignedTasks(
+  getUserAssignedWorkItems(
     userId: string,
     projectId?: string,
   ): Promise<WorkItemSummary[]>;
   getProjectStates(projectId: string): Promise<WorkItemState[]>;
-  countTasksByProject(projectId: string): Promise<number>;
+  countWorkItemsByProject(projectId: string): Promise<number>;
 }
 
 @Injectable()
@@ -67,31 +67,31 @@ export class WorkItemFacade implements IWorkItemFacade {
     };
   }
 
-  async getTaskById(idOrIdentifier: string): Promise<WorkItemSummary | null> {
-    const task = await this.workItemRepository.findTaskById(idOrIdentifier);
-    return task ? this.toSummary(task) : null;
+  async getWorkItemById(idOrIdentifier: string): Promise<WorkItemSummary | null> {
+    const item = await this.workItemRepository.findWorkItemById(idOrIdentifier);
+    return item ? this.toSummary(item) : null;
   }
 
-  async getProjectTasks(
+  async getProjectWorkItems(
     projectId: string,
     filter?: WorkItemFilter,
   ): Promise<WorkItemSummary[]> {
-    const tasks = await this.workItemRepository.findProjectTasks(
+    const items = await this.workItemRepository.findProjectWorkItems(
       projectId,
       filter,
     );
-    return tasks.map((workItem) => this.toSummary(workItem));
+    return items.map((workItem) => this.toSummary(workItem));
   }
 
-  async getUserAssignedTasks(
+  async getUserAssignedWorkItems(
     userId: string,
     projectId?: string,
   ): Promise<WorkItemSummary[]> {
-    const tasks = await this.workItemRepository.findTasksByAssignee(
+    const items = await this.workItemRepository.findWorkItemsByAssignee(
       userId,
       projectId,
     );
-    return tasks.map((workItem) => this.toSummary(workItem));
+    return items.map((workItem) => this.toSummary(workItem));
   }
 
   async getProjectStates(projectId: string): Promise<WorkItemState[]> {
@@ -99,7 +99,7 @@ export class WorkItemFacade implements IWorkItemFacade {
     return states;
   }
 
-  async countTasksByProject(projectId: string): Promise<number> {
-    return this.workItemRepository.countProjectTasks(projectId);
+  async countWorkItemsByProject(projectId: string): Promise<number> {
+    return this.workItemRepository.countProjectWorkItems(projectId);
   }
 }

@@ -2,7 +2,7 @@
 
 enum ProjectMemberRole {
   owner       // Truong nhom nghien cuu - toan quyen quan ly
-  contributor // Thanh vien nghien cuu - tao/sua task, upload paper, viet tai lieu
+  contributor // Thanh vien nghien cuu - tao/sua work-item, upload paper, viet tai lieu
   commenter   // GVHD / Reviewer - xem + binh luan, khong tao/sua noi dung
   viewer      // Hoi dong phan bien - chi xem (read-only)
 }
@@ -26,12 +26,12 @@ model Project {
   isActive       Boolean               @default(true) @map("is_active")
   createdById    String                @map("created_by_id") @db.Uuid
   createdBy      User                  @relation("ProjectCreator", fields: [createdById], references: [id], onDelete: Cascade)
-  modules        String[]              @default(["tasks", "cycles", "views", "pages", "stickies", "storage"])
+  modules        String[]              @default(["work_items", "cycles", "views", "pages", "stickies", "storage"])
   settings       Json?                 @default("{}")
 
-  // Task & Board extensions
-  taskSequence   Int                   @default(0) @map("task_sequence")
-  taskColumns    Json?                 @default("[]") @map("task_columns")
+  // WorkItem & Board extensions
+  workItemSequence   Int                   @default(0) @map("work_item_sequence")
+  workItemColumns    Json?                 @default("[]") @map("work_item_columns")
 
   createdAt      DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)

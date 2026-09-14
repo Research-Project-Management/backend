@@ -203,9 +203,9 @@ export class MemberRepository {
   }
 
   /**
-   * Unassign active tasks assigned to a member who is leaving/removed from the project.
+   * Unassign active work items assigned to a member who is leaving/removed from the project.
    */
-  async unassignMemberTasks(
+  async unassignMemberWorkItems(
     projectId: string,
     userId: string,
   ): Promise<number> {

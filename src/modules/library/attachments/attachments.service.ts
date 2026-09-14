@@ -28,7 +28,7 @@ import type {
   UpsertSyncAttachmentCommand,
   DeleteSyncEntityCommand,
   UpsertSyncEntityResult,
-} from '../sync/types/sync.types';
+} from '../core/types/entity-commands.types';
 import { Inject } from '@nestjs/common';
 
 import { calculateFileChecksum } from './utils/attachments.utils';
@@ -57,7 +57,7 @@ export class AttachmentsService {
   /**
    * Creates a new attachment with an initial Revision (revision 1).
    */
-  async createAttachment(input: CreateAttachmentInput) {
+  async createAttachment(input: CreateAttachmentInput, projectId?: string) {
     validateAttachmentInvariants({
       url: input.url,
       filename: input.filename,
@@ -72,7 +72,7 @@ export class AttachmentsService {
     }
 
     const userId = input.userId || 'system';
-    await this.itemExistencePort.assertExists(userId, targetItemId);
+    await this.itemExistencePort.assertExists(userId, targetItemId, projectId);
 
     const resolvedFileId =
       input.fileId ||
@@ -149,6 +149,7 @@ export class AttachmentsService {
     userId: string,
     attachmentId: string,
     input: ReplaceAttachmentFileInput,
+    projectId?: string,
   ) {
     validateAttachmentInvariants({
       url: input.url,
@@ -161,11 +162,13 @@ export class AttachmentsService {
       revisions: { orderBy: { revisionNumber: 'desc' }, take: 1 },
     });
 
-    if (
-      !attachment ||
-      ((attachment.item as any).userId &&
-        (attachment.item as any).userId !== userId)
-    ) {
+    const isAuthorized =
+      attachment &&
+      (projectId && projectId !== 'user'
+        ? (attachment.item as any).projectId === projectId
+        : (attachment.item as any).userId === userId);
+
+    if (!isAuthorized) {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
@@ -208,10 +211,18 @@ export class AttachmentsService {
   /**
    * Retrieves revision history for an attachment.
    */
-  async getRevisions(userId: string, attachmentId: string) {
+  async getRevisions(
+    userId: string,
+    attachmentId: string,
+    projectId?: string,
+  ) {
+    const scopeItemWhere =
+      projectId && projectId !== 'user'
+        ? { projectId, deletedAt: null }
+        : { userId, deletedAt: null };
     const attachment = await this.repo.findFirst({
       id: attachmentId,
-      item: { userId, deletedAt: null },
+      item: scopeItemWhere,
     });
 
     if (!attachment) {
@@ -224,8 +235,12 @@ export class AttachmentsService {
   /**
    * Retrieves all attachments for an item.
    */
-  async getItemAttachments(userId: string, itemId: string) {
-    await this.itemExistencePort.assertExists(userId, itemId);
+  async getItemAttachments(
+    userId: string,
+    itemId: string,
+    projectId?: string,
+  ) {
+    await this.itemExistencePort.assertExists(userId, itemId, projectId);
 
     const attachments = await this.repo.findManyByItemId(itemId);
 
@@ -239,10 +254,15 @@ export class AttachmentsService {
     userId: string,
     itemId: string | undefined,
     attachmentId: string,
+    projectId?: string,
   ) {
+    const scopeItemWhere =
+      projectId && projectId !== 'user'
+        ? { projectId, deletedAt: null }
+        : { userId, deletedAt: null };
     const where: any = {
       id: attachmentId,
-      item: { userId, deletedAt: null },
+      item: scopeItemWhere,
     };
     if (itemId) {
       where.itemId = itemId;
@@ -262,15 +282,24 @@ export class AttachmentsService {
   /**
    * Deletes an attachment and records a tombstone.
    */
-  async deleteAttachment(userId: string, attachmentId: string) {
+  async deleteAttachment(
+    userId: string,
+    attachmentId: string,
+    projectId?: string,
+  ) {
     if (!attachmentId) {
       throw new BadRequestException('Attachment ID is required');
     }
 
+    const scopeItemWhere =
+      projectId && projectId !== 'user'
+        ? { projectId, deletedAt: null }
+        : { userId, deletedAt: null };
+
     const attachment = await this.repo.findFirst(
       {
         id: attachmentId,
-        item: { userId, deletedAt: null },
+        item: scopeItemWhere,
       },
       { item: true },
     );
@@ -518,11 +547,16 @@ export class AttachmentsService {
     userId: string,
     itemId: string,
     attachmentId: string,
+    projectId?: string,
   ) {
+    const scopeItemWhere =
+      projectId && projectId !== 'user'
+        ? { projectId, deletedAt: null }
+        : { userId, deletedAt: null };
     const attachment = await this.repo.findFirst({
       id: attachmentId,
       itemId,
-      item: { userId },
+      item: scopeItemWhere,
     });
     if (!attachment) {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);

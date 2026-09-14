@@ -41,7 +41,7 @@ export class DraftRepository {
       },
       include: {
         project: {
-          select: { id: true, name: true, identifier: true, taskColumns: true },
+          select: { id: true, name: true, identifier: true, workItemColumns: true },
         },
       },
     });

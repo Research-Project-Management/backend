@@ -113,8 +113,24 @@ export class RoleGuard implements CanActivate {
         ? request.params.id
         : undefined);
 
-    if (explicitProjectId && isUUID(explicitProjectId)) {
-      return explicitProjectId;
+    const prismaAny = this.prisma as any;
+
+    if (explicitProjectId) {
+      if (isUUID(explicitProjectId)) {
+        return explicitProjectId;
+      }
+      if (prismaAny.project) {
+        const project = await prismaAny.project
+          .findFirst({
+            where: {
+              identifier: { equals: explicitProjectId, mode: 'insensitive' },
+              deletedAt: null,
+            },
+            select: { id: true },
+          })
+          .catch(() => null);
+        if (project?.id) return project.id;
+      }
     }
 
     const headerProjectId =
@@ -122,11 +138,23 @@ export class RoleGuard implements CanActivate {
       request.query?.projectId ||
       request.body?.projectId;
 
-    if (headerProjectId && isUUID(headerProjectId)) {
-      return headerProjectId;
+    if (headerProjectId) {
+      if (isUUID(headerProjectId)) {
+        return headerProjectId;
+      }
+      if (prismaAny.project) {
+        const project = await prismaAny.project
+          .findFirst({
+            where: {
+              identifier: { equals: headerProjectId, mode: 'insensitive' },
+              deletedAt: null,
+            },
+            select: { id: true },
+          })
+          .catch(() => null);
+        if (project?.id) return project.id;
+      }
     }
-
-    const prismaAny = this.prisma as any;
 
     // Lookup through sub-resources
     if (request.params?.cycleId && isUUID(request.params.cycleId) && prismaAny.cycle) {
@@ -139,15 +167,29 @@ export class RoleGuard implements CanActivate {
       if (cycle?.projectId) return cycle.projectId;
     }
 
-    const taskId = request.params?.taskId;
-    if (taskId && isUUID(taskId) && prismaAny.workItem) {
-      const task = await prismaAny.workItem
-        .findUnique({
-          where: { id: taskId },
+    const workItemId = request.params?.workItemId;
+    if (workItemId && prismaAny.workItem) {
+      const where = isUUID(workItemId)
+        ? { id: workItemId }
+        : { identifier: { equals: workItemId, mode: 'insensitive' } };
+      const workItem = await prismaAny.workItem
+        .findFirst({
+          where,
           select: { projectId: true },
         })
         .catch(() => null);
-      if (task?.projectId) return task.projectId;
+      if (workItem?.projectId) return workItem.projectId;
+    }
+
+    const commentId = request.params?.commentId;
+    if (commentId && isUUID(commentId) && prismaAny.workItemComment) {
+      const comment = await prismaAny.workItemComment
+        .findUnique({
+          where: { id: commentId },
+          select: { workItem: { select: { projectId: true } } },
+        })
+        .catch(() => null);
+      if (comment?.workItem?.projectId) return comment.workItem.projectId;
     }
 
     if (request.params?.pageId && isUUID(request.params.pageId) && prismaAny.page) {

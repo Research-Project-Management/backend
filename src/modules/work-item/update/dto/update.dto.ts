@@ -25,7 +25,7 @@ export class CreateWorkItemUpdateDto {
 
   @ApiPropertyOptional({
     description: 'Optional comment describing the current status',
-    example: 'All tasks on schedule, no blockers.',
+    example: 'All work items on schedule, no blockers.',
     maxLength: 500,
   })
   @IsString()

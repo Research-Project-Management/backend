@@ -9,7 +9,7 @@ import {
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { TaskPriority } from '@prisma/client';
+import { WorkItemPriority } from '@prisma/client';
 
 export class QueryWorkItemDto {
   @ApiPropertyOptional({ description: 'Filter by cycle/sprint ID' })
@@ -28,12 +28,12 @@ export class QueryWorkItemDto {
   columnId?: string;
 
   @ApiPropertyOptional({
-    enum: TaskPriority,
+    enum: WorkItemPriority,
     description: 'Filter by priority',
   })
   @IsOptional()
-  @IsEnum(TaskPriority)
-  priority?: TaskPriority;
+  @IsEnum(WorkItemPriority)
+  priority?: WorkItemPriority;
 
   @ApiPropertyOptional({ description: 'Filter by assignee user ID' })
   @IsOptional()
@@ -43,7 +43,7 @@ export class QueryWorkItemDto {
   @ApiPropertyOptional({ description: 'Filter by parent WorkItem ID' })
   @IsOptional()
   @IsString()
-  parentTaskId?: string;
+  parentWorkItemId?: string;
 
   @ApiPropertyOptional({ description: 'Filter by completion state' })
   @IsOptional()
@@ -52,7 +52,7 @@ export class QueryWorkItemDto {
   completed?: boolean;
 
   @ApiPropertyOptional({
-    description: 'Filter by archived status (default false: only active tasks)',
+    description: 'Filter by archived status (default false: only active work items)',
   })
   @IsOptional()
   @Transform(({ value }) => value === 'true' || value === true)

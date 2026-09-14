@@ -4,6 +4,7 @@ import { PrismaService } from '@/core/database/prisma.service';
 import { RedisCacheService } from '@/core/cache/redis.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'crypto';
+import { isUuid } from '@/core/utils/uuid.util';
 import { CreateWorkItemUpdateDto } from './dto/update.dto';
 import { WorkItemUpdate } from './types/update.types';
 import { WORK_ITEM_REDIS_KEYS } from '../core/constants/redis-keys.constant';
@@ -16,6 +17,22 @@ export class UpdateService {
     @Optional() private readonly eventEmitter?: EventEmitter2,
   ) {}
 
+  private async findWorkItem(workItemId: string) {
+    if (isUuid(workItemId) || !this.prismaService.workItem?.findFirst) {
+      return this.prismaService.workItem.findUnique({
+        where: { id: workItemId },
+        select: { id: true, projectId: true, updates: true },
+      });
+    }
+    return this.prismaService.workItem.findFirst({
+      where: {
+        identifier: { equals: workItemId, mode: 'insensitive' },
+        deletedAt: null,
+      },
+      select: { id: true, projectId: true, updates: true },
+    });
+  }
+
   /**
    * Parse raw JSON updates field from a WorkItem record.
    */
@@ -27,15 +44,12 @@ export class UpdateService {
   /**
    * Get all status updates for a work item, newest first.
    */
-  async getUpdates(taskId: string): Promise<{ updates: WorkItemUpdate[] }> {
-    const task = await this.prismaService.workItem.findUnique({
-      where: { id: taskId },
-      select: { id: true, updates: true },
-    });
+  async getUpdates(workItemId: string): Promise<{ updates: WorkItemUpdate[] }> {
+    const workItem = await this.findWorkItem(workItemId);
 
-    if (!task) throw new NotFoundException('Work item not found');
+    if (!workItem) throw new NotFoundException('Work item not found');
 
-    const updates = this.parseUpdates(task.updates).sort(
+    const updates = this.parseUpdates(workItem.updates).sort(
       (firstUpdate: WorkItemUpdate, secondUpdate: WorkItemUpdate) =>
         new Date(secondUpdate.createdAt).getTime() -
         new Date(firstUpdate.createdAt).getTime(),
@@ -49,18 +63,15 @@ export class UpdateService {
    * Keeps a rolling window of the last 20 updates.
    */
   async addUpdate(
-    taskId: string,
+    workItemId: string,
     authorId: string,
     createWorkItemUpdateDto: CreateWorkItemUpdateDto,
   ): Promise<{ update: WorkItemUpdate; updates: WorkItemUpdate[] }> {
-    const task = await this.prismaService.workItem.findUnique({
-      where: { id: taskId },
-      select: { id: true, projectId: true, updates: true },
-    });
+    const workItem = await this.findWorkItem(workItemId);
 
-    if (!task) throw new NotFoundException('Work item not found');
+    if (!workItem) throw new NotFoundException('Work item not found');
 
-    const existing = this.parseUpdates(task.updates);
+    const existing = this.parseUpdates(workItem.updates);
 
     const newUpdate: WorkItemUpdate = {
       id: randomUUID(),
@@ -74,24 +85,29 @@ export class UpdateService {
     const updated = [newUpdate, ...existing].slice(0, 20);
 
     await this.prismaService.workItem.update({
-      where: { id: taskId },
+      where: { id: workItem.id },
       data: { updates: updated as unknown as Prisma.InputJsonValue },
     });
 
     // Invalidate WorkItem cache
     if (this.cache) {
       await Promise.all([
-        this.cache.del(WORK_ITEM_REDIS_KEYS.WorkItem(taskId)),
-        this.cache.del(WORK_ITEM_REDIS_KEYS.projectTasks(task.projectId)),
+        this.cache.del(WORK_ITEM_REDIS_KEYS.workItem(workItem.id)),
+        this.cache.del(WORK_ITEM_REDIS_KEYS.projectWorkItems(workItem.projectId)),
       ]).catch(() => null);
     }
 
-    this.eventEmitter?.emit('task.update.added', {
-      taskId,
+    const updatePayload = {
+      entityType: 'work_item',
+      entityId: workItem.id,
+      workItemId: workItem.id,
       status: createWorkItemUpdateDto.status,
       authorId,
-      projectId: task.projectId,
-    });
+      projectId: workItem.projectId,
+      verb: 'updated',
+    };
+    this.eventEmitter?.emit('work-item.update.added', updatePayload);
+    this.eventEmitter?.emit('work-item.updated', updatePayload);
 
     return { update: newUpdate, updates: updated };
   }
@@ -100,18 +116,15 @@ export class UpdateService {
    * Delete a specific status update from a work item.
    */
   async deleteUpdate(
-    taskId: string,
+    workItemId: string,
     updateId: string,
     actorId: string,
   ): Promise<{ success: boolean; updates: WorkItemUpdate[] }> {
-    const task = await this.prismaService.workItem.findUnique({
-      where: { id: taskId },
-      select: { id: true, projectId: true, updates: true },
-    });
+    const workItem = await this.findWorkItem(workItemId);
 
-    if (!task) throw new NotFoundException('Work item not found');
+    if (!workItem) throw new NotFoundException('Work item not found');
 
-    const existing = this.parseUpdates(task.updates);
+    const existing = this.parseUpdates(workItem.updates);
     const target = existing.find(
       (updateItem: WorkItemUpdate) => updateItem.id === updateId,
     );
@@ -123,14 +136,14 @@ export class UpdateService {
     );
 
     await this.prismaService.workItem.update({
-      where: { id: taskId },
+      where: { id: workItem.id },
       data: { updates: filtered as unknown as Prisma.InputJsonValue },
     });
 
     if (this.cache) {
       await Promise.all([
-        this.cache.del(WORK_ITEM_REDIS_KEYS.WorkItem(taskId)),
-        this.cache.del(WORK_ITEM_REDIS_KEYS.projectTasks(task.projectId)),
+        this.cache.del(WORK_ITEM_REDIS_KEYS.workItem(workItem.id)),
+        this.cache.del(WORK_ITEM_REDIS_KEYS.projectWorkItems(workItem.projectId)),
       ]).catch(() => null);
     }
 
@@ -141,9 +154,9 @@ export class UpdateService {
    * Get the latest (most recent) status update for a work item.
    */
   async getLatestUpdate(
-    taskId: string,
+    workItemId: string,
   ): Promise<{ update: WorkItemUpdate | null }> {
-    const { updates } = await this.getUpdates(taskId);
+    const { updates } = await this.getUpdates(workItemId);
     return { update: updates[0] ?? null };
   }
 }

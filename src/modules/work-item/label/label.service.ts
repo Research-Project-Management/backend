@@ -164,7 +164,7 @@ export class LabelService {
       sortOrder,
       parentId: dto.parentId || null,
       projectId,
-      type: LabelType.task,
+      type: LabelType.work_item,
       createdById: userId,
     });
 
@@ -265,7 +265,7 @@ export class LabelService {
       throw new ForbiddenException('Label does not belong to this project');
     }
 
-    // 1. Detach label and all its sub-labels from all tasks in project (cascade safe deletion)
+    // 1. Detach label and all its sub-labels from all work items in project (cascade safe deletion)
     const labelIdsToDetach = [labelId];
     const labelNamesToDetach = [label.name];
     if (label.children && label.children.length > 0) {
@@ -274,7 +274,7 @@ export class LabelService {
         if (child.name) labelNamesToDetach.push(child.name);
       }
     }
-    await this.labelRepository.detachMultipleFromTasks(
+    await this.labelRepository.detachMultipleFromWorkItems(
       projectId,
       labelIdsToDetach,
       labelNamesToDetach,
@@ -364,7 +364,7 @@ export class LabelService {
         description: row.description?.trim() || null,
         projectId,
         createdById: userId,
-        type: LabelType.task,
+        type: LabelType.work_item,
         sortOrder: baseSortOrder,
       });
       baseSortOrder += 10000;
@@ -446,7 +446,7 @@ export class LabelService {
     const label = await this.labelRepository.create({
       name: dto.name.trim(),
       color,
-      type: dto.type || LabelType.task,
+      type: dto.type || LabelType.work_item,
       description: dto.description || null,
       parentId: dto.parentId || null,
       createdById: userId,
@@ -577,7 +577,7 @@ export class LabelService {
         description: row.description?.trim() || null,
         projectId: null,
         createdById: userId,
-        type: LabelType.task,
+        type: LabelType.work_item,
       });
     }
 

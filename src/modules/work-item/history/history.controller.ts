@@ -18,59 +18,59 @@ import { FeedQueryDto } from './dto/feed-query.dto';
 export class HistoryController {
   constructor(private readonly historyService: HistoryService) {}
 
-  @Get('work-items/:taskId/feed')
+  @Get('work-items/:workItemId/feed')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({
     summary:
       'Get unified collaboration feed for work item (Plane.so 5-tabs: all, activity, comments, transition, history)',
   })
-  @ApiParam({ name: 'taskId', description: 'Work item ID' })
+  @ApiParam({ name: 'workItemId', description: 'Work item ID' })
   async getWorkItemFeed(
-    @Param('taskId') taskId: string,
+    @Param('workItemId') workItemId: string,
     @Query() feedQueryDto: FeedQueryDto,
   ) {
-    return this.historyService.getUnifiedFeed(taskId, feedQueryDto);
+    return this.historyService.getUnifiedFeed(workItemId, feedQueryDto);
   }
 
-  @Get('work-items/:taskId/transitions')
+  @Get('work-items/:workItemId/transitions')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({
     summary:
       'Get state transitions and time-in-state calculation (Plane.so Transition tab)',
   })
-  @ApiParam({ name: 'taskId', description: 'Work item ID' })
-  async getTransitions(@Param('taskId') taskId: string) {
-    return this.historyService.getTransitions(taskId);
+  @ApiParam({ name: 'workItemId', description: 'Work item ID' })
+  async getTransitions(@Param('workItemId') workItemId: string) {
+    return this.historyService.getTransitions(workItemId);
   }
 
-  @Get('work-items/:taskId/history')
+  @Get('work-items/:workItemId/history')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({
     summary:
       'Get property changelog history with diff summary (Plane.so History tab)',
   })
-  @ApiParam({ name: 'taskId', description: 'Work item ID' })
+  @ApiParam({ name: 'workItemId', description: 'Work item ID' })
   async getHistory(
-    @Param('taskId') taskId: string,
+    @Param('workItemId') workItemId: string,
     @Query('sort') sort?: 'asc' | 'desc',
   ) {
-    return this.historyService.getHistory(taskId, sort);
+    return this.historyService.getHistory(workItemId, sort);
   }
 
-  @Get('work-items/:taskId/activity')
+  @Get('work-items/:workItemId/activity')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({
     summary: 'Get activity events for work item (Plane.so Activity tab)',
   })
-  @ApiParam({ name: 'taskId', description: 'Work item ID' })
+  @ApiParam({ name: 'workItemId', description: 'Work item ID' })
   async getActivity(
-    @Param('taskId') taskId: string,
+    @Param('workItemId') workItemId: string,
     @Query('sort') sort?: 'asc' | 'desc',
   ) {
-    return this.historyService.getActivity(taskId, sort);
+    return this.historyService.getActivity(workItemId, sort);
   }
 }

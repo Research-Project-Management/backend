@@ -44,11 +44,21 @@ export class LibraryStatsResponseDto {
   storageBytes?: number;
 }
 
+export class LibraryPermissionsDto {
+  canCreate!: boolean;
+  canEdit!: boolean;
+  canDelete!: boolean;
+  canManageCollections!: boolean;
+}
+
 export class LibraryOverviewResponseDto {
   recentItems!: RecentLibraryItem[];
   unfiledCount!: number;
   trashCount!: number;
   starredCount!: number;
+  duplicateCount!: number;
+  myPublicationsCount!: number;
+  permissions!: LibraryPermissionsDto;
   topTags!: Array<{
     id: string;
     name: string;

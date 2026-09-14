@@ -11,24 +11,29 @@ export interface RankUpdateItem {
 @Injectable()
 export class RankHandler {
   calculateReorder(
-    columnTasks: Array<{ id: string; columnId: string; rank: number }>,
-    taskId: string,
+    columnWorkItems: Array<{ id: string; columnId: string; rank: number }>,
+    workItemId: string,
     targetColumn: string,
     targetRank: number,
     isDoneFn: (columnId?: string | null) => boolean = (columnId) =>
       isStateCompleted(columnId),
+    movingWorkItem?: { id: string; columnId: string; rank: number },
   ): RankUpdateItem[] {
-    const currentTask = columnTasks.find((taskItem) => taskItem.id === taskId);
-    const otherTasks = columnTasks.filter((taskItem) => taskItem.id !== taskId);
-
-    if (!currentTask) {
-      throw new Error(`WorkItem with ID ${taskId} not found`);
+    let currentWorkItem = columnWorkItems.find((item) => item.id === workItemId);
+    if (!currentWorkItem && movingWorkItem && movingWorkItem.id === workItemId) {
+      currentWorkItem = movingWorkItem;
     }
 
-    otherTasks.splice(targetRank, 0, currentTask);
+    if (!currentWorkItem) {
+      throw new Error(`WorkItem with ID ${workItemId} not found`);
+    }
 
-    return otherTasks.map((taskItem, index) => ({
-      id: taskItem.id,
+    const otherWorkItems = columnWorkItems.filter((item) => item.id !== workItemId);
+    const clampedRank = Math.max(0, Math.min(targetRank, otherWorkItems.length));
+    otherWorkItems.splice(clampedRank, 0, { ...currentWorkItem, columnId: targetColumn });
+
+    return otherWorkItems.map((item, index) => ({
+      id: item.id,
       rank: index,
       columnId: targetColumn,
       completed: isDoneFn(targetColumn),

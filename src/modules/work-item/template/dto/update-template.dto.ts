@@ -7,7 +7,7 @@ import {
   MaxLength,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { TaskPriority } from '@prisma/client';
+import { WorkItemPriority } from '@prisma/client';
 
 export class UpdateTemplateDto {
   @ApiPropertyOptional({
@@ -43,12 +43,12 @@ export class UpdateTemplateDto {
   content?: string;
 
   @ApiPropertyOptional({
-    enum: TaskPriority,
+    enum: WorkItemPriority,
     description: 'Updated default priority level',
   })
   @IsOptional()
-  @IsEnum(TaskPriority)
-  priority?: TaskPriority;
+  @IsEnum(WorkItemPriority)
+  priority?: WorkItemPriority;
 
   @ApiPropertyOptional({
     description: 'Updated default label IDs',

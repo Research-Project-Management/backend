@@ -42,10 +42,10 @@ export class CacheInvalidationListener {
     }
   }
 
-  @OnEvent('task.*', { async: true })
-  async handleTaskChanged(event: EntityChangeEvent) {
+  @OnEvent('work-item.*', { async: true })
+  async handleWorkItemChanged(event: EntityChangeEvent) {
     if (event.projectId) {
-      await this.redisCache.delPattern(`tasks:${event.projectId}:*`);
+      await this.redisCache.delPattern(`work-items:${event.projectId}:*`);
       await this.redisCache.delPattern(
         `analytics:project:${event.projectId}:*`,
       );
@@ -56,6 +56,7 @@ export class CacheInvalidationListener {
       );
     }
     if (event.entityId) {
+      await this.redisCache.del(`work_item:${event.entityId}`);
       await this.redisCache.del(`WorkItem:${event.entityId}`);
     }
   }
@@ -111,7 +112,7 @@ export class CacheInvalidationListener {
     if (event.entityId || event.projectId) {
       const pid = event.entityId || event.projectId;
       await this.redisCache.del(`project:${pid}`);
-      await this.redisCache.delPattern(`tasks:${pid}:*`);
+      await this.redisCache.delPattern(`work-items:${pid}:*`);
       await this.redisCache.delPattern(`analytics:project:${pid}:*`);
     }
     if (event.workspaceId) {
@@ -126,7 +127,7 @@ export class CacheInvalidationListener {
   async handleCycleChanged(event: EntityChangeEvent) {
     if (event.projectId) {
       await this.redisCache.delPattern(`cycles:${event.projectId}:*`);
-      await this.redisCache.delPattern(`tasks:${event.projectId}:*`);
+      await this.redisCache.delPattern(`work-items:${event.projectId}:*`);
       await this.redisCache.delPattern(
         `analytics:project:${event.projectId}:*`,
       );

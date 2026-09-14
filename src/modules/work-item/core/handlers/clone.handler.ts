@@ -7,38 +7,38 @@ export class CloneHandler {
   constructor(private readonly idHandler: IdHandler) {}
 
   async buildCloneData(
-    sourceTask: any,
+    sourceWorkItem: any,
     authorId: string,
     destinationProjectId?: string,
   ) {
-    const targetProjectId = destinationProjectId || sourceTask.projectId;
-    const isSameProject = targetProjectId === sourceTask.projectId;
+    const targetProjectId = destinationProjectId || sourceWorkItem.projectId;
+    const isSameProject = targetProjectId === sourceWorkItem.projectId;
 
     const { identifier, sequenceNumber } =
       await this.idHandler.nextIdentifier(targetProjectId);
 
     const cloneData: Prisma.WorkItemCreateInput = {
-      title: `${sourceTask.title} (Copy)`,
-      content: sourceTask.content || sourceTask.description || '',
-      columnId: sourceTask.columnId,
-      rank: (sourceTask.rank ?? 0) + 1,
-      priority: sourceTask.priority,
+      title: `${sourceWorkItem.title} (Copy)`,
+      content: sourceWorkItem.content || sourceWorkItem.description || '',
+      columnId: sourceWorkItem.columnId,
+      rank: (sourceWorkItem.rank ?? 0) + 1,
+      priority: sourceWorkItem.priority,
       identifier,
       sequenceNumber,
-      labels: sourceTask.labels || [],
-      completed: sourceTask.completed,
-      startDate: sourceTask.startDate,
-      dueDate: sourceTask.dueDate,
+      labels: sourceWorkItem.labels || [],
+      completed: sourceWorkItem.completed,
+      startDate: sourceWorkItem.startDate,
+      dueDate: sourceWorkItem.dueDate,
       project: { connect: { id: targetProjectId } },
       author: { connect: { id: authorId } },
-      ...(sourceTask.assigneeId
-        ? { assignee: { connect: { id: sourceTask.assigneeId } } }
+      ...(sourceWorkItem.assigneeId
+        ? { assignee: { connect: { id: sourceWorkItem.assigneeId } } }
         : {}),
-      ...(isSameProject && sourceTask.cycleId
-        ? { cycle: { connect: { id: sourceTask.cycleId } } }
+      ...(isSameProject && sourceWorkItem.cycleId
+        ? { cycle: { connect: { id: sourceWorkItem.cycleId } } }
         : {}),
-      ...(isSameProject && sourceTask.parentTaskId
-        ? { parentTask: { connect: { id: sourceTask.parentTaskId } } }
+      ...(isSameProject && sourceWorkItem.parentWorkItemId
+        ? { parentWorkItem: { connect: { id: sourceWorkItem.parentWorkItemId } } }
         : {}),
     };
 

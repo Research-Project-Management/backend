@@ -1,14 +1,31 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { EntityType } from '@prisma/client';
+import { isUuid } from '@/core/utils/uuid.util';
 
 @Injectable()
 export class HistoryRepository {
   constructor(private readonly prismaService: PrismaService) {}
 
-  async findTaskWithProject(taskId: string) {
+  async resolveWorkItemUuid(workItemIdOrIdentifier: string): Promise<string | null> {
+    if (isUuid(workItemIdOrIdentifier)) {
+      return workItemIdOrIdentifier;
+    }
+    const item = await this.prismaService.workItem.findFirst({
+      where: {
+        identifier: { equals: workItemIdOrIdentifier, mode: 'insensitive' },
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    return item?.id || null;
+  }
+
+  async findWorkItemWithProject(workItemId: string) {
+    const itemUuid = await this.resolveWorkItemUuid(workItemId);
+    if (!itemUuid) return null;
     return this.prismaService.workItem.findUnique({
-      where: { id: taskId },
+      where: { id: itemUuid },
       select: {
         id: true,
         columnId: true,
@@ -19,16 +36,18 @@ export class HistoryRepository {
           select: {
             id: true,
             identifier: true,
-            taskColumns: true,
+            workItemColumns: true,
           },
         },
       },
     });
   }
 
-  async findTaskComments(taskId: string, sort: 'asc' | 'desc' = 'desc') {
+  async findWorkItemComments(workItemId: string, sort: 'asc' | 'desc' = 'desc') {
+    const itemUuid = await this.resolveWorkItemUuid(workItemId);
+    if (!itemUuid) return [];
     return this.prismaService.workItemComment.findMany({
-      where: { taskId },
+      where: { workItemId: itemUuid },
       orderBy: { createdAt: sort },
       include: {
         author: {
@@ -43,11 +62,13 @@ export class HistoryRepository {
     });
   }
 
-  async findTaskActivityEvents(taskId: string, sort: 'asc' | 'desc' = 'desc') {
+  async findWorkItemActivityEvents(workItemId: string, sort: 'asc' | 'desc' = 'desc') {
+    const itemUuid = await this.resolveWorkItemUuid(workItemId);
+    if (!itemUuid) return [];
     return this.prismaService.activityEvent.findMany({
       where: {
-        entityType: EntityType.task,
-        entityId: taskId,
+        entityType: EntityType.work_item,
+        entityId: itemUuid,
       },
       orderBy: { createdAt: sort },
       include: {
@@ -63,11 +84,13 @@ export class HistoryRepository {
     });
   }
 
-  async findStateTransitions(taskId: string) {
+  async findStateTransitions(workItemId: string) {
+    const itemUuid = await this.resolveWorkItemUuid(workItemId);
+    if (!itemUuid) return [];
     return this.prismaService.activityEvent.findMany({
       where: {
-        entityType: EntityType.task,
-        entityId: taskId,
+        entityType: EntityType.work_item,
+        entityId: itemUuid,
         OR: [
           { verb: 'transitioned' },
           { field: 'state' },
@@ -88,11 +111,13 @@ export class HistoryRepository {
     });
   }
 
-  async findHistoryEvents(taskId: string, sort: 'asc' | 'desc' = 'desc') {
+  async findHistoryEvents(workItemId: string, sort: 'asc' | 'desc' = 'desc') {
+    const itemUuid = await this.resolveWorkItemUuid(workItemId);
+    if (!itemUuid) return [];
     return this.prismaService.activityEvent.findMany({
       where: {
-        entityType: EntityType.task,
-        entityId: taskId,
+        entityType: EntityType.work_item,
+        entityId: itemUuid,
         field: { not: null },
       },
       orderBy: { createdAt: sort },

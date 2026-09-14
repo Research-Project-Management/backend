@@ -28,7 +28,7 @@ import type {
   UpsertSyncNoteCommand,
   DeleteSyncEntityCommand,
   UpsertSyncEntityResult,
-} from '../sync/types/sync.types';
+} from '../core/types/entity-commands.types';
 import {
   ITEM_READ_PORT,
   IItemReadPort,
@@ -51,12 +51,12 @@ export class NotesService implements IItemNotesExtractorPort {
     private readonly itemExistencePort?: IItemExistencePort,
   ) {}
 
-  async listNotes(userId: string, itemId?: string) {
-    return this.repo.findMany(userId, itemId);
+  async listNotes(userId: string, itemId?: string, projectId?: string) {
+    return this.repo.findMany(userId, itemId, projectId);
   }
 
-  async getNote(userId: string, id: string) {
-    return this.repo.findById(userId, id);
+  async getNote(userId: string, id: string, projectId?: string) {
+    return this.repo.findById(userId, id, undefined, projectId);
   }
 
   async createNote(userId: string, data: CreateNoteData) {
@@ -65,11 +65,13 @@ export class NotesService implements IItemNotesExtractorPort {
         await this.itemExistencePort.assertExists(
           userId,
           data.itemId,
+          data.projectId,
         );
       } else {
         const item = await this.itemReadPort.findById(
           userId,
           data.itemId,
+          data.projectId,
         );
         if (!item) {
           throw new NotFoundException(`Item not found`);
@@ -103,6 +105,7 @@ export class NotesService implements IItemNotesExtractorPort {
     id: string,
     expectedVersion: number,
     data: UpdateNoteData,
+    projectId?: string,
   ) {
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
       const updated = await this.repo.update(
@@ -111,6 +114,7 @@ export class NotesService implements IItemNotesExtractorPort {
         expectedVersion,
         data,
         tx,
+        projectId,
       );
 
       await helpers.appendChange(userId, {
@@ -136,6 +140,7 @@ export class NotesService implements IItemNotesExtractorPort {
     userId: string,
     id: string,
     expectedVersion?: number,
+    projectId?: string,
   ): Promise<boolean> {
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
       const deleted = await this.repo.softDelete(
@@ -143,6 +148,7 @@ export class NotesService implements IItemNotesExtractorPort {
         id,
         expectedVersion,
         tx,
+        projectId,
       );
 
       if (deleted) {

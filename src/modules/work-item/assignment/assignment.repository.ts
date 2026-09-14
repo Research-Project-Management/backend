@@ -10,7 +10,7 @@ import {
 import { isUuid } from '@/core/utils/uuid.util';
 
 
-export type TaskWithProject = WorkItem & {
+export type WorkItemWithProject = WorkItem & {
   /** JSON array of all assignee user IDs (multi-assignee). Prisma v6 field. */
   assigneeIds?: unknown;
   project?: {
@@ -29,21 +29,23 @@ export type TaskWithProject = WorkItem & {
 export class AssignmentRepository implements IAssignmentRepository {
   constructor(private readonly prismaService: PrismaService) {}
 
-  async findTask(taskId: string): Promise<WorkItem | null> {
-    if (isUuid(taskId)) {
+  async findWorkItem(workItemId: string): Promise<WorkItem | null> {
+    if (isUuid(workItemId)) {
       return this.prismaService.workItem.findFirst({
-        where: { id: taskId, deletedAt: null },
+        where: { id: workItemId, deletedAt: null },
       });
     }
     return this.prismaService.workItem.findFirst({
-      where: { identifier: taskId, deletedAt: null },
+      where: { identifier: workItemId, deletedAt: null },
     });
   }
 
-  async findTaskWithProject(taskId: string): Promise<TaskWithProject | null> {
-    const whereClause = isUuid(taskId)
-      ? { id: taskId, deletedAt: null }
-      : { identifier: taskId, deletedAt: null };
+  async findWorkItemWithProject(
+    workItemId: string,
+  ): Promise<WorkItemWithProject | null> {
+    const whereClause = isUuid(workItemId)
+      ? { id: workItemId, deletedAt: null }
+      : { identifier: workItemId, deletedAt: null };
 
     return this.prismaService.workItem.findFirst({
       where: whereClause,
@@ -123,23 +125,26 @@ export class AssignmentRepository implements IAssignmentRepository {
     });
   }
 
-  async assignTask(taskId: string, assigneeId: string | null): Promise<WorkItem> {
+  async assignWorkItem(
+    workItemId: string,
+    assigneeId: string | null,
+  ): Promise<WorkItem> {
     return this.prismaService.workItem.update({
-      where: { id: taskId },
+      where: { id: workItemId },
       data: assigneeId
         ? { assignee: { connect: { id: assigneeId } } }
         : { assignee: { disconnect: true } },
     });
   }
 
-  async bulkAssignTasks(
+  async bulkAssignWorkItems(
     projectId: string,
-    taskIds: string[],
+    workItemIds: string[],
     assigneeId: string | null,
   ): Promise<number> {
     const result = await this.prismaService.workItem.updateMany({
       where: {
-        id: { in: taskIds },
+        id: { in: workItemIds },
         projectId,
         deletedAt: null,
       },
@@ -165,17 +170,14 @@ export class AssignmentRepository implements IAssignmentRepository {
 
   /**
    * Persist the full assignee list and sync the primary assigneeId.
-   *
-   * NOTE: `assigneeIds` is a new Json field — `as any` cast is intentional
-   * until `prisma generate` updates the Prisma client types.
    */
   async setAssigneeIds(
-    taskId: string,
+    workItemId: string,
     assigneeIds: string[],
     primaryAssigneeId: string | null,
   ): Promise<void> {
     await (this.prismaService.workItem.update as any)({
-      where: { id: taskId },
+      where: { id: workItemId },
       data: {
         assigneeIds,
         assigneeId: primaryAssigneeId,

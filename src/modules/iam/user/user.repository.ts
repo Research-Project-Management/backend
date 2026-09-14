@@ -242,7 +242,7 @@ export class UserRepository implements IUserRepository {
     return [];
   }
 
-  async searchTasks(_userId: string, _query: string): Promise<Array<{ id: string; title: string; identifier: string; projectId: string; project?: { name: string }; updatedAt: Date }>> {
+  async searchWorkItems(_userId: string, _query: string): Promise<Array<{ id: string; title: string; identifier: string; projectId: string; project?: { name: string }; updatedAt: Date }>> {
     return [];
   }
 
@@ -275,7 +275,7 @@ export class UserRepository implements IUserRepository {
       storageQuotaBytes,
       storageUsedFormatted: formatBytes(0),
       stickiesCount: 0,
-      tasksCount: 0,
+      workItemsCount: 0,
       plan,
     };
   }

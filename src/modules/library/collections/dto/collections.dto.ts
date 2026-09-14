@@ -44,6 +44,10 @@ export class CreateCollectionDto {
 
   @IsOptional()
   parent?: string | null;
+
+  @IsOptional()
+  @IsUUID()
+  projectId?: string | null;
 }
 
 export class UpdateCollectionDto {

@@ -31,13 +31,13 @@ function formatDuration(ms: number): string {
 
 function resolveStateInfo(
   stateId: string | null | undefined,
-  taskColumns: any,
+  workItemColumns: any,
 ): { id: string; name: string; color: string; group: string } {
   if (!stateId) {
     return { id: '', name: 'None', color: '#94a3b8', group: 'backlog' };
   }
 
-  const columns = Array.isArray(taskColumns) ? taskColumns : [];
+  const columns = Array.isArray(workItemColumns) ? workItemColumns : [];
   const found = columns.find(
     (c: any) => c.id === stateId || c.slug === stateId,
   );
@@ -275,7 +275,7 @@ export class ActivityService {
   }
 
   /**
-   * Entity Timeline for TaskActivities modal.
+   * Entity Timeline for WorkItemActivities modal.
    */
   async getEntityActivity(
     entityType: EntityType,
@@ -333,24 +333,24 @@ export class ActivityService {
     return result;
   }
 
-  async getTaskActivity(taskId: string, limit = 50) {
-    return this.getEntityActivity(EntityType.task, taskId, limit);
+  async getWorkItemActivity(workItemId: string, limit = 50) {
+    return this.getEntityActivity(EntityType.work_item, workItemId, limit);
   }
 
   /**
    * Tracks full state transition flow and time-in-state calculation (Plane.so Transition tab).
    */
-  async getTaskTransitions(taskId: string) {
-    const task = await this.activityRepo.findTaskWithProject(taskId);
-    if (!task) {
-      throw new NotFoundException(`Work item '${taskId}' not found`);
+  async getWorkItemTransitions(workItemId: string) {
+    const workItem = await this.activityRepo.findWorkItemWithProject(workItemId);
+    if (!workItem) {
+      throw new NotFoundException(`Work item '${workItemId}' not found`);
     }
 
-    const taskColumns = task.project?.taskColumns || [];
+    const workItemColumns = (workItem.project as any)?.workItemColumns || [];
 
     // Find state transition events in chronological order
-    const events = await this.activityRepo.findTaskActivityEvents(
-      taskId,
+    const events = await this.activityRepo.findWorkItemActivityEvents(
+      workItemId,
       'asc',
     );
     const transitionEvents = events.filter(
@@ -370,16 +370,16 @@ export class ActivityService {
       timeInStateFormatted: string;
     }> = [];
 
-    let prevTimestamp = task.createdAt.getTime();
-    let currentStateId = task.columnId;
+    let prevTimestamp = workItem.createdAt.getTime();
+    let currentStateId = workItem.columnId;
 
     if (transitionEvents.length > 0) {
       for (const evt of transitionEvents) {
         const transitionTime = evt.createdAt.getTime();
         const durationMs = Math.max(0, transitionTime - prevTimestamp);
 
-        const fromState = resolveStateInfo(evt.oldValue, taskColumns);
-        const toState = resolveStateInfo(evt.newValue, taskColumns);
+        const fromState = resolveStateInfo(evt.oldValue, workItemColumns);
+        const toState = resolveStateInfo(evt.newValue, workItemColumns);
 
         transitions.push({
           id: evt.id,
@@ -401,20 +401,20 @@ export class ActivityService {
     // Current state duration
     const now = Date.now();
     const currentDurationMs = Math.max(0, now - prevTimestamp);
-    const currentState = resolveStateInfo(currentStateId, taskColumns);
+    const currentState = resolveStateInfo(currentStateId, workItemColumns);
 
-    const totalCycleTimeMs = task.completed
-      ? Math.max(0, task.updatedAt.getTime() - task.createdAt.getTime())
-      : Math.max(0, now - task.createdAt.getTime());
+    const totalCycleTimeMs = workItem.completed
+      ? Math.max(0, workItem.updatedAt.getTime() - workItem.createdAt.getTime())
+      : Math.max(0, now - workItem.createdAt.getTime());
 
     return {
-      taskId,
+      workItemId,
       currentState,
       currentDurationMs,
       currentDurationFormatted: formatDuration(currentDurationMs),
       totalCycleTimeMs,
       totalCycleTimeFormatted: formatDuration(totalCycleTimeMs),
-      completed: task.completed,
+      completed: workItem.completed,
       transitions,
     };
   }
@@ -422,9 +422,9 @@ export class ActivityService {
   /**
    * Tracks title and description revisions with oldValue and newValue diffs (Plane.so History tab).
    */
-  async getTaskHistory(taskId: string, options?: { sort?: 'asc' | 'desc' }) {
+  async getWorkItemHistory(workItemId: string, options?: { sort?: 'asc' | 'desc' }) {
     const sort = options?.sort || 'desc';
-    const events = await this.activityRepo.findTaskActivityEvents(taskId, sort);
+    const events = await this.activityRepo.findWorkItemActivityEvents(workItemId, sort);
 
     const historyEvents = events.filter(
       (e) =>
@@ -434,7 +434,7 @@ export class ActivityService {
     );
 
     return {
-      taskId,
+      workItemId,
       histories: historyEvents.map((evt) => ({
         id: evt.id,
         field: evt.field === 'content' ? 'description' : evt.field,
@@ -450,7 +450,7 @@ export class ActivityService {
    * Unified Collaboration Feed supporting 5 tabs: all, activity, comments, transition, history.
    */
   async getWorkItemUnifiedFeed(
-    taskId: string,
+    workItemId: string,
     options?: {
       tab?: string;
       sort?: 'asc' | 'desc';
@@ -464,17 +464,17 @@ export class ActivityService {
     const limit = Math.min(100, Math.max(1, options?.limit ?? 50));
 
     if (tab === 'transition' || tab === 'transitions') {
-      const data = await this.getTaskTransitions(taskId);
+      const data = await this.getWorkItemTransitions(workItemId);
       return { tab: 'transition', ...data };
     }
 
     if (tab === 'history') {
-      const data = await this.getTaskHistory(taskId, { sort });
+      const data = await this.getWorkItemHistory(workItemId, { sort });
       return { tab: 'history', ...data };
     }
 
     if (tab === 'comments') {
-      const comments = await this.activityRepo.findTaskComments(taskId, sort);
+      const comments = await this.activityRepo.findWorkItemComments(workItemId, sort);
       const feed = comments.map((c) => ({
         id: c.id,
         type: 'comment' as const,
@@ -500,8 +500,8 @@ export class ActivityService {
     }
 
     if (tab === 'activity') {
-      const activities = await this.activityRepo.findTaskActivityEvents(
-        taskId,
+      const activities = await this.activityRepo.findWorkItemActivityEvents(
+        workItemId,
         sort,
       );
       const propActivities = activities.filter((e) => e.field !== 'comment');
@@ -528,13 +528,13 @@ export class ActivityService {
     }
 
     // Default: Tab 'all' - Unified stream of comments, activities, transitions, and history
-    const [comments, activities, task] = await Promise.all([
-      this.activityRepo.findTaskComments(taskId, 'asc'),
-      this.activityRepo.findTaskActivityEvents(taskId, 'asc'),
-      this.activityRepo.findTaskWithProject(taskId),
+    const [comments, activities, workItem] = await Promise.all([
+      this.activityRepo.findWorkItemComments(workItemId, 'asc'),
+      this.activityRepo.findWorkItemActivityEvents(workItemId, 'asc'),
+      this.activityRepo.findWorkItemWithProject(workItemId),
     ]);
 
-    const taskColumns = task?.project?.taskColumns || [];
+    const workItemColumns = (workItem as any)?.project?.workItemColumns || [];
 
     const unifiedItems: Array<{
       id: string;
@@ -579,8 +579,8 @@ export class ActivityService {
           actor: a.actor,
           transition: {
             id: a.id,
-            fromState: resolveStateInfo(a.oldValue, taskColumns),
-            toState: resolveStateInfo(a.newValue, taskColumns),
+            fromState: resolveStateInfo(a.oldValue, workItemColumns),
+            toState: resolveStateInfo(a.newValue, workItemColumns),
             transitionedAt: a.createdAt,
           },
         });
@@ -700,8 +700,8 @@ export class ActivityService {
         limit,
       );
     } else {
-      const taskIds = uniqueTargets
-        .filter((target) => target.entityType === 'task')
+      const workItemIds = uniqueTargets
+        .filter((target) => (target.entityType as any) === 'work_item' || (target.entityType as any) === 'item')
         .map((target) => target.entityId);
       const paperIds = uniqueTargets
         .filter((target) => target.entityType === 'paper')
@@ -711,7 +711,7 @@ export class ActivityService {
         .map((target) => target.entityId);
 
       const titleMap = await this.activityRepo.findEntitiesTitleMap(
-        taskIds,
+        workItemIds,
         paperIds,
         pageIds,
       );
@@ -740,18 +740,18 @@ export class ActivityService {
     limit: number,
   ): Promise<RecentItemResponse[]> {
     const res = await this.activityRepo.findUserRecentItems(userId, limit);
-    const tasks = res.tasks;
+    const workItems = res.workItems;
     const papers = res.papers;
     const pages = res.pages;
 
     const combined: RecentItemResponse[] = [
-      ...tasks.map((taskRecord) => ({
-        id: `task-${taskRecord.id}`,
-        entityType: 'task' as const,
-        entityId: taskRecord.id,
-        title: taskRecord.title,
-        projectId: taskRecord.projectId,
-        lastInteractedAt: taskRecord.updatedAt,
+      ...workItems.map((itemRecord) => ({
+        id: `work_item-${itemRecord.id}`,
+        entityType: EntityType.work_item,
+        entityId: itemRecord.id,
+        title: itemRecord.title,
+        projectId: itemRecord.projectId,
+        lastInteractedAt: itemRecord.updatedAt,
       })),
       ...papers.map((paperRecord) => ({
         id: `paper-${paperRecord.id}`,

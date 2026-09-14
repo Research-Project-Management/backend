@@ -93,7 +93,7 @@ export class SearchRepository implements OnModuleInit {
   ) {
     // Build structured filters as SQL fragment
     const baseFilters: string[] = [
-      `(workspace_id = $1::uuid OR user_id = $1::uuid)`,
+      `(user_id = $1::uuid OR project_id = $1::uuid)`,
       `deleted_at IS NULL`,
       `search_vector @@ plainto_tsquery('english', $2)`,
     ];
@@ -115,13 +115,13 @@ export class SearchRepository implements OnModuleInit {
     // Collection and tag filters via subquery
     if (options.collectionId) {
       baseFilters.push(
-        `EXISTS (SELECT 1 FROM "collection_items" ci WHERE ci.catalog_item_id = "papers".id AND ci.collection_id = $${paramIdx++}::uuid)`,
+        `EXISTS (SELECT 1 FROM "collection_items" ci WHERE ci.item_id = "papers".id AND ci.collection_id = $${paramIdx++}::uuid)`,
       );
       params.push(options.collectionId);
     }
     if (options.tagId) {
       baseFilters.push(
-        `EXISTS (SELECT 1 FROM "catalog_item_tags" it WHERE it.catalog_item_id = "papers".id AND it.tag_id = $${paramIdx++}::uuid)`,
+        `EXISTS (SELECT 1 FROM "item_tags" it WHERE it.item_id = "papers".id AND it.tag_id = $${paramIdx++}::uuid)`,
       );
       params.push(options.tagId);
     }

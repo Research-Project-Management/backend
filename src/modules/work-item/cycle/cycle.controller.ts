@@ -21,8 +21,8 @@ import { CycleService } from './cycle.service';
 import {
   CreateCycleDto,
   UpdateCycleDto,
-  AddCycleTaskDto,
-  AddCycleTasksBatchDto,
+  AddCycleWorkItemDto,
+  AddCycleWorkItemsBatchDto,
   CompleteCycleDto,
 } from './dto/cycle.dto';
 import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
@@ -158,11 +158,14 @@ export class CycleController {
   @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Add a work item to a cycle' })
   @ApiResponse({ status: 200, description: 'Updated cycle object' })
-  async addTask(
+  async addWorkItem(
     @Param('cycleId') cycleId: string,
-    @Body() addCycleTaskDto: AddCycleTaskDto,
+    @Body() addCycleWorkItemDto: AddCycleWorkItemDto,
   ) {
-    return this.cycleService.addTask(cycleId, addCycleTaskDto.taskId);
+    return this.cycleService.addWorkItem(
+      cycleId,
+      addCycleWorkItemDto.workItemId,
+    );
   }
 
   @Post([
@@ -174,29 +177,29 @@ export class CycleController {
   @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Add multiple work items to a cycle in batch' })
   @ApiResponse({ status: 200, description: 'Batch addition summary' })
-  async addTasksBatch(
+  async addWorkItemsBatch(
     @Param('cycleId') cycleId: string,
-    @Body() addCycleTasksBatchDto: AddCycleTasksBatchDto,
+    @Body() addCycleWorkItemsBatchDto: AddCycleWorkItemsBatchDto,
   ) {
-    return this.cycleService.addTasksBatch(
+    return this.cycleService.addWorkItemsBatch(
       cycleId,
-      addCycleTasksBatchDto.taskIds,
+      addCycleWorkItemsBatchDto.workItemIds,
     );
   }
 
   @Delete([
-    'projects/:projectId/cycles/:cycleId/work-items/:taskId',
-    'cycles/:cycleId/work-items/:taskId',
+    'projects/:projectId/cycles/:cycleId/work-items/:workItemId',
+    'cycles/:cycleId/work-items/:workItemId',
   ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Remove a work item from a cycle' })
   @ApiResponse({ status: 200, description: 'WorkItem removal confirmation' })
-  async removeTask(
+  async removeWorkItem(
     @Param('cycleId') cycleId: string,
-    @Param('taskId') taskId: string,
+    @Param('workItemId') workItemId: string,
   ) {
-    return this.cycleService.removeTask(cycleId, taskId);
+    return this.cycleService.removeWorkItem(cycleId, workItemId);
   }
 
   @Post([

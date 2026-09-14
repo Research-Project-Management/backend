@@ -10,7 +10,7 @@ import {
   Max,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { TaskPriority } from '@prisma/client';
+import { WorkItemPriority } from '@prisma/client';
 
 export class UpdateWorkItemDto {
   @ApiPropertyOptional({ description: 'Title of the work item' })
@@ -62,10 +62,10 @@ export class UpdateWorkItemDto {
   @IsOptional()
   dueDate?: string | Date | null;
 
-  @ApiPropertyOptional({ enum: TaskPriority })
-  @IsEnum(TaskPriority)
+  @ApiPropertyOptional({ enum: WorkItemPriority })
+  @IsEnum(WorkItemPriority)
   @IsOptional()
-  priority?: TaskPriority;
+  priority?: WorkItemPriority;
 
   @ApiPropertyOptional({ description: 'Ordering rank in column' })
   @IsNumber()
@@ -82,7 +82,7 @@ export class UpdateWorkItemDto {
   })
   @IsString()
   @IsOptional()
-  parentTaskId?: string | null;
+  parentWorkItemId?: string | null;
 
   @ApiPropertyOptional({
     description: 'Labels associated with the work item',

@@ -38,13 +38,13 @@ export const TIMELINE_RELATION_TYPES: RelationType[] = [
 
 export interface WorkItemRelationItem {
   id?: string;
-  targetTaskId: string;
+  targetWorkItemId: string;
   type: RelationType;
   createdAt: string;
 }
 
 export interface EnrichedRelationItem extends WorkItemRelationItem {
-  targetTask?: {
+  targetWorkItem?: {
     id: string;
     title: string;
     identifier?: string | null;
@@ -55,10 +55,10 @@ export interface EnrichedRelationItem extends WorkItemRelationItem {
 }
 
 export interface IRelationRepository {
-  findTask(taskId: string): Promise<WorkItem | null>;
-  findTasksByIds(taskIds: string[]): Promise<WorkItem[]>;
-  updateTaskRelations(
-    taskId: string,
+  findWorkItem(workItemId: string): Promise<WorkItem | null>;
+  findWorkItemsByIds(workItemIds: string[]): Promise<WorkItem[]>;
+  updateWorkItemRelations(
+    workItemId: string,
     relations: Prisma.InputJsonValue,
   ): Promise<WorkItem>;
   executeTransaction(operations: any[]): Promise<any>;

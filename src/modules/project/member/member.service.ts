@@ -284,7 +284,7 @@ export class MemberService {
    * Remove a member from a project.
    * Enforces:
    * 1. Last Owner Protection: cannot remove the only owner.
-   * 2. Unassigns all active tasks currently assigned to this user in this project.
+   * 2. Unassigns all active work items currently assigned to this user in this project.
    */
   async removeMember(
     projectId: string,
@@ -311,8 +311,8 @@ export class MemberService {
       }
     }
 
-    // Unassign tasks assigned to this member in this project to prevent ghost assignees
-    await this.memberRepo.unassignMemberTasks(projectId, targetUserId);
+    // Unassign work items assigned to this member in this project to prevent ghost assignees
+    await this.memberRepo.unassignMemberWorkItems(projectId, targetUserId);
 
     // Delete membership
     await this.memberRepo.deleteMember(projectId, targetUserId);
@@ -357,7 +357,7 @@ export class MemberService {
         this.cache.del(CACHE_KEYS.detail(projectId)),
         this.cache.del(CACHE_KEYS.overview(projectId)),
         this.cache.del(CACHE_KEYS.userProjects(userId)),
-        this.cache.del(`flux:wi:tasks:${projectId}`),
+        this.cache.del(`flux:wi:work-items:${projectId}`),
       ]);
     } catch {
       // Best effort cache invalidation

@@ -18,47 +18,52 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
 import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
+import { ProjectRoleGuard } from '@/modules/iam/authz/guards/role.guard';
+import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
 import { ArchiveService } from './archive.service';
 import { BulkArchiveDto } from './dto/bulk-archive.dto';
 
 @ApiTags('work-items')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/work-items')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class ArchiveController {
   constructor(private readonly archiveService: ArchiveService) {}
 
-  @Post(':taskId/archive')
+  @Post(':workItemId/archive')
+  @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Archive a work item (hides from active Kanban/List views)',
   })
   @ApiParam({
-    name: 'taskId',
+    name: 'workItemId',
     description: 'Work item UUID or identifier (e.g. FLUX-123)',
   })
   async archiveWorkItem(
-    @Param('taskId') taskId: string,
+    @Param('workItemId') workItemId: string,
     @CurrentUser('id') userId: string,
   ) {
-    return this.archiveService.archiveWorkItem(taskId, userId);
+    return this.archiveService.archiveWorkItem(workItemId, userId);
   }
 
-  @Post(':taskId/restore')
+  @Post(':workItemId/restore')
+  @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Restore an archived work item to active boards' })
   @ApiParam({
-    name: 'taskId',
+    name: 'workItemId',
     description: 'Work item UUID or identifier (e.g. FLUX-123)',
   })
   async restoreWorkItem(
-    @Param('taskId') taskId: string,
+    @Param('workItemId') workItemId: string,
     @CurrentUser('id') userId: string,
   ) {
-    return this.archiveService.restoreWorkItem(taskId, userId);
+    return this.archiveService.restoreWorkItem(workItemId, userId);
   }
 
   @Post('bulk-archive')
+  @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Bulk archive multiple work items' })
   async bulkArchive(
@@ -69,6 +74,7 @@ export class ArchiveController {
   }
 
   @Post('bulk-restore')
+  @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Bulk restore multiple archived work items' })
   async bulkRestore(
@@ -79,12 +85,13 @@ export class ArchiveController {
   }
 
   @Get('projects/:projectId/archived')
+  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'List archived work items of a project' })
   @ApiParam({ name: 'projectId', description: 'Project UUID or identifier' })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
   @ApiQuery({ name: 'limit', required: false, type: Number, example: 50 })
   @ApiQuery({ name: 'search', required: false, type: String })
-  async getProjectArchivedTasks(
+  async getProjectArchivedWorkItems(
     @Param('projectId') projectId: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,

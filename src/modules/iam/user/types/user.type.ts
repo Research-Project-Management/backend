@@ -21,7 +21,7 @@ export interface UserStatsResult {
   storageQuotaBytes: number;
   storageUsedFormatted: string;
   stickiesCount: number;
-  tasksCount: number;
+  workItemsCount: number;
   plan: string;
 }
 

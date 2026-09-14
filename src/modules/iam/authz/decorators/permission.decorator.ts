@@ -7,7 +7,7 @@ export const PERMISSIONS_KEY = 'permissions';
  * Standard @RequirePermissions(...) decorator.
  * Usage:
  *   @RequirePermissions(Permission.PROJECT_UPDATE)
- *   @RequirePermissions(Permission.TASK_CREATE, Permission.TASK_ASSIGN)
+ *   @RequirePermissions(Permission.WORK_ITEM_CREATE, Permission.WORK_ITEM_ASSIGN)
  */
 export const RequirePermissions = (
   ...permissions: Permission[]

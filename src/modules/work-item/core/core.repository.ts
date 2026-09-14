@@ -9,7 +9,7 @@ import {
   WorkItemAttachments,
   USER_MINIMAL_SELECT,
   CYCLE_SELECT,
-  SUBTASK_SELECT,
+  CHILD_WORK_ITEM_SELECT,
 } from './types/work-item.types';
 import { deriveProjectIdentifierPrefix } from './utils/work-item.util';
 
@@ -17,14 +17,14 @@ import { deriveProjectIdentifierPrefix } from './utils/work-item.util';
 export class CoreRepository implements IWorkItemRepository {
   constructor(private readonly prismaService: PrismaService) {}
 
-  async nextProjectTaskIdentifier(
+  async nextProjectWorkItemIdentifier(
     projectId: string,
   ): Promise<{ identifier: string; sequenceNumber: number }> {
     try {
       const project = await this.prismaService.project.update({
         where: { id: projectId },
-        data: { taskSequence: { increment: 1 } },
-        select: { name: true, identifier: true, taskSequence: true },
+        data: { workItemSequence: { increment: 1 } },
+        select: { name: true, identifier: true, workItemSequence: true },
       });
 
       const prefix = deriveProjectIdentifierPrefix(
@@ -33,8 +33,8 @@ export class CoreRepository implements IWorkItemRepository {
       );
 
       return {
-        identifier: `${prefix}-${project.taskSequence}`,
-        sequenceNumber: project.taskSequence,
+        identifier: `${prefix}-${project.workItemSequence}`,
+        sequenceNumber: project.workItemSequence,
       };
     } catch {
       const project = await this.prismaService.project.findUnique({
@@ -46,18 +46,18 @@ export class CoreRepository implements IWorkItemRepository {
         project?.name,
       );
 
-      const lastTask = await this.prismaService.workItem.findFirst({
+      const lastWorkItem = await this.prismaService.workItem.findFirst({
         where: { projectId },
         orderBy: { sequenceNumber: 'desc' },
         select: { sequenceNumber: true },
       });
 
-      const sequenceNumber = (lastTask?.sequenceNumber ?? 0) + 1;
+      const sequenceNumber = (lastWorkItem?.sequenceNumber ?? 0) + 1;
       return { identifier: `${prefix}-${sequenceNumber}`, sequenceNumber };
     }
   }
 
-  async findProjectTasks(
+  async findProjectWorkItems(
     projectId: string,
     filter?: string | WorkItemFilterOptions,
   ): Promise<WorkItemWithRelations[]> {
@@ -121,14 +121,14 @@ export class CoreRepository implements IWorkItemRepository {
           where.assigneeId = filter.assigneeId;
         }
       }
-      if (filter.parentTaskId !== undefined) {
-        if (filter.parentTaskId === 'none' || filter.parentTaskId === 'null') {
-          where.parentTaskId = null;
+      if (filter.parentWorkItemId !== undefined) {
+        if (filter.parentWorkItemId === 'none' || filter.parentWorkItemId === 'null') {
+          where.parentWorkItemId = null;
         } else if (
-          filter.parentTaskId === null ||
-          isUuid(filter.parentTaskId)
+          filter.parentWorkItemId === null ||
+          isUuid(filter.parentWorkItemId)
         ) {
-          where.parentTaskId = filter.parentTaskId;
+          where.parentWorkItemId = filter.parentWorkItemId;
         }
       }
       if (filter.completed !== undefined) {
@@ -150,10 +150,10 @@ export class CoreRepository implements IWorkItemRepository {
       include: {
         assignee: { select: USER_MINIMAL_SELECT },
         cycle: { select: CYCLE_SELECT },
-        parentTask: { select: { id: true, title: true, identifier: true } },
-        subtasks: {
+        parentWorkItem: { select: { id: true, title: true, identifier: true } },
+        childWorkItems: {
           where: { deletedAt: null },
-          select: SUBTASK_SELECT,
+          select: CHILD_WORK_ITEM_SELECT,
           orderBy: { rank: 'asc' },
         },
         project: { select: { id: true } },
@@ -164,7 +164,7 @@ export class CoreRepository implements IWorkItemRepository {
     });
   }
 
-  async findTasksByAssignee(
+  async findWorkItemsByAssignee(
     userId: string,
     projectId?: string,
     take?: number,
@@ -200,10 +200,10 @@ export class CoreRepository implements IWorkItemRepository {
       include: {
         assignee: { select: USER_MINIMAL_SELECT },
         cycle: { select: CYCLE_SELECT },
-        parentTask: { select: { id: true, title: true, identifier: true } },
-        subtasks: {
+        parentWorkItem: { select: { id: true, title: true, identifier: true } },
+        childWorkItems: {
           where: { deletedAt: null },
-          select: SUBTASK_SELECT,
+          select: CHILD_WORK_ITEM_SELECT,
           orderBy: { rank: 'asc' },
         },
         project: { select: { id: true } },
@@ -217,37 +217,45 @@ export class CoreRepository implements IWorkItemRepository {
   async findProjectWithColumns(projectId: string) {
     return this.prismaService.project.findFirst({
       where: { id: projectId, deletedAt: null },
-      select: { id: true, name: true, taskColumns: true },
+      select: { id: true, name: true, workItemColumns: true },
     });
   }
 
-  async findTaskById(taskId: string): Promise<WorkItemWithRelations | null> {
-    if (!isUuid(taskId)) {
+  async findWorkItemById(workItemId: string): Promise<WorkItemWithRelations | null> {
+    if (!isUuid(workItemId)) {
       return this.prismaService.workItem.findFirst({
-        where: { identifier: taskId, deletedAt: null },
+        where: { identifier: workItemId, deletedAt: null },
         include: {
           assignee: { select: USER_MINIMAL_SELECT },
           cycle: { select: CYCLE_SELECT },
-          parentTask: { select: { id: true, title: true, identifier: true } },
-          subtasks: { select: SUBTASK_SELECT, orderBy: { rank: 'asc' } },
+          parentWorkItem: { select: { id: true, title: true, identifier: true } },
+          childWorkItems: {
+            where: { deletedAt: null },
+            select: CHILD_WORK_ITEM_SELECT,
+            orderBy: { rank: 'asc' },
+          },
           project: { select: { id: true } },
         },
       });
     }
 
     return this.prismaService.workItem.findFirst({
-      where: { id: taskId, deletedAt: null },
+      where: { id: workItemId, deletedAt: null },
       include: {
         assignee: { select: USER_MINIMAL_SELECT },
         cycle: { select: CYCLE_SELECT },
-        parentTask: { select: { id: true, title: true, identifier: true } },
-        subtasks: { select: SUBTASK_SELECT, orderBy: { rank: 'asc' } },
+        parentWorkItem: { select: { id: true, title: true, identifier: true } },
+        childWorkItems: {
+          where: { deletedAt: null },
+          select: CHILD_WORK_ITEM_SELECT,
+          orderBy: { rank: 'asc' },
+        },
         project: { select: { id: true } },
       },
     });
   }
 
-  async findTaskByIdentifier(
+  async findWorkItemByIdentifier(
     projectId: string,
     identifier: string,
   ): Promise<WorkItemWithRelations | null> {
@@ -256,26 +264,30 @@ export class CoreRepository implements IWorkItemRepository {
       include: {
         assignee: { select: USER_MINIMAL_SELECT },
         cycle: { select: CYCLE_SELECT },
-        parentTask: { select: { id: true, title: true, identifier: true } },
-        subtasks: { select: SUBTASK_SELECT, orderBy: { rank: 'asc' } },
+        parentWorkItem: { select: { id: true, title: true, identifier: true } },
+        childWorkItems: {
+          where: { deletedAt: null },
+          select: CHILD_WORK_ITEM_SELECT,
+          orderBy: { rank: 'asc' },
+        },
         project: { select: { id: true } },
       },
     });
   }
 
-  async countColumnTasks(projectId: string, columnId: string): Promise<number> {
+  async countColumnWorkItems(projectId: string, columnId: string): Promise<number> {
     return this.prismaService.workItem.count({
       where: { projectId, columnId, deletedAt: null, archivedAt: null },
     });
   }
 
-  async countProjectTasks(projectId: string): Promise<number> {
+  async countProjectWorkItems(projectId: string): Promise<number> {
     return this.prismaService.workItem.count({
       where: { projectId, deletedAt: null, archivedAt: null },
     });
   }
 
-  async createTask(
+  async createWorkItem(
     data: Prisma.WorkItemCreateInput | Prisma.WorkItemUncheckedCreateInput,
   ): Promise<WorkItemWithRelations> {
     return this.prismaService.workItem.create({
@@ -283,58 +295,66 @@ export class CoreRepository implements IWorkItemRepository {
       include: {
         assignee: { select: USER_MINIMAL_SELECT },
         cycle: { select: CYCLE_SELECT },
-        parentTask: { select: { id: true, title: true, identifier: true } },
-        subtasks: { select: SUBTASK_SELECT, orderBy: { rank: 'asc' } },
+        parentWorkItem: { select: { id: true, title: true, identifier: true } },
+        childWorkItems: {
+          where: { deletedAt: null },
+          select: CHILD_WORK_ITEM_SELECT,
+          orderBy: { rank: 'asc' },
+        },
         project: { select: { id: true } },
       },
     });
   }
 
-  async updateTask(
-    taskId: string,
+  async updateWorkItem(
+    workItemId: string,
     data: Prisma.WorkItemUpdateInput | Prisma.WorkItemUncheckedUpdateInput,
   ): Promise<WorkItemWithRelations> {
     return this.prismaService.workItem.update({
-      where: { id: taskId },
+      where: { id: workItemId },
       data: data,
       include: {
         assignee: { select: USER_MINIMAL_SELECT },
         cycle: { select: CYCLE_SELECT },
-        parentTask: { select: { id: true, title: true, identifier: true } },
-        subtasks: { select: SUBTASK_SELECT, orderBy: { rank: 'asc' } },
+        parentWorkItem: { select: { id: true, title: true, identifier: true } },
+        childWorkItems: {
+          where: { deletedAt: null },
+          select: CHILD_WORK_ITEM_SELECT,
+          orderBy: { rank: 'asc' },
+        },
         project: { select: { id: true } },
       },
     });
   }
 
-  async softDeleteTask(taskId: string): Promise<WorkItem> {
+  async softDeleteWorkItem(workItemId: string): Promise<WorkItem> {
     return this.prismaService.workItem.update({
-      where: { id: taskId },
+      where: { id: workItemId },
       data: { deletedAt: new Date() },
     });
   }
 
-  async restoreTask(taskId: string): Promise<WorkItem> {
+  async restoreWorkItem(workItemId: string): Promise<WorkItem> {
     return this.prismaService.workItem.update({
-      where: { id: taskId },
+      where: { id: workItemId },
       data: { deletedAt: null },
     });
   }
 
-  async deleteTask(taskId: string): Promise<WorkItem> {
+  async deleteWorkItem(workItemId: string): Promise<WorkItem> {
     return this.prismaService.workItem.delete({
-      where: { id: taskId },
+      where: { id: workItemId },
     });
   }
 
-  async findColumnTasks(projectId: string, columnId: string) {
+  async findColumnWorkItems(projectId: string, columnId: string) {
     return this.prismaService.workItem.findMany({
       where: { projectId, columnId, deletedAt: null },
       orderBy: { rank: 'asc' },
     });
   }
 
-  async updateTasksRank(
+  async updateWorkItemsRank(
     updates: Array<{
       id: string;
       rank: number;
@@ -360,20 +380,20 @@ export class CoreRepository implements IWorkItemRepository {
     );
   }
 
-  async findTasksByIds(taskIds: string[]): Promise<WorkItem[]> {
-    const validIds = taskIds.filter(isUuid);
+  async findWorkItemsByIds(workItemIds: string[]): Promise<WorkItem[]> {
+    const validIds = workItemIds.filter(isUuid);
     if (validIds.length === 0) return [];
     return this.prismaService.workItem.findMany({
       where: { id: { in: validIds }, deletedAt: null },
     });
   }
 
-  async bulkUpdateTasks(
+  async bulkUpdateWorkItems(
     projectId: string,
-    taskIds: string[],
+    workItemIds: string[],
     data: Prisma.WorkItemUpdateManyMutationInput,
   ) {
-    const validIds = taskIds.filter(isUuid);
+    const validIds = workItemIds.filter(isUuid);
     if (validIds.length === 0 || !projectId || !isUuid(projectId)) {
       return { count: 0 };
     }
@@ -386,13 +406,16 @@ export class CoreRepository implements IWorkItemRepository {
     });
   }
 
-  async bulkDeleteTasks(projectId: string, taskIds: string[]) {
-    const validIds = taskIds.filter(isUuid);
-    if (validIds.length === 0) return { count: 0 };
+  async bulkDeleteWorkItems(projectId: string, workItemIds: string[]) {
+    const validIds = workItemIds.filter(isUuid);
+    if (validIds.length === 0 || !projectId || !isUuid(projectId)) {
+      return { count: 0 };
+    }
     return this.prismaService.workItem.updateMany({
       where: {
         id: { in: validIds },
-        ...(projectId && isUuid(projectId) ? { projectId } : {}),
+        projectId,
+        deletedAt: null,
       },
       data: {
         deletedAt: new Date(),
@@ -435,18 +458,19 @@ export class CoreRepository implements IWorkItemRepository {
   }
 
   async updateAttachments(
-    taskId: string,
+    workItemId: string,
     attachments: WorkItemAttachments,
   ): Promise<WorkItem> {
-    return this.prismaService.workItem.findUniqueOrThrow({
-      where: { id: taskId },
+    return (this.prismaService.workItem as any).update({
+      where: { id: workItemId },
+      data: { attachments: attachments as any },
     });
   }
 
-  async disconnectParentTask(taskId: string): Promise<WorkItemWithRelations> {
+  async disconnectParentWorkItem(workItemId: string): Promise<WorkItemWithRelations> {
     return this.prismaService.workItem.update({
-      where: { id: taskId },
-      data: { parentTask: { disconnect: true } },
+      where: { id: workItemId },
+      data: { parentWorkItem: { disconnect: true } },
       include: {
         assignee: {
           select: USER_MINIMAL_SELECT,
@@ -454,9 +478,11 @@ export class CoreRepository implements IWorkItemRepository {
         cycle: {
           select: CYCLE_SELECT,
         },
-        parentTask: { select: { id: true, title: true, identifier: true } },
-        subtasks: {
-          select: SUBTASK_SELECT,
+        parentWorkItem: { select: { id: true, title: true, identifier: true } },
+        childWorkItems: {
+          where: { deletedAt: null },
+          select: CHILD_WORK_ITEM_SELECT,
+          orderBy: { rank: 'asc' },
         },
         project: { select: { id: true } },
       },
@@ -466,5 +492,3 @@ export class CoreRepository implements IWorkItemRepository {
 
 export const WorkItemRepository = CoreRepository;
 export type WorkItemRepository = CoreRepository;
-export const TaskRepository = CoreRepository;
-export type TaskRepository = CoreRepository;

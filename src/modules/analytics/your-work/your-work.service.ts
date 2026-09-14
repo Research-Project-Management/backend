@@ -5,7 +5,7 @@ import { YourWorkSummaryDto } from './dto/your-work.dto';
 import {
   ActivityFeedItem,
   ProjectWorkloadBreakdown,
-  UserTaskItem,
+  UserWorkItem,
   YourWorkActivityItem,
 } from './types/your-work.types';
 import { inferStateGroup } from '@/modules/work-item/state/utils/state.util';
@@ -25,9 +25,9 @@ export class YourWorkService {
     projectId: string | undefined,
     userId: string,
   ): Promise<YourWorkSummaryDto> {
-    const [tasks, activityFeed, recentItems, userProfile, projectList] =
+    const [workItems, activityFeed, recentItems, userProfile, projectList] =
       await Promise.all([
-        this.yourWorkRepo.findUserTasks(projectId, userId),
+        this.yourWorkRepo.findUserWorkItems(projectId, userId),
         projectId
           ? this.activityService.getProjectFeed(projectId, { limit: 20 })
           : this.activityService.getActivityFeed(undefined, { limit: 20 }),
@@ -36,13 +36,13 @@ export class YourWorkService {
         this.yourWorkRepo.findUserProjects(projectId, userId),
       ]);
 
-    const assigned = tasks.filter((taskItem) => taskItem.assigneeId === userId);
-    const created = tasks.filter((taskItem) => taskItem.authorId === userId);
-    const subscribed = tasks.filter(
-      (taskItem) =>
-        taskItem.assigneeId !== userId &&
-        taskItem.authorId !== userId &&
-        (taskItem.comments?.length || 0) > 0,
+    const assigned = workItems.filter((item) => item.assigneeId === userId);
+    const created = workItems.filter((item) => item.authorId === userId);
+    const subscribed = workItems.filter(
+      (item) =>
+        item.assigneeId !== userId &&
+        item.authorId !== userId &&
+        (item.comments?.length || 0) > 0,
     );
 
     const formattedActivities: YourWorkActivityItem[] = (
@@ -74,19 +74,20 @@ export class YourWorkService {
       };
     });
 
-    const resolveTaskStateGroup = (
-      taskItem: UserTaskItem,
+    const resolveWorkItemStateGroup = (
+      item: UserWorkItem,
     ): StateGroup => {
-      let colName = taskItem.columnId;
-      if (Array.isArray(taskItem.project?.taskColumns)) {
+      let colName = item.columnId;
+      const cols = item.project?.workItemColumns;
+      if (Array.isArray(cols)) {
         const matched = (
-          taskItem.project.taskColumns as Array<Record<string, unknown>>
-        ).find((c) => c.id === taskItem.columnId);
+          cols as Array<Record<string, unknown>>
+        ).find((c) => c.id === item.columnId);
         if (matched?.title || matched?.name) {
           colName = String(matched.title || matched.name);
         }
       }
-      return inferStateGroup(taskItem.columnId, colName);
+      return inferStateGroup(item.columnId, colName);
     };
 
     const stateGroupBreakdown: Record<string, number> = {
@@ -113,21 +114,21 @@ export class YourWorkService {
       none: 0,
     };
 
-    assigned.forEach((taskItem) => {
-      const group = resolveTaskStateGroup(taskItem);
+    assigned.forEach((item) => {
+      const group = resolveWorkItemStateGroup(item);
       stateGroupBreakdown[group] = (stateGroupBreakdown[group] || 0) + 1;
 
-      const prio = (taskItem.priority || 'none').toLowerCase();
+      const prio = (item.priority || 'none').toLowerCase();
       priorityBreakdown[prio] = (priorityBreakdown[prio] || 0) + 1;
     });
 
-    subscribed.forEach((taskItem) => {
-      const group = resolveTaskStateGroup(taskItem);
+    subscribed.forEach((item) => {
+      const group = resolveWorkItemStateGroup(item);
       subscribedStateGroupBreakdown[group] =
         (subscribedStateGroupBreakdown[group] || 0) + 1;
     });
 
-    // Group tasks per project to compute project-level workload & progress
+    // Group work items per project to compute project-level workload & progress
     const projectMap = new Map<
       string,
       {
@@ -135,10 +136,10 @@ export class YourWorkService {
         name: string;
         identifier: string | null;
         avatar: string | null;
-        taskColumns?: unknown;
-        assigned: UserTaskItem[];
-        created: UserTaskItem[];
-        subscribed: UserTaskItem[];
+        workItemColumns?: unknown;
+        assigned: UserWorkItem[];
+        created: UserWorkItem[];
+        subscribed: UserWorkItem[];
       }
     >();
 
@@ -149,36 +150,36 @@ export class YourWorkService {
         name: p.name,
         identifier: p.identifier,
         avatar: p.avatar,
-        taskColumns: p.taskColumns,
+        workItemColumns: p.workItemColumns,
         assigned: [],
         created: [],
         subscribed: [],
       });
     });
 
-    const registerProjectTask = (
-      taskItem: UserTaskItem,
+    const registerProjectWorkItem = (
+      item: UserWorkItem,
       category: 'assigned' | 'created' | 'subscribed',
     ) => {
-      if (!taskItem.projectId) return;
-      if (!projectMap.has(taskItem.projectId)) {
-        projectMap.set(taskItem.projectId, {
-          id: taskItem.projectId,
-          name: taskItem.project?.name || 'Untitled Project',
-          identifier: taskItem.project?.identifier || null,
-          avatar: taskItem.project?.avatar || null,
-          taskColumns: taskItem.project?.taskColumns,
+      if (!item.projectId) return;
+      if (!projectMap.has(item.projectId)) {
+        projectMap.set(item.projectId, {
+          id: item.projectId,
+          name: item.project?.name || 'Untitled Project',
+          identifier: item.project?.identifier || null,
+          avatar: item.project?.avatar || null,
+          workItemColumns: item.project?.workItemColumns,
           assigned: [],
           created: [],
           subscribed: [],
         });
       }
-      projectMap.get(taskItem.projectId)![category].push(taskItem);
+      projectMap.get(item.projectId)![category].push(item);
     };
 
-    assigned.forEach((t) => registerProjectTask(t, 'assigned'));
-    created.forEach((t) => registerProjectTask(t, 'created'));
-    subscribed.forEach((t) => registerProjectTask(t, 'subscribed'));
+    assigned.forEach((t) => registerProjectWorkItem(t, 'assigned'));
+    created.forEach((t) => registerProjectWorkItem(t, 'created'));
+    subscribed.forEach((t) => registerProjectWorkItem(t, 'subscribed'));
 
     const projectBreakdown: ProjectWorkloadBreakdown[] = Array.from(
       projectMap.values(),
@@ -192,7 +193,7 @@ export class YourWorkService {
           cancelled: 0,
         };
         p.assigned.forEach((t) => {
-          const group = resolveTaskStateGroup(t);
+          const group = resolveWorkItemStateGroup(t);
           pAssignedStateGroup[group] = (pAssignedStateGroup[group] || 0) + 1;
         });
 
@@ -204,7 +205,7 @@ export class YourWorkService {
           cancelled: 0,
         };
         p.subscribed.forEach((t) => {
-          const group = resolveTaskStateGroup(t);
+          const group = resolveWorkItemStateGroup(t);
           pSubscribedStateGroup[group] =
             (pSubscribedStateGroup[group] || 0) + 1;
         });

@@ -7,14 +7,14 @@
 
 export const WORK_ITEM_REDIS_KEYS = {
   /**
-   * Project tasks/work-items board list (String/JSON array, TTL 30m)
+   * Project work-items board list (String/JSON array, TTL 30m)
    */
-  projectTasks: (projectId: string) => `flux:wi:tasks:${projectId}`,
+  projectWorkItems: (projectId: string) => `flux:wi:work-items:${projectId}`,
 
   /**
    * Work-item aggregate details by ID (String/JSON, TTL 1h)
    */
-  WorkItem: (taskId: string) => `flux:wi:WorkItem:${taskId}`,
+  workItem: (workItemId: string) => `flux:wi:work-item:${workItemId}`,
 
   /**
    * Project sprint cycles list (String/JSON array, TTL 1h)
@@ -35,6 +35,7 @@ export const WORK_ITEM_REDIS_KEYS = {
    * Project labels list (JSON array, TTL 1h)
    */
   projectLabels: (projectId: string) => `flux:wi:labels:proj:${projectId}`,
+  WorkItem: (workItemId: string) => `flux:wi:work-item:${workItemId}`,
 } as const;
 
 /**

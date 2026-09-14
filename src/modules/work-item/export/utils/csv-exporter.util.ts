@@ -30,7 +30,7 @@ function escapeCsvField(val: unknown): string {
   return text;
 }
 
-export function exportTasksToCsv(tasks: any[]): string {
+export function exportWorkItemsToCsv(workItems: any[]): string {
   const headers = [
     'ID',
     'Identifier',
@@ -56,7 +56,7 @@ export function exportTasksToCsv(tasks: any[]): string {
   // Add RFC 4180 header row
   rows.push(headers.map(escapeCsvField).join(','));
 
-  for (const workItem of tasks) {
+  for (const workItem of workItems) {
     const labelsStr = Array.isArray(workItem.labels) ? workItem.labels.join('; ') : '';
 
     const row = [
@@ -85,3 +85,5 @@ export function exportTasksToCsv(tasks: any[]): string {
   // Prefix with UTF-8 BOM (\uFEFF) for Excel compatibility
   return '\uFEFF' + rows.join('\r\n');
 }
+
+

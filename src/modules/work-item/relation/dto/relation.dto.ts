@@ -15,7 +15,7 @@ export class AddRelationDto {
   })
   @IsString()
   @IsNotEmpty()
-  targetTaskId!: string;
+  targetWorkItemId!: string;
 
   @ApiProperty({
     description: 'Relation type',

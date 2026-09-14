@@ -7,7 +7,7 @@ import {
 
 /**
  * Automatically infers the state group from a state identifier or name.
- * Used for migrating legacy Project taskColumns into state groups.
+ * Used for migrating legacy Project workItemColumns into state groups.
  */
 export function inferStateGroup(
   id?: string | null,
@@ -65,7 +65,7 @@ export function isValidStateGroup(value: unknown): value is StateGroup {
 }
 
 /**
- * Safely parses and normalizes raw JSON data from Project.taskColumns
+ * Safely parses and normalizes raw JSON data from Project.workItemColumns
  * into full WorkItemState objects.
  */
 export function parseWorkItemStates(raw: unknown): WorkItemState[] {

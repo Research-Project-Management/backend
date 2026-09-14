@@ -297,12 +297,25 @@ export class CommitStage {
   ): Promise<any> {
     const createData = toItemData(metadata, options);
 
+    const isProject =
+      Boolean(workspaceId) &&
+      workspaceId !== 'user' &&
+      workspaceId !== options?.userId;
+    const effectiveUserId = options?.userId || workspaceId;
+    const effectiveProjectId = isProject ? workspaceId : undefined;
+
+    if (effectiveProjectId) {
+      createData.projectId = effectiveProjectId;
+    }
+
     const createdItem = await this.itemsService.createItem(
-      workspaceId,
+      effectiveUserId,
       createData,
       {
         source: (options?.source as any) || 'manual',
+        projectId: effectiveProjectId,
       },
+      effectiveProjectId,
     );
 
     return createdItem;

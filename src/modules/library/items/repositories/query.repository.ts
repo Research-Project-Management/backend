@@ -287,6 +287,28 @@ export class QueryRepository {
                       },
                     },
                     { doi: { contains: options.search, mode: 'insensitive' } },
+                    {
+                      publicationTitle: {
+                        contains: options.search,
+                        mode: 'insensitive',
+                      },
+                    },
+                    {
+                      citationKey: {
+                        contains: options.search,
+                        mode: 'insensitive',
+                      },
+                    },
+                    {
+                      contributors: {
+                        some: {
+                          fullName: {
+                            contains: options.search,
+                            mode: 'insensitive',
+                          },
+                        },
+                      },
+                    },
                   ],
                 }
               : {}),
@@ -381,6 +403,13 @@ export class QueryRepository {
         { title: { contains: options.search, mode: 'insensitive' } },
         { abstract: { contains: options.search, mode: 'insensitive' } },
         { doi: { contains: options.search, mode: 'insensitive' } },
+        { publicationTitle: { contains: options.search, mode: 'insensitive' } },
+        { citationKey: { contains: options.search, mode: 'insensitive' } },
+        {
+          contributors: {
+            some: { fullName: { contains: options.search, mode: 'insensitive' } },
+          },
+        },
       ];
     }
 
@@ -430,6 +459,28 @@ export class QueryRepository {
                       },
                     },
                     { doi: { contains: options.search, mode: 'insensitive' } },
+                    {
+                      publicationTitle: {
+                        contains: options.search,
+                        mode: 'insensitive',
+                      },
+                    },
+                    {
+                      citationKey: {
+                        contains: options.search,
+                        mode: 'insensitive',
+                      },
+                    },
+                    {
+                      contributors: {
+                        some: {
+                          fullName: {
+                            contains: options.search,
+                            mode: 'insensitive',
+                          },
+                        },
+                      },
+                    },
                   ],
                 }
               : {}),
@@ -461,11 +512,19 @@ export class QueryRepository {
     userId: string,
     itemId: string,
     tx?: Prisma.TransactionClient,
+    projectId?: string,
   ): Promise<boolean> {
-    if (!isUuid(itemId) || !isUuid(userId)) return false;
+    if (!isUuid(itemId)) return false;
     const client = this.getClient(tx);
+    const scopeWhere =
+      projectId && projectId !== 'user' && isUuid(projectId)
+        ? { projectId }
+        : isUuid(userId)
+          ? { userId }
+          : null;
+    if (!scopeWhere) return false;
     const count = await client.item.count({
-      where: { id: itemId, userId, deletedAt: null },
+      where: { id: itemId, ...scopeWhere, deletedAt: null },
     });
     return count > 0;
   }
@@ -474,8 +533,9 @@ export class QueryRepository {
     userId: string,
     itemId: string,
     tx?: Prisma.TransactionClient,
+    projectId?: string,
   ): Promise<void> {
-    const isPresent = await this.exists(userId, itemId, tx);
+    const isPresent = await this.exists(userId, itemId, tx, projectId);
     if (!isPresent) {
       throw new NotFoundException(
         `Item ${itemId} not found`,
@@ -487,10 +547,17 @@ export class QueryRepository {
     userId: string,
     itemIds: string[],
     tx?: Prisma.TransactionClient,
+    projectId?: string,
   ): Promise<Map<string, boolean>> {
     const result = new Map<string, boolean>();
     if (!itemIds || itemIds.length === 0) return result;
-    if (!isUuid(userId)) {
+    const scopeWhere =
+      projectId && projectId !== 'user' && isUuid(projectId)
+        ? { projectId }
+        : isUuid(userId)
+          ? { userId }
+          : null;
+    if (!scopeWhere) {
       for (const id of itemIds) result.set(id, false);
       return result;
     }
@@ -498,7 +565,7 @@ export class QueryRepository {
     const validIds = itemIds.filter(isUuid);
     const client = this.getClient(tx);
     const found = await client.item.findMany({
-      where: { id: { in: validIds }, userId, deletedAt: null },
+      where: { id: { in: validIds }, ...scopeWhere, deletedAt: null },
       select: { id: true },
     });
     const foundSet = new Set(found.map((it: any) => it.id));
@@ -512,11 +579,19 @@ export class QueryRepository {
     userId: string,
     itemId: string,
     tx?: Prisma.TransactionClient,
+    projectId?: string,
   ): Promise<ItemSummary | null> {
-    if (!isUuid(itemId) || !isUuid(userId)) return null;
+    if (!isUuid(itemId)) return null;
     const client = this.getClient(tx);
+    const scopeWhere =
+      projectId && projectId !== 'user' && isUuid(projectId)
+        ? { projectId }
+        : isUuid(userId)
+          ? { userId }
+          : null;
+    if (!scopeWhere) return null;
     const item = await client.item.findFirst({
-      where: { id: itemId, userId, deletedAt: null },
+      where: { id: itemId, ...scopeWhere, deletedAt: null },
       select: {
         id: true,
         userId: true,

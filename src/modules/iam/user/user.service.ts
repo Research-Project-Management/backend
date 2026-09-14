@@ -143,7 +143,7 @@ export class UserService {
   }
 
   /**
-   * Global search across projects, tasks, papers, pages, files, and stickies.
+   * Global search across projects, work items, papers, pages, files, and stickies.
    */
   async searchAll(
     userId: string,
@@ -152,10 +152,10 @@ export class UserService {
     if (!query || !query.trim()) return [];
     const cleanQuery = query.trim();
 
-    const [projects, tasks, papers, pages, files, stickies] = await Promise.all(
+    const [projects, workItems, papers, pages, files, stickies] = await Promise.all(
       [
         this.userRepo.searchProjects(userId, cleanQuery),
-        this.userRepo.searchTasks(userId, cleanQuery),
+        this.userRepo.searchWorkItems(userId, cleanQuery),
         this.userRepo.searchPapers(userId, cleanQuery),
         this.userRepo.searchPages(userId, cleanQuery),
         this.userRepo.searchFiles(userId, cleanQuery),
@@ -171,8 +171,8 @@ export class UserService {
         icon: project.avatar || null,
         updatedAt: project.updatedAt,
       })),
-      ...tasks.map((workItem: { id: string; title: string; identifier: string; projectId: string; project?: { name: string }; updatedAt: Date }) => ({
-        type: 'task' as const,
+      ...workItems.map((workItem: { id: string; title: string; identifier: string; projectId: string; project?: { name: string }; updatedAt: Date }) => ({
+        type: 'work_item' as const,
         id: workItem.id,
         name: workItem.title,
         identifier: workItem.identifier,

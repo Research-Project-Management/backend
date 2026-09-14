@@ -122,5 +122,9 @@ export class ConfirmCapturedUrlDto {
 
   @IsOptional()
   @IsString()
+  projectId?: string;
+
+  @IsOptional()
+  @IsString()
   idempotencyKey?: string;
 }

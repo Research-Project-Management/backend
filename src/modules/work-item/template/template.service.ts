@@ -218,7 +218,7 @@ export class TemplateService {
       [];
     const checklists = (template.checklists as any[]) || [];
 
-    const createTaskDto: any = {
+    const createWorkItemDto: any = {
       title,
       description: content,
       content,
@@ -236,19 +236,19 @@ export class TemplateService {
         : {}),
     };
 
-    const result = await this.workItemService.createTask(
+    const result = await this.workItemService.createWorkItem(
       template.projectId,
       authorId,
-      createTaskDto,
+      createWorkItemDto,
     );
 
-    const createdTask = (result as any)?.WorkItem || result;
+    const createdWorkItem = (result as any)?.workItem || (result as any)?.item || (result as any)?.WorkItem || result;
 
     if (this.eventEmitter) {
       this.eventEmitter.emit('template.instantiated', {
         templateId,
-        taskId: createdTask?.id,
-        identifier: createdTask?.identifier,
+        workItemId: createdWorkItem?.id,
+        identifier: createdWorkItem?.identifier,
         projectId: template.projectId,
         authorId,
       });
@@ -256,8 +256,10 @@ export class TemplateService {
 
     return {
       success: true,
-      message: `Work item "${createdTask?.identifier || title}" created from template "${template.name}"`,
-      WorkItem: createdTask,
+      message: `Work item "${createdWorkItem?.identifier || title}" created from template "${template.name}"`,
+      workItem: createdWorkItem,
+      item: createdWorkItem,
+      WorkItem: createdWorkItem,
     };
   }
 }

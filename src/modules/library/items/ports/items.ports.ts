@@ -82,43 +82,70 @@ export interface DuplicateCandidateItem {
 }
 
 export interface IItemReadPort {
-  findById(userId: string, itemId: string): Promise<ItemDetail | null>;
-  findByIds(userId: string, itemIds: string[]): Promise<ItemDetail[]>;
-  findByDoi(userId: string, doi: string): Promise<ItemDetail | null>;
+  findById(
+    userId: string,
+    itemId: string,
+    projectId?: string,
+  ): Promise<ItemDetail | null>;
+  findByIds(
+    userId: string,
+    itemIds: string[],
+    projectId?: string,
+  ): Promise<ItemDetail[]>;
+  findByDoi(
+    userId: string,
+    doi: string,
+    projectId?: string,
+  ): Promise<ItemDetail | null>;
   findSummaryById(
     userId: string,
     itemId: string,
+    projectId?: string,
   ): Promise<ItemDomainSummary | null>;
   findSummariesByIds(
     userId: string,
     itemIds: string[],
+    projectId?: string,
   ): Promise<ItemDomainSummary[]>;
   getItemSnapshot(
     userId: string,
     itemId: string,
+    projectId?: string,
   ): Promise<SyncItemSnapshot | null>;
   getItemSnapshots(
     userId: string,
     itemIds: string[],
+    projectId?: string,
   ): Promise<SyncItemSummary[]>;
   findQualityAuditItems(
     userId: string,
     limit?: number,
+    projectId?: string,
   ): Promise<QualityAuditCandidateItem[]>;
   findDuplicateCandidateItems(
     userId: string,
     limit?: number,
+    projectId?: string,
   ): Promise<DuplicateCandidateItem[]>;
 }
 
 export const ITEM_READ_PORT = Symbol('ITEM_READ_PORT');
 
 export interface IItemExistencePort {
-  exists(userId: string, itemId: string): Promise<boolean>;
-  assertExists(userId: string, itemId: string): Promise<void>;
+  exists(
+    userId: string,
+    itemId: string,
+    projectId?: string,
+  ): Promise<boolean>;
+  assertExists(
+    userId: string,
+    itemId: string,
+    projectId?: string,
+  ): Promise<void>;
   existMany(
     userId: string,
     itemIds: string[],
+    projectId?: string,
   ): Promise<Map<string, boolean>>;
 }
 

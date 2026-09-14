@@ -13,7 +13,7 @@ import {
   CreateCycleDto,
   UpdateCycleDto,
   CompleteCycleDto,
-  IncompleteTaskAction,
+  IncompleteWorkItemAction,
 } from './dto/cycle.dto';
 import {
   Cycle,
@@ -25,7 +25,7 @@ import {
 import { RedisCacheService } from '@/core/cache/redis.service';
 import { WORK_ITEM_REDIS_KEYS } from '../core/constants/redis-keys.constant';
 import { calculateCycleStats } from './utils/cycle.util';
-import { CycleStats, CycleTaskItem } from './types/cycle.types';
+import { CycleStats, CycleWorkItemItem } from './types/cycle.types';
 import { inferStateGroup } from '../state/utils/state.util';
 
 @Injectable()
@@ -59,7 +59,7 @@ export class CycleService implements OnModuleInit, OnModuleDestroy {
     if (!this.cache) return;
     const promises: Promise<void>[] = [
       this.cache.del(WORK_ITEM_REDIS_KEYS.projectCycles(projectId)),
-      this.cache.del(WORK_ITEM_REDIS_KEYS.projectTasks(projectId)),
+      this.cache.del(WORK_ITEM_REDIS_KEYS.projectWorkItems(projectId)),
       this.cache.del(`flux:proj:overview:${projectId}`),
     ];
     if (cycleId) {
@@ -152,8 +152,8 @@ export class CycleService implements OnModuleInit, OnModuleDestroy {
       throw new NotFoundException('Cycle not found');
     }
 
-    const tasks = await this.cycleRepository.findCycleTasks(cycleId);
-    const progress = calculateCycleStats(tasks);
+    const workItems = await this.cycleRepository.findCycleWorkItems(cycleId);
+    const progress = calculateCycleStats(workItems);
     return { progress };
   }
 
@@ -240,8 +240,8 @@ export class CycleService implements OnModuleInit, OnModuleDestroy {
     let endedAt: Date | undefined = undefined;
 
     if (isCompleting) {
-      const tasks = await this.cycleRepository.findCycleTasks(cycleId);
-      statsAtCompletion = calculateCycleStats(tasks);
+      const workItems = await this.cycleRepository.findCycleWorkItems(cycleId);
+      statsAtCompletion = calculateCycleStats(workItems);
       endedAt = new Date();
     }
 
@@ -303,39 +303,50 @@ export class CycleService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async addTask(cycleId: string, taskId: string) {
+  async addWorkItem(cycleId: string, workItemId: string) {
     const cycle = await this.cycleRepository.findCycleById(cycleId);
     if (!cycle) {
       throw new NotFoundException('Cycle not found');
     }
-    const updated = await this.cycleRepository.addTaskToCycle(taskId, cycleId);
+    const item = await this.cycleRepository.findWorkItemById(workItemId);
+    if (!item) {
+      throw new NotFoundException('WorkItem not found');
+    }
+    if (item.projectId !== cycle.projectId) {
+      throw new BadRequestException('Cannot add work item from a different project to this cycle');
+    }
+    const updated = await this.cycleRepository.addWorkItemToCycle(workItemId, cycleId);
     await this.invalidateCycleCache(cycle.projectId, cycleId);
-    return { message: 'WorkItem added to cycle', WorkItem: updated };
+    return { message: 'WorkItem added to cycle', workItem: updated };
   }
 
-  async addTasksBatch(cycleId: string, taskIds: string[]) {
+  async addWorkItemsBatch(cycleId: string, workItemIds: string[]) {
     const cycle = await this.cycleRepository.findCycleById(cycleId);
     if (!cycle) {
       throw new NotFoundException('Cycle not found');
     }
-    const result = await this.cycleRepository.addTasksBatch(taskIds, cycleId);
+    const result = await this.cycleRepository.addWorkItemsBatch(
+      workItemIds,
+      cycleId,
+      cycle.projectId,
+    );
     await this.invalidateCycleCache(cycle.projectId, cycleId);
     return {
-      message: `${result.count} tasks added to cycle`,
+      message: `${result.count} work items added to cycle`,
       count: result.count,
     };
   }
 
-  async removeTask(cycleId: string, taskId: string) {
+  async removeWorkItem(cycleId: string, workItemId: string) {
     const cycle = await this.cycleRepository.findCycleById(cycleId);
     if (!cycle) {
       throw new NotFoundException('Cycle not found');
     }
-    const updated = await this.cycleRepository.removeTaskFromCycle(taskId);
+    const updated = await this.cycleRepository.removeWorkItemFromCycle(workItemId);
     await this.invalidateCycleCache(cycle.projectId, cycleId);
     return {
       message: 'WorkItem removed from cycle',
-      WorkItem: updated,
+      workItem: updated,
     };
   }
 
@@ -345,7 +356,7 @@ export class CycleService implements OnModuleInit, OnModuleDestroy {
       throw new NotFoundException('Cycle not found');
     }
 
-    if (dto.action === IncompleteTaskAction.transfer) {
+    if (dto.action === IncompleteWorkItemAction.transfer) {
       if (!dto.targetCycleId) {
         throw new BadRequestException(
           'Target cycle ID is required for WorkItem transfer',
@@ -353,22 +364,22 @@ export class CycleService implements OnModuleInit, OnModuleDestroy {
       }
       if (dto.targetCycleId === cycleId) {
         throw new BadRequestException(
-          'Cannot transfer tasks to the same cycle',
+          'Cannot transfer work items to the same cycle',
         );
       }
     }
 
-    const tasks = await this.cycleRepository.findCycleTasks(cycleId);
-    const stats = calculateCycleStats(tasks);
+    const workItems = await this.cycleRepository.findCycleWorkItems(cycleId);
+    const stats = calculateCycleStats(workItems);
 
-    // Identify incomplete tasks using state groups
-    const incompleteTaskIds = tasks
-      .filter((workItem) => !workItem.completed && inferStateGroup(workItem.columnId, workItem.columnId) !== 'completed')
-      .map((workItem) => workItem.id);
+    // Identify incomplete work items using state groups
+    const incompleteWorkItemIds = workItems
+      .filter((workItem: any) => !workItem.completed && inferStateGroup(workItem.columnId, workItem.columnId) !== 'completed')
+      .map((workItem: any) => workItem.id);
 
     let transferredCount = 0;
 
-    if (dto.action === IncompleteTaskAction.transfer) {
+    if (dto.action === IncompleteWorkItemAction.transfer) {
       const target = await this.cycleRepository.findCycleById(
         dto.targetCycleId!,
       );
@@ -377,24 +388,24 @@ export class CycleService implements OnModuleInit, OnModuleDestroy {
       }
       if (target.status === CycleStatus.completed) {
         throw new BadRequestException(
-          'Cannot transfer tasks to an already completed cycle',
+          'Cannot transfer work items to an already completed cycle',
         );
       }
 
-      if (incompleteTaskIds.length > 0) {
-        const result = await this.cycleRepository.transferIncompleteTasks(
+      if (incompleteWorkItemIds.length > 0) {
+        const result = await this.cycleRepository.transferIncompleteWorkItems(
           cycleId,
           dto.targetCycleId!,
-          incompleteTaskIds,
+          incompleteWorkItemIds,
         );
         transferredCount = result.count;
       }
-    } else if (dto.action === IncompleteTaskAction.backlog) {
-      if (incompleteTaskIds.length > 0) {
-        const result = await this.cycleRepository.transferIncompleteTasks(
+    } else if (dto.action === IncompleteWorkItemAction.backlog) {
+      if (incompleteWorkItemIds.length > 0) {
+        const result = await this.cycleRepository.transferIncompleteWorkItems(
           cycleId,
           null,
-          incompleteTaskIds,
+          incompleteWorkItemIds,
         );
         transferredCount = result.count;
       }
@@ -441,8 +452,8 @@ export class CycleService implements OnModuleInit, OnModuleDestroy {
         projectId,
       );
     for (const cycle of eligibleToComplete) {
-      const tasks = await this.cycleRepository.findCycleTasks(cycle.id);
-      const stats = calculateCycleStats(tasks);
+      const workItems = await this.cycleRepository.findCycleWorkItems(cycle.id);
+      const stats = calculateCycleStats(workItems);
       const updated = await this.cycleRepository.updateCycle(cycle.id, {
         status: CycleStatus.completed,
         endedAt: now,
@@ -506,8 +517,8 @@ export class CycleService implements OnModuleInit, OnModuleDestroy {
     const cycle = await this.cycleRepository.findCycleById(cycleId);
     if (!cycle) throw new NotFoundException('Cycle not found');
 
-    const tasks = (cycle as any).tasks || [];
-    const total = tasks.length;
+    const workItems = (cycle as any).workItems || [];
+    const total = workItems.length;
     const startDate = cycle.startDate
       ? new Date(cycle.startDate)
       : new Date(cycle.createdAt);
@@ -524,12 +535,12 @@ export class CycleService implements OnModuleInit, OnModuleDestroy {
 
     while (cursor <= chartEnd) {
       const dateStr = cursor.toISOString().slice(0, 10);
-      const completedByDay = tasks.filter((taskItem: any) => {
-        const group = inferStateGroup(taskItem.columnId, taskItem.columnId);
-        const isDone = taskItem.completed === true || group === 'completed';
+      const completedByDay = workItems.filter((item: any) => {
+        const group = inferStateGroup(item.columnId, item.columnId);
+        const isDone = item.completed === true || group === 'completed';
         if (!isDone) return false;
-        const updatedDate = taskItem.updatedAt
-          ? new Date(taskItem.updatedAt)
+        const updatedDate = item.updatedAt
+          ? new Date(item.updatedAt)
           : new Date();
         return updatedDate <= new Date(dateStr + 'T23:59:59Z');
       }).length;
@@ -556,8 +567,8 @@ export class CycleService implements OnModuleInit, OnModuleDestroy {
     const cycle = await this.cycleRepository.findCycleById(cycleId);
     if (!cycle) throw new NotFoundException('Cycle not found');
 
-    const tasks = (cycle as any).tasks || [];
-    const stats = calculateCycleStats(tasks);
+    const workItems = (cycle as any).workItems || [];
+    const stats = calculateCycleStats(workItems);
     const velocityRate = stats.completionPercentage;
 
     return {
@@ -567,3 +578,5 @@ export class CycleService implements OnModuleInit, OnModuleDestroy {
     };
   }
 }
+
+

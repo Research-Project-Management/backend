@@ -5,7 +5,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { TaskCommentRepository } from './comment.repository';
+import { CommentRepository } from './comment.repository';
 import {
   CreateCommentDto,
   UpdateCommentDto,
@@ -42,9 +42,9 @@ function extractMentions(content: string): string[] {
 }
 
 @Injectable()
-export class TaskCommentService {
+export class CommentService {
   constructor(
-    private readonly commentRepository: TaskCommentRepository,
+    private readonly commentRepository: CommentRepository,
     @Optional() private readonly eventEmitter?: EventEmitter2,
   ) {}
 
@@ -53,8 +53,7 @@ export class TaskCommentService {
     userId: string,
     action: string,
   ) {
-    const comment =
-      await this.commentRepository.findTaskCommentWithProject(commentId);
+    const comment = await this.commentRepository.findCommentWithProject(commentId);
 
     if (!comment) {
       throw new NotFoundException('Comment not found');
@@ -64,16 +63,20 @@ export class TaskCommentService {
       return comment;
     }
 
-    if (comment.task?.project?.createdById === userId) {
+    const workItem = comment.workItem;
+
+    if (workItem?.project?.createdById === userId) {
       return comment;
     }
 
-    const projectRole = await this.commentRepository.findProjectMemberRole(
-      comment.task.projectId,
-      userId,
-    );
-    if (projectRole === 'owner') {
-      return comment;
+    if (workItem?.projectId) {
+      const projectRole = await this.commentRepository.findProjectMemberRole(
+        workItem.projectId,
+        userId,
+      );
+      if (projectRole === 'owner') {
+        return comment;
+      }
     }
 
     throw new ForbiddenException(
@@ -94,18 +97,18 @@ export class TaskCommentService {
     };
   }
 
-  async getTaskComments(taskId: string) {
-    const comments = await this.commentRepository.findTaskComments(taskId);
+  async getWorkItemComments(workItemId: string) {
+    const comments = await this.commentRepository.findWorkItemComments(workItemId);
     return { comments };
   }
 
-  async createTaskComment(
-    taskId: string,
+  async createWorkItemComment(
+    workItemId: string,
     userId: string,
     createCommentDto: CreateCommentDto,
   ) {
-    const comment = await this.commentRepository.createTaskComment({
-      taskId,
+    const comment = await this.commentRepository.createComment({
+      workItemId,
       authorId: userId,
       content: createCommentDto.content,
       attachments: createCommentDto.attachments,
@@ -115,7 +118,7 @@ export class TaskCommentService {
     const mentions = extractMentions(createCommentDto.content);
     if (mentions.length > 0 && this.eventEmitter) {
       this.eventEmitter.emit('comment.mention', {
-        taskId,
+        workItemId,
         commentId: comment.id,
         authorId: userId,
         mentionedUserIds: mentions,
@@ -123,7 +126,7 @@ export class TaskCommentService {
     }
 
     this.eventEmitter?.emit('comment.created', {
-      taskId,
+      workItemId,
       commentId: comment.id,
       authorId: userId,
       content: comment.content,
@@ -132,14 +135,14 @@ export class TaskCommentService {
     return { comment };
   }
 
-  async updateTaskComment(
+  async updateWorkItemComment(
     commentId: string,
     userId: string,
     updateCommentDto: UpdateCommentDto,
   ) {
     await this.assertCanModifyComment(commentId, userId, 'update');
 
-    const comment = await this.commentRepository.updateTaskComment(commentId, {
+    const comment = await this.commentRepository.updateComment(commentId, {
       ...(updateCommentDto.content !== undefined && {
         content: updateCommentDto.content,
       }),
@@ -150,25 +153,25 @@ export class TaskCommentService {
     });
 
     this.eventEmitter?.emit('comment.updated', {
-      taskId: comment.taskId,
-      commentId: comment.id,
+      workItemId: comment?.workItemId,
+      commentId: comment?.id,
       authorId: userId,
     });
 
     return { comment };
   }
 
-  async deleteTaskComment(commentId: string, userId: string) {
+  async deleteWorkItemComment(commentId: string, userId: string) {
     const existing = await this.assertCanModifyComment(
       commentId,
       userId,
       'delete',
     );
 
-    await this.commentRepository.deleteTaskComment(commentId);
+    await this.commentRepository.deleteComment(commentId);
 
     this.eventEmitter?.emit('comment.deleted', {
-      taskId: existing.taskId,
+      workItemId: existing.workItemId,
       commentId,
       authorId: userId,
     });
@@ -176,13 +179,12 @@ export class TaskCommentService {
     return { success: true };
   }
 
-  async addTaskReply(
+  async addWorkItemReply(
     commentId: string,
     userId: string,
     addReplyDto: AddReplyDto,
   ) {
-    const existing =
-      await this.commentRepository.findTaskCommentById(commentId);
+    const existing = await this.commentRepository.findCommentById(commentId);
     if (!existing) {
       throw new NotFoundException('Comment not found');
     }
@@ -192,20 +194,19 @@ export class TaskCommentService {
     const newReply = this.buildReply(addReplyDto.content, author);
     replies.push(newReply);
 
-    const comment = await this.commentRepository.updateTaskComment(commentId, {
+    const comment = await this.commentRepository.updateComment(commentId, {
       replies: replies as unknown as Prisma.InputJsonValue,
     });
 
     return { comment };
   }
 
-  async reactToTaskComment(
+  async reactToWorkItemComment(
     commentId: string,
     userId: string,
     reactCommentDto: ReactCommentDto,
   ) {
-    const existing =
-      await this.commentRepository.findTaskCommentById(commentId);
+    const existing = await this.commentRepository.findCommentById(commentId);
     if (!existing) {
       throw new NotFoundException('Comment not found');
     }
@@ -222,10 +223,19 @@ export class TaskCommentService {
 
     reactions[reactCommentDto.emoji] = users;
 
-    const comment = await this.commentRepository.updateTaskComment(commentId, {
+    const comment = await this.commentRepository.updateComment(commentId, {
       reactions: reactions,
     });
 
     return { comment };
   }
+
+  getComments = this.getWorkItemComments.bind(this);
+  createComment = this.createWorkItemComment.bind(this);
+  updateComment = this.updateWorkItemComment.bind(this);
+  deleteComment = this.deleteWorkItemComment.bind(this);
+  addReply = this.addWorkItemReply.bind(this);
+  reactComment = this.reactToWorkItemComment.bind(this);
 }
+
+

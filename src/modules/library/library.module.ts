@@ -9,7 +9,6 @@ import { TagsModule } from './tags/tags.module';
 import { AttachmentsModule } from './attachments/attachments.module';
 import { AnnotationsModule } from './annotations/annotations.module';
 import { NotesModule } from './notes/notes.module';
-import { SyncModule } from './sync/sync.module';
 import { SearchModule } from './search/search.module';
 import { CitationModule } from './citation/citation.module';
 import { IngestionModule } from './ingestion/ingestion.module';
@@ -43,7 +42,6 @@ import { RetractionModule } from './retraction/retraction.module';
     AnnotationsModule,
     NotesModule,
     OutboxModule,
-    SyncModule,
     SearchModule,
     CitationModule,
     ExportsModule,
@@ -63,7 +61,6 @@ import { RetractionModule } from './retraction/retraction.module';
     AnnotationsModule,
     NotesModule,
     OutboxModule,
-    SyncModule,
     SearchModule,
     CitationModule,
     ExportsModule,

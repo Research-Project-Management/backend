@@ -2,15 +2,15 @@ import { WorkItem, ProjectMember, ProjectMemberRole } from '@prisma/client';
 
 export { ProjectMemberRole };
 
-export interface AssignTaskResult {
-  WorkItem: WorkItem;
+export interface AssignWorkItemResult {
+  workItem: WorkItem;
   previousAssigneeId: string | null;
   newAssigneeId: string | null;
 }
 
 export interface BulkAssignResult {
   updatedCount: number;
-  taskIds: string[];
+  workItemIds: string[];
   assigneeId: string | null;
 }
 
@@ -25,15 +25,15 @@ export const ELIGIBLE_ASSIGNEE_ROLES: readonly ProjectMemberRole[] = [
 ] as const;
 
 export interface IAssignmentRepository {
-  findTask(taskId: string): Promise<WorkItem | null>;
+  findWorkItem(workItemId: string): Promise<WorkItem | null>;
   findProjectMember(
     projectId: string,
     userId: string,
   ): Promise<ProjectMember | null>;
-  assignTask(taskId: string, assigneeId: string | null): Promise<WorkItem>;
-  bulkAssignTasks(
+  assignWorkItem(workItemId: string, assigneeId: string | null): Promise<WorkItem>;
+  bulkAssignWorkItems(
     projectId: string,
-    taskIds: string[],
+    workItemIds: string[],
     assigneeId: string | null,
   ): Promise<number>;
   getProjectSettings(

@@ -308,6 +308,7 @@ export class CommandRepository {
     userId: string,
     data: CreateItemData,
     tx?: Prisma.TransactionClient,
+    projectId?: string,
   ) {
     const client = this.getClient(tx);
     const resolvedFileId =
@@ -388,7 +389,10 @@ export class CommandRepository {
       extra:
         resolveExtraPlainText(data.extra, undefined, data.extraFields) ?? '',
       uploadedById: data.uploadedById || 'system',
-      projectId: data.projectId || null,
+      projectId:
+        (projectId && projectId !== 'user' ? projectId : undefined) ||
+        data.projectId ||
+        null,
       version: 1,
       ...(() => {
         const rawCollectionIds = [
@@ -633,13 +637,16 @@ export class CommandRepository {
     expectedVersion: number | undefined,
     data: UpdateItemData,
     tx?: Prisma.TransactionClient,
+    projectId?: string,
   ) {
     const client = this.getClient(tx);
     const existing = await client.item.findFirst({
       where: {
         id,
         deletedAt: null,
-        OR: [{ userId }, { projectId: { not: null } }],
+        ...(projectId && projectId !== 'user'
+          ? { projectId }
+          : { userId }),
       } as any,
       include: {
         identifiers: true,
@@ -995,12 +1002,15 @@ export class CommandRepository {
     id: string,
     expectedVersion?: number,
     tx?: Prisma.TransactionClient,
+    projectId?: string,
   ): Promise<boolean> {
     const client = this.getClient(tx);
     const whereCondition: any = {
       id,
       deletedAt: null,
-      OR: [{ userId }, { projectId: { not: null } }],
+      ...(projectId && projectId !== 'user'
+        ? { projectId }
+        : { userId }),
     };
     if (expectedVersion !== undefined) {
       const existing = await client.item.findFirst({
@@ -1029,10 +1039,17 @@ export class CommandRepository {
     id: string,
     expectedVersion?: number,
     tx?: Prisma.TransactionClient,
+    projectId?: string,
   ) {
     const client = this.getClient(tx);
     const existing = await client.item.findFirst({
-      where: { id, userId, deletedAt: { not: null } },
+      where: {
+        id,
+        deletedAt: { not: null },
+        ...(projectId && projectId !== 'user'
+          ? { projectId }
+          : { userId }),
+      },
     });
 
     if (!existing) {
@@ -1085,10 +1102,16 @@ export class CommandRepository {
     userId: string,
     id: string,
     tx?: Prisma.TransactionClient,
+    projectId?: string,
   ): Promise<boolean> {
     const client = this.getClient(tx);
     const existing = await client.item.findFirst({
-      where: { id, userId },
+      where: {
+        id,
+        ...(projectId && projectId !== 'user'
+          ? { projectId }
+          : { userId }),
+      },
     });
 
     if (!existing) {

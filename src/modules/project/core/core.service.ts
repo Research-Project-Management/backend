@@ -448,14 +448,14 @@ export class CoreService {
   /**
    * Allocates the next sequential human-readable WorkItem identifier (e.g. 'BIO-42').
    */
-  async allocateTaskIdentifier(
+  async allocateWorkItemIdentifier(
     projectId: string,
   ): Promise<AllocatedIdentifier> {
-    return this.projectRepo.allocateTaskIdentifier(projectId);
+    return this.projectRepo.allocateWorkItemIdentifier(projectId);
   }
 
   /**
-   * Gets the short prefix code for tasks in this project (e.g. 'BIO').
+   * Gets the short prefix code for work items in this project (e.g. 'BIO').
    */
   async getProjectPrefix(projectId: string): Promise<string> {
     const project = await this.assertProjectExists(projectId);

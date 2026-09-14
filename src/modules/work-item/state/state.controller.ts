@@ -68,8 +68,8 @@ export class StateController {
     status: 200,
     description: 'Map of stateId to WorkItem count',
   })
-  async getStateTaskCounts(@Param('projectId') projectId: string) {
-    return this.stateService.getStateTaskCounts(projectId);
+  async getStateWorkItemCounts(@Param('projectId') projectId: string) {
+    return this.stateService.getStateWorkItemCounts(projectId);
   }
 
   @Get([

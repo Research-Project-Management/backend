@@ -120,7 +120,7 @@ export class LabelController {
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner')
   @ApiOperation({
-    summary: 'Delete project label and detach from tasks',
+    summary: 'Delete project label and detach from work items',
   })
   async deleteProjectLabel(
     @Param('projectId') projectId: string,

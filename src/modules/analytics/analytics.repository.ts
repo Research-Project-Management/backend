@@ -28,7 +28,7 @@ export class AnalyticsRepository {
       if (!proj) {
         return {
           members: 0,
-          tasks: 0,
+          workItems: 0,
           pages: 0,
           files: 0,
           stickies: 0,
@@ -41,7 +41,7 @@ export class AnalyticsRepository {
 
     const [
       membersCount,
-      tasksCount,
+      workItemsCount,
       pagesCount,
       filesCount,
       stickiesCount,
@@ -77,7 +77,7 @@ export class AnalyticsRepository {
 
     return {
       members: membersCount,
-      tasks: tasksCount,
+      workItems: workItemsCount,
       pages: pagesCount,
       files: filesCount,
       stickies: stickiesCount,
@@ -91,7 +91,7 @@ export class AnalyticsRepository {
       return {
         projects: 0,
         assignedWorkItems: 0,
-        createdTasks: 0,
+        createdWorkItems: 0,
         pages: 0,
         stickies: 0,
         papers: 0,
@@ -100,8 +100,8 @@ export class AnalyticsRepository {
 
     const [
       projectsCount,
-      assignedTasksCount,
-      createdTasksCount,
+      assignedWorkItemsCount,
+      createdWorkItemsCount,
       pagesCount,
       stickiesCount,
       papersCount,
@@ -128,15 +128,15 @@ export class AnalyticsRepository {
 
     return {
       projects: projectsCount,
-      assignedWorkItems: assignedTasksCount,
-      createdTasks: createdTasksCount,
+      assignedWorkItems: assignedWorkItemsCount,
+      createdWorkItems: createdWorkItemsCount,
       pages: pagesCount,
       stickies: stickiesCount,
       papers: papersCount,
     };
   }
 
-  async findProjectTasksWithAssignees(projectId: string) {
+  async findProjectWorkItemsWithAssignees(projectId: string) {
     let canonicalProjectId = projectId;
     if (!isUUID(canonicalProjectId)) {
       const proj = await this.prisma.project
@@ -165,7 +165,7 @@ export class AnalyticsRepository {
     });
   }
 
-  async findCycleTasks(cycleId: string) {
+  async findCycleWorkItems(cycleId: string) {
     if (!isUUID(cycleId)) return [];
     return this.prisma.workItem.findMany({
       where: { cycleId },
@@ -178,8 +178,8 @@ export class AnalyticsRepository {
     });
   }
 
-  /** Label distribution: count tasks per label string in a project */
-  async findProjectTasksByLabel(projectId: string) {
+  /** Label distribution: count work items per label string in a project */
+  async findProjectWorkItemsByLabel(projectId: string) {
     if (!isUUID(projectId)) return [];
     return this.prisma.workItem.findMany({
       where: { projectId, deletedAt: null },
@@ -187,8 +187,8 @@ export class AnalyticsRepository {
     });
   }
 
-  /** Time-series: tasks created and completed per day within a date range */
-  async findProjectTasksTimeSeries(projectId: string, from: Date, to: Date) {
+  /** Time-series: work items created and completed per day within a date range */
+  async findProjectWorkItemsTimeSeries(projectId: string, from: Date, to: Date) {
     if (!isUUID(projectId)) return [];
     return this.prisma.workItem.findMany({
       where: {
@@ -205,8 +205,8 @@ export class AnalyticsRepository {
     });
   }
 
-  /** Cycle burndown: tasks with dates for daily completion tracking */
-  async findCycleTasksWithDates(cycleId: string) {
+  /** Cycle burndown: work items with dates for daily completion tracking */
+  async findCycleWorkItemsWithDates(cycleId: string) {
     if (!isUUID(cycleId)) return [];
     return this.prisma.workItem.findMany({
       where: { cycleId, deletedAt: null },

@@ -12,7 +12,7 @@ import type {
   UpsertSyncCollectionCommand,
   DeleteSyncEntityCommand,
   UpsertSyncEntityResult,
-} from '../sync/types/sync.types';
+} from '../core/types/entity-commands.types';
 import { CollectionsRepository } from './collections.repository';
 import {
   CreateCollectionDto,
@@ -45,17 +45,23 @@ export class CollectionsService {
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
-  private async invalidateCollectionsCache(userId: string): Promise<void> {
+  private async invalidateCollectionsCache(
+    userId: string,
+    projectId?: string,
+  ): Promise<void> {
     if (this.cache) {
       await this.cache.delPattern(
         LIBRARY_REDIS_KEYS.collectionsPattern(userId),
       );
+      if (projectId) {
+        await this.cache.delPattern(`flux:lib:collections:proj:${projectId}*`);
+      }
     }
   }
 
-  async getCollections(userId: string) {
+  async getCollections(userId: string, projectId?: string) {
     const fetchCollections = async () => {
-      const rawCollections = await this.repo.findAll(userId);
+      const rawCollections = await this.repo.findAll(userId, projectId);
       const collections = rawCollections.map((c: any) => ({
         ...c,
         itemCount: c.itemCount ?? c._count?.collectionItems ?? 0,
@@ -68,7 +74,7 @@ export class CollectionsService {
       };
     };
 
-    if (this.cache) {
+    if (this.cache && !projectId) {
       return this.cache.wrap(
         LIBRARY_REDIS_KEYS.collections(userId),
         fetchCollections,
@@ -80,14 +86,15 @@ export class CollectionsService {
 
   async getCollectionTree(
     userId: string,
+    projectId?: string,
   ): Promise<{ tree: CollectionTreeNode[] }> {
     const fetchTree = async () => {
-      const collections = await this.repo.findAll(userId);
+      const collections = await this.repo.findAll(userId, projectId);
 
       return { tree: this.tree.buildTree(collections) };
     };
 
-    if (this.cache) {
+    if (this.cache && !projectId) {
       return this.cache.wrap(
         LIBRARY_REDIS_KEYS.collectionTree(userId),
         fetchTree,
@@ -97,8 +104,17 @@ export class CollectionsService {
     return fetchTree();
   }
 
-  async getCollectionById(userId: string, collectionId: string) {
-    const raw = await this.repo.findById(userId, collectionId);
+  async getCollectionById(
+    userId: string,
+    collectionId: string,
+    projectId?: string,
+  ) {
+    const raw = await this.repo.findById(
+      userId,
+      collectionId,
+      undefined,
+      projectId,
+    );
     if (!raw) {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
     }
@@ -119,6 +135,7 @@ export class CollectionsService {
   async createCollection(
     userId: string,
     dto: CreateCollectionDto,
+    projectId?: string,
   ) {
     // Normalize parentId from parentId or parent, treating 'root' or empty string as null
     const rawParentId = normalizeParentId(
@@ -137,12 +154,14 @@ export class CollectionsService {
       }
     }
 
+    const effectiveProjectId = projectId || dto.projectId || null;
     const collection = await this.repo.create(userId, userId, {
       name: dto.name,
       description: dto.description,
       color: dto.color,
       icon: dto.icon,
       parentId: rawParentId,
+      projectId: effectiveProjectId,
     });
 
     await this.invalidateCollectionsCache(userId);
@@ -153,10 +172,13 @@ export class CollectionsService {
     userId: string,
     collectionId: string,
     dto: UpdateCollectionDto,
+    projectId?: string,
   ) {
     const existing = await this.repo.findById(
       userId,
       collectionId,
+      undefined,
+      projectId,
     );
     if (!existing) {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
@@ -173,6 +195,8 @@ export class CollectionsService {
       const parent = await this.repo.findById(
         userId,
         rawParentId,
+        undefined,
+        projectId,
       );
       if (!parent) {
         throw new BadRequestException(
@@ -181,7 +205,7 @@ export class CollectionsService {
       }
 
       // Assert no indirect or direct circular loops in collection hierarchy
-      const allCollections = await this.repo.findAll(userId);
+      const allCollections = await this.repo.findAll(userId, projectId);
       this.tree.assertNoCycle(allCollections, collectionId, rawParentId);
     }
 
@@ -192,8 +216,11 @@ export class CollectionsService {
         ...dto,
         parentId: rawParentId,
       },
+      undefined,
+      undefined,
+      projectId,
     );
-    await this.invalidateCollectionsCache(userId);
+    await this.invalidateCollectionsCache(userId, projectId);
     return { collection };
   }
 
@@ -201,17 +228,20 @@ export class CollectionsService {
     userId: string,
     collectionId: string,
     strategy: CollectionDeleteStrategy = 'orphan',
+    projectId?: string,
   ) {
     const existing = await this.repo.findById(
       userId,
       collectionId,
+      undefined,
+      projectId,
     );
     if (!existing) {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
     }
 
-    await this.repo.delete(userId, collectionId, strategy);
-    await this.invalidateCollectionsCache(userId);
+    await this.repo.delete(userId, collectionId, strategy, undefined, projectId);
+    await this.invalidateCollectionsCache(userId, projectId);
     return { success: true };
   }
 
@@ -219,11 +249,14 @@ export class CollectionsService {
     userId: string,
     collectionId: string,
     itemIds: string[],
+    projectId?: string,
   ) {
     if (collectionId !== 'unfiled') {
       const collection = await this.repo.findById(
         userId,
         collectionId,
+        undefined,
+        projectId,
       );
       if (!collection) {
         throw new NotFoundException(`Collection not found: ${collectionId}`);
@@ -238,7 +271,7 @@ export class CollectionsService {
       itemIds,
     );
 
-    await this.invalidateCollectionsCache(userId);
+    await this.invalidateCollectionsCache(userId, projectId);
     return {
       message: 'Items moved successfully',
       count: itemIds.length,
@@ -253,10 +286,11 @@ export class CollectionsService {
       parentId?: string | null;
       orderIndex?: number;
     }>,
+    projectId?: string,
   ) {
-    await this.repo.reorder(userId, collections);
-    const updated = await this.repo.findAll(userId);
-    await this.invalidateCollectionsCache(userId);
+    await this.repo.reorder(userId, collections, projectId);
+    const updated = await this.repo.findAll(userId, projectId);
+    await this.invalidateCollectionsCache(userId, projectId);
     return { collections: updated };
   }
 
@@ -264,10 +298,13 @@ export class CollectionsService {
     userId: string,
     collectionId: string,
     dto: AssignItemsToCollectionDto,
+    projectId?: string,
   ) {
     const collection = await this.repo.findById(
       userId,
       collectionId,
+      undefined,
+      projectId,
     );
     if (!collection) {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
@@ -278,11 +315,16 @@ export class CollectionsService {
       return { success: true, count: 0 };
     }
 
-    // 1. Verify all itemIds belong to this user scope
+    // 1. Verify all itemIds belong to this user or project scope
+    const scopeWhere =
+      projectId && projectId !== 'user'
+        ? { projectId }
+        : { userId };
+
     const validItems = await this.prisma.item.findMany({
       where: {
         id: { in: ids },
-        userId,
+        ...scopeWhere,
         deletedAt: null,
       },
       select: { id: true },
@@ -299,7 +341,7 @@ export class CollectionsService {
     // 2. Batch add items to collection using createMany
     await this.repo.addItems(userId, collectionId, ids);
 
-    await this.invalidateCollectionsCache(userId);
+    await this.invalidateCollectionsCache(userId, projectId);
     return { success: true, count: ids.length };
   }
 
@@ -307,20 +349,28 @@ export class CollectionsService {
     userId: string,
     collectionId: string,
     itemId: string,
+    projectId?: string,
   ) {
     const collection = await this.repo.findById(
       userId,
       collectionId,
+      undefined,
+      projectId,
     );
     if (!collection) {
       throw new NotFoundException(`Collection not found: ${collectionId}`);
     }
 
     // Assert item belongs to scope
+    const scopeWhere =
+      projectId && projectId !== 'user'
+        ? { projectId }
+        : { userId };
+
     const item = await this.prisma.item.findFirst({
       where: {
         id: itemId,
-        userId,
+        ...scopeWhere,
         deletedAt: null,
       },
       select: { id: true },
@@ -330,7 +380,7 @@ export class CollectionsService {
     }
 
     await this.repo.removeItem(userId, collectionId, itemId);
-    await this.invalidateCollectionsCache(userId);
+    await this.invalidateCollectionsCache(userId, projectId);
     return { success: true };
   }
 

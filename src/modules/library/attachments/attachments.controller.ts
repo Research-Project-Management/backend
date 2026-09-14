@@ -5,6 +5,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   Req,
   Res,
   UseGuards,
@@ -25,13 +26,15 @@ import {
 } from './dto/attachments.dto';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/auth.guard';
 import { CurrentUser } from '../../../modules/iam/authn/decorators/user.decorator';
+import { ProjectRoleGuard } from '../../../modules/iam/authz/guards/role.guard';
+import { ProjectRoles } from '../../../modules/iam/authz/decorators/role.decorator';
 import { IStoragePort, STORAGE_PORT } from '../../storage/storage.port';
 
 @Controller([
   'api/v1/library',
   'api/v1/projects/:projectId/library',
 ])
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class AttachmentsController {
   constructor(
     private readonly attachmentsService: AttachmentsService,
@@ -47,6 +50,7 @@ export class AttachmentsController {
    * Frontend library uploads files through this gateway without directly referencing StorageModule.
    */
   @Post(['attachments/upload', 'upload', 'files/upload'])
+  @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   async uploadLibraryFile(
     @CurrentUser('id') userId: string,
@@ -93,6 +97,7 @@ export class AttachmentsController {
    * Stream / serve library file content scoped by access.
    */
   @Get(['attachments/files/:fileId/content', 'files/:fileId/content'])
+  @ProjectRoles('owner', 'contributor', 'viewer')
   async streamLibraryFile(
     @Param('fileId') fileId: string,
     @CurrentUser('id') userId: string,
@@ -124,15 +129,20 @@ export class AttachmentsController {
    * Stream / serve attachment content by attachment ID.
    */
   @Get('attachments/:attachmentId/content')
+  @ProjectRoles('owner', 'contributor', 'viewer')
   async streamAttachmentContent(
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
     @Res() res: FastifyReply,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
   ) {
+    const effectiveProjectId = paramProjectId || queryProjectId;
     const result = await this.attachmentsService.getItemAttachment(
       userId,
       undefined,
       attachmentId,
+      effectiveProjectId,
     );
     const attachment = (result as any)?.attachment || result;
 
@@ -168,98 +178,155 @@ export class AttachmentsController {
   }
 
   @Get('items/:itemId/attachments')
+  @ProjectRoles('owner', 'contributor', 'viewer')
   async getItemAttachments(
     @CurrentUser('id') userId: string,
     @Param('itemId') itemId: string,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
   ) {
-    return this.attachmentsService.getItemAttachments(userId, itemId);
+    const effectiveProjectId = paramProjectId || queryProjectId;
+    return this.attachmentsService.getItemAttachments(
+      userId,
+      itemId,
+      effectiveProjectId,
+    );
   }
 
   @Get(['attachments/:attachmentId', 'items/:itemId/attachments/:attachmentId'])
+  @ProjectRoles('owner', 'contributor', 'viewer')
   async getItemAttachment(
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
     @Param('itemId') itemId?: string,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
   ) {
+    const effectiveProjectId = paramProjectId || queryProjectId;
     return this.attachmentsService.getItemAttachment(
       userId,
       itemId,
       attachmentId,
+      effectiveProjectId,
     );
   }
 
   @Post('items/:itemId/attachments')
+  @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   async createAttachment(
     @CurrentUser('id') userId: string,
     @Param('itemId') itemId: string,
     @Body() dto: CreateAttachmentDto,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
   ) {
-    return this.attachmentsService.createAttachment({
-      ...dto,
-      userId,
-      itemId,
-    });
+    const effectiveProjectId = paramProjectId || queryProjectId;
+    return this.attachmentsService.createAttachment(
+      {
+        ...dto,
+        userId,
+        itemId,
+      },
+      effectiveProjectId,
+    );
   }
 
   @Get('attachments/:attachmentId/revisions')
+  @ProjectRoles('owner', 'contributor', 'viewer')
   async getRevisions(
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
   ) {
+    const effectiveProjectId = paramProjectId || queryProjectId;
     const revisions = await this.attachmentsService.getRevisions(
       userId,
       attachmentId,
+      effectiveProjectId,
     );
     return { revisions };
   }
 
   @Post('attachments/:attachmentId/revisions')
+  @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   async addRevision(
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
     @Body() dto: ReplaceAttachmentFileDto,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
   ) {
-    return this.attachmentsService.addRevision(userId, attachmentId, dto);
+    const effectiveProjectId = paramProjectId || queryProjectId;
+    return this.attachmentsService.addRevision(
+      userId,
+      attachmentId,
+      dto,
+      effectiveProjectId,
+    );
   }
 
   @Delete('attachments/:attachmentId')
+  @ProjectRoles('owner', 'contributor')
   async deleteAttachment(
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
   ) {
-    return this.attachmentsService.deleteAttachment(userId, attachmentId);
+    const effectiveProjectId = paramProjectId || queryProjectId;
+    return this.attachmentsService.deleteAttachment(
+      userId,
+      attachmentId,
+      effectiveProjectId,
+    );
   }
 
   @Post([
     'attachments/:attachmentId/set-primary',
     'items/:itemId/attachments/:attachmentId/set-primary',
   ])
+  @ProjectRoles('owner', 'contributor')
   async setPrimaryAttachment(
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
     @Param('itemId') itemId?: string,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
   ) {
-    const resolvedItemId = itemId || (await this.resolveAttachmentItemId(attachmentId));
+    const effectiveProjectId = paramProjectId || queryProjectId;
+    const resolvedItemId =
+      itemId || (await this.resolveAttachmentItemId(attachmentId));
     return this.attachmentsService.setPrimaryAttachment(
       userId,
       resolvedItemId,
       attachmentId,
+      effectiveProjectId,
     );
   }
 
   @Post('items/:itemId/attachments/snapshot')
+  @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   async captureSnapshot(
     @CurrentUser('id') userId: string,
     @Param('itemId') itemId: string,
     @Body() body?: { url?: string; title?: string },
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
   ) {
+    const effectiveProjectId = paramProjectId || queryProjectId;
+    const scopeWhere =
+      effectiveProjectId && effectiveProjectId !== 'user'
+        ? { projectId: effectiveProjectId }
+        : { userId };
+
     let targetUrl = body?.url?.trim();
     if (!targetUrl) {
       const item = await this.prisma.item.findFirst({
-        where: { id: itemId, userId, deletedAt: null },
+        where: { id: itemId, ...scopeWhere, deletedAt: null },
         select: { url: true, title: true },
       });
       if (!item) {

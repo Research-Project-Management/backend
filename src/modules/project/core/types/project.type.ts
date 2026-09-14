@@ -20,10 +20,10 @@ export type ProjectWithMembers = Project & {
 };
 
 export interface ProjectOverview {
-  totalTasks: number;
-  completedTasks: number;
-  inProgressTasks: number;
-  backlogTasks: number;
+  totalWorkItems: number;
+  completedWorkItems: number;
+  inProgressWorkItems: number;
+  backlogWorkItems: number;
   totalMembers: number;
   totalCycles: number;
   activeCycle?: {

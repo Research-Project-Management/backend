@@ -1,7 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsString, IsBoolean, IsArray, IsOptional } from 'class-validator';
 import type {
-  UserTaskItem,
+  UserWorkItem,
   YourWorkActivityItem,
 } from '../types/your-work.types';
 import type { RecentItemResponse } from '@/modules/activity/dto/activity.dto';
@@ -16,17 +16,17 @@ export class YourWorkSummaryDto {
   @IsString()
   userId!: string;
 
-  @ApiProperty({ description: 'Tasks assigned to the user' })
+  @ApiProperty({ description: 'Work items assigned to the user' })
   @IsArray()
-  assigned!: UserTaskItem[];
+  assigned!: UserWorkItem[];
 
-  @ApiProperty({ description: 'Tasks created by the user' })
+  @ApiProperty({ description: 'Work items created by the user' })
   @IsArray()
-  created!: UserTaskItem[];
+  created!: UserWorkItem[];
 
-  @ApiProperty({ description: 'Tasks subscribed by the user (commented on)' })
+  @ApiProperty({ description: 'Work items subscribed by the user (commented on)' })
   @IsArray()
-  subscribed!: UserTaskItem[];
+  subscribed!: UserWorkItem[];
 
   @ApiProperty({
     description: 'Formatted activity feed items for the project or user',
@@ -40,14 +40,14 @@ export class YourWorkSummaryDto {
 
   @ApiProperty({
     description:
-      'Workload breakdown across canonical state groups for assigned tasks',
+      'Workload breakdown across canonical state groups for assigned work items',
   })
   @IsOptional()
   stateGroupBreakdown?: Record<string, number>;
 
   @ApiProperty({
     description:
-      'Workload breakdown across canonical state groups for subscribed tasks',
+      'Workload breakdown across canonical state groups for subscribed work items',
   })
   @IsOptional()
   subscribedStateGroupBreakdown?: Record<string, number>;

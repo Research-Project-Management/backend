@@ -9,7 +9,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { TaskCommentService } from './comment.service';
+import { CommentService } from './comment.service';
 import {
   CreateCommentDto,
   UpdateCommentDto,
@@ -21,30 +21,30 @@ import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
 import { ProjectRoleGuard } from '@/modules/iam/authz/guards/role.guard';
 import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
 
-@ApiTags('Planning Tasks & Work Items')
+@ApiTags('Work Items')
 @ApiBearerAuth('JWT-auth')
 @Controller('api')
 @UseGuards(JwtAuthGuard, ProjectRoleGuard)
-export class TaskCommentController {
-  constructor(private readonly commentService: TaskCommentService) {}
+export class CommentController {
+  constructor(private readonly commentService: CommentService) {}
 
-  @Get('work-items/:taskId/comments')
+  @Get('work-items/:workItemId/comments')
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get all comments for a work item' })
-  async getTaskComments(@Param('taskId') taskId: string) {
-    return this.commentService.getTaskComments(taskId);
+  async getWorkItemComments(@Param('workItemId') workItemId: string) {
+    return this.commentService.getWorkItemComments(workItemId);
   }
 
-  @Post('work-items/:taskId/comments')
+  @Post('work-items/:workItemId/comments')
   @ProjectRoles('owner', 'contributor', 'commenter')
   @ApiOperation({ summary: 'Add a comment to a work item' })
-  async createTaskComment(
-    @Param('taskId') taskId: string,
+  async createWorkItemComment(
+    @Param('workItemId') workItemId: string,
     @CurrentUser('id') userId: string,
     @Body() createCommentDto: CreateCommentDto,
   ) {
-    return this.commentService.createTaskComment(
-      taskId,
+    return this.commentService.createWorkItemComment(
+      workItemId,
       userId,
       createCommentDto,
     );
@@ -53,12 +53,12 @@ export class TaskCommentController {
   @Put('work-items/comments/:commentId')
   @ProjectRoles('owner', 'contributor', 'commenter')
   @ApiOperation({ summary: 'Update a WorkItem comment' })
-  async updateTaskComment(
+  async updateWorkItemComment(
     @Param('commentId') commentId: string,
     @CurrentUser('id') userId: string,
     @Body() updateCommentDto: UpdateCommentDto,
   ) {
-    return this.commentService.updateTaskComment(
+    return this.commentService.updateWorkItemComment(
       commentId,
       userId,
       updateCommentDto,
@@ -68,33 +68,33 @@ export class TaskCommentController {
   @Delete('work-items/comments/:commentId')
   @ProjectRoles('owner', 'contributor', 'commenter')
   @ApiOperation({ summary: 'Delete a WorkItem comment' })
-  async deleteTaskComment(
+  async deleteWorkItemComment(
     @Param('commentId') commentId: string,
     @CurrentUser('id') userId: string,
   ) {
-    return this.commentService.deleteTaskComment(commentId, userId);
+    return this.commentService.deleteWorkItemComment(commentId, userId);
   }
 
   @Post('work-items/comments/:commentId/replies')
   @ProjectRoles('owner', 'contributor', 'commenter')
   @ApiOperation({ summary: 'Reply to a WorkItem comment' })
-  async addTaskReply(
+  async addWorkItemReply(
     @Param('commentId') commentId: string,
     @CurrentUser('id') userId: string,
     @Body() addReplyDto: AddReplyDto,
   ) {
-    return this.commentService.addTaskReply(commentId, userId, addReplyDto);
+    return this.commentService.addWorkItemReply(commentId, userId, addReplyDto);
   }
 
   @Post('work-items/comments/:commentId/reactions')
   @ProjectRoles('owner', 'contributor', 'commenter')
   @ApiOperation({ summary: 'React to a WorkItem comment with emoji' })
-  async reactToTaskComment(
+  async reactToWorkItemComment(
     @Param('commentId') commentId: string,
     @CurrentUser('id') userId: string,
     @Body() reactCommentDto: ReactCommentDto,
   ) {
-    return this.commentService.reactToTaskComment(
+    return this.commentService.reactToWorkItemComment(
       commentId,
       userId,
       reactCommentDto,

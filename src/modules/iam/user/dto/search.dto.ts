@@ -2,7 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export type UserEntityType =
   | 'project'
-  | 'task'
+  | 'work_item'
   | 'paper'
   | 'page'
   | 'file'
@@ -11,7 +11,7 @@ export type UserEntityType =
 
 export class UserSearchResultItem {
   @ApiProperty({
-    enum: ['project', 'task', 'paper', 'page', 'file', 'folder', 'sticky'],
+    enum: ['project', 'work_item', 'paper', 'page', 'file', 'folder', 'sticky'],
     example: 'project',
   })
   type!: UserEntityType;

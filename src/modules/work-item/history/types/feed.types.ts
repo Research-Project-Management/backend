@@ -20,7 +20,7 @@ export interface UnifiedFeedItem {
 }
 
 export interface UnifiedFeedResponse {
-  taskId: string;
+  workItemId: string;
   tab: string;
   sort: 'asc' | 'desc';
   total: number;

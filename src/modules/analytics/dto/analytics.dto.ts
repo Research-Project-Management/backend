@@ -15,7 +15,7 @@ export class ProjectOverviewDto {
 
   @ApiProperty()
   @IsNumber()
-  tasks!: number;
+  workItems!: number;
 
   @ApiProperty()
   @IsNumber()
@@ -50,7 +50,7 @@ export class UserOverviewDto {
 
   @ApiProperty()
   @IsNumber()
-  createdTasks!: number;
+  createdWorkItems!: number;
 
   @ApiProperty()
   @IsNumber()
@@ -66,7 +66,7 @@ export class UserOverviewDto {
   papers?: number;
 }
 
-export class ProjectTaskDistributionDto {
+export class ProjectWorkItemDistributionDto {
   @ApiProperty()
   @IsObject()
   state!: Record<string, number>;
@@ -92,19 +92,19 @@ export class CycleAnalyticsDto {
 
   @ApiProperty()
   @IsNumber()
-  totalTasks!: number;
+  totalWorkItems!: number;
 
   @ApiProperty()
   @IsNumber()
-  completedTasks!: number;
+  completedWorkItems!: number;
 
   @ApiProperty()
   @IsNumber()
-  inProgressTasks!: number;
+  inProgressWorkItems!: number;
 
   @ApiProperty()
   @IsNumber()
-  pendingTasks!: number;
+  pendingWorkItems!: number;
 
   @ApiProperty()
   @IsNumber()

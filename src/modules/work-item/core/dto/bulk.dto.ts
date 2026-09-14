@@ -7,7 +7,7 @@ import {
   IsString,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { TaskPriority } from '@prisma/client';
+import { WorkItemPriority } from '@prisma/client';
 
 export class BulkUpdateWorkItemDto {
   @ApiPropertyOptional({
@@ -19,12 +19,11 @@ export class BulkUpdateWorkItemDto {
   workItemIds?: string[];
 
   @ApiPropertyOptional({
-    description: 'Array of work item IDs to update (legacy alias)',
-    example: ['id-1', 'id-2'],
+    description: 'Array of work item IDs to update (alias for workItemIds)',
   })
   @IsArray()
   @IsOptional()
-  taskIds?: string[];
+  ids?: string[];
 
   @ApiProperty({
     description: 'Bulk update payload data',
@@ -34,7 +33,7 @@ export class BulkUpdateWorkItemDto {
   data!: {
     columnId?: string;
     assigneeId?: string | null;
-    priority?: TaskPriority | (string & {});
+    priority?: WorkItemPriority | (string & {});
     cycleId?: string | null;
     dueDate?: string | null;
     [key: string]: any;
@@ -56,12 +55,11 @@ export class BulkDeleteWorkItemDto {
   workItemIds?: string[];
 
   @ApiPropertyOptional({
-    description: 'Array of work item IDs to delete (legacy alias)',
-    example: ['id-1', 'id-2'],
+    description: 'Array of work item IDs to delete (alias for workItemIds)',
   })
   @IsArray()
   @IsOptional()
-  taskIds?: string[];
+  ids?: string[];
 
   @ApiPropertyOptional({ description: 'Project ID' })
   @IsString()
@@ -75,10 +73,10 @@ export class ReorderWorkItemDto {
   @IsOptional()
   workItemId?: string;
 
-  @ApiPropertyOptional({ description: 'Work item ID to reorder (legacy alias)' })
+  @ApiPropertyOptional({ description: 'Work item ID to reorder (alias for workItemId)' })
   @IsString()
   @IsOptional()
-  taskId?: string;
+  id?: string;
 
   @ApiPropertyOptional({ description: 'Target column ID' })
   @IsString()

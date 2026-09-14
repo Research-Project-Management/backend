@@ -12,14 +12,17 @@ export class LibraryService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  private buildScopeFilter(scopeId: string) {
-    return {
-      OR: [{ projectId: scopeId }, { userId: scopeId }],
-    };
+  private buildScopeFilter(scopeId: string, userId?: string) {
+    const isProject = Boolean(scopeId) && scopeId !== 'user' && scopeId !== userId;
+    if (isProject) {
+      return { projectId: scopeId };
+    }
+    const effectiveUserId = userId || scopeId;
+    return { userId: effectiveUserId, projectId: null };
   }
 
-  async getLibraryStats(scopeId: string): Promise<LibraryStats> {
-    const scopeFilter = this.buildScopeFilter(scopeId);
+  async getLibraryStats(scopeId: string, userId?: string): Promise<LibraryStats> {
+    const scopeFilter = this.buildScopeFilter(scopeId, userId);
     const [itemsCount, collectionsCount, tagsCount, notesCount, attachments] =
       await Promise.all([
         this.prisma.item.count({
@@ -33,7 +36,7 @@ export class LibraryService {
         }),
         this.prisma.note.count({
           where: {
-            OR: [{ projectId: scopeId }, { userId: scopeId }],
+            ...scopeFilter,
             deletedAt: null,
           },
         }),
@@ -63,53 +66,143 @@ export class LibraryService {
     scopeId: string,
     userId?: string,
   ): Promise<LibraryOverview> {
-    const scopeFilter = this.buildScopeFilter(scopeId);
-    const [recentItems, unfiledCount, trashCount, starredCount, tags] =
-      await Promise.all([
-        this.prisma.item.findMany({
-          where: { ...scopeFilter, deletedAt: null },
-          orderBy: { updatedAt: 'desc' },
-          take: 10,
-          include: {
-            contributors: {
-              orderBy: { orderIndex: 'asc' },
-            },
+    const isProject = Boolean(scopeId) && scopeId !== 'user' && scopeId !== userId;
+    const scopeFilter = this.buildScopeFilter(scopeId, userId);
+    const [
+      recentItems,
+      unfiledCount,
+      trashCount,
+      starredCount,
+      myPublicationsCount,
+      candidateItems,
+      tags,
+    ] = await Promise.all([
+      this.prisma.item.findMany({
+        where: { ...scopeFilter, deletedAt: null },
+        orderBy: { updatedAt: 'desc' },
+        take: 10,
+        include: {
+          contributors: {
+            orderBy: { orderIndex: 'asc' },
           },
-        }),
-        this.prisma.item.count({
-          where: {
-            ...scopeFilter,
-            deletedAt: null,
-            collectionItems: { none: {} },
+        },
+      }),
+      this.prisma.item.count({
+        where: {
+          ...scopeFilter,
+          deletedAt: null,
+          collectionItems: { none: {} },
+        },
+      }),
+      this.prisma.item.count({
+        where: {
+          ...scopeFilter,
+          deletedAt: { not: null },
+        },
+      }),
+      this.prisma.item.count({
+        where: {
+          ...scopeFilter,
+          deletedAt: null,
+          states: {
+            some: userId
+              ? { userId, rating: { gt: 0 } }
+              : { rating: { gt: 0 } },
           },
-        }),
-        this.prisma.item.count({
-          where: {
-            ...scopeFilter,
-            deletedAt: { not: null },
+        },
+      }),
+      this.prisma.item.count({
+        where: {
+          ...scopeFilter,
+          deletedAt: null,
+          isMyPublication: true,
+        },
+      }),
+      this.prisma.item.findMany({
+        where: { ...scopeFilter, deletedAt: null },
+        select: { id: true, title: true, doi: true, year: true },
+        take: 2000,
+      }),
+      this.prisma.tag.findMany({
+        where: scopeFilter,
+        include: {
+          _count: {
+            select: { itemTags: true },
           },
-        }),
-        this.prisma.item.count({
-          where: {
-            ...scopeFilter,
-            deletedAt: null,
-            states: {
-              some: userId
-                ? { userId, rating: { gt: 0 } }
-                : { rating: { gt: 0 } },
-            },
+        },
+        take: 50,
+      }),
+    ]);
+
+    // Fast server-side duplicate detection
+    const doiMap = new Map<string, string[]>();
+    const titleMap = new Map<string, string[]>();
+    const duplicateItemIds = new Set<string>();
+
+    for (const item of candidateItems) {
+      if (item.doi) {
+        const cleanDoi = item.doi.toLowerCase().trim();
+        const list = doiMap.get(cleanDoi) || [];
+        list.push(item.id);
+        doiMap.set(cleanDoi, list);
+      }
+      if (item.title) {
+        const cleanTitle = item.title.toLowerCase().trim().replace(/[^\w\s]/g, '');
+        const key = `${cleanTitle}:${item.year || ''}`;
+        const list = titleMap.get(key) || [];
+        list.push(item.id);
+        titleMap.set(key, list);
+      }
+    }
+
+    doiMap.forEach((ids) => {
+      if (ids.length > 1) {
+        ids.forEach((id) => duplicateItemIds.add(id));
+      }
+    });
+    titleMap.forEach((ids) => {
+      if (ids.length > 1) {
+        ids.forEach((id) => duplicateItemIds.add(id));
+      }
+    });
+
+    const duplicateCount = duplicateItemIds.size;
+
+    // Resolve RBAC permissions
+    let permissions = {
+      canCreate: true,
+      canEdit: true,
+      canDelete: true,
+      canManageCollections: true,
+    };
+
+    if (isProject && userId) {
+      const member = await this.prisma.projectMember.findUnique({
+        where: {
+          projectId_userId: {
+            projectId: scopeId,
+            userId,
           },
-        }),
-        this.prisma.tag.findMany({
-          where: scopeFilter,
-          include: {
-            _count: {
-              select: { itemTags: true },
-            },
-          },
-          take: 50,
-        }),
-      ]);
+        },
+        select: { role: true },
+      });
+
+      if (!member) {
+        permissions = {
+          canCreate: false,
+          canEdit: false,
+          canDelete: false,
+          canManageCollections: false,
+        };
+      } else if (member.role === 'viewer' || (member.role as string) === 'commenter') {
+        permissions = {
+          canCreate: false,
+          canEdit: false,
+          canDelete: false,
+          canManageCollections: false,
+        };
+      }
+    }
 
     const topTags = tags
       .map((t) => ({
@@ -126,6 +219,9 @@ export class LibraryService {
       unfiledCount,
       trashCount,
       starredCount,
+      duplicateCount,
+      myPublicationsCount,
+      permissions,
       topTags,
     };
   }

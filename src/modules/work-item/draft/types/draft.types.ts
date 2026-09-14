@@ -1,4 +1,4 @@
-import { TaskPriority } from '@prisma/client';
+import { WorkItemPriority } from '@prisma/client';
 
 export interface DraftAuthor {
   id: string;
@@ -13,7 +13,7 @@ export interface WorkItemDraftItem {
   content: string | null;
   description: string | null;
   columnId: string | null;
-  priority: TaskPriority;
+  priority: WorkItemPriority;
   startDate: Date | null;
   dueDate: Date | null;
   labels: string[];
