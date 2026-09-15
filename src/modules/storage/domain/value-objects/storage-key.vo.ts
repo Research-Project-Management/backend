@@ -26,9 +26,14 @@ export class StorageKey {
   /**
    * Generates a temporary multipart upload chunk key
    */
-  public static forMultipartUpload(uploadSessionId: string, partNumber?: number): StorageKey {
+  public static forMultipartUpload(
+    uploadSessionId: string,
+    partNumber?: number,
+  ): StorageKey {
     if (partNumber !== undefined) {
-      return new StorageKey(`uploads/multipart/${uploadSessionId}/part-${partNumber}`);
+      return new StorageKey(
+        `uploads/multipart/${uploadSessionId}/part-${partNumber}`,
+      );
     }
     return new StorageKey(`uploads/multipart/${uploadSessionId}`);
   }

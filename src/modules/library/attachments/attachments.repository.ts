@@ -1,7 +1,7 @@
 import { Injectable, Optional, Inject } from '@nestjs/common';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { Prisma } from '@prisma/client';
-import { IStoragePort, STORAGE_PORT } from '../../storage/storage.port';
+import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 
 @Injectable()
 export class AttachmentsRepository {

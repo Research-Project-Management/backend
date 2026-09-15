@@ -53,3 +53,49 @@ export function buildCollectionTree(
 
   return roots;
 }
+
+/**
+ * Sanitizes collection name string:
+ * - Strips script and style tags and contents
+ * - Strips all HTML tags
+ * - Strips control characters
+ * - Collapses whitespace and trims
+ * - Maximum length 255 characters
+ */
+export function sanitizeCollectionName(name?: string | null): string {
+  if (!name || typeof name !== 'string') return '';
+  let cleaned = name.trim();
+  cleaned = cleaned.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+  cleaned = cleaned.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+  cleaned = cleaned.replace(/<[^>]+>/g, '');
+  cleaned = cleaned.replace(/[\x00-\x1F\x7F]/g, '');
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+  if (cleaned.length > 255) {
+    cleaned = cleaned.substring(0, 255).trim();
+  }
+  return cleaned;
+}
+
+/**
+ * Sanitizes collection description string:
+ * - Strips script and style tags and contents
+ * - Strips dangerous HTML tags
+ * - Strips control characters
+ * - Collapses excessive whitespace and trims
+ * - Maximum length 1000 characters
+ */
+export function sanitizeCollectionDescription(
+  description?: string | null,
+): string {
+  if (!description || typeof description !== 'string') return '';
+  let cleaned = description.trim();
+  cleaned = cleaned.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+  cleaned = cleaned.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+  cleaned = cleaned.replace(/<[^>]+>/g, '');
+  cleaned = cleaned.replace(/[\x00-\x1F\x7F]/g, '');
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+  if (cleaned.length > 1000) {
+    cleaned = cleaned.substring(0, 1000).trim();
+  }
+  return cleaned;
+}

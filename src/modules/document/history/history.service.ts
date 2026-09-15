@@ -150,4 +150,157 @@ export class HistoryService {
     const { versions } = await this.getVersions(pageId);
     return { history: versions, events: versions };
   }
+
+  /**
+   * Computes line-by-line visual diff comparing two saved snapshot versions.
+   */
+  async compareVersions(
+    pageId: string,
+    fromVersionId: string,
+    toVersionId: string,
+  ) {
+    const fromVer = await this.historyRepo.findVersionById(fromVersionId);
+    if (!fromVer || fromVer.pageId !== pageId) {
+      throw new NotFoundException(`Source version ${fromVersionId} not found`);
+    }
+
+    const toVer = await this.historyRepo.findVersionById(toVersionId);
+    if (!toVer || toVer.pageId !== pageId) {
+      throw new NotFoundException(`Target version ${toVersionId} not found`);
+    }
+
+    const fromText = fromVer.content || '';
+    const toText = toVer.content || '';
+
+    const fromLines = fromText.split('\n');
+    const toLines = toText.split('\n');
+
+    const chunks: Array<{
+      type: 'added' | 'deleted' | 'unchanged';
+      value: string;
+      linesCount: number;
+    }> = [];
+    let addedLines = 0;
+    let deletedLines = 0;
+    let unchangedLines = 0;
+
+    const lcs = this.computeLcs(fromLines, toLines);
+    let i = 0;
+    let j = 0;
+    let l = 0;
+
+    while (i < fromLines.length || j < toLines.length) {
+      if (
+        l < lcs.length &&
+        i < fromLines.length &&
+        fromLines[i] === lcs[l] &&
+        j < toLines.length &&
+        toLines[j] === lcs[l]
+      ) {
+        const start = i;
+        while (
+          l < lcs.length &&
+          i < fromLines.length &&
+          j < toLines.length &&
+          fromLines[i] === lcs[l] &&
+          toLines[j] === lcs[l]
+        ) {
+          i++;
+          j++;
+          l++;
+        }
+        const slice = fromLines.slice(start, i);
+        chunks.push({
+          type: 'unchanged',
+          value: slice.join('\n'),
+          linesCount: slice.length,
+        });
+        unchangedLines += slice.length;
+      } else {
+        const delStart = i;
+        while (
+          i < fromLines.length &&
+          (l >= lcs.length || fromLines[i] !== lcs[l])
+        ) {
+          i++;
+        }
+        if (i > delStart) {
+          const slice = fromLines.slice(delStart, i);
+          chunks.push({
+            type: 'deleted',
+            value: slice.join('\n'),
+            linesCount: slice.length,
+          });
+          deletedLines += slice.length;
+        }
+
+        const addStart = j;
+        while (
+          j < toLines.length &&
+          (l >= lcs.length || toLines[j] !== lcs[l])
+        ) {
+          j++;
+        }
+        if (j > addStart) {
+          const slice = toLines.slice(addStart, j);
+          chunks.push({
+            type: 'added',
+            value: slice.join('\n'),
+            linesCount: slice.length,
+          });
+          addedLines += slice.length;
+        }
+      }
+    }
+
+    return {
+      fromVersionId,
+      toVersionId,
+      fromLabel: fromVer.label || fromVer.createdAt.toISOString(),
+      toLabel: toVer.label || toVer.createdAt.toISOString(),
+      chunks,
+      stats: {
+        addedLines,
+        deletedLines,
+        unchangedLines,
+      },
+    };
+  }
+
+  private computeLcs(a: string[], b: string[]): string[] {
+    const m = a.length;
+    const n = b.length;
+    if (m * n > 4_000_000) {
+      return a.filter((line) => b.includes(line));
+    }
+
+    const dp: number[][] = Array.from({ length: m + 1 }, () =>
+      new Array(n + 1).fill(0),
+    );
+    for (let i = 0; i < m; i++) {
+      for (let j = 0; j < n; j++) {
+        if (a[i] === b[j]) {
+          dp[i + 1][j + 1] = dp[i][j] + 1;
+        } else {
+          dp[i + 1][j + 1] = Math.max(dp[i + 1][j], dp[i][j + 1]);
+        }
+      }
+    }
+
+    const result: string[] = [];
+    let i = m;
+    let j = n;
+    while (i > 0 && j > 0) {
+      if (a[i - 1] === b[j - 1]) {
+        result.unshift(a[i - 1]);
+        i--;
+        j--;
+      } else if (dp[i - 1][j] >= dp[i][j - 1]) {
+        i--;
+      } else {
+        j--;
+      }
+    }
+    return result;
+  }
 }

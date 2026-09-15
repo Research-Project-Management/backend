@@ -145,7 +145,11 @@ export class UrlCaptureProvider {
    */
   async captureFromUrl(
     targetUrl: string,
-    context?: { workspaceId?: string; userId?: string },
+    context?: {
+      scopeId?: string;
+      projectId?: string;
+      userId?: string;
+    },
   ): Promise<CapturedItemMetadata> {
     const canonicalUrl = targetUrl.trim();
 
@@ -315,9 +319,13 @@ export class UrlCaptureProvider {
    */
   attachPreviewToken(
     meta: CapturedItemMetadata,
-    context?: { workspaceId?: string; userId?: string },
+    context?: {
+      scopeId?: string;
+      projectId?: string;
+      userId?: string;
+    },
   ): CapturedItemMetadata {
-    const ws = context?.workspaceId || 'unassigned';
+    const ws = context?.scopeId || context?.projectId || 'unassigned';
     const user = context?.userId || 'unassigned';
     const issuedAt = Date.now();
     const expiresAt = issuedAt + this.tokenTtlMs;
@@ -354,7 +362,11 @@ export class UrlCaptureProvider {
       tags?: string[];
     },
     token?: string,
-    context?: { workspaceId?: string; userId?: string },
+    context?: {
+      scopeId?: string;
+      projectId?: string;
+      userId?: string;
+    },
   ): PreviewTokenVerificationResult {
     if (!token) return { valid: false, reason: 'missing_token' };
 
@@ -375,7 +387,7 @@ export class UrlCaptureProvider {
       return { valid: false, reason: 'token_expired' };
     }
 
-    const ws = context?.workspaceId || 'unassigned';
+    const ws = context?.scopeId || context?.projectId || 'unassigned';
     const user = context?.userId || 'unassigned';
 
     const metadataDigest = this.calculateMetadataDigest(canonicalMeta);

@@ -26,7 +26,7 @@ export class EnrichStage {
    * into unrelated bibliographic data.
    */
   async execute(
-    workspaceId: string,
+    scopeId: string,
     candidates: MetadataCandidate[],
   ): Promise<MetadataCandidate[]> {
     if (!this.metadataService) {
@@ -68,7 +68,7 @@ export class EnrichStage {
       try {
         const resolved = await this.metadataService.resolve({
           query,
-          workspaceId,
+          scopeId,
         });
 
         if (resolved && resolved.metadata) {

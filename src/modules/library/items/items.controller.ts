@@ -48,6 +48,7 @@ export class ItemsController {
   ) {}
 
   @Get()
+  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'List library items' })
   async listItems(
     @CurrentUser('id') userId: string,
@@ -138,10 +139,16 @@ export class ItemsController {
     @Param('projectId') projectId: string | undefined,
     @Body() body: CreateItemDto,
   ) {
+    const {
+      citationCount: _c,
+      referenceCount: _r,
+      crossrefEnriched: _cr,
+      ...cleanBody
+    } = body;
     return this.itemsService.createItem(userId, {
-      ...body,
+      ...cleanBody,
       uploadedById: userId || 'system',
-      projectId: projectId || body.projectId,
+      projectId: projectId || cleanBody.projectId,
     });
   }
 
@@ -170,7 +177,13 @@ export class ItemsController {
         'Optimistic locking requirement: expectedVersion or If-Match header is required',
       );
     }
-    const { expectedVersion: _, ...updateData } = body;
+    const {
+      expectedVersion: _,
+      citationCount: _c,
+      referenceCount: _r,
+      crossrefEnriched: _cr,
+      ...updateData
+    } = body;
     return this.itemsService.updateItem(
       userId,
       id,

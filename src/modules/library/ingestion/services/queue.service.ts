@@ -8,7 +8,7 @@ import { IngestionStatus } from '@prisma/client';
 export interface QueuedIngestionJob {
   runId: string;
   projectId: string;
-  workspaceId?: string;
+  scopeId?: string;
   envelope: IngestionSubmissionEnvelope;
 }
 
@@ -58,8 +58,7 @@ export class QueueService implements OnModuleInit {
           `Found ${orphanedRuns.length} orphaned ingestion run(s) on startup. Marking as FAILED_RETRYABLE.`,
         );
         for (const run of orphanedRuns) {
-          const targetId =
-            (run as any).projectId || (run as any).workspaceId || '';
+          const targetId = run.projectId || run.userId || '';
           await this.repo.updateRunStatus(
             targetId,
             run.id,

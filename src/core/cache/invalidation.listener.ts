@@ -7,8 +7,8 @@ export interface EntityChangeEvent {
   entityId?: string;
   verb?: string;
   userId?: string;
-  workspaceId?: string;
   projectId?: string;
+  scopeId?: string;
 }
 
 @Injectable()
@@ -22,7 +22,7 @@ export class CacheInvalidationListener {
     pattern?: string;
     key?: string;
     userId?: string;
-    workspaceId?: string;
+    scopeId?: string;
     projectId?: string;
   }) {
     if (payload.key) {
@@ -37,8 +37,8 @@ export class CacheInvalidationListener {
     if (payload.projectId) {
       await this.redisCache.invalidateProject(payload.projectId);
     }
-    if (payload.workspaceId) {
-      await this.redisCache.invalidateWorkspace(payload.workspaceId);
+    if (payload.scopeId) {
+      await this.redisCache.invalidateScope(payload.scopeId);
     }
   }
 
@@ -48,11 +48,6 @@ export class CacheInvalidationListener {
       await this.redisCache.delPattern(`work-items:${event.projectId}:*`);
       await this.redisCache.delPattern(
         `analytics:project:${event.projectId}:*`,
-      );
-    }
-    if (event.workspaceId) {
-      await this.redisCache.delPattern(
-        `analytics:workspace:${event.workspaceId}:*`,
       );
     }
     if (event.entityId) {
@@ -70,10 +65,6 @@ export class CacheInvalidationListener {
     if (event.userId) {
       await this.redisCache.delPattern(`papers:${event.userId}:*`);
       await this.redisCache.delPattern(`library:${event.userId}:*`);
-    }
-    if (event.workspaceId) {
-      await this.redisCache.delPattern(`papers:${event.workspaceId}:*`);
-      await this.redisCache.delPattern(`library:${event.workspaceId}:*`);
     }
     if (event.entityId) {
       await this.redisCache.del(`paper:${event.entityId}`);
@@ -101,10 +92,6 @@ export class CacheInvalidationListener {
       await this.redisCache.delPattern(`files:${event.projectId}:*`);
       await this.redisCache.delPattern(`storage:${event.projectId}:*`);
     }
-    if (event.workspaceId) {
-      await this.redisCache.delPattern(`files:${event.workspaceId}:*`);
-      await this.redisCache.delPattern(`storage:${event.workspaceId}:*`);
-    }
   }
 
   @OnEvent('sticky.*', { async: true })
@@ -126,12 +113,6 @@ export class CacheInvalidationListener {
     if (event.userId) {
       await this.redisCache.delPattern(`projects:${event.userId}:*`);
       await this.redisCache.delPattern(`analytics:user:${event.userId}:*`);
-    }
-    if (event.workspaceId) {
-      await this.redisCache.delPattern(`projects:${event.workspaceId}:*`);
-      await this.redisCache.delPattern(
-        `analytics:workspace:${event.workspaceId}:*`,
-      );
     }
   }
 

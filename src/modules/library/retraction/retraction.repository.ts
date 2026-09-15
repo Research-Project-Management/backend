@@ -10,12 +10,19 @@ import {
 export class RetractionRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findItemById(userId: string, itemId: string) {
+  private getScopeWhere(userId: string, projectId?: string) {
+    if (projectId && projectId !== 'user') {
+      return { projectId, deletedAt: null };
+    }
+    return { userId, deletedAt: null };
+  }
+
+  async findItemById(userId: string, itemId: string, projectId?: string) {
+    const scopeWhere = this.getScopeWhere(userId, projectId);
     return this.prisma.item.findFirst({
       where: {
         id: itemId,
-        userId,
-        deletedAt: null,
+        ...scopeWhere,
       },
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
@@ -24,11 +31,15 @@ export class RetractionRepository {
     });
   }
 
-  async findItemsForScan(userId: string, itemIds?: string[]) {
+  async findItemsForScan(
+    userId: string,
+    itemIds?: string[],
+    projectId?: string,
+  ) {
+    const scopeWhere = this.getScopeWhere(userId, projectId);
     return this.prisma.item.findMany({
       where: {
-        userId,
-        deletedAt: null,
+        ...scopeWhere,
         ...(itemIds && itemIds.length > 0 ? { id: { in: itemIds } } : {}),
       },
       select: {
@@ -61,11 +72,11 @@ export class RetractionRepository {
     });
   }
 
-  async findRetractedItems(userId: string) {
+  async findRetractedItems(userId: string, projectId?: string) {
+    const scopeWhere = this.getScopeWhere(userId, projectId);
     return this.prisma.item.findMany({
       where: {
-        userId,
-        deletedAt: null,
+        ...scopeWhere,
         isRetracted: true,
       },
       orderBy: [{ updatedAt: 'desc' }],
@@ -78,11 +89,8 @@ export class RetractionRepository {
     });
   }
 
-  async getStats(userId: string): Promise<RetractionStats> {
-    const baseWhere = {
-      userId,
-      deletedAt: null,
-    };
+  async getStats(userId: string, projectId?: string): Promise<RetractionStats> {
+    const baseWhere = this.getScopeWhere(userId, projectId);
 
     const [total, checked, retracted, expressionsOfConcern, manual] =
       await Promise.all([

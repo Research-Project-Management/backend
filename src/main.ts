@@ -58,6 +58,7 @@ async function bootstrap() {
       bufferLogs: true,
     },
   );
+  app.useLogger(logger);
 
   // Multipart file uploads (Cloudflare R2 / S3 streaming)
   await app.register(multipart, {
@@ -73,15 +74,16 @@ async function bootstrap() {
   });
 
   // Rate Limiting (Throttle & Brute-force protection)
+  const isProd = process.env.NODE_ENV === 'production';
   await app.register(rateLimit, {
     timeWindow: '1 minute',
     max: (req) => {
       const url = req.raw.url || '';
-      // Strict throttle on sensitive auth / authentication endpoints (10 req/min)
+      // Throttle sensitive auth endpoints (120 req/min in dev, 15 req/min in prod)
       if (isSensitiveAuthRoute(url)) {
-        return 10;
+        return isProd ? 15 : 120;
       }
-      return 150;
+      return isProd ? 150 : 600;
     },
     keyGenerator: (req) => {
       const url = req.raw.url || '';

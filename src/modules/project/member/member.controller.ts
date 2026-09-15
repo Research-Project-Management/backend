@@ -28,12 +28,12 @@ import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
 
 @ApiTags('Project Members')
 @ApiBearerAuth('JWT-auth')
-@Controller('api')
+@Controller(['api/projects', 'api/project'])
 @UseGuards(JwtAuthGuard)
 export class MemberController {
   constructor(private readonly memberService: MemberService) {}
 
-  @Get(['project/:projectId/members', 'projects/:projectId/members'])
+  @Get(':projectId/members')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({
@@ -47,10 +47,7 @@ export class MemberController {
     return this.memberService.getMembers(projectId, query);
   }
 
-  @Get([
-    'project/:projectId/members/:userId',
-    'projects/:projectId/members/:userId',
-  ])
+  @Get(':projectId/members/:userId')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get details of a specific project member' })
@@ -62,7 +59,7 @@ export class MemberController {
     return this.memberService.getMember(projectId, userId);
   }
 
-  @Post(['project/:projectId/members', 'projects/:projectId/members'])
+  @Post(':projectId/members')
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner')
@@ -79,7 +76,7 @@ export class MemberController {
     return this.memberService.addMember(projectId, dto, actorId);
   }
 
-  @Post(['project/:projectId/members/bulk', 'projects/:projectId/members/bulk'])
+  @Post(':projectId/members/bulk')
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner')
@@ -95,10 +92,7 @@ export class MemberController {
     return this.memberService.bulkAddMembers(projectId, dto, actorId);
   }
 
-  @Put([
-    'project/:projectId/members/:userId',
-    'projects/:projectId/members/:userId',
-  ])
+  @Put(':projectId/members/:userId')
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner')
@@ -118,10 +112,7 @@ export class MemberController {
     return this.memberService.updateMemberRole(projectId, userId, dto, actorId);
   }
 
-  @Delete([
-    'project/:projectId/members/:userId',
-    'projects/:projectId/members/:userId',
-  ])
+  @Delete(':projectId/members/:userId')
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner')
@@ -140,7 +131,7 @@ export class MemberController {
     return this.memberService.removeMember(projectId, userId, actorId);
   }
 
-  @Post(['project/:projectId/leave', 'projects/:projectId/leave'])
+  @Post(':projectId/leave')
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')

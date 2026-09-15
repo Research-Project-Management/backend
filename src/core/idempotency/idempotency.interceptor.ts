@@ -54,16 +54,12 @@ export class IdempotencyInterceptor implements NestInterceptor {
     const cleanKey = idempotencyKey.trim();
     if (!cleanKey) return next.handle();
 
-    const candidateScope =
-      req.user?.id ||
-      req.user?.sub ||
-      req.params?.projectId ||
-      req.body?.projectId ||
-      req.params?.workspaceId ||
-      req.body?.workspaceId;
+    const rawUserId = req.user?.id || req.user?.sub;
+    const userId = rawUserId && isUuid(rawUserId) ? rawUserId : NIL_UUID;
 
-    const workspaceId =
-      candidateScope && isUuid(candidateScope) ? candidateScope : NIL_UUID;
+    const rawProjectId = req.params?.projectId || req.body?.projectId;
+    const projectId =
+      rawProjectId && isUuid(rawProjectId) ? rawProjectId : undefined;
 
     const requestHash = createHash('md5')
       .update(`${method}:${req.url || ''}:${JSON.stringify(req.body || {})}`)
@@ -71,7 +67,9 @@ export class IdempotencyInterceptor implements NestInterceptor {
 
     // If IdempotencyService is injected (Prisma/Redis distributed setup)
     if (this.idempotencyService) {
-      return from(this.idempotencyService.checkKey(cleanKey, workspaceId)).pipe(
+      return from(
+        this.idempotencyService.checkKey(cleanKey, userId, projectId),
+      ).pipe(
         mergeMap((check) => {
           if (check.isDuplicate) {
             if (check.inProgress) {
@@ -92,8 +90,9 @@ export class IdempotencyInterceptor implements NestInterceptor {
           return from(
             this.idempotencyService!.lockKey(
               cleanKey,
-              workspaceId,
+              userId,
               requestHash,
+              projectId,
             ),
           ).pipe(
             mergeMap(() =>
@@ -103,7 +102,8 @@ export class IdempotencyInterceptor implements NestInterceptor {
                     const statusCode = reply.statusCode || 200;
                     void this.idempotencyService?.saveResult({
                       idempotencyKey: cleanKey,
-                      workspaceId,
+                      userId,
+                      projectId,
                       requestHash,
                       statusCode,
                       responseBody: body,
@@ -112,7 +112,8 @@ export class IdempotencyInterceptor implements NestInterceptor {
                   error: () => {
                     void this.idempotencyService?.unlockKey(
                       cleanKey,
-                      workspaceId,
+                      userId,
+                      projectId,
                     );
                   },
                 }),

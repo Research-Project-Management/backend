@@ -41,6 +41,26 @@ export class ProjectMemberSummaryDto {
 }
 
 /**
+ * DTO representing server-authoritative granular project permissions.
+ */
+export class ProjectPermissionsDto {
+  @ApiProperty({ example: true })
+  canEdit!: boolean;
+
+  @ApiProperty({ example: true })
+  canDelete!: boolean;
+
+  @ApiProperty({ example: true })
+  canArchive!: boolean;
+
+  @ApiProperty({ example: true })
+  canManageMembers!: boolean;
+
+  @ApiProperty({ example: true })
+  canLeave!: boolean;
+}
+
+/**
  * DTO representing a project in API responses.
  */
 export class ProjectResponseDto {
@@ -88,6 +108,15 @@ export class ProjectResponseDto {
   @ApiPropertyOptional({ example: {} })
   settings?: Record<string, unknown> | null;
 
+  @ApiPropertyOptional({
+    example: 'owner',
+    enum: ['owner', 'contributor', 'commenter', 'viewer'],
+  })
+  yourRole?: string | null;
+
+  @ApiPropertyOptional({ type: ProjectPermissionsDto })
+  permissions?: ProjectPermissionsDto;
+
   @ApiProperty({ example: '2026-09-12T00:00:00.000Z' })
   createdAt!: Date | string;
 
@@ -107,6 +136,9 @@ export class ProjectDetailResponseDto {
     enum: ['owner', 'contributor', 'commenter', 'viewer'],
   })
   yourRole?: string | null;
+
+  @ApiPropertyOptional({ type: ProjectPermissionsDto })
+  permissions?: ProjectPermissionsDto;
 }
 
 /**

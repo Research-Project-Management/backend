@@ -27,6 +27,7 @@ model Page {
   content        Json?         @default("{}")
   status         PageStatus    @default(draft)
   rank           Float         @default(0)
+  labels         String[]      @default([])
   isLocked       Boolean       @default(false) @map("is_locked")
   isPublished    Boolean       @default(false) @map("is_published")
   views          Int           @default(0)

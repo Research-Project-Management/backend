@@ -18,4 +18,8 @@ export class ExportLibraryDto {
   @IsOptional()
   @IsString()
   tagId?: string;
+
+  @IsOptional()
+  @IsString()
+  projectId?: string;
 }

@@ -1,5 +1,3 @@
-
-
 /**
  * Sticky Note Domain Utilities
  *
@@ -130,4 +128,3 @@ export function getStickyTitleOrPreview(
   if (plainText.length <= maxLength) return plainText;
   return `${plainText.slice(0, maxLength).trim()}...`;
 }
-

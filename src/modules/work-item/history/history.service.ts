@@ -51,14 +51,8 @@ export class HistoryService {
       const timeInStateMs = Math.max(0, currentTimestamp - previousTimestamp);
       const timeInStateBadge = formatTimeInStateBadge(timeInStateMs);
 
-      const fromState: StateBadge = resolveStateBadge(
-        event.oldValue,
-        states,
-      );
-      const toState: StateBadge = resolveStateBadge(
-        event.newValue,
-        states,
-      );
+      const fromState: StateBadge = resolveStateBadge(event.oldValue, states);
+      const toState: StateBadge = resolveStateBadge(event.newValue, states);
 
       transitions.push({
         id: event.id,

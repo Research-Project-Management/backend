@@ -225,7 +225,7 @@ export class RoleGuard implements CanActivate {
         normalizedHeaderProjectId.toLowerCase()
       ) {
         throw new ForbiddenException(
-          'Access denied: Resource does not belong to the specified project context (Cross-tenant violation)',
+          'Access denied: Resource does not belong to the specified project context (Cross-project violation)',
         );
       }
     }
@@ -313,6 +313,3 @@ export type RolesGuard = RoleGuard;
 
 export const ProjectRoleGuard = RoleGuard;
 export type ProjectRoleGuard = RoleGuard;
-
-export const WorkspaceRoleGuard = RoleGuard;
-export type WorkspaceRoleGuard = RoleGuard;

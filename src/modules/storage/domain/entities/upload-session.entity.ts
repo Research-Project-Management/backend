@@ -10,7 +10,6 @@ export enum UploadSessionStatus {
 
 export interface UploadSessionProps {
   id: string;
-  tenantId: string;
   projectId?: string | null;
   userId: string;
   s3UploadId: string;
@@ -35,7 +34,6 @@ export interface UploadSessionProps {
  */
 export class UploadSession {
   public readonly id: string;
-  public readonly tenantId: string;
   public readonly projectId: string | null;
   public readonly userId: string;
   public readonly s3UploadId: string;
@@ -56,7 +54,6 @@ export class UploadSession {
 
   constructor(props: UploadSessionProps) {
     this.id = props.id;
-    this.tenantId = props.tenantId;
     this.projectId = props.projectId ?? null;
     this.userId = props.userId;
     this.s3UploadId = props.s3UploadId;
@@ -76,8 +73,12 @@ export class UploadSession {
     this._updatedAt = props.updatedAt ?? new Date();
   }
 
-  get status(): UploadSessionStatus { return this._status; }
-  get updatedAt(): Date { return this._updatedAt; }
+  get status(): UploadSessionStatus {
+    return this._status;
+  }
+  get updatedAt(): Date {
+    return this._updatedAt;
+  }
 
   public markUploading(): void {
     if (this._status === UploadSessionStatus.INITIALIZED) {

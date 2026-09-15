@@ -86,16 +86,19 @@ export class AiController {
   }
 
   /**
-   * Paper-scoped streaming RAG query
+   * Paper & Storage File-scoped streaming RAG query
    */
   @Post([
     'paper/:paperId/chat',
     'rag/papers/:paperId/stream',
     'papers/:paperId/stream',
     'papers/:paperId/chat',
+    'files/:paperId/chat',
+    'rag/files/:paperId/stream',
+    'storage/:paperId/chat',
   ])
   @BypassEnvelope()
-  @ApiOperation({ summary: 'Stream paper-scoped RAG responses via SSE' })
+  @ApiOperation({ summary: 'Stream paper/file-scoped RAG responses via SSE' })
   async streamPaper(
     @CurrentUser('id') userId: string,
     @Param('paperId') paperId: string,
@@ -106,11 +109,16 @@ export class AiController {
   }
 
   /**
-   * Paper-scoped synchronous RAG query
+   * Paper & Storage File-scoped synchronous RAG query
    */
-  @Post(['papers/:paperId/chat/sync', 'paper/:paperId/chat/sync'])
+  @Post([
+    'papers/:paperId/chat/sync',
+    'paper/:paperId/chat/sync',
+    'files/:paperId/chat/sync',
+    'storage/:paperId/chat/sync',
+  ])
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Synchronous paper-scoped RAG query' })
+  @ApiOperation({ summary: 'Synchronous paper/file-scoped RAG query' })
   async executePaper(
     @CurrentUser('id') userId: string,
     @Param('paperId') paperId: string,

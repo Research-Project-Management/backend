@@ -27,40 +27,65 @@ export class ChangeLogRepository {
   }
 
   async allocateNextSequence(
-    workspaceId: string,
+    scope: { userId?: string; projectId?: string } | string,
     tx?: Prisma.TransactionClient,
   ): Promise<bigint> {
     const client = this.getClient(tx);
+    const userId = typeof scope === 'object' ? scope.userId : scope;
+    const projectId = typeof scope === 'object' ? scope.projectId : undefined;
 
-    const record = await client.syncSequence.upsert({
-      where: { workspaceId },
-      create: {
-        workspaceId,
-        currentSequence: BigInt(1),
-      },
-      update: {
-        currentSequence: {
-          increment: BigInt(1),
+    if (projectId) {
+      const record = await client.syncSequence.upsert({
+        where: { projectId },
+        create: {
+          projectId,
+          currentSequence: BigInt(1),
         },
-      },
-      select: { currentSequence: true },
-    });
+        update: {
+          currentSequence: {
+            increment: BigInt(1),
+          },
+        },
+        select: { currentSequence: true },
+      });
+      return record.currentSequence;
+    }
 
-    return record.currentSequence;
+    if (userId) {
+      const record = await client.syncSequence.upsert({
+        where: { userId },
+        create: {
+          userId,
+          currentSequence: BigInt(1),
+        },
+        update: {
+          currentSequence: {
+            increment: BigInt(1),
+          },
+        },
+        select: { currentSequence: true },
+      });
+      return record.currentSequence;
+    }
+
+    return BigInt(1);
   }
 
   async appendChange(
-    workspaceId: string,
+    scope: { userId?: string; projectId?: string } | string,
     entry: AppendChangeEntry,
     tx?: Prisma.TransactionClient,
   ): Promise<LibraryChange> {
     const client = this.getClient(tx);
-    const seq = await this.allocateNextSequence(workspaceId, tx);
+    const userId = typeof scope === 'object' ? scope.userId : scope;
+    const projectId = typeof scope === 'object' ? scope.projectId : undefined;
+    const seq = await this.allocateNextSequence(scope, tx);
 
     return client.libraryChange.create({
       data: {
         seq,
-        workspaceId,
+        userId: userId || null,
+        projectId: projectId || null,
         entityType: entry.entityType,
         entityId: entry.entityId,
         action: entry.action,
@@ -71,47 +96,60 @@ export class ChangeLogRepository {
   }
 
   async recordTombstone(
-    workspaceId: string,
+    scope: { userId?: string; projectId?: string } | string,
     entry: RecordTombstoneEntry,
     tx?: Prisma.TransactionClient,
   ): Promise<Tombstone> {
     const client = this.getClient(tx);
-    const seq = await this.allocateNextSequence(workspaceId, tx);
+    const userId = typeof scope === 'object' ? scope.userId : scope;
+    const projectId = typeof scope === 'object' ? scope.projectId : undefined;
+    const seq = await this.allocateNextSequence(scope, tx);
 
-    return client.tombstone.upsert({
+    const existing = await client.tombstone.findFirst({
       where: {
-        workspaceId_entityType_entityId: {
-          workspaceId,
-          entityType: entry.entityType,
-          entityId: entry.entityId,
-        },
+        userId: userId || null,
+        projectId: projectId || null,
+        entityType: entry.entityType,
+        entityId: entry.entityId,
       },
-      create: {
-        workspaceId,
+    });
+
+    if (existing) {
+      return client.tombstone.update({
+        where: { id: existing.id },
+        data: {
+          seq,
+          deletedAt: new Date(),
+          deletedById: entry.deletedById ?? null,
+        },
+      });
+    }
+
+    return client.tombstone.create({
+      data: {
+        userId: userId || null,
+        projectId: projectId || null,
         entityType: entry.entityType,
         entityId: entry.entityId,
         seq,
-        deletedById: entry.deletedById ?? null,
-      },
-      update: {
-        seq,
-        deletedAt: new Date(),
         deletedById: entry.deletedById ?? null,
       },
     });
   }
 
   async getChangesSince(
-    workspaceId: string,
+    scope: { userId?: string; projectId?: string } | string,
     sinceSeq: bigint | number,
     limit: number = 100,
   ): Promise<LibraryChange[]> {
+    const userId = typeof scope === 'object' ? scope.userId : scope;
+    const projectId = typeof scope === 'object' ? scope.projectId : undefined;
     const seqBigInt =
       typeof sinceSeq === 'bigint' ? sinceSeq : BigInt(sinceSeq);
 
     return this.prisma.libraryChange.findMany({
       where: {
-        workspaceId,
+        ...(projectId ? { projectId } : { userId }),
         seq: {
           gt: seqBigInt,
         },
@@ -122,10 +160,12 @@ export class ChangeLogRepository {
   }
 
   async getTombstonesSince(
-    workspaceId: string,
+    scope: { userId?: string; projectId?: string } | string,
     sinceSeq?: bigint | number,
     limit: number = 100,
   ): Promise<Tombstone[]> {
+    const userId = typeof scope === 'object' ? scope.userId : scope;
+    const projectId = typeof scope === 'object' ? scope.projectId : undefined;
     const seqBigInt =
       sinceSeq !== undefined
         ? typeof sinceSeq === 'bigint'
@@ -135,7 +175,7 @@ export class ChangeLogRepository {
 
     return this.prisma.tombstone.findMany({
       where: {
-        workspaceId,
+        ...(projectId ? { projectId } : { userId }),
         ...(seqBigInt !== undefined
           ? {
               seq: {
@@ -149,12 +189,28 @@ export class ChangeLogRepository {
     });
   }
 
-  async getLatestSequence(workspaceId: string): Promise<bigint> {
-    const seq = await this.prisma.syncSequence.findUnique({
-      where: { workspaceId },
-      select: { currentSequence: true },
-    });
+  async getLatestSequence(
+    scope: { userId?: string; projectId?: string } | string,
+  ): Promise<bigint> {
+    const userId = typeof scope === 'object' ? scope.userId : scope;
+    const projectId = typeof scope === 'object' ? scope.projectId : undefined;
 
-    return seq?.currentSequence ?? BigInt(0);
+    if (projectId) {
+      const seq = await this.prisma.syncSequence.findUnique({
+        where: { projectId },
+        select: { currentSequence: true },
+      });
+      return seq?.currentSequence ?? BigInt(0);
+    }
+
+    if (userId) {
+      const seq = await this.prisma.syncSequence.findUnique({
+        where: { userId },
+        select: { currentSequence: true },
+      });
+      return seq?.currentSequence ?? BigInt(0);
+    }
+
+    return BigInt(0);
   }
 }

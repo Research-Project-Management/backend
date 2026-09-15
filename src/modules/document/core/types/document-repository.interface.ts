@@ -29,6 +29,7 @@ export const PAGE_LIST_SELECT = {
   icon: true,
   status: true,
   rank: true,
+  labels: true,
   views: true,
   parentPageId: true,
   mainFileId: true,

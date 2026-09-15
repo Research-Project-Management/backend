@@ -1,7 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { Prisma, Cycle, CycleStatus, WorkItem } from '@prisma/client';
-import { ICycleRepository, CycleWorkItemItem } from './types/cycle.types';
+import {
+  ICycleRepository,
+  CycleWorkItemItem,
+  CycleWithWorkItems,
+} from './types/cycle.types';
 import { USER_MINIMAL_SELECT } from '../core/types/work-item.types';
 
 @Injectable()
@@ -43,7 +47,7 @@ export class CycleRepository implements ICycleRepository {
     });
   }
 
-  async findCycleById(cycleId: string): Promise<Cycle | null> {
+  async findCycleById(cycleId: string): Promise<CycleWithWorkItems | null> {
     return this.prisma.cycle.findFirst({
       where: { id: cycleId, deletedAt: null },
       include: {

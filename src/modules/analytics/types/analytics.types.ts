@@ -10,6 +10,9 @@ export interface AssigneeDistributionItem {
 }
 
 export interface ProjectDistributionResult {
+  totalItems: number;
+  completedItems: number;
+  completionRate: number;
   state: Record<string, number>;
   priority: Record<string, number>;
   assignee: AssigneeDistributionItem[];

@@ -28,7 +28,7 @@ export class OutboxDispatcher
   async publish<T = any>(envelope: DomainEventEnvelope<T>): Promise<void> {
     const entry = LIBRARY_EVENT_REGISTRY[envelope.eventType];
     this.logger.debug(
-      `[DomainEventDispatcher] Dispatched ${envelope.eventType} for aggregate ${envelope.aggregateId} (workspace: ${envelope.workspaceId}) - ${entry?.expectedSideEffect || 'internal'}`,
+      `[DomainEventDispatcher] Dispatched ${envelope.eventType} for aggregate ${envelope.aggregateId} (scope: ${envelope.scopeId || envelope.projectId || envelope.userId}) - ${entry?.expectedSideEffect || 'internal'}`,
     );
 
     if (this.eventEmitter) {
@@ -49,7 +49,9 @@ export class OutboxDispatcher
 
     const envelope: DomainEventEnvelope = {
       eventId: event.id,
-      workspaceId: event.workspaceId,
+      userId: event.userId,
+      projectId: event.projectId ?? undefined,
+      scopeId: event.projectId || event.userId,
       aggregateId: event.aggregateId,
       eventType: event.eventType,
       payload: event.payload,

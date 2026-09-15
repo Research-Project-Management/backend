@@ -30,3 +30,22 @@ export class CreateVersionDto {
   @IsOptional()
   projectId?: string;
 }
+
+export interface DiffChunk {
+  type: 'added' | 'deleted' | 'unchanged';
+  value: string;
+  linesCount: number;
+}
+
+export interface VersionDiffResult {
+  fromVersionId: string;
+  toVersionId: string;
+  fromLabel?: string;
+  toLabel?: string;
+  chunks: DiffChunk[];
+  stats: {
+    addedLines: number;
+    deletedLines: number;
+    unchangedLines: number;
+  };
+}

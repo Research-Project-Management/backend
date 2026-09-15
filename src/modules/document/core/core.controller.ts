@@ -111,9 +111,10 @@ export class CoreController {
   async updatePage(
     @Param('pageId') pageId: string,
     @Body() dto: UpdatePageDto,
+    @CurrentUser('id') userId: string,
     @Param('projectId') projectId?: string,
   ) {
-    return this.pageService.updatePage(pageId, dto, projectId);
+    return this.pageService.updatePage(pageId, dto, projectId, userId);
   }
 
   @Delete([
@@ -129,9 +130,10 @@ export class CoreController {
   @ApiOperation({ summary: 'Soft delete a page/document' })
   async deletePage(
     @Param('pageId') pageId: string,
+    @CurrentUser('id') userId: string,
     @Param('projectId') projectId?: string,
   ) {
-    return this.pageService.deletePage(pageId, projectId);
+    return this.pageService.deletePage(pageId, projectId, userId);
   }
 
   @Post([

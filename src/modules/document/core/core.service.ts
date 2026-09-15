@@ -13,6 +13,8 @@ import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
 import { RedisCacheService } from '@/core/cache/redis.service';
 import { DOCUMENT_REDIS_KEYS } from './constants/redis-keys.constant';
 import { FormattedPage } from './types/core.types';
+import { sanitizeDocumentTitle, slugifyTitle } from './utils/document.utils';
+import { NodeService } from '../node/node.service';
 
 export { FormattedPage };
 
@@ -22,6 +24,7 @@ export class CoreService {
     private readonly pageRepo: CoreRepository,
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly cache?: RedisCacheService,
+    @Optional() private readonly nodeService?: NodeService,
   ) {}
 
   private async invalidatePageCache(projectId: string, pageId?: string) {
@@ -38,6 +41,11 @@ export class CoreService {
     pageId: string,
     targetParentId: string,
   ): Promise<void> {
+    if (this.nodeService) {
+      await this.nodeService.assertNoCircularReference(pageId, targetParentId);
+      return;
+    }
+
     if (pageId === targetParentId) {
       throw new BadRequestException('A page cannot be its own parent');
     }
@@ -72,6 +80,14 @@ export class CoreService {
   }
 
   async getProjectPageTree(projectId: string) {
+    if (this.nodeService) {
+      const res = await this.nodeService.getProjectTree(projectId);
+      return {
+        pages: res.nodes.map((pageItem) => this.formatPage(pageItem)),
+        tree: res.tree,
+      };
+    }
+
     const cacheKey = DOCUMENT_REDIS_KEYS.projectTree(projectId);
 
     if (this.cache) {
@@ -135,16 +151,18 @@ export class CoreService {
     }
 
     const isCreator = (project as any).createdById === userId;
-    const projMember = await this.pageRepo.findProjectMember(
-      project.id,
-      userId,
-    );
-    const hasRole =
-      projMember?.role === 'owner' || projMember?.role === 'contributor';
-    if (!isCreator && !hasRole) {
-      throw new ForbiddenException(
-        'You need contributor or owner role in the project to create pages',
+    if (!isCreator) {
+      const projMember = await this.pageRepo.findProjectMember(
+        project.id,
+        userId,
       );
+      const hasRole =
+        projMember?.role === 'owner' || projMember?.role === 'contributor';
+      if (!hasRole) {
+        throw new ForbiddenException(
+          'You need contributor or owner role in the project to create pages',
+        );
+      }
     }
 
     const parentPageId = dto.parentPageId ?? dto.parentPage ?? null;
@@ -160,12 +178,16 @@ export class CoreService {
       }
     }
 
+    const cleanTitle = sanitizeDocumentTitle(dto.title);
+    const cleanSlug = dto.slug || slugifyTitle(cleanTitle);
+
     const page = await this.pageRepo.createPage({
-      title: dto.title,
-      slug: dto.slug,
+      title: cleanTitle,
+      slug: cleanSlug,
       icon: dto.icon,
       coverImage: dto.coverImage,
       rank: dto.rank ?? 0,
+      labels: dto.labels ?? [],
       isLocked: dto.isLocked ?? false,
       isPublished: dto.isPublished ?? false,
       content: dto.content !== undefined ? dto.content : Prisma.JsonNull,
@@ -193,7 +215,12 @@ export class CoreService {
     return { page: this.formatPage(page) };
   }
 
-  async updatePage(pageId: string, dto: UpdatePageDto, projectId?: string) {
+  async updatePage(
+    pageId: string,
+    dto: UpdatePageDto,
+    projectId?: string,
+    userId?: string,
+  ) {
     const existing = await this.pageRepo.findPageById(pageId);
     if (!existing || existing.deletedAt) {
       throw new NotFoundException('Page not found');
@@ -201,6 +228,17 @@ export class CoreService {
 
     if (projectId && existing.projectId !== projectId) {
       throw new NotFoundException('Page not found in this project');
+    }
+
+    // Server-Authoritative Lock Protection: Reject content/title edits on locked pages
+    if (
+      existing.isLocked &&
+      dto.isLocked === undefined &&
+      (dto.content !== undefined || dto.title !== undefined)
+    ) {
+      throw new ForbiddenException(
+        'This document is locked against modifications',
+      );
     }
 
     const parentPageId = dto.parentPageId ?? dto.parentPage;
@@ -217,12 +255,22 @@ export class CoreService {
       await this.validateNoCircularParent(pageId, parentPageId);
     }
 
+    const cleanTitle =
+      dto.title !== undefined ? sanitizeDocumentTitle(dto.title) : undefined;
+    const cleanSlug =
+      dto.slug !== undefined
+        ? dto.slug
+        : cleanTitle
+          ? slugifyTitle(cleanTitle)
+          : undefined;
+
     const page = await this.pageRepo.updatePage(pageId, {
-      ...(dto.title !== undefined && { title: dto.title }),
-      ...(dto.slug !== undefined && { slug: dto.slug }),
+      ...(cleanTitle !== undefined && { title: cleanTitle }),
+      ...(cleanSlug !== undefined && { slug: cleanSlug }),
       ...(dto.icon !== undefined && { icon: dto.icon }),
       ...(dto.coverImage !== undefined && { coverImage: dto.coverImage }),
       ...(dto.rank !== undefined && { rank: dto.rank }),
+      ...(dto.labels !== undefined && { labels: dto.labels }),
       ...(dto.isLocked !== undefined && { isLocked: dto.isLocked }),
       ...(dto.isPublished !== undefined && { isPublished: dto.isPublished }),
       ...(dto.content !== undefined && { content: dto.content }),
@@ -248,7 +296,7 @@ export class CoreService {
         entityType: EntityType.page,
         entityId: page.id,
         verb: 'updated',
-        actorId: '',
+        actorId: userId || '',
         projectId: page.projectId || undefined,
       }),
     );
@@ -256,7 +304,7 @@ export class CoreService {
     return { page: this.formatPage(page) };
   }
 
-  async deletePage(pageId: string, projectId?: string) {
+  async deletePage(pageId: string, projectId?: string, userId?: string) {
     const page = await this.pageRepo.findPageById(pageId);
     if (!page) {
       throw new NotFoundException('Page not found');
@@ -275,7 +323,7 @@ export class CoreService {
         entityType: EntityType.page,
         entityId: page.id,
         verb: 'deleted',
-        actorId: '',
+        actorId: userId || '',
         projectId: page.projectId || undefined,
       }),
     );
@@ -328,6 +376,11 @@ export class CoreService {
   }
 
   async getPageFiles(pageId: string, projectId?: string) {
+    if (this.nodeService) {
+      const res = await this.nodeService.getChildren(pageId, projectId);
+      return { files: res.children.map((c) => this.formatPage(c)) };
+    }
+
     const page = await this.pageRepo.findPageById(pageId);
     if (!page) {
       throw new NotFoundException('Page not found');
@@ -345,6 +398,19 @@ export class CoreService {
     dto: { title: string; content?: any; parentPageId?: string },
     projectId?: string,
   ) {
+    if (this.nodeService) {
+      const res = await this.nodeService.createChildNode(
+        pageId,
+        userId,
+        {
+          title: dto.title,
+          content: dto.content,
+        },
+        projectId,
+      );
+      return { file: this.formatPage(res.node) };
+    }
+
     const parent = await this.pageRepo.findPageById(pageId);
     if (!parent) {
       throw new NotFoundException('Parent page not found');
@@ -353,8 +419,16 @@ export class CoreService {
       throw new NotFoundException('Page not found in this project');
     }
 
+    if (parent.isLocked) {
+      throw new ForbiddenException(
+        'Parent document is locked against modifications',
+      );
+    }
+
+    const cleanTitle = sanitizeDocumentTitle(dto.title);
     const created = await this.pageRepo.createPage({
-      title: dto.title,
+      title: cleanTitle,
+      slug: slugifyTitle(cleanTitle),
       content: dto.content !== undefined ? dto.content : Prisma.JsonNull,
       status: PageStatus.draft,
       project: { connect: { id: parent.projectId } },
@@ -368,6 +442,15 @@ export class CoreService {
   }
 
   async setMainFile(pageId: string, mainFileId: string, projectId?: string) {
+    if (this.nodeService) {
+      const res = await this.nodeService.setMainFile(
+        pageId,
+        mainFileId,
+        projectId,
+      );
+      return { page: this.formatPage(res.node) };
+    }
+
     const page = await this.pageRepo.findPageById(pageId);
     if (!page) {
       throw new NotFoundException('Page not found');

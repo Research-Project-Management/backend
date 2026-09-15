@@ -92,7 +92,6 @@ export type ItemRelationType =
 export interface ItemRelation {
   id: string;
   projectId?: string;
-  workspaceId?: string;
   sourceItemId: string;
   targetItemId: string;
   relationType: ItemRelationType;
@@ -110,7 +109,6 @@ export interface ItemRelationInput {
 export interface ItemSummary {
   id: string;
   projectId?: string;
-  workspaceId?: string;
   userId?: string;
   title: string;
   itemType?: string;

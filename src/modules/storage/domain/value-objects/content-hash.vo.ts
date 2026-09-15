@@ -9,7 +9,9 @@ export class ContentHash {
 
   private constructor(bytes: Buffer) {
     if (bytes.length !== 32) {
-      throw new Error(`Invalid SHA-256 hash byte length: expected 32 bytes, got ${bytes.length}`);
+      throw new Error(
+        `Invalid SHA-256 hash byte length: expected 32 bytes, got ${bytes.length}`,
+      );
     }
     this.rawBytes = Buffer.from(bytes);
   }

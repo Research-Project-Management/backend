@@ -9,7 +9,6 @@ export enum BlobStatus {
 
 export interface StorageBlobProps {
   id: string;
-  tenantId: string;
   contentHash: ContentHash;
   hashAlgorithm?: string;
   sizeBytes: bigint;
@@ -29,7 +28,6 @@ export interface StorageBlobProps {
  */
 export class StorageBlob {
   public readonly id: string;
-  public readonly tenantId: string;
   public readonly contentHash: ContentHash;
   public readonly hashAlgorithm: string;
   public readonly sizeBytes: bigint;
@@ -44,7 +42,6 @@ export class StorageBlob {
 
   constructor(props: StorageBlobProps) {
     this.id = props.id;
-    this.tenantId = props.tenantId;
     this.contentHash = props.contentHash;
     this.hashAlgorithm = props.hashAlgorithm ?? 'SHA256';
     this.sizeBytes = props.sizeBytes;

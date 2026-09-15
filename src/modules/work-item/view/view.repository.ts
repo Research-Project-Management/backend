@@ -47,7 +47,7 @@ export class ViewRepository {
       };
     }
 
-    const records = await (this.prismaService as any).workItemView.findMany({
+    const records = await this.prismaService.workItemView.findMany({
       where: whereClause,
       include: {
         createdBy: {
@@ -103,7 +103,7 @@ export class ViewRepository {
     viewId: string,
     userId?: string,
   ): Promise<WorkItemViewItem | null> {
-    const record = await (this.prismaService as any).workItemView.findUnique({
+    const record = await this.prismaService.workItemView.findUnique({
       where: { id: viewId },
       include: {
         createdBy: {
@@ -129,7 +129,10 @@ export class ViewRepository {
       id: record.id,
       name: record.name,
       description: record.description,
-      layout: record.displayFilters?.layout || record.query?.layout || 'board',
+      layout:
+        (record.displayFilters as Record<string, any>)?.layout ||
+        (record.query as Record<string, any>)?.layout ||
+        'board',
       query: (record.query as Record<string, any>) || {},
       filters: (record.filters as Record<string, any>) || {},
       displayFilters: (record.displayFilters as Record<string, any>) || {},
@@ -165,7 +168,7 @@ export class ViewRepository {
     projectId: string;
     createdById: string;
   }): Promise<WorkItemViewItem> {
-    const record = await (this.prismaService as any).workItemView.create({
+    const record = await this.prismaService.workItemView.create({
       data: {
         name: data.name,
         description: data.description ?? '',
@@ -196,7 +199,10 @@ export class ViewRepository {
       id: record.id,
       name: record.name,
       description: record.description,
-      layout: record.displayFilters?.layout || record.query?.layout || 'board',
+      layout:
+        (record.displayFilters as Record<string, any>)?.layout ||
+        (record.query as Record<string, any>)?.layout ||
+        'board',
       query: (record.query as Record<string, any>) || {},
       filters: (record.filters as Record<string, any>) || {},
       displayFilters: (record.displayFilters as Record<string, any>) || {},
@@ -235,7 +241,7 @@ export class ViewRepository {
     },
     userId?: string,
   ): Promise<WorkItemViewItem> {
-    const record = await (this.prismaService as any).workItemView.update({
+    const record = await this.prismaService.workItemView.update({
       where: { id: viewId },
       data: {
         ...(data.name !== undefined && { name: data.name }),
@@ -283,7 +289,10 @@ export class ViewRepository {
       id: record.id,
       name: record.name,
       description: record.description,
-      layout: record.displayFilters?.layout || record.query?.layout || 'board',
+      layout:
+        (record.displayFilters as Record<string, any>)?.layout ||
+        (record.query as Record<string, any>)?.layout ||
+        'board',
       query: (record.query as Record<string, any>) || {},
       filters: (record.filters as Record<string, any>) || {},
       displayFilters: (record.displayFilters as Record<string, any>) || {},
@@ -307,7 +316,7 @@ export class ViewRepository {
 
   async delete(viewId: string): Promise<boolean> {
     try {
-      await (this.prismaService as any).workItemView.delete({
+      await this.prismaService.workItemView.delete({
         where: { id: viewId },
       });
       return true;
@@ -320,7 +329,7 @@ export class ViewRepository {
     viewId: string,
     userId: string,
   ): Promise<{ isFavorite: boolean }> {
-    const existing = await (this.prismaService as any).viewFavorite.findUnique({
+    const existing = await this.prismaService.viewFavorite.findUnique({
       where: {
         viewId_userId: {
           viewId,
@@ -330,7 +339,7 @@ export class ViewRepository {
     });
 
     if (existing) {
-      await (this.prismaService as any).viewFavorite.delete({
+      await this.prismaService.viewFavorite.delete({
         where: {
           viewId_userId: {
             viewId,
@@ -340,7 +349,7 @@ export class ViewRepository {
       });
       return { isFavorite: false };
     } else {
-      await (this.prismaService as any).viewFavorite.create({
+      await this.prismaService.viewFavorite.create({
         data: {
           viewId,
           userId,
@@ -351,7 +360,7 @@ export class ViewRepository {
   }
 
   async isFavorite(viewId: string, userId: string): Promise<boolean> {
-    const record = await (this.prismaService as any).viewFavorite.findUnique({
+    const record = await this.prismaService.viewFavorite.findUnique({
       where: {
         viewId_userId: {
           viewId,
@@ -365,7 +374,7 @@ export class ViewRepository {
 
   async favorite(viewId: string, userId: string): Promise<boolean> {
     try {
-      await (this.prismaService as any).viewFavorite.upsert({
+      await this.prismaService.viewFavorite.upsert({
         where: {
           viewId_userId: {
             viewId,
@@ -383,7 +392,7 @@ export class ViewRepository {
 
   async unfavorite(viewId: string, userId: string): Promise<boolean> {
     try {
-      await (this.prismaService as any).viewFavorite.delete({
+      await this.prismaService.viewFavorite.delete({
         where: {
           viewId_userId: {
             viewId,
@@ -401,7 +410,7 @@ export class ViewRepository {
     projectId: string,
     userId: string,
   ): Promise<any[]> {
-    const favorites = await (this.prismaService as any).viewFavorite.findMany({
+    const favorites = await this.prismaService.viewFavorite.findMany({
       where: {
         userId,
         view: { projectId },

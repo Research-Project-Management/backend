@@ -55,12 +55,14 @@ export class ExportsController {
     @Query('format') format?: ExportFormatType,
     @Query('collectionId') collectionIdQuery?: string,
     @Query('tagId') tagId?: string,
+    @Query('projectId') projectIdQuery?: string,
   ) {
     const effectiveFormat = format || 'bibtex';
     const result = await this.exportsService.exportLibrary(userId, {
       format: effectiveFormat,
       collectionId: collectionIdQuery,
       tagId,
+      projectId: projectIdQuery,
     });
 
     return {

@@ -28,7 +28,7 @@ import { JwtAuthGuard } from '../../../modules/iam/authn/guards/auth.guard';
 import { CurrentUser } from '../../../modules/iam/authn/decorators/user.decorator';
 import { ProjectRoleGuard } from '../../../modules/iam/authz/guards/role.guard';
 import { ProjectRoles } from '../../../modules/iam/authz/decorators/role.decorator';
-import { IStoragePort, STORAGE_PORT } from '../../storage/storage.port';
+import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 
 @Controller(['api/v1/library', 'api/v1/projects/:projectId/library'])
 @UseGuards(JwtAuthGuard, ProjectRoleGuard)

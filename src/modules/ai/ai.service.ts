@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  UnprocessableEntityException,
   NotImplementedException,
   Logger,
   Optional,
@@ -11,7 +12,11 @@ import { FastifyReply } from 'fastify';
 import { EngineService } from './engine/engine.service';
 import { ThreadService } from './thread/thread.service';
 import { AiQueryDto } from './dto/ai.dto';
-import { buildAiPayload, formatPaperContext } from './utils/ai.util';
+import {
+  buildAiPayload,
+  formatPaperContext,
+  sanitizeChatTitle,
+} from './utils/ai.util';
 
 import { PrismaService } from '@/core/database/prisma.service';
 
@@ -33,6 +38,7 @@ export class AiService {
     userId: string,
     projectId?: string,
     chatId?: string,
+    pageId?: string,
   ): Promise<void> {
     if (projectId) {
       const project = await this.prisma.project.findFirst({
@@ -57,6 +63,54 @@ export class AiService {
         );
       }
     }
+
+    if (pageId) {
+      const page = await this.prisma.page.findFirst({
+        where: { id: pageId, deletedAt: null },
+        include: {
+          project: {
+            select: {
+              createdById: true,
+              members: { where: { userId }, select: { userId: true } },
+            },
+          },
+        },
+      });
+      if (!page) {
+        throw new NotFoundException('Document page not found');
+      }
+      const canAccess =
+        page.authorId === userId ||
+        page.project?.createdById === userId ||
+        (page.project?.members && page.project.members.length > 0);
+      if (!canAccess) {
+        throw new ForbiddenException(
+          'You do not have access to this document page',
+        );
+      }
+    }
+  }
+
+  /**
+   * Resolves storage file IDs to their underlying Vector RAG document IDs (ragDocId).
+   */
+  private async resolveDocumentIds(documentIds: string[]): Promise<string[]> {
+    if (!documentIds || documentIds.length === 0) return [];
+
+    const files = await this.prisma.file.findMany({
+      where: { id: { in: documentIds } },
+      select: { id: true, metaData: true },
+    });
+
+    const fileMap = new Map<string, string>();
+    for (const f of files) {
+      const meta = f.metaData as Record<string, any> | null;
+      if (meta?.ragDocId) {
+        fileMap.set(f.id, meta.ragDocId);
+      }
+    }
+
+    return documentIds.map((id) => fileMap.get(id) || id);
   }
 
   /**
@@ -68,29 +122,88 @@ export class AiService {
     reply: FastifyReply,
   ): Promise<void> {
     const targetProjectId = dto.projectId || dto.project_id;
-    const targetChatId = dto.chatId || dto.chat_id;
+    const targetPageId = dto.pageId || dto.page_id;
+    let targetChatId = dto.chatId || dto.chat_id;
 
-    await this.validateAccess(userId, targetProjectId, targetChatId);
+    await this.validateAccess(
+      userId,
+      targetProjectId,
+      targetChatId,
+      targetPageId,
+    );
 
     const payload = buildAiPayload(userId, dto);
+    if (payload.document_ids && payload.document_ids.length > 0) {
+      payload.document_ids = await this.resolveDocumentIds(
+        payload.document_ids,
+      );
+    }
 
-    // Save user message to thread if chatId is provided
-    if (payload.chat_id && payload.messages.length > 0) {
-      const lastMsg = payload.messages[payload.messages.length - 1];
-      if (lastMsg.role === 'user' && lastMsg.content.trim()) {
+    // Validate that user message is not empty
+    const userMessages = payload.messages.filter((m) => m.role === 'user');
+    const lastUserMsg = userMessages[userMessages.length - 1];
+    if (!lastUserMsg || !lastUserMsg.content || !lastUserMsg.content.trim()) {
+      throw new UnprocessableEntityException('Message content cannot be empty');
+    }
+
+    // Resolve or establish authoritative chat session
+    let effectiveTitle = 'New Chat';
+    if (targetPageId) {
+      const pageSession = await this.threadService.getOrCreatePageChat(
+        targetPageId,
+        userId,
+        targetProjectId,
+      );
+      targetChatId = pageSession.id;
+      effectiveTitle = pageSession.title;
+    } else if (!targetChatId) {
+      effectiveTitle = sanitizeChatTitle(lastUserMsg.content);
+      const newSession = await this.threadService.createChat(userId, {
+        projectId: targetProjectId,
+        title: effectiveTitle,
+        documentIds: payload.document_ids,
+      });
+      targetChatId = newSession.id;
+    }
+
+    payload.chat_id = targetChatId;
+
+    // Save user message to thread
+    try {
+      await this.threadService.appendMessages(targetChatId, userId, {
+        messages: [{ role: 'user', content: lastUserMsg.content }],
+        documentIds: payload.document_ids,
+      });
+    } catch (err) {
+      this.logger.warn(`Could not persist user message to thread: ${err}`);
+    }
+
+    const initialEvents = [
+      `data: [META]${JSON.stringify({
+        chatId: targetChatId,
+        title: effectiveTitle,
+      })}\n\n`,
+    ];
+
+    const onComplete = async (accumulatedText: string) => {
+      if (targetChatId && accumulatedText && accumulatedText.trim()) {
         try {
-          await this.threadService.appendMessages(payload.chat_id, userId, {
-            messages: [{ role: 'user', content: lastMsg.content }],
+          await this.threadService.appendMessages(targetChatId, userId, {
+            messages: [{ role: 'assistant', content: accumulatedText }],
+            documentIds: payload.document_ids,
           });
         } catch (err) {
           this.logger.warn(
-            `Could not persist user message to thread: ${err instanceof Error ? err.message : String(err)}`,
+            `Could not persist assistant stream response: ${err}`,
           );
         }
       }
-    }
+    };
 
-    return this.engineService.streamChat(payload, reply);
+    return this.engineService.streamChat(payload, reply, {
+      initialEvents,
+      onComplete,
+    });
   }
 
   /**
@@ -98,16 +211,183 @@ export class AiService {
    */
   async execute(userId: string, dto: AiQueryDto) {
     const targetProjectId = dto.projectId || dto.project_id;
-    const targetChatId = dto.chatId || dto.chat_id;
+    const targetPageId = dto.pageId || dto.page_id;
+    let targetChatId = dto.chatId || dto.chat_id;
 
-    await this.validateAccess(userId, targetProjectId, targetChatId);
+    await this.validateAccess(
+      userId,
+      targetProjectId,
+      targetChatId,
+      targetPageId,
+    );
 
     const payload = buildAiPayload(userId, dto);
-    return this.engineService.syncChat(payload);
+    if (payload.document_ids && payload.document_ids.length > 0) {
+      payload.document_ids = await this.resolveDocumentIds(
+        payload.document_ids,
+      );
+    }
+
+    // Validate that user message is not empty
+    const userMessages = payload.messages.filter((m) => m.role === 'user');
+    const lastUserMsg = userMessages[userMessages.length - 1];
+    if (!lastUserMsg || !lastUserMsg.content || !lastUserMsg.content.trim()) {
+      throw new UnprocessableEntityException('Message content cannot be empty');
+    }
+
+    // Resolve or establish authoritative chat session
+    let effectiveTitle = 'New Chat';
+    if (targetPageId) {
+      const pageSession = await this.threadService.getOrCreatePageChat(
+        targetPageId,
+        userId,
+        targetProjectId,
+      );
+      targetChatId = pageSession.id;
+      effectiveTitle = pageSession.title;
+    } else if (!targetChatId) {
+      effectiveTitle = sanitizeChatTitle(lastUserMsg.content);
+      const newSession = await this.threadService.createChat(userId, {
+        projectId: targetProjectId,
+        title: effectiveTitle,
+        documentIds: payload.document_ids,
+      });
+      targetChatId = newSession.id;
+    }
+
+    payload.chat_id = targetChatId;
+
+    // Save user message to thread
+    try {
+      await this.threadService.appendMessages(targetChatId, userId, {
+        messages: [{ role: 'user', content: lastUserMsg.content }],
+        documentIds: payload.document_ids,
+      });
+    } catch (err) {
+      this.logger.warn(`Could not persist user message to thread: ${err}`);
+    }
+
+    const result = await this.engineService.syncChat(payload);
+
+    if (targetChatId && result.content && result.content.trim()) {
+      try {
+        await this.threadService.appendMessages(targetChatId, userId, {
+          messages: [
+            {
+              role: 'assistant',
+              content: result.content,
+              sources: result.sources,
+              widgets: result.widgets,
+            },
+          ],
+          documentIds: payload.document_ids,
+        });
+      } catch (err) {
+        this.logger.warn(`Could not persist assistant sync response: ${err}`);
+      }
+    }
+
+    return { ...result, chatId: targetChatId, title: effectiveTitle };
   }
 
   /**
-   * Paper-scoped streaming RAG handler
+   * Resolves a paper target (either a Library Item or a Storage File) and verifies access.
+   */
+  private async resolvePaperTarget(
+    userId: string,
+    paperOrFileId: string,
+  ): Promise<{
+    title: string;
+    authors: string[];
+    year?: number | string;
+    doi?: string;
+    abstract?: string;
+    ragDocId: string | null;
+    scopeId: string;
+  }> {
+    // 1. Try finding Library Item
+    const item = await (this.prisma as any).item?.findFirst({
+      where: { id: paperOrFileId, deletedAt: null },
+      include: { contributors: { orderBy: { orderIndex: 'asc' } } },
+    });
+
+    if (item) {
+      const hasAccess =
+        item.uploadedById === userId ||
+        (item.projectId
+          ? (await this.prisma.projectMember.findFirst({
+              where: {
+                projectId: item.projectId,
+                userId,
+              },
+            })) !== null
+          : false);
+
+      if (!hasAccess) {
+        throw new ForbiddenException('You do not have access to this paper');
+      }
+
+      return {
+        title: item.title,
+        authors: item.contributors?.map((c: any) => c.fullName) || [],
+        year: item.year || undefined,
+        doi: item.doi || undefined,
+        abstract: item.abstract || undefined,
+        ragDocId: item.ragDocId || null,
+        scopeId: item.projectId || userId,
+      };
+    }
+
+    // 2. Try finding Storage File
+    const file = await this.prisma.file.findFirst({
+      where: { id: paperOrFileId, trashedAt: null },
+      include: {
+        sharedWith: { where: { userId } },
+      },
+    });
+
+    if (!file) {
+      throw new NotFoundException(
+        `Paper or scientific file with ID ${paperOrFileId} not found`,
+      );
+    }
+
+    // Access control for Storage File
+    let hasAccess = file.authorId === userId || file.sharedWith.length > 0;
+    if (!hasAccess && file.linkedToType === 'project' && file.linkedToId) {
+      const isMember = await this.prisma.projectMember.findFirst({
+        where: { projectId: file.linkedToId, userId },
+      });
+      hasAccess = isMember !== null;
+    }
+
+    if (!hasAccess) {
+      throw new ForbiddenException('You do not have access to this file');
+    }
+
+    const meta = (file.metaData as Record<string, any>) || {};
+    const scopeId =
+      file.linkedToType === 'project' && file.linkedToId
+        ? file.linkedToId
+        : userId;
+
+    return {
+      title: meta.title || file.filename,
+      authors: Array.isArray(meta.authors)
+        ? meta.authors
+        : meta.authors
+          ? [meta.authors]
+          : [],
+      year: meta.year || undefined,
+      doi: meta.doi || undefined,
+      abstract: meta.abstract || undefined,
+      ragDocId: meta.ragDocId || null,
+      scopeId,
+    };
+  }
+
+  /**
+   * Paper-scoped streaming RAG handler (supports both Library Item and Storage File)
    */
   async streamPaper(
     userId: string,
@@ -115,32 +395,7 @@ export class AiService {
     dto: AiQueryDto,
     reply: FastifyReply,
   ): Promise<void> {
-    const paper = await (this.prisma as any).item?.findFirst({
-      where: { id: paperId, deletedAt: null },
-      include: { contributors: { orderBy: { orderIndex: 'asc' } } },
-    });
-
-    if (!paper) {
-      throw new NotFoundException(`Paper with ID ${paperId} not found`);
-    }
-
-    // Verify access for the paper
-    const hasAccess =
-      paper.uploadedById === userId ||
-      (paper.projectId
-        ? (await this.prisma.projectMember.findFirst({
-            where: {
-              projectId: paper.projectId,
-              userId,
-            },
-          })) !== null
-        : false);
-
-    if (!hasAccess) {
-      throw new ForbiddenException('You do not have access to this paper');
-    }
-
-    const scopeId = paper.projectId || userId;
+    const resolved = await this.resolvePaperTarget(userId, paperId);
 
     // Chat ID ownership verification if provided, or secure user-scoped default
     let chatId = dto.chatId || dto.chat_id;
@@ -157,19 +412,18 @@ export class AiService {
       chatId = `paper-${paperId}-${userId}`;
     }
 
-    const paperDocId = paper.ragDocId || null;
     const paperContext = formatPaperContext({
-      title: paper.title,
-      authors: paper.contributors?.map((c: any) => c.fullName) || [],
-      year: paper.year || undefined,
-      doi: paper.doi || undefined,
-      abstract: paper.abstract || undefined,
+      title: resolved.title,
+      authors: resolved.authors,
+      year: resolved.year,
+      doi: resolved.doi,
+      abstract: resolved.abstract,
     });
 
     const payload = buildAiPayload(userId, dto);
-    payload.workspace_id = scopeId;
+    payload.workspace_id = resolved.scopeId;
     // Strict paper document scope - prevent foreign injected document IDs
-    payload.document_ids = paperDocId ? [paperDocId] : [];
+    payload.document_ids = resolved.ragDocId ? [resolved.ragDocId] : [];
     payload.chat_id = chatId;
     payload.intent_hint = 'paper_rag_qa';
 
@@ -184,35 +438,10 @@ export class AiService {
   }
 
   /**
-   * Paper-scoped synchronous RAG handler
+   * Paper-scoped synchronous RAG handler (supports both Library Item and Storage File)
    */
   async executePaper(userId: string, paperId: string, dto: AiQueryDto) {
-    const paper = await (this.prisma as any).item.findFirst({
-      where: { id: paperId, deletedAt: null },
-      include: { contributors: { orderBy: { orderIndex: 'asc' } } },
-    });
-
-    if (!paper) {
-      throw new NotFoundException(`Paper with ID ${paperId} not found`);
-    }
-
-    // Verify access for the paper
-    const hasAccess =
-      paper.uploadedById === userId ||
-      (paper.projectId
-        ? (await this.prisma.projectMember.findFirst({
-            where: {
-              projectId: paper.projectId,
-              userId,
-            },
-          })) !== null
-        : false);
-
-    if (!hasAccess) {
-      throw new ForbiddenException('You do not have access to this paper');
-    }
-
-    const scopeId = paper.projectId || userId;
+    const resolved = await this.resolvePaperTarget(userId, paperId);
 
     // Chat ID ownership verification if provided, or secure user-scoped default
     let chatId = dto.chatId || dto.chat_id;
@@ -229,18 +458,17 @@ export class AiService {
       chatId = `paper-${paperId}-${userId}`;
     }
 
-    const paperDocId = paper.ragDocId || null;
     const paperContext = formatPaperContext({
-      title: paper.title,
-      authors: paper.contributors?.map((c: any) => c.fullName) || [],
-      year: paper.year || undefined,
-      doi: paper.doi || undefined,
-      abstract: paper.abstract || undefined,
+      title: resolved.title,
+      authors: resolved.authors,
+      year: resolved.year,
+      doi: resolved.doi,
+      abstract: resolved.abstract,
     });
 
     const payload = buildAiPayload(userId, dto);
-    payload.workspace_id = scopeId;
-    payload.document_ids = paperDocId ? [paperDocId] : [];
+    payload.workspace_id = resolved.scopeId;
+    payload.document_ids = resolved.ragDocId ? [resolved.ragDocId] : [];
     payload.chat_id = chatId;
     payload.intent_hint = 'paper_rag_qa';
 

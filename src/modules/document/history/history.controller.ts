@@ -5,6 +5,8 @@ import {
   Delete,
   Body,
   Param,
+  Query,
+  BadRequestException,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -98,10 +100,36 @@ export class HistoryController {
   @HttpCode(HttpStatus.OK)
   @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Restore page to a specific history event state' })
-  async restoreHistory(
+  async restoreHistoryEvent(
     @Param('pageId') pageId: string,
     @Param('eventId') eventId: string,
   ) {
     return this.historyService.restoreVersion(pageId, eventId);
+  }
+
+  @Get([
+    'projects/:projectId/pages/:pageId/history/diff',
+    'projects/:projectId/pages/:pageId/versions/diff',
+    'pages/:pageId/versions/diff',
+  ])
+  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ApiOperation({
+    summary: 'Compute line-by-line visual diff between two version snapshots',
+  })
+  async compareVersions(
+    @Param('pageId') pageId: string,
+    @Query('from') fromVersionId: string,
+    @Query('to') toVersionId: string,
+  ) {
+    if (!fromVersionId || !toVersionId) {
+      throw new BadRequestException(
+        'Both "from" and "to" version IDs are required to compute diff',
+      );
+    }
+    return this.historyService.compareVersions(
+      pageId,
+      fromVersionId,
+      toVersionId,
+    );
   }
 }

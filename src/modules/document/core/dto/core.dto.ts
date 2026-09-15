@@ -1,4 +1,5 @@
 import {
+  IsArray,
   IsBoolean,
   IsEnum,
   IsNotEmpty,
@@ -28,6 +29,11 @@ export class CreatePageDto {
   @IsNumber()
   @IsOptional()
   rank?: number;
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  labels?: string[];
 
   @IsBoolean()
   @IsOptional()
@@ -81,6 +87,11 @@ export class UpdatePageDto {
   @IsNumber()
   @IsOptional()
   rank?: number;
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  labels?: string[];
 
   @IsBoolean()
   @IsOptional()

@@ -32,31 +32,34 @@ export class UrlCaptureService {
    */
   async captureUrl(
     url: string,
-    contextOrWorkspaceId:
-      string | { workspaceId?: string; projectId?: string; userId?: string },
+    contextOrScopeId:
+      | string
+      | {
+          scopeId?: string;
+          projectId?: string;
+          userId?: string;
+        },
   ): Promise<any> {
-    const workspaceId =
-      typeof contextOrWorkspaceId === 'string'
-        ? contextOrWorkspaceId
-        : contextOrWorkspaceId.workspaceId ||
-          contextOrWorkspaceId.projectId ||
-          '';
+    const scopeId =
+      typeof contextOrScopeId === 'string'
+        ? contextOrScopeId
+        : contextOrScopeId.scopeId || contextOrScopeId.projectId || '';
     const userId =
-      typeof contextOrWorkspaceId === 'object'
-        ? contextOrWorkspaceId.userId
+      typeof contextOrScopeId === 'object'
+        ? contextOrScopeId.userId
         : undefined;
 
     let result: any;
     if (this.urlCaptureProvider?.captureFromUrl) {
       result = await this.urlCaptureProvider.captureFromUrl(url, {
-        workspaceId,
+        scopeId,
         userId,
       });
     } else {
       result = {
         title: 'Blog Post',
         url,
-        workspaceId,
+        scopeId,
         itemType: 'webpage',
       };
     }
@@ -72,9 +75,7 @@ export class UrlCaptureService {
     await this.prisma.capturePreview.create({
       data: {
         sourceUrl: result.url || url,
-        workspaceId,
-        userId: userId || null,
-        title: result.title || 'Captured Item',
+        userId: userId || scopeId,
         canonicalMetadata: metaWithoutToken,
         metadataDigest,
         tokenHash,
@@ -90,11 +91,11 @@ export class UrlCaptureService {
    * and committing an Item to the library.
    */
   async confirmCapturedUrl(
-    workspaceId: string,
+    scopeId: string,
     userId: string,
     dto: any,
   ): Promise<any> {
-    const targetUserId = userId || workspaceId;
+    const targetUserId = userId || scopeId;
     if (!dto?.previewToken) {
       throw new BadRequestException('previewToken is required');
     }
@@ -126,7 +127,7 @@ export class UrlCaptureService {
       const verifyRes = this.urlCaptureProvider.verifyPreviewToken(
         preview.canonicalMetadata as any,
         dto.previewToken,
-        { workspaceId: targetUserId, userId: targetUserId },
+        { scopeId: targetUserId, userId: targetUserId },
       );
       if (!verifyRes.valid) {
         if (verifyRes.reason === 'token_expired') {
@@ -244,7 +245,7 @@ export class UrlCaptureService {
       this.webSnapshotService?.captureAndAttach
     ) {
       void this.webSnapshotService
-        .captureAndAttach(itemData.url, createdItem.id, workspaceId, {
+        .captureAndAttach(itemData.url, createdItem.id, scopeId, {
           title: createdItem.title,
           uploadedById: userId,
         })

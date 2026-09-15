@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@/core/database/prisma.module';
-import { R2Service } from '@/modules/storage/r2/r2.service';
+import { R2Service } from '@/modules/storage/infrastructure/drivers/r2.service';
 import { AttachmentController } from './attachment.controller';
 import { AttachmentService } from './attachment.service';
 import { AttachmentRepository } from './attachment.repository';

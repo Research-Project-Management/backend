@@ -17,6 +17,7 @@ const PROJECT_SELECT = {
   avatar: true,
   description: true,
   network: true,
+  isActive: true,
 } as const;
 
 @Injectable()
@@ -164,6 +165,22 @@ export class InvitationRepository {
 
     return this.prisma.user.findUnique({
       where: { id: userId },
+      select: USER_SELECT,
+    });
+  }
+
+  /**
+   * Fetch user profile by email (case-insensitive).
+   */
+  async findUserByEmail(email: string) {
+    if (!email) return null;
+    const normalizedEmail = email.trim().toLowerCase();
+
+    return this.prisma.user.findFirst({
+      where: {
+        email: { equals: normalizedEmail, mode: 'insensitive' },
+        deletedAt: null,
+      },
       select: USER_SELECT,
     });
   }

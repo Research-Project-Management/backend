@@ -4,11 +4,13 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { Prisma, RagStatus } from '@prisma/client';
 import { QueryRepository } from './repositories/query.repository';
 import { CommandRepository } from './repositories/command.repository';
 import { CreateItemData, UpdateItemData } from './types/items.types';
+import { sanitizeItemTitle } from './utils/items.utils';
 import {
   TransactionService,
   TransactionHelpers,
@@ -144,6 +146,12 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     },
     projectId?: string,
   ): Promise<any> {
+    const cleanTitle = sanitizeItemTitle(data.title);
+    if (!cleanTitle) {
+      throw new UnprocessableEntityException('Item title cannot be empty');
+    }
+    data.title = cleanTitle;
+
     const effectiveProjectId =
       projectId || context?.projectId || data.projectId || undefined;
     const execute = async (
@@ -167,14 +175,15 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
 
       const payload = buildItemCreatedOutboxPayload({
         itemId: item.id,
-        workspaceId: effectiveProjectId || userId,
+        userId,
+        projectId: effectiveProjectId,
         title: item.title,
         source: context?.source ?? 'manual',
         doi: item.doi,
       });
 
       await helpers.publishOutbox(
-        userId,
+        { userId, projectId: effectiveProjectId },
         item.id,
         LIBRARY_EVENT_TYPES.ITEM_CREATED,
         payload,
@@ -200,6 +209,14 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     context?: ItemTransactionContext,
     projectId?: string,
   ): Promise<any> {
+    if (data.title !== undefined) {
+      const cleanTitle = sanitizeItemTitle(data.title);
+      if (!cleanTitle) {
+        throw new UnprocessableEntityException('Item title cannot be empty');
+      }
+      data.title = cleanTitle;
+    }
+
     if (context) {
       const updated = await this.command.update(
         userId,
@@ -309,8 +326,8 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     await this.libraryTx.executeInTransaction(async (_tx, helpers) => {
       await helpers.publishOutbox(userId, id, 'library.item.reindexed', {
         itemId: id,
-        workspaceId: projectId || userId,
         userId,
+        projectId: projectId ?? undefined,
       });
     });
 
@@ -555,7 +572,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
   }
 
   async findByIds(userId: string, itemIds: string[], projectId?: string) {
-    return this.query.findByIds(userId, itemIds);
+    return this.query.findByIds(userId, itemIds, projectId);
   }
 
   async findByDoi(userId: string, doi: string, projectId?: string) {
@@ -668,7 +685,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         LIBRARY_EVENT_TYPES.ITEM_CREATED,
         buildItemCreatedOutboxPayload({
           itemId: created.id,
-          workspaceId: userId,
+          userId,
           title: created.title,
           source: 'external_sync',
         }),
@@ -686,11 +703,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     tx: Prisma.TransactionClient,
     helpers: TransactionHelpers,
   ): Promise<void> {
-    const targetUserId =
-      command.userId ||
-      (command as any).projectId ||
-      (command as any).workspaceId ||
-      '';
+    const targetUserId = command.userId || (command as any).projectId || '';
     const { entityId, reason, publishOutboxEventType, publishOutboxPayload } =
       command;
     const existing = await tx.item.findUnique({

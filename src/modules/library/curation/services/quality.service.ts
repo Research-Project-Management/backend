@@ -152,8 +152,12 @@ export class QualityService {
     };
   }
 
-  async getQualityAudit(userId: string) {
-    const items = await this.itemReadPort.findQualityAuditItems(userId, 2000);
+  async getQualityAudit(userId: string, projectId?: string) {
+    const items = await this.itemReadPort.findQualityAuditItems(
+      userId,
+      2000,
+      projectId,
+    );
 
     let totalScore = 0;
     let missingDoi = 0;

@@ -153,7 +153,7 @@ export class AnalyticsRepository {
     }
 
     return this.prisma.workItem.findMany({
-      where: { projectId: canonicalProjectId },
+      where: { projectId: canonicalProjectId, deletedAt: null },
       select: {
         id: true,
         columnId: true,

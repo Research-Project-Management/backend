@@ -48,7 +48,6 @@ export interface AttachmentEntity {
 export interface CreateAttachmentInput {
   userId?: string;
   projectId?: string;
-  workspaceId?: string;
   itemId?: string;
   filename: string;
   url: string;

@@ -17,15 +17,25 @@ export class IdempotencyService {
     @Optional() private readonly redisCache?: RedisCacheService,
   ) {}
 
+  private getRedisKey(
+    idempotencyKey: string,
+    userId: string,
+    projectId?: string,
+  ): string {
+    const scopePrefix = projectId ? `proj:${projectId}` : `user:${userId}`;
+    return `flux:idemp:${scopePrefix}:${idempotencyKey}`;
+  }
+
   /**
    * Checks if an idempotency key is currently in-progress or completed
    */
   async checkKey(
     idempotencyKey: string,
-    workspaceId: string,
+    userId: string,
+    projectId?: string,
   ): Promise<IdempotencyCheckResult> {
     // 1. Fast check via Redis
-    const redisKey = `flux:idemp:${workspaceId}:${idempotencyKey}`;
+    const redisKey = this.getRedisKey(idempotencyKey, userId, projectId);
     if (this.redisCache) {
       try {
         const cached = await this.redisCache.get<{
@@ -49,25 +59,19 @@ export class IdempotencyService {
       }
     }
 
-    // 2. Check Database Record using compound unique constraint
-    const record = await this.prisma.idempotencyRecord.findUnique({
+    // 2. Check Database Record using explicit userId and optional projectId
+    const record = await this.prisma.idempotencyRecord.findFirst({
       where: {
-        workspaceId_idempotencyKey: {
-          workspaceId,
-          idempotencyKey,
-        },
+        userId,
+        projectId: projectId || null,
+        idempotencyKey,
       },
     });
 
     if (record) {
       if (record.expiresAt < new Date()) {
         await this.prisma.idempotencyRecord.delete({
-          where: {
-            workspaceId_idempotencyKey: {
-              workspaceId,
-              idempotencyKey,
-            },
-          },
+          where: { id: record.id },
         });
         return { isDuplicate: false, inProgress: false };
       }
@@ -92,35 +96,45 @@ export class IdempotencyService {
    */
   async lockKey(
     idempotencyKey: string,
-    workspaceId: string,
+    userId: string,
     requestHash: string,
+    projectId?: string,
   ): Promise<void> {
     const expiresAt = new Date(Date.now() + this.DEFAULT_TTL_SEC * 1000);
 
-    // Save to DB using compound unique constraint
-    await this.prisma.idempotencyRecord.upsert({
+    // Save to DB using explicit userId and projectId
+    const existing = await this.prisma.idempotencyRecord.findFirst({
       where: {
-        workspaceId_idempotencyKey: {
-          workspaceId,
-          idempotencyKey,
-        },
-      },
-      update: {
-        status: 'in_progress',
-        requestHash,
-        expiresAt,
-      },
-      create: {
+        userId,
+        projectId: projectId || null,
         idempotencyKey,
-        workspaceId,
-        requestHash,
-        status: 'in_progress',
-        expiresAt,
       },
     });
 
+    if (existing) {
+      await this.prisma.idempotencyRecord.update({
+        where: { id: existing.id },
+        data: {
+          status: 'in_progress',
+          requestHash,
+          expiresAt,
+        },
+      });
+    } else {
+      await this.prisma.idempotencyRecord.create({
+        data: {
+          idempotencyKey,
+          userId,
+          projectId: projectId || null,
+          requestHash,
+          status: 'in_progress',
+          expiresAt,
+        },
+      });
+    }
+
     // Save to Redis
-    const redisKey = `flux:idemp:${workspaceId}:${idempotencyKey}`;
+    const redisKey = this.getRedisKey(idempotencyKey, userId, projectId);
     if (this.redisCache) {
       try {
         await this.redisCache.set(redisKey, { status: 'in_progress' }, 300); // 5 min in-progress lock
@@ -137,23 +151,32 @@ export class IdempotencyService {
     const ttl = input.ttlSeconds || this.DEFAULT_TTL_SEC;
     const expiresAt = new Date(Date.now() + ttl * 1000);
 
-    await this.prisma.idempotencyRecord.update({
+    const existing = await this.prisma.idempotencyRecord.findFirst({
       where: {
-        workspaceId_idempotencyKey: {
-          workspaceId: input.workspaceId,
-          idempotencyKey: input.idempotencyKey,
-        },
-      },
-      data: {
-        status: 'succeeded',
-        statusCode: input.statusCode,
-        responseBody:
-          (input.responseBody as Prisma.InputJsonValue) ?? Prisma.JsonNull,
-        expiresAt,
+        userId: input.userId,
+        projectId: input.projectId || null,
+        idempotencyKey: input.idempotencyKey,
       },
     });
 
-    const redisKey = `flux:idemp:${input.workspaceId}:${input.idempotencyKey}`;
+    if (existing) {
+      await this.prisma.idempotencyRecord.update({
+        where: { id: existing.id },
+        data: {
+          status: 'succeeded',
+          statusCode: input.statusCode,
+          responseBody:
+            (input.responseBody as Prisma.InputJsonValue) ?? Prisma.JsonNull,
+          expiresAt,
+        },
+      });
+    }
+
+    const redisKey = this.getRedisKey(
+      input.idempotencyKey,
+      input.userId,
+      input.projectId,
+    );
     if (this.redisCache) {
       try {
         await this.redisCache.set(
@@ -174,11 +197,16 @@ export class IdempotencyService {
   /**
    * Clears key on execution failure to allow immediate client retry
    */
-  async unlockKey(idempotencyKey: string, workspaceId: string): Promise<void> {
+  async unlockKey(
+    idempotencyKey: string,
+    userId: string,
+    projectId?: string,
+  ): Promise<void> {
     try {
       await this.prisma.idempotencyRecord.deleteMany({
         where: {
-          workspaceId,
+          userId,
+          projectId: projectId || null,
           idempotencyKey,
         },
       });
@@ -186,7 +214,7 @@ export class IdempotencyService {
       // Ignore if record already deleted
     }
 
-    const redisKey = `flux:idemp:${workspaceId}:${idempotencyKey}`;
+    const redisKey = this.getRedisKey(idempotencyKey, userId, projectId);
     if (this.redisCache) {
       try {
         await this.redisCache.del(redisKey);

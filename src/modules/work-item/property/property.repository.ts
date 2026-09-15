@@ -53,7 +53,7 @@ export class PropertyRepository {
   }
 
   async getOrCreate(projectId: string, userId: string): Promise<any> {
-    const existing = await (this.prisma as any).projectUserProperty.findUnique({
+    const existing = await this.prisma.projectUserProperty.findUnique({
       where: {
         projectId_userId: {
           projectId,
@@ -66,7 +66,7 @@ export class PropertyRepository {
       return this.mapRecord(existing);
     }
 
-    const created = await (this.prisma as any).projectUserProperty.create({
+    const created = await this.prisma.projectUserProperty.create({
       data: {
         projectId,
         userId,
@@ -117,7 +117,7 @@ export class PropertyRepository {
       updateData.sortOrder = data.sortOrder;
     }
 
-    const updated = await (this.prisma as any).projectUserProperty.update({
+    const updated = await this.prisma.projectUserProperty.update({
       where: {
         projectId_userId: {
           projectId,

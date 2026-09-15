@@ -18,7 +18,21 @@ import { WorkItemResponse, LabelMinimal } from '../types/work-item.types';
 
 export { WorkItemResponse };
 
-const resolveLabels = (record: any): LabelMinimal[] => {
+const resolveLabels = (
+  record: any,
+  labelLookup?: Map<string, { name: string; color: string }>,
+): LabelMinimal[] => {
+  if (
+    Array.isArray(record.labelAssignments) &&
+    record.labelAssignments.length > 0
+  ) {
+    return record.labelAssignments.map((la: any) => ({
+      id: la.label?.id || la.labelId,
+      name: la.label?.name || '',
+      color: la.label?.color || '#3b82f6',
+    }));
+  }
+
   if (
     Array.isArray(record.resolvedLabels) &&
     record.resolvedLabels.length > 0
@@ -33,9 +47,16 @@ const resolveLabels = (record: any): LabelMinimal[] => {
   const raw = record.labels;
   if (!Array.isArray(raw) || raw.length === 0) return [];
 
+  const lookup = labelLookup || record.labelLookup;
+
   return raw.map((labelItem: any) => {
     if (typeof labelItem === 'string') {
-      return { id: labelItem, name: labelItem, color: '#64748b' };
+      const match = lookup?.get?.(labelItem);
+      return {
+        id: labelItem,
+        name: match?.name || labelItem,
+        color: match?.color || '#64748b',
+      };
     }
     return {
       id: labelItem.id || labelItem.name || '',
@@ -45,7 +66,10 @@ const resolveLabels = (record: any): LabelMinimal[] => {
   });
 };
 
-export const formatWorkItem = (record: any): WorkItemResponse | null => {
+export const formatWorkItem = (
+  record: any,
+  labelLookup?: Map<string, { name: string; color: string }>,
+): WorkItemResponse | null => {
   if (!record) return null;
 
   const assignee = record.assignee
@@ -57,6 +81,36 @@ export const formatWorkItem = (record: any): WorkItemResponse | null => {
       }
     : null;
 
+  const assignees: UserMinimal[] =
+    Array.isArray(record.assignees) && record.assignees.length > 0
+      ? record.assignees.map((a: any) =>
+          a.user
+            ? {
+                id: a.user.id,
+                name: a.user.name,
+                email: a.user.email,
+                avatar: a.user.avatar,
+              }
+            : {
+                id: a.id,
+                name: a.name,
+                email: a.email,
+                avatar: a.avatar,
+              },
+        )
+      : assignee
+        ? [assignee]
+        : [];
+
+  const assigneeIds =
+    assignees.length > 0
+      ? assignees.map((a) => a.id)
+      : Array.isArray(record.assigneeIds)
+        ? record.assigneeIds
+        : record.assigneeId
+          ? [record.assigneeId]
+          : [];
+
   const cycle = record.cycle
     ? {
         id: record.cycle.id,
@@ -64,22 +118,79 @@ export const formatWorkItem = (record: any): WorkItemResponse | null => {
       }
     : record.cycleId || null;
 
-  const isCompleted = record.columnId === 'done';
+  const isCompleted = record.state?.group
+    ? record.state.group === 'completed'
+    : record.columnId === 'done' || Boolean(record.completed);
+
+  const stateGroup =
+    record.state?.group || (isCompleted ? 'completed' : 'unstarted');
 
   const childWorkItems = Array.isArray(record.childWorkItems)
-    ? record.childWorkItems.map((child: any) => ({
-        ...child,
-        id: child.id,
-        completed: child.columnId === 'done' || Boolean(child.completed),
-      }))
+    ? record.childWorkItems.map((child: any) => {
+        const childIsCompleted = child.state?.group
+          ? child.state.group === 'completed'
+          : child.columnId === 'done' || Boolean(child.completed);
+        return {
+          ...child,
+          id: child.id,
+          completed: childIsCompleted,
+          stateGroup:
+            child.state?.group ||
+            (childIsCompleted ? 'completed' : 'unstarted'),
+        };
+      })
     : [];
 
   const childWorkItemCount = childWorkItems.length;
   const childWorkItemCompletedCount = childWorkItems.filter(
     (child: any) => child.completed,
   ).length;
+  const progressPercentage =
+    childWorkItemCount > 0
+      ? Math.round((childWorkItemCompletedCount / childWorkItemCount) * 100)
+      : isCompleted
+        ? 100
+        : 0;
 
-  const labels = resolveLabels(record);
+  const labels = resolveLabels(record, labelLookup);
+
+  const relations =
+    (Array.isArray(record.outgoingRelations) &&
+      record.outgoingRelations.length > 0) ||
+    (Array.isArray(record.incomingRelations) &&
+      record.incomingRelations.length > 0)
+      ? [
+          ...(record.outgoingRelations || []).map((r: any) => ({
+            id: r.id,
+            type: r.type,
+            targetId: r.targetId,
+            targetWorkItem: r.targetWorkItem
+              ? {
+                  id: r.targetWorkItem.id,
+                  title: r.targetWorkItem.title,
+                  identifier: r.targetWorkItem.identifier,
+                }
+              : undefined,
+          })),
+          ...(record.incomingRelations || []).map((r: any) => ({
+            id: r.id,
+            type:
+              r.type === 'blocks'
+                ? 'blocked_by'
+                : r.type === 'blocked_by'
+                  ? 'blocks'
+                  : r.type,
+            targetId: r.sourceId,
+            targetWorkItem: r.sourceWorkItem
+              ? {
+                  id: r.sourceWorkItem.id,
+                  title: r.sourceWorkItem.title,
+                  identifier: r.sourceWorkItem.identifier,
+                }
+              : undefined,
+          })),
+        ]
+      : record.relations || [];
 
   return {
     ...record,
@@ -88,16 +199,16 @@ export const formatWorkItem = (record: any): WorkItemResponse | null => {
     sequenceNumber: record.sequenceNumber || null,
     description: record.content || '',
     content: record.content || '',
+    columnId: record.columnId,
+    state: record.state || null,
+    stateGroup,
+    progressPercentage,
     assignee,
-    assigneeIds: Array.isArray(record.assigneeIds)
-      ? record.assigneeIds
-      : record.assigneeId
-        ? [record.assigneeId]
-        : [],
+    assignees,
+    assigneeIds,
     cycle,
-    completed:
-      record.completed !== undefined ? Boolean(record.completed) : isCompleted,
-    relations: record.relations || [],
+    completed: isCompleted,
+    relations,
     labels,
     childWorkItems,
     childWorkItemCount,

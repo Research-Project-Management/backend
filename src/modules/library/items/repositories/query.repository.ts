@@ -22,16 +22,10 @@ export class QueryRepository {
     projectId?: string,
     tx?: Prisma.TransactionClient,
   ) {
-    if (!isUuid(id)) return null;
+    if (!isUuid(id) || !isUuid(userId)) return null;
     const client = this.getClient(tx);
-    const where: any = { id, deletedAt: null };
-    if (projectId && isUuid(projectId)) {
-      where.projectId = projectId;
-    } else if (isUuid(userId)) {
-      where.userId = userId;
-    }
-    return client.item.findFirst({
-      where,
+    const item = await client.item.findFirst({
+      where: { id, deletedAt: null },
       include: {
         contributors: {
           orderBy: { orderIndex: 'asc' },
@@ -59,22 +53,68 @@ export class QueryRepository {
         },
       },
     });
+
+    if (!item) return null;
+
+    if (item.userId === userId) {
+      if (projectId && isUuid(projectId) && item.projectId !== projectId) {
+        return null;
+      }
+      return item;
+    }
+
+    if (item.projectId) {
+      if (projectId && isUuid(projectId) && item.projectId !== projectId) {
+        return null;
+      }
+      const member = await client.projectMember.findUnique({
+        where: { projectId_userId: { projectId: item.projectId, userId } },
+        select: { id: true },
+      });
+      if (member) return item;
+    }
+
+    return null;
   }
 
   async findByIds(
     userId: string,
     ids: string[],
+    projectId?: string,
     tx?: Prisma.TransactionClient,
   ) {
     if (!isUuid(userId)) return [];
     const validIds = (ids || []).filter(isUuid);
     if (validIds.length === 0) return [];
     const client = this.getClient(tx);
+
+    const projectMemberWhere: Prisma.ItemWhereInput = {
+      project: {
+        members: {
+          some: {
+            userId,
+          },
+        },
+      },
+    };
+
+    let scopeWhere: Prisma.ItemWhereInput;
+    if (projectId && isUuid(projectId)) {
+      scopeWhere = {
+        projectId,
+        OR: [{ userId }, projectMemberWhere],
+      };
+    } else {
+      scopeWhere = {
+        OR: [{ userId }, projectMemberWhere],
+      };
+    }
+
     return client.item.findMany({
       where: {
         id: { in: validIds },
-        userId,
         deletedAt: null,
+        ...scopeWhere,
       },
       include: {
         contributors: {
@@ -516,19 +556,37 @@ export class QueryRepository {
     tx?: Prisma.TransactionClient,
     projectId?: string,
   ): Promise<boolean> {
-    if (!isUuid(itemId)) return false;
+    if (!isUuid(itemId) || !isUuid(userId)) return false;
     const client = this.getClient(tx);
-    const scopeWhere =
-      projectId && projectId !== 'user' && isUuid(projectId)
-        ? { projectId }
-        : isUuid(userId)
-          ? { userId }
-          : null;
-    if (!scopeWhere) return false;
-    const count = await client.item.count({
-      where: { id: itemId, ...scopeWhere, deletedAt: null },
+
+    const item = await client.item.findUnique({
+      where: { id: itemId },
+      select: { id: true, userId: true, projectId: true, deletedAt: true },
     });
-    return count > 0;
+
+    if (!item || item.deletedAt !== null) return false;
+
+    if (projectId && projectId !== 'user' && isUuid(projectId)) {
+      if (item.projectId !== projectId) return false;
+      if (item.userId === userId) return true;
+      const member = await client.projectMember.findUnique({
+        where: { projectId_userId: { projectId, userId } },
+        select: { id: true },
+      });
+      return Boolean(member);
+    }
+
+    if (item.userId === userId) return true;
+
+    if (item.projectId) {
+      const member = await client.projectMember.findUnique({
+        where: { projectId_userId: { projectId: item.projectId, userId } },
+        select: { id: true },
+      });
+      return Boolean(member);
+    }
+
+    return false;
   }
 
   async assertExists(

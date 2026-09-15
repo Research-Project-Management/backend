@@ -15,10 +15,33 @@ import { UpdateProjectDto } from './dto/update.dto';
 import { ProjectQueryDto } from './dto/query.dto';
 import {
   ProjectWithMembers,
+  EnrichedProject,
+  ProjectPermissions,
   ProjectOverview,
   AllocatedIdentifier,
 } from './types/project.type';
 import { deriveProjectPrefix } from './utils/identifier.util';
+import { calculateProjectPermissions } from './utils/permission.util';
+
+export const ALLOWED_PROJECT_MODULES = new Set([
+  'work_items',
+  'work-items',
+  'cycles',
+  'views',
+  'pages',
+]);
+
+export function sanitizeModules(modules?: string[]): string[] {
+  if (!modules || !Array.isArray(modules) || modules.length === 0) {
+    return ['work_items', 'cycles', 'views', 'pages'];
+  }
+  const filtered = modules
+    .map((m) => String(m).trim().toLowerCase())
+    .filter((m) => ALLOWED_PROJECT_MODULES.has(m));
+  return filtered.length > 0
+    ? filtered
+    : ['work_items', 'cycles', 'views', 'pages'];
+}
 
 @Injectable()
 export class CoreService {
@@ -46,25 +69,30 @@ export class CoreService {
   }
 
   private resolveUserRoleInProject(
-    project: { members?: Array<{ userId: string; role?: string }> } | null,
+    project: {
+      createdById?: string;
+      members?: Array<{ userId: string; role?: string }>;
+    } | null,
     userId?: string,
   ): ProjectMemberRole | string {
-    if (!userId || !project?.members) return ProjectMemberRole.viewer;
+    if (!userId || !project) return ProjectMemberRole.viewer;
+    if (project.createdById === userId) return ProjectMemberRole.owner;
 
-    const member = project.members.find((m) => m.userId === userId);
+    const member = project.members?.find((m) => m.userId === userId);
     return member?.role || ProjectMemberRole.viewer;
   }
 
   /**
    * Find all projects for a user with optional filter ('created' | 'shared' | 'all') and search.
+   * Enforces SSOT: Resolves actor's role and computes granular permissions for each project.
    */
   async findUserProjects(
     userId: string,
     query?: ProjectQueryDto,
   ): Promise<{
-    projects: ProjectWithMembers[];
-    myProjects: ProjectWithMembers[];
-    sharedProjects: ProjectWithMembers[];
+    projects: EnrichedProject[];
+    myProjects: EnrichedProject[];
+    sharedProjects: EnrichedProject[];
     total: number;
   }> {
     const filter = query?.type || 'all';
@@ -80,26 +108,57 @@ export class CoreService {
       );
     }
 
-    const myProjects = projects.filter((p) => p.createdById === userId);
-    const sharedProjects = projects.filter((p) => p.createdById !== userId);
+    // Resolve user roles for shared projects in a single batch query
+    const sharedProjectIds = projects
+      .filter((p) => p.createdById !== userId)
+      .map((p) => p.id);
+
+    const membershipMap = await this.projectRepo.findMembershipsForUser(
+      sharedProjectIds,
+      userId,
+    );
+
+    const enrichProject = (p: ProjectWithMembers): EnrichedProject => {
+      const yourRole =
+        p.createdById === userId
+          ? ProjectMemberRole.owner
+          : membershipMap.get(p.id) ||
+            p.members?.find((m) => m.userId === userId)?.role ||
+            ProjectMemberRole.viewer;
+      const permissions = calculateProjectPermissions(yourRole, p.isActive);
+
+      return {
+        ...p,
+        yourRole,
+        permissions,
+      };
+    };
+
+    const enrichedProjects = projects.map(enrichProject);
+    const myProjects = enrichedProjects.filter((p) => p.createdById === userId);
+    const sharedProjects = enrichedProjects.filter(
+      (p) => p.createdById !== userId,
+    );
 
     return {
-      projects,
+      projects: enrichedProjects,
       myProjects,
       sharedProjects,
-      total: projects.length,
+      total: enrichedProjects.length,
     };
   }
 
   /**
    * Find a single project by ID or identifier with Redis caching.
+   * Enforces SSOT: Computes and returns both yourRole and granular permissions.
    */
   async findById(
     projectId: string,
     userId?: string,
   ): Promise<{
-    project: ProjectWithMembers;
+    project: EnrichedProject;
     yourRole: ProjectMemberRole | string;
+    permissions: ProjectPermissions;
   }> {
     const cacheKey = CACHE_KEYS.detail(projectId);
     let project = this.cache
@@ -117,10 +176,18 @@ export class CoreService {
     }
 
     const yourRole = this.resolveUserRoleInProject(project, userId);
+    const permissions = calculateProjectPermissions(yourRole, project.isActive);
+
+    const enrichedProject: EnrichedProject = {
+      ...project,
+      yourRole,
+      permissions,
+    };
 
     return {
-      project,
+      project: enrichedProject,
       yourRole,
+      permissions,
     };
   }
 
@@ -179,13 +246,17 @@ export class CoreService {
       }
     }
 
+    // SSOT: Deterministically resolve project network privacy
+    const network = dto.isPrivate === false ? 'public' : 'secret';
+
     const project = await this.projectRepo.createProject(userId, {
       name: dto.name,
       identifier: identifier || null,
       avatar: dto.avatar || '',
       coverImage: dto.coverImage || dto.cover || '',
       description: dto.description || '',
-      modules: dto.modules,
+      modules: sanitizeModules(dto.modules),
+      network,
     });
 
     await this.invalidateProjectCache(project.id, [userId]);
@@ -243,7 +314,9 @@ export class CoreService {
       ...(dto.avatar !== undefined && { avatar: dto.avatar }),
       ...(coverVal !== undefined && { coverImage: coverVal }),
       ...(dto.description !== undefined && { description: dto.description }),
-      ...(dto.modules !== undefined && { modules: dto.modules }),
+      ...(dto.modules !== undefined && {
+        modules: sanitizeModules(dto.modules),
+      }),
       ...(activeVal !== undefined && { isActive: activeVal }),
       ...(dto.settings !== undefined && {
         settings: dto.settings as any,
@@ -408,12 +481,36 @@ export class CoreService {
 
   /**
    * Find archived projects accessible by a user.
+   * Enforces SSOT: Batch-resolves user roles and permissions.
    */
-  async findArchived(
-    userId: string,
-  ): Promise<{ projects: ProjectWithMembers[] }> {
+  async findArchived(userId: string): Promise<{ projects: EnrichedProject[] }> {
     const projects = await this.projectRepo.findArchivedProjectsByUser(userId);
-    return { projects };
+    const sharedProjectIds = projects
+      .filter((p) => p.createdById !== userId)
+      .map((p) => p.id);
+
+    const membershipMap = await this.projectRepo.findMembershipsForUser(
+      sharedProjectIds,
+      userId,
+    );
+
+    const enriched: EnrichedProject[] = projects.map((p) => {
+      const yourRole =
+        p.createdById === userId
+          ? ProjectMemberRole.owner
+          : membershipMap.get(p.id) ||
+            p.members?.find((m) => m.userId === userId)?.role ||
+            ProjectMemberRole.viewer;
+      const permissions = calculateProjectPermissions(yourRole, p.isActive);
+
+      return {
+        ...p,
+        yourRole,
+        permissions,
+      };
+    });
+
+    return { projects: enriched };
   }
 
   // --- Facade / Gateway methods for other modules ---

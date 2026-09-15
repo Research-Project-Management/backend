@@ -5,6 +5,7 @@ import {
   IsOptional,
   IsString,
   ArrayMinSize,
+  ArrayMaxSize,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ProjectMemberRole } from '@prisma/client';
@@ -38,6 +39,9 @@ export class BulkAddProjectMembersDto {
   @IsArray()
   @IsString({ each: true })
   @ArrayMinSize(1, { message: 'At least one user ID must be provided' })
+  @ArrayMaxSize(50, {
+    message: 'Cannot add more than 50 members in a single bulk operation',
+  })
   userIds!: string[];
 
   @ApiPropertyOptional({

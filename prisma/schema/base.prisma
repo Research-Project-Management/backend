@@ -14,8 +14,6 @@ enum EntityType {
   sticky
   comment
   collection
-  worklog
   project
   work_item
-  item
 }

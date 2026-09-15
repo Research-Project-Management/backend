@@ -16,19 +16,24 @@ export class ByteRange {
     this.totalSize = totalSize;
   }
 
-  public static parse(rangeHeader: string | undefined, totalSize: number): ByteRange | null {
+  public static parse(
+    rangeHeader: string | undefined,
+    totalSize: number,
+  ): ByteRange | null {
     if (!rangeHeader || totalSize <= 0) {
       return null;
     }
 
-    // Strict single-range regex — reject multiple overlapping ranges (Range Bombing DoS)
+    // Strict single-range regex ï¿½ reject multiple overlapping ranges (Range Bombing DoS)
     const match = rangeHeader.trim().match(/^bytes=(\d*)-(\d*)$/);
     if (!match) {
       return null;
     }
 
     const [_, startStr, endStr] = match;
-    let start: number | undefined = startStr ? parseInt(startStr, 10) : undefined;
+    let start: number | undefined = startStr
+      ? parseInt(startStr, 10)
+      : undefined;
     let end: number | undefined = endStr ? parseInt(endStr, 10) : undefined;
 
     // Case 1: Suffix range: bytes=-500 (last 500 bytes)
@@ -46,7 +51,14 @@ export class ByteRange {
       end = totalSize - 1;
     }
 
-    if (start === undefined || end === undefined || start < 0 || start >= totalSize || end < start || end >= totalSize) {
+    if (
+      start === undefined ||
+      end === undefined ||
+      start < 0 ||
+      start >= totalSize ||
+      end < start ||
+      end >= totalSize
+    ) {
       return null;
     }
 

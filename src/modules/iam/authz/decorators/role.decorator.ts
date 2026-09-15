@@ -53,15 +53,8 @@ export const CurrentRole = createParamDecorator(
   },
 );
 
-// ─── Controller Compatibility Aliases ──────────────────────────────────────────
+// ─── Controller Project Aliases ──────────────────────────────────────────────
 export const PROJECT_ROLES_KEY = ROLES_KEY;
-export const WORKSPACE_ROLES_KEY = ROLES_KEY;
-
 export const ProjectRoles = Roles;
-export const WorkspaceRoles = Roles;
-
 export const RequireProjectRole = RequireRole;
-export const RequireWorkspaceRole = RequireRole;
-
 export type ProjectRoleInput = RoleInput;
-export type WorkspaceRoleInput = RoleInput;

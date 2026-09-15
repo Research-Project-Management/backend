@@ -7,12 +7,7 @@ import { Module } from '@nestjs/common';
 import { AuthzController } from './authz.controller';
 import { AuthzService } from './authz.service';
 import { AuthzRepository } from './authz.repository';
-import {
-  RoleGuard,
-  RolesGuard,
-  ProjectRoleGuard,
-  WorkspaceRoleGuard,
-} from './guards/role.guard';
+import { RoleGuard, RolesGuard, ProjectRoleGuard } from './guards/role.guard';
 import { PermissionGuard, PermissionsGuard } from './guards/permission.guard';
 
 @Module({

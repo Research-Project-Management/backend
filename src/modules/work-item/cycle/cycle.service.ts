@@ -519,7 +519,7 @@ export class CycleService implements OnModuleInit, OnModuleDestroy {
     const cycle = await this.cycleRepository.findCycleById(cycleId);
     if (!cycle) throw new NotFoundException('Cycle not found');
 
-    const workItems = (cycle as any).workItems || [];
+    const workItems = cycle.workItems || [];
     const total = workItems.length;
     const startDate = cycle.startDate
       ? new Date(cycle.startDate)
@@ -569,7 +569,7 @@ export class CycleService implements OnModuleInit, OnModuleDestroy {
     const cycle = await this.cycleRepository.findCycleById(cycleId);
     if (!cycle) throw new NotFoundException('Cycle not found');
 
-    const workItems = (cycle as any).workItems || [];
+    const workItems = cycle.workItems || [];
     const stats = calculateCycleStats(workItems);
     const velocityRate = stats.completionPercentage;
 

@@ -282,11 +282,11 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Invalidate all keys matching a workspace scope
+   * Invalidate all keys matching an arbitrary entity/scope ID
    */
-  async invalidateWorkspace(workspaceId: string): Promise<void> {
-    if (!workspaceId) return;
-    await this.delPattern(`*${workspaceId}*`);
+  async invalidateScope(scopeId: string): Promise<void> {
+    if (!scopeId) return;
+    await this.delPattern(`*${scopeId}*`);
   }
 
   /**

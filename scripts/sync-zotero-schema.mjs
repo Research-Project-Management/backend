@@ -44,7 +44,7 @@ async function syncSchema() {
   fs.writeFileSync(backendDestPath, jsonContent, 'utf-8');
   console.log(`[Zotero Sync] Written to backend: ${backendDestPath}`);
 
-  const frontendDestDir = path.resolve(__dirname, '../../frontend/src/features/workspaces/library/schemas');
+  const frontendDestDir = path.resolve(__dirname, '../../frontend/src/features/library/schemas');
   const frontendDestPath = path.join(frontendDestDir, 'zotero-schema.json');
 
   if (fs.existsSync(frontendDestDir)) {

@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { CommentRepository } from './comment.repository';
 import {
@@ -17,6 +18,7 @@ import {
   CommentAuthor,
 } from './types/comment.types';
 import { PrismaService } from '@/core/database/prisma.service';
+import { sanitizeCommentContent } from '../core/utils/document.utils';
 
 @Injectable()
 export class CommentService {
@@ -84,10 +86,15 @@ export class CommentService {
   }
 
   async createComment(pageId: string, userId: string, dto: CreateCommentDto) {
+    const cleanContent = sanitizeCommentContent(dto.content);
+    if (!cleanContent) {
+      throw new UnprocessableEntityException('Comment content cannot be empty');
+    }
+
     const comment = await this.commentRepo.createComment({
       pageId,
       authorId: userId,
-      content: dto.content,
+      content: cleanContent,
       status: dto.status || CommentStatus.open,
       line: dto.line,
       lineEnd: dto.lineEnd,
@@ -103,9 +110,19 @@ export class CommentService {
   ) {
     await this.assertCanModifyComment(commentId, userId, 'update');
 
+    let cleanContent: string | undefined;
+    if (dto.content !== undefined) {
+      cleanContent = sanitizeCommentContent(dto.content);
+      if (!cleanContent) {
+        throw new UnprocessableEntityException(
+          'Comment content cannot be empty',
+        );
+      }
+    }
+
     const comment = await this.commentRepo.updateComment(commentId, {
-      content: dto.content,
-      status: dto.status,
+      ...(cleanContent !== undefined && { content: cleanContent }),
+      ...(dto.status !== undefined && { status: dto.status }),
       isEdited: true,
     });
 
@@ -125,9 +142,14 @@ export class CommentService {
       throw new NotFoundException('Comment not found');
     }
 
+    const cleanContent = sanitizeCommentContent(dto.content);
+    if (!cleanContent) {
+      throw new UnprocessableEntityException('Reply content cannot be empty');
+    }
+
     const author = await this.commentRepo.findAuthorById(userId);
     const replies = parseCommentReplies(existing.replies);
-    const newReply = this.buildReply(dto.content, author);
+    const newReply = this.buildReply(cleanContent, author);
     replies.push(newReply);
 
     const comment = await this.commentRepo.updateComment(commentId, {

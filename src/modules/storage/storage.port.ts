@@ -1,3 +1,5 @@
+import { STORAGE_PORT } from './storage.tokens';
+
 export interface ReadOwnedFileInput {
   fileId: string;
   projectId?: string;
@@ -54,4 +56,4 @@ export interface IStoragePort {
   ): Promise<{ path: string; url: string }>;
 }
 
-export const STORAGE_PORT = 'STORAGE_PORT';
+export { STORAGE_PORT };

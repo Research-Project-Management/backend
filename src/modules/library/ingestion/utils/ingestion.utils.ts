@@ -4,11 +4,11 @@ import { createHash } from 'crypto';
  * Computes SHA-256 hash for ingestion request payload to enable idempotency detection.
  */
 export function computeIngestionRequestHash(
-  workspaceId: string,
+  scopeId: string,
   payload: unknown,
 ): string {
   return createHash('sha256')
-    .update(JSON.stringify({ workspaceId, payload }))
+    .update(JSON.stringify({ scopeId, payload }))
     .digest('hex');
 }
 

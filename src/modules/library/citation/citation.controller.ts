@@ -15,6 +15,8 @@ import { FormatCitationDto, FormatBatchCitationDto } from './dto/citation.dto';
 import { normalizeCitationStyleId } from './utils/citation.utils';
 
 @Controller([
+  'api/v1/projects/:projectId/library/citation',
+  'api/v1/projects/:projectId/library/references',
   'api/v1/library/citation',
   'api/v1/library/references',
   'api/library/citation',
@@ -123,14 +125,18 @@ export class CitationController {
     @Param('itemId') itemId: string,
     @Query('style') style?: string,
     @Query('index') index?: string,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') routeProjectId?: string,
   ) {
     const styleId = normalizeCitationStyleId(style);
     const numIndex = index ? parseInt(index, 10) : 1;
+    const projectId = queryProjectId || routeProjectId;
     const res = await this.citationService.formatItemById(
       userId,
       itemId,
       styleId,
       numIndex,
+      projectId,
     );
     return {
       ...res,
@@ -149,6 +155,9 @@ export class CitationController {
     @Body('itemIds') itemIds?: string[],
     @Body('paperIds') paperIds?: string[],
     @Body('style') style?: string,
+    @Body('projectId') bodyProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') routeProjectId?: string,
   ) {
     const styleId = normalizeCitationStyleId(style);
     const ids = Array.isArray(itemIds)
@@ -156,6 +165,12 @@ export class CitationController {
       : Array.isArray(paperIds)
         ? paperIds
         : [];
-    return this.citationService.formatItemBatch(userId, ids, styleId);
+    const projectId = bodyProjectId || queryProjectId || routeProjectId;
+    return this.citationService.formatItemBatch(
+      userId,
+      ids,
+      styleId,
+      projectId,
+    );
   }
 }

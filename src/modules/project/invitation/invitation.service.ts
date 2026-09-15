@@ -3,16 +3,44 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  Optional,
 } from '@nestjs/common';
 import { randomBytes, createHash } from 'crypto';
 import { InvitationRepository } from './invitation.repository';
 import { CreateProjectInvitationDto } from './dto/create-invitation.dto';
 import { ProjectMemberRole, InvitationStatus } from '@prisma/client';
 import type { AuthenticatedUser } from '@/modules/iam/core/types/iam.type';
+import { RedisCacheService } from '@/core/cache/redis.service';
+import { CACHE_KEYS } from '../core/constants/cache.constant';
+import { IAM_REDIS_KEYS } from '@/modules/iam/core/constants/redis.constant';
 
 @Injectable()
 export class InvitationService {
-  constructor(private readonly repository: InvitationRepository) {}
+  constructor(
+    private readonly repository: InvitationRepository,
+    @Optional() private readonly cache?: RedisCacheService,
+  ) {}
+
+  /**
+   * Invalidates Redis caches for project and member when membership changes.
+   */
+  private async invalidateInvitationCaches(
+    projectId: string,
+    userId: string,
+  ): Promise<void> {
+    if (!this.cache) return;
+    try {
+      await Promise.all([
+        this.cache.del(IAM_REDIS_KEYS.role(projectId, userId)),
+        this.cache.del(IAM_REDIS_KEYS.permissions(projectId, userId)),
+        this.cache.del(CACHE_KEYS.detail(projectId)),
+        this.cache.del(CACHE_KEYS.overview(projectId)),
+        this.cache.del(CACHE_KEYS.userProjects(userId)),
+      ]);
+    } catch {
+      // Best effort cache invalidation
+    }
+  }
 
   /**
    * Helper to hash an invitation raw token using sha256.
@@ -95,6 +123,9 @@ export class InvitationService {
       InvitationStatus.accepted,
     );
 
+    // SSOT: Invalidate Redis caches so caller immediately sees their new permissions and project list
+    await this.invalidateInvitationCaches(invitation.projectId, user.id);
+
     return {
       message: 'Successfully joined project',
       projectId: invitation.projectId,
@@ -130,6 +161,7 @@ export class InvitationService {
 
   /**
    * Join a project using an invite code (project identifier, token, or tokenHash).
+   * Enforces Zero-Trust: Private projects strictly require an authentic invitation token.
    */
   async joinByCode(code: string, user: AuthenticatedUser) {
     const trimmed = code.trim();
@@ -148,13 +180,13 @@ export class InvitationService {
       return this.acceptInvitation(invitation.id, user);
     }
 
-    // 2. Try finding project by identifier (e.g. "TIEPTUC", "TT2") or ID
+    // 2. Try finding project by identifier (e.g. "BIO", "DLGA") or ID
     const project = await this.repository.findProjectByIdOrIdentifier(trimmed);
     if (!project) {
       throw new NotFoundException('Project or invite code not found');
     }
 
-    // Check if user already a member
+    // Check if user is already a member
     const existing = await this.repository.findMember(project.id, user.id);
     if (existing) {
       return {
@@ -174,9 +206,17 @@ export class InvitationService {
       return this.acceptInvitation(pendingInvite.id, user);
     }
 
-    // If project network is public or accessible
+    // Anti-BOLA / Zero-Trust Security Invariant:
+    // Only projects explicitly configured with public network allow open joining without an invitation
+    if (project.network !== 'public') {
+      throw new ForbiddenException(
+        'This project is private and requires a valid invitation token to join',
+      );
+    }
+
     const role = ProjectMemberRole.contributor;
     await this.repository.addProjectMember(project.id, user.id, role);
+    await this.invalidateInvitationCaches(project.id, user.id);
 
     return {
       message: 'Joined project successfully',
@@ -187,6 +227,11 @@ export class InvitationService {
 
   /**
    * Create an invitation for a specific project.
+   * Enforces SSOT invariants:
+   * 1. Cannot invite with owner role (ownership is via creation or transfer only).
+   * 2. Cannot send invites for archived/deleted projects.
+   * 3. Cannot invite self.
+   * 4. Cannot invite a user who is already a member of the project.
    */
   async createInvitation(
     projectId: string,
@@ -199,9 +244,22 @@ export class InvitationService {
       throw new NotFoundException('Project not found');
     }
 
+    if ((project as any).isActive === false) {
+      throw new BadRequestException(
+        'Cannot send invitations for an archived or inactive project',
+      );
+    }
+
+    // Zero-Trust: Prevent assigning owner role via invitation
+    if (dto.role === ProjectMemberRole.owner) {
+      throw new ForbiddenException(
+        'Cannot invite a member with owner role. Use transfer ownership instead.',
+      );
+    }
+
     const email = dto.email.trim().toLowerCase();
 
-    // Check if user already exists and is already a member
+    // Prevent self-invitation
     const targetUser = await this.repository.findUserById(inviterId);
     if (
       targetUser &&
@@ -209,6 +267,20 @@ export class InvitationService {
       targetUser.email.toLowerCase() === email
     ) {
       throw new BadRequestException('You cannot invite yourself');
+    }
+
+    // Prevent inviting someone who is already a member of this project
+    const existingUser = await this.repository.findUserByEmail(email);
+    if (existingUser) {
+      const isMember = await this.repository.findMember(
+        project.id,
+        existingUser.id,
+      );
+      if (isMember) {
+        throw new BadRequestException(
+          'User is already a member of this project',
+        );
+      }
     }
 
     // Check if duplicate pending invite exists
@@ -223,7 +295,7 @@ export class InvitationService {
       );
     }
 
-    // Generate token
+    // Generate cryptographically secure token
     const rawToken = randomBytes(24).toString('hex');
     const tokenHash = this.hashToken(rawToken);
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days

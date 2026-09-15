@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { isUuid } from '@/core/utils/uuid.util';
-import { Prisma, WorkItem } from '@prisma/client';
+import { Prisma, WorkItem, EntityType } from '@prisma/client';
 import {
   IWorkItemRepository,
   WorkItemWithRelations,
@@ -9,6 +9,7 @@ import {
   WorkItemAttachments,
   USER_MINIMAL_SELECT,
   CYCLE_SELECT,
+  STATE_MINIMAL_SELECT,
   CHILD_WORK_ITEM_SELECT,
 } from './types/work-item.types';
 import { deriveProjectIdentifierPrefix } from './utils/work-item.util';
@@ -151,6 +152,7 @@ export class CoreRepository implements IWorkItemRepository {
     return this.prismaService.workItem.findMany({
       where,
       include: {
+        state: { select: STATE_MINIMAL_SELECT },
         assignee: { select: USER_MINIMAL_SELECT },
         cycle: { select: CYCLE_SELECT },
         parentWorkItem: { select: { id: true, title: true, identifier: true } },
@@ -201,6 +203,7 @@ export class CoreRepository implements IWorkItemRepository {
     return this.prismaService.workItem.findMany({
       where,
       include: {
+        state: { select: STATE_MINIMAL_SELECT },
         assignee: { select: USER_MINIMAL_SELECT },
         cycle: { select: CYCLE_SELECT },
         parentWorkItem: { select: { id: true, title: true, identifier: true } },
@@ -237,6 +240,7 @@ export class CoreRepository implements IWorkItemRepository {
       return this.prismaService.workItem.findFirst({
         where: { identifier: workItemId, deletedAt: null },
         include: {
+          state: { select: STATE_MINIMAL_SELECT },
           assignee: { select: USER_MINIMAL_SELECT },
           cycle: { select: CYCLE_SELECT },
           parentWorkItem: {
@@ -255,6 +259,7 @@ export class CoreRepository implements IWorkItemRepository {
     return this.prismaService.workItem.findFirst({
       where: { id: workItemId, deletedAt: null },
       include: {
+        state: { select: STATE_MINIMAL_SELECT },
         assignee: { select: USER_MINIMAL_SELECT },
         cycle: { select: CYCLE_SELECT },
         parentWorkItem: { select: { id: true, title: true, identifier: true } },
@@ -275,6 +280,7 @@ export class CoreRepository implements IWorkItemRepository {
     return this.prismaService.workItem.findFirst({
       where: { projectId, identifier, deletedAt: null },
       include: {
+        state: { select: STATE_MINIMAL_SELECT },
         assignee: { select: USER_MINIMAL_SELECT },
         cycle: { select: CYCLE_SELECT },
         parentWorkItem: { select: { id: true, title: true, identifier: true } },
@@ -306,9 +312,27 @@ export class CoreRepository implements IWorkItemRepository {
   async createWorkItem(
     data: Prisma.WorkItemCreateInput | Prisma.WorkItemUncheckedCreateInput,
   ): Promise<WorkItemWithRelations> {
+    const createData = { ...(data as any) };
+    const hasRelationConnect = Boolean(
+      createData.project?.connect ||
+      createData.author?.connect ||
+      createData.assignee?.connect ||
+      createData.cycle?.connect ||
+      createData.parentWorkItem?.connect ||
+      createData.state?.connect,
+    );
+
+    if (createData.columnId && hasRelationConnect) {
+      if (!createData.state) {
+        createData.state = { connect: { id: createData.columnId } };
+      }
+      delete createData.columnId;
+    }
+
     return this.prismaService.workItem.create({
-      data: data as Prisma.WorkItemCreateInput,
+      data: createData,
       include: {
+        state: { select: STATE_MINIMAL_SELECT },
         assignee: { select: USER_MINIMAL_SELECT },
         cycle: { select: CYCLE_SELECT },
         parentWorkItem: { select: { id: true, title: true, identifier: true } },
@@ -326,10 +350,29 @@ export class CoreRepository implements IWorkItemRepository {
     workItemId: string,
     data: Prisma.WorkItemUpdateInput | Prisma.WorkItemUncheckedUpdateInput,
   ): Promise<WorkItemWithRelations> {
+    const updateData = { ...(data as any) };
+    const hasRelationConnect = Boolean(
+      updateData.assignee?.connect ||
+      updateData.assignee?.disconnect ||
+      updateData.cycle?.connect ||
+      updateData.cycle?.disconnect ||
+      updateData.parentWorkItem?.connect ||
+      updateData.parentWorkItem?.disconnect ||
+      updateData.state?.connect,
+    );
+
+    if (updateData.columnId && hasRelationConnect) {
+      if (!updateData.state) {
+        updateData.state = { connect: { id: updateData.columnId } };
+      }
+      delete updateData.columnId;
+    }
+
     return this.prismaService.workItem.update({
       where: { id: workItemId },
-      data: data,
+      data: updateData,
       include: {
+        state: { select: STATE_MINIMAL_SELECT },
         assignee: { select: USER_MINIMAL_SELECT },
         cycle: { select: CYCLE_SELECT },
         parentWorkItem: { select: { id: true, title: true, identifier: true } },
@@ -473,14 +516,102 @@ export class CoreRepository implements IWorkItemRepository {
     return member?.role ?? null;
   }
 
-  async updateAttachments(
+  async saveInitialAttachments(
     workItemId: string,
-    attachments: WorkItemAttachments,
-  ): Promise<WorkItem> {
-    return (this.prismaService.workItem as any).update({
-      where: { id: workItemId },
-      data: { attachments: attachments as any },
-    });
+    projectId: string,
+    authorId: string,
+    attachments: any,
+  ): Promise<void> {
+    if (!attachments || typeof attachments !== 'object') return;
+    const records: Prisma.EntityAttachmentCreateManyInput[] = [];
+
+    if (Array.isArray(attachments.pages)) {
+      for (const p of attachments.pages) {
+        if (p?.pageId || p?.id) {
+          records.push({
+            entityType: EntityType.work_item,
+            entityId: workItemId,
+            projectId,
+            authorId,
+            filename: p.title || 'Untitled Page',
+            url: `/pages/${p.pageId || p.id}`,
+            mimeType: 'application/x-page',
+            size: 0,
+            metadata: {
+              category: 'page',
+              pageId: p.pageId || p.id,
+              title: p.title,
+            },
+          });
+        }
+      }
+    }
+
+    if (Array.isArray(attachments.papers)) {
+      for (const p of attachments.papers) {
+        if (p?.paperId || p?.id) {
+          records.push({
+            entityType: EntityType.work_item,
+            entityId: workItemId,
+            projectId,
+            authorId,
+            filename: p.title || 'Untitled Paper',
+            url: p.doi ? `https://doi.org/${p.doi}` : '',
+            mimeType: 'application/x-paper',
+            size: 0,
+            metadata: {
+              category: 'paper',
+              paperId: p.paperId || p.id,
+              title: p.title,
+              doi: p.doi,
+              citationKey: p.citationKey,
+            },
+          });
+        }
+      }
+    }
+
+    if (Array.isArray(attachments.files)) {
+      for (const f of attachments.files) {
+        if (f?.url) {
+          records.push({
+            entityType: EntityType.work_item,
+            entityId: workItemId,
+            projectId,
+            authorId,
+            filename: f.name || 'file',
+            url: f.url,
+            mimeType: f.type || 'application/octet-stream',
+            size: typeof f.size === 'number' ? f.size : 0,
+            metadata: { category: 'file', name: f.name },
+          });
+        }
+      }
+    }
+
+    if (Array.isArray(attachments.links)) {
+      for (const l of attachments.links) {
+        if (l?.url) {
+          records.push({
+            entityType: EntityType.work_item,
+            entityId: workItemId,
+            projectId,
+            authorId,
+            filename: l.title || l.url,
+            url: l.url,
+            mimeType: 'text/uri-list',
+            size: 0,
+            metadata: { category: 'link', url: l.url, title: l.title },
+          });
+        }
+      }
+    }
+
+    if (records.length > 0) {
+      await this.prismaService.entityAttachment.createMany({
+        data: records,
+      });
+    }
   }
 
   async disconnectParentWorkItem(
@@ -490,6 +621,7 @@ export class CoreRepository implements IWorkItemRepository {
       where: { id: workItemId },
       data: { parentWorkItem: { disconnect: true } },
       include: {
+        state: { select: STATE_MINIMAL_SELECT },
         assignee: {
           select: USER_MINIMAL_SELECT,
         },
@@ -503,6 +635,34 @@ export class CoreRepository implements IWorkItemRepository {
           orderBy: { rank: 'asc' },
         },
         project: { select: { id: true } },
+      },
+    });
+  }
+
+  async findLabelsByIds(
+    projectId: string,
+    labelIds: string[],
+  ): Promise<Array<{ id: string; name: string; color: string }>> {
+    if (!labelIds.length) return [];
+    const uniqueIds = Array.from(new Set(labelIds.filter(Boolean)));
+    if (!uniqueIds.length) return [];
+    return this.prismaService.label.findMany({
+      where: { id: { in: uniqueIds }, projectId },
+      select: { id: true, name: true, color: true },
+    });
+  }
+
+  async findStateById(stateId: string) {
+    if (!isUuid(stateId)) return null;
+    return this.prismaService.workItemState.findUnique({
+      where: { id: stateId },
+      select: {
+        id: true,
+        name: true,
+        color: true,
+        group: true,
+        sequence: true,
+        isDefault: true,
       },
     });
   }

@@ -100,6 +100,45 @@ export function buildTipTapDocFromText(text: string): Record<string, unknown> {
 }
 
 /**
+ * Sanitizes note title:
+ * - Strips all HTML tags and scripts
+ * - Strips control characters
+ * - Collapses excessive whitespace and trims
+ * - Maximum 255 characters
+ * - Defaults to 'Untitled Note' if empty
+ */
+export function sanitizeNoteTitle(title?: string | null): string {
+  if (!title || typeof title !== 'string') return 'Untitled Note';
+  let cleaned = stripNoteHtml(title).trim();
+  cleaned = cleaned.replace(/[\x00-\x1F\x7F]/g, '');
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+  if (cleaned.length > 255) {
+    cleaned = cleaned.substring(0, 255).trim();
+  }
+  return cleaned || 'Untitled Note';
+}
+
+/**
+ * Sanitizes note markdown/HTML content against stored XSS:
+ * - Strips <script>, <style>, <iframe>, <object>, <embed>, <applet> tags and bodies
+ * - Strips javascript: and vbscript: URIs
+ * - Strips inline event handlers (onload, onerror, onclick, etc.)
+ */
+export function sanitizeNoteContent(content?: string | null): string {
+  if (!content || typeof content !== 'string') return '';
+  const cleaned = content
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+    .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
+    .replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '')
+    .replace(/<embed\b[^<]*(?:(?!<\/embed>)<[^<]*)*<\/embed>/gi, '')
+    .replace(/<applet\b[^<]*(?:(?!<\/applet>)<[^<]*)*<\/applet>/gi, '')
+    .replace(/(?:javascript|vbscript):[^\s"')]+/gi, '')
+    .replace(/\son\w+\s*=\s*(?:'[^']*'|"[^"]*"|[^\s>]+)/gi, '');
+  return cleaned.trim();
+}
+
+/**
  * Formats annotations and highlights extracted from PDF attachments into structured Markdown.
  * Annotations are sorted by page → Y coordinate → X coordinate (Zotero annotationSortIndex).
  * Highlights are grouped by color with semantic labels within each page section.

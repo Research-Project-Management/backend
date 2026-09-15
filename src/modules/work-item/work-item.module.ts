@@ -9,7 +9,6 @@ import { StateModule } from './state/state.module';
 import { AssignmentModule } from './assignment/assignment.module';
 import { RelationModule } from './relation/relation.module';
 import { UpdateModule } from './update/update.module';
-import { ExportModule } from './export/export.module';
 import { HistoryModule } from './history/history.module';
 import { ViewModule } from './view/view.module';
 import { PropertyModule } from './property/property.module';
@@ -28,7 +27,6 @@ import { TemplateModule } from './template/template.module';
     AssignmentModule,
     RelationModule,
     UpdateModule,
-    ExportModule,
     HistoryModule,
     ViewModule,
     PropertyModule,
@@ -48,7 +46,6 @@ import { TemplateModule } from './template/template.module';
     AssignmentModule,
     RelationModule,
     UpdateModule,
-    ExportModule,
     HistoryModule,
     ViewModule,
     PropertyModule,

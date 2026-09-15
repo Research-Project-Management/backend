@@ -48,7 +48,7 @@ export class IngestionController {
   ) {
     const effectiveIdempotencyKey = idempotencyKeyHeader || dto.idempotencyKey;
     const effectiveProjectId =
-      paramProjectId || queryProjectId || dto.projectId || userId;
+      paramProjectId || queryProjectId || dto.projectId || undefined;
 
     let payload: any;
     switch (dto.kind) {
@@ -100,7 +100,6 @@ export class IngestionController {
 
     return this.ingestionService.submit({
       projectId: effectiveProjectId,
-      workspaceId: effectiveProjectId,
       userId,
       idempotencyKey: effectiveIdempotencyKey,
       payload,
@@ -160,14 +159,13 @@ export class IngestionController {
   ) {
     const effectiveIdempotencyKey = idempotencyKeyHeader || dto.idempotencyKey;
     const effectiveProjectId =
-      paramProjectId || queryProjectId || (dto as any).projectId || userId;
+      paramProjectId || queryProjectId || (dto as any).projectId || undefined;
     let command: any;
 
     switch (dto.source) {
       case 'doi':
         command = {
           source: 'doi',
-          workspaceId: effectiveProjectId,
           projectId: effectiveProjectId,
           userId,
           doi: dto.doi || '',
@@ -179,7 +177,6 @@ export class IngestionController {
       case 'url':
         command = {
           source: 'url',
-          workspaceId: effectiveProjectId,
           projectId: effectiveProjectId,
           userId,
           url: dto.url || '',
@@ -193,7 +190,6 @@ export class IngestionController {
       case 'bibtex':
         command = {
           source: 'bibtex',
-          workspaceId: effectiveProjectId,
           projectId: effectiveProjectId,
           userId,
           content: dto.content || dto.bibtex || '',
@@ -205,7 +201,6 @@ export class IngestionController {
       case 'pdf':
         command = {
           source: 'pdf',
-          workspaceId: effectiveProjectId,
           projectId: effectiveProjectId,
           userId,
           fileId: dto.fileId,
@@ -219,7 +214,6 @@ export class IngestionController {
       default:
         command = {
           source: dto.source,
-          workspaceId: effectiveProjectId,
           projectId: effectiveProjectId,
           userId,
           idempotencyKey: effectiveIdempotencyKey,
@@ -237,9 +231,8 @@ export class IngestionController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    const effectiveProjectId = paramProjectId || queryProjectId || userId;
+    const effectiveProjectId = paramProjectId || queryProjectId || undefined;
     return this.ingestionService.captureUrl(dto.url, {
-      workspaceId: effectiveProjectId,
       projectId: effectiveProjectId,
       userId,
     });
@@ -254,9 +247,9 @@ export class IngestionController {
     @Param('projectId') paramProjectId?: string,
   ) {
     const effectiveProjectId =
-      paramProjectId || queryProjectId || dto.projectId || userId;
+      paramProjectId || queryProjectId || dto.projectId || undefined;
     return this.ingestionService.confirmCapturedUrl(
-      effectiveProjectId,
+      effectiveProjectId || userId,
       userId,
       dto,
     );

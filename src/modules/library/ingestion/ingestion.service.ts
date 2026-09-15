@@ -44,8 +44,7 @@ export class IngestionService implements IngestionPort {
   async submit(
     envelope: IngestionSubmissionEnvelope,
   ): Promise<IngestionAcceptedResult> {
-    const projectId =
-      envelope.userId || envelope.projectId || envelope.workspaceId || '';
+    const projectId = envelope.projectId || envelope.userId || '';
     const idempotencyKey = envelope.idempotencyKey?.trim();
 
     const requestHash = createHash('sha256')
@@ -234,8 +233,7 @@ export class IngestionService implements IngestionPort {
    * Delegates to modern IngestionPipelineRunner via mapped envelope.
    */
   async ingest(command: IngestionCommand): Promise<IngestionResult> {
-    const projectId =
-      command.userId || command.projectId || (command as any).workspaceId || '';
+    const projectId = command.projectId || command.userId || '';
     const envelope = this.mapCommandToEnvelope(projectId, command);
 
     const submissionRes = await this.submit(envelope);
@@ -391,7 +389,11 @@ export class IngestionService implements IngestionPort {
   async captureUrl(
     url: string,
     contextOrProjectId:
-      string | { projectId?: string; workspaceId?: string; userId?: string },
+      | string
+      | {
+          projectId?: string;
+          userId?: string;
+        },
   ) {
     return this.urlCapture.captureUrl(url, contextOrProjectId);
   }

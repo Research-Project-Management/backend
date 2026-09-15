@@ -26,6 +26,7 @@ export interface CreateProjectInput {
   description?: string;
   modules?: string[];
   settings?: Record<string, unknown>;
+  network?: string | null;
 }
 
 @Injectable()
@@ -73,6 +74,30 @@ export class CoreRepository {
       },
       orderBy: { updatedAt: 'desc' },
     });
+  }
+
+  /**
+   * Batch-fetch project memberships for a user across multiple project IDs.
+   * High performance single query preventing N+1 lookup and independent of member pagination limit.
+   */
+  async findMembershipsForUser(
+    projectIds: string[],
+    userId: string,
+  ): Promise<Map<string, ProjectMemberRole>> {
+    if (!projectIds.length || !isUuid(userId)) return new Map();
+
+    const validProjectIds = projectIds.filter(isUuid);
+    if (!validProjectIds.length) return new Map();
+
+    const rows = await this.prisma.projectMember.findMany({
+      where: {
+        userId,
+        projectId: { in: validProjectIds },
+      },
+      select: { projectId: true, role: true },
+    });
+
+    return new Map(rows.map((r) => [r.projectId, r.role]));
   }
 
   /**
@@ -131,7 +156,8 @@ export class CoreRepository {
     data: CreateProjectInput,
   ): Promise<ProjectWithMembers> {
     const identifier =
-      data.identifier?.trim().toUpperCase() || deriveProjectPrefix(data.name);
+      data.identifier?.trim().toUpperCase() ||
+      deriveProjectPrefix(data.identifier, data.name);
 
     return this.prisma.project.create({
       data: {
@@ -140,14 +166,8 @@ export class CoreRepository {
         avatar: data.avatar || '',
         coverImage: data.coverImage || '',
         description: data.description || '',
-        modules: data.modules || [
-          'work_items',
-          'cycles',
-          'views',
-          'pages',
-          'stickies',
-          'storage',
-        ],
+        network: data.network || 'secret',
+        modules: data.modules || ['work_items', 'cycles', 'views', 'pages'],
         settings: (data.settings || {}) as Prisma.InputJsonValue,
         createdBy: { connect: { id: userId } },
         members: {
@@ -444,6 +464,7 @@ export class CoreRepository {
 
   /**
    * Allocate the next sequential WorkItem identifier (e.g. 'BIO-1', 'BIO-2').
+   * Uses atomic database sequence increment on Project record to prevent race conditions and duplicate codes.
    */
   async allocateWorkItemIdentifier(
     projectId: string,
@@ -455,17 +476,36 @@ export class CoreRepository {
             identifier: { equals: projectId, mode: 'insensitive' },
             deletedAt: null,
           },
-      select: { id: true, identifier: true, name: true },
+      select: {
+        id: true,
+        identifier: true,
+        name: true,
+        workItemSequence: true,
+      },
     });
 
-    const prefix = deriveProjectPrefix(project?.identifier, project?.name);
-    const resolvedProjectId = project?.id || projectId;
+    if (!project) {
+      const fallbackPrefix = 'WI';
+      return {
+        identifier: `${fallbackPrefix}-1`,
+        sequenceNumber: 1,
+      };
+    }
 
-    // Count existing work items in this project to derive next sequence
-    const currentCount = await this.prisma.workItem.count({
-      where: { projectId: resolvedProjectId },
+    const updated = await this.prisma.project.update({
+      where: { id: project.id },
+      data: {
+        workItemSequence: { increment: 1 },
+      },
+      select: {
+        identifier: true,
+        name: true,
+        workItemSequence: true,
+      },
     });
-    const sequenceNumber = currentCount + 1;
+
+    const prefix = deriveProjectPrefix(updated.identifier, updated.name);
+    const sequenceNumber = updated.workItemSequence;
 
     return {
       identifier: `${prefix}-${sequenceNumber}`,

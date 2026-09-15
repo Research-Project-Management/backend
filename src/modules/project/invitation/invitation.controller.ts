@@ -26,14 +26,14 @@ import type { AuthenticatedUser } from '@/modules/iam/core/types/iam.type';
 
 @ApiTags('Project Invitations')
 @ApiBearerAuth('JWT-auth')
-@Controller('api')
+@Controller(['api/projects', 'api/project'])
 @UseGuards(JwtAuthGuard)
 export class InvitationController {
   constructor(private readonly invitationService: InvitationService) {}
 
   // ─── 1. Incoming Invitations (For Current User) ───────────────────────────
 
-  @Get(['project/invitations/me', 'projects/invitations/me'])
+  @Get('invitations/me')
   @ApiOperation({
     summary: 'Get all pending invitations received by current user',
     description:
@@ -44,10 +44,7 @@ export class InvitationController {
     return this.invitationService.getMyInvitations(user);
   }
 
-  @Post([
-    'project/invitations/:invitationId/accept',
-    'projects/invitations/:invitationId/accept',
-  ])
+  @Post('invitations/:invitationId/accept')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Accept a project invitation' })
   @ApiResponse({
@@ -61,10 +58,7 @@ export class InvitationController {
     return this.invitationService.acceptInvitation(invitationId, user);
   }
 
-  @Post([
-    'project/invitations/:invitationId/decline',
-    'projects/invitations/:invitationId/decline',
-  ])
+  @Post('invitations/:invitationId/decline')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Decline a project invitation' })
   @ApiResponse({ status: 200, description: 'Invitation declined' })
@@ -75,7 +69,7 @@ export class InvitationController {
     return this.invitationService.declineInvitation(invitationId, user);
   }
 
-  @Post(['project/invitations/join', 'projects/invitations/join'])
+  @Post('invitations/join')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Join a project using an invite code, token, or identifier',
@@ -90,7 +84,7 @@ export class InvitationController {
 
   // ─── 2. Project-level Invitations (Manage by Owner) ─────────────────────────
 
-  @Get(['project/:projectId/invitations', 'projects/:projectId/invitations'])
+  @Get(':projectId/invitations')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner')
   @ApiOperation({ summary: 'List all invitations for a specific project' })
@@ -99,7 +93,7 @@ export class InvitationController {
     return this.invitationService.getProjectInvitations(projectId);
   }
 
-  @Post(['project/:projectId/invitations', 'projects/:projectId/invitations'])
+  @Post(':projectId/invitations')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner')
   @ApiOperation({ summary: 'Invite a user to a project via email' })
@@ -112,10 +106,7 @@ export class InvitationController {
     return this.invitationService.createInvitation(projectId, dto, inviterId);
   }
 
-  @Delete([
-    'project/:projectId/invitations/:invitationId',
-    'projects/:projectId/invitations/:invitationId',
-  ])
+  @Delete(':projectId/invitations/:invitationId')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner')
   @ApiOperation({ summary: 'Revoke a project invitation' })

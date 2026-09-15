@@ -19,6 +19,7 @@ import { TypesModule } from './types/types.module';
 import { StateModule } from './state/state.module';
 import { ExportsModule } from './exports/exports.module';
 import { RetractionModule } from './retraction/retraction.module';
+import { LibraryFacade, LIBRARY_FACADE } from './library.facade';
 
 /**
  * Pure Composition Root for the Library Module.
@@ -48,7 +49,16 @@ import { RetractionModule } from './retraction/retraction.module';
     IngestionModule,
     SavedSearchesModule,
   ],
+  providers: [
+    LibraryFacade,
+    {
+      provide: LIBRARY_FACADE,
+      useExisting: LibraryFacade,
+    },
+  ],
   exports: [
+    LibraryFacade,
+    LIBRARY_FACADE,
     CoreModule,
     TypesModule,
     ItemsModule,

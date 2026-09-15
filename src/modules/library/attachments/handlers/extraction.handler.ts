@@ -2,7 +2,7 @@ import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '../../../../core/database/prisma.service';
 import { PdfProvider } from '../providers/pdf.provider';
 import { SearchService } from '../../search/search.service';
-import { STORAGE_PORT, IStoragePort } from '../../../storage/storage.port';
+import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { OutboxEvent } from '@prisma/client';
 import { OutboxDispatchHandler } from '../../outbox/types/outbox.types';
 import { AttachmentStorageException } from '../errors/attachments.errors';
@@ -215,17 +215,17 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         }
       }
 
-      const tenantId =
+      const scopeId =
         (attachment.item as any)?.projectId ||
         (attachment.item as any)?.userId ||
         payload.projectId ||
         (payload as any).userId;
 
       // 6. Build in-library citation graph (match references against papers in same project scope)
-      if (doc.references && doc.references.length > 0 && tenantId) {
+      if (doc.references && doc.references.length > 0 && scopeId) {
         try {
           await this.linkInLibraryCitations(
-            tenantId,
+            scopeId,
             attachment.itemId,
             doc.references,
           );
@@ -299,13 +299,13 @@ export class ExtractionHandler implements OutboxDispatchHandler {
    * Automatically establishes in-library citation edges ('cites') in item_relations.
    */
   private async linkInLibraryCitations(
-    tenantId: string,
+    scopeId: string,
     sourceItemId: string,
     references: Array<{ title?: string; doi?: string; arxivId?: string }>,
   ): Promise<void> {
     const scopePapers = await this.prisma.item.findMany({
       where: {
-        OR: [{ projectId: tenantId }, { userId: tenantId }],
+        OR: [{ projectId: scopeId }, { userId: scopeId }],
         id: { not: sourceItemId },
         deletedAt: null,
       },

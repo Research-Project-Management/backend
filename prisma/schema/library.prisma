@@ -490,7 +490,10 @@ model ItemRevision {
 
 model IdempotencyRecord {
   id             String    @id @default(uuid()) @db.Uuid
-  workspaceId    String    @map("workspace_id")
+  userId         String    @map("user_id") @db.Uuid
+  user           User      @relation("UserIdempotencyRecords", fields: [userId], references: [id], onDelete: Cascade)
+  projectId      String?   @map("project_id") @db.Uuid
+  project        Project?  @relation("ProjectIdempotencyRecords", fields: [projectId], references: [id], onDelete: Cascade)
   idempotencyKey String    @map("idempotency_key")
   requestHash    String?   @map("request_hash")
   statusCode     Int?      @map("status_code")
@@ -501,14 +504,19 @@ model IdempotencyRecord {
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@unique([workspaceId, idempotencyKey])
+  @@index([userId, idempotencyKey])
+  @@index([projectId, idempotencyKey])
   @@index([expiresAt])
   @@map("idempotency_records")
 }
 
 model SyncSequence {
-  workspaceId     String @id @map("workspace_id")
-  currentSequence BigInt @default(0) @map("current_sequence")
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          String?  @unique @map("user_id") @db.Uuid
+  user            User?    @relation("UserSyncSequence", fields: [userId], references: [id], onDelete: Cascade)
+  projectId       String?  @unique @map("project_id") @db.Uuid
+  project         Project? @relation("ProjectSyncSequence", fields: [projectId], references: [id], onDelete: Cascade)
+  currentSequence BigInt   @default(0) @map("current_sequence")
 
   @@map("sync_sequences")
 }
@@ -516,7 +524,10 @@ model SyncSequence {
 model LibraryChange {
   id          String   @id @default(uuid()) @db.Uuid
   seq         BigInt
-  workspaceId String   @map("workspace_id")
+  userId      String?  @map("user_id") @db.Uuid
+  user        User?    @relation("UserLibraryChanges", fields: [userId], references: [id], onDelete: Cascade)
+  projectId   String?  @map("project_id") @db.Uuid
+  project     Project? @relation("ProjectLibraryChanges", fields: [projectId], references: [id], onDelete: Cascade)
   entityType  String   @map("entity_type")
   entityId    String   @map("entity_id")
   action      String
@@ -524,26 +535,35 @@ model LibraryChange {
   data        Json?
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  @@unique([workspaceId, seq])
+  @@index([userId, seq])
+  @@index([projectId, seq])
   @@map("library_changes")
 }
 
 model Tombstone {
-  id          String   @id @default(uuid()) @db.Uuid
-  workspaceId String   @map("workspace_id")
-  entityType  String   @map("entity_type")
-  entityId    String   @map("entity_id")
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String?   @map("user_id") @db.Uuid
+  user        User?     @relation("UserTombstones", fields: [userId], references: [id], onDelete: Cascade)
+  projectId   String?   @map("project_id") @db.Uuid
+  project     Project?  @relation("ProjectTombstones", fields: [projectId], references: [id], onDelete: Cascade)
+  entityType  String    @map("entity_type")
+  entityId    String    @map("entity_id")
   seq         BigInt
-  deletedById String?  @map("deleted_by_id")
-  deletedAt   DateTime @default(now()) @map("deleted_at") @db.Timestamptz(6)
+  deletedById String?   @map("deleted_by_id") @db.Uuid
+  deletedBy   User?     @relation("TombstoneDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
+  deletedAt   DateTime  @default(now()) @map("deleted_at") @db.Timestamptz(6)
 
-  @@unique([workspaceId, entityType, entityId])
+  @@index([userId, entityType, entityId])
+  @@index([projectId, entityType, entityId])
   @@map("tombstones")
 }
 
 model OutboxEvent {
   id             String       @id @default(uuid()) @db.Uuid
-  workspaceId    String       @map("workspace_id")
+  userId         String       @map("user_id") @db.Uuid
+  user           User         @relation("UserOutboxEvents", fields: [userId], references: [id], onDelete: Cascade)
+  projectId      String?      @map("project_id") @db.Uuid
+  project        Project?     @relation("ProjectOutboxEvents", fields: [projectId], references: [id], onDelete: Cascade)
   aggregateId    String       @map("aggregate_id")
   eventType      String       @map("event_type")
   payload        Json
@@ -560,12 +580,17 @@ model OutboxEvent {
   updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([status, createdAt])
+  @@index([userId, createdAt])
+  @@index([projectId, createdAt])
   @@map("outbox_events")
 }
 
 model IngestionRun {
   id              String               @id @default(uuid()) @db.Uuid
-  workspaceId     String               @map("workspace_id")
+  userId          String               @map("user_id") @db.Uuid
+  user            User                 @relation("UserIngestionRuns", fields: [userId], references: [id], onDelete: Cascade)
+  projectId       String?              @map("project_id") @db.Uuid
+  project         Project?             @relation("ProjectIngestionRuns", fields: [projectId], references: [id], onDelete: Cascade)
   requesterId     String?              @map("requester_id")
   inputParams     Json                 @map("input_params")
   inputHash       String               @map("input_hash")
@@ -587,7 +612,8 @@ model IngestionRun {
   decisions       IngestionDecision[]
   reviewCases     IngestionReviewCase[]
 
-  @@index([workspaceId, status])
+  @@index([userId, status])
+  @@index([projectId, status])
   @@map("ingestion_runs")
 }
 
@@ -637,7 +663,10 @@ model IngestionDecision {
 
 model IngestionReviewCase {
   id             String       @id @default(uuid()) @db.Uuid
-  workspaceId    String       @map("workspace_id")
+  userId         String?      @map("user_id") @db.Uuid
+  user           User?        @relation("UserIngestionReviewCases", fields: [userId], references: [id], onDelete: Cascade)
+  projectId      String?      @map("project_id") @db.Uuid
+  project        Project?     @relation("ProjectIngestionReviewCases", fields: [projectId], references: [id], onDelete: Cascade)
   ingestionRunId String       @map("ingestion_run_id") @db.Uuid
   ingestionRun   IngestionRun @relation(fields: [ingestionRunId], references: [id], onDelete: Cascade)
   targetItemId   String?      @map("target_item_id") @db.Uuid
@@ -653,131 +682,6 @@ model IngestionReviewCase {
   @@map("ingestion_review_cases")
 }
 
-model ZoteroConnection {
-  id              String          @id @default(uuid()) @db.Uuid
-  workspaceId     String          @map("workspace_id")
-  userId          String          @map("user_id") @db.Uuid
-  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  provider        String          @default("zotero")
-  accountName     String?         @map("account_name")
-  accountType     String?         @default("user") @map("account_type")
-  zoteroUserId    String?         @map("zotero_user_id")
-  encryptedApiKey String          @map("encrypted_api_key")
-  keyIv           String          @map("key_iv")
-  keyTag          String          @map("key_tag")
-  scopes          Json?           @default("{}")
-  status          String          @default("active")
-  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  bindings        ZoteroBinding[]
-
-  @@unique([workspaceId, zoteroUserId])
-  @@index([workspaceId, status])
-  @@map("zotero_connections")
-}
-
-model ZoteroBinding {
-  id                String              @id @default(uuid()) @db.Uuid
-  connectionId      String              @map("connection_id") @db.Uuid
-  connection        ZoteroConnection    @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-  workspaceId       String              @map("workspace_id")
-  remoteLibraryType String              @default("user") @map("remote_library_type")
-  remoteLibraryId   String              @map("remote_library_id")
-  lastSyncVersion   BigInt              @default(0) @map("last_sync_version")
-  lastSyncAt        DateTime?           @map("last_sync_at") @db.Timestamptz(6)
-  syncStatus        String              @default("idle") @map("sync_status")
-  syncDirection     String              @default("read_only") @map("sync_direction")
-  createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt         DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  itemBindings      ZoteroItemBinding[]
-  syncRuns          ZoteroSyncRun[]
-  syncFailures      ZoteroSyncFailure[]
-
-  @@unique([workspaceId, remoteLibraryType, remoteLibraryId])
-  @@index([connectionId])
-  @@map("zotero_bindings")
-}
-
-model ZoteroItemBinding {
-  id            String        @id @default(uuid()) @db.Uuid
-  bindingId     String        @map("binding_id") @db.Uuid
-  binding       ZoteroBinding @relation(fields: [bindingId], references: [id], onDelete: Cascade)
-  workspaceId   String        @map("workspace_id")
-  entityType    String        @map("entity_type")
-  entityId      String        @map("entity_id")
-  remoteKey     String        @map("remote_key")
-  remoteVersion BigInt        @default(0) @map("remote_version")
-  baseSnapshot  Json?         @map("base_snapshot")
-  rawPayload    Json?         @map("raw_payload")
-  syncState     String        @default("synced") @map("sync_state")
-  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  @@unique([bindingId, remoteKey])
-  @@unique([bindingId, entityType, entityId])
-  @@index([workspaceId, entityType, entityId])
-  @@map("zotero_item_bindings")
-}
-
-model ZoteroSyncRun {
-  id            String              @id @default(uuid()) @db.Uuid
-  bindingId     String              @map("binding_id") @db.Uuid
-  binding       ZoteroBinding       @relation(fields: [bindingId], references: [id], onDelete: Cascade)
-  workspaceId   String              @map("workspace_id")
-  direction     String              @default("pull")
-  versionBefore BigInt              @default(0) @map("version_before")
-  versionAfter  BigInt              @default(0) @map("version_after")
-  itemsCreated  Int                 @default(0) @map("items_created")
-  itemsUpdated  Int                 @default(0) @map("items_updated")
-  itemsDeleted  Int                 @default(0) @map("items_deleted")
-  status        String              @default("pending")
-  errorMessage  String?             @map("error_message")
-  startedAt     DateTime            @default(now()) @map("started_at") @db.Timestamptz(6)
-  completedAt   DateTime?           @map("completed_at") @db.Timestamptz(6)
-  createdAt     DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  failures      ZoteroSyncFailure[]
-
-  @@index([bindingId, startedAt])
-  @@map("zotero_sync_runs")
-}
-
-model ZoteroSyncFailure {
-  id           String         @id @default(uuid()) @db.Uuid
-  syncRunId    String?        @map("sync_run_id") @db.Uuid
-  syncRun      ZoteroSyncRun? @relation(fields: [syncRunId], references: [id], onDelete: SetNull)
-  bindingId    String         @map("binding_id") @db.Uuid
-  binding      ZoteroBinding  @relation(fields: [bindingId], references: [id], onDelete: Cascade)
-  workspaceId  String         @map("workspace_id")
-  operation    String
-  remoteKey    String?        @map("remote_key")
-  entityId     String?        @map("entity_id")
-  errorMessage String         @map("error_message")
-  errorDetails Json?          @map("error_details")
-  attempts     Int            @default(1)
-  status       String         @default("retryable")
-  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  @@index([bindingId, status])
-  @@map("zotero_sync_failures")
-}
-
-model IntegrationPolicy {
-  id        String   @id @default(uuid()) @db.Uuid
-  provider  String   @unique
-  isPaused  Boolean  @default(false) @map("is_paused")
-  reason    String?
-  changedBy String?  @map("changed_by")
-  changedAt DateTime @default(now()) @map("changed_at") @db.Timestamptz(6)
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  @@map("integration_policies")
-}
 
 model CapturePreview {
   id                String    @id @default(uuid()) @db.Uuid

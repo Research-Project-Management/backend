@@ -49,8 +49,11 @@ export class LabelController {
     summary: 'List all project labels with hierarchical sub-labels',
   })
   @ApiResponse({ status: 200, description: 'Project labels tree' })
-  async getProjectLabels(@Param('projectId') projectId: string) {
-    return this.labelService.getProjectLabels(projectId);
+  async getProjectLabels(
+    @Param('projectId') projectId: string,
+    @Query() query?: QueryLabelDto,
+  ) {
+    return this.labelService.getProjectLabels(projectId, query?.type);
   }
 
   @Post(['projects/:projectId/labels', 'project/:projectId/labels'])

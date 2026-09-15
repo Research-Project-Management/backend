@@ -236,4 +236,42 @@ export class AssignmentController {
       userId,
     );
   }
+
+  @Post('projects/:projectId/work-items/:workItemId/subscribers/me')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ApiOperation({
+    summary: 'Subscribe current user to notifications for a work item',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Updated subscriber list for the work item',
+  })
+  async subscribeMe(
+    @Param('projectId') projectId: string,
+    @Param('workItemId') workItemId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.assignmentService.subscribeMe(projectId, workItemId, userId);
+  }
+
+  @Delete('projects/:projectId/work-items/:workItemId/subscribers/me')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ApiOperation({
+    summary: 'Unsubscribe current user from notifications for a work item',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Updated subscriber list for the work item',
+  })
+  async unsubscribeMe(
+    @Param('projectId') projectId: string,
+    @Param('workItemId') workItemId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.assignmentService.unsubscribeMe(projectId, workItemId, userId);
+  }
 }

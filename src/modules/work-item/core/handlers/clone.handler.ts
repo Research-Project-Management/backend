@@ -32,8 +32,12 @@ export class CloneHandler {
       projectId: targetProjectId,
       authorId: authorId,
       assigneeId: sourceWorkItem.assigneeId || null,
-      cycleId: isSameProject && sourceWorkItem.cycleId ? sourceWorkItem.cycleId : null,
-      parentWorkItemId: isSameProject && sourceWorkItem.parentWorkItemId ? sourceWorkItem.parentWorkItemId : null,
+      cycleId:
+        isSameProject && sourceWorkItem.cycleId ? sourceWorkItem.cycleId : null,
+      parentWorkItemId:
+        isSameProject && sourceWorkItem.parentWorkItemId
+          ? sourceWorkItem.parentWorkItemId
+          : null,
     };
 
     return { cloneData, targetProjectId, isSameProject, identifier };

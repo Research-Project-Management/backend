@@ -1,0 +1,145 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import { AssetService } from '@/modules/document/asset/asset.service';
+import { PrismaService } from '@/core/database/prisma.service';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
+
+describe('Document AssetService (Figures, Images & LaTeX Assets)', () => {
+  let service: AssetService;
+  let prisma: any;
+
+  const mockProjectId = '11111111-1111-1111-1111-111111111111';
+  const mockUserId = '22222222-2222-2222-2222-222222222222';
+  const mockAssetId = '33333333-3333-3333-3333-333333333333';
+
+  beforeEach(async () => {
+    prisma = {
+      page: {
+        create: jest.fn(),
+        findMany: jest.fn(),
+        findFirst: jest.fn(),
+        update: jest.fn(),
+      },
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [AssetService, { provide: PrismaService, useValue: prisma }],
+    }).compile();
+
+    service = module.get<AssetService>(AssetService);
+  });
+
+  describe('uploadAsset', () => {
+    it('should reject invalid file extensions', async () => {
+      await expect(
+        service.uploadAsset(mockProjectId, mockUserId, {
+          filename: 'dangerous_script.exe',
+          contentBase64: 'SGVsbG8=',
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should reject empty filename', async () => {
+      await expect(
+        service.uploadAsset(mockProjectId, mockUserId, {
+          filename: '   ',
+          contentBase64: 'SGVsbG8=',
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should upload valid image asset and return metadata', async () => {
+      prisma.page.create.mockResolvedValueOnce({
+        id: mockAssetId,
+        title: 'architecture.png',
+        projectId: mockProjectId,
+        parentPageId: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const res = await service.uploadAsset(mockProjectId, mockUserId, {
+        filename: 'architecture.png',
+        contentBase64:
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        path: 'figures/architecture.png',
+      });
+
+      expect(prisma.page.create).toHaveBeenCalled();
+      expect(res.id).toBe(mockAssetId);
+      expect(res.filename).toBe('architecture.png');
+      expect(res.path).toBe('figures/architecture.png');
+      expect(res.mimeType).toBe('image/png');
+    });
+  });
+
+  describe('getProjectAssets', () => {
+    it('should return list of project assets', async () => {
+      prisma.page.findMany.mockResolvedValueOnce([
+        {
+          id: mockAssetId,
+          title: 'plot.pdf',
+          projectId: mockProjectId,
+          parentPageId: null,
+          content: {
+            isAsset: true,
+            filename: 'plot.pdf',
+            path: 'figures/plot.pdf',
+            mimeType: 'application/pdf',
+            sizeBytes: 1024,
+          },
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ]);
+
+      const assets = await service.getProjectAssets(mockProjectId);
+
+      expect(assets).toHaveLength(1);
+      expect(assets[0].filename).toBe('plot.pdf');
+      expect(assets[0].path).toBe('figures/plot.pdf');
+    });
+  });
+
+  describe('getProjectAssetMap', () => {
+    it('should return filepath to base64 map for compiler integration', async () => {
+      prisma.page.findMany.mockResolvedValueOnce([
+        {
+          id: mockAssetId,
+          title: 'architecture.png',
+          content: {
+            isAsset: true,
+            path: 'figures/architecture.png',
+            base64: 'IMAGE_BASE64_DATA',
+          },
+        },
+      ]);
+
+      const map = await service.getProjectAssetMap(mockProjectId);
+
+      expect(map['figures/architecture.png']).toBe('IMAGE_BASE64_DATA');
+    });
+  });
+
+  describe('deleteAsset', () => {
+    it('should throw NotFoundException if asset does not exist', async () => {
+      prisma.page.findFirst.mockResolvedValueOnce(null);
+
+      await expect(service.deleteAsset(mockAssetId)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('should soft-delete asset', async () => {
+      prisma.page.findFirst.mockResolvedValueOnce({ id: mockAssetId });
+      prisma.page.update.mockResolvedValueOnce({ id: mockAssetId });
+
+      const res = await service.deleteAsset(mockAssetId);
+
+      expect(res.ok).toBe(true);
+      expect(prisma.page.update).toHaveBeenCalledWith({
+        where: { id: mockAssetId },
+        data: { deletedAt: expect.any(Date) },
+      });
+    });
+  });
+});

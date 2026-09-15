@@ -8,7 +8,7 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FastifyRequest } from 'fastify';
 import { AttachmentRepository } from './attachment.repository';
-import { R2Service } from '@/modules/storage/r2/r2.service';
+import { R2Service } from '@/modules/storage/infrastructure/drivers/r2.service';
 import { PrismaService } from '@/core/database/prisma.service';
 import {
   CreateAttachmentDto as BaseAttachmentDto,

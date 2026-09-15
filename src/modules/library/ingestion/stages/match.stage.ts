@@ -47,7 +47,7 @@ export class MatchStage {
    *     This keeps fuzzy matching accurate without loading the entire workspace.
    */
   async execute(
-    workspaceId: string,
+    scopeId: string,
     proposed: ItemMetadata,
   ): Promise<DuplicateMatchResult> {
     const proposedDoi = proposed.doi?.toLowerCase().trim();
@@ -56,7 +56,7 @@ export class MatchStage {
     if (proposedDoi) {
       const doiMatch = await this.prisma.item.findFirst({
         where: {
-          OR: [{ projectId: workspaceId }, { userId: workspaceId }],
+          OR: [{ projectId: scopeId }, { userId: scopeId }],
           doi: proposedDoi,
           deletedAt: null,
         },
@@ -92,7 +92,7 @@ export class MatchStage {
 
     const candidateItems = await this.prisma.item.findMany({
       where: {
-        OR: [{ projectId: workspaceId }, { userId: workspaceId }],
+        OR: [{ projectId: scopeId }, { userId: scopeId }],
         deletedAt: null,
         title: { contains: firstSignificantWord, mode: 'insensitive' },
       },

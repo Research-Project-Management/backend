@@ -27,5 +27,3 @@ export interface RetractionStats {
   expressionsOfConcernCount: number;
   manualCount: number;
 }
-
-export type WorkspaceRetractionStats = RetractionStats;

@@ -22,6 +22,15 @@ export const CYCLE_SELECT = {
   name: true,
 } as const;
 
+export const STATE_MINIMAL_SELECT = {
+  id: true,
+  name: true,
+  color: true,
+  group: true,
+  sequence: true,
+  isDefault: true,
+} as const;
+
 export const CHILD_WORK_ITEM_SELECT = {
   id: true,
   title: true,
@@ -31,6 +40,7 @@ export const CHILD_WORK_ITEM_SELECT = {
   rank: true,
   assigneeId: true,
   assignee: { select: USER_MINIMAL_SELECT },
+  state: { select: STATE_MINIMAL_SELECT },
   dueDate: true,
 } as const;
 
@@ -39,6 +49,15 @@ export interface UserMinimal {
   name: string | null;
   email: string | null;
   avatar: string | null;
+}
+
+export interface StateMinimal {
+  id: string;
+  name: string;
+  color: string;
+  group: string;
+  sequence: number;
+  isDefault: boolean;
 }
 
 export interface CycleMinimal {
@@ -52,9 +71,11 @@ export interface ChildWorkItemMinimal {
   identifier: string | null;
   columnId: string;
   completed: boolean;
+  stateGroup?: string;
   rank: number;
   assigneeId: string | null;
   assignee?: UserMinimal | null;
+  state?: StateMinimal | null;
   dueDate?: Date | string | null;
 }
 
@@ -115,6 +136,7 @@ export interface WorkItemAttachments {
 
 export type WorkItemWithRelations = Prisma.WorkItemGetPayload<{
   include: {
+    state: { select: typeof STATE_MINIMAL_SELECT };
     assignee: { select: typeof USER_MINIMAL_SELECT };
     cycle: { select: typeof CYCLE_SELECT };
     parentWorkItem: { select: { id: true; title: true; identifier: true } };
@@ -133,6 +155,9 @@ export interface WorkItemResponse {
   content: string;
   description: string;
   columnId: string;
+  state?: StateMinimal | null;
+  stateGroup?: string;
+  progressPercentage?: number;
   priority: WorkItemPriority;
   relations?: Prisma.JsonValue;
   startDate?: string | null;
@@ -219,10 +244,12 @@ export interface IWorkItemRepository {
     projectId: string,
     userId: string,
   ): Promise<string | null>;
-  updateAttachments(
+  saveInitialAttachments(
     workItemId: string,
-    attachments: WorkItemAttachments,
-  ): Promise<WorkItem>;
+    projectId: string,
+    authorId: string,
+    attachments: any,
+  ): Promise<void>;
   countProjectWorkItems(projectId: string): Promise<number>;
   disconnectParentWorkItem(workItemId: string): Promise<WorkItemWithRelations>;
 }

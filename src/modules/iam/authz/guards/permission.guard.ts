@@ -194,7 +194,7 @@ export class PermissionGuard implements CanActivate {
         normalizedHeaderProjectId.toLowerCase()
       ) {
         throw new ForbiddenException(
-          'Access denied: Resource does not belong to the specified project context (Cross-tenant violation)',
+          'Access denied: Resource does not belong to the specified project context (Cross-project violation)',
         );
       }
     }

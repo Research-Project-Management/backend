@@ -10,7 +10,7 @@ import { Readability } from '@mozilla/readability';
 import createDOMPurify from 'dompurify';
 import { MetadataRoutingPolicy } from '../../ingestion/metadata/policies/metadata.policy';
 import { AttachmentsService } from '../attachments.service';
-import { R2Service } from '../../../storage/r2/r2.service';
+import { R2Service } from '@/modules/storage/infrastructure/drivers/r2.service';
 import { SsrfGuardService } from '../../core/services/ssrf-guard.service';
 
 export interface SnapshotResult {

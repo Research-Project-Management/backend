@@ -102,7 +102,6 @@ model FileShare {
 
 model StorageBlob {
   id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId      String         @map("tenant_id") @db.Uuid
   contentHash   Bytes          @map("content_hash")
   hashAlgorithm String         @default("SHA256") @map("hash_algorithm") @db.VarChar(16)
   sizeBytes     BigInt         @map("size_bytes")
@@ -117,7 +116,7 @@ model StorageBlob {
   files         File[]
   versions      FileVersion[]
 
-  @@unique([tenantId, contentHash], map: "uq_blobs_tenant_hash")
+  @@unique([contentHash], map: "uq_blobs_content_hash")
   @@index([tombstoneAt], map: "idx_blobs_tombstone")
   @@index([status], map: "idx_blobs_status")
   @@map("storage_blobs")
@@ -149,7 +148,6 @@ model FileVersion {
 
 model UploadSession {
   id           String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId     String              @map("tenant_id") @db.Uuid
   projectId    String?             @map("project_id") @db.Uuid
   userId       String              @map("user_id") @db.Uuid
   s3UploadId   String              @map("s3_upload_id") @db.VarChar(255)
@@ -171,7 +169,8 @@ model UploadSession {
   parts        UploadPart[]
 
   @@index([status, expiresAt], map: "idx_upload_sessions_cleanup")
-  @@index([tenantId, userId], map: "idx_upload_sessions_user")
+  @@index([userId], map: "idx_upload_sessions_user")
+  @@index([projectId], map: "idx_upload_sessions_project")
   @@map("upload_sessions")
 }
 
@@ -194,13 +193,13 @@ model UploadPart {
 
 model StorageQuota {
   id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId  String   @map("tenant_id") @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
   projectId String?  @map("project_id") @db.Uuid
   usedBytes BigInt   @default(0) @map("used_bytes")
   maxBytes  BigInt   @map("max_bytes")
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@unique([tenantId, projectId], map: "uq_quota_scope")
+  @@unique([userId, projectId], map: "uq_quota_scope")
   @@map("storage_quotas")
 }
 
@@ -210,7 +209,6 @@ model StorageQuota {
 
 model FileAuditLog {
   id          String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId    String          @map("tenant_id") @db.Uuid
   projectId   String?         @map("project_id") @db.Uuid
   fileId      String          @map("file_id") @db.Uuid
   actorId     String          @map("actor_id") @db.Uuid
@@ -223,6 +221,7 @@ model FileAuditLog {
   timestamp   DateTime        @default(now()) @db.Timestamptz(6)
 
   @@index([fileId, timestamp(sort: Desc)], map: "idx_audit_log_file_time")
-  @@index([tenantId, action], map: "idx_audit_log_tenant_action")
+  @@index([actorId, action], map: "idx_audit_log_actor_action")
+  @@index([projectId], map: "idx_audit_log_project")
   @@map("file_audit_logs")
 }

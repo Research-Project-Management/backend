@@ -23,7 +23,7 @@ export type IngestionCommand =
   | {
       source: 'doi';
       projectId: string;
-      workspaceId?: string;
+      scopeId?: string;
       doi: string;
       userId?: string;
       collectionId?: string;
@@ -33,7 +33,7 @@ export type IngestionCommand =
   | {
       source: 'url';
       projectId: string;
-      workspaceId?: string;
+      scopeId?: string;
       url: string;
       previewToken?: string;
       userId?: string;
@@ -54,7 +54,7 @@ export type IngestionCommand =
   | {
       source: 'bibtex';
       projectId: string;
-      workspaceId?: string;
+      scopeId?: string;
       content: string;
       userId?: string;
       collectionId?: string;
@@ -63,7 +63,7 @@ export type IngestionCommand =
   | {
       source: 'pdf';
       projectId: string;
-      workspaceId?: string;
+      scopeId?: string;
       fileId: string;
       filename?: string;
       userId?: string;
@@ -86,7 +86,7 @@ export interface IngestionResult {
 export interface IngestionRunSnapshot {
   id: string;
   projectId: string;
-  workspaceId?: string;
+  scopeId?: string;
   sourceType: string;
   status: IngestionStatus;
   totalItems: number;

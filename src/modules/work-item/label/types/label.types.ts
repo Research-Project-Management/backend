@@ -31,7 +31,10 @@ export interface ImportLabelResult {
 }
 
 export interface ILabelRepository {
-  findProjectLabels(projectId: string): Promise<LabelWithChildren[]>;
+  findProjectLabels(
+    projectId: string,
+    type?: LabelType,
+  ): Promise<LabelWithChildren[]>;
   findUserLabels(
     userId: string,
     type?: LabelType,
@@ -62,5 +65,10 @@ export interface ILabelRepository {
     projectId: string,
     labelIds: string[],
     labelNames?: string[],
+  ): Promise<number>;
+  detachFromPages(projectId: string, labelId: string): Promise<number>;
+  detachMultipleFromPages(
+    projectId: string,
+    labelIds: string[],
   ): Promise<number>;
 }

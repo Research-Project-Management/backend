@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  UnprocessableEntityException,
   Logger,
   Optional,
 } from '@nestjs/common';
@@ -26,6 +27,8 @@ import {
 import {
   buildCollectionTree,
   normalizeParentId,
+  sanitizeCollectionName,
+  sanitizeCollectionDescription,
 } from './utils/collections.utils';
 import { TreeEngine } from './engines/tree.engine';
 import { PrismaService } from '../../../core/database/prisma.service';
@@ -152,9 +155,18 @@ export class CollectionsService {
     }
 
     const effectiveProjectId = projectId || dto.projectId || null;
+    const cleanName = sanitizeCollectionName(dto.name);
+    if (!cleanName) {
+      throw new UnprocessableEntityException('Collection name cannot be empty');
+    }
+    const cleanDescription =
+      dto.description !== undefined
+        ? sanitizeCollectionDescription(dto.description)
+        : undefined;
+
     const collection = await this.repo.create(userId, userId, {
-      name: dto.name,
-      description: dto.description,
+      name: cleanName,
+      description: cleanDescription,
       color: dto.color,
       icon: dto.icon,
       parentId: rawParentId,
@@ -206,11 +218,29 @@ export class CollectionsService {
       this.tree.assertNoCycle(allCollections, collectionId, rawParentId);
     }
 
+    let cleanName: string | undefined = undefined;
+    if (dto.name !== undefined) {
+      cleanName = sanitizeCollectionName(dto.name);
+      if (!cleanName) {
+        throw new UnprocessableEntityException(
+          'Collection name cannot be empty',
+        );
+      }
+    }
+    const cleanDescription =
+      dto.description !== undefined
+        ? sanitizeCollectionDescription(dto.description)
+        : undefined;
+
     const collection = await this.repo.update(
       userId,
       collectionId,
       {
         ...dto,
+        ...(cleanName !== undefined ? { name: cleanName } : {}),
+        ...(cleanDescription !== undefined
+          ? { description: cleanDescription }
+          : {}),
         parentId: rawParentId,
       },
       undefined,
@@ -532,7 +562,7 @@ export class CollectionsService {
    */
   async syncCollectionsToItem(
     tx: Prisma.TransactionClient,
-    tenantId: string,
+    userId: string,
     itemId: string,
     targetCollectionIds: string[],
   ): Promise<void> {
@@ -551,11 +581,11 @@ export class CollectionsService {
 
     if (uniqueIds.length === 0) return;
 
-    // Batch verify collections belong to tenant in a single query (eliminates N+1)
+    // Batch verify collections belong to user in a single query (eliminates N+1)
     const validCollections = await tx.collection.findMany({
       where: {
         id: { in: uniqueIds },
-        userId: tenantId,
+        userId,
         deletedAt: null,
       },
       select: { id: true },

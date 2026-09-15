@@ -11,9 +11,15 @@ import {
 export class LabelRepository implements ILabelRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findProjectLabels(projectId: string): Promise<LabelWithChildren[]> {
+  async findProjectLabels(
+    projectId: string,
+    type?: LabelType,
+  ): Promise<LabelWithChildren[]> {
     return this.prisma.label.findMany({
-      where: { projectId },
+      where: {
+        projectId,
+        ...(type && { type }),
+      },
       include: {
         children: {
           orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
@@ -149,6 +155,57 @@ export class LabelRepository implements ILabelRepository {
       );
 
       return workItems.length;
+    } catch {
+      return 0;
+    }
+  }
+
+  async detachFromPages(projectId: string, labelId: string): Promise<number> {
+    return this.detachMultipleFromPages(projectId, [labelId]);
+  }
+
+  async detachMultipleFromPages(
+    projectId: string,
+    labelIds: string[],
+  ): Promise<number> {
+    const targets = Array.from(new Set(labelIds.filter(Boolean)));
+    if (!targets.length) return 0;
+
+    try {
+      const pageClient = (this.prisma as any).page;
+      if (!pageClient) return 0;
+
+      const pages = await pageClient.findMany({
+        where: {
+          projectId,
+          deletedAt: null,
+        },
+      });
+
+      if (!pages || !pages.length) return 0;
+
+      const targetSet = new Set(targets);
+      const updates = pages
+        .filter(
+          (item: any) =>
+            Array.isArray(item.labels) &&
+            item.labels.some((l: string) => targetSet.has(l)),
+        )
+        .map((item: any) => {
+          const cleaned = item.labels.filter(
+            (label: string) => !targetSet.has(label),
+          );
+          return pageClient.update({
+            where: { id: item.id },
+            data: { labels: cleaned },
+          });
+        });
+
+      if (updates.length > 0) {
+        await this.prisma.$transaction(updates);
+      }
+
+      return updates.length;
     } catch {
       return 0;
     }

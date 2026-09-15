@@ -175,11 +175,26 @@ export class AssignmentRepository implements IAssignmentRepository {
     assigneeIds: string[],
     primaryAssigneeId: string | null,
   ): Promise<void> {
-    await (this.prismaService.workItem.update as any)({
+    await this.prismaService.workItem.update({
       where: { id: workItemId },
       data: {
         assigneeIds,
         assigneeId: primaryAssigneeId,
+      },
+    });
+  }
+
+  /**
+   * Persist the subscriber IDs list.
+   */
+  async setSubscriberIds(
+    workItemId: string,
+    subscriberIds: string[],
+  ): Promise<void> {
+    await this.prismaService.workItem.update({
+      where: { id: workItemId },
+      data: {
+        subscriberIds: subscriberIds as any,
       },
     });
   }

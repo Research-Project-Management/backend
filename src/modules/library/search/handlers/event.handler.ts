@@ -18,7 +18,7 @@ export class EventHandler {
   @OnEvent(LIBRARY_EVENT_TYPES.ITEM_DELETED, { async: true })
   async handleItemDeleted(event: DomainEventEnvelope) {
     this.logger.debug(
-      `[SearchEventHandler] Cleaning up full-text index for deleted item ${event.aggregateId} (scope: ${(event as any).userId || (event as any).projectId || (event as any).workspaceId})`,
+      `[SearchEventHandler] Cleaning up full-text index for deleted item ${event.aggregateId} (scope: ${event.scopeId || (event as any).userId || (event as any).projectId})`,
     );
 
     try {
@@ -59,7 +59,7 @@ export class EventHandler {
   @OnEvent(LIBRARY_EVENT_TYPES.ITEM_CREATED, { async: true })
   handleItemCreated(event: DomainEventEnvelope) {
     this.logger.debug(
-      `[EventHandler] New item indexed in library: ${event.aggregateId} (scope: ${(event as any).userId || (event as any).projectId || (event as any).workspaceId})`,
+      `[EventHandler] New item indexed in library: ${event.aggregateId} (scope: ${event.scopeId || (event as any).userId || (event as any).projectId})`,
     );
   }
 }

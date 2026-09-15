@@ -4,7 +4,6 @@ export type NoteEntity = PrismaNote;
 
 export interface CreateNoteData {
   projectId?: string;
-  workspaceId?: string;
   itemId?: string | null;
   title?: string;
   contentJson?: Record<string, unknown> | null;

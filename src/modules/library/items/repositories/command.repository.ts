@@ -19,6 +19,7 @@ import {
   normalizeIssn,
   cleanBannedString,
   cleanAbstractText,
+  sanitizeItemTitle,
 } from '../utils/items.utils';
 import { getFileContentPath } from '@/modules/storage/storage.port';
 import {
@@ -344,7 +345,7 @@ export class CommandRepository {
 
     const createData: any = {
       userId,
-      title: data.title,
+      title: sanitizeItemTitle(data.title) || 'Untitled Item',
       year: data.year ?? null,
       doi: cleanDoi,
       abstract: data.abstract ?? data.abstractNote ?? '',
@@ -703,7 +704,10 @@ export class CommandRepository {
     const updated = await client.item.update({
       where: { id },
       data: {
-        title: data.title ?? existing.title,
+        title:
+          data.title !== undefined
+            ? sanitizeItemTitle(data.title) || existing.title
+            : existing.title,
         year: data.year !== undefined ? data.year : existing.year,
         doi: cleanDoi !== undefined ? cleanDoi : existing.doi,
         abstract: cleanAbstract,
@@ -1134,7 +1138,9 @@ export class CommandRepository {
     });
     if (!source) return;
 
-    const rawType = String(relation.relationType || '').trim().toLowerCase();
+    const rawType = String(relation.relationType || '')
+      .trim()
+      .toLowerCase();
     const validRelationTypes = new Set([
       'cites',
       'cited_by',
@@ -1149,7 +1155,9 @@ export class CommandRepository {
       'uses_dataset',
       'survey_of',
     ]);
-    const relationType = validRelationTypes.has(rawType) ? (rawType as any) : 'related';
+    const relationType = validRelationTypes.has(rawType)
+      ? (rawType as any)
+      : 'related';
 
     await client.itemRelation.upsert({
       where: {

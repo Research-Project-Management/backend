@@ -14,9 +14,22 @@ export {
   BulkAddProjectMembersResult,
 };
 
+export interface ProjectPermissions {
+  canEdit: boolean;
+  canDelete: boolean;
+  canArchive: boolean;
+  canManageMembers: boolean;
+  canLeave: boolean;
+}
+
 export type ProjectWithMembers = Project & {
   createdBy?: MinimalUser | null;
   members?: ProjectMemberWithUser[];
+};
+
+export type EnrichedProject = ProjectWithMembers & {
+  yourRole?: ProjectMemberRole | string;
+  permissions?: ProjectPermissions;
 };
 
 export interface ProjectOverview {

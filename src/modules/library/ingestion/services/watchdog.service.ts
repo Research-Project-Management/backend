@@ -85,12 +85,12 @@ export class WatchdogService
    * If retries are exhausted, transitions to terminal FAILED_FINAL.
    */
   async reconcileOrphanedRuns(
-    workspaceId?: string,
+    scopeId?: string,
     timeoutMs: number = WatchdogService.DEFAULT_TIMEOUT_MS,
   ): Promise<WatchdogReconciliationResult> {
     const olderThan = new Date(Date.now() - timeoutMs);
     const orphanedRuns = await this.repo.findOrphanedRuns(olderThan, {
-      workspaceId,
+      scopeId,
       limit: 100,
     });
 
@@ -106,11 +106,12 @@ export class WatchdogService
     let deadLettered = 0;
 
     for (const run of orphanedRuns) {
+      const runScopeId = run.projectId || run.userId;
       const nextAttempt = run.attempts + 1;
       const canRetry = nextAttempt < run.maxRetries;
 
       if (canRetry) {
-        await this.repo.reconcileRun(run.workspaceId, run.id, {
+        await this.repo.reconcileRun(runScopeId, run.id, {
           status: IngestionStatus.FAILED_RETRYABLE,
           lastError: `Ingestion run stalled at status ${run.status} after ${timeoutMs / 1000}s. Reconciled by watchdog for retry.`,
           attemptsIncrement: true,
@@ -126,9 +127,9 @@ export class WatchdogService
           const envelope =
             run.inputParams as unknown as IngestionSubmissionEnvelope;
           if (envelope && typeof envelope === 'object') {
-            this.queue.enqueue(run.id, run.workspaceId, {
+            this.queue.enqueue(run.id, runScopeId, {
               ...envelope,
-              workspaceId: run.workspaceId,
+              scopeId: runScopeId,
             });
             this.logger.log(
               `Watchdog auto-retried stalled run ${run.id} into ingestion queue`,
@@ -136,7 +137,7 @@ export class WatchdogService
           }
         }
       } else {
-        await this.repo.reconcileRun(run.workspaceId, run.id, {
+        await this.repo.reconcileRun(runScopeId, run.id, {
           status: IngestionStatus.FAILED_FINAL,
           lastError: `Ingestion run stalled at status ${run.status} and exhausted maximum retries (${run.maxRetries}). Marked failed by watchdog.`,
           attemptsIncrement: true,
@@ -177,14 +178,15 @@ export class WatchdogService
           run.inputParams as unknown as IngestionSubmissionEnvelope;
         if (!envelope || typeof envelope !== 'object') continue;
 
-        const enqueued = this.queue.enqueue(run.id, run.workspaceId, {
+        const runScopeId = run.projectId || run.userId;
+        const enqueued = this.queue.enqueue(run.id, runScopeId, {
           ...envelope,
-          workspaceId: run.workspaceId,
+          scopeId: runScopeId,
         });
         if (enqueued) {
           recovered++;
           this.logger.log(
-            `Startup recovery: re-enqueued abandoned run ${run.id} (${run.status}) in workspace ${run.workspaceId}`,
+            `Startup recovery: re-enqueued abandoned run ${run.id} (${run.status}) in scope ${runScopeId}`,
           );
         }
       }

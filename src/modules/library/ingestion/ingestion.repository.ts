@@ -74,15 +74,25 @@ export class IngestionRepository {
   // ── Run Operations ────────────────────────────────────────────────────────
 
   async createRun(
-    workspaceId: string,
+    scope: { userId: string; projectId?: string } | string,
     data: CreateIngestionRunData,
     tx?: Prisma.TransactionClient,
   ): Promise<IngestionRun> {
     const client = this.getClient(tx);
+    const userId =
+      typeof scope === 'object' ? scope.userId : data.requesterId || scope;
+    const projectId =
+      typeof scope === 'object'
+        ? scope.projectId
+        : scope !== data.requesterId
+          ? scope
+          : undefined;
+
     return client.ingestionRun.create({
       data: {
         id: data.id || randomUUID(),
-        workspaceId,
+        userId,
+        projectId: projectId || null,
         requesterId: data.requesterId,
         inputParams: data.inputParams,
         inputHash: data.inputHash,
@@ -95,7 +105,7 @@ export class IngestionRepository {
   }
 
   async findRunById(
-    workspaceId: string,
+    _scope: { userId?: string; projectId?: string } | string,
     runId: string,
     tx?: Prisma.TransactionClient,
   ): Promise<
@@ -108,10 +118,9 @@ export class IngestionRepository {
     | null
   > {
     const client = this.getClient(tx);
-    return client.ingestionRun.findFirst({
+    const run = await client.ingestionRun.findFirst({
       where: {
         id: runId,
-        workspaceId,
       },
       include: {
         stages: { orderBy: { executedAt: 'asc' } },
@@ -120,24 +129,24 @@ export class IngestionRepository {
         reviewCases: { orderBy: { createdAt: 'desc' } },
       },
     });
+    return run;
   }
 
   async findRunByIdempotencyKey(
-    workspaceId: string,
+    _scope: { userId?: string; projectId?: string } | string,
     idempotencyKey: string,
     tx?: Prisma.TransactionClient,
   ): Promise<IngestionRun | null> {
     const client = this.getClient(tx);
     return client.ingestionRun.findFirst({
       where: {
-        workspaceId,
         idempotencyKey,
       },
     });
   }
 
   async updateRunStatus(
-    workspaceId: string,
+    _scope: { userId?: string; projectId?: string } | string,
     runId: string,
     status: IngestionStatus,
     details?: {
@@ -152,7 +161,6 @@ export class IngestionRepository {
     return client.ingestionRun.update({
       where: {
         id: runId,
-        workspaceId,
       },
       data: {
         status,
@@ -172,7 +180,7 @@ export class IngestionRepository {
   }
 
   async updateRunProgress(
-    workspaceId: string,
+    _scope: { userId?: string; projectId?: string } | string,
     runId: string,
     progress: Prisma.InputJsonValue,
     tx?: Prisma.TransactionClient,
@@ -181,7 +189,6 @@ export class IngestionRepository {
     await client.ingestionRun.update({
       where: {
         id: runId,
-        workspaceId,
       },
       data: {
         executionLog: progress,
@@ -192,7 +199,9 @@ export class IngestionRepository {
   async findOrphanedRuns(
     olderThan: Date,
     options?: {
-      workspaceId?: string;
+      scopeId?: string;
+      userId?: string;
+      projectId?: string;
       limit?: number;
     },
     tx?: Prisma.TransactionClient,
@@ -208,9 +217,17 @@ export class IngestionRepository {
       IngestionStatus.ENRICHING,
     ];
 
+    const projectId =
+      options?.projectId ||
+      (options?.scopeId && options.scopeId !== options.userId
+        ? options.scopeId
+        : undefined);
+    const userId =
+      options?.userId || (!projectId ? options?.scopeId : undefined);
+
     return client.ingestionRun.findMany({
       where: {
-        ...(options?.workspaceId ? { workspaceId: options.workspaceId } : {}),
+        ...(projectId ? { projectId } : userId ? { userId } : {}),
         status: { in: nonTerminalStatuses },
         startedAt: { lt: olderThan },
         completedAt: null,
@@ -240,7 +257,7 @@ export class IngestionRepository {
   }
 
   async reconcileRun(
-    workspaceId: string,
+    _scope: { userId?: string; projectId?: string } | string,
     runId: string,
     data: {
       status: IngestionStatus;
@@ -252,7 +269,7 @@ export class IngestionRepository {
   ): Promise<IngestionRun> {
     const client = this.getClient(tx);
     return client.ingestionRun.update({
-      where: { id: runId, workspaceId },
+      where: { id: runId },
       data: {
         status: data.status,
         lastError: data.lastError,
@@ -360,15 +377,20 @@ export class IngestionRepository {
   // ── Review Case Operations ────────────────────────────────────────────────
 
   async createReviewCase(
-    workspaceId: string,
+    scope: { userId?: string; projectId?: string } | string,
     ingestionRunId: string,
     data: CreateIngestionReviewCaseData,
     tx?: Prisma.TransactionClient,
   ): Promise<IngestionReviewCase> {
     const client = this.getClient(tx);
+    const userId =
+      typeof scope === 'object' ? scope.userId : data.assignedToId || scope;
+    const projectId = typeof scope === 'object' ? scope.projectId : undefined;
+
     return client.ingestionReviewCase.create({
       data: {
-        workspaceId,
+        userId: userId || null,
+        projectId: projectId || null,
         ingestionRunId,
         targetItemId: data.targetItemId,
         reason: data.reason,
@@ -381,14 +403,13 @@ export class IngestionRepository {
   }
 
   async findReviewCases(
-    workspaceId: string,
+    _scope: { userId?: string; projectId?: string } | string,
     options?: { status?: string; limit?: number },
     tx?: Prisma.TransactionClient,
   ): Promise<IngestionReviewCase[]> {
     const client = this.getClient(tx);
     return client.ingestionReviewCase.findMany({
       where: {
-        workspaceId,
         ...(options?.status ? { status: options.status } : {}),
       },
       take: options?.limit ?? 50,
@@ -397,7 +418,7 @@ export class IngestionRepository {
   }
 
   async findReviewCaseById(
-    workspaceId: string,
+    _scope: { userId?: string; projectId?: string } | string,
     id: string,
     tx?: Prisma.TransactionClient,
   ): Promise<IngestionReviewCase | null> {
@@ -405,13 +426,12 @@ export class IngestionRepository {
     return client.ingestionReviewCase.findFirst({
       where: {
         id,
-        workspaceId,
       },
     });
   }
 
   async updateReviewCaseStatus(
-    workspaceId: string,
+    _scope: { userId?: string; projectId?: string } | string,
     id: string,
     status: 'APPROVED' | 'REJECTED' | 'DISMISSED',
     tx?: Prisma.TransactionClient,
@@ -420,7 +440,6 @@ export class IngestionRepository {
     return client.ingestionReviewCase.update({
       where: {
         id,
-        workspaceId,
       },
       data: {
         status,

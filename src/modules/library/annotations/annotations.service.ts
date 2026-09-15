@@ -343,7 +343,7 @@ export class AnnotationsService {
     tx: Prisma.TransactionClient,
     helpers: TransactionHelpers,
   ): Promise<void> {
-    const userId = command.userId || (command as any).workspaceId || 'system';
+    const userId = command.userId || 'system';
     const { entityId } = command;
     const existing = await tx.annotation.findUnique({
       where: { id: entityId },

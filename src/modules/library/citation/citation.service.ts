@@ -350,7 +350,6 @@ export class CitationService {
         const resolved = await this.metadataPort.resolve({
           query: input,
           userId,
-          workspaceId: userId,
         });
 
         if (
@@ -475,14 +474,27 @@ export class CitationService {
     itemId: string,
     styleId: CitationStyleId = 'apa-7th',
     index: number = 1,
+    projectId?: string,
   ) {
     const item: any = this.itemsService
-      ? await this.itemsService.getItem(userId, itemId)
+      ? await this.itemsService.getItem(userId, itemId, projectId)
       : await this.prisma?.item.findFirst({
           where: {
             id: itemId,
-            userId,
             deletedAt: null,
+            OR: [
+              { userId },
+              {
+                project: {
+                  members: {
+                    some: {
+                      userId,
+                    },
+                  },
+                },
+              },
+            ],
+            ...(projectId ? { projectId } : {}),
           },
           include: {
             contributors: {
@@ -578,14 +590,27 @@ export class CitationService {
     userId: string,
     itemIds: string[],
     styleId: CitationStyleId = 'apa-7th',
+    projectId?: string,
   ) {
     const items = this.itemsService
-      ? await this.itemsService.findByIds(userId, itemIds)
+      ? await this.itemsService.findByIds(userId, itemIds, projectId)
       : (await this.prisma?.item.findMany({
           where: {
             id: { in: itemIds },
-            userId,
             deletedAt: null,
+            OR: [
+              { userId },
+              {
+                project: {
+                  members: {
+                    some: {
+                      userId,
+                    },
+                  },
+                },
+              },
+            ],
+            ...(projectId ? { projectId } : {}),
           },
           include: {
             contributors: {

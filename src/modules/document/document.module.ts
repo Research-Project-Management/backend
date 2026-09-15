@@ -1,20 +1,30 @@
 import { Module } from '@nestjs/common';
 import { CoreModule } from './core/core.module';
-import { PageModule } from './page/page.module';
+import { NodeModule } from './node/node.module';
 import { HistoryModule } from './history/history.module';
-import { LatexModule } from './latex/latex.module';
-import { EngineModule } from './engine/engine.module';
+import { CompilerModule } from './compiler/compiler.module';
 import { CommentModule } from './comment/comment.module';
-import { DocumentFacade, DOCUMENT_FACADE } from './core/document.facade';
+import { TemplateModule } from './template/template.module';
+import { CollaborationModule } from './collaboration/collaboration.module';
+import { ExportModule } from './export/export.module';
+import { OutlineModule } from './outline/outline.module';
+import { AssetModule } from './asset/asset.module';
+import { SynctexModule } from './synctex/synctex.module';
+import { DocumentFacade, DOCUMENT_FACADE } from './document.facade';
 
 @Module({
   imports: [
     CoreModule,
-    PageModule,
+    NodeModule,
     HistoryModule,
-    LatexModule,
-    EngineModule,
+    CompilerModule,
     CommentModule,
+    TemplateModule,
+    CollaborationModule,
+    ExportModule,
+    OutlineModule,
+    AssetModule,
+    SynctexModule,
   ],
   providers: [
     DocumentFacade,
@@ -25,13 +35,18 @@ import { DocumentFacade, DOCUMENT_FACADE } from './core/document.facade';
   ],
   exports: [
     CoreModule,
-    PageModule,
+    NodeModule,
     DocumentFacade,
     DOCUMENT_FACADE,
     HistoryModule,
-    LatexModule,
-    EngineModule,
+    CompilerModule,
     CommentModule,
+    TemplateModule,
+    CollaborationModule,
+    ExportModule,
+    OutlineModule,
+    AssetModule,
+    SynctexModule,
   ],
 })
 export class DocumentModule {}

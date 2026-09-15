@@ -16,8 +16,39 @@ import { LibraryItemSource } from '../../outbox/outbox.events';
 import { ItemsService } from '../../items/items.service';
 import { NotesService } from '../../notes/notes.service';
 import { AttachmentsService } from '../../attachments/attachments.service';
-import { getFileContentPath } from '../../../storage/storage.port';
+import { getFileContentPath } from '@/modules/storage/storage.port';
 import { IngestionStatus, Prisma } from '@prisma/client';
+
+const SYSTEM_RESERVED_KEYS = new Set([
+  'id',
+  'userId',
+  'projectId',
+  'scopeId',
+  'workspaceId',
+  'tenantId',
+  'deletedAt',
+  'createdAt',
+  'updatedAt',
+  'version',
+  'citationCount',
+  'referenceCount',
+  'crossrefEnriched',
+  'retractionStatus',
+  'isRetracted',
+]);
+
+function sanitizeOverrides(
+  overrides?: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!overrides || typeof overrides !== 'object') return {};
+  const clean: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(overrides)) {
+    if (!SYSTEM_RESERVED_KEYS.has(key)) {
+      clean[key] = val;
+    }
+  }
+  return clean;
+}
 
 @Injectable()
 export class PipelineService {
@@ -41,7 +72,7 @@ export class PipelineService {
    */
   async executePipeline(
     runId: string,
-    workspaceId: string,
+    scopeId: string,
     envelope: IngestionSubmissionEnvelope,
   ): Promise<void> {
     // Stage 1: IDENTIFY & PARSE
@@ -49,13 +80,14 @@ export class PipelineService {
     const identifiedCandidates = await this.identify.execute(
       runId,
       envelope.payload,
-      workspaceId,
+      scopeId,
     );
+    const sanitizedOverrides = sanitizeOverrides(envelope.overrides);
     const initialCandidates = identifiedCandidates.map((candidate) => ({
       ...candidate,
       normalizedMetadata: {
         ...candidate.normalizedMetadata,
-        ...(envelope.overrides || {}),
+        ...sanitizedOverrides,
       },
     }));
     await this.repo.createStage(runId, {
@@ -98,7 +130,7 @@ export class PipelineService {
     // Stage 3: ENRICH (Crossref, OpenAlex, PubMed, arXiv)
     const enrichStart = Date.now();
     const enrichedCandidates = await this.enrich.execute(
-      workspaceId,
+      scopeId,
       normalizedCandidates,
     );
     await this.repo.createStage(runId, {
@@ -149,7 +181,7 @@ export class PipelineService {
           const itemDecision =
             await this.reconcile.execute(candidatesForRecord);
           const matchRes = await this.match.execute(
-            workspaceId,
+            scopeId,
             itemDecision.proposedItem,
           );
 
@@ -163,7 +195,7 @@ export class PipelineService {
             });
           } else {
             const created = await this.commit.execute(
-              workspaceId,
+              scopeId,
               itemDecision.proposedItem,
               {
                 collectionIds: envelope.collectionIds,
@@ -199,7 +231,7 @@ export class PipelineService {
         } finally {
           processed++;
           try {
-            await this.repo.updateRunProgress(workspaceId, runId, {
+            await this.repo.updateRunProgress(scopeId, runId, {
               total,
               processed,
               succeeded,
@@ -229,25 +261,20 @@ export class PipelineService {
         },
       });
 
-      await this.repo.updateRunStatus(
-        workspaceId,
-        runId,
-        IngestionStatus.READY,
-        {
-          itemId: createdItemIds[0],
-          completedAt: new Date(),
-          executionLog: {
-            total,
-            processed,
-            succeeded,
-            duplicates,
-            failed,
-            percentage: 100,
-            status: 'COMPLETED',
-            items: progressItems.slice(-50),
-          } as unknown as Prisma.InputJsonValue,
-        },
-      );
+      await this.repo.updateRunStatus(scopeId, runId, IngestionStatus.READY, {
+        itemId: createdItemIds[0],
+        completedAt: new Date(),
+        executionLog: {
+          total,
+          processed,
+          succeeded,
+          duplicates,
+          failed,
+          percentage: 100,
+          status: 'COMPLETED',
+          items: progressItems.slice(-50),
+        } as unknown as Prisma.InputJsonValue,
+      });
       return;
     }
 
@@ -267,7 +294,7 @@ export class PipelineService {
     // Stage 5: MATCH (Duplicate Detection)
     const matchStart = Date.now();
     const matchResult = await this.match.execute(
-      workspaceId,
+      scopeId,
       decision.proposedItem,
     );
     await this.repo.createStage(runId, {
@@ -290,7 +317,7 @@ export class PipelineService {
       if (this.items) {
         // Fetch current state to build a null-safe patch
         const existing = await this.items.getItem(
-          workspaceId,
+          scopeId,
           matchResult.targetItemId,
         );
 
@@ -360,7 +387,7 @@ export class PipelineService {
 
         if (Object.keys(enrichPatch).length > 0) {
           enrichedItem = await this.items.updateItem(
-            workspaceId,
+            scopeId,
             matchResult.targetItemId,
             undefined,
             enrichPatch,
@@ -384,15 +411,17 @@ export class PipelineService {
           const uploadedFileIdentifier = envelope.payload.fileId;
           const uploadedFilename = envelope.payload.filename || 'document.pdf';
           try {
-            await this.attachments.createAttachment({
-              workspaceId,
-              itemId: matchResult.targetItemId,
-              fileId: uploadedFileIdentifier,
-              filename: uploadedFilename,
-              url: getFileContentPath(uploadedFileIdentifier),
-              mimeType: 'application/pdf',
-              size: 0,
-            });
+            await this.attachments.createAttachment(
+              {
+                itemId: matchResult.targetItemId,
+                fileId: uploadedFileIdentifier,
+                filename: uploadedFilename,
+                url: getFileContentPath(uploadedFileIdentifier),
+                mimeType: 'application/pdf',
+                size: 0,
+              },
+              scopeId,
+            );
             this.logger.log(
               `[EXACT_MERGE] Attached uploaded file ${uploadedFileIdentifier} to item ${matchResult.targetItemId}`,
             );
@@ -460,32 +489,27 @@ export class PipelineService {
         },
       });
 
-      await this.repo.updateRunStatus(
-        workspaceId,
-        runId,
-        IngestionStatus.READY,
-        {
-          itemId: matchResult.targetItemId,
-          completedAt: new Date(),
-          executionLog: {
-            total: 1,
-            processed: 1,
-            succeeded: 0,
-            duplicates: 1,
-            failed: 0,
-            percentage: 100,
-            status: 'COMPLETED',
-            currentTitle: decision.proposedItem?.title || 'Document',
-            items: [
-              {
-                title: decision.proposedItem?.title || 'Document',
-                status: 'DUPLICATE',
-                itemId: matchResult.targetItemId,
-              },
-            ],
-          } as unknown as Prisma.InputJsonValue,
-        },
-      );
+      await this.repo.updateRunStatus(scopeId, runId, IngestionStatus.READY, {
+        itemId: matchResult.targetItemId,
+        completedAt: new Date(),
+        executionLog: {
+          total: 1,
+          processed: 1,
+          succeeded: 0,
+          duplicates: 1,
+          failed: 0,
+          percentage: 100,
+          status: 'COMPLETED',
+          currentTitle: decision.proposedItem?.title || 'Document',
+          items: [
+            {
+              title: decision.proposedItem?.title || 'Document',
+              status: 'DUPLICATE',
+              itemId: matchResult.targetItemId,
+            },
+          ],
+        } as unknown as Prisma.InputJsonValue,
+      });
       return;
     }
 
@@ -498,7 +522,7 @@ export class PipelineService {
         duplicateMatch: matchResult as unknown as Prisma.InputJsonValue,
       });
 
-      await this.repo.createReviewCase(workspaceId, runId, {
+      await this.repo.createReviewCase(scopeId, runId, {
         targetItemId: matchResult.targetItemId,
         reason: `Probable match with existing item "${matchResult.targetItemTitle}"`,
         evidence: {
@@ -512,7 +536,7 @@ export class PipelineService {
       });
 
       await this.repo.updateRunStatus(
-        workspaceId,
+        scopeId,
         runId,
         IngestionStatus.NEEDS_REVIEW,
         { completedAt: new Date() },
@@ -523,7 +547,7 @@ export class PipelineService {
     // Stage 6: COMMIT (create new Item via CommitStage)
     const commitStart = Date.now();
     const createdItem = await this.commit.execute(
-      workspaceId,
+      scopeId,
       decision.proposedItem,
       {
         collectionIds: envelope.collectionIds,
@@ -548,7 +572,7 @@ export class PipelineService {
       outputSnapshot: { itemId: createdItem?.id },
     });
 
-    await this.repo.updateRunStatus(workspaceId, runId, IngestionStatus.READY, {
+    await this.repo.updateRunStatus(scopeId, runId, IngestionStatus.READY, {
       itemId: createdItem?.id,
       completedAt: new Date(),
       executionLog: {

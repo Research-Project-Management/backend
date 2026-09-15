@@ -22,8 +22,9 @@ export class RetractionService {
   async checkItem(
     userId: string,
     itemId: string,
+    projectId?: string,
   ): Promise<RetractionCheckResult> {
-    const item = await this.repo.findItemById(userId, itemId);
+    const item = await this.repo.findItemById(userId, itemId, projectId);
     if (!item) {
       throw new NotFoundException(`Item ${itemId} not found`);
     }
@@ -70,8 +71,13 @@ export class RetractionService {
   async checkLibrary(
     userId: string,
     dto?: BatchCheckRetractionDto,
+    projectId?: string,
   ): Promise<{ scanned: number; newlyRetracted: number }> {
-    const items = await this.repo.findItemsForScan(userId, dto?.itemIds);
+    const items = await this.repo.findItemsForScan(
+      userId,
+      dto?.itemIds,
+      projectId,
+    );
     let newlyRetracted = 0;
 
     for (const item of items) {
@@ -106,8 +112,13 @@ export class RetractionService {
     };
   }
 
-  async setManualFlag(userId: string, itemId: string, dto: FlagRetractionDto) {
-    const item = await this.repo.findItemById(userId, itemId);
+  async setManualFlag(
+    userId: string,
+    itemId: string,
+    dto: FlagRetractionDto,
+    projectId?: string,
+  ) {
+    const item = await this.repo.findItemById(userId, itemId, projectId);
     if (!item) {
       throw new NotFoundException(`Item ${itemId} not found`);
     }
@@ -130,8 +141,8 @@ export class RetractionService {
     );
   }
 
-  async removeManualFlag(userId: string, itemId: string) {
-    const item = await this.repo.findItemById(userId, itemId);
+  async removeManualFlag(userId: string, itemId: string, projectId?: string) {
+    const item = await this.repo.findItemById(userId, itemId, projectId);
     if (!item) {
       throw new NotFoundException(`Item ${itemId} not found`);
     }
@@ -145,11 +156,11 @@ export class RetractionService {
     );
   }
 
-  async getRetractedItems(userId: string) {
-    return this.repo.findRetractedItems(userId);
+  async getRetractedItems(userId: string, projectId?: string) {
+    return this.repo.findRetractedItems(userId, projectId);
   }
 
-  async getStats(userId: string): Promise<RetractionStats> {
-    return this.repo.getStats(userId);
+  async getStats(userId: string, projectId?: string): Promise<RetractionStats> {
+    return this.repo.getStats(userId, projectId);
   }
 }

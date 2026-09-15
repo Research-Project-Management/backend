@@ -3,7 +3,11 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { FastifyReply } from 'fastify';
 import { Readable } from 'stream';
-import { StreamChatPayload, SyncChatResponse } from './types/engine.types';
+import {
+  StreamChatPayload,
+  SyncChatResponse,
+  StreamChatOptions,
+} from './types/engine.types';
 import { getErrorMessage, tryCatch } from '@/core/utils/error.util';
 
 @Injectable()
@@ -90,6 +94,7 @@ export class EngineService {
   async streamChat(
     payload: StreamChatPayload,
     reply: FastifyReply,
+    options?: StreamChatOptions,
   ): Promise<void> {
     reply.hijack();
     const rawRes = reply.raw;
@@ -105,6 +110,12 @@ export class EngineService {
     if (rawRes.socket) {
       rawRes.socket.setNoDelay(true);
       rawRes.socket.setTimeout(0);
+    }
+
+    if (options?.initialEvents && options.initialEvents.length > 0) {
+      for (const evt of options.initialEvents) {
+        rawRes.write(evt);
+      }
     }
 
     let delegationToken = '';
@@ -146,6 +157,13 @@ export class EngineService {
         this.fluxUrl;
       rawRes.write(`data: ${fallbackMsg}\n\n`);
       rawRes.write('data: [DONE]\n\n');
+      if (options?.onComplete) {
+        try {
+          await options.onComplete(fallbackMsg);
+        } catch (err) {
+          this.logger.warn(`Failed in onComplete fallback: ${err}`);
+        }
+      }
       rawRes.end();
       return;
     }
@@ -153,13 +171,54 @@ export class EngineService {
     const responseBody = result.value.body;
     if (!responseBody) {
       rawRes.write('data: [DONE]\n\n');
+      if (options?.onComplete) {
+        try {
+          await options.onComplete('');
+        } catch (err) {
+          this.logger.warn(`Failed in onComplete empty stream: ${err}`);
+        }
+      }
       rawRes.end();
       return;
     }
 
+    let accumulatedText = '';
+    let lineBuffer = '';
+
     const nodeStream = Readable.fromWeb(responseBody as any);
-    nodeStream.on('data', (chunk) => rawRes.write(chunk));
-    nodeStream.on('end', () => rawRes.end());
+    nodeStream.on('data', (chunk: Buffer | string) => {
+      rawRes.write(chunk);
+      const textChunk =
+        typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      lineBuffer += textChunk;
+      const lines = lineBuffer.split('\n');
+      lineBuffer = lines.pop() || '';
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6);
+          if (
+            data === '[DONE]' ||
+            data.startsWith('[META]') ||
+            data.startsWith('[ACTION]')
+          ) {
+            continue;
+          }
+          accumulatedText += data;
+        }
+      }
+    });
+
+    nodeStream.on('end', async () => {
+      if (options?.onComplete) {
+        try {
+          await options.onComplete(accumulatedText);
+        } catch (err) {
+          this.logger.warn(`Failed in onComplete stream: ${err}`);
+        }
+      }
+      rawRes.end();
+    });
+
     nodeStream.on('error', (err) => {
       this.logger.error('Stream pipe error:', err);
       rawRes.end();

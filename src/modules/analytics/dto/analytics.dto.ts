@@ -68,6 +68,18 @@ export class UserOverviewDto {
 
 export class ProjectWorkItemDistributionDto {
   @ApiProperty()
+  @IsNumber()
+  totalItems!: number;
+
+  @ApiProperty()
+  @IsNumber()
+  completedItems!: number;
+
+  @ApiProperty()
+  @IsNumber()
+  completionRate!: number;
+
+  @ApiProperty()
   @IsObject()
   state!: Record<string, number>;
 

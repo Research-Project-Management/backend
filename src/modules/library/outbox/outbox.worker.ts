@@ -276,7 +276,8 @@ export class OutboxWorker
           WHERE e.id = c.id
           RETURNING 
             e.id,
-            e.workspace_id AS "workspaceId",
+            e.user_id AS "userId",
+            e.project_id AS "projectId",
             e.aggregate_id AS "aggregateId",
             e.event_type AS "eventType",
             e.payload,
@@ -299,7 +300,8 @@ export class OutboxWorker
           return rows.map((r) => ({
             event: {
               id: r.id,
-              workspaceId: r.workspaceId,
+              userId: r.userId,
+              projectId: r.projectId,
               aggregateId: r.aggregateId,
               eventType: r.eventType,
               payload: r.payload,

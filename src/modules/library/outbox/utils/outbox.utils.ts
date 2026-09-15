@@ -4,12 +4,18 @@ import { createHash } from 'crypto';
  * Generates an idempotent deduplication key for outbox events.
  */
 export function generateOutboxDedupeKey(
-  workspaceId: string,
+  scope: { userId?: string; projectId?: string } | string,
   aggregateId: string,
   eventType: string,
   version: number,
 ): string {
-  return `${workspaceId}:${aggregateId}:${eventType}:v${version}`;
+  const scopeStr =
+    typeof scope === 'object'
+      ? scope.projectId
+        ? `proj:${scope.projectId}`
+        : `user:${scope.userId}`
+      : scope;
+  return `${scopeStr}:${aggregateId}:${eventType}:v${version}`;
 }
 
 /**

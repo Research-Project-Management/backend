@@ -32,14 +32,19 @@ import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
 import { ProjectRoleGuard } from '@/modules/iam/authz/guards/role.guard';
 import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
 
+import { AnalyticsService } from '@/modules/analytics/analytics.service';
+
 @ApiTags('Projects')
 @ApiBearerAuth('JWT-auth')
-@Controller('api')
+@Controller(['api/projects', 'api/project'])
 @UseGuards(JwtAuthGuard)
 export class CoreController {
-  constructor(private readonly projectService: CoreService) {}
+  constructor(
+    private readonly projectService: CoreService,
+    private readonly analyticsService: AnalyticsService,
+  ) {}
 
-  @Get('projects')
+  @Get()
   @ApiOperation({
     summary: 'List user projects (My Projects & Shared with Me)',
   })
@@ -55,7 +60,7 @@ export class CoreController {
     return this.projectService.findUserProjects(userId, query);
   }
 
-  @Post('projects')
+  @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create a new project for current user' })
   @ApiResponse({
@@ -70,7 +75,7 @@ export class CoreController {
     return this.projectService.create(userId, dto);
   }
 
-  @Get('projects/archived')
+  @Get('archived')
   @ApiOperation({ summary: 'List all archived projects for current user' })
   @ApiResponse({
     status: 200,
@@ -81,7 +86,29 @@ export class CoreController {
     return this.projectService.findArchived(userId);
   }
 
-  @Get(['project/:projectId', 'projects/:projectId'])
+  @Get('analytics')
+  @ApiOperation({
+    summary: 'Get project analytics via query parameter or user overview',
+  })
+  async getProjectAnalyticsByQuery(
+    @Query('projectId') projectId?: string,
+    @CurrentUser('id') userId?: string,
+  ) {
+    if (projectId) {
+      return this.analyticsService.getProjectAnalytics(projectId);
+    }
+    return this.analyticsService.getUserOverview(userId || '');
+  }
+
+  @Get(':projectId/analytics')
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ApiOperation({ summary: 'Get project dimensional insights and analytics' })
+  async getProjectAnalytics(@Param('projectId') projectId: string) {
+    return this.analyticsService.getProjectAnalytics(projectId);
+  }
+
+  @Get(':projectId')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get a project by ID' })
@@ -97,7 +124,7 @@ export class CoreController {
     return this.projectService.findById(projectId, userId);
   }
 
-  @Get(['project/:projectId/overview', 'projects/:projectId/overview'])
+  @Get(':projectId/overview')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get project overview and statistics' })
@@ -112,7 +139,7 @@ export class CoreController {
     return this.projectService.findOverview(projectId, userId);
   }
 
-  @Put(['project/:projectId', 'projects/:projectId'])
+  @Put(':projectId')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner')
   @ApiOperation({ summary: 'Update project settings (Owner only)' })
@@ -129,7 +156,7 @@ export class CoreController {
     return this.projectService.update(projectId, dto, actorId);
   }
 
-  @Delete(['project/:projectId', 'projects/:projectId'])
+  @Delete(':projectId')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner')
   @ApiOperation({ summary: 'Soft-delete a project (Owner only)' })
@@ -144,7 +171,7 @@ export class CoreController {
     return this.projectService.softDelete(projectId, actorId);
   }
 
-  @Post(['project/:projectId/restore', 'projects/:projectId/restore'])
+  @Post(':projectId/restore')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner')
   @ApiOperation({ summary: 'Restore a soft-deleted project (Owner only)' })
@@ -159,7 +186,7 @@ export class CoreController {
     return this.projectService.restore(projectId, actorId);
   }
 
-  @Patch(['project/:projectId/archive', 'projects/:projectId/archive'])
+  @Patch(':projectId/archive')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner')
   @ApiOperation({
@@ -176,12 +203,7 @@ export class CoreController {
     return this.projectService.archive(projectId, userId);
   }
 
-  @Patch([
-    'project/:projectId/unarchive',
-    'projects/:projectId/unarchive',
-    'project/:projectId/restore-archive',
-    'projects/:projectId/restore-archive',
-  ])
+  @Patch([':projectId/unarchive', ':projectId/restore-archive'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner')
   @ApiOperation({ summary: 'Unarchive/restore a project to active status' })

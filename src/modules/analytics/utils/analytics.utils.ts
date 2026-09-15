@@ -12,6 +12,7 @@ import {
 export interface WorkItemWithAssigneeInfo {
   columnId?: string | null;
   priority?: string | null;
+  completed?: boolean;
   assigneeId?: string | null;
   assignee?: {
     name?: string | null;
@@ -30,6 +31,11 @@ export interface CycleWorkItemMetricSource {
 export function aggregateProjectDistributions(
   workItems: WorkItemWithAssigneeInfo[],
 ): ProjectDistributionResult {
+  const totalItems = workItems.length;
+  const completedItems = workItems.filter((i) => Boolean(i.completed)).length;
+  const completionRate =
+    totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0;
+
   const stateDistribution: Record<string, number> = {};
   const priorityDistribution: Record<string, number> = {};
   const assigneeMap = new Map<string, AssigneeDistributionItem>();
@@ -58,6 +64,9 @@ export function aggregateProjectDistributions(
   }
 
   return {
+    totalItems,
+    completedItems,
+    completionRate,
     state: stateDistribution,
     priority: priorityDistribution,
     assignee: Array.from(assigneeMap.values()),

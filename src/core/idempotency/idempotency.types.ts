@@ -7,8 +7,9 @@ export interface IdempotencyCheckResult {
 
 export interface SaveIdempotencyResultInput {
   idempotencyKey: string;
-  workspaceId: string;
-  requestHash: string;
+  userId: string;
+  projectId?: string;
+  requestHash?: string;
   statusCode: number;
   responseBody: unknown;
   ttlSeconds?: number;

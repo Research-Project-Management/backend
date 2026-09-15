@@ -11,7 +11,7 @@ export type ClaimResult =
 
 /**
  * Helper to determine if a database error is strictly a unique constraint violation
- * on the idempotency table's (workspaceId, idempotencyKey) compound key.
+ * on the idempotency table's (scopeId, idempotencyKey) compound key.
  */
 export function isIdempotencyUniqueViolation(error: unknown): boolean {
   if (!error) return false;
@@ -49,17 +49,16 @@ export function isIdempotencyUniqueViolation(error: unknown): boolean {
         .toLowerCase()
         .replace(/[`"'\s]/g, ''),
     );
-    const hasWorkspace =
-      norm.includes('workspaceid') || norm.includes('workspace_id');
+    const hasScope = norm.includes('scopeid') || norm.includes('scope_id');
     const hasKey =
       norm.includes('idempotencykey') || norm.includes('idempotency_key');
-    if (hasWorkspace && hasKey && norm.length === 2) {
+    if (hasScope && hasKey && norm.length === 2) {
       return true;
     }
     return false;
   }
 
-  // 2. Specific known unique constraint name strings for workspaceId + idempotencyKey
+  // 2. Specific known unique constraint name strings for scopeId + idempotencyKey
   const rawConstraint =
     (typeof target === 'string' && target.trim().length > 0
       ? target
@@ -79,12 +78,12 @@ export function isIdempotencyUniqueViolation(error: unknown): boolean {
   }
 
   const KNOWN_CONSTRAINTS = [
-    'idempotency_records_workspace_id_idempotency_key_key',
-    'idempotency_record_workspace_id_idempotency_key_key',
-    'idempotencyrecord_workspaceid_idempotencykey_key',
-    'idempotency_records_workspaceid_idempotencykey_key',
-    'workspace_id_idempotency_key',
-    'workspaceid_idempotencykey',
+    'idempotency_records_scope_id_idempotency_key_key',
+    'idempotency_record_scope_id_idempotency_key_key',
+    'idempotencyrecord_scopeid_idempotencykey_key',
+    'idempotency_records_scopeid_idempotencykey_key',
+    'scope_id_idempotency_key',
+    'scopeid_idempotencykey',
   ];
 
   for (const known of KNOWN_CONSTRAINTS) {
@@ -111,7 +110,7 @@ export class IdempotencyRepository {
   }
 
   async claim(
-    workspaceId: string,
+    scope: { userId: string; projectId?: string } | string,
     idempotencyKey: string,
     requestHash: string,
     ttlSeconds: number = 86400, // 24 hours
@@ -119,11 +118,14 @@ export class IdempotencyRepository {
     const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
     const leaseToken = expiresAt.toISOString();
     const keyFingerprint = IdempotencyRepository.getFingerprint(idempotencyKey);
+    const userId = typeof scope === 'object' ? scope.userId : scope;
+    const projectId = typeof scope === 'object' ? scope.projectId : undefined;
 
     try {
       await this.prisma.idempotencyRecord.create({
         data: {
-          workspaceId,
+          userId,
+          projectId: projectId || null,
           idempotencyKey,
           requestHash,
           status: 'in_progress',
@@ -139,12 +141,11 @@ export class IdempotencyRepository {
         throw err;
       }
 
-      const existing = await this.prisma.idempotencyRecord.findUnique({
+      const existing = await this.prisma.idempotencyRecord.findFirst({
         where: {
-          workspaceId_idempotencyKey: {
-            workspaceId,
-            idempotencyKey,
-          },
+          userId,
+          projectId: projectId || null,
+          idempotencyKey,
         },
       });
 
@@ -154,7 +155,7 @@ export class IdempotencyRepository {
 
       if (existing.requestHash !== requestHash) {
         this.logger.warn(
-          `Idempotency payload mismatch for workspace ${workspaceId} (key fp: ${keyFingerprint})`,
+          `Idempotency payload mismatch for user ${userId} / project ${projectId} (key fp: ${keyFingerprint})`,
         );
         return { status: 'mismatch' };
       }
@@ -196,14 +197,17 @@ export class IdempotencyRepository {
 
   async markSucceededInTx(
     tx: Prisma.TransactionClient,
-    workspaceId: string,
+    scope: { userId: string; projectId?: string } | string,
     idempotencyKey: string,
     statusCode: number,
     responseBody: any,
     leaseToken?: string,
   ): Promise<boolean> {
+    const userId = typeof scope === 'object' ? scope.userId : scope;
+    const projectId = typeof scope === 'object' ? scope.projectId : undefined;
     const where: Prisma.IdempotencyRecordWhereInput = {
-      workspaceId,
+      userId,
+      projectId: projectId || null,
       idempotencyKey,
       status: 'in_progress',
     };
@@ -220,7 +224,7 @@ export class IdempotencyRepository {
     });
     if (res.count === 0 && leaseToken) {
       this.logger.warn(
-        `Lost idempotency lease on markSucceededInTx for workspace ${workspaceId} (key fp: ${IdempotencyRepository.getFingerprint(idempotencyKey)})`,
+        `Lost idempotency lease on markSucceededInTx for user ${userId} / project ${projectId} (key fp: ${IdempotencyRepository.getFingerprint(idempotencyKey)})`,
       );
       return false;
     }
@@ -228,14 +232,17 @@ export class IdempotencyRepository {
   }
 
   async markSucceeded(
-    workspaceId: string,
+    scope: { userId: string; projectId?: string } | string,
     idempotencyKey: string,
     statusCode: number,
     responseBody: any,
     leaseToken?: string,
   ): Promise<boolean> {
-    const where: any = {
-      workspaceId,
+    const userId = typeof scope === 'object' ? scope.userId : scope;
+    const projectId = typeof scope === 'object' ? scope.projectId : undefined;
+    const where: Prisma.IdempotencyRecordWhereInput = {
+      userId,
+      projectId: projectId || null,
       idempotencyKey,
       status: 'in_progress',
     };
@@ -252,7 +259,7 @@ export class IdempotencyRepository {
     });
     if (res.count === 0 && leaseToken) {
       this.logger.warn(
-        `Lost idempotency lease on markSucceeded for workspace ${workspaceId} (key fp: ${IdempotencyRepository.getFingerprint(idempotencyKey)})`,
+        `Lost idempotency lease on markSucceeded for user ${userId} / project ${projectId} (key fp: ${IdempotencyRepository.getFingerprint(idempotencyKey)})`,
       );
       return false;
     }
@@ -260,12 +267,15 @@ export class IdempotencyRepository {
   }
 
   async markFailed(
-    workspaceId: string,
+    scope: { userId: string; projectId?: string } | string,
     idempotencyKey: string,
     leaseToken?: string,
   ): Promise<boolean> {
-    const where: any = {
-      workspaceId,
+    const userId = typeof scope === 'object' ? scope.userId : scope;
+    const projectId = typeof scope === 'object' ? scope.projectId : undefined;
+    const where: Prisma.IdempotencyRecordWhereInput = {
+      userId,
+      projectId: projectId || null,
       idempotencyKey,
       status: 'in_progress',
     };
@@ -276,6 +286,7 @@ export class IdempotencyRepository {
       where,
       data: {
         status: 'failed',
+        statusCode: 500,
       },
     });
     return res.count > 0;

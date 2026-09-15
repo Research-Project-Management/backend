@@ -33,3 +33,7 @@ export interface SyncChatResponse {
   widgets?: Array<Record<string, unknown>>;
   [key: string]: unknown;
 }
+export interface StreamChatOptions {
+  initialEvents?: string[];
+  onComplete?: (accumulatedText: string) => Promise<void> | void;
+}

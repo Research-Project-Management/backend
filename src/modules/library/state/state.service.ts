@@ -242,15 +242,27 @@ export class StateService {
       const item = await this.prisma.item.findFirst({
         where: {
           id: itemId,
-          userId,
           deletedAt: null,
         },
-        select: { id: true },
+        select: { id: true, userId: true, projectId: true },
       });
       if (!item) {
         throw new NotFoundException(`Item not found: ${itemId}`);
       }
-      return;
+      if (item.userId === userId) return;
+      if (item.projectId) {
+        const member = await this.prisma.projectMember.findUnique({
+          where: {
+            projectId_userId: {
+              projectId: item.projectId,
+              userId,
+            },
+          },
+          select: { id: true },
+        });
+        if (member) return;
+      }
+      throw new NotFoundException(`Item not found: ${itemId}`);
     }
     throw new NotFoundException(`Item not found: ${itemId}`);
   }

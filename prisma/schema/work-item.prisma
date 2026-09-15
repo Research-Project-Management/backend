@@ -21,9 +21,15 @@ enum ViewAccess {
 }
 
 enum LabelType {
-  sticky
-  cycle
   work_item
+  page
+}
+
+enum WorkItemRelationType {
+  blocks
+  blocked_by
+  relates_to
+  duplicate_of
 }
 
 model WorkItemState {
@@ -56,7 +62,6 @@ model Cycle {
   status            CycleStatus @default(planned)
   milestones        Json?       @default("[]")
   deliverables      Json?       @default("[]")
-  labels            String[]    @default([])
   order             Int         @default(0)
   startedAt         DateTime?   @map("started_at") @db.Timestamptz(6)
   endedAt           DateTime?   @map("ended_at") @db.Timestamptz(6)
@@ -114,7 +119,12 @@ model WorkItem {
   deletedAt      DateTime?         @map("deleted_at") @db.Timestamptz(6)
 
   // Relations
-  comments       WorkItemComment[]
+  comments              WorkItemComment[]
+  assignees             WorkItemAssignee[]
+  labelAssignments      WorkItemLabelAssignment[]
+  outgoingRelations     WorkItemRelation[]        @relation("SourceWorkItemRelations")
+  incomingRelations     WorkItemRelation[]        @relation("TargetWorkItemRelations")
+  entityLinks           WorkItemEntityLink[]
 
   @@index([projectId, columnId, rank])
   @@index([projectId, columnId, deletedAt, rank])
@@ -293,6 +303,7 @@ model Label {
   project     Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   createdById String    @map("created_by_id") @db.Uuid
   createdBy   User      @relation("UserCreatedLabels", fields: [createdById], references: [id], onDelete: Cascade)
+  workItemAssignments WorkItemLabelAssignment[] @relation("WorkItemLabelAssignments")
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -302,3 +313,62 @@ model Label {
   @@index([createdById])
   @@map("labels")
 }
+
+model WorkItemAssignee {
+  workItemId String   @map("work_item_id") @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  isPrimary  Boolean  @default(false) @map("is_primary")
+  assignedAt DateTime @default(now()) @map("assigned_at") @db.Timestamptz(6)
+
+  workItem   WorkItem @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+  user       User     @relation("WorkItemCoAssignees", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([workItemId, userId])
+  @@index([userId])
+  @@map("work_item_assignees")
+}
+
+model WorkItemRelation {
+  id             String               @id @default(uuid()) @db.Uuid
+  sourceId       String               @map("source_id") @db.Uuid
+  targetId       String               @map("target_id") @db.Uuid
+  type           WorkItemRelationType
+  createdAt      DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  sourceWorkItem WorkItem             @relation("SourceWorkItemRelations", fields: [sourceId], references: [id], onDelete: Cascade)
+  targetWorkItem WorkItem             @relation("TargetWorkItemRelations", fields: [targetId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId, targetId, type])
+  @@index([targetId])
+  @@map("work_item_relations")
+}
+
+model WorkItemLabelAssignment {
+  workItemId String   @map("work_item_id") @db.Uuid
+  labelId    String   @map("label_id") @db.Uuid
+  assignedAt DateTime @default(now()) @map("assigned_at") @db.Timestamptz(6)
+
+  workItem   WorkItem @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+  label      Label    @relation("WorkItemLabelAssignments", fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@id([workItemId, labelId])
+  @@index([labelId])
+  @@map("work_item_label_assignments")
+}
+
+model WorkItemEntityLink {
+  id          String     @id @default(uuid()) @db.Uuid
+  workItemId  String     @map("work_item_id") @db.Uuid
+  entityType  EntityType @map("entity_type")
+  entityId    String     @map("entity_id") @db.Uuid
+  description String?    @default("")
+  metadata    Json?      @default("{}")
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  workItem    WorkItem   @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+
+  @@unique([workItemId, entityType, entityId])
+  @@index([entityType, entityId])
+  @@map("work_item_entity_links")
+}
+

@@ -57,6 +57,22 @@ export class CoreService {
     await Promise.all(deletions).catch(() => null);
   }
 
+  private async buildLabelLookup(
+    projectId: string,
+    labelIds: string[],
+  ): Promise<Map<string, { name: string; color: string }>> {
+    const lookup = new Map<string, { name: string; color: string }>();
+    if (!labelIds.length) return lookup;
+    const labels = await this.workItemRepository.findLabelsByIds(
+      projectId,
+      labelIds,
+    );
+    for (const l of labels) {
+      lookup.set(l.id, { name: l.name, color: l.color });
+    }
+    return lookup;
+  }
+
   // ── Queries ─────────────────────────────────────────────────────────────────
 
   async getProjectWorkItems(
@@ -96,7 +112,9 @@ export class CoreService {
         projectId,
         filterOptions,
       );
-      return records.map(formatWorkItem).filter(Boolean);
+      const allLabelIds = records.flatMap((r) => r.labels || []);
+      const labelLookup = await this.buildLabelLookup(projectId, allLabelIds);
+      return records.map((r) => formatWorkItem(r, labelLookup)).filter(Boolean);
     };
 
     if (this.cache && (isUnfiltered || isSimpleCycle)) {
@@ -113,7 +131,11 @@ export class CoreService {
         WORK_ITEM_REDIS_KEYS.workItem(workItemId),
       );
       if (cached) {
-        const formatted = formatWorkItem(cached);
+        const labelLookup = await this.buildLabelLookup(
+          cached.projectId,
+          cached.labels || [],
+        );
+        const formatted = formatWorkItem(cached, labelLookup);
         return { workItem: formatted, item: formatted };
       }
     }
@@ -125,7 +147,11 @@ export class CoreService {
         item,
         600,
       );
-    const formatted = formatWorkItem(item);
+    const labelLookup = await this.buildLabelLookup(
+      item.projectId,
+      item.labels || [],
+    );
+    const formatted = formatWorkItem(item, labelLookup);
     return { workItem: formatted, item: formatted };
   }
 
@@ -142,9 +168,16 @@ export class CoreService {
 
     const defaultState =
       rawProject.states?.find((s) => s.isDefault) || rawProject.states?.[0];
-    const targetColumn =
-      createWorkItemDto.columnId ||
-      (defaultState ? defaultState.id : 'backlog');
+    const targetState =
+      rawProject.states?.find(
+        (s) =>
+          s.id === createWorkItemDto.columnId ||
+          s.name.toLowerCase() === createWorkItemDto.columnId?.toLowerCase() ||
+          s.group.toLowerCase() === createWorkItemDto.columnId?.toLowerCase(),
+      ) || defaultState;
+    const targetColumn = targetState
+      ? targetState.id
+      : createWorkItemDto.columnId;
     const columnCount = await this.workItemRepository.countColumnWorkItems(
       projectId,
       targetColumn,
@@ -157,7 +190,6 @@ export class CoreService {
     const workItem = await this.workItemRepository.createWorkItem({
       title: createWorkItemDto.title,
       content: createWorkItemDto.content || createWorkItemDto.description || '',
-      columnId: targetColumn,
       rank: createWorkItemDto.rank ?? columnCount,
       priority: mapPriority(createWorkItemDto.priority),
       identifier,
@@ -166,7 +198,8 @@ export class CoreService {
       completed:
         createWorkItemDto.completed !== undefined
           ? createWorkItemDto.completed
-          : isStateCompleted(targetColumn),
+          : targetState?.group === 'completed' ||
+            isStateCompleted(targetColumn || ''),
       relations: createWorkItemDto.relations || [],
       startDate: createWorkItemDto.startDate
         ? new Date(createWorkItemDto.startDate)
@@ -184,6 +217,7 @@ export class CoreService {
             : [],
       project: { connect: { id: projectId } },
       author: { connect: { id: authorId } },
+      ...(targetColumn ? { state: { connect: { id: targetColumn } } } : {}),
       ...(createWorkItemDto.assigneeId
         ? { assignee: { connect: { id: createWorkItemDto.assigneeId } } }
         : {}),
@@ -192,6 +226,15 @@ export class CoreService {
         : {}),
       ...(parentId ? { parentWorkItem: { connect: { id: parentId } } } : {}),
     });
+
+    if (createWorkItemDto.attachments) {
+      await this.workItemRepository.saveInitialAttachments(
+        workItem.id,
+        projectId,
+        authorId,
+        createWorkItemDto.attachments,
+      );
+    }
 
     await this.invalidateWorkItemCache(
       projectId,
@@ -207,7 +250,19 @@ export class CoreService {
       identifier: workItem.identifier,
       sequenceNumber: workItem.sequenceNumber,
     });
-    const formatted = formatWorkItem(workItem);
+    const labelLookup = await this.buildLabelLookup(
+      workItem.projectId,
+      workItem.labels || [],
+    );
+    const formatted = formatWorkItem(
+      {
+        ...workItem,
+        ...(createWorkItemDto.attachments
+          ? { attachments: createWorkItemDto.attachments }
+          : {}),
+      },
+      labelLookup,
+    );
     return { workItem: formatted, item: formatted };
   }
 
@@ -237,6 +292,32 @@ export class CoreService {
 
     const parentId = updateWorkItemDto.parentWorkItemId;
 
+    let targetIsCompleted: boolean | undefined;
+    let targetColumnId: string | undefined;
+    if (updateWorkItemDto.columnId !== undefined) {
+      let targetState = await this.workItemRepository.findStateById(
+        updateWorkItemDto.columnId,
+      );
+      if (!targetState) {
+        const rawProject = await this.workItemRepository.findProjectWithColumns(
+          existing.projectId,
+        );
+        targetState = rawProject?.states?.find(
+          (s) =>
+            s.id === updateWorkItemDto.columnId ||
+            s.name.toLowerCase() ===
+              updateWorkItemDto.columnId?.toLowerCase() ||
+            s.group.toLowerCase() === updateWorkItemDto.columnId?.toLowerCase(),
+        ) as any;
+      }
+      targetColumnId = targetState
+        ? targetState.id
+        : updateWorkItemDto.columnId;
+      targetIsCompleted = targetState
+        ? targetState.group === 'completed'
+        : isStateCompleted(targetColumnId);
+    }
+
     const updated = await this.workItemRepository.updateWorkItem(existing.id, {
       ...(updateWorkItemDto.title !== undefined && {
         title: updateWorkItemDto.title,
@@ -247,13 +328,17 @@ export class CoreService {
       ...(updateWorkItemDto.description !== undefined && {
         content: updateWorkItemDto.description,
       }),
-      ...(updateWorkItemDto.columnId !== undefined && {
-        columnId: updateWorkItemDto.columnId,
-        completed: isStateCompleted(updateWorkItemDto.columnId),
+      ...(targetColumnId !== undefined && {
+        state: { connect: { id: targetColumnId } },
+        completed:
+          updateWorkItemDto.completed !== undefined
+            ? updateWorkItemDto.completed
+            : targetIsCompleted,
       }),
-      ...(updateWorkItemDto.completed !== undefined && {
-        completed: updateWorkItemDto.completed,
-      }),
+      ...(updateWorkItemDto.completed !== undefined &&
+        targetColumnId === undefined && {
+          completed: updateWorkItemDto.completed,
+        }),
       ...(updateWorkItemDto.priority !== undefined && {
         priority: mapPriority(updateWorkItemDto.priority),
       }),
@@ -313,7 +398,11 @@ export class CoreService {
       updateWorkItemDto,
       userId,
     );
-    const formatted = formatWorkItem(updated);
+    const labelLookup = await this.buildLabelLookup(
+      updated.projectId,
+      updated.labels || [],
+    );
+    const formatted = formatWorkItem(updated, labelLookup);
     return { workItem: formatted, item: formatted };
   }
 
@@ -345,12 +434,18 @@ export class CoreService {
       targetColumn,
     );
 
+    const targetState =
+      await this.workItemRepository.findStateById(targetColumn);
+    const isTargetDone = targetState
+      ? targetState.group === 'completed'
+      : isStateCompleted(targetColumn);
+
     const updates = this.rankHandler.calculateReorder(
       columnItems,
       item.id,
       targetColumn,
       targetRank,
-      undefined,
+      () => isTargetDone,
       item,
     );
 
@@ -429,7 +524,12 @@ export class CoreService {
     const data: any = {};
     if (payload.columnId !== undefined) {
       data.columnId = payload.columnId;
-      data.completed = isStateCompleted(payload.columnId);
+      const targetState = await this.workItemRepository.findStateById(
+        payload.columnId,
+      );
+      data.completed = targetState
+        ? targetState.group === 'completed'
+        : isStateCompleted(payload.columnId);
     }
     if (payload.assigneeId !== undefined) data.assigneeId = payload.assigneeId;
     if (payload.priority !== undefined)

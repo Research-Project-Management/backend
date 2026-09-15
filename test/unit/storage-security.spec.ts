@@ -1,7 +1,17 @@
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { validateMagicBytes, isBlockedExtension, sanitizeFilename } from '@/modules/storage/file/utils/file-validator.util';
-import { R2Service } from '@/modules/storage/r2/r2.service';
-import { StorageAdapter } from '@/modules/storage/storage.adapter';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  validateMagicBytes,
+  isBlockedExtension,
+  sanitizeFilename,
+} from '@/modules/storage/domain/value-objects/file-validator.util';
+import { R2Service } from '@/modules/storage/infrastructure/drivers/r2.service';
+import { StorageAccessPolicy } from '@/modules/storage/application/policies/storage-access.policy';
+import { StorageNode } from '@/modules/storage/domain/entities/storage-node.entity';
+import { FileScope } from '@/modules/storage/domain/value-objects/file-scope.vo';
 import { Readable } from 'stream';
 
 describe('Storage & File Security Suite', () => {
@@ -24,12 +34,16 @@ describe('Storage & File Security Suite', () => {
     it('should sanitize filenames preventing path traversal and special characters', () => {
       expect(sanitizeFilename('../../../etc/passwd')).toBe('passwd');
       expect(sanitizeFilename('..\\..\\secret.env')).toBe('secret.env');
-      expect(sanitizeFilename('my paper; rm -rf.pdf')).toBe('my_paper__rm_-rf.pdf');
+      expect(sanitizeFilename('my paper; rm -rf.pdf')).toBe(
+        'my_paper__rm_-rf.pdf',
+      );
     });
 
     it('should reject claimed PDF files that lack valid PDF magic bytes (%PDF-)', () => {
       // Fake PDF that is actually plain text or HTML
-      const fakePdfBuffer = Buffer.from('<html><script>alert(1)</script></html>');
+      const fakePdfBuffer = Buffer.from(
+        '<html><script>alert(1)</script></html>',
+      );
       expect(() => {
         validateMagicBytes(fakePdfBuffer, 'application/pdf', 'paper.pdf');
       }).toThrow(BadRequestException);
@@ -50,7 +64,9 @@ describe('Storage & File Security Suite', () => {
     });
 
     it('should accept authentic PNG files with 0x89PNG header', () => {
-      const realPngBuffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+      const realPngBuffer = Buffer.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00,
+      ]);
       expect(() => {
         validateMagicBytes(realPngBuffer, 'image/png', 'figure.png');
       }).not.toThrow();
@@ -59,7 +75,11 @@ describe('Storage & File Security Suite', () => {
     it('should reject Windows PE executables disguised as documents', () => {
       const fakeExecutable = Buffer.from([0x4d, 0x5a, 0x90, 0x00, 0x03]); // MZ header
       expect(() => {
-        validateMagicBytes(fakeExecutable, 'application/octet-stream', 'doc.bin');
+        validateMagicBytes(
+          fakeExecutable,
+          'application/octet-stream',
+          'doc.bin',
+        );
       }).toThrow(BadRequestException);
     });
 
@@ -96,76 +116,144 @@ describe('Storage & File Security Suite', () => {
     });
 
     it('should safely resolve legitimate keys strictly inside uploads directory', () => {
-      const legitimatePath = r2Service.getLocalFilePath('users/user-123/paper.pdf');
+      const legitimatePath = r2Service.getLocalFilePath(
+        'users/user-123/paper.pdf',
+      );
       expect(legitimatePath).toContain('uploads');
       expect(legitimatePath).not.toContain('..');
     });
   });
 
-  describe('StorageAdapter - BOLA / IDOR Authorization Protection', () => {
-    let storageAdapter: StorageAdapter;
+  describe('StorageAccessPolicy - 5-Tier ReBAC & BOLA/IDOR Protection', () => {
+    let accessPolicy: StorageAccessPolicy;
     let mockPrisma: any;
-    let mockR2Service: any;
+    let mockNodeRepo: any;
 
     beforeEach(() => {
       mockPrisma = {
-        file: {
+        fileShare: {
+          findUnique: jest.fn(),
+        },
+        projectMember: {
           findUnique: jest.fn(),
         },
       };
-      mockR2Service = {
-        getObjectStream: jest.fn().mockResolvedValue({
-          Body: Readable.from([Buffer.from('%PDF-1.7 sample data')]),
-        }),
+      mockNodeRepo = {
+        findById: jest.fn(),
       };
-      storageAdapter = new StorageAdapter(mockPrisma, mockR2Service);
+      accessPolicy = new StorageAccessPolicy(mockPrisma, mockNodeRepo);
     });
 
-    it('should throw ForbiddenException when a user attempts to read another user file without permission', async () => {
+    it('should throw ForbiddenException when user attempts to access another user private file without permission', async () => {
       const fileId = 'a0000000-0000-4000-8000-000000000001';
       const fileOwnerId = 'owner-user-id';
       const attackerId = 'attacker-user-id';
 
-      mockPrisma.file.findUnique.mockResolvedValue({
-        id: fileId,
-        authorId: fileOwnerId,
-        trashedAt: null,
-        key: 'users/owner/uploads/test.pdf',
-        sharedWith: [],
-        linkedToType: 'Personal',
-        linkedToId: fileOwnerId,
-      });
+      mockNodeRepo.findById.mockResolvedValue(
+        new StorageNode({
+          id: fileId,
+          name: 'private_paper.pdf',
+          isFolder: false,
+          size: 1024n,
+          authorId: fileOwnerId,
+          scope: FileScope.Personal,
+        }),
+      );
+      mockPrisma.fileShare.findUnique.mockResolvedValue(null);
 
       await expect(
-        storageAdapter.readOwnedFile({
-          fileId,
-          userId: attackerId,
-        }),
+        accessPolicy.assertCanAccess(attackerId, fileId, 'read'),
       ).rejects.toThrow(ForbiddenException);
     });
 
-    it('should allow read access when caller is the verified file owner', async () => {
+    it('should allow read access when caller is the verified author/owner', async () => {
       const fileId = 'a0000000-0000-4000-8000-000000000001';
       const fileOwnerId = 'owner-user-id';
 
-      mockPrisma.file.findUnique.mockResolvedValue({
-        id: fileId,
-        authorId: fileOwnerId,
-        trashedAt: null,
-        url: '/api/files/r2/users/owner/uploads/test.pdf',
-        key: 'users/owner/uploads/test.pdf',
-        sharedWith: [],
-        linkedToType: 'Personal',
-        linkedToId: fileOwnerId,
-      });
+      mockNodeRepo.findById.mockResolvedValue(
+        new StorageNode({
+          id: fileId,
+          name: 'my_thesis.pdf',
+          isFolder: false,
+          size: 2048n,
+          authorId: fileOwnerId,
+          scope: FileScope.Personal,
+        }),
+      );
 
-      const result = await storageAdapter.readOwnedFile({
+      const node = await accessPolicy.assertCanAccess(
+        fileOwnerId,
         fileId,
-        userId: fileOwnerId,
+        'read',
+      );
+      expect(node).toBeDefined();
+      expect(node.id).toBe(fileId);
+    });
+
+    it('should allow read access when file is explicitly shared via FileShare ACL', async () => {
+      const fileId = 'a0000000-0000-4000-8000-000000000001';
+      const collaboratorId = 'collaborator-123';
+
+      mockNodeRepo.findById.mockResolvedValue(
+        new StorageNode({
+          id: fileId,
+          name: 'shared_dataset.csv',
+          isFolder: false,
+          size: 4096n,
+          authorId: 'principal-investigator',
+          scope: FileScope.Personal,
+        }),
+      );
+
+      mockPrisma.fileShare.findUnique.mockResolvedValue({
+        fileId,
+        userId: collaboratorId,
+        permission: 'view',
       });
 
-      expect(result).toBeDefined();
-      expect(result.fileId).toBe(fileId);
+      const node = await accessPolicy.assertCanAccess(
+        collaboratorId,
+        fileId,
+        'read',
+      );
+      expect(node.id).toBe(fileId);
+
+      // But should forbid write when permission is only 'view'
+      await expect(
+        accessPolicy.assertCanAccess(collaboratorId, fileId, 'write'),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should allow project members to read files within Project Workbench scope', async () => {
+      const fileId = 'a0000000-0000-4000-8000-000000000002';
+      const projectId = 'project-ai-lab';
+      const memberUserId = 'researcher-member';
+
+      mockNodeRepo.findById.mockResolvedValue(
+        new StorageNode({
+          id: fileId,
+          projectId,
+          name: 'project_report.docx',
+          isFolder: false,
+          size: 8192n,
+          authorId: 'pi-leader',
+          scope: FileScope.Project,
+        }),
+      );
+
+      mockPrisma.fileShare.findUnique.mockResolvedValue(null);
+      mockPrisma.projectMember.findUnique.mockResolvedValue({
+        projectId,
+        userId: memberUserId,
+        role: 'MEMBER',
+      });
+
+      const node = await accessPolicy.assertCanAccess(
+        memberUserId,
+        fileId,
+        'read',
+      );
+      expect(node.id).toBe(fileId);
     });
   });
 });

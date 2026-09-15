@@ -236,7 +236,7 @@ export interface MetadataRequest {
   query: string;
   queryType?: QueryType;
   userId?: string;
-  workspaceId?: string;
+  scopeId?: string;
   forceRefresh?: boolean;
   signal?: AbortSignal;
 }

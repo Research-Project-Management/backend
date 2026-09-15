@@ -30,10 +30,14 @@ export interface CycleWorkItemItem {
   completed: boolean;
 }
 
+export type CycleWithWorkItems = Cycle & {
+  workItems: (WorkItem & { assignee?: any })[];
+};
+
 export interface ICycleRepository {
   findProjectCycles(projectId: string): Promise<Cycle[]>;
   findActiveCycle(projectId: string, excludeId?: string): Promise<Cycle | null>;
-  findCycleById(cycleId: string): Promise<Cycle | null>;
+  findCycleById(cycleId: string): Promise<CycleWithWorkItems | null>;
   findOverlappingCycle(
     projectId: string,
     start: Date,

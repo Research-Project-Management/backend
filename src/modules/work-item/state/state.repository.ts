@@ -1,6 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
-import { IStateRepository, StateGroup, WorkItemState, DEFAULT_WORK_ITEM_STATES } from './types/state.types';
+import {
+  IStateRepository,
+  StateGroup,
+  WorkItemState,
+  DEFAULT_WORK_ITEM_STATES,
+} from './types/state.types';
 
 @Injectable()
 export class StateRepository implements IStateRepository {

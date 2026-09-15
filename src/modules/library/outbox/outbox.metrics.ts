@@ -25,9 +25,19 @@ export class OutboxMetrics {
     return this.gauges.get(name) || 0;
   }
 
-  recordSyncPull(workspaceId: string, durationMs: number, changeCount: number) {
+  recordSyncPull(
+    scope: { userId?: string; projectId?: string } | string,
+    durationMs: number,
+    changeCount: number,
+  ) {
+    const scopeStr =
+      typeof scope === 'object'
+        ? scope.projectId
+          ? `project:${scope.projectId}`
+          : `user:${scope.userId}`
+        : scope;
     this.logger.debug(
-      `[OutboxMetrics] Pull executed for workspace ${workspaceId}: ${changeCount} changes in ${durationMs}ms`,
+      `[OutboxMetrics] Pull executed for scope ${scopeStr}: ${changeCount} changes in ${durationMs}ms`,
     );
   }
 

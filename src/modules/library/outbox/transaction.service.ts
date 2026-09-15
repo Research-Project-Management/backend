@@ -15,15 +15,15 @@ import {
 
 export interface TransactionHelpers {
   appendChange(
-    workspaceId: string,
+    scope: { userId?: string; projectId?: string } | string,
     entry: AppendChangeEntry,
   ): Promise<LibraryChange>;
   recordTombstone(
-    workspaceId: string,
+    scope: { userId?: string; projectId?: string } | string,
     entry: RecordTombstoneEntry,
   ): Promise<Tombstone>;
   publishOutbox(
-    workspaceId: string,
+    scope: { userId: string; projectId?: string | null } | string,
     aggregateId: string,
     eventType: string,
     payload: any,
@@ -47,24 +47,32 @@ export class TransactionService {
   ): Promise<T> {
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const helpers: TransactionHelpers = {
-        appendChange: async (workspaceId: string, entry: AppendChangeEntry) => {
-          return this.changeLogRepo.appendChange(workspaceId, entry, tx);
+        appendChange: async (
+          scope: { userId?: string; projectId?: string } | string,
+          entry: AppendChangeEntry,
+        ) => {
+          return this.changeLogRepo.appendChange(scope, entry, tx);
         },
         recordTombstone: async (
-          workspaceId: string,
+          scope: { userId?: string; projectId?: string } | string,
           entry: RecordTombstoneEntry,
         ) => {
-          return this.changeLogRepo.recordTombstone(workspaceId, entry, tx);
+          return this.changeLogRepo.recordTombstone(scope, entry, tx);
         },
         publishOutbox: async (
-          workspaceId: string,
+          scope: { userId: string; projectId?: string | null } | string,
           aggregateId: string,
           eventType: string,
           payload: any,
         ) => {
+          const userId = typeof scope === 'object' ? scope.userId : scope;
+          const projectId =
+            typeof scope === 'object' ? scope.projectId : undefined;
+
           return tx.outboxEvent.create({
             data: {
-              workspaceId,
+              userId,
+              projectId: projectId || null,
               aggregateId,
               eventType,
               payload: payload ?? {},
@@ -80,22 +88,24 @@ export class TransactionService {
   }
 
   async getChangesSince(
-    workspaceId: string,
+    scope: { userId?: string; projectId?: string } | string,
     sinceSeq: bigint = BigInt(0),
     limit: number = 100,
-  ) {
-    return this.changeLogRepo.getChangesSince(workspaceId, sinceSeq, limit);
+  ): Promise<LibraryChange[]> {
+    return this.changeLogRepo.getChangesSince(scope, sinceSeq, limit);
   }
 
   async getTombstonesSince(
-    workspaceId: string,
-    sinceSeq: bigint = BigInt(0),
+    scope: { userId?: string; projectId?: string } | string,
+    sinceSeq?: bigint,
     limit: number = 100,
-  ) {
-    return this.changeLogRepo.getTombstonesSince(workspaceId, sinceSeq, limit);
+  ): Promise<Tombstone[]> {
+    return this.changeLogRepo.getTombstonesSince(scope, sinceSeq, limit);
   }
 
-  async getLatestSequence(workspaceId: string) {
-    return this.changeLogRepo.getLatestSequence(workspaceId);
+  async getLatestSequence(
+    scope: { userId?: string; projectId?: string } | string,
+  ) {
+    return this.changeLogRepo.getLatestSequence(scope);
   }
 }

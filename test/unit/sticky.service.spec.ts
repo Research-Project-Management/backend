@@ -150,7 +150,9 @@ describe('StickyService', () => {
 
       await expect(
         service.createSticky(mockUser.id, { content: '<p></p>' }),
-      ).rejects.toThrow('Please add content to your existing draft note before creating a new one');
+      ).rejects.toThrow(
+        'Please add content to your existing draft note before creating a new one',
+      );
     });
 
     it('should automatically rotate color and sanitize script tags', async () => {

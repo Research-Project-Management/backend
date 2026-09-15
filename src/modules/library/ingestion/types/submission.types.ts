@@ -49,7 +49,7 @@ export type SubmissionPayload =
 
 export interface IngestionSubmissionEnvelope {
   projectId?: string;
-  workspaceId?: string;
+  scopeId?: string;
   userId?: string;
   idempotencyKey?: string;
   payload: SubmissionPayload;

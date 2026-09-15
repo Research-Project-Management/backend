@@ -50,7 +50,3 @@ export const ROLE_DESCRIPTIONS: Record<
 export const ProjectRole = Role;
 export type ProjectRole = Role;
 export const ProjectRoleHierarchy = RoleHierarchy;
-
-export const WorkspaceRole = Role;
-export type WorkspaceRole = Role;
-export const WorkspaceRoleHierarchy = RoleHierarchy;

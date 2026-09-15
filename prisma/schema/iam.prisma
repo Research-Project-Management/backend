@@ -73,6 +73,7 @@ model User {
   userTemplates       WorkItemTemplate[]    @relation("UserTemplates")
   userAttachments     EntityAttachment[]    @relation("UserAttachments")
   createdLabels       Label[]               @relation("UserCreatedLabels")
+  workItemCoAssignments WorkItemAssignee[]  @relation("WorkItemCoAssignees")
 
   // AI & Intelligence Relations (Unified Copilot & Chat History)
   aiChats             AiChat[]              @relation("UserAiChats")
@@ -81,15 +82,22 @@ model User {
   stickies            Sticky[]              @relation("UserStickies")
 
   // Academic Library Relations (Personal Scope & Curation)
-  items               Item[]                @relation("UserItems")
-  collections         Collection[]          @relation("UserCollections")
-  tags                Tag[]                 @relation("UserTags")
-  annotations         Annotation[]          @relation("UserAnnotations")
-  notes               Note[]                @relation("UserNotes")
-  itemStates          State[]               @relation("UserItemStates")
-  savedSearches       SavedSearch[]         @relation("UserSavedSearches")
-  zoteroConnections   ZoteroConnection[]
-  capturePreviews     CapturePreview[]
+  items                  Item[]                @relation("UserItems")
+  collections            Collection[]          @relation("UserCollections")
+  tags                   Tag[]                 @relation("UserTags")
+  annotations            Annotation[]          @relation("UserAnnotations")
+  notes                  Note[]                @relation("UserNotes")
+  itemStates             State[]               @relation("UserItemStates")
+  savedSearches          SavedSearch[]         @relation("UserSavedSearches")
+  capturePreviews        CapturePreview[]
+  idempotencyRecords     IdempotencyRecord[]   @relation("UserIdempotencyRecords")
+  syncSequence           SyncSequence?         @relation("UserSyncSequence")
+  libraryChanges         LibraryChange[]       @relation("UserLibraryChanges")
+  tombstones             Tombstone[]           @relation("UserTombstones")
+  deletedTombstones      Tombstone[]           @relation("TombstoneDeletedBy")
+  outboxEvents           OutboxEvent[]         @relation("UserOutboxEvents")
+  ingestionRuns          IngestionRun[]        @relation("UserIngestionRuns")
+  ingestionReviewCases   IngestionReviewCase[] @relation("UserIngestionReviewCases")
 
   // Document Relations (Page & Document Collaboration)
   authoredPages        Page[]                @relation("PageAuthor")

@@ -42,11 +42,11 @@ export class LabelService {
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
-  private async invalidateLabelCache(scopeId?: string, projectId?: string) {
+  private async invalidateLabelCache(userId?: string, projectId?: string) {
     if (!this.cache) return;
     const promises: Promise<void>[] = [];
-    if (scopeId) {
-      promises.push(this.cache.del(WORK_ITEM_REDIS_KEYS.labels(scopeId)));
+    if (userId) {
+      promises.push(this.cache.del(WORK_ITEM_REDIS_KEYS.labels(userId)));
     }
     if (projectId) {
       promises.push(
@@ -65,8 +65,10 @@ export class LabelService {
 
   // ── 1. Project-Scoped Methods ───────────────────────────────────────────────
 
-  async getProjectLabels(projectId: string) {
-    const cacheKey = WORK_ITEM_REDIS_KEYS.projectLabels(projectId);
+  async getProjectLabels(projectId: string, type?: LabelType) {
+    const cacheKey = type
+      ? `${WORK_ITEM_REDIS_KEYS.projectLabels(projectId)}:${type}`
+      : WORK_ITEM_REDIS_KEYS.projectLabels(projectId);
     if (this.cache) {
       const cached = await this.cache.get<{ labels: LabelWithChildren[] }>(
         cacheKey,
@@ -82,7 +84,10 @@ export class LabelService {
       throw new NotFoundException(`Project not found: ${projectId}`);
     }
 
-    const labels = await this.labelRepository.findProjectLabels(projectId);
+    const labels = await this.labelRepository.findProjectLabels(
+      projectId,
+      type,
+    );
     const result = { labels };
 
     if (this.cache) {
@@ -164,7 +169,7 @@ export class LabelService {
       sortOrder,
       parentId: dto.parentId || null,
       projectId,
-      type: LabelType.work_item,
+      type: dto.type || LabelType.work_item,
       createdById: userId,
     });
 
@@ -250,6 +255,7 @@ export class LabelService {
       }),
       ...(dto.parentId !== undefined && { parentId: dto.parentId }),
       ...(dto.sortOrder !== undefined && { sortOrder: dto.sortOrder }),
+      ...(dto.type !== undefined && { type: dto.type }),
     });
 
     await this.invalidateLabelCache(existing.createdById, projectId);
@@ -265,7 +271,7 @@ export class LabelService {
       throw new ForbiddenException('Label does not belong to this project');
     }
 
-    // 1. Detach label and all its sub-labels from all work items in project (cascade safe deletion)
+    // 1. Detach label and all its sub-labels from all work items & pages in project (cascade safe deletion)
     const labelIdsToDetach = [labelId];
     const labelNamesToDetach = [label.name];
     if (label.children && label.children.length > 0) {
@@ -274,11 +280,14 @@ export class LabelService {
         if (child.name) labelNamesToDetach.push(child.name);
       }
     }
-    await this.labelRepository.detachMultipleFromWorkItems(
-      projectId,
-      labelIdsToDetach,
-      labelNamesToDetach,
-    );
+    await Promise.all([
+      this.labelRepository.detachMultipleFromWorkItems(
+        projectId,
+        labelIdsToDetach,
+        labelNamesToDetach,
+      ),
+      this.labelRepository.detachMultipleFromPages(projectId, labelIdsToDetach),
+    ]);
 
     // 2. Delete label (Cascade in DB deletes sub-labels)
     await this.labelRepository.delete(labelId);

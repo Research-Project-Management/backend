@@ -514,12 +514,32 @@ export class AttachmentsService {
       { item: true },
       tx,
     );
-    if (
-      !attachment ||
-      (userId && attachment.item.userId && attachment.item.userId !== userId)
-    ) {
+    if (!attachment) {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
+
+    if (userId) {
+      const item = attachment.item;
+      if (item.projectId) {
+        if (item.userId !== userId) {
+          const client = tx ?? this.prisma;
+          const member = await client.projectMember.findUnique({
+            where: {
+              projectId_userId: {
+                projectId: item.projectId,
+                userId,
+              },
+            },
+          });
+          if (!member) {
+            throw new NotFoundException(`Attachment ${attachmentId} not found`);
+          }
+        }
+      } else if (item.userId && item.userId !== userId) {
+        throw new NotFoundException(`Attachment ${attachmentId} not found`);
+      }
+    }
+
     return attachment;
   }
 
@@ -559,9 +579,9 @@ export class AttachmentsService {
     return { success: true };
   }
 
-  async assertAttachmentInWorkspace(
+  async assertAttachmentInScope(
     attachmentId: string,
-    workspaceIdOrUserId?: string,
+    scopeOrUserId?: string,
     tx?: Prisma.TransactionClient,
   ): Promise<any> {
     const attachment = await this.repo.findUnique(attachmentId, undefined, tx);

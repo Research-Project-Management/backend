@@ -16,6 +16,8 @@ import {
 import {
   formatLiteratureNoteMarkdown,
   buildTipTapDocFromText,
+  sanitizeNoteTitle,
+  sanitizeNoteContent,
 } from './utils/notes.utils';
 import {
   TransactionService,
@@ -79,7 +81,15 @@ export class NotesService implements IItemNotesExtractorPort {
       }
     }
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const note = await this.repo.create(userId, data, tx);
+      const sanitizedData: CreateNoteData = {
+        ...data,
+        title: sanitizeNoteTitle(data.title),
+        contentMd:
+          data.contentMd !== undefined
+            ? sanitizeNoteContent(data.contentMd)
+            : '',
+      };
+      const note = await this.repo.create(userId, sanitizedData, tx);
 
       await helpers.appendChange(userId, {
         entityType: 'Note',
@@ -108,11 +118,20 @@ export class NotesService implements IItemNotesExtractorPort {
     projectId?: string,
   ) {
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
+      const sanitizedData: UpdateNoteData = {
+        ...data,
+        ...(data.title !== undefined
+          ? { title: sanitizeNoteTitle(data.title) }
+          : {}),
+        ...(data.contentMd !== undefined
+          ? { contentMd: sanitizeNoteContent(data.contentMd) }
+          : {}),
+      };
       const updated = await this.repo.update(
         userId,
         id,
         expectedVersion,
-        data,
+        sanitizedData,
         tx,
         projectId,
       );

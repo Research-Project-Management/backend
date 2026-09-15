@@ -291,18 +291,16 @@ export class CommitStage {
    * Persists Item, child attachments, tags/keywords, and literature notes.
    */
   async execute(
-    workspaceId: string,
+    scopeId: string,
     metadata: ItemMetadata,
     options?: CommitStageOptions,
   ): Promise<any> {
     const createData = toItemData(metadata, options);
 
     const isProject =
-      Boolean(workspaceId) &&
-      workspaceId !== 'user' &&
-      workspaceId !== options?.userId;
-    const effectiveUserId = options?.userId || workspaceId;
-    const effectiveProjectId = isProject ? workspaceId : undefined;
+      Boolean(scopeId) && scopeId !== 'user' && scopeId !== options?.userId;
+    const effectiveUserId = options?.userId || scopeId;
+    const effectiveProjectId = isProject ? scopeId : undefined;
 
     if (effectiveProjectId) {
       createData.projectId = effectiveProjectId;

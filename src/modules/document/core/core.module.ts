@@ -3,8 +3,10 @@ import { CoreController } from './core.controller';
 import { CoreService } from './core.service';
 import { CoreRepository } from './core.repository';
 import { DocumentFacade, DOCUMENT_FACADE } from './document.facade';
+import { NodeModule } from '../node/node.module';
 
 @Module({
+  imports: [NodeModule],
   controllers: [CoreController],
   providers: [
     CoreService,

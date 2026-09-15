@@ -523,4 +523,84 @@ export class AssignmentService {
 
     return { assignees: updated, primaryAssigneeId };
   }
+
+  /**
+   * Subscribe current user to notifications for a work item.
+   */
+  async subscribeMe(
+    projectId: string,
+    workItemId: string,
+    userId: string,
+  ): Promise<{ subscribers: string[] }> {
+    const item =
+      await this.assignmentRepository.findWorkItemWithProject(workItemId);
+    if (!item || item.projectId !== projectId) {
+      throw new NotFoundException('Work item not found in this project');
+    }
+
+    const currentSubscribers: string[] = Array.isArray(
+      (item as any).subscriberIds,
+    )
+      ? ((item as any).subscriberIds as string[])
+      : [];
+
+    if (currentSubscribers.includes(userId)) {
+      return { subscribers: currentSubscribers };
+    }
+
+    const updated = [...currentSubscribers, userId];
+    await this.assignmentRepository.setSubscriberIds(item.id, updated);
+    await this.invalidateWorkItemCache(projectId, item.id, item.identifier);
+
+    const payload = {
+      entityType: 'work_item',
+      entityId: item.id,
+      workItemId: item.id,
+      subscriberIds: updated,
+      actorId: userId,
+      projectId,
+      verb: 'updated',
+    };
+    this.eventEmitter?.emit('work-item.updated', payload);
+
+    return { subscribers: updated };
+  }
+
+  /**
+   * Unsubscribe current user from notifications for a work item.
+   */
+  async unsubscribeMe(
+    projectId: string,
+    workItemId: string,
+    userId: string,
+  ): Promise<{ subscribers: string[] }> {
+    const item =
+      await this.assignmentRepository.findWorkItemWithProject(workItemId);
+    if (!item || item.projectId !== projectId) {
+      throw new NotFoundException('Work item not found in this project');
+    }
+
+    const currentSubscribers: string[] = Array.isArray(
+      (item as any).subscriberIds,
+    )
+      ? ((item as any).subscriberIds as string[])
+      : [];
+
+    const updated = currentSubscribers.filter((id) => id !== userId);
+    await this.assignmentRepository.setSubscriberIds(item.id, updated);
+    await this.invalidateWorkItemCache(projectId, item.id, item.identifier);
+
+    const payload = {
+      entityType: 'work_item',
+      entityId: item.id,
+      workItemId: item.id,
+      subscriberIds: updated,
+      actorId: userId,
+      projectId,
+      verb: 'updated',
+    };
+    this.eventEmitter?.emit('work-item.updated', payload);
+
+    return { subscribers: updated };
+  }
 }

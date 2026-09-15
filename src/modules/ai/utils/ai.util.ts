@@ -3,17 +3,59 @@ import { AiEnginePayload } from '../types/ai.types';
 import { AiMessageDto } from '../engine/types/engine.types';
 
 /**
+ * Sanitizes chat thread titles by stripping HTML tags, scripts,
+ * and control characters, truncating to a safe length.
+ */
+export function sanitizeChatTitle(rawTitle?: string | null): string {
+  if (!rawTitle) return 'New Chat';
+  const sanitized = rawTitle
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+    .replace(/<[^>]*>/g, '')
+    .replace(/[\x00-\x1F\x7F]/g, '')
+    .trim();
+  return sanitized.length > 0 ? sanitized.slice(0, 100) : 'New Chat';
+}
+
+/**
+ * Sanitizes message content by stripping null bytes and unprintable control characters
+ * while preserving valid tabs and newlines, bounded to max 50,000 characters.
+ */
+export function sanitizeChatMessageContent(rawContent?: string | null): string {
+  if (!rawContent) return '';
+  return rawContent
+    .replace(/\0/g, '')
+    .replace(/[\x01-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    .trim()
+    .slice(0, 50000);
+}
+
+/**
+ * Enforces role security: client-submitted messages cannot claim 'system' role
+ * unless explicitly authorized. Maps arbitrary/invalid roles to 'user'.
+ */
+export function validateAndSanitizeRole(role?: string): 'user' | 'assistant' {
+  if (role === 'assistant') return 'assistant';
+  return 'user';
+}
+
+/**
  * Normalizes input messages from DTO, handling both `messages` array and fallback `query` string.
  */
 export function normalizeMessages(dto: AiQueryDto): AiMessageDto[] {
   if (Array.isArray(dto.messages) && dto.messages.length > 0) {
     return dto.messages.map((m) => ({
-      role: m.role,
-      content: m.content || '',
+      role: validateAndSanitizeRole(m.role),
+      content: sanitizeChatMessageContent(m.content),
     }));
   }
   if (dto.query && dto.query.trim()) {
-    return [{ role: 'user', content: dto.query.trim() }];
+    return [
+      {
+        role: 'user',
+        content: sanitizeChatMessageContent(dto.query),
+      },
+    ];
   }
   return [{ role: 'user', content: '' }];
 }
@@ -47,11 +89,14 @@ export function buildAiPayload(
     document_ids: documentIds,
     web_search_sites: dto.web_search_sites || dto.webSearchSites || [],
     intent_hint: dto.intent_hint || dto.intentHint || undefined,
-    // Editor / Writing Context
+    // Editor / Writing Context with length safety guards
     filename: dto.filename || 'document.tex',
-    file_content: dto.file_content || dto.fileContent || '',
-    selection: dto.selection || '',
-    cursor_context: dto.cursor_context || dto.cursorContext || '',
+    file_content: (dto.file_content || dto.fileContent || '').slice(0, 100000),
+    selection: (dto.selection || '').slice(0, 20000),
+    cursor_context: (dto.cursor_context || dto.cursorContext || '').slice(
+      0,
+      10000,
+    ),
     cursor_line: dto.cursor_line ?? dto.cursorLine ?? 1,
     cursor_column: dto.cursor_column ?? dto.cursorColumn ?? 1,
     selection_start_line: dto.selection_start_line ?? dto.selectionStartLine,
@@ -59,7 +104,11 @@ export function buildAiPayload(
       dto.selection_start_column ?? dto.selectionStartColumn,
     selection_end_line: dto.selection_end_line ?? dto.selectionEndLine,
     selection_end_column: dto.selection_end_column ?? dto.selectionEndColumn,
-    document_structure: dto.document_structure || dto.documentStructure || '',
+    document_structure: (
+      dto.document_structure ||
+      dto.documentStructure ||
+      ''
+    ).slice(0, 10000),
   };
 }
 

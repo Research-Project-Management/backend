@@ -2,7 +2,6 @@ import { FileScope } from '../value-objects/file-scope.vo';
 
 export interface StorageNodeProps {
   id: string;
-  tenantId: string;
   projectId?: string | null;
   parentId?: string | null;
   name: string;
@@ -25,7 +24,6 @@ export interface StorageNodeProps {
  */
 export class StorageNode {
   public readonly id: string;
-  public readonly tenantId: string;
   public readonly projectId: string | null;
   public readonly isFolder: boolean;
   public readonly authorId: string;
@@ -44,7 +42,6 @@ export class StorageNode {
 
   constructor(props: StorageNodeProps) {
     this.id = props.id;
-    this.tenantId = props.tenantId;
     this.projectId = props.projectId ?? null;
     this.isFolder = props.isFolder;
     this.authorId = props.authorId;
@@ -53,7 +50,9 @@ export class StorageNode {
     this._parentId = props.parentId ?? null;
     this._name = props.name;
     this._size = props.size;
-    this._mimeType = props.mimeType ?? (props.isFolder ? 'application/x-directory' : 'application/octet-stream');
+    this._mimeType =
+      props.mimeType ??
+      (props.isFolder ? 'application/x-directory' : 'application/octet-stream');
     this._blobId = props.blobId ?? null;
     this._scope = props.scope ?? FileScope.Personal;
     this._starred = props.starred ?? false;
@@ -62,16 +61,36 @@ export class StorageNode {
     this._updatedAt = props.updatedAt ?? new Date();
   }
 
-  get parentId(): string | null { return this._parentId; }
-  get name(): string { return this._name; }
-  get size(): bigint { return this._size; }
-  get mimeType(): string { return this._mimeType; }
-  get blobId(): string | null { return this._blobId; }
-  get scope(): FileScope { return this._scope; }
-  get starred(): boolean { return this._starred; }
-  get metadata(): Record<string, any> { return this._metadata; }
-  get trashedAt(): Date | null { return this._trashedAt; }
-  get updatedAt(): Date { return this._updatedAt; }
+  get parentId(): string | null {
+    return this._parentId;
+  }
+  get name(): string {
+    return this._name;
+  }
+  get size(): bigint {
+    return this._size;
+  }
+  get mimeType(): string {
+    return this._mimeType;
+  }
+  get blobId(): string | null {
+    return this._blobId;
+  }
+  get scope(): FileScope {
+    return this._scope;
+  }
+  get starred(): boolean {
+    return this._starred;
+  }
+  get metadata(): Record<string, any> {
+    return this._metadata;
+  }
+  get trashedAt(): Date | null {
+    return this._trashedAt;
+  }
+  get updatedAt(): Date {
+    return this._updatedAt;
+  }
 
   public rename(newName: string): void {
     const trimmed = newName.trim();

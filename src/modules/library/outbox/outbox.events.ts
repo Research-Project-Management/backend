@@ -61,7 +61,8 @@ export type LibraryItemSource =
 
 export interface ItemCreatedOutboxPayload {
   itemId: string;
-  workspaceId: string;
+  userId?: string;
+  projectId?: string;
   title: string;
   source: LibraryItemSource;
   doi?: string | null;
@@ -70,7 +71,8 @@ export interface ItemCreatedOutboxPayload {
 
 export function buildItemCreatedOutboxPayload(input: {
   itemId: string;
-  workspaceId: string;
+  userId?: string;
+  projectId?: string;
   title: string;
   source: LibraryItemSource;
   doi?: string | null;
@@ -78,7 +80,8 @@ export function buildItemCreatedOutboxPayload(input: {
 }): ItemCreatedOutboxPayload {
   return {
     itemId: input.itemId,
-    workspaceId: input.workspaceId,
+    userId: input.userId,
+    projectId: input.projectId,
     title: input.title,
     source: input.source,
     ...(input.doi ? { doi: input.doi } : {}),

@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  UnprocessableEntityException,
   Optional,
   Logger,
 } from '@nestjs/common';
@@ -16,6 +17,11 @@ import { MessageRole } from '@prisma/client';
 import { RedisCacheService } from '@/core/cache/redis.service';
 import { AI_REDIS_KEYS } from './constants/redis-keys.constant';
 import { PrismaService } from '@/core/database/prisma.service';
+import {
+  sanitizeChatTitle,
+  sanitizeChatMessageContent,
+  validateAndSanitizeRole,
+} from '../utils/ai.util';
 
 export interface FormattedChatSession {
   id: string;
@@ -80,10 +86,9 @@ export class ThreadService {
     projectId?: string | null,
   ) {
     if (!this.cache) return;
-    const scopeId = projectId || userId;
     const promises: Promise<any>[] = [
-      this.cache.del(AI_REDIS_KEYS.userChats(scopeId, userId, projectId)),
-      this.cache.del(AI_REDIS_KEYS.userChats(userId, userId, null)),
+      this.cache.del(AI_REDIS_KEYS.userChats(userId, projectId)),
+      this.cache.del(AI_REDIS_KEYS.userChats(userId, null)),
     ];
     if (chatId) {
       promises.push(this.cache.del(AI_REDIS_KEYS.chatThread(chatId)));
@@ -116,8 +121,7 @@ export class ThreadService {
       }
     }
 
-    const scopeId = projectId || userId;
-    const cacheKey = AI_REDIS_KEYS.userChats(scopeId, userId, projectId);
+    const cacheKey = AI_REDIS_KEYS.userChats(userId, projectId);
     if (this.cache) {
       const cached = await this.cache.get<FormattedChatSession[]>(cacheKey);
       if (cached) return cached;
@@ -151,6 +155,40 @@ export class ThreadService {
     await this.threadRepo.deletePageChat(pageId, userId);
     await this.invalidateThreadCache(userId);
     return { success: true };
+  }
+
+  async getOrCreatePageChat(
+    pageId: string,
+    userId: string,
+    projectId?: string | null,
+  ): Promise<FormattedChatSession> {
+    if (!pageId) {
+      throw new BadRequestException('pageId is required');
+    }
+    const raw = await this.threadRepo.findPageChat(pageId, userId);
+    if (raw) {
+      return formatChat(raw);
+    }
+
+    const page = await this.prisma.page.findUnique({
+      where: { id: pageId },
+      select: { title: true, projectId: true },
+    });
+
+    const title = page?.title
+      ? `${sanitizeChatTitle(page.title)} Discussion`
+      : 'Page Chat';
+    const effectiveProjectId = projectId || page?.projectId || null;
+
+    const created = await this.threadRepo.createChat({
+      userId,
+      projectId: effectiveProjectId,
+      pageId,
+      title,
+    });
+
+    await this.invalidateThreadCache(userId, created.id, effectiveProjectId);
+    return formatChat(created);
   }
 
   async getChat(chatId: string, userId: string): Promise<FormattedChatSession> {
@@ -228,14 +266,14 @@ export class ThreadService {
       userId,
       projectId: dto.projectId,
       pageId: dto.pageId,
-      title: dto.title,
+      title: sanitizeChatTitle(dto.title),
       documentIds: dto.documentIds,
     });
 
     if (dto.messages && dto.messages.length > 0) {
       const formattedMessages = dto.messages.map((m: any) => ({
-        role: (m.role as MessageRole) || MessageRole.user,
-        content: m.content || '',
+        role: validateAndSanitizeRole(m.role),
+        content: sanitizeChatMessageContent(m.content),
         sources: m.sources,
         widgets: m.widgets,
         selectionContext: m.selectionContext,
@@ -265,13 +303,21 @@ export class ThreadService {
       throw new NotFoundException('Chat not found');
     }
 
+    if (!dto.messages || dto.messages.length === 0) {
+      throw new UnprocessableEntityException('Messages array cannot be empty');
+    }
+
     const formattedMessages = dto.messages.map((m: any) => ({
-      role: (m.role as MessageRole) || MessageRole.user,
-      content: m.content || '',
+      role: validateAndSanitizeRole(m.role),
+      content: sanitizeChatMessageContent(m.content),
       sources: m.sources,
       widgets: m.widgets,
       selectionContext: m.selectionContext,
     }));
+
+    if (formattedMessages.some((m) => !m.content || !m.content.trim())) {
+      throw new UnprocessableEntityException('Message content cannot be empty');
+    }
 
     const updated = await this.threadRepo.createMessages(
       chatId,
@@ -295,7 +341,8 @@ export class ThreadService {
       throw new NotFoundException('Chat not found');
     }
 
-    const updated = await this.threadRepo.updateChatTitle(chatId, dto.title);
+    const cleanTitle = sanitizeChatTitle(dto.title);
+    const updated = await this.threadRepo.updateChatTitle(chatId, cleanTitle);
     const result = formatChat(updated);
 
     await this.invalidateThreadCache(chat.userId, chatId, chat.projectId);

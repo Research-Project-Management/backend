@@ -48,7 +48,12 @@ export class CurationController {
 
   @Get(['quality-audit', 'quality', 'integrity'])
   @ProjectRoles('owner', 'contributor', 'viewer')
-  async getQualityAudit(@CurrentUser('id') userId: string) {
-    return this.qualityService.getQualityAudit(userId);
+  async getQualityAudit(
+    @CurrentUser('id') userId: string,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
+  ) {
+    const effectiveProjectId = paramProjectId || queryProjectId;
+    return this.qualityService.getQualityAudit(userId, effectiveProjectId);
   }
 }

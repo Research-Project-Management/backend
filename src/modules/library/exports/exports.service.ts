@@ -106,9 +106,50 @@ export class ExportsService {
     userId: string,
     dto: ExportLibraryDto,
   ): Promise<ExportResult> {
+    let scopeWhere: any = { userId, deletedAt: null };
+
+    if (dto.projectId && dto.projectId !== 'user') {
+      const member = await this.prisma.projectMember.findUnique({
+        where: {
+          projectId_userId: {
+            projectId: dto.projectId,
+            userId,
+          },
+        },
+        select: { id: true },
+      });
+      if (!member) {
+        throw new NotFoundException(
+          `Project ${dto.projectId} not found or access denied`,
+        );
+      }
+      scopeWhere = { projectId: dto.projectId, deletedAt: null };
+    } else if (dto.collectionId) {
+      const collection = await this.prisma.collection.findFirst({
+        where: { id: dto.collectionId, deletedAt: null },
+        select: { id: true, userId: true, projectId: true },
+      });
+      if (collection?.projectId) {
+        const member = await this.prisma.projectMember.findUnique({
+          where: {
+            projectId_userId: {
+              projectId: collection.projectId,
+              userId,
+            },
+          },
+          select: { id: true },
+        });
+        if (!member) {
+          throw new NotFoundException(
+            `Collection ${dto.collectionId} not found or access denied`,
+          );
+        }
+        scopeWhere = { projectId: collection.projectId, deletedAt: null };
+      }
+    }
+
     const where = {
-      userId,
-      deletedAt: null,
+      ...scopeWhere,
       ...(dto.itemIds && dto.itemIds.length > 0
         ? { id: { in: dto.itemIds } }
         : {}),
@@ -125,7 +166,7 @@ export class ExportsService {
 
     if (dto.itemIds && dto.itemIds.length > 0) {
       items = this.itemReadPort
-        ? await this.itemReadPort.findByIds(userId, dto.itemIds)
+        ? await this.itemReadPort.findByIds(userId, dto.itemIds, dto.projectId)
         : await this.prisma.item.findMany({
             where,
             include: { contributors: { orderBy: { orderIndex: 'asc' } } },
@@ -276,7 +317,6 @@ export class ExportsService {
     const collection = await this.prisma.collection.findFirst({
       where: {
         id: collectionId,
-        userId,
         deletedAt: null,
       },
     });
@@ -285,10 +325,30 @@ export class ExportsService {
       throw new BadRequestException(`Collection ${collectionId} not found`);
     }
 
+    let scopeWhere: any = { userId, deletedAt: null };
+    if (collection.projectId) {
+      const member = await this.prisma.projectMember.findUnique({
+        where: {
+          projectId_userId: {
+            projectId: collection.projectId,
+            userId,
+          },
+        },
+        select: { id: true },
+      });
+      if (!member) {
+        throw new BadRequestException(
+          `Collection ${collectionId} not found or access denied`,
+        );
+      }
+      scopeWhere = { projectId: collection.projectId, deletedAt: null };
+    } else if (collection.userId !== userId) {
+      throw new BadRequestException(`Collection ${collectionId} not found`);
+    }
+
     const items = await this.prisma.item.findMany({
       where: {
-        userId,
-        deletedAt: null,
+        ...scopeWhere,
         collectionItems: { some: { collectionId } },
       },
       include: {
@@ -301,6 +361,7 @@ export class ExportsService {
     const bibtexRes = await this.exportLibrary(userId, {
       format: 'bibtex',
       collectionId,
+      projectId: collection.projectId ?? undefined,
     });
 
     const files: Array<{

@@ -15,21 +15,25 @@ import {
 export class CoreRepository implements IPageRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findProjectPages(projectId: string): Promise<PageListItem[]> {
-    let canonicalProjectId = projectId;
-    if (!isUuid(canonicalProjectId)) {
-      const proj = await this.prisma.project
-        .findFirst({
-          where: {
-            identifier: { equals: canonicalProjectId, mode: 'insensitive' },
-            deletedAt: null,
-          },
-          select: { id: true },
-        })
-        .catch(() => null);
-      if (!proj) return [];
-      canonicalProjectId = proj.id;
+  private async resolveProjectId(projectId: string): Promise<string | null> {
+    if (isUuid(projectId)) {
+      return projectId;
     }
+    const proj = await this.prisma.project
+      .findFirst({
+        where: {
+          identifier: { equals: projectId, mode: 'insensitive' },
+          deletedAt: null,
+        },
+        select: { id: true },
+      })
+      .catch(() => null);
+    return proj?.id ?? null;
+  }
+
+  async findProjectPages(projectId: string): Promise<PageListItem[]> {
+    const canonicalProjectId = await this.resolveProjectId(projectId);
+    if (!canonicalProjectId) return [];
 
     return this.prisma.page.findMany({
       where: {
@@ -43,20 +47,8 @@ export class CoreRepository implements IPageRepository {
   }
 
   async findProjectPageTree(projectId: string): Promise<PageListItem[]> {
-    let canonicalProjectId = projectId;
-    if (!isUuid(canonicalProjectId)) {
-      const proj = await this.prisma.project
-        .findFirst({
-          where: {
-            identifier: { equals: canonicalProjectId, mode: 'insensitive' },
-            deletedAt: null,
-          },
-          select: { id: true },
-        })
-        .catch(() => null);
-      if (!proj) return [];
-      canonicalProjectId = proj.id;
-    }
+    const canonicalProjectId = await this.resolveProjectId(projectId);
+    if (!canonicalProjectId) return [];
 
     return this.prisma.page.findMany({
       where: {
@@ -70,11 +62,38 @@ export class CoreRepository implements IPageRepository {
 
   /**
    * Lean ancestor chain traversal — only fetches `id` and `parentPageId`.
-   * Used by `validateNoCircularParent` to avoid N+1 with heavy content payload.
+   * Uses single PostgreSQL Recursive CTE to prevent N+1 query amplification.
    */
   async findPageAncestorChain(
     startPageId: string,
   ): Promise<Array<{ id: string; parentPageId: string | null }>> {
+    if (!isUuid(startPageId)) return [];
+
+    try {
+      if (typeof (this.prisma as any).$queryRaw === 'function') {
+        const rows = await this.prisma.$queryRaw<
+          Array<{ id: string; parentPageId: string | null }>
+        >`
+          WITH RECURSIVE ancestors AS (
+            SELECT id, "parentPageId", 1 AS depth
+            FROM "Page"
+            WHERE id = ${startPageId}::uuid AND "deletedAt" IS NULL
+            UNION ALL
+            SELECT p.id, p."parentPageId", a.depth + 1
+            FROM "Page" p
+            INNER JOIN ancestors a ON p.id = a."parentPageId"
+            WHERE p."deletedAt" IS NULL AND a.depth < 50
+          )
+          SELECT id, "parentPageId" FROM ancestors;
+        `;
+        if (Array.isArray(rows) && rows.length > 0) {
+          return rows;
+        }
+      }
+    } catch {
+      // Fallback below if $queryRaw fails or non-PG env
+    }
+
     const ancestors: Array<{ id: string; parentPageId: string | null }> = [];
     const visited = new Set<string>();
     let currentId: string | null = startPageId;

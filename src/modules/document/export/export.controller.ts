@@ -1,0 +1,43 @@
+import {
+  Controller,
+  Post,
+  Body,
+  Param,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { ExportService } from './export.service';
+import { ExportDocumentDto } from './dto/export.dto';
+import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
+import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
+import { ProjectRoleGuard } from '@/modules/iam/authz/guards/role.guard';
+import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
+
+@ApiTags('Document - Export')
+@ApiBearerAuth('JWT-auth')
+@Controller('api')
+@UseGuards(JwtAuthGuard)
+export class ExportController {
+  constructor(private readonly exportService: ExportService) {}
+
+  @Post([
+    'projects/:projectId/pages/:pageId/export',
+    'project/:projectId/pages/:pageId/export',
+    'pages/:pageId/export',
+  ])
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Export document to PDF, Markdown, LaTeX source or bundle',
+  })
+  async exportDocument(
+    @Param('pageId') pageId: string,
+    @CurrentUser('id') userId: string,
+    @Body() dto: ExportDocumentDto,
+  ) {
+    return this.exportService.exportDocument(pageId, userId, dto);
+  }
+}

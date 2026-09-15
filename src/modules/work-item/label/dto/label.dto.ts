@@ -59,6 +59,11 @@ export class CreateProjectLabelDto {
   @IsNumber()
   @IsOptional()
   sortOrder?: number;
+
+  @ApiPropertyOptional({ enum: LabelType, default: LabelType.work_item })
+  @IsEnum(LabelType)
+  @IsOptional()
+  type?: LabelType;
 }
 
 export class UpdateProjectLabelDto {
@@ -70,6 +75,11 @@ export class UpdateProjectLabelDto {
   @IsOptional()
   @MaxLength(255)
   name?: string;
+
+  @ApiPropertyOptional({ enum: LabelType })
+  @IsEnum(LabelType)
+  @IsOptional()
+  type?: LabelType;
 
   @ApiPropertyOptional({
     description: 'Updated hex color code',

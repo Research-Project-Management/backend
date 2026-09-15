@@ -5,7 +5,7 @@ import { DoiParser } from '../parsers/doi.parser';
 import { BibtexParser } from '../parsers/bibtex.parser';
 import { RisParser } from '../parsers/ris.parser';
 import { NormalizationPolicy } from '../policies/normalization.policy';
-import { IStoragePort, STORAGE_PORT } from '../../../storage/storage.port';
+import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 import { PdfProvider } from '../../attachments/providers/pdf.provider';
 import { QueryClassifier } from '../metadata/classifiers/query.classifier';
 import { randomUUID } from 'crypto';
@@ -31,7 +31,7 @@ export class IdentifyStage {
   async execute(
     runId: string,
     payload: SubmissionPayload,
-    workspaceId?: string,
+    scopeId?: string,
   ): Promise<MetadataCandidate[]> {
     const candidates: MetadataCandidate[] = [];
 
@@ -400,7 +400,7 @@ export class IdentifyStage {
           this.storagePort?.readOwnedFile &&
           this.pdf?.extractDocumentFromBuffer &&
           payload.fileId &&
-          workspaceId
+          scopeId
         ) {
           try {
             const fileRecord = await this.storagePort.readOwnedFile({
@@ -409,7 +409,7 @@ export class IdentifyStage {
             if (fileRecord?.buffer) {
               fileBuffer = fileRecord.buffer;
               const extractedDocument =
-                await this.pdf.extractDocumentFromBuffer(fileBuffer);
+                await this.pdf.extractDocumentFromBuffer(fileRecord.buffer);
               extractedMetadata =
                 extractedDocument?.metadata || extractedDocument || {};
 

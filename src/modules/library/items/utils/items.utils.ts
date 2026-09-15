@@ -798,3 +798,29 @@ export function normalizeItemType(type?: string | null): string {
   return 'journalArticle';
 }
 export const normalizeLibraryItemType = normalizeItemType;
+
+/**
+ * Sanitizes an academic library item title:
+ * 1. Strips <script> and <style> tags and their contents
+ * 2. Strips remaining HTML/XML tags
+ * 3. Decodes HTML entities
+ * 4. Strips LaTeX curly braces
+ * 5. Strips control characters
+ * 6. Collapses multiple whitespace into a single space and trims
+ * 7. Enforces maximum length of 1000 characters
+ */
+export function sanitizeItemTitle(title?: string | null): string {
+  if (!title || typeof title !== 'string') return '';
+  let cleaned = title.trim();
+  cleaned = cleaned.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+  cleaned = cleaned.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+  cleaned = stripXmlAndHtmlTags(cleaned);
+  cleaned = decodeHtmlEntities(cleaned);
+  cleaned = stripLatexBraces(cleaned);
+  cleaned = cleaned.replace(/[\x00-\x1F\x7F]/g, '');
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+  if (cleaned.length > 1000) {
+    cleaned = cleaned.substring(0, 1000).trim();
+  }
+  return cleaned;
+}
