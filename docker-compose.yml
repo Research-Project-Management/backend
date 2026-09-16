@@ -134,6 +134,7 @@ services:
       REDIS_URL: ${REDIS_URL}
       GROBID_URL: http://grobid:8070
       ZOTERO_TRANSLATOR_URL: http://translator:1969
+      LATEX_URL: ${LATEX_URL:-http://flux_latex_compiler:2918}
       CLIENT_URL: ${CLIENT_URL}
       ORIGINS: ${ORIGINS}
     depends_on:
