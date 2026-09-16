@@ -244,4 +244,50 @@ describe('StorageFacade & UploadDirectUseCase Integration Suite', () => {
       }),
     ).rejects.toThrow(BadRequestException);
   });
+
+  it('should stream binary stream directly via getFileStream', async () => {
+    const content = Buffer.from('%PDF-1.7 Large Dataset or Paper Stream Test');
+    const uploaded = await facade.uploadFile({
+      userId: 'user-stream',
+      filename: 'paper.pdf',
+      buffer: content,
+      mimeType: 'application/pdf',
+    });
+
+    const streamResult = await facade.getFileStream(uploaded.fileId);
+    expect(streamResult.mimeType).toBe('application/pdf');
+    expect(streamResult.filename).toBe('paper.pdf');
+    expect(streamResult.stream).toBeDefined();
+  });
+
+  it('should generate presigned download and upload URLs for system consumers', async () => {
+    mockDriver.getPresignedDownloadUrl.mockResolvedValueOnce('https://storage.flux.ai/download/signed-url');
+    mockDriver.getPresignedUploadUrl.mockResolvedValueOnce('https://storage.flux.ai/upload/signed-url');
+
+    const content = Buffer.from('%PDF-1.7 Presign Download Test');
+    const uploaded = await facade.uploadFile({
+      userId: 'user-presign',
+      filename: 'dataset.pdf',
+      buffer: content,
+      mimeType: 'application/pdf',
+    });
+
+    const downloadUrl = await facade.getPresignedDownloadUrl(uploaded.fileId);
+    expect(downloadUrl).toBe('https://storage.flux.ai/download/signed-url');
+
+    const uploadRes = await facade.getPresignedUploadUrl({
+      userId: 'user-presign',
+      filename: 'large-dataset.csv',
+      mimeType: 'text/csv',
+      sizeBytes: 50 * 1024 * 1024,
+    });
+    expect(uploadRes.uploadUrl).toBe('https://storage.flux.ai/upload/signed-url');
+    expect(uploadRes.storageKey).toContain('uploads/user-presign/');
+  });
+
+  it('should check quota usage for system consumers', async () => {
+    const quota = await facade.checkQuota('user-123');
+    expect(quota).toBeDefined();
+    expect(quota.maxBytes).toBeGreaterThan(0);
+  });
 });

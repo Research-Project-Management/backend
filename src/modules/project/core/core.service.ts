@@ -16,12 +16,14 @@ import { ProjectQueryDto } from './dto/query.dto';
 import {
   ProjectWithMembers,
   EnrichedProject,
-  ProjectPermissions,
   ProjectOverview,
   AllocatedIdentifier,
+  ProjectPermissions,
 } from './types/project.type';
-import { deriveProjectPrefix } from './utils/identifier.util';
 import { calculateProjectPermissions } from './utils/permission.util';
+import { FavoriteRepository } from '../favorite/favorite.repository';
+import { LabelRepository } from '../label/label.repository';
+import { deriveProjectPrefix } from './utils/identifier.util';
 
 export const ALLOWED_PROJECT_MODULES = new Set([
   'work_items',
@@ -47,6 +49,8 @@ export function sanitizeModules(modules?: string[]): string[] {
 export class CoreService {
   constructor(
     private readonly projectRepo: CoreRepository,
+    private readonly favoriteRepo: FavoriteRepository,
+    private readonly labelRepo: LabelRepository,
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
@@ -74,17 +78,16 @@ export class CoreService {
       members?: Array<{ userId: string; role?: string }>;
     } | null,
     userId?: string,
-  ): ProjectMemberRole | string {
+  ): ProjectMemberRole {
     if (!userId || !project) return ProjectMemberRole.viewer;
     if (project.createdById === userId) return ProjectMemberRole.owner;
 
     const member = project.members?.find((m) => m.userId === userId);
-    return member?.role || ProjectMemberRole.viewer;
+    return (member?.role as ProjectMemberRole) || ProjectMemberRole.viewer;
   }
 
   /**
-   * Find all projects for a user with optional filter ('created' | 'shared' | 'all') and search.
-   * Enforces SSOT: Resolves actor's role and computes granular permissions for each project.
+   * Find all projects for a user with rich filters (state, priority, label, archive, favorite, search).
    */
   async findUserProjects(
     userId: string,
@@ -95,8 +98,7 @@ export class CoreService {
     sharedProjects: EnrichedProject[];
     total: number;
   }> {
-    const filter = query?.type || 'all';
-    let projects = await this.projectRepo.findProjectsByUser(userId, filter);
+    let projects = await this.projectRepo.findProjectsByUser(userId, query);
 
     if (query?.search?.trim()) {
       const s = query.search.trim().toLowerCase();
@@ -105,6 +107,19 @@ export class CoreService {
           p.name.toLowerCase().includes(s) ||
           p.identifier?.toLowerCase().includes(s) ||
           p.description?.toLowerCase().includes(s),
+      );
+    }
+
+    // Batch check favorites for this user
+    const favoriteSet = await this.favoriteRepo.batchCheckFavorites(
+      projects.map((p) => p.id),
+      userId,
+    );
+
+    // Apply favorite filter if requested
+    if (query?.isFavorite !== undefined) {
+      projects = projects.filter((p) =>
+        query.isFavorite ? favoriteSet.has(p.id) : !favoriteSet.has(p.id),
       );
     }
 
@@ -131,6 +146,8 @@ export class CoreService {
         ...p,
         yourRole,
         permissions,
+        isFavorite: favoriteSet.has(p.id),
+        projectLabelsList: p.labels?.map((l) => l.label) || [],
       };
     };
 
@@ -149,57 +166,60 @@ export class CoreService {
   }
 
   /**
-   * Find a single project by ID or identifier with Redis caching.
-   * Enforces SSOT: Computes and returns both yourRole and granular permissions.
+   * Find single project by ID with enriched roles, permissions, and favorites.
    */
   async findById(
     projectId: string,
-    userId?: string,
+    userId: string,
   ): Promise<{
     project: EnrichedProject;
-    yourRole: ProjectMemberRole | string;
+    yourRole: ProjectMemberRole;
     permissions: ProjectPermissions;
   }> {
     const cacheKey = CACHE_KEYS.detail(projectId);
-    let project = this.cache
-      ? await this.cache.get<ProjectWithMembers>(cacheKey)
-      : null;
 
-    if (!project) {
-      project = await this.projectRepo.findProjectById(projectId);
-      if (!project) {
+    const projectFetch = async (): Promise<ProjectWithMembers> => {
+      const proj = await this.projectRepo.findProjectById(projectId);
+      if (!proj) {
         throw new NotFoundException('Project not found');
       }
-      if (this.cache) {
-        await this.cache.set(cacheKey, project, CACHE_TTL_SECONDS.DETAIL);
-      }
-    }
+      return proj;
+    };
 
+    const project = this.cache
+      ? await this.cache.wrap(
+          cacheKey,
+          projectFetch,
+          CACHE_TTL_SECONDS.DETAIL,
+        )
+      : await projectFetch();
+
+    const isFavorite = await this.favoriteRepo.isFavorite(projectId, userId);
     const yourRole = this.resolveUserRoleInProject(project, userId);
     const permissions = calculateProjectPermissions(yourRole, project.isActive);
 
-    const enrichedProject: EnrichedProject = {
-      ...project,
-      yourRole,
-      permissions,
-    };
-
     return {
-      project: enrichedProject,
+      project: {
+        ...project,
+        yourRole,
+        permissions,
+        isFavorite,
+        projectLabelsList: project.labels?.map((l) => l.label) || [],
+      },
       yourRole,
       permissions,
     };
   }
 
   /**
-   * Find project dashboard overview statistics with Redis caching.
+   * Find project dashboard overview metrics.
    */
   async findOverview(
     projectId: string,
-    userId?: string,
+    userId: string,
   ): Promise<{
     overview: ProjectOverview;
-    yourRole: ProjectMemberRole | string;
+    yourRole: ProjectMemberRole;
   }> {
     const cacheKey = CACHE_KEYS.overview(projectId);
 
@@ -246,17 +266,19 @@ export class CoreService {
       }
     }
 
-    // SSOT: Deterministically resolve project network privacy
-    const network = dto.isPrivate === false ? 'public' : 'secret';
-
     const project = await this.projectRepo.createProject(userId, {
       name: dto.name,
       identifier: identifier || null,
       avatar: dto.avatar || '',
       coverImage: dto.coverImage || dto.cover || '',
       description: dto.description || '',
+      state: dto.state,
+      priority: dto.priority,
+      startDate: dto.startDate ? new Date(dto.startDate) : null,
+      targetDate: dto.targetDate ? new Date(dto.targetDate) : null,
+      labelIds: dto.labelIds,
+      templateId: dto.templateId || null,
       modules: sanitizeModules(dto.modules),
-      network,
     });
 
     await this.invalidateProjectCache(project.id, [userId]);
@@ -301,12 +323,11 @@ export class CoreService {
     }
 
     const coverVal = dto.coverImage !== undefined ? dto.coverImage : dto.cover;
-    const activeVal =
-      dto.isActive !== undefined
-        ? dto.isActive
-        : dto.isArchived !== undefined
-          ? !dto.isArchived
-          : undefined;
+
+    // Handle label assignments replacement if provided
+    if (dto.labelIds !== undefined) {
+      await this.labelRepo.replaceProjectLabels(projectId, dto.labelIds);
+    }
 
     const project = await this.projectRepo.updateProject(projectId, {
       ...(dto.name !== undefined && { name: dto.name.trim() }),
@@ -314,10 +335,22 @@ export class CoreService {
       ...(dto.avatar !== undefined && { avatar: dto.avatar }),
       ...(coverVal !== undefined && { coverImage: coverVal }),
       ...(dto.description !== undefined && { description: dto.description }),
+      ...(dto.state !== undefined && { state: dto.state }),
+      ...(dto.priority !== undefined && { priority: dto.priority }),
+      ...(dto.startDate !== undefined && {
+        startDate: dto.startDate ? new Date(dto.startDate) : null,
+      }),
+      ...(dto.targetDate !== undefined && {
+        targetDate: dto.targetDate ? new Date(dto.targetDate) : null,
+      }),
+      ...(dto.isActive !== undefined && { isActive: dto.isActive }),
+      ...(dto.isArchived !== undefined && {
+        isArchived: dto.isArchived,
+        archivedAt: dto.isArchived ? new Date() : null,
+      }),
       ...(dto.modules !== undefined && {
         modules: sanitizeModules(dto.modules),
       }),
-      ...(activeVal !== undefined && { isActive: activeVal }),
       ...(dto.settings !== undefined && {
         settings: dto.settings as any,
       }),
@@ -415,7 +448,7 @@ export class CoreService {
     if (!existing) {
       throw new NotFoundException('Project not found');
     }
-    if (!existing.isActive) {
+    if (existing.isArchived) {
       throw new BadRequestException('Project is already archived');
     }
 
@@ -454,7 +487,7 @@ export class CoreService {
     if (!existing) {
       throw new NotFoundException('Project not found');
     }
-    if (existing.isActive) {
+    if (!existing.isArchived) {
       throw new BadRequestException('Project is not archived');
     }
 
@@ -481,7 +514,6 @@ export class CoreService {
 
   /**
    * Find archived projects accessible by a user.
-   * Enforces SSOT: Batch-resolves user roles and permissions.
    */
   async findArchived(userId: string): Promise<{ projects: EnrichedProject[] }> {
     const projects = await this.projectRepo.findArchivedProjectsByUser(userId);
@@ -507,10 +539,17 @@ export class CoreService {
         ...p,
         yourRole,
         permissions,
+        projectLabelsList: p.labels?.map((l) => l.label) || [],
       };
     });
 
     return { projects: enriched };
+  }
+
+  async allocateNextWorkItemSequence(
+    projectId: string,
+  ): Promise<AllocatedIdentifier> {
+    return this.projectRepo.allocateNextWorkItemSequence(projectId);
   }
 
   // --- Facade / Gateway methods for other modules ---

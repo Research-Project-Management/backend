@@ -12,8 +12,15 @@ function escapeCsvField(val: unknown): string {
     text = val.toISOString();
   } else if (typeof val === 'object') {
     text = JSON.stringify(val);
-  } else {
+  } else if (
+    typeof val === 'string' ||
+    typeof val === 'number' ||
+    typeof val === 'boolean' ||
+    typeof val === 'bigint'
+  ) {
     text = String(val);
+  } else {
+    text = '';
   }
 
   // Check if escaping is required: contains comma, quote, or newline

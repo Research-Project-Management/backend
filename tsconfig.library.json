@@ -1,0 +1,27 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false
+  },
+  "include": [
+    "src/standalone-library.ts",
+    "src/core/**/*",
+    "src/modules/library/**/*",
+    "src/modules/storage/**/*",
+    "src/modules/iam/authn/**/*",
+    "src/modules/iam/authz/**/*",
+    "src/modules/iam/core/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "test",
+    "src/modules/work-item/**/*",
+    "src/modules/document/**/*",
+    "src/modules/ai/**/*",
+    "src/modules/activity/**/*",
+    "src/modules/analytics/**/*",
+    "src/modules/sticky/**/*",
+    "src/modules/project/**/*"
+  ]
+}

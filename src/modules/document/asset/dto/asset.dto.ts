@@ -44,6 +44,8 @@ export interface DocumentAssetItem {
   mimeType: string;
   sizeBytes: number;
   contentBase64?: string;
+  fileId?: string;
+  storageUrl?: string;
   projectId: string;
   parentPageId: string | null;
   createdAt: Date;

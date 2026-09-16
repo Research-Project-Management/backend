@@ -207,22 +207,10 @@ export class InvitationService {
     }
 
     // Anti-BOLA / Zero-Trust Security Invariant:
-    // Only projects explicitly configured with public network allow open joining without an invitation
-    if (project.network !== 'public') {
-      throw new ForbiddenException(
-        'This project is private and requires a valid invitation token to join',
-      );
-    }
-
-    const role = ProjectMemberRole.contributor;
-    await this.repository.addProjectMember(project.id, user.id, role);
-    await this.invalidateInvitationCaches(project.id, user.id);
-
-    return {
-      message: 'Joined project successfully',
-      projectId: project.id,
-      project,
-    };
+    // Joining a project requires a pending invitation
+    throw new ForbiddenException(
+      'A valid invitation token is required to join this project',
+    );
   }
 
   /**

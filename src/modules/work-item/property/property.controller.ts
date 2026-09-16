@@ -23,7 +23,7 @@ import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
 
 @ApiTags('Work Item User Properties (Plane.so Parity)')
 @ApiBearerAuth('JWT-auth')
-@Controller('api')
+@Controller(['api/v1', 'api'])
 @UseGuards(JwtAuthGuard)
 export class PropertyController {
   constructor(private readonly propertyService: PropertyService) {}

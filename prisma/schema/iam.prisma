@@ -55,6 +55,10 @@ model User {
   // Collaborative Project Relations (Clean & Two-Tier)
   createdProjects     Project[]             @relation("ProjectCreator")
   projectMembers      ProjectMember[]       @relation("UserProjectMemberships")
+  projectFavorites    ProjectFavorite[]     @relation("UserProjectFavorites")
+  projectLabels       ProjectLabel[]        @relation("UserProjectLabels")
+  projectTemplates    ProjectTemplate[]     @relation("UserProjectTemplates")
+  projectLinks        ProjectLink[]         @relation("UserProjectLinks")
 
   // Storage Relations (Personal Scope & File Sharing)
   authoredFiles       File[]                @relation("UserFiles")
@@ -100,8 +104,9 @@ model User {
   ingestionReviewCases   IngestionReviewCase[] @relation("UserIngestionReviewCases")
 
   // Document Relations (Page & Document Collaboration)
-  authoredPages        Page[]                @relation("PageAuthor")
-  authoredPageComments PageComment[]         @relation("PageCommentAuthor")
+  authoredPages           Page[]           @relation("PageAuthor")
+  authoredPageComments    PageComment[]    @relation("PageCommentAuthor")
+  authoredPageSuggestions PageSuggestion[] @relation("PageSuggestionAuthor")
 
   @@index([email])
   @@index([status, deletedAt])

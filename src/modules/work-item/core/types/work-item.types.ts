@@ -138,6 +138,17 @@ export type WorkItemWithRelations = Prisma.WorkItemGetPayload<{
   include: {
     state: { select: typeof STATE_MINIMAL_SELECT };
     assignee: { select: typeof USER_MINIMAL_SELECT };
+    assignees: {
+      select: {
+        isPrimary: true;
+        user: { select: typeof USER_MINIMAL_SELECT };
+      };
+    };
+    labelAssignments: {
+      select: {
+        label: { select: { id: true; name: true; color: true } };
+      };
+    };
     cycle: { select: typeof CYCLE_SELECT };
     parentWorkItem: { select: { id: true; title: true; identifier: true } };
     childWorkItems: {
@@ -188,11 +199,22 @@ export interface WorkItemResponse {
 }
 
 export interface WorkItemFilterOptions {
-  cycleId?: string | null;
-  columnId?: string;
-  priority?: WorkItemPriority;
-  assigneeId?: string | null;
+  cycleId?: string | string[] | null;
+  cycle?: string | string[] | null;
+  columnId?: string | string[];
+  state?: string | string[];
+  stateGroup?: string | string[];
+  priority?: WorkItemPriority | WorkItemPriority[];
+  assigneeId?: string | string[] | null;
+  assignees?: string | string[] | null;
+  labels?: string | string[];
+  createdById?: string | string[];
+  authorId?: string | string[];
   parentWorkItemId?: string | null;
+  dueDate?: string;
+  startDate?: string;
+  orderBy?: string;
+  orderDirection?: 'asc' | 'desc';
   completed?: boolean;
   archived?: boolean;
   search?: string;

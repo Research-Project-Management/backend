@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AssetService } from '@/modules/document/asset/asset.service';
 import { PrismaService } from '@/core/database/prisma.service';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { STORAGE_PORT } from '@/modules/storage/storage.port';
 
 describe('Document AssetService (Figures, Images & LaTeX Assets)', () => {
   let service: AssetService;
@@ -140,6 +141,112 @@ describe('Document AssetService (Figures, Images & LaTeX Assets)', () => {
         where: { id: mockAssetId },
         data: { deletedAt: expect.any(Date) },
       });
+    });
+  });
+
+  describe('AssetService with STORAGE_PORT connected', () => {
+    let storageService: AssetService;
+    let mockStoragePort: any;
+
+    beforeEach(async () => {
+      mockStoragePort = {
+        uploadFile: jest.fn().mockResolvedValue({
+          fileId: 'file-123',
+          url: '/api/files/file-123/content',
+          path: 'attachments/file-123.png',
+          filename: 'architecture.png',
+          size: 100,
+          mimeType: 'image/png',
+        }),
+        readOwnedFile: jest.fn().mockResolvedValue({
+          fileId: 'file-123',
+          filename: 'architecture.png',
+          mimeType: 'image/png',
+          size: 100,
+          storageKey: 'attachments/file-123.png',
+          contentUrl: '/api/files/file-123/content',
+          buffer: Buffer.from('TEST_BINARY_PAYLOAD'),
+        }),
+        deleteFile: jest.fn().mockResolvedValue(undefined),
+      };
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          AssetService,
+          { provide: PrismaService, useValue: prisma },
+          { provide: STORAGE_PORT, useValue: mockStoragePort },
+        ],
+      }).compile();
+
+      storageService = module.get<AssetService>(AssetService);
+    });
+
+    it('should upload binary to storagePort and attach fileId/storageUrl', async () => {
+      prisma.page.create.mockResolvedValueOnce({
+        id: mockAssetId,
+        title: 'architecture.png',
+        projectId: mockProjectId,
+        parentPageId: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const res = await storageService.uploadAsset(mockProjectId, mockUserId, {
+        filename: 'architecture.png',
+        contentBase64:
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        path: 'figures/architecture.png',
+      });
+
+      expect(mockStoragePort.uploadFile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: mockUserId,
+          filename: 'architecture.png',
+          projectId: mockProjectId,
+          source: 'document',
+        }),
+      );
+      expect(res.fileId).toBe('file-123');
+      expect(res.storageUrl).toBe('/api/files/file-123/content');
+    });
+
+    it('should retrieve binary from storagePort when base64 is not saved in JSON', async () => {
+      prisma.page.findFirst.mockResolvedValueOnce({
+        id: mockAssetId,
+        title: 'architecture.png',
+        projectId: mockProjectId,
+        parentPageId: null,
+        content: {
+          isAsset: true,
+          fileId: 'file-123',
+          mimeType: 'image/png',
+          base64: '',
+        },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const res = await storageService.getAsset(mockAssetId);
+
+      expect(mockStoragePort.readOwnedFile).toHaveBeenCalledWith({
+        fileId: 'file-123',
+      });
+      expect(res.contentBase64).toBe(
+        Buffer.from('TEST_BINARY_PAYLOAD').toString('base64'),
+      );
+    });
+
+    it('should delete storage file when deleting asset', async () => {
+      prisma.page.findFirst.mockResolvedValueOnce({
+        id: mockAssetId,
+        content: { fileId: 'file-123' },
+      });
+      prisma.page.update.mockResolvedValueOnce({ id: mockAssetId });
+
+      await storageService.deleteAsset(mockAssetId);
+
+      expect(mockStoragePort.deleteFile).toHaveBeenCalledWith('file-123');
+      expect(prisma.page.update).toHaveBeenCalled();
     });
   });
 });

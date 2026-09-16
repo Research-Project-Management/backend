@@ -16,7 +16,6 @@ const PROJECT_SELECT = {
   identifier: true,
   avatar: true,
   description: true,
-  network: true,
   isActive: true,
 } as const;
 

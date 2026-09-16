@@ -42,7 +42,7 @@ import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
 
 @ApiTags('Planning Work Items')
 @ApiBearerAuth('JWT-auth')
-@Controller('api')
+@Controller(['api/v1', 'api'])
 @UseGuards(JwtAuthGuard)
 export class CoreController {
   constructor(
@@ -315,10 +315,13 @@ export class CoreController {
     @CurrentUser('id') userId: string,
     @Body() duplicateWorkItemDto: DuplicateWorkItemDto,
   ) {
+    const targetProjectId =
+      duplicateWorkItemDto?.destinationProjectId ||
+      (duplicateWorkItemDto as any)?.projectId;
     return this.workItemService.duplicateWorkItem(
       workItemId,
       userId,
-      duplicateWorkItemDto?.destinationProjectId,
+      targetProjectId,
     );
   }
 

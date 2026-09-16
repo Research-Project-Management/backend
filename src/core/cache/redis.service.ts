@@ -111,6 +111,10 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  getClient(): Redis | null {
+    return this.redisClient;
+  }
+
   isReady(): boolean {
     return this.isConnected && this.redisClient !== null;
   }

@@ -458,3 +458,90 @@ export interface CursorPaginatedResult<T> {
     totalCount?: number;
   };
 }
+
+export interface DocumentBoundingBoxDto {
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface DocumentSectionDto {
+  id: string;
+  num: string;
+  title: string;
+  paragraphs: string[];
+  page: number;
+  coords?: DocumentBoundingBoxDto;
+  imradCategory?:
+    | 'introduction'
+    | 'methods'
+    | 'results'
+    | 'discussion'
+    | 'conclusion'
+    | 'other';
+}
+
+export interface DocumentFigureDto {
+  id: string;
+  label: string;
+  caption: string;
+  page: number;
+  coords?: DocumentBoundingBoxDto;
+}
+
+export interface DocumentTableDto {
+  id: string;
+  label: string;
+  caption: string;
+  page: number;
+  coords?: DocumentBoundingBoxDto;
+  headers?: string[];
+  rows?: string[][];
+  markdown?: string;
+}
+
+export interface DocumentFormulaDto {
+  id: string;
+  label?: string;
+  text: string;
+  page: number;
+  coords?: DocumentBoundingBoxDto;
+}
+
+export interface DocumentReferenceDto {
+  id?: string;
+  title?: string;
+  authors: string[];
+  year?: number;
+  journal?: string;
+  volume?: string;
+  issue?: string;
+  pages?: string;
+  doi?: string;
+  arxivId?: string;
+  rawCitation?: string;
+}
+
+export interface DocumentFulltextResponse {
+  title?: string;
+  abstract?: string;
+  sections: DocumentSectionDto[];
+  figures: DocumentFigureDto[];
+  tables: DocumentTableDto[];
+  formulas: DocumentFormulaDto[];
+  references: DocumentReferenceDto[];
+}
+
+export class ParseCitationsDto {
+  @ApiProperty({
+    description:
+      'Raw unformatted citation text or multi-line bibliography string to parse via GROBID CRF',
+    example:
+      'Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., Kaiser, L., & Polosukhin, I. (2017). Attention is all you need. Advances in neural information processing systems, 30.',
+  })
+  @IsString()
+  citations!: string;
+}
+

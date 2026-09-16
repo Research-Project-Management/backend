@@ -20,6 +20,7 @@ export interface WorkItemState {
   id: string;
   name: string;
   color: string;
+  icon?: string;
   group: StateGroup;
   description?: string;
   sequence: number;
@@ -29,25 +30,44 @@ export interface WorkItemState {
   accentColor?: string;
 }
 
+export function getStateDefaultIcon(group: StateGroup): string {
+  switch (group) {
+    case 'backlog':
+      return 'circle-dashed';
+    case 'unstarted':
+      return 'circle';
+    case 'started':
+      return 'circle-dot';
+    case 'completed':
+      return 'check-circle';
+    case 'cancelled':
+      return 'x-circle';
+    default:
+      return 'circle';
+  }
+}
+
 export const DEFAULT_WORK_ITEM_STATES: WorkItemState[] = [
   {
     id: 'backlog',
     name: 'Backlog',
     title: 'Backlog',
     group: 'backlog',
-    color: '#6366F1',
-    accentColor: '#6366F1',
+    color: '#8A9093',
+    accentColor: '#8A9093',
+    icon: 'circle-dashed',
     sequence: 1000,
     isDefault: true,
     description: 'Items awaiting prioritization and scheduling',
   },
   {
     id: 'todo',
-    name: 'To Do',
-    title: 'To Do',
+    name: 'Todo',
+    title: 'Todo',
     group: 'unstarted',
-    color: '#0EA5E9',
-    accentColor: '#0EA5E9',
+    color: '#525866',
+    accentColor: '#525866',
+    icon: 'circle',
     sequence: 2000,
     isDefault: false,
     description: 'Items ready to be worked on in the current cycle',
@@ -57,8 +77,9 @@ export const DEFAULT_WORK_ITEM_STATES: WorkItemState[] = [
     name: 'In Progress',
     title: 'In Progress',
     group: 'started',
-    color: '#F59E0B',
-    accentColor: '#F59E0B',
+    color: '#EAB308',
+    accentColor: '#EAB308',
+    icon: 'circle-dot',
     sequence: 3000,
     isDefault: false,
     description: 'Items actively being worked on by assignees',
@@ -68,8 +89,9 @@ export const DEFAULT_WORK_ITEM_STATES: WorkItemState[] = [
     name: 'Done',
     title: 'Done',
     group: 'completed',
-    color: '#22C55E',
-    accentColor: '#22C55E',
+    color: '#10B981',
+    accentColor: '#10B981',
+    icon: 'check-circle',
     sequence: 4000,
     isDefault: false,
     description: 'Items completed and accepted',
@@ -79,8 +101,9 @@ export const DEFAULT_WORK_ITEM_STATES: WorkItemState[] = [
     name: 'Cancelled',
     title: 'Cancelled',
     group: 'cancelled',
-    color: '#EF4444',
-    accentColor: '#EF4444',
+    color: '#8A9093',
+    accentColor: '#8A9093',
+    icon: 'x-circle',
     sequence: 5000,
     isDefault: false,
     description: 'Items abandoned, duplicate, or rejected',

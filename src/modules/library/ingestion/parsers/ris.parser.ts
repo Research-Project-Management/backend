@@ -1,8 +1,12 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ItemMetadata, CreatorInput } from '../metadata/types/metadata.types';
 import { IngestionValidationException } from '../errors/ingestion.errors';
 import { cleanAbstractText } from '../../items/utils/items.utils';
 import { normalizeAcademicTags } from '../../tags/utils/tags.utils';
+import {
+  ZoteroTranslatorClient,
+  ZoteroItem,
+} from '../../infra/zotero/zotero-translator.client';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { Cite } = require('@citation-js/core');
@@ -12,6 +16,94 @@ require('@citation-js/plugin-ris');
 @Injectable()
 export class RisParser {
   private readonly logger = new Logger(RisParser.name);
+
+  constructor(
+    @Optional()
+    private readonly zoteroClient?: ZoteroTranslatorClient,
+  ) {}
+
+  /**
+   * Asynchronously parses raw RIS text delegating to Zotero Translation Server.
+   * Handles non-standard tags, multi-line notes, and custom publisher fields.
+   * Falls back gracefully to @citation-js/core if sidecar is offline.
+   */
+  async parseAsync(content: string): Promise<ItemMetadata[]> {
+    if (!content || typeof content !== 'string' || !content.trim()) {
+      throw new IngestionValidationException(
+        'RIS content must be a non-empty string',
+      );
+    }
+
+    if (this.zoteroClient) {
+      try {
+        const zoteroItems = await this.zoteroClient.importData(
+          content,
+          'application/x-research-info-systems',
+        );
+        if (zoteroItems && zoteroItems.length > 0) {
+          return zoteroItems.map((item) => this.mapZoteroItemToMetadata(item));
+        }
+      } catch (err: any) {
+        this.logger.debug(
+          `Zotero TS RIS import failed: ${err?.message} — falling back to Cite.js`,
+        );
+      }
+    }
+
+    return this.parse(content);
+  }
+
+  private mapZoteroItemToMetadata(item: ZoteroItem): ItemMetadata {
+    const rawAuthors: string[] = [];
+    const creators: CreatorInput[] = [];
+
+    for (const c of item.creators || []) {
+      const family = (c.lastName || c.name || '').trim();
+      const given = (c.firstName || '').trim();
+      const fullName =
+        family && given ? `${family}, ${given}` : family || given;
+      if (fullName) {
+        rawAuthors.push(fullName);
+        creators.push({
+          firstName: given || undefined,
+          lastName: family || undefined,
+          creatorType: c.creatorType === 'editor' ? 'editor' : 'author',
+        });
+      }
+    }
+
+    let year: number | undefined;
+    if (item.year) {
+      year = item.year;
+    } else if (item.date) {
+      const match = item.date.match(/\b(19|20)\d{2}\b/);
+      if (match) year = parseInt(match[0], 10);
+    }
+
+    const keywords = (item.tags || [])
+      .map((t) => t.tag?.trim())
+      .filter(Boolean);
+
+    return {
+      title: item.title || 'Untitled',
+      authors: rawAuthors,
+      creators,
+      year,
+      publicationDate: item.date,
+      publicationTitle: item.publicationTitle,
+      publisher: item.publisher,
+      volume: item.volume,
+      issue: item.issue,
+      pages: item.pages,
+      doi: item.DOI,
+      isbn: item.ISBN,
+      issn: item.ISSN,
+      url: item.url,
+      abstract: cleanAbstractText(item.abstractNote),
+      keywords: keywords.length > 0 ? keywords : undefined,
+      itemType: item.itemType || 'journalArticle',
+    };
+  }
 
   /**
    * Parses a raw RIS string into one or more ItemMetadata objects using @citation-js engine.

@@ -58,6 +58,14 @@ export class CreateStateDto {
   accentColor?: string;
 
   @ApiPropertyOptional({
+    description: 'Icon identifier or SVG name matching the state group or custom icon',
+    example: 'circle-dot',
+  })
+  @IsString()
+  @IsOptional()
+  icon?: string;
+
+  @ApiPropertyOptional({
     description: 'Detailed description of the state purposes and exit criteria',
     example: 'Code review completed by at least 2 peers',
   })

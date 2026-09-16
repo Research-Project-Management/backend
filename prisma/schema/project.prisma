@@ -15,6 +15,23 @@ enum InvitationStatus {
   expired
 }
 
+enum ProjectState {
+  draft       // Bản nháp / Ý tưởng sơ khởi
+  planning    // Lên kế hoạch, scoping tài nguyên
+  execution   // Đang triển khai thực hiện (In Progress)
+  monitoring  // Thử nghiệm, nghiệm thu, kiểm thử (Staging / Review)
+  completed   // Hoàn thành
+  cancelled   // Hủy bỏ / Tạm ngưng
+}
+
+enum ProjectPriority {
+  urgent      // Khẩn cấp
+  high        // Cao
+  medium      // Trung bình
+  low         // Thấp
+  none        // Không xác định
+}
+
 model Project {
   id             String                @id @default(uuid()) @db.Uuid
   name           String
@@ -22,12 +39,26 @@ model Project {
   description    String?               @default("")
   avatar         String?
   coverImage     String?               @map("cover_image")
-  network        String?               @default("secret") // secret, public
+
+  // Vòng đời & Portfolio Tracking
+  state          ProjectState          @default(planning)
+  priority       ProjectPriority       @default(none)
+  startDate      DateTime?             @map("start_date") @db.Date
+  targetDate     DateTime?             @map("target_date") @db.Date
+
+  // Trạng thái vận hành & Lưu trữ
   isActive       Boolean               @default(true) @map("is_active")
+  isArchived     Boolean               @default(false) @map("is_archived")
+  archivedAt     DateTime?             @map("archived_at") @db.Timestamptz(6)
+
   createdById    String                @map("created_by_id") @db.Uuid
   createdBy      User                  @relation("ProjectCreator", fields: [createdById], references: [id], onDelete: Cascade)
-  modules        String[]              @default(["work_items", "cycles", "views", "pages", "stickies", "storage"])
+  modules        String[]              @default(["work_items", "cycles", "views", "pages"])
   settings       Json?                 @default("{}")
+
+  // Template liên kết (nếu được tạo từ Project Template)
+  templateId     String?               @map("template_id") @db.Uuid
+  template       ProjectTemplate?      @relation(fields: [templateId], references: [id], onDelete: SetNull)
 
   // WorkItem & Board extensions
   workItemSequence   Int                   @default(0) @map("work_item_sequence")
@@ -39,11 +70,13 @@ model Project {
   // Relations
   members        ProjectMember[]
   invitations    ProjectInvitation[]
+  labels         ProjectLabelAssignment[]
+  favorites      ProjectFavorite[]
   pages          Page[]
   states         WorkItemState[]
   cycles         Cycle[]
   workItems      WorkItem[]
-  labels         Label[]
+  projectLabels  Label[]
   views          WorkItemView[]
   userProperties ProjectUserProperty[]
   drafts         WorkItemDraft[]
@@ -51,6 +84,7 @@ model Project {
   activityEvents ActivityEvent[]
   aiChats        AiChat[]              @relation("ProjectAiChats")
   stickies       Sticky[]              @relation("ProjectStickies")
+  links          ProjectLink[]
 
   // Academic Library Relations (Project Scope & Collaborative Repository)
   items                Item[]                @relation("ProjectItems")
@@ -67,7 +101,8 @@ model Project {
   ingestionReviewCases IngestionReviewCase[] @relation("ProjectIngestionReviewCases")
 
   @@index([createdById])
-  @@index([isActive, deletedAt])
+  @@index([state, priority])
+  @@index([isActive, isArchived, deletedAt])
   @@map("projects")
 }
 
@@ -104,4 +139,91 @@ model ProjectInvitation {
   @@index([projectId, status])
   @@index([email])
   @@map("project_invitations")
+}
+
+model ProjectLabel {
+  id          String                   @id @default(uuid()) @db.Uuid
+  name        String                   @db.VarChar(50)
+  color       String                   @db.VarChar(10) // Hex color code e.g. #3B82F6
+  description String?                  @db.VarChar(200)
+  userId      String                   @map("user_id") @db.Uuid
+  user        User                     @relation("UserProjectLabels", fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  assignments ProjectLabelAssignment[]
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@map("project_labels")
+}
+
+model ProjectLabelAssignment {
+  id         String       @id @default(uuid()) @db.Uuid
+  projectId  String       @map("project_id") @db.Uuid
+  project    Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  labelId    String       @map("label_id") @db.Uuid
+  label      ProjectLabel @relation(fields: [labelId], references: [id], onDelete: Cascade)
+  assignedAt DateTime     @default(now()) @map("assigned_at") @db.Timestamptz(6)
+
+  @@unique([projectId, labelId])
+  @@index([projectId])
+  @@index([labelId])
+  @@map("project_label_assignments")
+}
+
+model ProjectFavorite {
+  id        String   @id @default(uuid()) @db.Uuid
+  projectId String   @map("project_id") @db.Uuid
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId    String   @map("user_id") @db.Uuid
+  user      User     @relation("UserProjectFavorites", fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([projectId, userId])
+  @@index([userId])
+  @@map("project_favorites")
+}
+
+model ProjectTemplate {
+  id               String    @id @default(uuid()) @db.Uuid
+  name             String    @db.VarChar(100)
+  description      String?   @db.VarChar(500)
+  avatar           String?
+  coverImage       String?   @map("cover_image")
+  isPublic         Boolean   @default(false) @map("is_public")
+  createdById      String    @map("created_by_id") @db.Uuid
+  createdBy        User      @relation("UserProjectTemplates", fields: [createdById], references: [id], onDelete: Cascade)
+
+  // Cấu hình dự án mẫu (Features / Modules)
+  defaultModules   String[]  @default(["work_items", "cycles", "views", "pages"]) @map("default_modules")
+  settings         Json?     @default("{}")
+
+  // Cấu hình khởi tạo khi sinh Project từ Template
+  initialStates    Json?     @default("[]") @map("initial_states")
+  initialLabels    Json?     @default("[]") @map("initial_labels")
+  initialWorkItems Json?     @default("[]") @map("initial_work_items")
+
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  projects         Project[]
+
+  @@index([createdById])
+  @@map("project_templates")
+}
+
+model ProjectLink {
+  id          String   @id @default(uuid()) @db.Uuid
+  projectId   String   @map("project_id") @db.Uuid
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title       String   @db.VarChar(255)
+  url         String   @db.Text
+  createdById String   @map("created_by_id") @db.Uuid
+  createdBy   User     @relation("UserProjectLinks", fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([projectId, createdAt])
+  @@map("project_links")
 }

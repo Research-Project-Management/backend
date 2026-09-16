@@ -1,4 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import {
+  ZoteroTranslatorClient,
+  ZoteroItem,
+} from '../../infra/zotero/zotero-translator.client';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { Cite } = require('@citation-js/core');
@@ -37,6 +41,90 @@ export interface ParsedBibtexEntry {
 @Injectable()
 export class BibtexParser {
   private readonly logger = new Logger(BibtexParser.name);
+
+  constructor(
+    @Optional()
+    private readonly zoteroClient?: ZoteroTranslatorClient,
+  ) {}
+
+  /**
+   * Parse a raw BibTeX string asynchronously.
+   * Delegates to Zotero Translation Server (700+ publisher translators, LaTeX macro expansions).
+   * Falls back gracefully to @citation-js if sidecar is offline.
+   */
+  async parseAsync(rawBibtex: string): Promise<ParsedBibtexEntry[]> {
+    if (!rawBibtex || typeof rawBibtex !== 'string' || !rawBibtex.trim()) {
+      return [];
+    }
+
+    if (this.zoteroClient) {
+      try {
+        const zoteroItems = await this.zoteroClient.importData(
+          rawBibtex,
+          'application/x-bibtex',
+        );
+        if (zoteroItems && zoteroItems.length > 0) {
+          return zoteroItems.map((item) => this.mapZoteroItemToEntry(item));
+        }
+      } catch (err: any) {
+        this.logger.debug(
+          `Zotero TS BibTeX import failed: ${err?.message} — falling back to Cite.js`,
+        );
+      }
+    }
+
+    return this.parse(rawBibtex);
+  }
+
+  private mapZoteroItemToEntry(item: ZoteroItem): ParsedBibtexEntry {
+    const authors: string[] = [];
+    const editors: string[] = [];
+
+    for (const c of item.creators || []) {
+      const name =
+        c.name ||
+        (c.firstName && c.lastName
+          ? `${c.firstName} ${c.lastName}`
+          : c.lastName || '');
+      if (!name) continue;
+      if (c.creatorType === 'editor') {
+        editors.push(name);
+      } else {
+        authors.push(name);
+      }
+    }
+
+    let year: number | null = null;
+    if (item.year) {
+      year = item.year;
+    } else if (item.date) {
+      const match = item.date.match(/\b(19|20)\d{2}\b/);
+      if (match) year = parseInt(match[0], 10);
+    }
+
+    return {
+      citationKey: item.key,
+      itemType: item.itemType || 'journalArticle',
+      title: item.title || 'Untitled',
+      authors,
+      editors: editors.length > 0 ? editors : undefined,
+      year,
+      journal: item.publicationTitle,
+      publisher: item.publisher,
+      place: item.place,
+      volume: item.volume,
+      issue: item.issue,
+      pages: item.pages,
+      doi: item.DOI,
+      isbn: item.ISBN,
+      issn: item.ISSN,
+      url: item.url,
+      abstract: item.abstractNote,
+      series: (item as any).series,
+      keywords: item.tags?.map((t) => t.tag).filter(Boolean),
+      extra: item.extra,
+    };
+  }
 
   /**
    * Parse a raw BibTeX string containing one or multiple entries using @citation-js engine.

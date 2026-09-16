@@ -6,6 +6,7 @@ export const calculateCycleStats = (
     Partial<CycleWorkItemItem> & {
       columnId?: string;
       completed?: boolean;
+      state?: { id?: string; name?: string; group?: string } | null;
     }
   >,
 ): CycleStats => {
@@ -18,7 +19,12 @@ export const calculateCycleStats = (
   let cancelled = 0;
 
   for (const workItem of safeItems) {
-    const group = inferStateGroup(workItem.columnId, workItem.columnId);
+    const group =
+      workItem.state?.group ||
+      inferStateGroup(
+        workItem.columnId,
+        workItem.state?.name || workItem.columnId,
+      );
     const isCompleted = workItem.completed === true || group === 'completed';
 
     if (isCompleted) {

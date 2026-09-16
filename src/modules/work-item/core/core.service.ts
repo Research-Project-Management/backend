@@ -23,6 +23,7 @@ import { formatWorkItem, mapPriority } from './utils/work-item.util';
 import { isStateCompleted } from '../state/utils/state.util';
 import { isUuid } from '@/core/utils/uuid.util';
 import { WORK_ITEM_REDIS_KEYS } from './constants/redis-keys.constant';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class CoreService {
@@ -94,11 +95,19 @@ export class CoreService {
           : filter
             ? {
                 cycleId: filter.cycleId || filter.cycle,
-                columnId: filter.columnId,
+                columnId: filter.columnId || filter.state,
+                stateGroup: filter.stateGroup,
                 priority: filter.priority,
-                assigneeId: filter.assigneeId,
+                assigneeId: filter.assigneeId || filter.assignees,
+                labels: filter.labels,
+                createdById: filter.createdById || filter.authorId,
                 parentWorkItemId: filter.parentWorkItemId,
+                dueDate: filter.dueDate,
+                startDate: filter.startDate,
+                orderBy: filter.orderBy,
+                orderDirection: filter.orderDirection,
                 completed: filter.completed,
+                archived: filter.archived,
                 search: filter.search,
                 limit: filter.limit,
                 offset:
@@ -168,24 +177,94 @@ export class CoreService {
 
     const defaultState =
       rawProject.states?.find((s) => s.isDefault) || rawProject.states?.[0];
-    const targetState =
+    const normalizedCol = (createWorkItemDto.columnId || '')
+      .toLowerCase()
+      .trim();
+    let targetState =
       rawProject.states?.find(
         (s) =>
           s.id === createWorkItemDto.columnId ||
-          s.name.toLowerCase() === createWorkItemDto.columnId?.toLowerCase() ||
-          s.group.toLowerCase() === createWorkItemDto.columnId?.toLowerCase(),
+          s.name.toLowerCase() === normalizedCol ||
+          s.group.toLowerCase() === normalizedCol ||
+          s.name.toLowerCase().replace(/[\s_-]+/g, '_') ===
+            normalizedCol.replace(/[\s_-]+/g, '_') ||
+          (normalizedCol.includes('progress') && s.group === 'started') ||
+          (normalizedCol.includes('todo') && s.group === 'unstarted') ||
+          (normalizedCol.includes('done') && s.group === 'completed'),
       ) || defaultState;
+
+    if (
+      createWorkItemDto.completed === true &&
+      targetState?.group !== 'completed'
+    ) {
+      const completedState = rawProject.states?.find(
+        (s) => s.group === 'completed',
+      );
+      if (completedState) {
+        targetState = completedState;
+      }
+    } else if (
+      createWorkItemDto.completed === false &&
+      targetState?.group === 'completed'
+    ) {
+      if (defaultState && defaultState.group !== 'completed') {
+        targetState = defaultState;
+      }
+    }
+
     const targetColumn = targetState
       ? targetState.id
       : createWorkItemDto.columnId;
+    const isCompleted = targetState
+      ? targetState.group === 'completed'
+      : isStateCompleted(targetColumn || '');
+
     const columnCount = await this.workItemRepository.countColumnWorkItems(
-      projectId,
+      rawProject.id,
       targetColumn,
     );
-    const { identifier, sequenceNumber } =
-      await this.idHandler.nextIdentifier(projectId);
+    const { identifier, sequenceNumber } = await this.idHandler.nextIdentifier(
+      rawProject.id,
+    );
 
     const parentId = createWorkItemDto.parentWorkItemId;
+    let validParentId: string | null = null;
+    if (parentId && isUuid(parentId)) {
+      const parentItem =
+        await this.workItemRepository.findWorkItemById(parentId);
+      if (parentItem && parentItem.projectId === rawProject.id) {
+        validParentId = parentItem.id;
+      }
+    }
+
+    let validCycleId: string | null = null;
+    if (createWorkItemDto.cycleId && isUuid(createWorkItemDto.cycleId)) {
+      const cycle = await this.workItemRepository.findCycleById(
+        createWorkItemDto.cycleId,
+      );
+      if (cycle && cycle.projectId === rawProject.id && !cycle.deletedAt) {
+        validCycleId = cycle.id;
+      }
+    }
+
+    const rawAssigneeIds = Array.isArray(createWorkItemDto.assigneeIds)
+      ? createWorkItemDto.assigneeIds
+      : createWorkItemDto.assigneeId
+        ? [createWorkItemDto.assigneeId]
+        : [];
+    const validAssigneeIds = (
+      await Promise.all(
+        rawAssigneeIds.map(async (uid) => {
+          if (!isUuid(uid)) return null;
+          const isMember = await this.workItemRepository.isProjectMember(
+            rawProject.id,
+            uid,
+          );
+          return isMember ? uid : null;
+        }),
+      )
+    ).filter(Boolean) as string[];
+    const validAssigneeId = validAssigneeIds[0] || null;
 
     const workItem = await this.workItemRepository.createWorkItem({
       title: createWorkItemDto.title,
@@ -194,12 +273,12 @@ export class CoreService {
       priority: mapPriority(createWorkItemDto.priority),
       identifier,
       sequenceNumber,
-      labels: createWorkItemDto.labels || [],
-      completed:
-        createWorkItemDto.completed !== undefined
-          ? createWorkItemDto.completed
-          : targetState?.group === 'completed' ||
-            isStateCompleted(targetColumn || ''),
+      labels: Array.isArray(createWorkItemDto.labels)
+        ? createWorkItemDto.labels.filter(
+            (l) => typeof l === 'string' && l.trim().length > 0,
+          )
+        : [],
+      completed: isCompleted,
       relations: createWorkItemDto.relations || [],
       startDate: createWorkItemDto.startDate
         ? new Date(createWorkItemDto.startDate)
@@ -208,23 +287,17 @@ export class CoreService {
         ? new Date(createWorkItemDto.dueDate)
         : null,
       timeSpent: createWorkItemDto.timeSpent || 0,
-      assigneeIds:
-        createWorkItemDto.assigneeIds &&
-        Array.isArray(createWorkItemDto.assigneeIds)
-          ? createWorkItemDto.assigneeIds
-          : createWorkItemDto.assigneeId
-            ? [createWorkItemDto.assigneeId]
-            : [],
-      project: { connect: { id: projectId } },
+      assigneeIds: validAssigneeIds,
+      project: { connect: { id: rawProject.id } },
       author: { connect: { id: authorId } },
       ...(targetColumn ? { state: { connect: { id: targetColumn } } } : {}),
-      ...(createWorkItemDto.assigneeId
-        ? { assignee: { connect: { id: createWorkItemDto.assigneeId } } }
+      ...(validAssigneeId
+        ? { assignee: { connect: { id: validAssigneeId } } }
         : {}),
-      ...(createWorkItemDto.cycleId
-        ? { cycle: { connect: { id: createWorkItemDto.cycleId } } }
+      ...(validCycleId ? { cycle: { connect: { id: validCycleId } } } : {}),
+      ...(validParentId
+        ? { parentWorkItem: { connect: { id: validParentId } } }
         : {}),
-      ...(parentId ? { parentWorkItem: { connect: { id: parentId } } } : {}),
     });
 
     if (createWorkItemDto.attachments) {
@@ -298,7 +371,7 @@ export class CoreService {
       let targetState = await this.workItemRepository.findStateById(
         updateWorkItemDto.columnId,
       );
-      if (!targetState) {
+      if (!targetState || targetState.projectId !== existing.projectId) {
         const rawProject = await this.workItemRepository.findProjectWithColumns(
           existing.projectId,
         );
@@ -316,6 +389,113 @@ export class CoreService {
       targetIsCompleted = targetState
         ? targetState.group === 'completed'
         : isStateCompleted(targetColumnId);
+    } else if (updateWorkItemDto.completed !== undefined) {
+      const rawProject = await this.workItemRepository.findProjectWithColumns(
+        existing.projectId,
+      );
+      const isCurrentlyCompleted =
+        existing.state?.group === 'completed' ||
+        existing.columnId === 'done' ||
+        Boolean(existing.completed);
+
+      if (updateWorkItemDto.completed && !isCurrentlyCompleted) {
+        const completedState = rawProject?.states?.find(
+          (s) => s.group === 'completed',
+        );
+        if (completedState) {
+          targetColumnId = completedState.id;
+        }
+        targetIsCompleted = true;
+      } else if (!updateWorkItemDto.completed && isCurrentlyCompleted) {
+        const unstartedState =
+          rawProject?.states?.find((s) => s.isDefault) ||
+          rawProject?.states?.find((s) => s.group === 'unstarted') ||
+          rawProject?.states?.[0];
+        if (unstartedState) {
+          targetColumnId = unstartedState.id;
+        }
+        targetIsCompleted = false;
+      } else {
+        targetIsCompleted = updateWorkItemDto.completed;
+      }
+    }
+
+    let cycleUpdate: Prisma.WorkItemUpdateInput['cycle'] | undefined;
+    if (updateWorkItemDto.cycleId !== undefined) {
+      if (!updateWorkItemDto.cycleId) {
+        cycleUpdate = { disconnect: true };
+      } else if (isUuid(updateWorkItemDto.cycleId)) {
+        const cycle = await this.workItemRepository.findCycleById(
+          updateWorkItemDto.cycleId,
+        );
+        if (
+          cycle &&
+          cycle.projectId === existing.projectId &&
+          !cycle.deletedAt
+        ) {
+          cycleUpdate = { connect: { id: cycle.id } };
+        } else {
+          cycleUpdate = { disconnect: true };
+        }
+      }
+    }
+
+    let assigneeUpdate: Prisma.WorkItemUpdateInput['assignee'] | undefined;
+    if (updateWorkItemDto.assigneeId !== undefined) {
+      if (!updateWorkItemDto.assigneeId) {
+        assigneeUpdate = { disconnect: true };
+      } else if (isUuid(updateWorkItemDto.assigneeId)) {
+        const isMember = await this.workItemRepository.isProjectMember(
+          existing.projectId,
+          updateWorkItemDto.assigneeId,
+        );
+        if (isMember) {
+          assigneeUpdate = {
+            connect: { id: updateWorkItemDto.assigneeId },
+          };
+        } else {
+          assigneeUpdate = { disconnect: true };
+        }
+      }
+    }
+
+    let validAssigneeIds: string[] | undefined;
+    if (updateWorkItemDto.assigneeIds !== undefined) {
+      if (Array.isArray(updateWorkItemDto.assigneeIds)) {
+        const filtered = (
+          await Promise.all(
+            updateWorkItemDto.assigneeIds.map(async (uid) => {
+              if (!isUuid(uid)) return null;
+              const isMember = await this.workItemRepository.isProjectMember(
+                existing.projectId,
+                uid,
+              );
+              return isMember ? uid : null;
+            }),
+          )
+        ).filter(Boolean) as string[];
+        validAssigneeIds = filtered;
+      } else {
+        validAssigneeIds = [];
+      }
+    }
+
+    let parentUpdate: Prisma.WorkItemUpdateInput['parentWorkItem'] | undefined;
+    if (parentId !== undefined) {
+      if (!parentId) {
+        parentUpdate = { disconnect: true };
+      } else if (isUuid(parentId) && parentId !== workItemId) {
+        const parent = await this.workItemRepository.findWorkItemById(parentId);
+        if (
+          parent &&
+          parent.projectId === existing.projectId &&
+          parent.id !== workItemId
+        ) {
+          parentUpdate = { connect: { id: parent.id } };
+        } else {
+          parentUpdate = { disconnect: true };
+        }
+      }
     }
 
     const updated = await this.workItemRepository.updateWorkItem(existing.id, {
@@ -330,14 +510,11 @@ export class CoreService {
       }),
       ...(targetColumnId !== undefined && {
         state: { connect: { id: targetColumnId } },
-        completed:
-          updateWorkItemDto.completed !== undefined
-            ? updateWorkItemDto.completed
-            : targetIsCompleted,
+        completed: targetIsCompleted,
       }),
-      ...(updateWorkItemDto.completed !== undefined &&
-        targetColumnId === undefined && {
-          completed: updateWorkItemDto.completed,
+      ...(targetColumnId === undefined &&
+        targetIsCompleted !== undefined && {
+          completed: targetIsCompleted,
         }),
       ...(updateWorkItemDto.priority !== undefined && {
         priority: mapPriority(updateWorkItemDto.priority),
@@ -346,7 +523,11 @@ export class CoreService {
         rank: updateWorkItemDto.rank,
       }),
       ...(updateWorkItemDto.labels !== undefined && {
-        labels: updateWorkItemDto.labels,
+        labels: Array.isArray(updateWorkItemDto.labels)
+          ? updateWorkItemDto.labels.filter(
+              (l) => typeof l === 'string' && l.trim().length > 0,
+            )
+          : [],
       }),
       ...(updateWorkItemDto.relations !== undefined && {
         relations: updateWorkItemDto.relations,
@@ -367,23 +548,11 @@ export class CoreService {
       ...(updateWorkItemDto.timeSpent !== undefined && {
         timeSpent: updateWorkItemDto.timeSpent,
       }),
-      ...(updateWorkItemDto.assigneeId !== undefined && {
-        assignee: updateWorkItemDto.assigneeId
-          ? { connect: { id: updateWorkItemDto.assigneeId } }
-          : { disconnect: true },
-      }),
-      ...(updateWorkItemDto.cycleId !== undefined && {
-        cycle: updateWorkItemDto.cycleId
-          ? { connect: { id: updateWorkItemDto.cycleId } }
-          : { disconnect: true },
-      }),
-      ...(parentId !== undefined && {
-        parentWorkItem: parentId
-          ? { connect: { id: parentId } }
-          : { disconnect: true },
-      }),
-      ...(updateWorkItemDto.assigneeIds !== undefined && {
-        assigneeIds: updateWorkItemDto.assigneeIds,
+      ...(assigneeUpdate !== undefined && { assignee: assigneeUpdate }),
+      ...(cycleUpdate !== undefined && { cycle: cycleUpdate }),
+      ...(parentUpdate !== undefined && { parentWorkItem: parentUpdate }),
+      ...(validAssigneeIds !== undefined && {
+        assigneeIds: validAssigneeIds,
       }),
     });
 
@@ -521,26 +690,86 @@ export class CoreService {
       };
     }
 
+    const rawProject =
+      await this.workItemRepository.findProjectWithColumns(projectId);
+    const canonicalProjectId = rawProject?.id || projectId;
+
     const data: any = {};
     if (payload.columnId !== undefined) {
-      data.columnId = payload.columnId;
-      const targetState = await this.workItemRepository.findStateById(
-        payload.columnId,
+      const targetState = rawProject?.states?.find(
+        (s) =>
+          s.id === payload.columnId ||
+          s.name.toLowerCase() === payload.columnId?.toLowerCase() ||
+          s.group.toLowerCase() === payload.columnId?.toLowerCase(),
       );
+      data.columnId = targetState ? targetState.id : payload.columnId;
       data.completed = targetState
         ? targetState.group === 'completed'
-        : isStateCompleted(payload.columnId);
+        : isStateCompleted(data.columnId);
+    } else if (payload.completed !== undefined) {
+      if (payload.completed) {
+        const completedState = rawProject?.states?.find(
+          (s) => s.group === 'completed',
+        );
+        if (completedState) {
+          data.columnId = completedState.id;
+        }
+        data.completed = true;
+      } else {
+        const defaultState =
+          rawProject?.states?.find((s) => s.isDefault) ||
+          rawProject?.states?.find((s) => s.group === 'unstarted') ||
+          rawProject?.states?.[0];
+        if (defaultState) {
+          data.columnId = defaultState.id;
+        }
+        data.completed = false;
+      }
     }
-    if (payload.assigneeId !== undefined) data.assigneeId = payload.assigneeId;
+
+    if (payload.assigneeId !== undefined) {
+      if (!payload.assigneeId) {
+        data.assigneeId = null;
+      } else if (isUuid(payload.assigneeId)) {
+        const isMember = await this.workItemRepository.isProjectMember(
+          canonicalProjectId,
+          payload.assigneeId,
+        );
+        if (isMember) {
+          data.assigneeId = payload.assigneeId;
+        }
+      }
+    }
+
     if (payload.priority !== undefined)
       data.priority = mapPriority(payload.priority);
-    if (payload.cycleId !== undefined) data.cycleId = payload.cycleId;
+
+    if (payload.cycleId !== undefined) {
+      if (!payload.cycleId) {
+        data.cycleId = null;
+      } else if (isUuid(payload.cycleId)) {
+        const cycle = await this.workItemRepository.findCycleById(
+          payload.cycleId,
+        );
+        if (
+          cycle &&
+          cycle.projectId === canonicalProjectId &&
+          !cycle.deletedAt
+        ) {
+          data.cycleId = cycle.id;
+        }
+      }
+    }
+
     if (payload.dueDate !== undefined)
       data.dueDate = payload.dueDate ? new Date(payload.dueDate) : null;
+
     if (payload.clearLabels === true) {
       data.labels = [];
     } else if (payload.labels !== undefined && Array.isArray(payload.labels)) {
-      data.labels = payload.labels;
+      data.labels = payload.labels.filter(
+        (l: any) => typeof l === 'string' && l.trim().length > 0,
+      );
     }
 
     const result = await this.workItemRepository.bulkUpdateWorkItems(

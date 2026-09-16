@@ -30,7 +30,10 @@ import { InstantiateTemplateDto } from './dto/instantiate-template.dto';
 
 @ApiTags('work-items')
 @ApiBearerAuth('JWT-auth')
-@Controller('api/work-items/projects/:projectId/templates')
+@Controller([
+  'api/v1/work-items/projects/:projectId/templates',
+  'api/work-items/projects/:projectId/templates',
+])
 @UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class TemplateController {
   constructor(private readonly templateService: TemplateService) {}

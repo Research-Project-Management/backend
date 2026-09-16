@@ -32,7 +32,7 @@ import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
 
 @ApiTags('Planning Cycles')
 @ApiBearerAuth('JWT-auth')
-@Controller('api')
+@Controller(['api/v1', 'api'])
 @UseGuards(JwtAuthGuard)
 export class CycleController {
   constructor(private readonly cycleService: CycleService) {}

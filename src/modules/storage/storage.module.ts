@@ -6,6 +6,7 @@ import {
   STORAGE_BLOB_REPOSITORY,
   UPLOAD_SESSION_REPOSITORY,
   STORAGE_QUOTA_REPOSITORY,
+  STORAGE_VERSION_REPOSITORY,
   STORAGE_PORT,
 } from './storage.tokens';
 
@@ -15,6 +16,7 @@ import { PrismaStorageNodeRepository } from './infrastructure/persistence/prisma
 import { PrismaStorageBlobRepository } from './infrastructure/persistence/prisma-storage-blob.repository';
 import { PrismaUploadSessionRepository } from './infrastructure/persistence/prisma-upload-session.repository';
 import { PrismaStorageQuotaRepository } from './infrastructure/persistence/prisma-storage-quota.repository';
+import { PrismaStorageVersionRepository } from './infrastructure/persistence/prisma-storage-version.repository';
 import { StorageRedisCacheService } from './infrastructure/cache/storage-redis-cache.service';
 
 // Application: Policies & Use Cases
@@ -29,6 +31,10 @@ import { RestoreNodeUseCase } from './application/use-cases/trash/restore-node.u
 import { PermanentDeleteUseCase } from './application/use-cases/trash/permanent-delete.use-case';
 import { StreamBinaryUseCase } from './application/use-cases/stream/stream-binary.use-case';
 import { CheckQuotaUseCase } from './application/use-cases/quota/check-quota.use-case';
+import { UploadNewVersionUseCase } from './application/use-cases/version/upload-new-version.use-case';
+import { GetFileVersionsUseCase } from './application/use-cases/version/get-file-versions.use-case';
+import { DownloadFileVersionUseCase } from './application/use-cases/version/download-file-version.use-case';
+import { RevertFileVersionUseCase } from './application/use-cases/version/revert-file-version.use-case';
 
 // Application: Cron Jobs
 import { TrashRetentionJob } from './application/jobs/trash-retention.cron';
@@ -41,6 +47,7 @@ import { UploadController } from './presentation/controllers/upload.controller';
 import { StreamController } from './presentation/controllers/stream.controller';
 import { TrashController } from './presentation/controllers/trash.controller';
 import { QuotaController } from './presentation/controllers/quota.controller';
+import { VersionController } from './presentation/controllers/version.controller';
 
 // Facade (Public API)
 import { StorageFacade } from './storage.facade';
@@ -54,6 +61,7 @@ import { R2Service } from './infrastructure/drivers/r2.service';
     StreamController,
     TrashController,
     QuotaController,
+    VersionController,
   ],
   providers: [
     // 1. Storage Driver Factory & Compatibility R2Service
@@ -81,6 +89,10 @@ import { R2Service } from './infrastructure/drivers/r2.service';
       provide: STORAGE_QUOTA_REPOSITORY,
       useClass: PrismaStorageQuotaRepository,
     },
+    {
+      provide: STORAGE_VERSION_REPOSITORY,
+      useClass: PrismaStorageVersionRepository,
+    },
 
     // 3. Cache & Policy
     StorageRedisCacheService,
@@ -97,6 +109,10 @@ import { R2Service } from './infrastructure/drivers/r2.service';
     PermanentDeleteUseCase,
     StreamBinaryUseCase,
     CheckQuotaUseCase,
+    UploadNewVersionUseCase,
+    GetFileVersionsUseCase,
+    DownloadFileVersionUseCase,
+    RevertFileVersionUseCase,
 
     // 5. Background Jobs
     TrashRetentionJob,
@@ -117,6 +133,7 @@ import { R2Service } from './infrastructure/drivers/r2.service';
     STORAGE_DRIVER,
     STORAGE_NODE_REPOSITORY,
     STORAGE_BLOB_REPOSITORY,
+    STORAGE_VERSION_REPOSITORY,
   ],
 })
 export class StorageModule {}

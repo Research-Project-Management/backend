@@ -26,7 +26,12 @@ import type { AuthenticatedUser } from '@/modules/iam/core/types/iam.type';
 
 @ApiTags('Project Invitations')
 @ApiBearerAuth('JWT-auth')
-@Controller(['api/projects', 'api/project'])
+@Controller([
+  'api/v1/projects',
+  'api/v1/project',
+  'api/projects',
+  'api/project',
+])
 @UseGuards(JwtAuthGuard)
 export class InvitationController {
   constructor(private readonly invitationService: InvitationService) {}

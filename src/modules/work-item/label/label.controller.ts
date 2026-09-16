@@ -35,7 +35,7 @@ import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
 
 @ApiTags('Work Item Labels')
 @ApiBearerAuth('JWT-auth')
-@Controller('api')
+@Controller(['api/v1', 'api'])
 @UseGuards(JwtAuthGuard)
 export class LabelController {
   constructor(private readonly labelService: LabelService) {}

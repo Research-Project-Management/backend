@@ -3,6 +3,7 @@ import {
   Logger,
   BadRequestException,
   Optional,
+  Inject,
 } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { JSDOM } from 'jsdom';
@@ -10,7 +11,7 @@ import { Readability } from '@mozilla/readability';
 import createDOMPurify from 'dompurify';
 import { MetadataRoutingPolicy } from '../../ingestion/metadata/policies/metadata.policy';
 import { AttachmentsService } from '../attachments.service';
-import { R2Service } from '@/modules/storage/infrastructure/drivers/r2.service';
+import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { SsrfGuardService } from '../../core/services/ssrf-guard.service';
 
 export interface SnapshotResult {
@@ -38,7 +39,9 @@ export class WebSnapshotService {
 
   constructor(
     private readonly attachmentsService: AttachmentsService,
-    @Optional() private readonly r2Service?: R2Service,
+    @Optional()
+    @Inject(STORAGE_PORT)
+    private readonly storagePort?: IStoragePort,
     @Optional() ssrfGuard?: SsrfGuardService,
   ) {
     this.ssrfGuard = ssrfGuard || new SsrfGuardService();
@@ -416,9 +419,9 @@ export class WebSnapshotService {
     const filename = `Snapshot_${sanitizedTitle}_${new Date().toISOString().slice(0, 10)}.html`;
 
     let fileUrl = `/api/files/snapshots/${fileKey}`;
-    if (this.r2Service?.uploadBuffer) {
+    if (this.storagePort?.uploadBuffer) {
       try {
-        const uploadResult = await this.r2Service.uploadBuffer(
+        const uploadResult = await this.storagePort.uploadBuffer(
           fileKey,
           Buffer.from(snapshot.htmlContent, 'utf-8'),
           'text/html; charset=utf-8',

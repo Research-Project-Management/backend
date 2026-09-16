@@ -275,6 +275,29 @@ export class DriveController {
     return this.nodeRepo.update(node);
   }
 
+  @Put(':id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Update file metadata and description' })
+  async updateNodeMetadata(
+    @Param('id') id: string,
+    @Body() dto: { metaData?: Record<string, any>; description?: string },
+  ) {
+    const node = await this.nodeRepo.findById(id);
+    if (!node || node.isTrashed()) {
+      throw new NotFoundException('Node not found');
+    }
+    const currentMeta = node.metadata || {};
+    const updatedMeta = {
+      ...currentMeta,
+      ...(dto.metaData || {}),
+      ...(dto.description !== undefined ? { description: dto.description } : {}),
+    };
+    (node as any)._metadata = updatedMeta;
+    (node as any)._updatedAt = new Date();
+    await this.nodeRepo.update(node);
+    return this.mapNodeToDto(node);
+  }
+
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Move file to trash' })

@@ -5,6 +5,7 @@ import {
   BadRequestException,
   ForbiddenException,
   UnprocessableEntityException,
+  Optional,
 } from '@nestjs/common';
 import { Prisma, RagStatus } from '@prisma/client';
 import { QueryRepository } from './repositories/query.repository';
@@ -21,7 +22,10 @@ import {
   LibraryItemSource,
   buildItemCreatedOutboxPayload,
 } from '../outbox/outbox.events';
-import { CursorPaginatedResult } from './dto/items.dto';
+import {
+  CursorPaginatedResult,
+  DocumentFulltextResponse,
+} from './dto/items.dto';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { normalizeTags } from '../tags/utils/tags.utils';
 import { TagsService } from '../tags/tags.service';
@@ -31,6 +35,7 @@ import { RagProvider } from '../search/providers/rag.provider';
 import { ItemsMapper } from './mappers/items.mapper';
 import { TypeConversionPreview, ConvertTypeOptions } from './types/items.types';
 import { ItemTransformer } from './transformers/item.transformer';
+import { GrobidClient, GrobidReference } from '../infra/grobid/grobid.client';
 import { randomUUID } from 'crypto';
 import {
   IItemReadPort,
@@ -69,7 +74,18 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     private readonly typesService: TypesService,
     private readonly rag: RagProvider,
     private readonly transformer: ItemTransformer,
+    @Optional() private readonly grobid?: GrobidClient,
   ) {}
+
+  /**
+   * Parses raw unformatted citation strings or multi-line bibliographies via GROBID CRF.
+   */
+  async parseCitations(rawCitations: string): Promise<GrobidReference[]> {
+    if (!this.grobid) {
+      return [];
+    }
+    return this.grobid.processCitationList(rawCitations);
+  }
 
   private mapFlattenedState(
     item: Record<string, any>,
@@ -84,8 +100,77 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     return this.mapFlattenedState(item, userId);
   }
 
-  async getFulltext(userId: string, id: string) {
-    return this.query.getFulltext(userId, id);
+  /**
+   * Retrieves the structured academic full-text document tree extracted by GROBID.
+   * Feeds the Frontend Reader's DocumentNavDrawer (Outline, Figures, Tables, Formulas).
+   */
+  async getFulltext(
+    userId: string,
+    id: string,
+    projectId?: string,
+  ): Promise<DocumentFulltextResponse> {
+    const item = await this.query.findById(userId, id, projectId);
+    if (!item) {
+      throw new NotFoundException(`Item ${id} not found or access denied`);
+    }
+
+    // 1. Look for authoritative grobid_fulltext record in metadataSourceRecord
+    const fulltextRecord = await this.prisma.metadataSourceRecord.findFirst({
+      where: {
+        itemId: id,
+        sourceProvider: 'grobid_fulltext',
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (
+      fulltextRecord?.rawPayload &&
+      typeof fulltextRecord.rawPayload === 'object'
+    ) {
+      const payload = fulltextRecord.rawPayload as Record<string, any>;
+      return {
+        title: payload.title || item.title,
+        abstract: payload.abstract || item.abstract || undefined,
+        sections: Array.isArray(payload.sections) ? payload.sections : [],
+        figures: Array.isArray(payload.figures) ? payload.figures : [],
+        tables: Array.isArray(payload.tables) ? payload.tables : [],
+        formulas: Array.isArray(payload.formulas) ? payload.formulas : [],
+        references: Array.isArray(payload.references) ? payload.references : [],
+      };
+    }
+
+    // 2. Fallback to grobid header record if available
+    const headerRecord = await this.prisma.metadataSourceRecord.findFirst({
+      where: {
+        itemId: id,
+        sourceProvider: 'grobid',
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (headerRecord?.rawPayload && typeof headerRecord.rawPayload === 'object') {
+      const payload = headerRecord.rawPayload as Record<string, any>;
+      return {
+        title: payload.title || item.title,
+        abstract: payload.abstract || item.abstract || undefined,
+        sections: [],
+        figures: [],
+        tables: [],
+        formulas: [],
+        references: Array.isArray(payload.references) ? payload.references : [],
+      };
+    }
+
+    // 3. Return clean empty structure instead of 404 so Reader renders gracefully
+    return {
+      title: item.title,
+      abstract: item.abstract || undefined,
+      sections: [],
+      figures: [],
+      tables: [],
+      formulas: [],
+      references: [],
+    };
   }
 
   async listItems(

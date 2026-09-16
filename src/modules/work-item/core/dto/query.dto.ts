@@ -11,39 +11,128 @@ import { Transform, Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { WorkItemPriority } from '@prisma/client';
 
+const toArrayOrString = ({
+  value,
+}: {
+  value: any;
+}): string | string[] | undefined => {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (Array.isArray(value)) {
+    return value
+      .map(String)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+  if (typeof value === 'string') {
+    if (value.includes(',')) {
+      return value
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+    }
+    return value.trim();
+  }
+  return [String(value)];
+};
+
 export class QueryWorkItemDto {
-  @ApiPropertyOptional({ description: 'Filter by cycle/sprint ID' })
+  @ApiPropertyOptional({ description: 'Filter by cycle ID(s)' })
   @IsOptional()
-  @IsString()
-  cycleId?: string;
+  @Transform(toArrayOrString)
+  cycleId?: string | string[];
 
   @ApiPropertyOptional({ description: 'Alias for cycleId' })
   @IsOptional()
-  @IsString()
-  cycle?: string;
+  @Transform(toArrayOrString)
+  cycle?: string | string[];
 
-  @ApiPropertyOptional({ description: 'Filter by board column ID' })
+  @ApiPropertyOptional({ description: 'Filter by state/column ID(s)' })
   @IsOptional()
-  @IsString()
-  columnId?: string;
+  @Transform(toArrayOrString)
+  columnId?: string | string[];
+
+  @ApiPropertyOptional({ description: 'Alias for columnId' })
+  @IsOptional()
+  @Transform(toArrayOrString)
+  state?: string | string[];
 
   @ApiPropertyOptional({
-    enum: WorkItemPriority,
-    description: 'Filter by priority',
+    description:
+      'Filter by state group(s) (backlog, unstarted, started, completed, cancelled)',
   })
   @IsOptional()
-  @IsEnum(WorkItemPriority)
-  priority?: WorkItemPriority;
+  @Transform(toArrayOrString)
+  stateGroup?: string | string[];
 
-  @ApiPropertyOptional({ description: 'Filter by assignee user ID' })
+  @ApiPropertyOptional({
+    description: 'Filter by priority or list of priorities',
+  })
   @IsOptional()
-  @IsString()
-  assigneeId?: string;
+  @Transform(toArrayOrString)
+  priority?: WorkItemPriority | WorkItemPriority[];
+
+  @ApiPropertyOptional({
+    description: 'Filter by assignee user ID(s) or unassigned',
+  })
+  @IsOptional()
+  @Transform(toArrayOrString)
+  assigneeId?: string | string[];
+
+  @ApiPropertyOptional({ description: 'Alias for assigneeId' })
+  @IsOptional()
+  @Transform(toArrayOrString)
+  assignees?: string | string[];
+
+  @ApiPropertyOptional({ description: 'Filter by label name(s) or ID(s)' })
+  @IsOptional()
+  @Transform(toArrayOrString)
+  labels?: string | string[];
+
+  @ApiPropertyOptional({ description: 'Filter by creator / author user ID(s)' })
+  @IsOptional()
+  @Transform(toArrayOrString)
+  createdById?: string | string[];
+
+  @ApiPropertyOptional({ description: 'Alias for createdById' })
+  @IsOptional()
+  @Transform(toArrayOrString)
+  authorId?: string | string[];
 
   @ApiPropertyOptional({ description: 'Filter by parent WorkItem ID' })
   @IsOptional()
   @IsString()
   parentWorkItemId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Filter by due date (today, this_week, this_month, overdue, no_date)',
+  })
+  @IsOptional()
+  @IsString()
+  dueDate?: string;
+
+  @ApiPropertyOptional({
+    description: 'Filter by start date (today, this_week, this_month, no_date)',
+  })
+  @IsOptional()
+  @IsString()
+  startDate?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Field to order by (rank, createdAt, updatedAt, priority, dueDate, startDate, title)',
+  })
+  @IsOptional()
+  @IsString()
+  orderBy?: string;
+
+  @ApiPropertyOptional({
+    description: 'Order direction (asc, desc)',
+    default: 'asc',
+  })
+  @IsOptional()
+  @IsString()
+  orderDirection?: 'asc' | 'desc';
 
   @ApiPropertyOptional({ description: 'Filter by completion state' })
   @IsOptional()

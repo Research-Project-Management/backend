@@ -137,4 +137,13 @@ export class StorageNode {
     this._size = sizeBytes;
     this._updatedAt = new Date();
   }
+
+  public updateBlob(blobId: string, sizeBytes: bigint, mimeType?: string): void {
+    this._blobId = blobId;
+    this._size = sizeBytes;
+    if (mimeType) {
+      this._mimeType = mimeType;
+    }
+    this._updatedAt = new Date();
+  }
 }

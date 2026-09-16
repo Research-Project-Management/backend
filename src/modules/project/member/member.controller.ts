@@ -28,7 +28,12 @@ import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
 
 @ApiTags('Project Members')
 @ApiBearerAuth('JWT-auth')
-@Controller(['api/projects', 'api/project'])
+@Controller([
+  'api/v1/projects',
+  'api/v1/project',
+  'api/projects',
+  'api/project',
+])
 @UseGuards(JwtAuthGuard)
 export class MemberController {
   constructor(private readonly memberService: MemberService) {}

@@ -1,4 +1,5 @@
-import { Injectable, Inject, NotFoundException } from '@nestjs/common';
+import { Injectable, Inject, Optional, NotFoundException } from '@nestjs/common';
+import * as crypto from 'crypto';
 import {
   IStoragePort,
   ReadOwnedFileInput,
@@ -17,11 +18,14 @@ import { IStorageDriver } from './domain/ports/storage-driver.port';
 import { IStorageNodeRepository } from './domain/ports/storage-node.repository.port';
 import { IStorageBlobRepository } from './domain/ports/storage-blob.repository.port';
 import { UploadDirectUseCase } from './application/use-cases/upload/upload-direct.use-case';
+import { PresignUploadUseCase } from './application/use-cases/upload/presign-upload.use-case';
+import { CheckQuotaUseCase } from './application/use-cases/quota/check-quota.use-case';
 import { FileScope } from './domain/value-objects/file-scope.vo';
 
 /**
  * StorageFacade: The Single Public Reception Desk for Storage
- * Implements IStoragePort for complete backward compatibility with Library, Work-Item, AI, and Document modules.
+ * Implements IStoragePort for complete platform-wide storage services:
+ * CAS deduplication, quota checking, streaming, presigned URLs, and entity attachments.
  */
 @Injectable()
 export class StorageFacade implements IStoragePort {
@@ -32,6 +36,10 @@ export class StorageFacade implements IStoragePort {
     @Inject(STORAGE_BLOB_REPOSITORY)
     private readonly blobRepo: IStorageBlobRepository,
     private readonly uploadDirectUseCase: UploadDirectUseCase,
+    @Optional()
+    private readonly presignUploadUseCase?: PresignUploadUseCase,
+    @Optional()
+    private readonly checkQuotaUseCase?: CheckQuotaUseCase,
   ) {}
 
   async readOwnedFile(input: ReadOwnedFileInput): Promise<ReadOwnedFileOutput> {
@@ -118,5 +126,121 @@ export class StorageFacade implements IStoragePort {
       path: key,
       url: `/api/files/r2/${encodeURIComponent(key)}`,
     };
+  }
+
+  async deleteFile(fileId: string): Promise<void> {
+    const node = await this.nodeRepo.findById(fileId);
+    if (node && !node.isTrashed()) {
+      node.trash();
+      await this.nodeRepo.update(node);
+    }
+  }
+
+  async getFileStream(
+    fileId: string,
+    range?: { start: number; end: number },
+  ): Promise<{
+    stream: NodeJS.ReadableStream;
+    mimeType: string;
+    size: number;
+    filename: string;
+    contentRange?: string;
+  }> {
+    const node = await this.nodeRepo.findById(fileId);
+    if (!node || node.isTrashed()) {
+      throw new NotFoundException(`Storage node not found: ${fileId}`);
+    }
+    if (!node.blobId) {
+      throw new NotFoundException(
+        `File has no physical binary payload: ${fileId}`,
+      );
+    }
+    const blob = await this.blobRepo.findById(node.blobId);
+    if (!blob) {
+      throw new NotFoundException(
+        `Physical storage blob not found for node: ${fileId}`,
+      );
+    }
+
+    const { stream, contentLength, contentRange } = await this.driver.getStream(
+      blob.s3Key.value(),
+      range,
+    );
+
+    return {
+      stream,
+      mimeType: node.mimeType,
+      size: contentLength,
+      filename: node.name,
+      contentRange,
+    };
+  }
+
+  async getPresignedDownloadUrl(
+    fileId: string,
+    expiresInSeconds = 3600,
+  ): Promise<string> {
+    const node = await this.nodeRepo.findById(fileId);
+    if (!node || node.isTrashed()) {
+      throw new NotFoundException(`Storage node not found: ${fileId}`);
+    }
+    if (!node.blobId) {
+      throw new NotFoundException(
+        `File has no physical binary payload: ${fileId}`,
+      );
+    }
+    const blob = await this.blobRepo.findById(node.blobId);
+    if (!blob) {
+      throw new NotFoundException(
+        `Physical storage blob not found for node: ${fileId}`,
+      );
+    }
+    return this.driver.getPresignedDownloadUrl(blob.s3Key.value(), {
+      expiresInSeconds,
+      filename: node.name,
+    });
+  }
+
+  async getPresignedUploadUrl(input: {
+    userId: string;
+    filename: string;
+    mimeType: string;
+    sizeBytes: number;
+  }): Promise<{
+    uploadUrl: string;
+    storageKey: string;
+    fileUuid: string;
+    expiresIn: number;
+  }> {
+    if (this.presignUploadUseCase) {
+      return this.presignUploadUseCase.execute(input);
+    }
+    const cleanExt = (input.filename.split('.').pop() || 'bin').replace(
+      /[^a-zA-Z0-9]/g,
+      '',
+    );
+    const fileUuid = crypto.randomUUID();
+    const storageKey = `uploads/${input.userId}/${fileUuid}.${cleanExt}`;
+    const uploadUrl = await this.driver.getPresignedUploadUrl(storageKey, {
+      mimeType: input.mimeType,
+      sizeBytes: input.sizeBytes,
+      expiresInSeconds: 300,
+    });
+    return {
+      uploadUrl,
+      storageKey,
+      fileUuid,
+      expiresIn: 300,
+    };
+  }
+
+  async checkQuota(
+    userId?: string | null,
+    projectId?: string | null,
+  ): Promise<{ usedBytes: number; maxBytes: number; percentage: number }> {
+    if (this.checkQuotaUseCase) {
+      return this.checkQuotaUseCase.execute(userId, projectId);
+    }
+    return { usedBytes: 0, maxBytes: 5 * 1024 * 1024 * 1024, percentage: 0 };
   }
 }

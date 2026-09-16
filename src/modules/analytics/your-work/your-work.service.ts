@@ -30,20 +30,37 @@ export class YourWorkService {
         this.yourWorkRepo.findUserWorkItems(projectId, userId),
         projectId
           ? this.activityService.getProjectFeed(projectId, { limit: 20 })
-          : this.activityService.getActivityFeed(undefined, { limit: 20 }),
+          : this.activityService.getUserFeed(userId, { limit: 20 }),
         this.activityService.getRecentItems(projectId, userId, 10),
         this.yourWorkRepo.findUserProfile(userId),
         this.yourWorkRepo.findUserProjects(projectId, userId),
       ]);
 
-    const assigned = workItems.filter((item) => item.assigneeId === userId);
+    const isUserAssigned = (item: UserWorkItem) => {
+      if (item.assigneeId === userId) return true;
+      if (
+        Array.isArray(item.assigneeIds) &&
+        (item.assigneeIds as string[]).includes(userId)
+      ) {
+        return true;
+      }
+      return false;
+    };
+
+    const isUserSubscribed = (item: UserWorkItem) => {
+      if (isUserAssigned(item) || item.authorId === userId) return false;
+      if (
+        Array.isArray(item.subscriberIds) &&
+        (item.subscriberIds as string[]).includes(userId)
+      ) {
+        return true;
+      }
+      return (item.comments?.length || 0) > 0;
+    };
+
+    const assigned = workItems.filter(isUserAssigned);
     const created = workItems.filter((item) => item.authorId === userId);
-    const subscribed = workItems.filter(
-      (item) =>
-        item.assigneeId !== userId &&
-        item.authorId !== userId &&
-        (item.comments?.length || 0) > 0,
-    );
+    const subscribed = workItems.filter(isUserSubscribed);
 
     const formattedActivities: YourWorkActivityItem[] = (
       activityFeed.items as ActivityFeedItem[]

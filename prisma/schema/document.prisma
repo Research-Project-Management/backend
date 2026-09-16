@@ -18,6 +18,12 @@ enum CommentStatus {
   resolved
 }
 
+enum SuggestionStatus {
+  pending
+  accepted
+  rejected
+}
+
 model Page {
   id             String        @id @default(uuid()) @db.Uuid
   title          String
@@ -50,6 +56,7 @@ model Page {
   // Relations
   versions       PageVersion[]
   comments       PageComment[]
+  suggestions    PageSuggestion[]
   aiChats        AiChat[]      @relation("PageAiChats")
 
   @@index([projectId, parentPageId, rank])
@@ -98,4 +105,31 @@ model PageComment {
   @@index([pageId, status])
   @@index([authorId])
   @@map("page_comments")
+}
+
+model PageSuggestion {
+  id            String           @id @default(uuid()) @db.Uuid
+  pageId        String           @map("page_id") @db.Uuid
+  page          Page             @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  projectPageId String?          @map("project_page_id") @db.Uuid
+  authorId      String           @map("author_id") @db.Uuid
+  author        User             @relation("PageSuggestionAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  type          String           @default("replace") // 'insert' | 'delete' | 'replace'
+  originalText  String           @default("") @map("original_text")
+  suggestedText String           @default("") @map("suggested_text")
+  fromLine      Int              @map("from_line")
+  fromColumn    Int              @default(1) @map("from_column")
+  toLine        Int              @map("to_line")
+  toColumn      Int              @default(1) @map("to_column")
+  description   String?          @default("")
+  status        SuggestionStatus @default(pending)
+  resolvedById  String?          @map("resolved_by_id") @db.Uuid
+  resolvedAt    DateTime?        @map("resolved_at") @db.Timestamptz(6)
+  createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt     DateTime?        @map("deleted_at") @db.Timestamptz(6)
+
+  @@index([pageId, status])
+  @@index([authorId])
+  @@map("page_suggestions")
 }

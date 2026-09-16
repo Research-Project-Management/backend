@@ -8,10 +8,10 @@ import { ProjectPermissions } from '../types/project.type';
  * Enforces Zero-Trust: Frontend must never calculate permissions; Backend is the SSOT.
  */
 export function calculateProjectPermissions(
-  role?: ProjectMemberRole | string | null,
+  role?: ProjectMemberRole | null,
   isActive = true,
 ): ProjectPermissions {
-  const isOwner = role === ProjectMemberRole.owner || role === 'owner';
+  const isOwner = role === ProjectMemberRole.owner;
 
   if (!isActive) {
     // In archived/inactive state, project settings are read-only.

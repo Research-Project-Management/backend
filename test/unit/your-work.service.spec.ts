@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { YourWorkService } from './your-work.service';
-import { YourWorkRepository } from './your-work.repository';
+import { YourWorkService } from '@/modules/analytics/your-work/your-work.service';
+import { YourWorkRepository } from '@/modules/analytics/your-work/your-work.repository';
 import { ActivityService } from '@/modules/activity/activity.service';
 
 describe('YourWorkService', () => {
@@ -70,6 +70,7 @@ describe('YourWorkService', () => {
           useValue: {
             getProjectFeed: jest.fn().mockResolvedValue({ items: [] }),
             getActivityFeed: jest.fn().mockResolvedValue({ items: [] }),
+            getUserFeed: jest.fn().mockResolvedValue({ items: [] }),
             getRecentItems: jest.fn().mockResolvedValue([]),
           },
         },
@@ -99,5 +100,12 @@ describe('YourWorkService', () => {
     expect(result.userData?.createdAt).toBe('2026-03-04T00:00:00.000Z');
     expect(result.projectBreakdown?.length).toBe(1);
     expect(result.projectBreakdown?.[0].projectName).toBe('Project Alpha');
+  });
+
+  it('should fetch userFeed when projectId is undefined', async () => {
+    const result = await service.getYourWork(undefined, 'user-1');
+
+    expect(result.success).toBe(true);
+    expect(activityService.getUserFeed).toHaveBeenCalledWith('user-1', { limit: 20 });
   });
 });

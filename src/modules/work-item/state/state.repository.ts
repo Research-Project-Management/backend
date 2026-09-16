@@ -5,6 +5,7 @@ import {
   StateGroup,
   WorkItemState,
   DEFAULT_WORK_ITEM_STATES,
+  getStateDefaultIcon,
 } from './types/state.types';
 
 @Injectable()
@@ -41,6 +42,7 @@ export class StateRepository implements IStateRepository {
       title: s.name,
       color: s.color,
       accentColor: s.color,
+      icon: s.icon || getStateDefaultIcon(s.group as StateGroup),
       group: s.group as StateGroup,
       sequence: s.sequence,
       isDefault: s.isDefault,
@@ -54,6 +56,7 @@ export class StateRepository implements IStateRepository {
         data: {
           name: s.name,
           color: s.color,
+          icon: s.icon || getStateDefaultIcon(s.group),
           group: s.group,
           sequence: s.sequence,
           isDefault: s.isDefault,
@@ -77,6 +80,7 @@ export class StateRepository implements IStateRepository {
           update: {
             name: s.name,
             color: s.color,
+            icon: s.icon || getStateDefaultIcon(s.group),
             group: s.group,
             sequence: s.sequence,
             isDefault: s.isDefault ?? false,
@@ -86,6 +90,7 @@ export class StateRepository implements IStateRepository {
             id: s.id,
             name: s.name,
             color: s.color,
+            icon: s.icon || getStateDefaultIcon(s.group),
             group: s.group,
             sequence: s.sequence,
             isDefault: s.isDefault ?? false,

@@ -28,6 +28,7 @@ export interface CycleWorkItemItem {
   columnId: string;
   priority?: string;
   completed: boolean;
+  state?: { id?: string; name?: string; group?: string } | null;
 }
 
 export type CycleWithWorkItems = Cycle & {

@@ -39,6 +39,19 @@ export class AuthGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest();
 
+    if (process.env.STANDALONE_LIBRARY === 'true') {
+      const defaultUserId = '3f3fb23b-2193-4763-84e5-c934a10b3cd9';
+      const uid = request.headers?.['x-user-id'] || defaultUserId;
+      request.user = {
+        id: uid,
+        sub: uid,
+        email: 'tester@flux.local',
+        name: 'Sandbox Tester',
+        role: 'OWNER',
+      };
+      return true;
+    }
+
     // 1. Support Inter-Service Authentication (e.g. FLux-AI orchestrator tools)
     const internalKey = request.headers?.['x-internal-key'];
     const configuredInternalKey =

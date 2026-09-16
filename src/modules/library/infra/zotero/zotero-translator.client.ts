@@ -175,6 +175,132 @@ export class ZoteroTranslatorClient {
   }
 
   /**
+   * Imports arbitrary academic bibliographic text into structured ZoteroItem array.
+   * Leverages Zotero Translation Server's 30+ format import engines:
+   * BibTeX, Better BibTeX, RIS, EndNote, MODS, PubMed XML, RefWorks, COinS, CSL-JSON.
+   *
+   * POST /import
+   */
+  async importData(
+    data: string,
+    formatHint?: string,
+  ): Promise<ZoteroItem[]> {
+    if (!this.enabled || !data?.trim()) return [];
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+
+    try {
+      const response = await fetch(`${this.baseUrl}/import`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': formatHint || 'text/plain; charset=utf-8',
+          'User-Agent': this.userAgent,
+        },
+        body: data,
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        this.logger.debug(
+          `Zotero Translation Server /import returned status ${response.status}`,
+        );
+        return [];
+      }
+
+      const parsed = await response.json();
+      return Array.isArray(parsed) ? (parsed as ZoteroItem[]) : [];
+    } catch (err: any) {
+      this.logger.warn(`Zotero /import call failed: ${err?.message}`);
+      return [];
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  /**
+   * Exports an array of ZoteroItems into standardized citation strings or files.
+   * Supported formats: 'bibtex', 'betterbibtex', 'ris', 'csljson', or any CSL style ('apa', 'ieee', etc.).
+   *
+   * POST /export?format=...
+   */
+  async exportItems(
+    items: ZoteroItem[],
+    format: string = 'bibtex',
+  ): Promise<string> {
+    if (!this.enabled || !items || items.length === 0) return '';
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+
+    try {
+      const response = await fetch(
+        `${this.baseUrl}/export?format=${encodeURIComponent(format)}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': this.userAgent,
+          },
+          body: JSON.stringify(items),
+          signal: controller.signal,
+        },
+      );
+
+      if (!response.ok) {
+        this.logger.warn(
+          `Zotero /export returned HTTP ${response.status} for format ${format}`,
+        );
+        return '';
+      }
+
+      return await response.text();
+    } catch (err: any) {
+      this.logger.warn(`Zotero /export failed: ${err?.message}`);
+      return '';
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  /**
+   * Resolves a persistent scholarly identifier (DOI, ISBN, PMID, arXiv ID)
+   * through Zotero Translation Server's authoritative publisher translators.
+   *
+   * POST /search
+   */
+  async searchIdentifier(identifier: string): Promise<ZoteroItem[]> {
+    if (!this.enabled || !identifier?.trim()) return [];
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+
+    try {
+      const response = await fetch(`${this.baseUrl}/search`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'User-Agent': this.userAgent,
+        },
+        body: identifier.trim(),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        return [];
+      }
+
+      const parsed = await response.json();
+      return Array.isArray(parsed) ? (parsed as ZoteroItem[]) : [];
+    } catch (err: any) {
+      this.logger.debug(`Zotero /search failed for ${identifier}: ${err?.message}`);
+      return [];
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  /**
    * Health check — returns true if Zotero Translation Server is alive.
    */
   async isAlive(): Promise<boolean> {

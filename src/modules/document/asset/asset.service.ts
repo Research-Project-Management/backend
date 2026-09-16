@@ -3,11 +3,14 @@ import {
   NotFoundException,
   BadRequestException,
   Logger,
+  Optional,
+  Inject,
 } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { UploadAssetDto, DocumentAssetItem } from './dto/asset.dto';
 import { PageStatus, Prisma } from '@prisma/client';
 import { slugifyTitle } from '../core/utils/document.utils';
+import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 
 const ASSET_EXTENSIONS = new Set([
   'png',
@@ -54,7 +57,12 @@ export class AssetService {
   private readonly logger = new Logger(AssetService.name);
   private static readonly MAX_ASSET_SIZE_BYTES = 25 * 1024 * 1024; // 25 MB
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional()
+    @Inject(STORAGE_PORT)
+    private readonly storagePort?: IStoragePort,
+  ) {}
 
   /**
    * Uploads and stores a research document asset (image, figure, sty, cls, data).
@@ -88,13 +96,37 @@ export class AssetService {
 
     const cleanPath = dto.path || cleanFilename;
 
-    const assetPayload = {
+    let fileId: string | undefined;
+    let storageUrl: string | undefined;
+
+    if (this.storagePort) {
+      try {
+        const uploadRes = await this.storagePort.uploadFile({
+          userId,
+          filename: cleanFilename,
+          buffer,
+          mimeType,
+          projectId,
+          source: 'document',
+        });
+        fileId = uploadRes.fileId;
+        storageUrl = uploadRes.url;
+      } catch (err: any) {
+        this.logger.warn(
+          `Failed to offload document asset to storage port: ${err?.message}`,
+        );
+      }
+    }
+
+    const assetPayload: Record<string, any> = {
       isAsset: true,
       filename: cleanFilename,
       path: cleanPath,
       mimeType,
       sizeBytes,
       base64: dto.contentBase64,
+      ...(fileId ? { fileId } : {}),
+      ...(storageUrl ? { storageUrl } : {}),
     };
 
     const isImage = mimeType.startsWith('image/');
@@ -121,6 +153,8 @@ export class AssetService {
       path: cleanPath,
       mimeType,
       sizeBytes,
+      fileId,
+      storageUrl,
       projectId,
       parentPageId: page.parentPageId,
       createdAt: page.createdAt,
@@ -154,6 +188,8 @@ export class AssetService {
           mimeType: content.mimeType || inferMimeType(p.title),
           sizeBytes:
             typeof content.sizeBytes === 'number' ? content.sizeBytes : 0,
+          fileId: content.fileId,
+          storageUrl: content.storageUrl,
           projectId: p.projectId,
           parentPageId: p.parentPageId,
           createdAt: p.createdAt,
@@ -190,10 +226,26 @@ export class AssetService {
     }
 
     const content = page.content as Record<string, any> | null;
-    const base64 = content?.base64 || '';
+    let base64 = content?.base64 || '';
     const mimeType = content?.mimeType || inferMimeType(page.title);
+
+    if (!base64 && content?.fileId && this.storagePort?.readOwnedFile) {
+      try {
+        const fileOutput = await this.storagePort.readOwnedFile({
+          fileId: content.fileId,
+        });
+        if (fileOutput.buffer) {
+          base64 = fileOutput.buffer.toString('base64');
+        }
+      } catch (err: any) {
+        this.logger.warn(
+          `Failed to read asset buffer from storage port: ${err?.message}`,
+        );
+      }
+    }
+
     const sizeBytes =
-      content?.sizeBytes || Buffer.from(base64, 'base64').length;
+      content?.sizeBytes || (base64 ? Buffer.from(base64, 'base64').length : 0);
 
     return {
       id: page.id,
@@ -202,6 +254,8 @@ export class AssetService {
       mimeType,
       sizeBytes,
       contentBase64: base64,
+      fileId: content?.fileId,
+      storageUrl: content?.storageUrl,
       projectId: page.projectId,
       parentPageId: page.parentPageId,
       createdAt: page.createdAt,
@@ -225,9 +279,24 @@ export class AssetService {
 
     for (const p of pages) {
       const content = p.content as Record<string, any> | null;
-      if (content && content.isAsset && content.base64) {
+      if (content && content.isAsset) {
         const filePath = content.path || content.filename || p.title;
-        fileMap[filePath] = content.base64;
+        if (content.base64) {
+          fileMap[filePath] = content.base64;
+        } else if (content.fileId && this.storagePort?.readOwnedFile) {
+          try {
+            const fileOutput = await this.storagePort.readOwnedFile({
+              fileId: content.fileId,
+            });
+            if (fileOutput.buffer) {
+              fileMap[filePath] = fileOutput.buffer.toString('base64');
+            }
+          } catch (err: any) {
+            this.logger.warn(
+              `Failed to read asset from storage for project map: ${err?.message}`,
+            );
+          }
+        }
       }
     }
 
@@ -235,7 +304,7 @@ export class AssetService {
   }
 
   /**
-   * Soft-deletes an asset.
+   * Soft-deletes an asset and cleans up underlying storage object if present.
    */
   async deleteAsset(assetId: string): Promise<{ ok: boolean }> {
     const page = await this.prisma.page.findFirst({
@@ -244,6 +313,17 @@ export class AssetService {
 
     if (!page) {
       throw new NotFoundException(`Asset ${assetId} not found`);
+    }
+
+    const content = page.content as Record<string, any> | null;
+    if (content?.fileId && this.storagePort?.deleteFile) {
+      try {
+        await this.storagePort.deleteFile(content.fileId);
+      } catch (err: any) {
+        this.logger.warn(
+          `Failed to delete storage file for asset ${content.fileId}: ${err?.message}`,
+        );
+      }
     }
 
     await this.prisma.page.update({

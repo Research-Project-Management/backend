@@ -25,7 +25,7 @@ import { BulkArchiveDto } from './dto/bulk-archive.dto';
 
 @ApiTags('work-items')
 @ApiBearerAuth('JWT-auth')
-@Controller('api/work-items')
+@Controller(['api/v1/work-items', 'api/work-items'])
 @UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class ArchiveController {
   constructor(private readonly archiveService: ArchiveService) {}

@@ -107,6 +107,107 @@ export class RelationService {
     return { relations: enriched };
   }
 
+  /**
+   * Check if a directed path exists between startId and goalId for a given relation type semantics.
+   * For 'blocks': an edge X -> Y exists if:
+   *   1. WorkItemRelation has (sourceId: X, targetId: Y, type: 'blocks') OR (sourceId: Y, targetId: X, type: 'blocked_by')
+   *   2. Or in JSON relations: item X has targetWorkItemId: Y with type: 'blocks'
+   */
+  private async hasDirectedPath(
+    startId: string,
+    goalId: string,
+    relationCategory: 'blocks' | 'duplicate_of',
+    maxDepth = 30,
+  ): Promise<boolean> {
+    if (startId === goalId) return true;
+
+    const visited = new Set<string>([startId]);
+    const queue: { id: string; depth: number }[] = [{ id: startId, depth: 0 }];
+
+    while (queue.length > 0) {
+      const { id: currentId, depth } = queue.shift()!;
+      if (depth >= maxDepth) break;
+
+      const nextNodeIds = new Set<string>();
+
+      if (relationCategory === 'blocks') {
+        const outgoingRelations =
+          await this.relationRepository.prisma.workItemRelation.findMany({
+            where: {
+              OR: [
+                { sourceId: currentId, type: 'blocks' },
+                { targetId: currentId, type: 'blocked_by' },
+              ],
+            },
+            select: { sourceId: true, targetId: true, type: true },
+          });
+
+        for (const rel of outgoingRelations) {
+          const nextId = rel.type === 'blocks' ? rel.targetId : rel.sourceId;
+          if (nextId && nextId !== currentId) {
+            nextNodeIds.add(nextId);
+          }
+        }
+
+        // Also check JSON relations on currentId as fallback
+        const currentItem =
+          await this.relationRepository.prisma.workItem.findUnique({
+            where: { id: currentId },
+            select: { relations: true },
+          });
+
+        if (currentItem && Array.isArray(currentItem.relations)) {
+          for (const r of currentItem.relations as unknown as WorkItemRelationItem[]) {
+            if (r.type === 'blocks' && r.targetWorkItemId) {
+              nextNodeIds.add(r.targetWorkItemId);
+            }
+          }
+        }
+      } else if (relationCategory === 'duplicate_of') {
+        const outgoingRelations =
+          await this.relationRepository.prisma.workItemRelation.findMany({
+            where: {
+              sourceId: currentId,
+              type: 'duplicate_of',
+            },
+            select: { targetId: true },
+          });
+
+        for (const rel of outgoingRelations) {
+          if (rel.targetId && rel.targetId !== currentId) {
+            nextNodeIds.add(rel.targetId);
+          }
+        }
+
+        const currentItem =
+          await this.relationRepository.prisma.workItem.findUnique({
+            where: { id: currentId },
+            select: { relations: true },
+          });
+
+        if (currentItem && Array.isArray(currentItem.relations)) {
+          for (const r of currentItem.relations as unknown as WorkItemRelationItem[]) {
+            if (r.type === 'duplicate_of' && r.targetWorkItemId) {
+              nextNodeIds.add(r.targetWorkItemId);
+            }
+          }
+        }
+      }
+
+      for (const nextId of nextNodeIds) {
+        if (nextId === goalId) {
+          return true;
+        }
+        if (!visited.has(nextId)) {
+          visited.add(nextId);
+          queue.push({ id: nextId, depth: depth + 1 });
+        }
+      }
+    }
+
+    return false;
+  }
+
   async addRelation(
     workItemId: string,
     addRelationDto: AddRelationDto,
@@ -132,6 +233,42 @@ export class RelationService {
       throw new BadRequestException(
         'Cannot link work items across different projects',
       );
+    }
+
+    // DAG Cycle Detection
+    if (addRelationDto.type === 'blocks') {
+      const wouldCycle = await this.hasDirectedPath(
+        targetItem.id,
+        sourceItem.id,
+        'blocks',
+      );
+      if (wouldCycle) {
+        throw new BadRequestException(
+          'Circular dependency detected: Work items cannot block each other directly or transitively.',
+        );
+      }
+    } else if (addRelationDto.type === 'blocked_by') {
+      const wouldCycle = await this.hasDirectedPath(
+        sourceItem.id,
+        targetItem.id,
+        'blocks',
+      );
+      if (wouldCycle) {
+        throw new BadRequestException(
+          'Circular dependency detected: Work item cannot be blocked by a work item that it already blocks directly or transitively.',
+        );
+      }
+    } else if (addRelationDto.type === 'duplicate_of') {
+      const wouldCycle = await this.hasDirectedPath(
+        targetItem.id,
+        sourceItem.id,
+        'duplicate_of',
+      );
+      if (wouldCycle) {
+        throw new BadRequestException(
+          'Circular dependency detected: Work items cannot be duplicates of each other directly or transitively.',
+        );
+      }
     }
 
     const targetType =
@@ -164,20 +301,38 @@ export class RelationService {
       createdAt: now,
     });
 
-    await this.relationRepository.executeTransaction([
-      this.relationRepository.prisma.workItem.update({
+    // Execute updates in an atomic interactive transaction
+    await this.relationRepository.prisma.$transaction(async (tx) => {
+      await tx.workItem.update({
         where: { id: sourceItem.id },
         data: {
           relations: sourceRelations as unknown as Prisma.InputJsonValue,
         },
-      }),
-      this.relationRepository.prisma.workItem.update({
+      });
+
+      await tx.workItem.update({
         where: { id: targetItem.id },
         data: {
           relations: targetRelations as unknown as Prisma.InputJsonValue,
         },
-      }),
-    ]);
+      });
+
+      await tx.workItemRelation.upsert({
+        where: {
+          sourceId_targetId_type: {
+            sourceId: sourceItem.id,
+            targetId: targetItem.id,
+            type: addRelationDto.type as any,
+          },
+        },
+        create: {
+          sourceId: sourceItem.id,
+          targetId: targetItem.id,
+          type: addRelationDto.type as any,
+        },
+        update: {},
+      });
+    });
 
     await this.invalidateWorkItemCache(
       sourceItem.projectId,
@@ -235,33 +390,40 @@ export class RelationService {
         relation.targetWorkItemId !== (targetItem?.id || targetWorkItemId),
     );
 
-    const updates: Promise<any>[] = [
-      this.relationRepository.prisma.workItem.update({
+    const effectiveTargetId = targetItem?.id || targetWorkItemId;
+
+    await this.relationRepository.prisma.$transaction(async (tx) => {
+      await tx.workItem.update({
         where: { id: sourceItem.id },
         data: {
           relations: sourceRelations as unknown as Prisma.InputJsonValue,
         },
-      }),
-    ];
+      });
 
-    if (targetItem) {
-      const targetRelations = (
-        Array.isArray(targetItem.relations)
-          ? (targetItem.relations as unknown as WorkItemRelationItem[])
-          : []
-      ).filter((relation) => relation.targetWorkItemId !== sourceItem.id);
+      if (targetItem) {
+        const targetRelations = (
+          Array.isArray(targetItem.relations)
+            ? (targetItem.relations as unknown as WorkItemRelationItem[])
+            : []
+        ).filter((relation) => relation.targetWorkItemId !== sourceItem.id);
 
-      updates.push(
-        this.relationRepository.prisma.workItem.update({
+        await tx.workItem.update({
           where: { id: targetItem.id },
           data: {
             relations: targetRelations as unknown as Prisma.InputJsonValue,
           },
-        }),
-      );
-    }
+        });
+      }
 
-    await this.relationRepository.executeTransaction(updates as any);
+      await tx.workItemRelation.deleteMany({
+        where: {
+          OR: [
+            { sourceId: sourceItem.id, targetId: effectiveTargetId },
+            { sourceId: effectiveTargetId, targetId: sourceItem.id },
+          ],
+        },
+      });
+    });
 
     await this.invalidateWorkItemCache(
       sourceItem.projectId,

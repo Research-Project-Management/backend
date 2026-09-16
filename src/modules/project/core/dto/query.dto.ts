@@ -1,5 +1,7 @@
-import { IsBoolean, IsIn, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsEnum, IsIn, IsOptional, IsString, IsUUID } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
+import { ProjectPriority, ProjectState } from '@prisma/client';
 
 /**
  * Query DTO for filtering and searching projects.
@@ -23,14 +25,39 @@ export class ProjectQueryDto {
   search?: string;
 
   @ApiPropertyOptional({
+    description: 'Filter by project lifecycle state',
+    enum: ProjectState,
+  })
+  @IsEnum(ProjectState)
+  @IsOptional()
+  state?: ProjectState;
+
+  @ApiPropertyOptional({
+    description: 'Filter by project priority',
+    enum: ProjectPriority,
+  })
+  @IsEnum(ProjectPriority)
+  @IsOptional()
+  priority?: ProjectPriority;
+
+  @ApiPropertyOptional({
+    description: 'Filter by ProjectLabel UUID',
+  })
+  @IsUUID('4')
+  @IsOptional()
+  labelId?: string;
+
+  @ApiPropertyOptional({
     description: 'Filter by archived status',
     default: false,
   })
+  @Transform(({ value }) => value === 'true' || value === true)
   @IsBoolean()
   @IsOptional()
   isArchived?: boolean;
 
   @ApiPropertyOptional({ description: 'Filter by favorite status' })
+  @Transform(({ value }) => value === 'true' || value === true)
   @IsBoolean()
   @IsOptional()
   isFavorite?: boolean;

@@ -147,7 +147,9 @@ export class PdfProvider {
       for (let pageIndex = 1; pageIndex <= maxPagesToExtract; pageIndex++) {
         const page = await document.getPage(pageIndex);
         const content = await page.getTextContent();
-        const pageText = content.items.map((it: any) => it.str).join(' ');
+        const pageText = content.items
+          .map((it: any) => (it.str || '') + (it.hasEOL ? '\n' : ' '))
+          .join('');
         pages.push({
           pageIndex: pageIndex - 1,
           textContent: pageText,
@@ -188,6 +190,13 @@ export class PdfProvider {
         unpdfExtractedMetadata.arxivId ||
         headerExtractedMetadata.arxivId,
       title:
+        (unpdfExtractedMetadata.title &&
+        unpdfExtractedMetadata.title.length > 8 &&
+        !/^(untitled|document|microsoft|arxiv|\d{4}\.)/i.test(
+          unpdfExtractedMetadata.title,
+        )
+          ? unpdfExtractedMetadata.title
+          : textExtractedMetadata.title) ||
         textExtractedMetadata.title ||
         unpdfExtractedMetadata.title ||
         (headerExtractedMetadata.title &&
@@ -514,12 +523,18 @@ export class PdfProvider {
       abstractIndex !== -1 ? lines.slice(0, abstractIndex) : lines.slice(0, 25);
     const cleanLines = headerLines.filter((lineItem) => {
       if (
-        /^(arxiv[:\s._/-]*\d|https?:\/\/|\d+$|submitted to|accepted (as|at)|proceedings of|ieee|acm|springer|elsevier)/i.test(
+        /^(arxiv[:\s._/-]*\d|https?:\/\/|\d+$|submitted to|accepted (as|at)|published as|proceedings of|ieee|acm|springer|elsevier|under review|provided proper)/i.test(
           lineItem,
         )
       )
         return false;
-      if (/copyright|all rights reserved|doi:\s*10\./i.test(lineItem))
+      if (
+        /reproduce the tables and figures|permission to|copyright|all rights reserved|doi:\s*10\.|scholarly works/i.test(
+          lineItem,
+        )
+      )
+        return false;
+      if (/^\d+\s*\|\s*[a-z]/i.test(lineItem))
         return false;
       return true;
     });
@@ -556,17 +571,22 @@ export class PdfProvider {
         }
 
         titleLines.push(currentLine);
-        if (currentLine.length >= 25 || titleLines.length >= 2) {
+        // Continue if line ends with hyphen or title is short
+        const endsWithHyphen = currentLine.trim().endsWith('-');
+        if (!endsWithHyphen && (currentLine.length >= 40 || titleLines.length >= 2)) {
           authorStartIndex = lineIndex + 1;
           break;
         }
       }
 
-      const candidateTitle = titleLines
+      const rawTitle = titleLines
         .filter((l, i, arr) => arr.indexOf(l) === i)
         .join(' ')
         .replace(/\s+/g, ' ')
         .trim();
+      const candidateTitle = rawTitle
+        .replace(/\b([A-Za-z])\s+([A-Za-z])\b/g, '$1$2')
+        .replace(/-\s+/g, '');
       if (candidateTitle.length > 5 && candidateTitle.length < 250) {
         metadata.title = candidateTitle;
       }

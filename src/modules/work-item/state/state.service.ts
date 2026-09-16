@@ -12,7 +12,11 @@ import {
   UpdateStateDto,
   ReorderStatesDto,
 } from './dto/state.dto';
-import { DEFAULT_WORK_ITEM_STATES, WorkItemState } from './types/state.types';
+import {
+  DEFAULT_WORK_ITEM_STATES,
+  WorkItemState,
+  getStateDefaultIcon,
+} from './types/state.types';
 import {
   generateStateSlug,
   isStateCompleted,
@@ -155,6 +159,9 @@ export class StateService {
       title: targetName,
       color,
       accentColor: color,
+      icon: (
+        createStateDto.icon || getStateDefaultIcon(createStateDto.group)
+      ).trim(),
       group: createStateDto.group,
       sequence,
       isDefault,
@@ -261,6 +268,11 @@ export class StateService {
       updateStateDto.description !== undefined
         ? updateStateDto.description.trim()
         : current.description;
+    const newIcon = (
+      updateStateDto.icon ||
+      current.icon ||
+      getStateDefaultIcon(newGroup)
+    ).trim();
 
     const updatedStates = existingStates.map((state) => {
       if (state.id === stateId) {
@@ -270,6 +282,7 @@ export class StateService {
           title: newName,
           color: newColor,
           accentColor: newColor,
+          icon: newIcon,
           group: newGroup,
           sequence: newSequence,
           isDefault: becomesDefault || state.isDefault,

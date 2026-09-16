@@ -12,6 +12,7 @@ import { CollectionsModule } from '../collections/collections.module';
 import { SearchModule } from '../search/search.module';
 import { TypesModule } from '../types/types.module';
 import { ITEM_EXISTENCE_PORT, ITEM_READ_PORT } from './ports/items.ports';
+import { GrobidClient } from '../infra/grobid/grobid.client';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { ITEM_EXISTENCE_PORT, ITEM_READ_PORT } from './ports/items.ports';
     ItemsService,
     ItemsMapper,
     ItemTransformer,
+    GrobidClient,
     {
       provide: ITEM_EXISTENCE_PORT,
       useExisting: ItemsService,

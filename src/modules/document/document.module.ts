@@ -10,6 +10,7 @@ import { ExportModule } from './export/export.module';
 import { OutlineModule } from './outline/outline.module';
 import { AssetModule } from './asset/asset.module';
 import { SynctexModule } from './synctex/synctex.module';
+import { SuggestionModule } from './suggestion/suggestion.module';
 import { DocumentFacade, DOCUMENT_FACADE } from './document.facade';
 
 @Module({
@@ -25,6 +26,7 @@ import { DocumentFacade, DOCUMENT_FACADE } from './document.facade';
     OutlineModule,
     AssetModule,
     SynctexModule,
+    SuggestionModule,
   ],
   providers: [
     DocumentFacade,
@@ -47,6 +49,7 @@ import { DocumentFacade, DOCUMENT_FACADE } from './document.facade';
     OutlineModule,
     AssetModule,
     SynctexModule,
+    SuggestionModule,
   ],
 })
 export class DocumentModule {}

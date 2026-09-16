@@ -24,7 +24,7 @@ import { AddRelationDto, RelationResponseDto } from './dto/relation.dto';
 
 @ApiTags('Work Item Relations')
 @ApiBearerAuth('JWT-auth')
-@Controller('api')
+@Controller(['api/v1', 'api'])
 @UseGuards(JwtAuthGuard)
 export class RelationController {
   constructor(private readonly relationService: RelationService) {}

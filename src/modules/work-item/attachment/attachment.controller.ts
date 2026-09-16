@@ -30,10 +30,11 @@ import {
   AttachLinkDto,
 } from './dto/attachment.dto';
 import { PresignAttachmentDto } from './dto/presign-attachment.dto';
+import { EntityType } from '@prisma/client';
 
 @ApiTags('Work Item Attachments')
 @ApiBearerAuth('JWT-auth')
-@Controller('api')
+@Controller(['api/v1', 'api'])
 @UseGuards(JwtAuthGuard)
 export class AttachmentController {
   constructor(private readonly attachmentService: AttachmentService) {}
@@ -222,5 +223,27 @@ export class AttachmentController {
   @ApiParam({ name: 'id', description: 'Attachment UUID' })
   async deleteOne(@Param('id') id: string, @CurrentUser('id') userId: string) {
     return this.attachmentService.deleteAttachment(id, userId);
+  }
+
+  @Get([
+    'entities/:entityType/:entityId/work-items',
+    'work-items/linked/:entityType/:entityId',
+  ])
+  @ApiOperation({
+    summary: 'Get all work items linked to an entity (page, paper, etc.)',
+  })
+  @ApiParam({
+    name: 'entityType',
+    description: 'Entity type (page, paper, work_item, etc.)',
+  })
+  @ApiParam({ name: 'entityId', description: 'Entity ID' })
+  async getWorkItemsByLinkedEntity(
+    @Param('entityType') entityType: EntityType,
+    @Param('entityId') entityId: string,
+  ) {
+    return this.attachmentService.getWorkItemsByLinkedEntity(
+      entityType,
+      entityId,
+    );
   }
 }

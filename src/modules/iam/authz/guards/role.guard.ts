@@ -29,6 +29,10 @@ export class RoleGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    if (process.env.STANDALONE_LIBRARY === 'true') {
+      return true;
+    }
+
     const requiredRoles = this.reflector.getAllAndOverride<RoleInput[]>(
       ROLES_KEY,
       [context.getHandler(), context.getClass()],

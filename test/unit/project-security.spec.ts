@@ -45,12 +45,11 @@ describe('Project Module Security & SSOT Suite', () => {
       invitationService = new InvitationService(mockRepo, mockCache);
     });
 
-    it('should reject joinByCode for a private project when no invitation token is provided (Anti-BOLA)', async () => {
+    it('should reject joinByCode when no invitation token is provided and no pending invite exists (Anti-BOLA)', async () => {
       mockRepo.findProjectByIdOrIdentifier.mockResolvedValue({
         id: 'proj-private-uuid',
         name: 'Private Cancer Research',
         identifier: 'PCR',
-        network: 'secret',
         isActive: true,
       });
 
@@ -61,22 +60,30 @@ describe('Project Module Security & SSOT Suite', () => {
       expect(mockRepo.addProjectMember).not.toHaveBeenCalled();
     });
 
-    it('should allow joinByCode for an explicitly public project', async () => {
+    it('should accept pending invitation when joining by project identifier if pending invite exists for user email', async () => {
       mockRepo.findProjectByIdOrIdentifier.mockResolvedValue({
         id: 'proj-public-uuid',
         name: 'Open Climate Science',
         identifier: 'OCS',
-        network: 'public',
         isActive: true,
       });
+      const pendingInvite = {
+        id: 'invite-pending-uuid',
+        projectId: 'proj-public-uuid',
+        email: mockUser.email,
+        role: ProjectMemberRole.contributor,
+        status: InvitationStatus.pending,
+        expiresAt: new Date(Date.now() + 100000),
+      };
+      mockRepo.findPendingByProjectAndEmail.mockResolvedValue(pendingInvite);
+      mockRepo.findById = jest.fn().mockResolvedValue(pendingInvite);
 
       const result = await invitationService.joinByCode('OCS', mockUser as any);
 
-      expect(result.message).toBe('Joined project successfully');
-      expect(mockRepo.addProjectMember).toHaveBeenCalledWith(
-        'proj-public-uuid',
-        mockUser.id,
-        ProjectMemberRole.contributor,
+      expect(result.message).toBe('Successfully joined project');
+      expect(mockRepo.updateStatus).toHaveBeenCalledWith(
+        'invite-pending-uuid',
+        InvitationStatus.accepted,
       );
       expect(mockCache.del).toHaveBeenCalled();
     });
@@ -86,7 +93,6 @@ describe('Project Module Security & SSOT Suite', () => {
         id: 'proj-existing-uuid',
         name: 'Existing Lab',
         identifier: 'LAB',
-        network: 'secret',
       });
       mockRepo.findMember.mockResolvedValue({
         userId: mockUser.id,
@@ -218,6 +224,7 @@ describe('Project Module Security & SSOT Suite', () => {
 
     beforeEach(() => {
       mockPrisma = {
+        $transaction: jest.fn((cb) => cb(mockPrisma)),
         project: {
           findFirst: jest.fn().mockResolvedValue({
             id: '7b9b0c20-67c8-4796-932d-20d0fca56641',
@@ -249,7 +256,6 @@ describe('Project Module Security & SSOT Suite', () => {
         },
         select: {
           identifier: true,
-          name: true,
           workItemSequence: true,
         },
       });

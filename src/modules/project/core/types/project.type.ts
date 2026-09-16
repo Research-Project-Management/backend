@@ -1,4 +1,4 @@
-import { Project, ProjectMember, ProjectMemberRole } from '@prisma/client';
+import { Project, ProjectMember, ProjectMemberRole, ProjectLabel } from '@prisma/client';
 
 import {
   MinimalUser,
@@ -25,11 +25,14 @@ export interface ProjectPermissions {
 export type ProjectWithMembers = Project & {
   createdBy?: MinimalUser | null;
   members?: ProjectMemberWithUser[];
+  labels?: Array<{ label: ProjectLabel }>;
 };
 
 export type EnrichedProject = ProjectWithMembers & {
-  yourRole?: ProjectMemberRole | string;
+  yourRole?: ProjectMemberRole;
   permissions?: ProjectPermissions;
+  isFavorite?: boolean;
+  projectLabelsList?: ProjectLabel[];
 };
 
 export interface ProjectOverview {
@@ -37,6 +40,9 @@ export interface ProjectOverview {
   completedWorkItems: number;
   inProgressWorkItems: number;
   backlogWorkItems: number;
+  completionPercentage: number;
+  daysRemaining?: number | null;
+  isOverdue?: boolean;
   totalMembers: number;
   totalCycles: number;
   activeCycle?: {

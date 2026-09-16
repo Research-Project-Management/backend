@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { isUuid } from '@/core/utils/uuid.util';
-import { Prisma, WorkItem, EntityType } from '@prisma/client';
+import { Prisma, WorkItem, EntityType, WorkItemPriority } from '@prisma/client';
 import {
   IWorkItemRepository,
   WorkItemWithRelations,
@@ -14,16 +14,59 @@ import {
 } from './types/work-item.types';
 import { deriveProjectIdentifierPrefix } from './utils/work-item.util';
 
+export const BASE_WORK_ITEM_INCLUDE = {
+  state: { select: STATE_MINIMAL_SELECT },
+  assignee: { select: USER_MINIMAL_SELECT },
+  assignees: {
+    select: {
+      isPrimary: true,
+      user: { select: USER_MINIMAL_SELECT },
+    },
+  },
+  labelAssignments: {
+    select: {
+      label: { select: { id: true, name: true, color: true } },
+    },
+  },
+  cycle: { select: CYCLE_SELECT },
+  parentWorkItem: { select: { id: true, title: true, identifier: true } },
+  childWorkItems: {
+    where: { deletedAt: null },
+    select: CHILD_WORK_ITEM_SELECT,
+    orderBy: { rank: 'asc' as const },
+  },
+  project: { select: { id: true } },
+} as const;
+
 @Injectable()
 export class CoreRepository implements IWorkItemRepository {
   constructor(private readonly prismaService: PrismaService) {}
 
+  private async executeTx<T>(fn: (tx: any) => Promise<T>): Promise<T> {
+    if (typeof this.prismaService.$transaction === 'function') {
+      return this.prismaService.$transaction(fn);
+    }
+    return fn(this.prismaService);
+  }
+
   async nextProjectWorkItemIdentifier(
     projectId: string,
   ): Promise<{ identifier: string; sequenceNumber: number }> {
+    let canonicalProjectId = projectId;
+    if (!isUuid(canonicalProjectId)) {
+      const p = await this.prismaService.project.findFirst({
+        where: {
+          identifier: { equals: canonicalProjectId, mode: 'insensitive' },
+          deletedAt: null,
+        },
+        select: { id: true },
+      });
+      if (p) canonicalProjectId = p.id;
+    }
+
     try {
       const project = await this.prismaService.project.update({
-        where: { id: projectId },
+        where: { id: canonicalProjectId },
         data: { workItemSequence: { increment: 1 } },
         select: { name: true, identifier: true, workItemSequence: true },
       });
@@ -39,7 +82,7 @@ export class CoreRepository implements IWorkItemRepository {
       };
     } catch {
       const project = await this.prismaService.project.findUnique({
-        where: { id: projectId },
+        where: { id: canonicalProjectId },
         select: { identifier: true, name: true },
       });
       const prefix = deriveProjectIdentifierPrefix(
@@ -48,7 +91,7 @@ export class CoreRepository implements IWorkItemRepository {
       );
 
       const lastWorkItem = await this.prismaService.workItem.findFirst({
-        where: { projectId },
+        where: { projectId: canonicalProjectId },
         orderBy: { sequenceNumber: 'desc' },
         select: { sequenceNumber: true },
       });
@@ -98,34 +141,201 @@ export class CoreRepository implements IWorkItemRepository {
         where.cycleId = filter;
       }
     } else if (filter) {
-      if (filter.cycleId !== undefined) {
-        if (
-          filter.cycleId === 'none' ||
-          filter.cycleId === 'null' ||
-          filter.cycleId === 'unassigned'
-        ) {
-          where.cycleId = null;
-        } else if (filter.cycleId === null || isUuid(filter.cycleId)) {
-          where.cycleId = filter.cycleId;
+      const normalizeArray = (val: unknown): string[] => {
+        if (val === undefined || val === null) return [];
+        if (Array.isArray(val))
+          return val
+            .map(String)
+            .map((s) => s.trim())
+            .filter(Boolean);
+        if (typeof val === 'string') {
+          if (val.includes(','))
+            return val
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean);
+          const trimmed = val.trim();
+          return trimmed ? [trimmed] : [];
         }
+        if (typeof val === 'number' || typeof val === 'boolean') {
+          return [String(val)];
+        }
+        return [];
+      };
+
+      // State and State Group
+      const stateFilters = normalizeArray(filter.columnId || filter.state);
+      if (filter.stateGroup) {
+        const groups = normalizeArray(filter.stateGroup);
+        if (groups.length > 0) {
+          const matchingStates =
+            await this.prismaService.workItemState.findMany({
+              where: { projectId: canonicalProjectId, group: { in: groups } },
+              select: { id: true },
+            });
+          const stateIdsFromGroup = matchingStates.map((s) => s.id);
+          if (stateFilters.length > 0) {
+            const intersection = stateFilters.filter((id) =>
+              stateIdsFromGroup.includes(id),
+            );
+            where.columnId = {
+              in: intersection.length > 0 ? intersection : ['__no_match__'],
+            };
+          } else {
+            where.columnId = { in: stateIdsFromGroup };
+          }
+        }
+      } else if (stateFilters.length === 1) {
+        where.columnId = stateFilters[0];
+      } else if (stateFilters.length > 1) {
+        where.columnId = { in: stateFilters };
       }
-      if (filter.columnId) where.columnId = filter.columnId;
-      if (filter.priority) where.priority = filter.priority;
-      if (filter.assigneeId !== undefined) {
-        if (
-          filter.assigneeId === 'unassigned' ||
-          filter.assigneeId === 'none' ||
-          filter.assigneeId === 'null'
-        ) {
+
+      // Priority
+      const priorities = normalizeArray(filter.priority) as WorkItemPriority[];
+      if (priorities.length === 1) {
+        where.priority = priorities[0];
+      } else if (priorities.length > 1) {
+        where.priority = { in: priorities };
+      }
+
+      // Assignees
+      const assigneeFilters = normalizeArray(
+        filter.assigneeId || filter.assignees,
+      );
+      if (assigneeFilters.length > 0) {
+        const hasUnassigned = assigneeFilters.some(
+          (id) =>
+            id === 'unassigned' ||
+            id === 'none' ||
+            id === 'null' ||
+            id === '__unassigned__',
+        );
+        const specificAssigneeIds = assigneeFilters.filter(
+          (id) =>
+            isUuid(id) &&
+            id !== 'unassigned' &&
+            id !== 'none' &&
+            id !== 'null' &&
+            id !== '__unassigned__',
+        );
+        if (hasUnassigned && specificAssigneeIds.length > 0) {
+          where.OR = [
+            { assigneeId: { in: specificAssigneeIds } },
+            { assigneeId: null },
+          ];
+        } else if (hasUnassigned) {
           where.assigneeId = null;
-        } else if (filter.assigneeId === null || isUuid(filter.assigneeId)) {
-          where.assigneeId = filter.assigneeId;
+        } else if (specificAssigneeIds.length === 1) {
+          where.assigneeId = specificAssigneeIds[0];
+        } else if (specificAssigneeIds.length > 1) {
+          where.assigneeId = { in: specificAssigneeIds };
         }
       }
+
+      // Cycles
+      const cycleFilters = normalizeArray(filter.cycleId || filter.cycle);
+      if (cycleFilters.length > 0) {
+        const hasNoCycle = cycleFilters.some(
+          (id) =>
+            id === 'none' ||
+            id === 'null' ||
+            id === 'unassigned' ||
+            id === '__no_cycle__' ||
+            id === 'no_cycle',
+        );
+        const specificCycleIds = cycleFilters.filter(
+          (id) =>
+            isUuid(id) &&
+            id !== 'none' &&
+            id !== 'null' &&
+            id !== 'unassigned' &&
+            id !== '__no_cycle__' &&
+            id !== 'no_cycle',
+        );
+        if (hasNoCycle && specificCycleIds.length > 0) {
+          where.OR = [{ cycleId: { in: specificCycleIds } }, { cycleId: null }];
+        } else if (hasNoCycle) {
+          where.cycleId = null;
+        } else if (specificCycleIds.length === 1) {
+          where.cycleId = specificCycleIds[0];
+        } else if (specificCycleIds.length > 1) {
+          where.cycleId = { in: specificCycleIds };
+        }
+      }
+
+      // Labels
+      const labelFilters = normalizeArray(filter.labels);
+      if (labelFilters.length > 0) {
+        where.labels = { hasSome: labelFilters };
+      }
+
+      // Author / Created By
+      const authorFilters = normalizeArray(
+        filter.createdById || filter.authorId,
+      );
+      const validAuthorIds = authorFilters.filter(isUuid);
+      if (validAuthorIds.length === 1) {
+        where.authorId = validAuthorIds[0];
+      } else if (validAuthorIds.length > 1) {
+        where.authorId = { in: validAuthorIds };
+      }
+
+      // Due date & Start date
+      if (filter.dueDate) {
+        const due = filter.dueDate.toLowerCase().trim();
+        const now = new Date();
+        const todayStart = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          now.getDate(),
+        );
+        const todayEnd = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          now.getDate(),
+          23,
+          59,
+          59,
+          999,
+        );
+
+        if (due === 'today') {
+          where.dueDate = { gte: todayStart, lte: todayEnd };
+        } else if (due === 'overdue') {
+          where.dueDate = { lt: todayStart };
+          where.completed = false;
+        } else if (due === 'this_week') {
+          const dayOfWeek = now.getDay() || 7;
+          const weekStart = new Date(todayStart);
+          weekStart.setDate(weekStart.getDate() - (dayOfWeek - 1));
+          const weekEnd = new Date(weekStart);
+          weekEnd.setDate(weekEnd.getDate() + 6);
+          weekEnd.setHours(23, 59, 59, 999);
+          where.dueDate = { gte: weekStart, lte: weekEnd };
+        } else if (due === 'this_month') {
+          const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+          const monthEnd = new Date(
+            now.getFullYear(),
+            now.getMonth() + 1,
+            0,
+            23,
+            59,
+            59,
+            999,
+          );
+          where.dueDate = { gte: monthStart, lte: monthEnd };
+        } else if (due === 'no_date') {
+          where.dueDate = null;
+        }
+      }
+
+      // Parent work item
       if (filter.parentWorkItemId !== undefined) {
         if (
           filter.parentWorkItemId === 'none' ||
-          filter.parentWorkItemId === 'null'
+          filter.parentWorkItemId === 'null' ||
+          filter.parentWorkItemId === '__none__'
         ) {
           where.parentWorkItemId = null;
         } else if (
@@ -135,6 +345,7 @@ export class CoreRepository implements IWorkItemRepository {
           where.parentWorkItemId = filter.parentWorkItemId;
         }
       }
+
       if (filter.completed !== undefined) {
         where.completed = filter.completed;
       }
@@ -149,21 +360,51 @@ export class CoreRepository implements IWorkItemRepository {
       if (filter.offset) skip = filter.offset;
     }
 
+    // Dynamic Ordering
+    let orderBy: Prisma.WorkItemOrderByWithRelationInput[] = [
+      { rank: 'asc' },
+      { createdAt: 'desc' },
+    ];
+    if (filter && typeof filter === 'object' && filter.orderBy) {
+      const direction =
+        (filter.orderDirection || 'asc').toLowerCase() === 'desc'
+          ? 'desc'
+          : 'asc';
+      switch (filter.orderBy) {
+        case 'createdAt':
+        case 'created_at':
+          orderBy = [{ createdAt: direction }, { rank: 'asc' }];
+          break;
+        case 'updatedAt':
+        case 'updated_at':
+          orderBy = [{ updatedAt: direction }, { rank: 'asc' }];
+          break;
+        case 'priority':
+          orderBy = [{ priority: direction }, { rank: 'asc' }];
+          break;
+        case 'dueDate':
+        case 'due_date':
+          orderBy = [{ dueDate: direction }, { rank: 'asc' }];
+          break;
+        case 'startDate':
+        case 'start_date':
+          orderBy = [{ startDate: direction }, { rank: 'asc' }];
+          break;
+        case 'title':
+          orderBy = [{ title: direction }, { rank: 'asc' }];
+          break;
+        case 'manual':
+        case 'rank':
+        default:
+          orderBy = [{ rank: direction }];
+          break;
+      }
+    }
+
     return this.prismaService.workItem.findMany({
       where,
-      include: {
-        state: { select: STATE_MINIMAL_SELECT },
-        assignee: { select: USER_MINIMAL_SELECT },
-        cycle: { select: CYCLE_SELECT },
-        parentWorkItem: { select: { id: true, title: true, identifier: true } },
-        childWorkItems: {
-          where: { deletedAt: null },
-          select: CHILD_WORK_ITEM_SELECT,
-          orderBy: { rank: 'asc' },
-        },
-        project: { select: { id: true } },
-      },
-      orderBy: { rank: 'asc' },
+      include: BASE_WORK_ITEM_INCLUDE,
+      orderBy,
       ...(take ? { take } : {}),
       ...(skip ? { skip } : {}),
     });
@@ -202,18 +443,7 @@ export class CoreRepository implements IWorkItemRepository {
 
     return this.prismaService.workItem.findMany({
       where,
-      include: {
-        state: { select: STATE_MINIMAL_SELECT },
-        assignee: { select: USER_MINIMAL_SELECT },
-        cycle: { select: CYCLE_SELECT },
-        parentWorkItem: { select: { id: true, title: true, identifier: true } },
-        childWorkItems: {
-          where: { deletedAt: null },
-          select: CHILD_WORK_ITEM_SELECT,
-          orderBy: { rank: 'asc' },
-        },
-        project: { select: { id: true } },
-      },
+      include: BASE_WORK_ITEM_INCLUDE,
       orderBy: [{ updatedAt: 'desc' }, { rank: 'asc' }],
       ...(take ? { take } : {}),
       ...(skip ? { skip } : {}),
@@ -221,8 +451,14 @@ export class CoreRepository implements IWorkItemRepository {
   }
 
   async findProjectWithColumns(projectId: string) {
+    const where = isUuid(projectId)
+      ? { id: projectId, deletedAt: null }
+      : {
+          identifier: { equals: projectId, mode: 'insensitive' as const },
+          deletedAt: null,
+        };
     return this.prismaService.project.findFirst({
-      where: { id: projectId, deletedAt: null },
+      where,
       select: {
         id: true,
         name: true,
@@ -239,37 +475,13 @@ export class CoreRepository implements IWorkItemRepository {
     if (!isUuid(workItemId)) {
       return this.prismaService.workItem.findFirst({
         where: { identifier: workItemId, deletedAt: null },
-        include: {
-          state: { select: STATE_MINIMAL_SELECT },
-          assignee: { select: USER_MINIMAL_SELECT },
-          cycle: { select: CYCLE_SELECT },
-          parentWorkItem: {
-            select: { id: true, title: true, identifier: true },
-          },
-          childWorkItems: {
-            where: { deletedAt: null },
-            select: CHILD_WORK_ITEM_SELECT,
-            orderBy: { rank: 'asc' },
-          },
-          project: { select: { id: true } },
-        },
+        include: BASE_WORK_ITEM_INCLUDE,
       });
     }
 
     return this.prismaService.workItem.findFirst({
       where: { id: workItemId, deletedAt: null },
-      include: {
-        state: { select: STATE_MINIMAL_SELECT },
-        assignee: { select: USER_MINIMAL_SELECT },
-        cycle: { select: CYCLE_SELECT },
-        parentWorkItem: { select: { id: true, title: true, identifier: true } },
-        childWorkItems: {
-          where: { deletedAt: null },
-          select: CHILD_WORK_ITEM_SELECT,
-          orderBy: { rank: 'asc' },
-        },
-        project: { select: { id: true } },
-      },
+      include: BASE_WORK_ITEM_INCLUDE,
     });
   }
 
@@ -279,18 +491,7 @@ export class CoreRepository implements IWorkItemRepository {
   ): Promise<WorkItemWithRelations | null> {
     return this.prismaService.workItem.findFirst({
       where: { projectId, identifier, deletedAt: null },
-      include: {
-        state: { select: STATE_MINIMAL_SELECT },
-        assignee: { select: USER_MINIMAL_SELECT },
-        cycle: { select: CYCLE_SELECT },
-        parentWorkItem: { select: { id: true, title: true, identifier: true } },
-        childWorkItems: {
-          where: { deletedAt: null },
-          select: CHILD_WORK_ITEM_SELECT,
-          orderBy: { rank: 'asc' },
-        },
-        project: { select: { id: true } },
-      },
+      include: BASE_WORK_ITEM_INCLUDE,
     });
   }
 
@@ -329,20 +530,102 @@ export class CoreRepository implements IWorkItemRepository {
       delete createData.columnId;
     }
 
-    return this.prismaService.workItem.create({
-      data: createData,
-      include: {
-        state: { select: STATE_MINIMAL_SELECT },
-        assignee: { select: USER_MINIMAL_SELECT },
-        cycle: { select: CYCLE_SELECT },
-        parentWorkItem: { select: { id: true, title: true, identifier: true } },
-        childWorkItems: {
-          where: { deletedAt: null },
-          select: CHILD_WORK_ITEM_SELECT,
-          orderBy: { rank: 'asc' },
-        },
-        project: { select: { id: true } },
-      },
+    return this.executeTx(async (tx) => {
+      const created = await tx.workItem.create({
+        data: createData,
+        include: BASE_WORK_ITEM_INCLUDE,
+      });
+
+      // Dual-write assignees
+      const assigneeIdsToSync: string[] = [];
+      if (created.assigneeId) assigneeIdsToSync.push(created.assigneeId);
+      if (Array.isArray(created.assigneeIds)) {
+        created.assigneeIds.forEach((id: any) => {
+          if (typeof id === 'string' && id && !assigneeIdsToSync.includes(id)) {
+            assigneeIdsToSync.push(id);
+          }
+        });
+      }
+
+      if (assigneeIdsToSync.length > 0 && tx.workItemAssignee) {
+        await tx.workItemAssignee.createMany({
+          data: assigneeIdsToSync.map((userId) => ({
+            workItemId: created.id,
+            userId,
+            isPrimary: userId === created.assigneeId,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
+      // Dual-write labels - batched to eliminate N+1 queries
+      if (
+        Array.isArray(created.labels) &&
+        created.labels.length > 0 &&
+        tx.label &&
+        tx.workItemLabelAssignment
+      ) {
+        const rawLabels: unknown[] = Array.isArray(created.labels)
+          ? (created.labels as unknown[])
+          : [];
+        const uniqueLabelNames: string[] = Array.from(
+          new Set(
+            rawLabels
+              .filter(
+                (l: unknown): l is string =>
+                  typeof l === 'string' && Boolean(l.trim()),
+              )
+              .map((l: string) => l.trim()),
+          ),
+        );
+
+        if (uniqueLabelNames.length > 0) {
+          const existingLabels = await tx.label.findMany({
+            where: {
+              projectId: created.projectId,
+              name: { in: uniqueLabelNames, mode: 'insensitive' },
+            },
+          });
+
+          const existingMap = new Map<string, any>(
+            existingLabels.map((l: any) => [l.name.toLowerCase(), l]),
+          );
+
+          const missingNames: string[] = uniqueLabelNames.filter(
+            (name: string) => !existingMap.has(name.toLowerCase()),
+          );
+
+          if (missingNames.length > 0) {
+            await tx.label.createMany({
+              data: missingNames.map((name: string) => ({
+                name,
+                projectId: created.projectId,
+                createdById: created.authorId,
+              })),
+              skipDuplicates: true,
+            });
+          }
+
+          const allLabels = await tx.label.findMany({
+            where: {
+              projectId: created.projectId,
+              name: { in: uniqueLabelNames, mode: 'insensitive' },
+            },
+          });
+
+          if (allLabels.length > 0) {
+            await tx.workItemLabelAssignment.createMany({
+              data: allLabels.map((label: any) => ({
+                workItemId: created.id,
+                labelId: label.id,
+              })),
+              skipDuplicates: true,
+            });
+          }
+        }
+      }
+
+      return created;
     });
   }
 
@@ -368,21 +651,118 @@ export class CoreRepository implements IWorkItemRepository {
       delete updateData.columnId;
     }
 
-    return this.prismaService.workItem.update({
-      where: { id: workItemId },
-      data: updateData,
-      include: {
-        state: { select: STATE_MINIMAL_SELECT },
-        assignee: { select: USER_MINIMAL_SELECT },
-        cycle: { select: CYCLE_SELECT },
-        parentWorkItem: { select: { id: true, title: true, identifier: true } },
-        childWorkItems: {
-          where: { deletedAt: null },
-          select: CHILD_WORK_ITEM_SELECT,
-          orderBy: { rank: 'asc' },
-        },
-        project: { select: { id: true } },
-      },
+    return this.executeTx(async (tx) => {
+      const updated = await tx.workItem.update({
+        where: { id: workItemId },
+        data: updateData,
+        include: BASE_WORK_ITEM_INCLUDE,
+      });
+
+      // Dual-write assignees if updated
+      if (
+        (updateData.assigneeId !== undefined ||
+          updateData.assigneeIds !== undefined ||
+          updateData.assignee !== undefined) &&
+        tx.workItemAssignee
+      ) {
+        const assigneeIdsToSync: string[] = [];
+        if (updated.assigneeId) assigneeIdsToSync.push(updated.assigneeId);
+        if (Array.isArray(updated.assigneeIds)) {
+          updated.assigneeIds.forEach((id: any) => {
+            if (typeof id === 'string' && id && !assigneeIdsToSync.includes(id)) {
+              assigneeIdsToSync.push(id);
+            }
+          });
+        }
+
+        await tx.workItemAssignee.deleteMany({
+          where: { workItemId },
+        });
+
+        if (assigneeIdsToSync.length > 0) {
+          await tx.workItemAssignee.createMany({
+            data: assigneeIdsToSync.map((userId) => ({
+              workItemId,
+              userId,
+              isPrimary: userId === updated.assigneeId,
+            })),
+            skipDuplicates: true,
+          });
+        }
+      }
+
+      // Dual-write labels if updated - batched to eliminate N+1 queries
+      if (
+        updateData.labels !== undefined &&
+        Array.isArray(updated.labels) &&
+        tx.label &&
+        tx.workItemLabelAssignment
+      ) {
+        await tx.workItemLabelAssignment.deleteMany({
+          where: { workItemId },
+        });
+
+        const rawLabels: unknown[] = Array.isArray(updated.labels)
+          ? (updated.labels as unknown[])
+          : [];
+        const uniqueLabelNames: string[] = Array.from(
+          new Set(
+            rawLabels
+              .filter(
+                (l: unknown): l is string =>
+                  typeof l === 'string' && Boolean(l.trim()),
+              )
+              .map((l: string) => l.trim()),
+          ),
+        );
+
+        if (uniqueLabelNames.length > 0) {
+          const existingLabels = await tx.label.findMany({
+            where: {
+              projectId: updated.projectId,
+              name: { in: uniqueLabelNames, mode: 'insensitive' },
+            },
+          });
+
+          const existingMap = new Map<string, any>(
+            existingLabels.map((l: any) => [l.name.toLowerCase(), l]),
+          );
+
+          const missingNames: string[] = uniqueLabelNames.filter(
+            (name: string) => !existingMap.has(name.toLowerCase()),
+          );
+
+          if (missingNames.length > 0) {
+            await tx.label.createMany({
+              data: missingNames.map((name: string) => ({
+                name,
+                projectId: updated.projectId,
+                createdById: updated.authorId,
+              })),
+              skipDuplicates: true,
+            });
+          }
+
+          const allLabels = await tx.label.findMany({
+            where: {
+              projectId: updated.projectId,
+              name: { in: uniqueLabelNames, mode: 'insensitive' },
+            },
+          });
+
+          if (allLabels.length > 0) {
+            await tx.workItemLabelAssignment.createMany({
+              data: allLabels.map((label: any) => ({
+                workItemId,
+                labelId: label.id,
+              })),
+              skipDuplicates: true,
+            });
+          }
+        }
+      }
+
+      return updated;
     });
   }
 
@@ -620,22 +1000,7 @@ export class CoreRepository implements IWorkItemRepository {
     return this.prismaService.workItem.update({
       where: { id: workItemId },
       data: { parentWorkItem: { disconnect: true } },
-      include: {
-        state: { select: STATE_MINIMAL_SELECT },
-        assignee: {
-          select: USER_MINIMAL_SELECT,
-        },
-        cycle: {
-          select: CYCLE_SELECT,
-        },
-        parentWorkItem: { select: { id: true, title: true, identifier: true } },
-        childWorkItems: {
-          where: { deletedAt: null },
-          select: CHILD_WORK_ITEM_SELECT,
-          orderBy: { rank: 'asc' },
-        },
-        project: { select: { id: true } },
-      },
+      include: BASE_WORK_ITEM_INCLUDE,
     });
   }
 
@@ -663,8 +1028,28 @@ export class CoreRepository implements IWorkItemRepository {
         group: true,
         sequence: true,
         isDefault: true,
+        projectId: true,
       },
     });
+  }
+
+  async findCycleById(cycleId: string) {
+    if (!isUuid(cycleId)) return null;
+    return this.prismaService.cycle.findUnique({
+      where: { id: cycleId },
+      select: {
+        id: true,
+        name: true,
+        projectId: true,
+        deletedAt: true,
+        status: true,
+      },
+    });
+  }
+
+  async isProjectMember(projectId: string, userId: string): Promise<boolean> {
+    const role = await this.findProjectMemberRole(projectId, userId);
+    return role !== null;
   }
 }
 

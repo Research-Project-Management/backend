@@ -29,6 +29,7 @@ import {
   CursorPaginationQueryDto,
   CreateItemDto,
   UpdateItemDto,
+  ParseCitationsDto,
 } from './dto/items.dto';
 
 @ApiTags('Library Items')
@@ -100,6 +101,22 @@ export class ItemsController {
     );
   }
 
+  @Post('citations/parse')
+  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ApiOperation({
+    summary: 'Parse raw unformatted citation strings via GROBID CRF model',
+    description:
+      'Extracts structured title, authors, venue, year, volume, and DOI from unstructured raw text strings without needing a PDF file.',
+  })
+  async parseCitations(@Body() dto: ParseCitationsDto) {
+    const references = await this.itemsService.parseCitations(dto.citations);
+    return {
+      success: true,
+      count: references.length,
+      data: references,
+    };
+  }
+
   @Get(':id')
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get a library item by ID' })
@@ -121,14 +138,10 @@ export class ItemsController {
   async getFulltext(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
+    @Param('projectId') projectId?: string,
   ) {
-    const fulltext = await this.itemsService.getFulltext(userId, id);
-    if (!fulltext) {
-      throw new NotFoundException(
-        `Full-text structured extraction not found for item ${id}`,
-      );
-    }
-    return fulltext;
+    const fulltext = await this.itemsService.getFulltext(userId, id, projectId);
+    return { success: true, data: fulltext, ...fulltext };
   }
 
   @Post()

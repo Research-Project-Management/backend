@@ -208,6 +208,20 @@ export class ExtractionHandler implements OutboxDispatchHandler {
               } as any,
             },
           });
+
+          // Synchronize extracted referenceCount & core metadata onto the Item model
+          if (doc.references && doc.references.length > 0) {
+            await this.prisma.item.update({
+              where: { id: attachment.itemId },
+              data: {
+                referenceCount: doc.references.length,
+                ...(!attachment.item?.doi && doc.metadata?.doi ? { doi: doc.metadata.doi } : {}),
+                ...(!attachment.item?.arxivId && doc.metadata?.arxivId ? { arxivId: doc.metadata.arxivId } : {}),
+                ...(!attachment.item?.abstract && doc.metadata?.abstract ? { abstract: doc.metadata.abstract } : {}),
+                ...(!attachment.item?.year && doc.metadata?.year ? { year: doc.metadata.year } : {}),
+              },
+            });
+          }
         } catch (provenanceErr: any) {
           this.logger.debug(
             `Could not store GROBID provenance: ${provenanceErr?.message}`,
@@ -298,7 +312,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
    * Matches extracted bibliographic references against other papers in the same scope.
    * Automatically establishes in-library citation edges ('cites') in item_relations.
    */
-  private async linkInLibraryCitations(
+  public async linkInLibraryCitations(
     scopeId: string,
     sourceItemId: string,
     references: Array<{ title?: string; doi?: string; arxivId?: string }>,

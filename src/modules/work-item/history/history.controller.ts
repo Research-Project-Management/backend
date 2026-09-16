@@ -13,7 +13,7 @@ import { FeedQueryDto } from './dto/feed-query.dto';
 
 @ApiTags('Work Item History & Activity')
 @ApiBearerAuth('JWT-auth')
-@Controller('api')
+@Controller(['api/v1', 'api'])
 @UseGuards(JwtAuthGuard)
 export class HistoryController {
   constructor(private readonly historyService: HistoryService) {}

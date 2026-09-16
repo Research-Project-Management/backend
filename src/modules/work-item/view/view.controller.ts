@@ -30,7 +30,7 @@ import { QueryWorkItemDto } from '../core/dto/query.dto';
 
 @ApiTags('Work Item Saved Views')
 @ApiBearerAuth('JWT-auth')
-@Controller('api')
+@Controller(['api/v1', 'api'])
 @UseGuards(JwtAuthGuard)
 export class ViewController {
   constructor(private readonly viewService: ViewService) {}

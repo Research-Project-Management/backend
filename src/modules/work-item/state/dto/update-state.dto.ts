@@ -57,6 +57,14 @@ export class UpdateStateDto {
   accentColor?: string;
 
   @ApiPropertyOptional({
+    description: 'Updated icon identifier or SVG name',
+    example: 'circle-dot',
+  })
+  @IsString()
+  @IsOptional()
+  icon?: string;
+
+  @ApiPropertyOptional({
     description: 'Updated description of the state purposes',
     example: 'Waiting for security approval',
   })

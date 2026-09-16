@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ProjectPriority, ProjectState } from '@prisma/client';
 
 /**
  * DTO representing minimal project user (Lead / Creator / Member).
@@ -15,6 +16,23 @@ export class ProjectUserSummaryDto {
 
   @ApiPropertyOptional({ example: 'https://example.com/avatar.png' })
   avatar?: string | null;
+}
+
+/**
+ * DTO representing a project label.
+ */
+export class ProjectLabelSummaryDto {
+  @ApiProperty({ example: 'b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a22' })
+  id!: string;
+
+  @ApiProperty({ example: 'Infrastructure' })
+  name!: string;
+
+  @ApiProperty({ example: '#3B82F6' })
+  color!: string;
+
+  @ApiPropertyOptional({ example: 'Platform infra' })
+  description?: string | null;
 }
 
 /**
@@ -82,25 +100,37 @@ export class ProjectResponseDto {
   @ApiPropertyOptional({ example: 'Investigating transformer architectures.' })
   description?: string | null;
 
+  @ApiProperty({ enum: ProjectState, example: ProjectState.execution })
+  state!: ProjectState;
+
+  @ApiProperty({ enum: ProjectPriority, example: ProjectPriority.high })
+  priority!: ProjectPriority;
+
+  @ApiPropertyOptional({ example: '2026-10-01' })
+  startDate?: Date | string | null;
+
+  @ApiPropertyOptional({ example: '2026-12-31' })
+  targetDate?: Date | string | null;
+
   @ApiProperty({ example: true })
   isActive!: boolean;
 
-  @ApiPropertyOptional({ example: false })
-  isArchived?: boolean;
+  @ApiProperty({ example: false })
+  isArchived!: boolean;
+
+  @ApiPropertyOptional({ example: null })
+  archivedAt?: Date | string | null;
 
   @ApiPropertyOptional({ example: false })
   isFavorite?: boolean;
 
-  @ApiProperty({ example: false })
-  isPrivate!: boolean;
-
-  @ApiPropertyOptional({ example: 'Asia/Ho_Chi_Minh' })
-  timezone?: string | null;
-
   @ApiProperty({
-    example: ['overview', 'work_items', 'pages'],
+    example: ['work_items', 'cycles', 'views', 'pages'],
   })
   modules!: string[];
+
+  @ApiPropertyOptional({ type: [ProjectLabelSummaryDto] })
+  labels?: ProjectLabelSummaryDto[];
 
   @ApiPropertyOptional({ type: [ProjectMemberSummaryDto] })
   members?: ProjectMemberSummaryDto[];

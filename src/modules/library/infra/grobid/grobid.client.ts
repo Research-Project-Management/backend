@@ -240,6 +240,51 @@ export class GrobidClient {
   }
 
   /**
+   * Parses raw unformatted citation strings or bibliographies via GROBID CRF model.
+   * Sends to GROBID /api/processCitationList → TEI XML → parsed GrobidReference array.
+   * Enables decomposing messy copy-pasted citations into structured fields without a PDF file.
+   */
+  async processCitationList(rawCitations: string): Promise<GrobidReference[]> {
+    if (!this.enabled || !rawCitations?.trim()) return [];
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+
+    try {
+      const params = new URLSearchParams();
+      params.append('citations', rawCitations.trim());
+
+      const response = await fetch(`${this.baseUrl}/api/processCitationList`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8',
+        },
+        body: params.toString(),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        this.logger.warn(
+          `GROBID processCitationList returned HTTP ${response.status}`,
+        );
+        return [];
+      }
+
+      const teiXml = await response.text();
+      return this.parseTeiReferences(teiXml);
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        this.logger.warn('GROBID processCitationList timed out');
+      } else {
+        this.logger.warn(`GROBID processCitationList error: ${err?.message}`);
+      }
+      return [];
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  /**
    * Authoritative In-House Full-Text Document Parsing via GROBID.
    * Calls /api/processFulltextDocument with teiCoordinates for head, figure, table, formula, biblStruct.
    * Extracts sections (IMRAD), tables (matrix/markdown), figures (captions/bboxes), formulas, and references

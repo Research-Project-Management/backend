@@ -4,11 +4,13 @@ import {
   NotFoundException,
   BadRequestException,
   Optional,
+  Inject,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FastifyRequest } from 'fastify';
 import { AttachmentRepository } from './attachment.repository';
 import { R2Service } from '@/modules/storage/infrastructure/drivers/r2.service';
+import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { PrismaService } from '@/core/database/prisma.service';
 import {
   CreateAttachmentDto as BaseAttachmentDto,
@@ -31,8 +33,11 @@ export class AttachmentService {
 
   constructor(
     private readonly repository: AttachmentRepository,
-    private readonly r2Service: R2Service,
+    @Optional() private readonly r2Service: R2Service,
     private readonly prismaService: PrismaService,
+    @Optional()
+    @Inject(STORAGE_PORT)
+    private readonly storagePort?: IStoragePort,
     @Optional() private readonly eventEmitter?: EventEmitter2,
   ) {}
 
@@ -67,19 +72,23 @@ export class AttachmentService {
     const storageKey = `attachments/${dto.entityType}/${dto.entityId}/${Date.now()}-${cleanName}`;
     const contentType = dto.contentType || 'application/octet-stream';
 
-    const presigned = await this.r2Service.getPresignedUploadUrl(
-      storageKey,
-      contentType,
-      3600,
-    );
+    if (this.r2Service?.getPresignedUploadUrl) {
+      const presigned = await this.r2Service.getPresignedUploadUrl(
+        storageKey,
+        contentType,
+        3600,
+      );
 
-    return {
-      signedUrl: presigned.signedUrl,
-      storageKey: presigned.path,
-      fileUrl: presigned.url,
-      entityType: dto.entityType,
-      entityId: dto.entityId,
-    };
+      return {
+        signedUrl: presigned.signedUrl,
+        storageKey: presigned.path,
+        fileUrl: presigned.url,
+        entityType: dto.entityType,
+        entityId: dto.entityId,
+      };
+    }
+
+    throw new BadRequestException('Object storage direct upload is not configured');
   }
 
   /**
@@ -125,22 +134,48 @@ export class AttachmentService {
     const cleanName = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
     const storageKey = `attachments/${entityType}/${entityId}/${Date.now()}-${cleanName}`;
 
-    const uploadRes = await this.r2Service.uploadBuffer(
-      storageKey,
-      buffer,
-      mimeType,
-    );
+    let url = '';
+    let finalKey = storageKey;
+    let fileId: string | undefined;
+
+    if (this.storagePort) {
+      const uploadRes = await this.storagePort.uploadFile({
+        userId: authorId,
+        filename,
+        buffer,
+        mimeType,
+        projectId: fields.projectId,
+        source: 'work-item',
+      });
+      url = uploadRes.url;
+      finalKey = uploadRes.path;
+      fileId = uploadRes.fileId;
+    } else if (this.r2Service) {
+      const uploadRes = await this.r2Service.uploadBuffer(
+        storageKey,
+        buffer,
+        mimeType,
+      );
+      url = uploadRes.url;
+      finalKey = uploadRes.path;
+    } else {
+      throw new BadRequestException('Storage provider is not available');
+    }
 
     const attachment = await this.repository.create(
       {
         entityType,
         entityId,
         filename,
-        url: uploadRes.url,
-        storageKey: uploadRes.path,
+        url,
+        storageKey: finalKey,
         size: buffer.length,
         mimeType,
         projectId: fields.projectId,
+        metadata: {
+          ...(fileId ? { fileId } : {}),
+          source: 'work-item',
+        },
       },
       authorId,
     );
@@ -395,6 +430,29 @@ export class AttachmentService {
       authorId,
     );
 
+    if (this.prismaService.workItemEntityLink) {
+      await this.prismaService.workItemEntityLink
+        .upsert({
+          where: {
+            workItemId_entityType_entityId: {
+              workItemId: workItem.id,
+              entityType: EntityType.page,
+              entityId: pageId,
+            },
+          },
+          create: {
+            workItemId: workItem.id,
+            entityType: EntityType.page,
+            entityId: pageId,
+            description: title,
+          },
+          update: {
+            description: title,
+          },
+        })
+        .catch(() => null);
+    }
+
     const formattedWorkItem = await this.getFormattedWorkItem(workItem.id);
     return {
       message: 'Page attached successfully',
@@ -424,6 +482,19 @@ export class AttachmentService {
     );
     if (target) {
       await this.repository.delete(target.id);
+    }
+
+    if (this.prismaService.workItemEntityLink) {
+      const resolvedEntityId = (target?.metadata as any)?.pageId || pageId;
+      await this.prismaService.workItemEntityLink
+        .deleteMany({
+          where: {
+            workItemId: workItem.id,
+            entityType: EntityType.page,
+            entityId: resolvedEntityId,
+          },
+        })
+        .catch(() => null);
     }
 
     const formattedWorkItem = await this.getFormattedWorkItem(workItem.id);
@@ -464,6 +535,29 @@ export class AttachmentService {
       authorId,
     );
 
+    if (this.prismaService.workItemEntityLink) {
+      await this.prismaService.workItemEntityLink
+        .upsert({
+          where: {
+            workItemId_entityType_entityId: {
+              workItemId: workItem.id,
+              entityType: EntityType.paper,
+              entityId: paperId,
+            },
+          },
+          create: {
+            workItemId: workItem.id,
+            entityType: EntityType.paper,
+            entityId: paperId,
+            description: title,
+          },
+          update: {
+            description: title,
+          },
+        })
+        .catch(() => null);
+    }
+
     const formattedWorkItem = await this.getFormattedWorkItem(workItem.id);
     return {
       message: 'Paper attached successfully',
@@ -495,6 +589,19 @@ export class AttachmentService {
     );
     if (target) {
       await this.repository.delete(target.id);
+    }
+
+    if (this.prismaService.workItemEntityLink) {
+      const resolvedEntityId = (target?.metadata as any)?.paperId || paperId;
+      await this.prismaService.workItemEntityLink
+        .deleteMany({
+          where: {
+            workItemId: workItem.id,
+            entityType: EntityType.paper,
+            entityId: resolvedEntityId,
+          },
+        })
+        .catch(() => null);
     }
 
     const formattedWorkItem = await this.getFormattedWorkItem(workItem.id);
@@ -688,7 +795,16 @@ export class AttachmentService {
       throw new NotFoundException(`Attachment ${id} not found`);
     }
 
-    if (attachment.storageKey) {
+    const fileId = (attachment.metadata as any)?.fileId;
+    if (fileId && this.storagePort?.deleteFile) {
+      try {
+        await this.storagePort.deleteFile(fileId);
+      } catch (err: any) {
+        this.logger.warn(
+          `Failed to delete storage file ${fileId}: ${err?.message}`,
+        );
+      }
+    } else if (attachment.storageKey && this.r2Service) {
       try {
         await this.r2Service.deleteObject(attachment.storageKey);
       } catch (err: any) {
@@ -708,5 +824,46 @@ export class AttachmentService {
     });
 
     return { success: true, id };
+  }
+
+  /**
+   * Retrieves all work items linked to a specific entity (e.g. page or paper).
+   */
+  async getWorkItemsByLinkedEntity(entityType: EntityType, entityId: string) {
+    if (!this.prismaService.workItemEntityLink) {
+      return [];
+    }
+
+    const links = await this.prismaService.workItemEntityLink.findMany({
+      where: {
+        entityType,
+        entityId,
+      },
+      include: {
+        workItem: {
+          select: {
+            id: true,
+            identifier: true,
+            title: true,
+            columnId: true,
+            state: true,
+            priority: true,
+            projectId: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return links.map((link) => ({
+      linkId: link.id,
+      entityType: link.entityType,
+      entityId: link.entityId,
+      description: link.description,
+      createdAt: link.createdAt,
+      workItem: link.workItem,
+    }));
   }
 }

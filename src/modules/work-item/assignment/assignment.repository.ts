@@ -128,11 +128,35 @@ export class AssignmentRepository implements IAssignmentRepository {
     workItemId: string,
     assigneeId: string | null,
   ): Promise<WorkItem> {
-    return this.prismaService.workItem.update({
-      where: { id: workItemId },
-      data: assigneeId
-        ? { assignee: { connect: { id: assigneeId } } }
-        : { assignee: { disconnect: true } },
+    return this.prismaService.$transaction(async (tx) => {
+      const updated = await tx.workItem.update({
+        where: { id: workItemId },
+        data: assigneeId
+          ? {
+              assignee: { connect: { id: assigneeId } },
+              assigneeIds: [assigneeId],
+            }
+          : {
+              assignee: { disconnect: true },
+              assigneeIds: [],
+            },
+      });
+
+      await tx.workItemAssignee.deleteMany({
+        where: { workItemId },
+      });
+
+      if (assigneeId) {
+        await tx.workItemAssignee.create({
+          data: {
+            workItemId,
+            userId: assigneeId,
+            isPrimary: true,
+          },
+        });
+      }
+
+      return updated;
     });
   }
 
@@ -141,17 +165,36 @@ export class AssignmentRepository implements IAssignmentRepository {
     workItemIds: string[],
     assigneeId: string | null,
   ): Promise<number> {
-    const result = await this.prismaService.workItem.updateMany({
-      where: {
-        id: { in: workItemIds },
-        projectId,
-        deletedAt: null,
-      },
-      data: {
-        assigneeId: assigneeId || null,
-      },
+    return this.prismaService.$transaction(async (tx) => {
+      const result = await tx.workItem.updateMany({
+        where: {
+          id: { in: workItemIds },
+          projectId,
+          deletedAt: null,
+        },
+        data: {
+          assigneeId: assigneeId || null,
+          assigneeIds: assigneeId ? [assigneeId] : [],
+        },
+      });
+
+      await tx.workItemAssignee.deleteMany({
+        where: { workItemId: { in: workItemIds } },
+      });
+
+      if (assigneeId) {
+        await tx.workItemAssignee.createMany({
+          data: workItemIds.map((workItemId) => ({
+            workItemId,
+            userId: assigneeId,
+            isPrimary: true,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
+      return result.count;
     });
-    return result.count;
   }
 
   async getProjectSettings(
@@ -175,13 +218,30 @@ export class AssignmentRepository implements IAssignmentRepository {
     assigneeIds: string[],
     primaryAssigneeId: string | null,
   ): Promise<void> {
-    await this.prismaService.workItem.update({
-      where: { id: workItemId },
-      data: {
-        assigneeIds,
-        assigneeId: primaryAssigneeId,
-      },
-    });
+    await this.prismaService.$transaction([
+      this.prismaService.workItem.update({
+        where: { id: workItemId },
+        data: {
+          assigneeIds,
+          assigneeId: primaryAssigneeId,
+        },
+      }),
+      this.prismaService.workItemAssignee.deleteMany({
+        where: { workItemId },
+      }),
+      ...(assigneeIds.length > 0
+        ? [
+            this.prismaService.workItemAssignee.createMany({
+              data: assigneeIds.map((userId) => ({
+                workItemId,
+                userId,
+                isPrimary: userId === primaryAssigneeId,
+              })),
+              skipDuplicates: true,
+            }),
+          ]
+        : []),
+    ]);
   }
 
   /**

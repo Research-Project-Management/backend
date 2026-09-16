@@ -372,11 +372,15 @@ export class CycleService implements OnModuleInit, OnModuleDestroy {
 
     // Identify incomplete work items using state groups
     const incompleteWorkItemIds = workItems
-      .filter(
-        (workItem: any) =>
-          !workItem.completed &&
-          inferStateGroup(workItem.columnId, workItem.columnId) !== 'completed',
-      )
+      .filter((workItem: any) => {
+        const group =
+          workItem.state?.group ||
+          inferStateGroup(
+            workItem.columnId,
+            workItem.state?.name || workItem.columnId,
+          );
+        return !workItem.completed && group !== 'completed';
+      })
       .map((workItem: any) => workItem.id);
 
     let transferredCount = 0;
@@ -538,7 +542,9 @@ export class CycleService implements OnModuleInit, OnModuleDestroy {
     while (cursor <= chartEnd) {
       const dateStr = cursor.toISOString().slice(0, 10);
       const completedByDay = workItems.filter((item: any) => {
-        const group = inferStateGroup(item.columnId, item.columnId);
+        const group =
+          item.state?.group ||
+          inferStateGroup(item.columnId, item.state?.name || item.columnId);
         const isDone = item.completed === true || group === 'completed';
         if (!isDone) return false;
         const updatedDate = item.updatedAt

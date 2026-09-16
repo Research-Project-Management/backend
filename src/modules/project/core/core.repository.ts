@@ -1,6 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
-import { Prisma, Project, ProjectMemberRole } from '@prisma/client';
+import {
+  Prisma,
+  Project,
+  ProjectMemberRole,
+  ProjectPriority,
+  ProjectState,
+} from '@prisma/client';
 import {
   ProjectWithMembers,
   ProjectOverview,
@@ -9,7 +15,7 @@ import {
 import { isUuid } from '@/core/utils/uuid.util';
 import { DEFAULT_WORK_ITEM_STATES } from '@/modules/work-item/state/types/state.types';
 import { deriveProjectPrefix } from './utils/identifier.util';
-import { parseWorkItemStates } from '@/modules/work-item/state/utils/state.util';
+import { ProjectQueryDto } from './dto/query.dto';
 
 export const USER_SELECT = {
   id: true,
@@ -21,12 +27,17 @@ export const USER_SELECT = {
 export interface CreateProjectInput {
   name: string;
   identifier?: string | null;
+  state?: ProjectState;
+  priority?: ProjectPriority;
+  startDate?: Date | null;
+  targetDate?: Date | null;
+  labelIds?: string[];
+  templateId?: string | null;
   avatar?: string;
   coverImage?: string;
   description?: string;
   modules?: string[];
   settings?: Record<string, unknown>;
-  network?: string | null;
 }
 
 @Injectable()
@@ -36,17 +47,21 @@ export class CoreRepository {
   // ─── 1. Core Project Lifecycle & Retrieval ─────────────────────────────────
 
   /**
-   * Find active projects accessible by a user (created by them or where they are a member).
+   * Find projects accessible by a user with rich filtering (state, priority, label, archive).
    */
   async findProjectsByUser(
     userId: string,
-    filter: 'created' | 'shared' | 'all' = 'all',
+    query?: ProjectQueryDto,
   ): Promise<ProjectWithMembers[]> {
     if (!isUuid(userId)) return [];
 
+    const filter = query?.type || 'all';
+    const isArchived = query?.isArchived ?? false;
+
     const where: Prisma.ProjectWhereInput = {
-      isActive: true,
       deletedAt: null,
+      isActive: true,
+      isArchived,
       ...(filter === 'created'
         ? { createdById: userId }
         : filter === 'shared'
@@ -57,6 +72,9 @@ export class CoreRepository {
           : {
               OR: [{ createdById: userId }, { members: { some: { userId } } }],
             }),
+      ...(query?.state ? { state: query.state } : {}),
+      ...(query?.priority ? { priority: query.priority } : {}),
+      ...(query?.labelId ? { labels: { some: { labelId: query.labelId } } } : {}),
     };
 
     return this.prisma.project.findMany({
@@ -66,6 +84,11 @@ export class CoreRepository {
           take: 20,
           include: {
             user: { select: USER_SELECT },
+          },
+        },
+        labels: {
+          include: {
+            label: true,
           },
         },
         _count: {
@@ -78,7 +101,6 @@ export class CoreRepository {
 
   /**
    * Batch-fetch project memberships for a user across multiple project IDs.
-   * High performance single query preventing N+1 lookup and independent of member pagination limit.
    */
   async findMembershipsForUser(
     projectIds: string[],
@@ -101,38 +123,39 @@ export class CoreRepository {
   }
 
   /**
-   * Find a project by its unique UUID or uppercase identifier code.
+   * Find single project by ID with members, labels, and metadata.
    */
   async findProjectById(projectId: string): Promise<ProjectWithMembers | null> {
-    if (!projectId) return null;
-
-    const where: Prisma.ProjectWhereInput = isUuid(projectId)
-      ? { id: projectId, deletedAt: null }
-      : {
-          identifier: { equals: projectId, mode: 'insensitive' },
-          deletedAt: null,
-        };
+    if (!isUuid(projectId)) return null;
 
     return this.prisma.project.findFirst({
-      where,
+      where: { id: projectId, deletedAt: null },
       include: {
+        createdBy: { select: USER_SELECT },
         members: {
           include: {
             user: { select: USER_SELECT },
           },
+          orderBy: { joinedAt: 'asc' },
+        },
+        labels: {
+          include: {
+            label: true,
+          },
+        },
+        _count: {
+          select: { members: true },
         },
       },
     });
   }
 
   /**
-   * Find a project by its unique WorkItem identifier key (e.g. "FLUX", "BIO").
+   * Find project by unique identifier (e.g. 'DLGA').
    */
   async findProjectByIdentifier(
     identifier: string,
   ): Promise<ProjectWithMembers | null> {
-    if (!identifier) return null;
-
     return this.prisma.project.findFirst({
       where: {
         identifier: { equals: identifier.trim(), mode: 'insensitive' },
@@ -144,12 +167,17 @@ export class CoreRepository {
             user: { select: USER_SELECT },
           },
         },
+        labels: {
+          include: {
+            label: true,
+          },
+        },
       },
     });
   }
 
   /**
-   * Create a new project. The creator is atomically enrolled as the project 'owner'.
+   * Create a new project. The creator is atomically enrolled as project 'owner'.
    */
   async createProject(
     userId: string,
@@ -166,16 +194,34 @@ export class CoreRepository {
         avatar: data.avatar || '',
         coverImage: data.coverImage || '',
         description: data.description || '',
-        network: data.network || 'secret',
-        modules: data.modules || ['work_items', 'cycles', 'views', 'pages'],
+        state: data.state || ProjectState.planning,
+        priority: data.priority || ProjectPriority.none,
+        startDate: data.startDate || null,
+        targetDate: data.targetDate || null,
+        templateId: data.templateId || null,
+        modules: data.modules || [
+          'work_items',
+          'cycles',
+          'views',
+          'pages',
+          'stickies',
+          'storage',
+        ],
         settings: (data.settings || {}) as Prisma.InputJsonValue,
-        createdBy: { connect: { id: userId } },
+        createdById: userId,
         members: {
           create: {
             userId,
             role: ProjectMemberRole.owner,
           },
         },
+        ...(data.labelIds && data.labelIds.length > 0
+          ? {
+              labels: {
+                create: data.labelIds.map((labelId) => ({ labelId })),
+              },
+            }
+          : {}),
         states: {
           create: DEFAULT_WORK_ITEM_STATES.map((s) => ({
             name: s.name,
@@ -191,6 +237,11 @@ export class CoreRepository {
         members: {
           include: {
             user: { select: USER_SELECT },
+          },
+        },
+        labels: {
+          include: {
+            label: true,
           },
         },
       },
@@ -211,6 +262,11 @@ export class CoreRepository {
         members: {
           include: {
             user: { select: USER_SELECT },
+          },
+        },
+        labels: {
+          include: {
+            label: true,
           },
         },
       },
@@ -240,22 +296,35 @@ export class CoreRepository {
             user: { select: USER_SELECT },
           },
         },
+        labels: {
+          include: {
+            label: true,
+          },
+        },
       },
     });
   }
 
   /**
-   * Archive a project (make inactive).
+   * Archive a project.
    */
   async archiveProject(projectId: string): Promise<ProjectWithMembers> {
     return this.prisma.project.update({
       where: { id: projectId },
-      data: { isActive: false },
+      data: {
+        isArchived: true,
+        archivedAt: new Date(),
+      },
       include: {
         members: {
           take: 20,
           include: {
             user: { select: USER_SELECT },
+          },
+        },
+        labels: {
+          include: {
+            label: true,
           },
         },
         _count: {
@@ -271,12 +340,20 @@ export class CoreRepository {
   async unarchiveProject(projectId: string): Promise<ProjectWithMembers> {
     return this.prisma.project.update({
       where: { id: projectId },
-      data: { isActive: true },
+      data: {
+        isArchived: false,
+        archivedAt: null,
+      },
       include: {
         members: {
           take: 20,
           include: {
             user: { select: USER_SELECT },
+          },
+        },
+        labels: {
+          include: {
+            label: true,
           },
         },
         _count: {
@@ -297,7 +374,7 @@ export class CoreRepository {
     return this.prisma.project.findMany({
       where: {
         OR: [{ createdById: userId }, { members: { some: { userId } } }],
-        isActive: false,
+        isArchived: true,
         deletedAt: null,
       },
       include: {
@@ -305,6 +382,11 @@ export class CoreRepository {
           take: 20,
           include: {
             user: { select: USER_SELECT },
+          },
+        },
+        labels: {
+          include: {
+            label: true,
           },
         },
         _count: {
@@ -326,6 +408,15 @@ export class CoreRepository {
       if (!proj) return null;
       projectId = proj.id;
     }
+
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: {
+        startDate: true,
+        targetDate: true,
+        state: true,
+      },
+    });
 
     const states = await this.prisma.workItemState.findMany({
       where: { projectId },
@@ -350,6 +441,7 @@ export class CoreRepository {
       inProgressWorkItems,
       backlogWorkItems,
       membersCount,
+      cyclesCount,
     ] = await Promise.all([
       this.prisma.workItem.count({
         where: { projectId, deletedAt: null },
@@ -398,17 +490,70 @@ export class CoreRepository {
       this.prisma.projectMember.count({
         where: { projectId },
       }),
+      this.prisma.cycle.count({
+        where: { projectId },
+      }),
     ]);
+
+    const completionPercentage =
+      workItemTotal > 0
+        ? Math.round((completedWorkItems / workItemTotal) * 100)
+        : 0;
+
+    let daysRemaining: number | null = null;
+    let isOverdue = false;
+
+    if (project?.targetDate) {
+      const now = new Date();
+      const target = new Date(project.targetDate);
+      const diffMs = target.getTime() - now.getTime();
+      daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+      isOverdue = daysRemaining < 0 && project.state !== 'completed';
+    }
 
     return {
       totalWorkItems: workItemTotal,
       completedWorkItems,
       inProgressWorkItems,
       backlogWorkItems,
+      completionPercentage,
+      daysRemaining,
+      isOverdue,
       totalMembers: membersCount,
-      totalCycles: 0,
+      totalCycles: cyclesCount,
       activeCycle: null,
     };
+  }
+
+  // ─── 2. Identifier Sequence Allocation ──────────────────────────────────
+
+  async allocateNextWorkItemSequence(
+    projectId: string,
+  ): Promise<AllocatedIdentifier> {
+    return this.prisma.$transaction(
+      async (tx) => {
+        const updated = await tx.project.update({
+          where: { id: projectId },
+          data: {
+            workItemSequence: {
+              increment: 1,
+            },
+          },
+          select: {
+            identifier: true,
+            workItemSequence: true,
+          },
+        });
+
+        return {
+          identifier: `${updated.identifier}-${updated.workItemSequence}`,
+          sequenceNumber: updated.workItemSequence,
+        };
+      },
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      },
+    );
   }
 
   /**
@@ -464,53 +609,11 @@ export class CoreRepository {
 
   /**
    * Allocate the next sequential WorkItem identifier (e.g. 'BIO-1', 'BIO-2').
-   * Uses atomic database sequence increment on Project record to prevent race conditions and duplicate codes.
    */
   async allocateWorkItemIdentifier(
     projectId: string,
   ): Promise<AllocatedIdentifier> {
-    const project = await this.prisma.project.findFirst({
-      where: isUuid(projectId)
-        ? { id: projectId, deletedAt: null }
-        : {
-            identifier: { equals: projectId, mode: 'insensitive' },
-            deletedAt: null,
-          },
-      select: {
-        id: true,
-        identifier: true,
-        name: true,
-        workItemSequence: true,
-      },
-    });
-
-    if (!project) {
-      const fallbackPrefix = 'WI';
-      return {
-        identifier: `${fallbackPrefix}-1`,
-        sequenceNumber: 1,
-      };
-    }
-
-    const updated = await this.prisma.project.update({
-      where: { id: project.id },
-      data: {
-        workItemSequence: { increment: 1 },
-      },
-      select: {
-        identifier: true,
-        name: true,
-        workItemSequence: true,
-      },
-    });
-
-    const prefix = deriveProjectPrefix(updated.identifier, updated.name);
-    const sequenceNumber = updated.workItemSequence;
-
-    return {
-      identifier: `${prefix}-${sequenceNumber}`,
-      sequenceNumber,
-    };
+    return this.allocateNextWorkItemSequence(projectId);
   }
 }
 

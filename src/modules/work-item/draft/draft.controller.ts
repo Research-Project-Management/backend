@@ -28,7 +28,7 @@ import { QueryDraftDto } from './dto/query-draft.dto';
 
 @ApiTags('work-items')
 @ApiBearerAuth('JWT-auth')
-@Controller('api/work-items/drafts')
+@Controller(['api/v1/work-items/drafts', 'api/work-items/drafts'])
 @UseGuards(JwtAuthGuard)
 export class DraftController {
   constructor(private readonly draftService: DraftService) {}

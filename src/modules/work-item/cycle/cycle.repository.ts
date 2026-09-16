@@ -26,6 +26,9 @@ export class CycleRepository implements ICycleRepository {
             completed: true,
             createdAt: true,
             updatedAt: true,
+            state: {
+              select: { id: true, name: true, group: true },
+            },
           },
         },
       },
@@ -55,6 +58,7 @@ export class CycleRepository implements ICycleRepository {
           where: { deletedAt: null },
           include: {
             assignee: { select: USER_MINIMAL_SELECT },
+            state: { select: { id: true, name: true, group: true } },
           },
         },
       },
@@ -132,6 +136,9 @@ export class CycleRepository implements ICycleRepository {
         columnId: true,
         priority: true,
         completed: true,
+        state: {
+          select: { id: true, name: true, group: true },
+        },
       },
     });
   }
@@ -220,6 +227,9 @@ export class CycleRepository implements ICycleRepository {
             completed: true,
             createdAt: true,
             updatedAt: true,
+            state: {
+              select: { id: true, name: true, group: true },
+            },
           },
         },
       },

@@ -14,7 +14,11 @@ export const mapPriority = (priority?: string): WorkItemPriority => {
     : WorkItemPriority.none;
 };
 
-import { WorkItemResponse, LabelMinimal } from '../types/work-item.types';
+import {
+  WorkItemResponse,
+  LabelMinimal,
+  UserMinimal,
+} from '../types/work-item.types';
 
 export { WorkItemResponse };
 

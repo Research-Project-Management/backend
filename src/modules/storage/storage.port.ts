@@ -49,11 +49,41 @@ export interface IStoragePort {
   readOwnedFile(input: ReadOwnedFileInput): Promise<ReadOwnedFileOutput>;
   linkFile(input: LinkFileInput): Promise<void>;
   uploadFile(input: UploadFileInput): Promise<UploadFileOutput>;
+  deleteFile?(fileId: string): Promise<void>;
   uploadBuffer?(
     key: string,
     buffer: Buffer,
     contentType?: string,
   ): Promise<{ path: string; url: string }>;
+  getFileStream?(
+    fileId: string,
+    range?: { start: number; end: number },
+  ): Promise<{
+    stream: NodeJS.ReadableStream;
+    mimeType: string;
+    size: number;
+    filename: string;
+    contentRange?: string;
+  }>;
+  getPresignedDownloadUrl?(
+    fileId: string,
+    expiresInSeconds?: number,
+  ): Promise<string>;
+  getPresignedUploadUrl?(input: {
+    userId: string;
+    filename: string;
+    mimeType: string;
+    sizeBytes: number;
+  }): Promise<{
+    uploadUrl: string;
+    storageKey: string;
+    fileUuid: string;
+    expiresIn: number;
+  }>;
+  checkQuota?(
+    userId?: string | null,
+    projectId?: string | null,
+  ): Promise<{ usedBytes: number; maxBytes: number; percentage: number }>;
 }
 
 export { STORAGE_PORT };

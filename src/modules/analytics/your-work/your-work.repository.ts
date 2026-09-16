@@ -34,6 +34,8 @@ export class YourWorkRepository implements IYourWorkRepository {
           { assigneeId: userId },
           { authorId: userId },
           { comments: { some: { authorId: userId } } },
+          { assigneeIds: { array_contains: userId } },
+          { subscriberIds: { array_contains: userId } },
         ],
       },
       include: {
