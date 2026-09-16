@@ -102,7 +102,9 @@ export type PageVersionSummary = Prisma.PageVersionGetPayload<{
     projectPageId: true;
     createdAt: true;
   };
-}>;
+}> & {
+  savedBy?: { id: string; name: string; avatar?: string | null };
+};
 
 export interface IHistoryRepository {
   findPageVersions(pageId: string): Promise<PageVersionSummary[]>;

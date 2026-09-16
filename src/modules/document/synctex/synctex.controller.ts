@@ -18,14 +18,7 @@ import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
 export class SynctexController {
   constructor(private readonly synctexService: SynctexService) {}
 
-  @Post([
-    'projects/:projectId/synctex/forward',
-    'projects/:projectId/pages/:pageId/synctex/forward',
-    'pages/:pageId/synctex/forward',
-    'documents/:documentId/synctex/forward',
-    'synctex/forward',
-    'compiler/synctex/forward',
-  ])
+  @Post(['synctex/forward', 'projects/:projectId/synctex/forward', 'compiler/synctex/forward'])
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
@@ -35,14 +28,7 @@ export class SynctexController {
     return this.synctexService.forwardSync(dto);
   }
 
-  @Post([
-    'projects/:projectId/synctex/reverse',
-    'projects/:projectId/pages/:pageId/synctex/reverse',
-    'pages/:pageId/synctex/reverse',
-    'documents/:documentId/synctex/reverse',
-    'synctex/reverse',
-    'compiler/synctex/reverse',
-  ])
+  @Post(['synctex/reverse', 'projects/:projectId/synctex/reverse', 'compiler/synctex/reverse'])
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:

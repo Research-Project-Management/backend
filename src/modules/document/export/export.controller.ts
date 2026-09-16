@@ -18,16 +18,11 @@ import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
 @ApiTags('Document - Export')
 @ApiBearerAuth('JWT-auth')
 @Controller('api')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class ExportController {
   constructor(private readonly exportService: ExportService) {}
 
-  @Post([
-    'projects/:projectId/pages/:pageId/export',
-    'project/:projectId/pages/:pageId/export',
-    'pages/:pageId/export',
-  ])
-  @UseGuards(ProjectRoleGuard)
+  @Post(['pages/:pageId/export', 'projects/:projectId/pages/:pageId/export'])
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({

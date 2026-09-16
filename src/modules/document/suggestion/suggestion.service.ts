@@ -11,6 +11,8 @@ import { SuggestionRepository, SuggestionWithAuthor } from './suggestion.reposit
 import { CreateSuggestionDto } from './dto/suggestion.dto';
 import { SuggestionStatus } from '@prisma/client';
 import { CoreService } from '../core/core.service';
+import { RedisCacheService } from '@/core/cache/redis.service';
+import { DOCUMENT_REDIS_KEYS } from '../core/constants/redis-keys.constant';
 
 function applyReplacementToContent(
   contentStr: string,
@@ -64,7 +66,17 @@ export class SuggestionService {
     private readonly coreService: CoreService,
     private readonly prisma: PrismaService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
+    @Optional() private readonly cache?: RedisCacheService,
   ) {}
+
+  private async invalidateCache(pageId: string, projectId?: string | null) {
+    if (!this.cache) return;
+    const tasks = [this.cache.del(DOCUMENT_REDIS_KEYS.page(pageId))];
+    if (projectId) {
+      tasks.push(this.cache.del(DOCUMENT_REDIS_KEYS.projectTree(projectId)));
+    }
+    await Promise.all(tasks);
+  }
 
   async createSuggestion(
     pageId: string,
@@ -159,6 +171,8 @@ export class SuggestionService {
         },
       }),
     ]);
+
+    await this.invalidateCache(pageId, page.projectId);
 
     this.eventEmitter?.emit('document.collaboration.event', {
       pageId,
@@ -255,6 +269,8 @@ export class SuggestionService {
         },
       }),
     ]);
+
+    await this.invalidateCache(pageId, page.projectId);
 
     this.eventEmitter?.emit('document.collaboration.event', {
       pageId,

@@ -26,18 +26,12 @@ import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
 
 @ApiTags('Document - Core')
 @ApiBearerAuth('JWT-auth')
-@Controller(['api/v1', 'api'])
-@UseGuards(JwtAuthGuard)
+@Controller('api')
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class CoreController {
   constructor(private readonly pageService: CoreService) {}
 
-  @Get([
-    'projects/:projectId/pages',
-    'project/:projectId/pages',
-    'projects/:projectId/documents',
-    'project/:projectId/documents',
-  ])
-  @UseGuards(ProjectRoleGuard)
+  @Get('projects/:projectId/pages')
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'List all pages/documents in a project' })
   async getProjectPages(
@@ -48,13 +42,7 @@ export class CoreController {
     return this.pageService.getProjectPages(projectId, status, search);
   }
 
-  @Get([
-    'projects/:projectId/pages/tree',
-    'project/:projectId/pages/tree',
-    'projects/:projectId/documents/tree',
-    'project/:projectId/documents/tree',
-  ])
-  @UseGuards(ProjectRoleGuard)
+  @Get('projects/:projectId/pages/tree')
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({
     summary: 'Get ordered document tree hierarchy for a project',
@@ -63,15 +51,7 @@ export class CoreController {
     return this.pageService.getProjectPageTree(projectId);
   }
 
-  @Post([
-    'projects/:projectId/pages',
-    'project/:projectId/pages',
-    'projects/:projectId/documents',
-    'project/:projectId/documents',
-    'pages',
-    'documents',
-  ])
-  @UseGuards(ProjectRoleGuard)
+  @Post(['pages', 'projects/:projectId/pages'])
   @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create a new page/document in a project' })
@@ -84,15 +64,7 @@ export class CoreController {
     return this.pageService.createPage(effectiveProjectId, userId, dto);
   }
 
-  @Get([
-    'projects/:projectId/pages/:pageId',
-    'project/:projectId/pages/:pageId',
-    'projects/:projectId/documents/:pageId',
-    'project/:projectId/documents/:pageId',
-    'pages/:pageId',
-    'documents/:pageId',
-  ])
-  @UseGuards(ProjectRoleGuard)
+  @Get(['pages/:pageId', 'projects/:projectId/pages/:pageId'])
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get a single page/document by ID' })
   async getPage(
@@ -102,15 +74,7 @@ export class CoreController {
     return this.pageService.getPage(pageId, projectId);
   }
 
-  @Put([
-    'projects/:projectId/pages/:pageId',
-    'project/:projectId/pages/:pageId',
-    'projects/:projectId/documents/:pageId',
-    'project/:projectId/documents/:pageId',
-    'pages/:pageId',
-    'documents/:pageId',
-  ])
-  @UseGuards(ProjectRoleGuard)
+  @Put(['pages/:pageId', 'projects/:projectId/pages/:pageId'])
   @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Update page/document content or metadata' })
   async updatePage(
@@ -122,15 +86,7 @@ export class CoreController {
     return this.pageService.updatePage(pageId, dto, projectId, userId);
   }
 
-  @Delete([
-    'projects/:projectId/pages/:pageId',
-    'project/:projectId/pages/:pageId',
-    'projects/:projectId/documents/:pageId',
-    'project/:projectId/documents/:pageId',
-    'pages/:pageId',
-    'documents/:pageId',
-  ])
-  @UseGuards(ProjectRoleGuard)
+  @Delete(['pages/:pageId', 'projects/:projectId/pages/:pageId'])
   @ProjectRoles('owner')
   @ApiOperation({ summary: 'Soft delete a page/document' })
   async deletePage(
@@ -141,15 +97,7 @@ export class CoreController {
     return this.pageService.deletePage(pageId, projectId, userId);
   }
 
-  @Post([
-    'projects/:projectId/pages/:pageId/restore',
-    'project/:projectId/pages/:pageId/restore',
-    'projects/:projectId/documents/:pageId/restore',
-    'project/:projectId/documents/:pageId/restore',
-    'pages/:pageId/restore',
-    'documents/:pageId/restore',
-  ])
-  @UseGuards(ProjectRoleGuard)
+  @Post(['pages/:pageId/restore', 'projects/:projectId/pages/:pageId/restore'])
   @ProjectRoles('owner')
   @ApiOperation({ summary: 'Restore a soft-deleted page/document' })
   async restorePage(
@@ -159,16 +107,8 @@ export class CoreController {
     return this.pageService.restorePage(pageId, projectId);
   }
 
-  @Post([
-    'projects/:projectId/pages/:pageId/duplicate',
-    'project/:projectId/pages/:pageId/duplicate',
-    'projects/:projectId/documents/:pageId/duplicate',
-    'project/:projectId/documents/:pageId/duplicate',
-    'pages/:pageId/duplicate',
-    'documents/:pageId/duplicate',
-  ])
+  @Post(['pages/:pageId/duplicate', 'projects/:projectId/pages/:pageId/duplicate'])
   @HttpCode(HttpStatus.CREATED)
-  @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Duplicate an existing page/document' })
   async duplicatePage(
@@ -179,15 +119,7 @@ export class CoreController {
     return this.pageService.duplicatePage(pageId, userId, projectId);
   }
 
-  @Get([
-    'projects/:projectId/pages/:pageId/files',
-    'project/:projectId/pages/:pageId/files',
-    'projects/:projectId/documents/:pageId/files',
-    'project/:projectId/documents/:pageId/files',
-    'pages/:pageId/files',
-    'documents/:pageId/files',
-  ])
-  @UseGuards(ProjectRoleGuard)
+  @Get(['pages/:pageId/files', 'projects/:projectId/pages/:pageId/files'])
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'List files attached to a page/document' })
   async getPageFiles(
@@ -197,16 +129,8 @@ export class CoreController {
     return this.pageService.getPageFiles(pageId, projectId);
   }
 
-  @Post([
-    'projects/:projectId/pages/:pageId/files',
-    'project/:projectId/pages/:pageId/files',
-    'projects/:projectId/documents/:pageId/files',
-    'project/:projectId/documents/:pageId/files',
-    'pages/:pageId/files',
-    'documents/:pageId/files',
-  ])
+  @Post(['pages/:pageId/files', 'projects/:projectId/pages/:pageId/files'])
   @HttpCode(HttpStatus.CREATED)
-  @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Create a sub-file (child page) within a page' })
   async createPageFile(
@@ -223,15 +147,7 @@ export class CoreController {
     return this.pageService.createPageFile(pageId, userId, dto, projectId);
   }
 
-  @Put([
-    'projects/:projectId/pages/:pageId/main-file',
-    'project/:projectId/pages/:pageId/main-file',
-    'projects/:projectId/documents/:pageId/main-file',
-    'project/:projectId/documents/:pageId/main-file',
-    'pages/:pageId/main-file',
-    'documents/:pageId/main-file',
-  ])
-  @UseGuards(ProjectRoleGuard)
+  @Put(['pages/:pageId/main-file', 'projects/:projectId/pages/:pageId/main-file'])
   @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Set the main/root file of a page' })
   async setMainFile(
@@ -242,15 +158,7 @@ export class CoreController {
     return this.pageService.setMainFile(pageId, dto.mainFileId, projectId);
   }
 
-  @Put([
-    'projects/:projectId/pages/:pageId/thumbnail',
-    'project/:projectId/pages/:pageId/thumbnail',
-    'projects/:projectId/documents/:pageId/thumbnail',
-    'project/:projectId/documents/:pageId/thumbnail',
-    'pages/:pageId/thumbnail',
-    'documents/:pageId/thumbnail',
-  ])
-  @UseGuards(ProjectRoleGuard)
+  @Put(['pages/:pageId/thumbnail', 'projects/:projectId/pages/:pageId/thumbnail'])
   @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Update page PDF thumbnail' })
   async updateThumbnail(

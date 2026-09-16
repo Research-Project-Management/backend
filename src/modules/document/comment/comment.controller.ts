@@ -31,10 +31,9 @@ export class CommentController {
   constructor(private readonly commentService: CommentService) {}
 
   @Get([
-    'comments',
     'pages/:pageId/comments',
-    'page/:pageId/comments',
-    'documents/:pageId/comments',
+    'projects/:projectId/pages/:pageId/comments',
+    'comments',
   ])
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get all comments for a document page' })
@@ -47,10 +46,9 @@ export class CommentController {
   }
 
   @Post([
-    'comments',
     'pages/:pageId/comments',
-    'page/:pageId/comments',
-    'documents/:pageId/comments',
+    'projects/:projectId/pages/:pageId/comments',
+    'comments',
   ])
   @ProjectRoles('owner', 'contributor', 'commenter')
   @ApiOperation({ summary: 'Add a comment to a manuscript page' })
@@ -64,14 +62,12 @@ export class CommentController {
   }
 
   @Put([
-    'comments/:commentId',
     'pages/:pageId/comments/:commentId',
-    'pages/comments/:commentId',
+    'comments/:commentId',
   ])
   @Patch([
-    'comments/:commentId',
     'pages/:pageId/comments/:commentId',
-    'pages/comments/:commentId',
+    'comments/:commentId',
   ])
   @ProjectRoles('owner', 'contributor', 'commenter')
   @ApiOperation({ summary: 'Update a page comment' })
@@ -84,9 +80,8 @@ export class CommentController {
   }
 
   @Patch([
-    'comments/:commentId/resolve',
     'pages/:pageId/comments/:commentId/resolve',
-    'pages/comments/:commentId/resolve',
+    'comments/:commentId/resolve',
   ])
   @ProjectRoles('owner', 'contributor', 'commenter')
   @ApiOperation({ summary: 'Resolve or reopen a page comment' })
@@ -101,9 +96,8 @@ export class CommentController {
   }
 
   @Delete([
-    'comments/:commentId',
     'pages/:pageId/comments/:commentId',
-    'pages/comments/:commentId',
+    'comments/:commentId',
   ])
   @ProjectRoles('owner', 'contributor', 'commenter')
   @ApiOperation({ summary: 'Delete a page comment' })
@@ -115,12 +109,10 @@ export class CommentController {
   }
 
   @Post([
-    'comments/:commentId/replies',
-    'comments/:commentId/reply',
-    'pages/:pageId/comments/:commentId/replies',
     'pages/:pageId/comments/:commentId/reply',
-    'pages/comments/:commentId/replies',
-    'pages/comments/:commentId/reply',
+    'pages/:pageId/comments/:commentId/replies',
+    'comments/:commentId/reply',
+    'comments/:commentId/replies',
   ])
   @ProjectRoles('owner', 'contributor', 'commenter')
   @ApiOperation({ summary: 'Reply to a page comment' })
@@ -133,9 +125,8 @@ export class CommentController {
   }
 
   @Delete([
-    'comments/:commentId/replies/:replyId',
     'pages/:pageId/comments/:commentId/replies/:replyId',
-    'pages/comments/:commentId/replies/:replyId',
+    'comments/:commentId/replies/:replyId',
   ])
   @ProjectRoles('owner', 'contributor', 'commenter')
   @ApiOperation({ summary: 'Delete a reply from a page comment' })

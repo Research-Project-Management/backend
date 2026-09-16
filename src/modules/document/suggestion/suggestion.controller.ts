@@ -21,16 +21,11 @@ import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
 @ApiTags('Document - Suggestion & Track Changes')
 @ApiBearerAuth('JWT-auth')
 @Controller('api')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class SuggestionController {
   constructor(private readonly suggestionService: SuggestionService) {}
 
-  @Get([
-    'projects/:projectId/pages/:pageId/suggestions',
-    'project/:projectId/pages/:pageId/suggestions',
-    'pages/:pageId/suggestions',
-  ])
-  @UseGuards(ProjectRoleGuard)
+  @Get(['pages/:pageId/suggestions', 'projects/:projectId/pages/:pageId/suggestions'])
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'List review suggestions (Track Changes) for a document page' })
   async getSuggestions(
@@ -41,12 +36,7 @@ export class SuggestionController {
     return { suggestions };
   }
 
-  @Post([
-    'projects/:projectId/pages/:pageId/suggestions',
-    'project/:projectId/pages/:pageId/suggestions',
-    'pages/:pageId/suggestions',
-  ])
-  @UseGuards(ProjectRoleGuard)
+  @Post(['pages/:pageId/suggestions', 'projects/:projectId/pages/:pageId/suggestions'])
   @ProjectRoles('owner', 'contributor', 'commenter')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create a new proposed edit/suggestion in Track Changes mode' })
@@ -60,11 +50,9 @@ export class SuggestionController {
   }
 
   @Post([
-    'projects/:projectId/pages/:pageId/suggestions/:suggestionId/accept',
-    'project/:projectId/pages/:pageId/suggestions/:suggestionId/accept',
     'pages/:pageId/suggestions/:suggestionId/accept',
+    'projects/:projectId/pages/:pageId/suggestions/:suggestionId/accept',
   ])
-  @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Accept a proposed edit and apply diff to document' })
@@ -77,11 +65,9 @@ export class SuggestionController {
   }
 
   @Post([
-    'projects/:projectId/pages/:pageId/suggestions/:suggestionId/reject',
-    'project/:projectId/pages/:pageId/suggestions/:suggestionId/reject',
     'pages/:pageId/suggestions/:suggestionId/reject',
+    'projects/:projectId/pages/:pageId/suggestions/:suggestionId/reject',
   ])
-  @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Reject a proposed edit without applying' })
@@ -94,11 +80,9 @@ export class SuggestionController {
   }
 
   @Post([
-    'projects/:projectId/pages/:pageId/suggestions/accept-all',
-    'project/:projectId/pages/:pageId/suggestions/accept-all',
     'pages/:pageId/suggestions/accept-all',
+    'projects/:projectId/pages/:pageId/suggestions/accept-all',
   ])
-  @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Accept all pending suggestions on this document' })
@@ -110,11 +94,9 @@ export class SuggestionController {
   }
 
   @Post([
-    'projects/:projectId/pages/:pageId/suggestions/reject-all',
-    'project/:projectId/pages/:pageId/suggestions/reject-all',
     'pages/:pageId/suggestions/reject-all',
+    'projects/:projectId/pages/:pageId/suggestions/reject-all',
   ])
-  @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Reject all pending suggestions on this document' })

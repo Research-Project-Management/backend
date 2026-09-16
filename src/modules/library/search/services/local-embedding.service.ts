@@ -24,6 +24,13 @@ export class LocalEmbeddingService implements OnModuleInit {
    */
   private async initPipeline(): Promise<void> {
     if (this.pipelineInstance || this.isInitializing) return;
+    if (process.env.ENABLE_LOCAL_ONNX_EMBEDDING !== 'true') {
+      this.logger.log(
+        'In-process ONNX embedding is disabled (ENABLE_LOCAL_ONNX_EMBEDDING !== true). Using built-in deterministic subword vectorizer.',
+      );
+      this.modelAvailable = false;
+      return;
+    }
     this.isInitializing = true;
 
     try {

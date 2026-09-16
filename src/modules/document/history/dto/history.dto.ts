@@ -28,6 +28,10 @@ export class CreateVersionDto {
 
   @IsString()
   @IsOptional()
+  rootPageId?: string;
+
+  @IsString()
+  @IsOptional()
   projectId?: string;
 }
 

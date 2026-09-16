@@ -26,7 +26,7 @@ import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
 @ApiTags('Document - Collaboration')
 @ApiBearerAuth('JWT-auth')
 @Controller('api')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class CollaborationController {
   constructor(
     private readonly collaborationService: CollaborationService,
@@ -34,7 +34,6 @@ export class CollaborationController {
   ) {}
 
   @Sse('projects/:projectId/pages/:pageId/collaboration/stream')
-  @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({
     summary: 'Real-time SSE event stream for live cursors, presence and locks',
@@ -58,12 +57,22 @@ export class CollaborationController {
     );
   }
 
+  @Sse('pages/:pageId/collaboration/stream')
+  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ApiOperation({
+    summary: 'Real-time SSE event stream for live cursors, presence and locks (direct page route)',
+  })
+  streamCollaborationEventsDirect(
+    @Param('pageId') pageId: string,
+    @Req() req: FastifyRequest,
+  ): Observable<MessageEvent> {
+    return this.streamCollaborationEvents(pageId, req);
+  }
+
   @Get([
-    'projects/:projectId/pages/:pageId/collaboration/presence',
-    'project/:projectId/pages/:pageId/collaboration/presence',
     'pages/:pageId/collaboration/presence',
+    'projects/:projectId/pages/:pageId/collaboration/presence',
   ])
-  @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({
     summary: 'Get current active users viewing or editing this document',
@@ -74,11 +83,9 @@ export class CollaborationController {
   }
 
   @Post([
-    'projects/:projectId/pages/:pageId/collaboration/heartbeat',
-    'project/:projectId/pages/:pageId/collaboration/heartbeat',
     'pages/:pageId/collaboration/heartbeat',
+    'projects/:projectId/pages/:pageId/collaboration/heartbeat',
   ])
-  @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -107,11 +114,9 @@ export class CollaborationController {
   }
 
   @Post([
-    'projects/:projectId/pages/:pageId/collaboration/leave',
-    'project/:projectId/pages/:pageId/collaboration/leave',
     'pages/:pageId/collaboration/leave',
+    'projects/:projectId/pages/:pageId/collaboration/leave',
   ])
-  @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Explicitly signal leaving document room' })

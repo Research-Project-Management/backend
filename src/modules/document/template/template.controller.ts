@@ -39,10 +39,7 @@ export class TemplateController {
     return this.templateService.getTemplateById(id);
   }
 
-  @Post([
-    'projects/:projectId/templates/:templateId/apply',
-    'project/:projectId/templates/:templateId/apply',
-  ])
+  @Post('projects/:projectId/templates/:templateId/apply')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.CREATED)
@@ -64,9 +61,8 @@ export class TemplateController {
   }
 
   @Post([
-    'projects/:projectId/pages/:pageId/save-as-template',
-    'project/:projectId/pages/:pageId/save-as-template',
     'pages/:pageId/save-as-template',
+    'projects/:projectId/pages/:pageId/save-as-template',
   ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')

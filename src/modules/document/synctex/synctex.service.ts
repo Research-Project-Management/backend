@@ -80,26 +80,13 @@ export class SynctexService {
     }
 
     this.logger.debug(
-      `SyncTeX forward compiler lookup failed, using calculated heuristic estimation`,
+      `SyncTeX forward lookup not available: document not compiled or no synctex record found`,
     );
 
-    // Heuristic fallback: approx 50 lines per standard LaTeX A4 page, 14pt per line
-    const approxLinesPerPage = 50;
-    const estPage = Math.max(1, Math.ceil(dto.line / approxLinesPerPage));
-    const lineInPage = (dto.line - 1) % approxLinesPerPage;
-    const estY = Math.min(750, 100 + lineInPage * 13.5);
-
     return {
-      success: true,
-      result: {
-        page: estPage,
-        x: 72,
-        y: estY,
-        width: 450,
-        height: 14,
-        precision: 'estimated',
-      },
-      fallback: true,
+      success: false,
+      fallback: false,
+      error: 'SyncTeX data not available. Please compile document first.',
     };
   }
 
@@ -143,24 +130,14 @@ export class SynctexService {
       };
     }
 
-    // Heuristic fallback: reverse calculation from PDF page & y offset
-    const approxLinesPerPage = 50;
-    const relativeY = Math.max(0, dto.y - 100);
-    const lineInPage = Math.floor(relativeY / 13.5);
-    const estLine = Math.max(
-      1,
-      (dto.page - 1) * approxLinesPerPage + lineInPage + 1,
+    this.logger.debug(
+      `SyncTeX reverse lookup not available: document not compiled or no synctex record found`,
     );
 
     return {
-      success: true,
-      result: {
-        file: 'main.tex',
-        line: estLine,
-        column: 0,
-        precision: 'estimated',
-      },
-      fallback: true,
+      success: false,
+      fallback: false,
+      error: 'SyncTeX data not available. Please compile document first.',
     };
   }
 }

@@ -22,12 +22,7 @@ import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
 export class OutlineController {
   constructor(private readonly outlineService: OutlineService) {}
 
-  @Get([
-    'projects/:projectId/pages/:pageId/outline',
-    'projects/:projectId/documents/:pageId/outline',
-    'pages/:pageId/outline',
-    'documents/:pageId/outline',
-  ])
+  @Get(['pages/:pageId/outline', 'projects/:projectId/pages/:pageId/outline'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({
@@ -38,7 +33,7 @@ export class OutlineController {
     return this.outlineService.getDocumentOutline(pageId);
   }
 
-  @Post(['compiler/outline', 'document/outline'])
+  @Post('compiler/outline')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:

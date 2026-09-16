@@ -26,11 +26,7 @@ import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
 export class HistoryController {
   constructor(private readonly historyService: HistoryService) {}
 
-  @Get([
-    'projects/:projectId/pages/:pageId/versions',
-    'project/:projectId/pages/:pageId/versions',
-    'pages/:pageId/versions',
-  ])
+  @Get(['pages/:pageId/versions', 'projects/:projectId/pages/:pageId/versions'])
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'List all versions of a page' })
   async getVersions(@Param('pageId') pageId: string) {
@@ -38,9 +34,8 @@ export class HistoryController {
   }
 
   @Get([
-    'projects/:projectId/pages/:pageId/versions/:versionId',
-    'project/:projectId/pages/:pageId/versions/:versionId',
     'pages/:pageId/versions/:versionId',
+    'projects/:projectId/pages/:pageId/versions/:versionId',
   ])
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get single version snapshot with content' })
@@ -51,11 +46,7 @@ export class HistoryController {
     return this.historyService.getVersion(pageId, versionId);
   }
 
-  @Post([
-    'projects/:projectId/pages/:pageId/versions',
-    'project/:projectId/pages/:pageId/versions',
-    'pages/:pageId/versions',
-  ])
+  @Post(['pages/:pageId/versions', 'projects/:projectId/pages/:pageId/versions'])
   @HttpCode(HttpStatus.CREATED)
   @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Save a new version snapshot of a page' })
@@ -68,9 +59,8 @@ export class HistoryController {
   }
 
   @Post([
-    'projects/:projectId/pages/:pageId/versions/:versionId/restore',
-    'project/:projectId/pages/:pageId/versions/:versionId/restore',
     'pages/:pageId/versions/:versionId/restore',
+    'projects/:projectId/pages/:pageId/versions/:versionId/restore',
   ])
   @HttpCode(HttpStatus.OK)
   @ProjectRoles('owner', 'contributor')
@@ -83,9 +73,8 @@ export class HistoryController {
   }
 
   @Delete([
-    'projects/:projectId/pages/:pageId/versions/:versionId',
-    'project/:projectId/pages/:pageId/versions/:versionId',
     'pages/:pageId/versions/:versionId',
+    'projects/:projectId/pages/:pageId/versions/:versionId',
   ])
   @ProjectRoles('owner')
   async deleteVersion(
@@ -95,11 +84,7 @@ export class HistoryController {
     return this.historyService.deleteVersion(versionId, pageId);
   }
 
-  @Get([
-    'projects/:projectId/pages/:pageId/history',
-    'project/:projectId/pages/:pageId/history',
-    'pages/:pageId/history',
-  ])
+  @Get(['pages/:pageId/history', 'projects/:projectId/pages/:pageId/history'])
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get change history (activity log) for a page' })
   async getHistory(@Param('pageId') pageId: string) {
@@ -107,9 +92,8 @@ export class HistoryController {
   }
 
   @Post([
-    'projects/:projectId/pages/:pageId/history/:eventId/restore',
-    'project/:projectId/pages/:pageId/history/:eventId/restore',
     'pages/:pageId/history/:eventId/restore',
+    'projects/:projectId/pages/:pageId/history/:eventId/restore',
   ])
   @HttpCode(HttpStatus.OK)
   @ProjectRoles('owner', 'contributor')
@@ -122,9 +106,8 @@ export class HistoryController {
   }
 
   @Get([
-    'projects/:projectId/pages/:pageId/history/diff',
-    'projects/:projectId/pages/:pageId/versions/diff',
     'pages/:pageId/versions/diff',
+    'projects/:projectId/pages/:pageId/versions/diff',
   ])
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({

@@ -24,16 +24,11 @@ import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
 @ApiTags('Document - Node & Tree')
 @ApiBearerAuth('JWT-auth')
 @Controller('api')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class NodeController {
   constructor(private readonly nodeService: NodeService) {}
 
-  @Get([
-    'projects/:projectId/nodes/tree',
-    'projects/:projectId/tree',
-    'project/:projectId/tree',
-  ])
-  @UseGuards(ProjectRoleGuard)
+  @Get('projects/:projectId/nodes/tree')
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({
     summary:
@@ -43,8 +38,7 @@ export class NodeController {
     return this.nodeService.getProjectTree(projectId);
   }
 
-  @Put(['projects/:projectId/nodes/:nodeId/move', 'nodes/:nodeId/move'])
-  @UseGuards(ProjectRoleGuard)
+  @Put(['nodes/:nodeId/move', 'projects/:projectId/nodes/:nodeId/move'])
   @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -59,11 +53,7 @@ export class NodeController {
     return this.nodeService.moveNode(nodeId, dto, projectId);
   }
 
-  @Get([
-    'projects/:projectId/nodes/:nodeId/ancestors',
-    'nodes/:nodeId/ancestors',
-  ])
-  @UseGuards(ProjectRoleGuard)
+  @Get(['nodes/:nodeId/ancestors', 'projects/:projectId/nodes/:nodeId/ancestors'])
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({
     summary:
@@ -73,11 +63,7 @@ export class NodeController {
     return this.nodeService.getAncestors(nodeId);
   }
 
-  @Put([
-    'projects/:projectId/nodes/:nodeId/main-file',
-    'nodes/:nodeId/main-file',
-  ])
-  @UseGuards(ProjectRoleGuard)
+  @Put(['nodes/:nodeId/main-file', 'projects/:projectId/nodes/:nodeId/main-file'])
   @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -92,8 +78,7 @@ export class NodeController {
     return this.nodeService.setMainFile(nodeId, dto.mainFileId, projectId);
   }
 
-  @Get(['projects/:projectId/nodes/:nodeId/children', 'nodes/:nodeId/children'])
-  @UseGuards(ProjectRoleGuard)
+  @Get(['nodes/:nodeId/children', 'projects/:projectId/nodes/:nodeId/children'])
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'List direct children/sub-files of a node' })
   async getChildren(
@@ -104,12 +89,8 @@ export class NodeController {
     return { files: res.children, children: res.children };
   }
 
-  @Post([
-    'projects/:projectId/nodes/:nodeId/children',
-    'nodes/:nodeId/children',
-  ])
+  @Post(['nodes/:nodeId/children', 'projects/:projectId/nodes/:nodeId/children'])
   @HttpCode(HttpStatus.CREATED)
-  @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
   @ApiOperation({
     summary: 'Create a child node or sub-file within a parent node',

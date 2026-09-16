@@ -66,20 +66,34 @@ export class HistoryService {
       throw new NotFoundException('Page not found');
     }
 
+    const effectiveProjectPageId = dto.projectPageId || dto.rootPageId || null;
+    const contentToSave =
+      dto.content !== undefined
+        ? dto.content
+        : typeof page.content === 'string'
+          ? page.content
+          : JSON.stringify(page.content || '');
+
+    // Deduplicate auto_save if content has not changed from the latest snapshot
+    if (dto.eventType === VersionEventType.auto_save) {
+      const latestList = await this.historyRepo.findPageVersions(pageId);
+      if (latestList.length > 0) {
+        const latestFull = await this.historyRepo.findVersionById(latestList[0].id);
+        if (latestFull && latestFull.content === contentToSave) {
+          return { version: latestFull };
+        }
+      }
+    }
+
     const version = await this.historyRepo.createVersion({
       page: { connect: { id: pageId } },
-      projectPageId: dto.projectPageId || null,
+      projectPageId: effectiveProjectPageId,
       title: dto.title || page.title,
-      content:
-        dto.content !== undefined
-          ? dto.content
-          : typeof page.content === 'string'
-            ? page.content
-            : JSON.stringify(page.content || ''),
+      content: contentToSave,
       label: dto.label || '',
       savedById: userId,
       eventType: dto.eventType || VersionEventType.manual_save,
-      fileName: dto.fileName || '',
+      fileName: dto.fileName || page.title,
     });
 
     await this.invalidateVersionCache(pageId);
@@ -123,16 +137,28 @@ export class HistoryService {
       throw new NotFoundException('Failed to restore page: page not found');
     }
 
+    const pageContentStr =
+      typeof page.content === 'string'
+        ? page.content
+        : JSON.stringify(page.content || '');
+
+    // Append-only history pattern: record a restore event snapshot so we never lose history
+    await this.historyRepo.createVersion({
+      page: { connect: { id: pageId } },
+      projectPageId: page.parentPageId || page.id,
+      title: page.title,
+      content: pageContentStr,
+      label: `Restored to "${version.label || version.title || 'Previous version'}"`,
+      savedById: version.savedById,
+      eventType: VersionEventType.manual_save,
+      fileName: version.fileName || page.title,
+    });
+
     // Invalidate both version cache and page/tree cache
     await Promise.all([
       this.invalidateVersionCache(pageId),
       this.invalidatePageTreeCache(page?.projectId),
     ]);
-
-    const pageContentStr =
-      typeof page.content === 'string'
-        ? page.content
-        : JSON.stringify(page.content || '');
 
     return {
       message: 'Version restored successfully',

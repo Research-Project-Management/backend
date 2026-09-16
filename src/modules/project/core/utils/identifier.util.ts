@@ -29,19 +29,38 @@ export function deriveProjectPrefix(
   name?: string | null,
 ): string {
   if (identifier && identifier.trim()) {
-    return identifier.trim().toUpperCase();
+    const clean = identifier
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/đ/g, 'd')
+      .replace(/Đ/g, 'D')
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9_-]/g, '');
+    if (clean) return clean;
   }
   if (name && name.trim()) {
-    const words = name.trim().split(/\s+/);
+    const normalizedName = name
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/đ/g, 'd')
+      .replace(/Đ/g, 'D');
+    const words = normalizedName.trim().split(/\s+/).filter(Boolean);
     if (words.length >= 2) {
       const acronym = words
         .map((w) => w[0])
         .join('')
         .slice(0, 5)
-        .toUpperCase();
+        .toUpperCase()
+        .replace(/[^A-Z0-9_-]/g, '');
       if (acronym.length >= 2) return acronym;
     }
-    return name.trim().slice(0, 4).toUpperCase();
+    const clean = normalizedName
+      .trim()
+      .slice(0, 4)
+      .toUpperCase()
+      .replace(/[^A-Z0-9_-]/g, '');
+    if (clean) return clean;
   }
   return 'PROJ';
 }

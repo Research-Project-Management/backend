@@ -21,7 +21,7 @@ describe('Document SynctexService (Code <-> PDF 2-Way Navigation)', () => {
   });
 
   describe('forwardSync', () => {
-    it('should return calculated fallback coordinates if compiler service is offline', async () => {
+    it('should return error if compiler service is offline or synctex is not available (Overleaf deterministic alignment)', async () => {
       // Fetch will fail or abort because localhost:2918 mock is not running in unit test
       const res = await service.forwardSync({
         file: 'main.tex',
@@ -29,21 +29,34 @@ describe('Document SynctexService (Code <-> PDF 2-Way Navigation)', () => {
         column: 4,
       });
 
-      expect(res.success).toBe(true);
-      expect(res.fallback).toBe(true);
-      expect(res.result).toBeDefined();
-      expect(res.result?.page).toBe(1);
-      expect(res.result?.y).toBeGreaterThan(100);
+      expect(res.success).toBe(false);
+      expect(res.fallback).toBe(false);
+      expect(res.error).toBe('SyncTeX data not available. Please compile document first.');
     });
 
-    it('should calculate page > 1 for lines past line 50', async () => {
+    it('should parse ground truth coordinates when compiler service returns synctex', async () => {
+      const mockResult = {
+        page: 2,
+        x: 150,
+        y: 300,
+        width: 400,
+        height: 12,
+        precision: 'ground_truth',
+      };
+
+      jest.spyOn<any, any>(service, 'postJson').mockResolvedValueOnce({
+        success: true,
+        result: mockResult,
+      });
+
       const res = await service.forwardSync({
         file: 'main.tex',
-        line: 120,
+        line: 45,
+        column: 2,
       });
 
       expect(res.success).toBe(true);
-      expect(res.result?.page).toBe(3); // 120 / 50 = ceil(2.4) = 3
+      expect(res.result).toEqual(mockResult);
     });
 
     it('should reject invalid line and column numbers', async () => {
@@ -65,18 +78,39 @@ describe('Document SynctexService (Code <-> PDF 2-Way Navigation)', () => {
   });
 
   describe('reverseSync', () => {
-    it('should return calculated fallback source position if compiler service is offline', async () => {
+    it('should return error if compiler service is offline or synctex is not available', async () => {
       const res = await service.reverseSync({
         page: 2,
         x: 100,
         y: 250,
       });
 
+      expect(res.success).toBe(false);
+      expect(res.fallback).toBe(false);
+      expect(res.error).toBe('SyncTeX data not available. Please compile document first.');
+    });
+
+    it('should parse source line when compiler service returns reverse synctex', async () => {
+      const mockResult = {
+        file: 'chapters/intro.tex',
+        line: 88,
+        column: 5,
+        precision: 'ground_truth',
+      };
+
+      jest.spyOn<any, any>(service, 'postJson').mockResolvedValueOnce({
+        success: true,
+        result: mockResult,
+      });
+
+      const res = await service.reverseSync({
+        page: 2,
+        x: 120,
+        y: 400,
+      });
+
       expect(res.success).toBe(true);
-      expect(res.fallback).toBe(true);
-      expect(res.result).toBeDefined();
-      expect(res.result?.file).toBe('main.tex');
-      expect(res.result?.line).toBeGreaterThan(50); // page 2
+      expect(res.result).toEqual(mockResult);
     });
 
     it('should reject invalid page and negative coordinates', async () => {

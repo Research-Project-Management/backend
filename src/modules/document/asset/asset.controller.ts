@@ -20,13 +20,12 @@ import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
 @ApiTags('Document - Asset')
 @ApiBearerAuth('JWT-auth')
 @Controller('api')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class AssetController {
   constructor(private readonly assetService: AssetService) {}
 
-  @Post(['projects/:projectId/assets', 'projects/:projectId/documents/assets'])
+  @Post('projects/:projectId/assets')
   @HttpCode(HttpStatus.CREATED)
-  @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
   @ApiOperation({
     summary:
@@ -40,8 +39,7 @@ export class AssetController {
     return this.assetService.uploadAsset(projectId, userId, dto);
   }
 
-  @Get(['projects/:projectId/assets', 'projects/:projectId/documents/assets'])
-  @UseGuards(ProjectRoleGuard)
+  @Get('projects/:projectId/assets')
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({
     summary: 'List all binary figures and assets in the document project',
@@ -51,7 +49,6 @@ export class AssetController {
   }
 
   @Get(['assets/:assetId', 'projects/:projectId/assets/:assetId'])
-  @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get binary data and metadata of a specific asset' })
   async getAsset(
@@ -62,7 +59,6 @@ export class AssetController {
   }
 
   @Delete(['assets/:assetId', 'projects/:projectId/assets/:assetId'])
-  @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete a document asset' })

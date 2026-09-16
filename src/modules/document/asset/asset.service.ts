@@ -12,6 +12,8 @@ import { UploadAssetDto, DocumentAssetItem } from './dto/asset.dto';
 import { PageStatus, Prisma } from '@prisma/client';
 import { slugifyTitle, validateSafePath } from '../core/utils/document.utils';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
+import { RedisCacheService } from '@/core/cache/redis.service';
+import { DOCUMENT_REDIS_KEYS } from '../core/constants/redis-keys.constant';
 
 const ASSET_EXTENSIONS = new Set([
   'png',
@@ -63,6 +65,7 @@ export class AssetService {
     @Optional()
     @Inject(STORAGE_PORT)
     private readonly storagePort?: IStoragePort,
+    @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
   /**
@@ -160,6 +163,10 @@ export class AssetService {
           : {}),
       },
     });
+
+    if (this.cache && projectId) {
+      await this.cache.del(DOCUMENT_REDIS_KEYS.projectTree(projectId));
+    }
 
     return {
       id: page.id,
@@ -542,6 +549,9 @@ export class AssetService {
             where: { id: assetId },
             data: { trashedAt: new Date() },
           });
+          if (this.cache && fileNode.linkedToId) {
+            await this.cache.del(DOCUMENT_REDIS_KEYS.projectTree(fileNode.linkedToId));
+          }
           return { ok: true };
         }
       }
@@ -563,6 +573,10 @@ export class AssetService {
       where: { id: assetId },
       data: { deletedAt: new Date() },
     });
+
+    if (this.cache && page.projectId) {
+      await this.cache.del(DOCUMENT_REDIS_KEYS.projectTree(page.projectId));
+    }
 
     return { ok: true };
   }

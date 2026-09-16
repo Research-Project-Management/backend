@@ -216,7 +216,7 @@ export class CompilerService {
             typeof json.error === 'string'
               ? json.error
               : 'LaTeX compilation failed',
-          fallback: true,
+          fallback: false,
           pdf: typeof json.pdf === 'string' ? json.pdf : '',
           synctex: typeof json.synctex === 'string' ? json.synctex : '',
           logs: typeof json.logs === 'string' ? json.logs : '',
