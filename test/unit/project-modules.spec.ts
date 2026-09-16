@@ -269,6 +269,41 @@ describe('Project Sub-Modules Specification (Single Responsibility)', () => {
       expect(overview.isOverdue).toBe(false);
       expect(overview.daysRemaining).toBeGreaterThanOrEqual(29);
     });
+
+    it('should compute time series data correctly for a date range', async () => {
+      mockRepo.findProjectWorkItemsTimeSeries = jest.fn().mockResolvedValue([
+        {
+          id: 'wi-1',
+          createdAt: new Date('2026-09-01T10:00:00Z'),
+          updatedAt: new Date('2026-09-02T10:00:00Z'),
+          completed: true,
+        },
+      ]);
+
+      const series = await analyticsService.getTimeSeries(
+        'proj-1',
+        '2026-09-01',
+        '2026-09-02',
+      );
+      expect(series).toHaveLength(2);
+      expect(series[0].date).toBe('2026-09-01');
+      expect(series[0].created).toBe(1);
+      expect(series[1].date).toBe('2026-09-02');
+      expect(series[1].completed).toBe(1);
+    });
+
+    it('should return sorted label distribution for a project', async () => {
+      mockRepo.findProjectWorkItemsByLabel = jest.fn().mockResolvedValue([
+        { id: '1', labels: ['bug', 'frontend'] },
+        { id: '2', labels: ['bug'] },
+      ]);
+
+      const result = await analyticsService.getLabelDistribution('proj-1');
+      expect(result.labels).toEqual([
+        { label: 'bug', count: 2 },
+        { label: 'frontend', count: 1 },
+      ]);
+    });
   });
 
   // ─── 6. Template Module ────────────────────────────────────────────────────

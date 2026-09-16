@@ -25,5 +25,6 @@ export interface IStorageNodeRepository {
   findByBlobId(blobId: string): Promise<StorageNode[]>;
   softDeleteSubtree(rootNodeId: string): Promise<number>;
   restoreSubtree(rootNodeId: string): Promise<number>;
+  findSubtreeNodes(rootNodeId: string): Promise<StorageNode[]>;
   findExpiredTrash(daysOld: number, limit: number): Promise<StorageNode[]>;
 }

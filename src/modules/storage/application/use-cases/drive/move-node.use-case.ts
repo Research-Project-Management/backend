@@ -39,6 +39,21 @@ export class MoveNodeUseCase {
           'Target parent folder does not exist or is not a folder',
         );
       }
+
+      // If moving a folder, ensure target parent is not a descendant of this folder
+      if (node.isFolder) {
+        let curr: StorageNode | null = targetParent;
+        const visited = new Set<string>([nodeId]);
+        while (curr && curr.parentId) {
+          if (visited.has(curr.parentId)) {
+            throw new BadRequestException(
+              'Cannot move a folder into its own subfolder (circular hierarchy detected)',
+            );
+          }
+          visited.add(curr.parentId);
+          curr = await this.nodeRepo.findById(curr.parentId);
+        }
+      }
     }
 
     node.moveTo(newParentId);

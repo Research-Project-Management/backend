@@ -25,7 +25,7 @@ import {
 @ApiTags('Project States')
 @ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard)
-@Controller('api/v1/projects')
+@Controller(['api/v1/projects', 'api/projects'])
 export class StateController {
   constructor(private readonly stateService: StateService) {}
 

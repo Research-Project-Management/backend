@@ -112,4 +112,31 @@ export class ProjectAnalyticsRepository {
       },
     });
   }
+
+  async findProjectWorkItemsByLabel(projectId: string) {
+    return this.prisma.workItem.findMany({
+      where: { projectId, deletedAt: null },
+      select: { id: true, labels: true },
+    });
+  }
+
+  async findProjectWorkItemsTimeSeries(
+    projectId: string,
+    from: Date,
+    to: Date,
+  ) {
+    return this.prisma.workItem.findMany({
+      where: {
+        projectId,
+        deletedAt: null,
+        createdAt: { gte: from, lte: to },
+      },
+      select: {
+        id: true,
+        createdAt: true,
+        updatedAt: true,
+        completed: true,
+      },
+    });
+  }
 }

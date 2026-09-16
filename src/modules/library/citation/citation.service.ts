@@ -24,6 +24,10 @@ import {
   ItemMetadata,
 } from '../ingestion/metadata/types/metadata.types';
 import { normalizeTags } from '../tags/utils/tags.utils';
+import {
+  getAcademicContactEmail,
+  getAcademicUserAgent,
+} from '../core/constants/academic-client.constants';
 
 export type { ReferenceData };
 
@@ -64,6 +68,11 @@ export class CitationService {
     styleId: CitationStyleId = 'apa-7th',
     index: number = 1,
   ): FormattedCitationResult {
+    const style = this.registry.getStyle(styleId);
+    if (!style) {
+      throw new BadRequestException(`Unsupported citation style: ${styleId}`);
+    }
+
     if (this.cslEngine) {
       try {
         const cslItem = CslJsonMapper.toCsl(item);
@@ -77,15 +86,11 @@ export class CitationService {
         };
       } catch (err: any) {
         this.logger.warn(
-          `CslEngineService format error: ${err?.message || err}. Falling back to registry.`,
+          `CslEngineService format error: ${err?.message || err}. Falling back to default format.`,
         );
       }
     }
 
-    const style = this.registry.getStyle(styleId);
-    if (!style) {
-      throw new BadRequestException(`Unsupported citation style: ${styleId}`);
-    }
     return style.format(item, index);
   }
 
@@ -100,6 +105,11 @@ export class CitationService {
     citations: Array<{ id?: string; inText: string; bibliography: string }>;
     bibliographyText: string;
   } {
+    const style = this.registry.getStyle(styleId);
+    if (!style) {
+      throw new BadRequestException(`Unsupported citation style: ${styleId}`);
+    }
+
     if (this.cslEngine) {
       try {
         const cslItems = items.map((it) => CslJsonMapper.toCsl(it));
@@ -111,14 +121,9 @@ export class CitationService {
         };
       } catch (err: any) {
         this.logger.warn(
-          `CslEngineService batch error: ${err?.message || err}`,
+          `CslEngineService batch error: ${err?.message || err}. Falling back to default format.`,
         );
       }
-    }
-
-    const style = this.registry.getStyle(styleId);
-    if (!style) {
-      throw new BadRequestException(`Unsupported citation style: ${styleId}`);
     }
 
     const citations = items.map((item, idx) => {
@@ -140,11 +145,7 @@ export class CitationService {
   }
 
   private get crossRefMailto(): string {
-    return (
-      process.env.CROSSREF_EMAIL ||
-      process.env.ACADEMIC_EMAIL ||
-      'contact@flux.academic'
-    );
+    return getAcademicContactEmail();
   }
 
   /**
@@ -168,7 +169,7 @@ export class CitationService {
         {
           headers: {
             Accept: 'application/json',
-            'User-Agent': `FluxResearchPlatform/1.0 (mailto:${mailto}; https://flux.study)`,
+            'User-Agent': getAcademicUserAgent('Citation'),
           },
           signal: controller.signal,
         },
@@ -214,7 +215,7 @@ export class CitationService {
         {
           headers: {
             Accept: 'application/json',
-            'User-Agent': `FluxResearchPlatform/1.0 (mailto:${mailto}; https://flux.study)`,
+            'User-Agent': getAcademicUserAgent('Citation'),
           },
           signal: controller.signal,
         },
@@ -262,6 +263,11 @@ export class CitationService {
       }
     }
 
+    const combinedTags = normalizeTags([
+      ...(metadata.keywords || []),
+      ...(metadata.tags || []),
+    ]);
+
     return {
       doi: metadata.doi,
       title: metadata.title || '',
@@ -293,14 +299,8 @@ export class CitationService {
       openAccessPdfUrl: metadata.openAccessPdfUrl || metadata.pdfUrl,
       abstract: metadata.abstract || metadata.abstractNote,
       citationCount: metadata.citationCount,
-      keywords: normalizeTags([
-        ...(metadata.keywords || []),
-        ...(metadata.tags || []),
-      ]),
-      tags: normalizeTags([
-        ...(metadata.tags || []),
-        ...(metadata.keywords || []),
-      ]),
+      keywords: combinedTags,
+      tags: combinedTags,
       type: metadata.type || metadata.itemType || 'journal-article',
       itemType: metadata.itemType || metadata.type || 'journalArticle',
       extraFields: metadata.extraFields,

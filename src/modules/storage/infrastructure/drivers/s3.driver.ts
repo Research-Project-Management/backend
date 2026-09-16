@@ -12,12 +12,15 @@ import {
   CompleteMultipartUploadCommand,
   AbortMultipartUploadCommand,
   ListPartsCommand,
+  PutBucketLifecycleConfigurationCommand,
+  GetBucketLifecycleConfigurationCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import {
   IStorageDriver,
   StorageObjectMetadata,
   CompletedPart,
+  StorageLifecycleConfiguration,
 } from '../../domain/ports/storage-driver.port';
 import { Readable } from 'node:stream';
 
@@ -276,5 +279,107 @@ export class S3StorageDriver implements IStorageDriver {
       eTag: p.ETag!,
       etag: p.ETag!,
     }));
+  }
+
+  async applyLifecycleRules(
+    config?: StorageLifecycleConfiguration,
+  ): Promise<void> {
+    const rules = config?.rules || [
+      {
+        id: 'cleanup-temp-uploads',
+        prefix: 'tmp/',
+        status: 'Enabled',
+        expirationDays: 1,
+      },
+      {
+        id: 'abort-incomplete-multipart',
+        prefix: '',
+        status: 'Enabled',
+        abortIncompleteMultipartUploadDays: 7,
+      },
+      {
+        id: 'archive-cold-storage',
+        prefix: 'archives/',
+        status: 'Enabled',
+        transitions: [
+          { days: 90, storageClass: 'STANDARD_IA' },
+          { days: 180, storageClass: 'GLACIER' },
+        ],
+      },
+      {
+        id: 'expire-old-backups',
+        prefix: 'backups/',
+        status: 'Enabled',
+        expirationDays: 30,
+      },
+    ];
+
+    const s3Rules = rules.map((r) => {
+      const ruleDef: any = {
+        ID: r.id,
+        Status: r.status,
+        Filter: r.prefix ? { Prefix: r.prefix } : {},
+      };
+      if (r.expirationDays !== undefined) {
+        ruleDef.Expiration = { Days: r.expirationDays };
+      }
+      if (r.abortIncompleteMultipartUploadDays !== undefined) {
+        ruleDef.AbortIncompleteMultipartUpload = {
+          DaysAfterInitiation: r.abortIncompleteMultipartUploadDays,
+        };
+      }
+      if (r.transitions && r.transitions.length > 0) {
+        ruleDef.Transitions = r.transitions.map((t) => ({
+          Days: t.days,
+          StorageClass: t.storageClass,
+        }));
+      }
+      return ruleDef;
+    });
+
+    try {
+      await this.client.send(
+        new PutBucketLifecycleConfigurationCommand({
+          Bucket: this.bucket,
+          LifecycleConfiguration: {
+            Rules: s3Rules,
+          },
+        }),
+      );
+      this.logger.log(
+        `Bucket lifecycle configuration applied to ${this.bucket} (${s3Rules.length} rules)`,
+      );
+    } catch (err: any) {
+      this.logger.warn(
+        `Failed to apply bucket lifecycle configuration on ${this.bucket}: ${err?.message}`,
+      );
+    }
+  }
+
+  async getLifecycleRules(): Promise<StorageLifecycleConfiguration | null> {
+    try {
+      const res = await this.client.send(
+        new GetBucketLifecycleConfigurationCommand({
+          Bucket: this.bucket,
+        }),
+      );
+      if (!res.Rules) return null;
+      return {
+        rules: res.Rules.map((r) => ({
+          id: r.ID || 'unnamed-rule',
+          prefix: r.Filter?.Prefix || '',
+          status: (r.Status as any) || 'Enabled',
+          expirationDays: r.Expiration?.Days,
+          abortIncompleteMultipartUploadDays:
+            r.AbortIncompleteMultipartUpload?.DaysAfterInitiation,
+          transitions: r.Transitions?.map((t) => ({
+            days: t.Days ?? 0,
+            storageClass: (t.StorageClass as any) || 'STANDARD_IA',
+          })),
+        })),
+      };
+    } catch {
+      return null;
+    }
   }
 }

@@ -6,6 +6,7 @@ import {
   IStorageDriver,
   StorageObjectMetadata,
   CompletedPart,
+  StorageLifecycleConfiguration,
 } from '../../domain/ports/storage-driver.port';
 
 @Injectable()
@@ -143,5 +144,35 @@ export class LocalStorageDriver implements IStorageDriver {
 
   async listUploadedParts(): Promise<CompletedPart[]> {
     return [];
+  }
+
+  private activeLifecycleConfig: StorageLifecycleConfiguration | null = null;
+
+  async applyLifecycleRules(
+    config?: StorageLifecycleConfiguration,
+  ): Promise<void> {
+    this.activeLifecycleConfig = config || {
+      rules: [
+        {
+          id: 'cleanup-temp-uploads',
+          prefix: 'tmp/',
+          status: 'Enabled',
+          expirationDays: 1,
+        },
+        {
+          id: 'expire-old-backups',
+          prefix: 'backups/',
+          status: 'Enabled',
+          expirationDays: 30,
+        },
+      ],
+    };
+    this.logger.log(
+      `LocalStorageDriver lifecycle rules configured: ${this.activeLifecycleConfig.rules.length} rules`,
+    );
+  }
+
+  async getLifecycleRules(): Promise<StorageLifecycleConfiguration | null> {
+    return this.activeLifecycleConfig;
   }
 }

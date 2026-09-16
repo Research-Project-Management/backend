@@ -59,6 +59,7 @@ model User {
   projectLabels       ProjectLabel[]        @relation("UserProjectLabels")
   projectTemplates    ProjectTemplate[]     @relation("UserProjectTemplates")
   projectLinks        ProjectLink[]         @relation("UserProjectLinks")
+  projectUpdates      ProjectUpdate[]       @relation("UserProjectUpdates")
 
   // Storage Relations (Personal Scope & File Sharing)
   authoredFiles       File[]                @relation("UserFiles")

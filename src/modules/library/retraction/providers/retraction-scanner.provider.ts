@@ -1,16 +1,25 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../../core/database/prisma.service';
 import { RetractionDetails } from '../types/retraction.types';
+import { RetractionDatabaseService } from '../services/retraction-database.service';
+import {
+  getAcademicContactEmail,
+  getAcademicUserAgent,
+} from '../../core/constants/academic-client.constants';
 
 @Injectable()
 export class RetractionScannerProvider {
   private readonly logger = new Logger(RetractionScannerProvider.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly retractionDb: RetractionDatabaseService,
+  ) {}
 
   /**
    * Scans a DOI and/or title for retraction markers.
-   * Checks database cache first, then title heuristics, then external provider.
+   * Checks local Retraction Watch dataset & in-memory index first (0ms),
+   * then title heuristics, then external provider.
    */
   async scan(
     doi?: string | null,
@@ -20,27 +29,21 @@ export class RetractionScannerProvider {
     const cleanDoiVal = doi?.trim().toLowerCase();
     const cleanPmidVal = pmid?.trim();
 
-    // 1. Check local cache (RetractionRecord)
+    // 1. Check local Retraction Watch dataset & in-memory fast index
     if (cleanDoiVal || cleanPmidVal) {
-      const cached = await this.prisma.retractionRecord.findFirst({
-        where: {
-          OR: [
-            ...(cleanDoiVal ? [{ doi: cleanDoiVal }] : []),
-            ...(cleanPmidVal ? [{ pmid: cleanPmidVal }] : []),
-          ],
-        },
-      });
+      const localResult = await this.retractionDb.checkRetraction(
+        cleanDoiVal,
+        cleanPmidVal,
+      );
 
-      if (cached) {
-        return {
-          nature: cached.nature as any,
-          reason: cached.reason || '',
-          noticeUrl: cached.noticeUrl || undefined,
-          date: cached.retractionDate
-            ? cached.retractionDate.toISOString()
-            : undefined,
-          source: cached.source as any,
-        };
+      if (localResult === false) {
+        // Confirmed clean via verified cache / known non-retracted paper
+        return null;
+      }
+
+      if (localResult) {
+        // Confirmed retracted from Retraction Watch seed dataset or local DB
+        return localResult;
       }
     }
 
@@ -77,32 +80,16 @@ export class RetractionScannerProvider {
       try {
         const onlineResult = await this.queryOnlineRetraction(cleanDoiVal);
         if (onlineResult) {
-          // Save to local cache
-          await this.prisma.retractionRecord.upsert({
-            where: { doi: cleanDoiVal },
-            create: {
-              doi: cleanDoiVal,
-              pmid: cleanPmidVal || null,
-              nature: onlineResult.nature,
-              reason: onlineResult.reason || '',
-              noticeUrl: onlineResult.noticeUrl || null,
-              retractionDate: onlineResult.date
-                ? new Date(onlineResult.date)
-                : null,
-              source: onlineResult.source,
-            },
-            update: {
-              nature: onlineResult.nature,
-              reason: onlineResult.reason || '',
-              noticeUrl: onlineResult.noticeUrl || null,
-              retractionDate: onlineResult.date
-                ? new Date(onlineResult.date)
-                : null,
-              source: onlineResult.source,
-            },
-          });
-
+          // Save to local retraction database
+          await this.retractionDb.saveRetraction(
+            cleanDoiVal,
+            onlineResult,
+            cleanPmidVal,
+          );
           return onlineResult;
+        } else {
+          // Record as verified clean to eliminate redundant online calls on future scans
+          await this.retractionDb.saveClean(cleanDoiVal, cleanPmidVal);
         }
       } catch (err: any) {
         this.logger.debug(
@@ -121,12 +108,13 @@ export class RetractionScannerProvider {
     const timeout = setTimeout(() => controller.abort(), 3500);
 
     try {
-      // Query Crossref API with timeout
-      const url = `https://api.crossref.org/works/${encodeURIComponent(doi)}`;
+      // Query Crossref API with timeout and polite pool
+      const mailto = getAcademicContactEmail();
+      const url = `https://api.crossref.org/works/${encodeURIComponent(doi)}?mailto=${encodeURIComponent(mailto)}`;
       const res = await fetch(url, {
         signal: controller.signal,
         headers: {
-          'User-Agent': 'FluxResearch/1.0 (mailto:support@flux.dev)',
+          'User-Agent': getAcademicUserAgent('RetractionScanner'),
         },
       });
 

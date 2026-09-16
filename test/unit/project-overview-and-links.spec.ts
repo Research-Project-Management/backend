@@ -118,6 +118,7 @@ describe('Project Overview & Link Modules', () => {
         getOverdueCount: jest.fn(),
         getActiveCycle: jest.fn(),
         getRecentActivities: jest.fn(),
+        getLatestStatusUpdate: jest.fn(),
       };
 
       const module: TestingModule = await Test.createTestingModule({

@@ -211,6 +211,15 @@ export class ArchiveService {
     projectId: string,
     query: { page?: number; limit?: number; search?: string },
   ) {
-    return this.archiveRepository.findArchivedWorkItems(projectId, query);
+    const res = await this.archiveRepository.findArchivedWorkItems(
+      projectId,
+      query,
+    );
+    return {
+      ...res,
+      archivedItems: res.workItems,
+      count: res.total,
+    };
   }
 }
+

@@ -2,6 +2,10 @@ import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { RetractionRepository } from './retraction.repository';
 import { RetractionScannerProvider } from './providers/retraction-scanner.provider';
 import {
+  RetractionDatabaseService,
+  RetractionDatabaseStats,
+} from './services/retraction-database.service';
+import {
   FlagRetractionDto,
   BatchCheckRetractionDto,
 } from './dto/retraction.dto';
@@ -17,6 +21,7 @@ export class RetractionService {
   constructor(
     private readonly repo: RetractionRepository,
     private readonly scanner: RetractionScannerProvider,
+    private readonly retractionDb: RetractionDatabaseService,
   ) {}
 
   async checkItem(
@@ -162,5 +167,14 @@ export class RetractionService {
 
   async getStats(userId: string, projectId?: string): Promise<RetractionStats> {
     return this.repo.getStats(userId, projectId);
+  }
+
+  async getDatabaseStats(): Promise<RetractionDatabaseStats> {
+    return this.retractionDb.getDatabaseStats();
+  }
+
+  async seedDatabase(force = false): Promise<{ seeded: number }> {
+    const seeded = await this.retractionDb.seedIfEmpty(force);
+    return { seeded };
   }
 }

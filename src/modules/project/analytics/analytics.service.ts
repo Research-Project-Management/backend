@@ -108,4 +108,67 @@ export class ProjectAnalyticsService {
       byAssignee,
     };
   }
+
+  /**
+   * Daily WorkItem creation and completion trend for a date range
+   */
+  async getTimeSeries(
+    projectId: string,
+    fromDate: string,
+    toDate: string,
+  ): Promise<{ date: string; created: number; completed: number }[]> {
+    const from = new Date(fromDate);
+    const to = new Date(toDate);
+    to.setHours(23, 59, 59, 999);
+
+    const items = await this.analyticsRepo.findProjectWorkItemsTimeSeries(
+      projectId,
+      from,
+      to,
+    );
+
+    const dayMap: Record<string, { created: number; completed: number }> = {};
+    const cur = new Date(from);
+    while (cur <= to) {
+      const key = cur.toISOString().slice(0, 10);
+      dayMap[key] = { created: 0, completed: 0 };
+      cur.setDate(cur.getDate() + 1);
+    }
+
+    for (const item of items) {
+      const cDate = item.createdAt.toISOString().slice(0, 10);
+      if (dayMap[cDate]) dayMap[cDate].created++;
+      if (item.completed) {
+        const uDate = item.updatedAt.toISOString().slice(0, 10);
+        if (dayMap[uDate]) dayMap[uDate].completed++;
+      }
+    }
+
+    return Object.entries(dayMap).map(([date, counts]) => ({
+      date,
+      ...counts,
+    }));
+  }
+
+  /**
+   * Label distribution for a project
+   */
+  async getLabelDistribution(
+    projectId: string,
+  ): Promise<{ labels: { label: string; count: number }[] }> {
+    const items = await this.analyticsRepo.findProjectWorkItemsByLabel(projectId);
+    const labelCount: Record<string, number> = {};
+    for (const item of items) {
+      const labels: string[] = Array.isArray(item.labels)
+        ? (item.labels as string[])
+        : [];
+      for (const label of labels) {
+        if (label) labelCount[label] = (labelCount[label] || 0) + 1;
+      }
+    }
+    const labels = Object.entries(labelCount)
+      .map(([label, count]) => ({ label, count }))
+      .sort((a, b) => b.count - a.count);
+    return { labels };
+  }
 }

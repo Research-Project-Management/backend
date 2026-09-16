@@ -125,11 +125,18 @@ export class CollaborationService {
    * Broadcasts document lock state change to all active collaborators.
    */
   broadcastLockChange(pageId: string, isLocked: boolean, lockedBy: string) {
-    this.eventEmitter?.emit('document.collaboration.event', {
+    const payload = {
       pageId,
       type: isLocked ? 'page-locked' : 'page-unlocked',
+      isLocked,
       lockedBy,
       timestamp: Date.now(),
+    };
+    this.eventEmitter?.emit('document.collaboration.event', payload);
+    // Also emit canonical 'lock-updated' for full cross-system compatibility
+    this.eventEmitter?.emit('document.collaboration.event', {
+      ...payload,
+      type: 'lock-updated',
     });
   }
 

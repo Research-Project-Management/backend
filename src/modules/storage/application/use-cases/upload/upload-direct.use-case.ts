@@ -1,4 +1,4 @@
-import { Injectable, Inject, BadRequestException } from '@nestjs/common';
+import { Injectable, Inject, Optional, BadRequestException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as crypto from 'crypto';
 import {
@@ -21,6 +21,7 @@ import {
 import { StorageNode } from '../../../domain/entities/storage-node.entity';
 import { FileUploadedEvent } from '../../../domain/events/file-uploaded.event';
 import { StorageRedisCacheService } from '../../../infrastructure/cache/storage-redis-cache.service';
+import { StorageQueueProducer } from '../../queues/storage-queue.producer';
 import {
   validateMagicBytes,
   sanitizeFilename,
@@ -59,6 +60,7 @@ export class UploadDirectUseCase {
     private readonly quotaRepo: IStorageQuotaRepository,
     private readonly cache: StorageRedisCacheService,
     private readonly eventEmitter: EventEmitter2,
+    @Optional() private readonly queueProducer?: StorageQueueProducer,
   ) {}
 
   async execute(input: UploadDirectInput): Promise<UploadDirectOutput> {
@@ -152,6 +154,21 @@ export class UploadDirectUseCase {
         input.projectId,
       ),
     );
+
+    // 9. Enqueue background media/dataset processing job
+    if (this.queueProducer) {
+      this.queueProducer
+        .queueFileProcessing({
+          fileId,
+          blobId,
+          s3Key: StorageKey.forBlob(hashHex).value(),
+          mimeType: input.mimeType,
+          filename: cleanFilename,
+          userId: input.userId,
+          projectId: input.projectId,
+        })
+        .catch(() => {});
+    }
 
     return {
       fileId,

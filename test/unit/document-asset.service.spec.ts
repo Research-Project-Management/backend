@@ -18,6 +18,14 @@ describe('Document AssetService (Figures, Images & LaTeX Assets)', () => {
         create: jest.fn(),
         findMany: jest.fn(),
         findFirst: jest.fn(),
+        findUnique: jest.fn(),
+        update: jest.fn(),
+      },
+      file: {
+        create: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
+        findFirst: jest.fn().mockResolvedValue(null),
+        findUnique: jest.fn().mockResolvedValue(null),
         update: jest.fn(),
       },
     };
@@ -43,6 +51,40 @@ describe('Document AssetService (Figures, Images & LaTeX Assets)', () => {
       await expect(
         service.uploadAsset(mockProjectId, mockUserId, {
           filename: '   ',
+          contentBase64: 'SGVsbG8=',
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should reject filename containing path traversal or directory separators', async () => {
+      await expect(
+        service.uploadAsset(mockProjectId, mockUserId, {
+          filename: '../../etc/passwd.png',
+          contentBase64: 'SGVsbG8=',
+        }),
+      ).rejects.toThrow(BadRequestException);
+
+      await expect(
+        service.uploadAsset(mockProjectId, mockUserId, {
+          filename: 'nested/figure.png',
+          contentBase64: 'SGVsbG8=',
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should reject path containing directory traversal or drive letter', async () => {
+      await expect(
+        service.uploadAsset(mockProjectId, mockUserId, {
+          filename: 'figure.png',
+          path: 'figures/../../secret.png',
+          contentBase64: 'SGVsbG8=',
+        }),
+      ).rejects.toThrow(BadRequestException);
+
+      await expect(
+        service.uploadAsset(mockProjectId, mockUserId, {
+          filename: 'figure.png',
+          path: 'C:/Windows/System32/calc.png',
           contentBase64: 'SGVsbG8=',
         }),
       ).rejects.toThrow(BadRequestException);
@@ -206,6 +248,15 @@ describe('Document AssetService (Figures, Images & LaTeX Assets)', () => {
           source: 'document',
         }),
       );
+      expect(prisma.page.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            content: expect.not.objectContaining({
+              base64: expect.anything(),
+            }),
+          }),
+        }),
+      );
       expect(res.fileId).toBe('file-123');
       expect(res.storageUrl).toBe('/api/files/file-123/content');
     });
@@ -247,6 +298,90 @@ describe('Document AssetService (Figures, Images & LaTeX Assets)', () => {
 
       expect(mockStoragePort.deleteFile).toHaveBeenCalledWith('file-123');
       expect(prisma.page.update).toHaveBeenCalled();
+    });
+
+    it('should discover and load storage files from prisma.file in getProjectAssetMap', async () => {
+      prisma.page.findMany.mockResolvedValueOnce([]);
+      prisma.file.findMany.mockResolvedValueOnce([
+        {
+          id: 'storage-file-456',
+          filename: 'diagram.png',
+          size: 2048n,
+          mimeType: 'image/png',
+          metaData: { path: 'figures/diagram.png' },
+        },
+      ]);
+      mockStoragePort.readOwnedFile.mockResolvedValueOnce({
+        fileId: 'storage-file-456',
+        filename: 'diagram.png',
+        mimeType: 'image/png',
+        size: 2048,
+        storageKey: 'diagram.png',
+        contentUrl: '/api/files/storage-file-456/content',
+        buffer: Buffer.from('DIAGRAM_PAYLOAD'),
+      });
+
+      const map = await storageService.getProjectAssetMap(mockProjectId);
+
+      expect(mockStoragePort.readOwnedFile).toHaveBeenCalledWith({
+        fileId: 'storage-file-456',
+      });
+      expect(map['diagram.png']).toBe(
+        Buffer.from('DIAGRAM_PAYLOAD').toString('base64'),
+      );
+      expect(map['figures/diagram.png']).toBe(
+        Buffer.from('DIAGRAM_PAYLOAD').toString('base64'),
+      );
+    });
+
+    it('should find asset in prisma.file if not in prisma.page in getAsset', async () => {
+      prisma.page.findFirst.mockResolvedValueOnce(null);
+      prisma.file.findFirst.mockResolvedValueOnce({
+        id: 'storage-node-789',
+        filename: 'chart.pdf',
+        size: 4096n,
+        mimeType: 'application/pdf',
+        metaData: {},
+        url: '/api/files/storage-node-789/content',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      mockStoragePort.readOwnedFile.mockResolvedValueOnce({
+        fileId: 'storage-node-789',
+        filename: 'chart.pdf',
+        mimeType: 'application/pdf',
+        size: 4096,
+        storageKey: 'chart.pdf',
+        contentUrl: '/api/files/storage-node-789/content',
+        buffer: Buffer.from('CHART_BUFFER'),
+      });
+
+      const res = await storageService.getAsset('storage-node-789');
+
+      expect(res.id).toBe('storage-node-789');
+      expect(res.filename).toBe('chart.pdf');
+      expect(res.contentBase64).toBe(
+        Buffer.from('CHART_BUFFER').toString('base64'),
+      );
+    });
+
+    it('should soft-delete in prisma.file if asset is in storage', async () => {
+      prisma.page.findFirst.mockResolvedValueOnce(null);
+      prisma.file.findFirst.mockResolvedValueOnce({
+        id: 'storage-node-789',
+      });
+      prisma.file.update.mockResolvedValueOnce({ id: 'storage-node-789' });
+
+      const res = await storageService.deleteAsset('storage-node-789');
+
+      expect(res.ok).toBe(true);
+      expect(mockStoragePort.deleteFile).toHaveBeenCalledWith(
+        'storage-node-789',
+      );
+      expect(prisma.file.update).toHaveBeenCalledWith({
+        where: { id: 'storage-node-789' },
+        data: { trashedAt: expect.any(Date) },
+      });
     });
   });
 });

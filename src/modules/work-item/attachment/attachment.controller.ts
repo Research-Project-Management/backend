@@ -57,8 +57,12 @@ export class AttachmentController {
   async addAttachment(
     @Param('workItemId') workItemId: string,
     @Body() dto: CreateAttachmentDto,
+    @Req() req: FastifyRequest,
     @CurrentUser('id') userId: string,
   ) {
+    if ((req as any)?.isMultipart?.()) {
+      return this.attachmentService.uploadMultipart(req, userId);
+    }
     return this.attachmentService.addAttachment(workItemId, dto, userId);
   }
 
@@ -198,10 +202,18 @@ export class AttachmentController {
     summary: 'Generate presigned URL for direct attachment upload',
   })
   async presign(
+    @Param('workItemId') workItemId: string,
     @Body() dto: PresignAttachmentDto,
     @CurrentUser('id') userId: string,
   ) {
-    return this.attachmentService.generatePresignedUpload(dto, userId);
+    return this.attachmentService.generatePresignedUpload(
+      {
+        ...dto,
+        entityType: dto.entityType || EntityType.work_item,
+        entityId: dto.entityId || workItemId,
+      },
+      userId,
+    );
   }
 
   @Post(['attachments/upload', 'work-items/:workItemId/attachments/upload'])

@@ -10,8 +10,24 @@ export interface StorageObjectMetadata {
 
 export interface CompletedPart {
   partNumber: number;
-  eTag: string;
+  eTag?: string;
   etag?: string;
+}
+
+export interface StorageLifecycleRule {
+  id: string;
+  prefix?: string;
+  status: 'Enabled' | 'Disabled';
+  expirationDays?: number;
+  abortIncompleteMultipartUploadDays?: number;
+  transitions?: Array<{
+    days: number;
+    storageClass: 'STANDARD_IA' | 'GLACIER' | 'DEEP_ARCHIVE';
+  }>;
+}
+
+export interface StorageLifecycleConfiguration {
+  rules: StorageLifecycleRule[];
 }
 
 /**
@@ -68,4 +84,9 @@ export interface IStorageDriver {
   ): Promise<{ location?: string; eTag?: string }>;
   abortMultipartUpload(key: string, uploadId: string): Promise<void>;
   listUploadedParts(key: string, uploadId: string): Promise<CompletedPart[]>;
+
+  applyLifecycleRules?(
+    config?: StorageLifecycleConfiguration,
+  ): Promise<void>;
+  getLifecycleRules?(): Promise<StorageLifecycleConfiguration | null>;
 }

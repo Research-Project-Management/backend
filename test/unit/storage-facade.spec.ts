@@ -77,6 +77,7 @@ describe('StorageFacade & UploadDirectUseCase Integration Suite', () => {
       findByBlobId: jest.fn(),
       softDeleteSubtree: jest.fn(),
       restoreSubtree: jest.fn(),
+      findSubtreeNodes: jest.fn(),
       findExpiredTrash: jest.fn(),
     };
 

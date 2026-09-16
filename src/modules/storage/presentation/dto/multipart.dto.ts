@@ -18,8 +18,16 @@ export class InitiateMultipartDto {
   mimeType?: string;
 
   @IsNumber()
-  @IsNotEmpty({ message: 'Total size is required' })
-  totalSize!: number;
+  @IsOptional()
+  totalSize?: number;
+
+  @IsNumber()
+  @IsOptional()
+  sizeBytes?: number;
+
+  @IsNumber()
+  @IsOptional()
+  size?: number;
 
   @IsString()
   @IsOptional()

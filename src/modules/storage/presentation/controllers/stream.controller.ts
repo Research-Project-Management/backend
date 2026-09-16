@@ -28,6 +28,9 @@ import { IStorageBlobRepository } from '../../domain/ports/storage-blob.reposito
 import { IStorageDriver } from '../../domain/ports/storage-driver.port';
 import { ZipPackager } from '../../infrastructure/utils/zip-packager';
 import { StorageNode } from '../../domain/entities/storage-node.entity';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { isDangerousInlineMime } from '../../domain/value-objects/file-validator.util';
+import { FileDownloadedEvent } from '../../domain/events/file-downloaded.event';
 
 @ApiTags('Storage & Streaming')
 @Controller(['api/v1/storage/files', 'api/files', 'api/file'])
@@ -41,6 +44,7 @@ export class StreamController {
     private readonly blobRepo: IStorageBlobRepository,
     @Inject(STORAGE_DRIVER)
     private readonly driver: IStorageDriver,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   @Get([
@@ -67,11 +71,25 @@ export class StreamController {
         rangeHeader,
       );
 
+      // Security hardening against Stored XSS
+      const isDangerous = isDangerousInlineMime(result.mimeType);
+      const isDownloadEndpoint =
+        req.url.includes('/download') ||
+        (req.query as any)?.download === 'true' ||
+        (req.query as any)?.download === '1';
+      const dispositionType =
+        isDangerous || isDownloadEndpoint ? 'attachment' : 'inline';
+
       res.status(result.statusCode);
       res.header('Content-Type', result.mimeType);
       res.header('Content-Length', result.contentLength);
       res.header('Accept-Ranges', 'bytes');
       res.header('X-Content-Type-Options', 'nosniff');
+      res.header('X-Frame-Options', 'SAMEORIGIN');
+
+      if (isDangerous) {
+        res.header('Content-Security-Policy', "default-src 'none'; sandbox");
+      }
 
       if (result.contentRange) {
         res.header('Content-Range', result.contentRange);
@@ -81,7 +99,20 @@ export class StreamController {
       const encoded = encodeURIComponent(result.filename);
       res.header(
         'Content-Disposition',
-        `inline; filename="${result.filename.replace(/[^\x20-\x7E]/g, '_')}"; filename*=UTF-8''${encoded}`,
+        `${dispositionType}; filename="${result.filename.replace(/[^\x20-\x7E]/g, '_')}"; filename*=UTF-8''${encoded}`,
+      );
+
+      // Audit Logging: Emit event for tracking access to research files
+      this.eventEmitter.emit(
+        'file.downloaded',
+        new FileDownloadedEvent(
+          fileId,
+          result.filename,
+          result.mimeType,
+          result.contentLength,
+          (req as any).user?.id || null,
+          req.ip,
+        ),
       );
 
       return res.send(result.stream);
@@ -129,9 +160,26 @@ export class StreamController {
       }
 
       const contentType = output.ContentType || 'application/octet-stream';
+      const isDangerous = isDangerousInlineMime(contentType);
+      const isDownloadEndpoint = req.url.includes('/download');
+      const dispositionType =
+        isDangerous || isDownloadEndpoint ? 'attachment' : 'inline';
+
       res.header('Content-Type', contentType);
       res.header('Accept-Ranges', 'bytes');
       res.header('X-Content-Type-Options', 'nosniff');
+      res.header('X-Frame-Options', 'SAMEORIGIN');
+
+      if (isDangerous) {
+        res.header('Content-Security-Policy', "default-src 'none'; sandbox");
+      }
+
+      const basename = key.split('/').pop() || 'file';
+      const encoded = encodeURIComponent(basename);
+      res.header(
+        'Content-Disposition',
+        `${dispositionType}; filename="${basename.replace(/[^\x20-\x7E]/g, '_')}"; filename*=UTF-8''${encoded}`,
+      );
 
       if (output.ContentLength !== undefined) {
         res.header('Content-Length', output.ContentLength);
@@ -190,9 +238,16 @@ export class StreamController {
     }
 
     const zip = new ZipPackager();
+    const visited = new Set<string>();
 
-    const addNodeToZip = async (node: StorageNode, currentPath = '') => {
-      if (node.isTrashed()) return;
+    const addNodeToZip = async (
+      node: StorageNode,
+      currentPath = '',
+      depth = 0,
+    ) => {
+      if (node.isTrashed() || depth > 25) return;
+      if (visited.has(node.id)) return;
+      visited.add(node.id);
 
       if (node.isFolder) {
         const folderPath = currentPath
@@ -205,7 +260,7 @@ export class StreamController {
           limit: 1000,
         });
         for (const child of children.nodes) {
-          await addNodeToZip(child, folderPath);
+          await addNodeToZip(child, folderPath, depth + 1);
         }
       } else if (node.blobId) {
         const blob = await this.blobRepo.findById(node.blobId);

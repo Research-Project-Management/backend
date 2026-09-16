@@ -20,6 +20,9 @@ export class SynctexController {
 
   @Post([
     'projects/:projectId/synctex/forward',
+    'projects/:projectId/pages/:pageId/synctex/forward',
+    'pages/:pageId/synctex/forward',
+    'documents/:documentId/synctex/forward',
     'synctex/forward',
     'compiler/synctex/forward',
   ])
@@ -34,6 +37,9 @@ export class SynctexController {
 
   @Post([
     'projects/:projectId/synctex/reverse',
+    'projects/:projectId/pages/:pageId/synctex/reverse',
+    'pages/:pageId/synctex/reverse',
+    'documents/:documentId/synctex/reverse',
     'synctex/reverse',
     'compiler/synctex/reverse',
   ])

@@ -419,11 +419,32 @@ export class WebSnapshotService {
     const filename = `Snapshot_${sanitizedTitle}_${new Date().toISOString().slice(0, 10)}.html`;
 
     let fileUrl = `/api/files/snapshots/${fileKey}`;
-    if (this.storagePort?.uploadBuffer) {
+    let resolvedFileId: string | undefined;
+    const buffer = Buffer.from(snapshot.htmlContent, 'utf-8');
+
+    if (this.storagePort?.uploadFile) {
+      try {
+        const uploadResult = await this.storagePort.uploadFile({
+          userId,
+          filename,
+          buffer,
+          mimeType: 'text/html; charset=utf-8',
+          source: 'library_snapshot',
+        });
+        fileUrl = uploadResult.url;
+        resolvedFileId = uploadResult.fileId;
+      } catch (err: any) {
+        this.logger.warn(
+          `Storage uploadFile failed, falling back to uploadBuffer: ${err?.message}`,
+        );
+      }
+    }
+
+    if (!resolvedFileId && this.storagePort?.uploadBuffer) {
       try {
         const uploadResult = await this.storagePort.uploadBuffer(
           fileKey,
-          Buffer.from(snapshot.htmlContent, 'utf-8'),
+          buffer,
           'text/html; charset=utf-8',
         );
         fileUrl = uploadResult.url;
@@ -440,6 +461,7 @@ export class WebSnapshotService {
       itemId,
       filename,
       url: fileUrl,
+      fileId: resolvedFileId,
       mimeType: 'text/html',
       size: snapshot.sizeBytes,
       fileHash: snapshot.checksum,

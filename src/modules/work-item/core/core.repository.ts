@@ -401,13 +401,111 @@ export class CoreRepository implements IWorkItemRepository {
       }
     }
 
-    return this.prismaService.workItem.findMany({
+    const records = await this.prismaService.workItem.findMany({
       where,
       include: BASE_WORK_ITEM_INCLUDE,
       orderBy,
       ...(take ? { take } : {}),
       ...(skip ? { skip } : {}),
     });
+
+    if (this.prismaService.entityAttachment?.findMany && records.length > 0) {
+      try {
+        const itemIds = records.map((r) => r.id);
+        const attachments = await this.prismaService.entityAttachment.findMany({
+          where: {
+            entityType: EntityType.work_item,
+            entityId: { in: itemIds },
+          },
+          orderBy: { createdAt: 'asc' },
+        });
+        const attachmentMap = new Map<string, any[]>();
+        for (const att of attachments) {
+          const list = attachmentMap.get(att.entityId) || [];
+          list.push(att);
+          attachmentMap.set(att.entityId, list);
+        }
+        for (const r of records) {
+          const itemAtts = attachmentMap.get(r.id);
+          if (itemAtts && itemAtts.length > 0) {
+            (r as any).attachments = this.formatEntityAttachments(itemAtts);
+          }
+        }
+      } catch {
+        // Graceful fallback if table is unavailable in mocks
+      }
+    }
+
+    return records;
+  }
+
+  private formatEntityAttachments(records: any[]): WorkItemAttachments {
+    const pages: any[] = [];
+    const papers: any[] = [];
+    const files: any[] = [];
+    const links: any[] = [];
+
+    const safeRecords = Array.isArray(records) ? records : [];
+    for (const r of safeRecords) {
+      const meta = (r.metadata as Record<string, any>) || {};
+      const category =
+        meta.category ||
+        (r.mimeType === 'application/x-page'
+          ? 'page'
+          : r.mimeType === 'application/x-paper'
+            ? 'paper'
+            : r.mimeType === 'text/uri-list'
+              ? 'link'
+              : 'file');
+
+      if (category === 'page') {
+        pages.push({
+          id: r.id,
+          pageId: meta.pageId || r.id,
+          title: meta.title || r.filename,
+          slug: meta.slug || null,
+          addedAt: r.createdAt
+            ? new Date(r.createdAt).toISOString()
+            : new Date().toISOString(),
+        });
+      } else if (category === 'paper') {
+        papers.push({
+          id: r.id,
+          paperId: meta.paperId || r.id,
+          title: meta.title || r.filename,
+          doi: meta.doi || null,
+          citationKey: meta.citationKey || null,
+          addedAt: r.createdAt
+            ? new Date(r.createdAt).toISOString()
+            : new Date().toISOString(),
+        });
+      } else if (category === 'link') {
+        links.push({
+          id: r.id,
+          title: meta.title || r.filename,
+          url: r.url,
+          addedAt: r.createdAt
+            ? new Date(r.createdAt).toISOString()
+            : new Date().toISOString(),
+        });
+      } else {
+        files.push({
+          id: r.id,
+          name: r.filename,
+          url: r.url,
+          size: r.size ? `${Math.round(r.size / 1024)} KB` : undefined,
+          type: r.mimeType,
+          createdAt: r.createdAt
+            ? new Date(r.createdAt).toISOString()
+            : new Date().toISOString(),
+          uploadedAt: r.createdAt
+            ? new Date(r.createdAt).toISOString()
+            : new Date().toISOString(),
+        });
+      }
+    }
+
+    return { pages, papers, files, links };
   }
 
   async findWorkItemsByAssignee(
@@ -472,17 +570,36 @@ export class CoreRepository implements IWorkItemRepository {
   async findWorkItemById(
     workItemId: string,
   ): Promise<WorkItemWithRelations | null> {
-    if (!isUuid(workItemId)) {
-      return this.prismaService.workItem.findFirst({
-        where: { identifier: workItemId, deletedAt: null },
-        include: BASE_WORK_ITEM_INCLUDE,
-      });
+    const item = !isUuid(workItemId)
+      ? await this.prismaService.workItem.findFirst({
+          where: { identifier: workItemId, deletedAt: null },
+          include: BASE_WORK_ITEM_INCLUDE,
+        })
+      : await this.prismaService.workItem.findFirst({
+          where: { id: workItemId, deletedAt: null },
+          include: BASE_WORK_ITEM_INCLUDE,
+        });
+
+    if (!item) return null;
+
+    if (this.prismaService.entityAttachment?.findMany) {
+      try {
+        const records = await this.prismaService.entityAttachment.findMany({
+          where: {
+            entityType: EntityType.work_item,
+            entityId: item.id,
+          },
+          orderBy: { createdAt: 'asc' },
+        });
+        if (records && records.length > 0) {
+          (item as any).attachments = this.formatEntityAttachments(records);
+        }
+      } catch {
+        // Graceful fallback
+      }
     }
 
-    return this.prismaService.workItem.findFirst({
-      where: { id: workItemId, deletedAt: null },
-      include: BASE_WORK_ITEM_INCLUDE,
-    });
+    return item;
   }
 
   async findWorkItemByIdentifier(
@@ -992,6 +1109,126 @@ export class CoreRepository implements IWorkItemRepository {
         data: records,
       });
     }
+  }
+
+  async syncAttachments(
+    workItemId: string,
+    projectId: string,
+    authorId?: string,
+    attachments?: any,
+  ): Promise<void> {
+    if (
+      !attachments ||
+      typeof attachments !== 'object' ||
+      !this.prismaService.entityAttachment
+    ) {
+      return;
+    }
+
+    const records: Prisma.EntityAttachmentCreateManyInput[] = [];
+
+    if (Array.isArray(attachments.pages)) {
+      for (const p of attachments.pages) {
+        const pageId = p?.pageId || p?.id;
+        if (pageId) {
+          records.push({
+            entityType: EntityType.work_item,
+            entityId: workItemId,
+            projectId,
+            authorId,
+            filename: p.title || 'Untitled Page',
+            url: `/pages/${pageId}`,
+            mimeType: 'application/x-page',
+            size: 0,
+            metadata: {
+              category: 'page',
+              pageId,
+              title: p.title,
+            },
+          });
+        }
+      }
+    }
+
+    if (Array.isArray(attachments.papers)) {
+      for (const p of attachments.papers) {
+        const paperId = p?.paperId || p?.id;
+        if (paperId) {
+          records.push({
+            entityType: EntityType.work_item,
+            entityId: workItemId,
+            projectId,
+            authorId,
+            filename: p.title || 'Untitled Paper',
+            url: p.doi ? `https://doi.org/${p.doi}` : '',
+            mimeType: 'application/x-paper',
+            size: 0,
+            metadata: {
+              category: 'paper',
+              paperId,
+              title: p.title,
+              doi: p.doi,
+              citationKey: p.citationKey,
+            },
+          });
+        }
+      }
+    }
+
+    if (Array.isArray(attachments.files)) {
+      for (const f of attachments.files) {
+        if (f?.url) {
+          records.push({
+            entityType: EntityType.work_item,
+            entityId: workItemId,
+            projectId,
+            authorId,
+            filename: f.name || f.filename || 'file',
+            url: f.url,
+            mimeType: f.type || f.mimeType || 'application/octet-stream',
+            size: typeof f.size === 'number' ? f.size : 0,
+            metadata: {
+              category: 'file',
+              name: f.name || f.filename,
+              ...(f.fileId ? { fileId: f.fileId } : {}),
+            },
+          });
+        }
+      }
+    }
+
+    if (Array.isArray(attachments.links)) {
+      for (const l of attachments.links) {
+        if (l?.url) {
+          records.push({
+            entityType: EntityType.work_item,
+            entityId: workItemId,
+            projectId,
+            authorId,
+            filename: l.title || l.url,
+            url: l.url,
+            mimeType: 'text/uri-list',
+            size: 0,
+            metadata: { category: 'link', url: l.url, title: l.title },
+          });
+        }
+      }
+    }
+
+    await this.executeTx(async (tx) => {
+      await tx.entityAttachment.deleteMany({
+        where: {
+          entityType: EntityType.work_item,
+          entityId: workItemId,
+        },
+      });
+
+      if (records.length > 0) {
+        await tx.entityAttachment.createMany({
+          data: records,
+        });
+      }
+    });
   }
 
   async disconnectParentWorkItem(

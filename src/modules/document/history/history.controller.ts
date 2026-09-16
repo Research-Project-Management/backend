@@ -37,6 +37,20 @@ export class HistoryController {
     return this.historyService.getVersions(pageId);
   }
 
+  @Get([
+    'projects/:projectId/pages/:pageId/versions/:versionId',
+    'project/:projectId/pages/:pageId/versions/:versionId',
+    'pages/:pageId/versions/:versionId',
+  ])
+  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ApiOperation({ summary: 'Get single version snapshot with content' })
+  async getVersion(
+    @Param('pageId') pageId: string,
+    @Param('versionId') versionId: string,
+  ) {
+    return this.historyService.getVersion(pageId, versionId);
+  }
+
   @Post([
     'projects/:projectId/pages/:pageId/versions',
     'project/:projectId/pages/:pageId/versions',

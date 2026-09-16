@@ -3,6 +3,7 @@ import { RetractionController } from './retraction.controller';
 import { RetractionService } from './retraction.service';
 import { RetractionRepository } from './retraction.repository';
 import { RetractionScannerProvider } from './providers/retraction-scanner.provider';
+import { RetractionDatabaseService } from './services/retraction-database.service';
 import { CoreModule } from '../../../core/core.module';
 
 @Module({
@@ -11,8 +12,14 @@ import { CoreModule } from '../../../core/core.module';
   providers: [
     RetractionService,
     RetractionRepository,
+    RetractionDatabaseService,
     RetractionScannerProvider,
   ],
-  exports: [RetractionService, RetractionRepository, RetractionScannerProvider],
+  exports: [
+    RetractionService,
+    RetractionRepository,
+    RetractionDatabaseService,
+    RetractionScannerProvider,
+  ],
 })
 export class RetractionModule {}

@@ -79,3 +79,43 @@ ${trimmed}
 \\end{document}
 `;
 }
+
+/**
+ * Validates that a file or folder path does not contain path traversal vectors
+ * (e.g. '../', '..\\', absolute root '/' or drive letter 'C:').
+ * Returns the normalized safe relative path, or throws an error.
+ */
+export function validateSafePath(rawPath: string, fieldName = 'path'): string {
+  if (!rawPath || typeof rawPath !== 'string') {
+    throw new Error(`${fieldName} must be a non-empty string`);
+  }
+
+  // Check for null bytes
+  if (rawPath.includes('\0')) {
+    throw new Error(`Null bytes are prohibited in ${fieldName}`);
+  }
+
+  // Normalize backslashes to forward slashes
+  const normalized = rawPath.replace(/\\/g, '/').trim();
+
+  // Check for drive letters (e.g. C:)
+  if (/^[a-zA-Z]:/.test(normalized)) {
+    throw new Error(`Drive letters are prohibited in ${fieldName}`);
+  }
+
+  // Check for absolute path
+  if (normalized.startsWith('/')) {
+    throw new Error(`Absolute paths starting with '/' are prohibited in ${fieldName}`);
+  }
+
+  // Check for directory traversal components
+  const segments = normalized.split('/');
+  for (const seg of segments) {
+    if (seg === '..') {
+      throw new Error(`Path traversal ('..') is prohibited in ${fieldName}`);
+    }
+  }
+
+  return normalized;
+}
+

@@ -32,6 +32,8 @@ import { StorageKey } from '../../../domain/value-objects/storage-key.vo';
 import { FileScope } from '../../../domain/value-objects/file-scope.vo';
 import { FileUploadedEvent } from '../../../domain/events/file-uploaded.event';
 import { StorageRedisCacheService } from '../../../infrastructure/cache/storage-redis-cache.service';
+import { Optional } from '@nestjs/common';
+import { StorageQueueProducer } from '../../queues/storage-queue.producer';
 
 export interface InitiateMultipartInput {
   userId: string;
@@ -63,6 +65,7 @@ export class MultipartUploadUseCase {
     private readonly quotaRepo: IStorageQuotaRepository,
     private readonly cache: StorageRedisCacheService,
     private readonly eventEmitter: EventEmitter2,
+    @Optional() private readonly queueProducer?: StorageQueueProducer,
   ) {}
 
   /**
@@ -150,10 +153,16 @@ export class MultipartUploadUseCase {
     }
 
     // 1. Tell S3 to concatenate all uploaded parts
+    const normalizedParts = input.parts.map((p) => ({
+      partNumber: p.partNumber,
+      eTag: p.eTag || p.etag || '',
+      etag: p.etag || p.eTag || '',
+    }));
+
     await this.driver.completeMultipartUpload(
       session.s3Key,
       session.s3UploadId,
-      input.parts,
+      normalizedParts,
     );
 
     // 2. Consume quota
@@ -165,10 +174,10 @@ export class MultipartUploadUseCase {
 
     // 3. Create StorageBlob & StorageNode with deterministic parts-based ContentHash
     const blobId = crypto.randomUUID();
-    const partsSignature = input.parts
+    const partsSignature = normalizedParts
       .slice()
       .sort((a, b) => a.partNumber - b.partNumber)
-      .map((p) => `${p.partNumber}:${p.etag}`)
+      .map((p) => `${p.partNumber}:${p.eTag}`)
       .join(';');
     const contentHash = ContentHash.fromHex(
       crypto
@@ -224,8 +233,24 @@ export class MultipartUploadUseCase {
       ),
     );
 
+    // 6. Enqueue background media/dataset processing job
+    if (this.queueProducer) {
+      this.queueProducer
+        .queueFileProcessing({
+          fileId,
+          blobId,
+          s3Key: session.s3Key,
+          mimeType: session.mimeType,
+          filename: session.filename,
+          userId: session.userId,
+          projectId: session.projectId,
+        })
+        .catch(() => {});
+    }
+
     return {
       fileId,
+      blobId,
       url: `/api/files/${encodeURIComponent(fileId)}/content`,
       filename: session.filename,
       size: Number(session.totalSize),

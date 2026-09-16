@@ -50,9 +50,11 @@ export class ExportService {
         return this.exportMarkdown(page, safeTitle);
 
       case DocumentExportFormat.LATEX_SOURCE:
+      case DocumentExportFormat.LATEX_SOURCE_UNDERSCORE:
         return this.exportLatexSource(page, safeTitle);
 
       case DocumentExportFormat.LATEX_BUNDLE:
+      case DocumentExportFormat.LATEX_BUNDLE_UNDERSCORE:
         return this.exportLatexBundle(page, safeTitle);
 
       default:

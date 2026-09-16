@@ -1,0 +1,31 @@
+{
+  "rules": [
+    {
+      "id": "cleanup-temp-uploads",
+      "prefix": "tmp/",
+      "status": "Enabled",
+      "expirationDays": 1
+    },
+    {
+      "id": "abort-incomplete-multipart",
+      "prefix": "",
+      "status": "Enabled",
+      "abortIncompleteMultipartUploadDays": 7
+    },
+    {
+      "id": "archive-cold-storage",
+      "prefix": "archives/",
+      "status": "Enabled",
+      "transitions": [
+        { "days": 90, "storageClass": "STANDARD_IA" },
+        { "days": 180, "storageClass": "GLACIER" }
+      ]
+    },
+    {
+      "id": "expire-old-backups",
+      "prefix": "backups/",
+      "status": "Enabled",
+      "expirationDays": 30
+    }
+  ]
+}

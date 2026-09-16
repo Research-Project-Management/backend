@@ -14,23 +14,32 @@ export class OverviewService {
       throw new NotFoundException(`Project with ID "${projectId}" not found`);
     }
 
-    const [stateCounts, overdueCount, activeCycleData, recentActivities] =
-      await Promise.all([
-        this.overviewRepo.getWorkItemStateGroupCounts(projectId),
-        this.overviewRepo.getOverdueCount(projectId),
-        this.overviewRepo.getActiveCycle(projectId),
-        this.overviewRepo.getRecentActivities(projectId, 10),
-      ]);
+    const [
+      stateCounts,
+      overdueCount,
+      activeCycleData,
+      recentActivities,
+      latestStatusUpdate,
+    ] = await Promise.all([
+      this.overviewRepo.getWorkItemStateGroupCounts(projectId),
+      this.overviewRepo.getOverdueCount(projectId),
+      this.overviewRepo.getActiveCycle(projectId),
+      this.overviewRepo.getRecentActivities(projectId, 10),
+      this.overviewRepo.getLatestStatusUpdate(projectId),
+    ]);
 
     const backlog = stateCounts.backlog || 0;
     const unstarted = stateCounts.unstarted || 0;
     const started = stateCounts.started || 0;
     const completed = stateCounts.completed || 0;
+    const cancelled = stateCounts.cancelled || 0;
 
     const totalIssues = backlog + unstarted + started + completed;
+    const totalWorkItems = totalIssues + cancelled;
+    const actionableTotal = totalIssues;
     const completionPercentage =
-      totalIssues > 0
-        ? parseFloat(((completed / totalIssues) * 100).toFixed(1))
+      actionableTotal > 0
+        ? parseFloat(((completed / actionableTotal) * 100).toFixed(1))
         : 0;
 
     let activeCycleDto = null;
@@ -43,11 +52,19 @@ export class OverviewService {
           ? parseFloat(((cycleCompleted / cycleTotal) * 100).toFixed(1))
           : 0;
 
+      let daysRemaining: number | null = null;
+      if (cycle.endDate) {
+        const diffMs =
+          new Date(cycle.endDate).getTime() - new Date().getTime();
+        daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+      }
+
       activeCycleDto = {
         id: cycle.id,
         name: cycle.name,
         startDate: cycle.startDate,
         endDate: cycle.endDate,
+        daysRemaining,
         totalIssues: cycleTotal,
         completedIssues: cycleCompleted,
         completionPercentage: cyclePercentage,
@@ -75,6 +92,12 @@ export class OverviewService {
               avatar: projectMeta.createdBy.avatar,
             }
           : null,
+        members: (projectMeta.members || []).map((m: any) => ({
+          id: m.user?.id || m.id,
+          name: m.user?.name || 'Member',
+          avatar: m.user?.avatar || null,
+          role: m.role || 'contributor',
+        })),
       },
       links: (projectMeta.links || []).map((link) => ({
         id: link.id,
@@ -87,10 +110,12 @@ export class OverviewService {
       })),
       metrics: {
         totalIssues,
+        totalWorkItems,
         completed,
         started,
         unstarted,
         backlog,
+        cancelled,
         overdue: overdueCount,
         completionPercentage,
       },
@@ -110,6 +135,19 @@ export class OverviewService {
           avatar: act.actor?.avatar || null,
         },
       })),
+      currentUpdate: latestStatusUpdate
+        ? {
+            id: latestStatusUpdate.id,
+            status: latestStatusUpdate.status,
+            message: latestStatusUpdate.message,
+            createdAt: latestStatusUpdate.createdAt,
+            author: {
+              id: latestStatusUpdate.createdBy.id,
+              name: latestStatusUpdate.createdBy.name,
+              avatar: latestStatusUpdate.createdBy.avatar,
+            },
+          }
+        : null,
     };
   }
 }

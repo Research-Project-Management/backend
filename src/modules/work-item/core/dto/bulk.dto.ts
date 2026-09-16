@@ -36,6 +36,7 @@ export class BulkUpdateWorkItemDto {
     priority?: WorkItemPriority | (string & {});
     cycleId?: string | null;
     dueDate?: string | null;
+    startDate?: string | null;
     [key: string]: any;
   };
 

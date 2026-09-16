@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { isUUID as isUuid } from 'class-validator';
-import { Prisma, Page } from '@prisma/client';
+import { Prisma, Page, PageStatus } from '@prisma/client';
 import {
   IPageRepository,
   PageWithAuthor,
@@ -31,16 +31,38 @@ export class CoreRepository implements IPageRepository {
     return proj?.id ?? null;
   }
 
-  async findProjectPages(projectId: string): Promise<PageListItem[]> {
+  async findProjectPages(
+    projectId: string,
+    status?: string,
+    search?: string,
+  ): Promise<PageListItem[]> {
     const canonicalProjectId = await this.resolveProjectId(projectId);
     if (!canonicalProjectId) return [];
 
+    const where: Prisma.PageWhereInput = {
+      projectId: canonicalProjectId,
+    };
+
+    if (status === 'archived') {
+      where.OR = [
+        { status: PageStatus.archived },
+        { deletedAt: { not: null } },
+      ];
+    } else {
+      where.deletedAt = null;
+      if (status && status !== 'all' && status in PageStatus) {
+        where.status = status as PageStatus;
+      } else if (!status || status === 'all') {
+        where.status = { not: PageStatus.archived };
+      }
+    }
+
+    if (search && search.trim()) {
+      where.title = { contains: search.trim(), mode: 'insensitive' };
+    }
+
     return this.prisma.page.findMany({
-      where: {
-        projectId: canonicalProjectId,
-        parentPageId: null,
-        deletedAt: null,
-      },
+      where,
       select: PAGE_LIST_SELECT,
       orderBy: [{ rank: 'asc' }, { updatedAt: 'desc' }],
     });

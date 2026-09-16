@@ -21,7 +21,7 @@ import { ProjectResponseDto } from '../core/dto/response.dto';
 @ApiTags('Project Archiving')
 @ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard)
-@Controller('api/v1/projects')
+@Controller(['api/v1/projects', 'api/projects'])
 export class ArchiveController {
   constructor(private readonly archiveService: ArchiveService) {}
 

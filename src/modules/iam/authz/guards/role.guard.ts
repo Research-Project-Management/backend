@@ -171,17 +171,56 @@ export class RoleGuard implements CanActivate {
         if (workItem?.projectId) resolvedProjectId = workItem.projectId;
       } else if (
         request.params?.commentId &&
-        isUUID(request.params.commentId) &&
-        prismaAny.workItemComment?.findUnique
+        isUUID(request.params.commentId)
       ) {
-        const comment = await Promise.resolve(
-          prismaAny.workItemComment.findUnique({
-            where: { id: request.params.commentId },
-            select: { workItem: { select: { projectId: true } } },
-          }),
-        ).catch(() => null);
-        if (comment?.workItem?.projectId)
-          resolvedProjectId = comment.workItem.projectId;
+        if (prismaAny.workItemComment?.findUnique) {
+          const comment = await Promise.resolve(
+            prismaAny.workItemComment.findUnique({
+              where: { id: request.params.commentId },
+              select: { workItem: { select: { projectId: true } } },
+            }),
+          ).catch(() => null);
+          if (comment?.workItem?.projectId) {
+            resolvedProjectId = comment.workItem.projectId;
+          }
+        }
+        if (!resolvedProjectId && prismaAny.pageComment?.findUnique) {
+          const pageComment = await Promise.resolve(
+            prismaAny.pageComment.findUnique({
+              where: { id: request.params.commentId },
+              select: { page: { select: { projectId: true } } },
+            }),
+          ).catch(() => null);
+          if (pageComment?.page?.projectId) {
+            resolvedProjectId = pageComment.page.projectId;
+          }
+        }
+      } else if (
+        request.params?.assetId &&
+        isUUID(request.params.assetId)
+      ) {
+        if (prismaAny.page?.findUnique) {
+          const page = await Promise.resolve(
+            prismaAny.page.findUnique({
+              where: { id: request.params.assetId },
+              select: { projectId: true },
+            }),
+          ).catch(() => null);
+          if (page?.projectId) {
+            resolvedProjectId = page.projectId;
+          }
+        }
+        if (!resolvedProjectId && prismaAny.file?.findUnique) {
+          const file = await Promise.resolve(
+            prismaAny.file.findUnique({
+              where: { id: request.params.assetId },
+              select: { linkedToId: true },
+            }),
+          ).catch(() => null);
+          if (file?.linkedToId) {
+            resolvedProjectId = file.linkedToId;
+          }
+        }
       } else if (
         request.params?.pageId &&
         isUUID(request.params.pageId) &&

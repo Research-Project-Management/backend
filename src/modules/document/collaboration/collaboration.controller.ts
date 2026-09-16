@@ -11,9 +11,10 @@ import {
   MessageEvent,
   Req,
 } from '@nestjs/common';
+import type { FastifyRequest } from 'fastify';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { Observable, fromEvent } from 'rxjs';
-import { filter, map } from 'rxjs/operators';
+import { filter, map, takeUntil } from 'rxjs/operators';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CollaborationService } from './collaboration.service';
 import { HeartbeatDto } from './dto/collaboration.dto';
@@ -40,16 +41,20 @@ export class CollaborationController {
   })
   streamCollaborationEvents(
     @Param('pageId') pageId: string,
+    @Req() req: FastifyRequest,
   ): Observable<MessageEvent> {
     if (!this.eventEmitter) {
       return new Observable<MessageEvent>();
     }
+
+    const disconnect$ = fromEvent(req.raw, 'close');
 
     return fromEvent(this.eventEmitter, 'document.collaboration.event').pipe(
       filter((event: any) => event?.pageId === pageId),
       map((event: any) => ({
         data: event,
       })),
+      takeUntil(disconnect$),
     );
   }
 

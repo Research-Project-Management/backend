@@ -6,6 +6,8 @@ export enum DocumentExportFormat {
   MARKDOWN = 'markdown',
   LATEX_SOURCE = 'latex-source',
   LATEX_BUNDLE = 'latex-bundle',
+  LATEX_SOURCE_UNDERSCORE = 'latex_source',
+  LATEX_BUNDLE_UNDERSCORE = 'latex_bundle',
 }
 
 export class ExportDocumentDto {

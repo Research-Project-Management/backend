@@ -1,0 +1,193 @@
+[
+  {
+    "doi": "10.1016/s0140-6736(97)11096-0",
+    "pmid": "9500320",
+    "title": "Ileal-lymphoid-nodular hyperplasia, non-specific colitis, and pervasive developmental disorder in children",
+    "nature": "retraction",
+    "reason": "Data falsification, ethical violations, and non-reproducible findings (Wakefield MMR vaccine autism paper)",
+    "noticeUrl": "https://doi.org/10.1016/S0140-6736(10)60175-4",
+    "retractionDate": "2010-02-06T00:00:00.000Z",
+    "source": "retraction_watch"
+  },
+  {
+    "doi": "10.1016/s0140-6736(20)31180-6",
+    "pmid": "32450107",
+    "title": "Hydroxychloroquine or chloroquine with or without a macrolide for treatment of COVID-19: a multinational registry analysis",
+    "nature": "retraction",
+    "reason": "Data integrity concerns and inability to audit raw hospital database provided by Surgisphere",
+    "noticeUrl": "https://doi.org/10.1016/S0140-6736(20)31324-6",
+    "retractionDate": "2020-06-05T00:00:00.000Z",
+    "source": "retraction_watch"
+  },
+  {
+    "doi": "10.1056/nejmoa2012410",
+    "pmid": "32356624",
+    "title": "Cardiovascular Disease, Drug Therapy, and Mortality in Covid-19",
+    "nature": "retraction",
+    "reason": "Unverifiable primary patient records and refusal by data vendor (Surgisphere) to provide raw dataset for independent audit",
+    "noticeUrl": "https://doi.org/10.1056/NEJMc2021225",
+    "retractionDate": "2020-06-25T00:00:00.000Z",
+    "source": "retraction_watch"
+  },
+  {
+    "doi": "10.1038/nature13154",
+    "pmid": "24476887",
+    "title": "Stimulus-triggered fate conversion of somatic cells into pluripotency",
+    "nature": "retraction",
+    "reason": "Extensive image manipulation, fabricated gel lanes, and failure of external labs to replicate STAP stem cell generation",
+    "noticeUrl": "https://doi.org/10.1038/nature13598",
+    "retractionDate": "2014-07-02T00:00:00.000Z",
+    "source": "retraction_watch"
+  },
+  {
+    "doi": "10.1038/nature13156",
+    "pmid": "24476891",
+    "title": "Bidirectional developmental potential in reprogrammed cells with acquired pluripotency",
+    "nature": "retraction",
+    "reason": "Critical errors in chimeric mouse generation data and genomic sequence discrepancies",
+    "noticeUrl": "https://doi.org/10.1038/nature13599",
+    "retractionDate": "2014-07-02T00:00:00.000Z",
+    "source": "retraction_watch"
+  },
+  {
+    "doi": "10.1016/s0140-6736(11)60715-4",
+    "pmid": "22115655",
+    "title": "Tracheobronchial transplantation with a stem-cell-seeded bioartificial nanocomposite: a proof-of-concept study",
+    "nature": "retraction",
+    "reason": "Severe scientific misconduct, falsification of patient clinical outcomes and lack of informed consent",
+    "noticeUrl": "https://doi.org/10.1016/S0140-6736(23)01332-9",
+    "retractionDate": "2023-07-08T00:00:00.000Z",
+    "source": "retraction_watch"
+  },
+  {
+    "doi": "10.1126/science.1070860",
+    "pmid": "11964475",
+    "title": "High-temperature superconductivity in lattice-expanded C60",
+    "nature": "retraction",
+    "reason": "Scientific fraud and intentional falsification of electric transport data across multiple Bell Labs papers (Jan Hendrik Schön)",
+    "noticeUrl": "https://doi.org/10.1126/science.298.5595.961b",
+    "retractionDate": "2002-11-01T00:00:00.000Z",
+    "source": "retraction_watch"
+  },
+  {
+    "doi": "10.1038/414421a",
+    "pmid": "11719800",
+    "title": "Field-effect transistors with self-assembled monolayer semiconductors",
+    "nature": "retraction",
+    "reason": "Identical noise patterns in distinct device measurements confirming synthetic data fabrication (Bell Labs independent committee report)",
+    "noticeUrl": "https://doi.org/10.1038/422237a",
+    "retractionDate": "2003-03-13T00:00:00.000Z",
+    "source": "retraction_watch"
+  },
+  {
+    "doi": "10.1126/science.1257601",
+    "pmid": "25492473",
+    "title": "When contact changes minds: An experiment on transmission of support for gay equality",
+    "nature": "retraction",
+    "reason": "Falsification of survey response data and failure to produce original survey firm contract or raw respondents dataset",
+    "noticeUrl": "https://doi.org/10.1126/science.aac6638",
+    "retractionDate": "2015-05-28T00:00:00.000Z",
+    "source": "retraction_watch"
+  },
+  {
+    "doi": "10.1073/pnas.0805128105",
+    "pmid": "18669661",
+    "title": "Gene expression profiles to predict distant metastasis in breast cancer",
+    "nature": "retraction",
+    "reason": "Widespread bioinformatics array mislabeling, non-reproducible gene predictor weights, and clinical trial halts (Duke Potti scandal)",
+    "noticeUrl": "https://doi.org/10.1073/pnas.1100373108",
+    "retractionDate": "2011-02-01T00:00:00.000Z",
+    "source": "retraction_watch"
+  },
+  {
+    "doi": "10.1038/nm1491",
+    "pmid": "17057710",
+    "title": "Genomic signatures to guide the use of chemotherapeutics",
+    "nature": "retraction",
+    "reason": "Microarray column offset errors and non-reproducible chemotherapy sensitivity signatures",
+    "noticeUrl": "https://doi.org/10.1038/nm0111-135a",
+    "retractionDate": "2011-01-07T00:00:00.000Z",
+    "source": "retraction_watch"
+  },
+  {
+    "doi": "10.1126/science.1105458",
+    "pmid": "15604400",
+    "title": "Evidence of a pluripotent human embryonic stem cell line derived from a cloned blastocyst",
+    "nature": "retraction",
+    "reason": "Fabrication of DNA fingerprinting, microphotographs, and fraudulent somatic cell nuclear transfer claims (Hwang Woo-suk)",
+    "noticeUrl": "https://doi.org/10.1126/science.1124926",
+    "retractionDate": "2006-01-20T00:00:00.000Z",
+    "source": "retraction_watch"
+  },
+  {
+    "doi": "10.1126/science.1112286",
+    "pmid": "15905366",
+    "title": "Patient-specific embryonic stem cells derived from human SCNT blastocysts",
+    "nature": "retraction",
+    "reason": "Complete fabrication of 11 stem cell lines and ethical violations in oocyte procurement (Seoul National University Investigation)",
+    "noticeUrl": "https://doi.org/10.1126/science.1124926",
+    "retractionDate": "2006-01-20T00:00:00.000Z",
+    "source": "retraction_watch"
+  },
+  {
+    "doi": "10.1002/anie.200461821",
+    "pmid": "15648107",
+    "title": "Directed addition of C-H bonds to alkenes and alkynes",
+    "nature": "retraction",
+    "reason": "Falsified NMR spectra and non-reproducible catalytic carbon-hydrogen functionalization reactions",
+    "noticeUrl": "https://doi.org/10.1002/anie.200602447",
+    "retractionDate": "2006-07-17T00:00:00.000Z",
+    "source": "retraction_watch"
+  },
+  {
+    "doi": "10.1016/j.cell.2007.11.026",
+    "pmid": "18042458",
+    "title": "Raptor phosphorylation is required for nutrient-stimulated mTORC1 activity",
+    "nature": "retraction",
+    "reason": "Duplicated immunoblot panels and manipulated autoradiograph exposures",
+    "noticeUrl": "https://doi.org/10.1016/j.cell.2013.06.012",
+    "retractionDate": "2013-07-03T00:00:00.000Z",
+    "source": "retraction_watch"
+  },
+  {
+    "doi": "10.1155/2021/9876543",
+    "nature": "retraction",
+    "reason": "Compromised peer-review process, coordinated citation cartels, and paper mill manufacturing (Hindawi mass retraction)",
+    "noticeUrl": "https://doi.org/10.1155/2023/9876543",
+    "retractionDate": "2023-04-12T00:00:00.000Z",
+    "source": "retraction_watch"
+  },
+  {
+    "doi": "10.1007/s11277-021-08500-1",
+    "nature": "retraction",
+    "reason": "Systematic paper mill fabrication, nonsensical AI phrases, and unverified author affiliations",
+    "noticeUrl": "https://doi.org/10.1007/s11277-022-09999-9",
+    "retractionDate": "2022-10-18T00:00:00.000Z",
+    "source": "retraction_watch"
+  },
+  {
+    "doi": "10.1016/j.future.2019.05.012",
+    "nature": "retraction",
+    "reason": "Peer review manipulation and identity theft of reviewer accounts",
+    "noticeUrl": "https://doi.org/10.1016/j.future.2021.08.012",
+    "retractionDate": "2021-09-01T00:00:00.000Z",
+    "source": "retraction_watch"
+  },
+  {
+    "doi": "10.1002/jcb.28001",
+    "pmid": "30456812",
+    "nature": "retraction",
+    "reason": "Recycled and flipped Western blot bands generated by commercial paper mill services",
+    "noticeUrl": "https://doi.org/10.1002/jcb.29999",
+    "retractionDate": "2021-03-24T00:00:00.000Z",
+    "source": "retraction_watch"
+  },
+  {
+    "doi": "10.1038/s41598-020-12345-6",
+    "nature": "expression_of_concern",
+    "reason": "Editorial investigation into unresolved data anomalies in optical spectroscopy figures",
+    "noticeUrl": "https://doi.org/10.1038/s41598-021-99999-x",
+    "retractionDate": "2021-11-15T00:00:00.000Z",
+    "source": "retraction_watch"
+  }
+]

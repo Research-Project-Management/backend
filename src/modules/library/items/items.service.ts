@@ -32,6 +32,7 @@ import { TagsService } from '../tags/tags.service';
 import { CollectionsService } from '../collections/collections.service';
 import { TypesService } from '../types/types.service';
 import { RagProvider } from '../search/providers/rag.provider';
+import { SemanticSearchService } from '../search/services/semantic-search.service';
 import { ItemsMapper } from './mappers/items.mapper';
 import { TypeConversionPreview, ConvertTypeOptions } from './types/items.types';
 import { ItemTransformer } from './transformers/item.transformer';
@@ -75,6 +76,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     private readonly rag: RagProvider,
     private readonly transformer: ItemTransformer,
     @Optional() private readonly grobid?: GrobidClient,
+    @Optional() private readonly semanticSearch?: SemanticSearchService,
   ) {}
 
   /**
@@ -382,6 +384,19 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       ragStatus: RagStatus.pending,
       ragLastAttemptAt: new Date(),
     });
+
+    let localIndexed = false;
+    // 1. In-process Local Semantic Vector Indexing (100% offline, Zero-API)
+    try {
+      if (this.semanticSearch) {
+        await this.semanticSearch.indexItem(item);
+        localIndexed = true;
+      }
+    } catch (err: any) {
+      this.logger.debug(`Local semantic indexing skipped: ${err?.message}`);
+    }
+
+    // 2. External Qdrant indexing if FLUX_AI_URL is available
     try {
       const result = await this.rag.indexPaper(item);
       await this.command.updateRagStatus(item.id, {
@@ -393,12 +408,24 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         `Paper ${item.id} successfully indexed into Qdrant (docId: ${result.docId})`,
       );
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Indexing failed';
-      await this.command.updateRagStatus(item.id, {
-        ragStatus: 'failed',
-        ragError: message,
-      });
-      this.logger.error(`Failed to index paper ${item.id}: ${message}`);
+      const message =
+        err instanceof Error ? err.message : 'External RAG unavailable';
+      if (localIndexed) {
+        // Local in-process vector search is ready, so mark as indexed!
+        await this.command.updateRagStatus(item.id, {
+          ragStatus: 'indexed',
+          ragIndexedAt: new Date(),
+        });
+        this.logger.log(
+          `Paper ${item.id} indexed into local vector store (external Qdrant offline).`,
+        );
+      } else {
+        await this.command.updateRagStatus(item.id, {
+          ragStatus: 'failed',
+          ragError: message,
+        });
+        this.logger.error(`Failed to index paper ${item.id}: ${message}`);
+      }
     }
   }
 

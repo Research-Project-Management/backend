@@ -16,6 +16,7 @@ import {
   cleanAbstractText,
 } from '../utils/metadata.utils';
 import { ProviderFetchError } from '../services/executor.service';
+import { getAcademicContactEmail } from '../../../core/constants/academic-client.constants';
 
 @Injectable()
 export class CrossRefProvider implements MetadataProvider {
@@ -30,11 +31,7 @@ export class CrossRefProvider implements MetadataProvider {
   private readonly logger = new Logger(CrossRefProvider.name);
 
   private get mailto(): string {
-    return (
-      process.env.CROSSREF_EMAIL ||
-      process.env.ACADEMIC_EMAIL ||
-      'contact@flux.academic'
-    );
+    return getAcademicContactEmail();
   }
 
   supports(queryType: QueryType): boolean {
@@ -109,12 +106,11 @@ export class CrossRefProvider implements MetadataProvider {
     const cleanTitle = title.trim();
     if (!cleanTitle) return null;
 
-    const url = `https://api.crossref.org/works?query.bibliographic=${encodeURIComponent(cleanTitle)}&rows=1&mailto=contact@flux.academic`;
+    const url = `https://api.crossref.org/works?query.bibliographic=${encodeURIComponent(cleanTitle)}&rows=1&mailto=${encodeURIComponent(this.mailto)}`;
 
     const response = await fetch(url, {
       headers: {
-        'User-Agent':
-          'FluxResearchPlatform/1.0 (mailto:contact@flux.academic; https://flux.study)',
+        'User-Agent': `FluxResearchPlatform/1.0 (mailto:${this.mailto}; https://flux.study)`,
         Accept: 'application/json',
       },
       signal,

@@ -85,6 +85,13 @@ export class UpdateWorkItemDto {
   parentWorkItemId?: string | null;
 
   @ApiPropertyOptional({
+    description: 'Parent work item ID (alias for parentWorkItemId)',
+  })
+  @IsString()
+  @IsOptional()
+  parentId?: string | null;
+
+  @ApiPropertyOptional({
     description: 'Labels associated with the work item',
     type: [String],
   })

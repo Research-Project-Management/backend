@@ -272,6 +272,18 @@ export interface IWorkItemRepository {
     authorId: string,
     attachments: any,
   ): Promise<void>;
+  syncAttachments(
+    workItemId: string,
+    projectId: string,
+    authorId?: string,
+    attachments?: any,
+  ): Promise<void>;
   countProjectWorkItems(projectId: string): Promise<number>;
   disconnectParentWorkItem(workItemId: string): Promise<WorkItemWithRelations>;
+  findWorkItemsByAssignee(
+    userId: string,
+    projectId?: string,
+    take?: number,
+    skip?: number,
+  ): Promise<WorkItemWithRelations[]>;
 }

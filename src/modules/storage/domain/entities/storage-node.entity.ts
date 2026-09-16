@@ -146,4 +146,30 @@ export class StorageNode {
     }
     this._updatedAt = new Date();
   }
+
+  public updateMetadata(metadata: Record<string, any>): void {
+    this._metadata = { ...this._metadata, ...metadata };
+    this._updatedAt = new Date();
+  }
+
+  public toJSON() {
+    return {
+      id: this.id,
+      name: this._name,
+      filename: this._name,
+      isFolder: this.isFolder,
+      size: Number(this._size),
+      mimeType: this._mimeType,
+      parentId: this._parentId,
+      parent: this._parentId,
+      starred: this._starred,
+      isStarred: this._starred,
+      metadata: this._metadata,
+      metaData: this._metadata,
+      authorId: this.authorId,
+      createdAt: this.createdAt,
+      updatedAt: this._updatedAt,
+      trashedAt: this._trashedAt,
+    };
+  }
 }

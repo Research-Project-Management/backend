@@ -26,6 +26,7 @@ import { LabelRepository } from '../label/label.repository';
 import { deriveProjectPrefix } from './utils/identifier.util';
 
 export const ALLOWED_PROJECT_MODULES = new Set([
+  'overview',
   'work_items',
   'work-items',
   'cycles',
@@ -35,14 +36,14 @@ export const ALLOWED_PROJECT_MODULES = new Set([
 
 export function sanitizeModules(modules?: string[]): string[] {
   if (!modules || !Array.isArray(modules) || modules.length === 0) {
-    return ['work_items', 'cycles', 'views', 'pages'];
+    return ['overview', 'work_items', 'cycles', 'views', 'pages'];
   }
   const filtered = modules
     .map((m) => String(m).trim().toLowerCase())
     .filter((m) => ALLOWED_PROJECT_MODULES.has(m));
   return filtered.length > 0
     ? filtered
-    : ['work_items', 'cycles', 'views', 'pages'];
+    : ['overview', 'work_items', 'cycles', 'views', 'pages'];
 }
 
 @Injectable()
@@ -355,6 +356,14 @@ export class CoreService {
         settings: dto.settings as any,
       }),
     });
+
+    if (dto.isFavorite !== undefined && actorId) {
+      if (dto.isFavorite) {
+        await this.favoriteRepo.addFavorite(projectId, actorId);
+      } else {
+        await this.favoriteRepo.removeFavorite(projectId, actorId);
+      }
+    }
 
     const memberIds = project.members?.map((m) => m.userId) || [];
     await this.invalidateProjectCache(projectId, memberIds);

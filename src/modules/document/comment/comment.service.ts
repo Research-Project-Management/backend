@@ -142,6 +142,20 @@ export class CommentService {
       throw new NotFoundException('Comment not found');
     }
 
+    const commentPage = (existing as any).page;
+    if (commentPage?.projectId) {
+      const member = await this.prisma.projectMember.findUnique({
+        where: {
+          projectId_userId: { projectId: commentPage.projectId, userId },
+        },
+      });
+      if (!member) {
+        throw new ForbiddenException(
+          'You do not have permission to reply to comments in this project',
+        );
+      }
+    }
+
     const cleanContent = sanitizeCommentContent(dto.content);
     if (!cleanContent) {
       throw new UnprocessableEntityException('Reply content cannot be empty');

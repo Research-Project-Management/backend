@@ -10,6 +10,7 @@ import { MemberModule } from './member/member.module';
 import { InvitationModule } from './invitation/invitation.module';
 import { LinkModule } from './link/link.module';
 import { OverviewModule } from './overview/overview.module';
+import { StatusUpdateModule } from './status-update/status-update.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { OverviewModule } from './overview/overview.module';
     InvitationModule,
     LinkModule,
     OverviewModule,
+    StatusUpdateModule,
   ],
   exports: [
     CoreModule,
@@ -37,6 +39,7 @@ import { OverviewModule } from './overview/overview.module';
     InvitationModule,
     LinkModule,
     OverviewModule,
+    StatusUpdateModule,
   ],
 })
 export class ProjectModule {}

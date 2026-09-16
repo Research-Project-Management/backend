@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Put,
+  Patch,
   Delete,
   Param,
   Query,
@@ -16,6 +17,7 @@ import {
   UpdateCommentDto,
   AddReplyDto,
 } from './dto/comment.dto';
+import { CommentStatus } from '@prisma/client';
 import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
 import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
 import { ProjectRoleGuard } from '@/modules/iam/authz/guards/role.guard';
@@ -66,6 +68,11 @@ export class CommentController {
     'pages/:pageId/comments/:commentId',
     'pages/comments/:commentId',
   ])
+  @Patch([
+    'comments/:commentId',
+    'pages/:pageId/comments/:commentId',
+    'pages/comments/:commentId',
+  ])
   @ProjectRoles('owner', 'contributor', 'commenter')
   @ApiOperation({ summary: 'Update a page comment' })
   async updateComment(
@@ -74,6 +81,23 @@ export class CommentController {
     @Body() dto: UpdateCommentDto,
   ) {
     return this.commentService.updateComment(commentId, userId, dto);
+  }
+
+  @Patch([
+    'comments/:commentId/resolve',
+    'pages/:pageId/comments/:commentId/resolve',
+    'pages/comments/:commentId/resolve',
+  ])
+  @ProjectRoles('owner', 'contributor', 'commenter')
+  @ApiOperation({ summary: 'Resolve or reopen a page comment' })
+  async resolveComment(
+    @Param('commentId') commentId: string,
+    @CurrentUser('id') userId: string,
+    @Body('resolved') resolved?: boolean,
+  ) {
+    return this.commentService.updateComment(commentId, userId, {
+      status: resolved ? CommentStatus.resolved : CommentStatus.open,
+    });
   }
 
   @Delete([
@@ -92,8 +116,11 @@ export class CommentController {
 
   @Post([
     'comments/:commentId/replies',
+    'comments/:commentId/reply',
     'pages/:pageId/comments/:commentId/replies',
+    'pages/:pageId/comments/:commentId/reply',
     'pages/comments/:commentId/replies',
+    'pages/comments/:commentId/reply',
   ])
   @ProjectRoles('owner', 'contributor', 'commenter')
   @ApiOperation({ summary: 'Reply to a page comment' })

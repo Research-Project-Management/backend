@@ -27,7 +27,7 @@ import { AssignProjectLabelsDto } from './dto/assign-label.dto';
 @ApiTags('Project Labels')
 @ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard)
-@Controller('api/v1')
+@Controller(['api/v1', 'api'])
 export class LabelController {
   constructor(private readonly labelService: LabelService) {}
 

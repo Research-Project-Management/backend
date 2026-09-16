@@ -145,6 +145,18 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
     return Number(result);
   }
 
+  async findSubtreeNodes(rootNodeId: string): Promise<StorageNode[]> {
+    const records = await this.prisma.$queryRaw<any[]>`
+      WITH RECURSIVE subtree AS (
+        SELECT * FROM files WHERE id = ${rootNodeId}::uuid
+        UNION ALL
+        SELECT f.* FROM files f JOIN subtree s ON f.parent_id = s.id
+      )
+      SELECT * FROM subtree;
+    `;
+    return records.map(StorageNodeMapper.toDomain);
+  }
+
   async findExpiredTrash(
     daysOld: number,
     limit: number,

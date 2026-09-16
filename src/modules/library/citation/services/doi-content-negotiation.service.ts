@@ -4,6 +4,7 @@ import {
   normalizeDoi,
   cleanBibliographicText,
 } from '../../items/utils/items.utils';
+import { getAcademicUserAgent } from '../../core/constants/academic-client.constants';
 
 export interface DoiCitationResult {
   styleId: string;
@@ -103,8 +104,7 @@ export class DoiContentNegotiationService {
         {
           headers: {
             Accept: acceptHeader,
-            'User-Agent':
-              'Flux-Academic-Research/1.0 (mailto:support@flux.study)',
+            'User-Agent': getAcademicUserAgent('Research'),
           },
           signal: controller.signal,
         },
@@ -203,8 +203,7 @@ export class DoiContentNegotiationService {
           headers: {
             Accept:
               'application/vnd.citationstyles.csl+json, application/citeproc+json, application/json',
-            'User-Agent':
-              'Flux-Academic-Research/1.0 (mailto:support@flux.study)',
+            'User-Agent': getAcademicUserAgent('Research'),
           },
           signal: controller.signal,
         },

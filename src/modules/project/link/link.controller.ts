@@ -23,7 +23,7 @@ import { UpdateProjectLinkDto } from './dto/update-link.dto';
 @ApiTags('Project Links')
 @ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard)
-@Controller('api/v1/projects')
+@Controller(['api/v1/projects', 'api/projects'])
 export class LinkController {
   constructor(private readonly linkService: LinkService) {}
 

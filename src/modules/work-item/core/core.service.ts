@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
   Optional,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -134,6 +135,28 @@ export class CoreService {
     return { workItems };
   }
 
+  async getUserWorkItems(userId: string, query?: QueryWorkItemDto) {
+    const limit = query?.limit ? Number(query.limit) : 50;
+    const offset =
+      query?.page && query?.limit ? (query.page - 1) * query.limit : 0;
+    const records = await this.workItemRepository.findWorkItemsByAssignee(
+      userId,
+      query?.projectId,
+      limit,
+      offset,
+    );
+    const allLabelIds = records.flatMap((r) => r.labels || []);
+    const projectId =
+      query?.projectId || (records[0]?.projectId as string | undefined);
+    const labelLookup = projectId
+      ? await this.buildLabelLookup(projectId, allLabelIds)
+      : new Map<string, { id: string; name: string; color: string }>();
+    const workItems = records
+      .map((r) => formatWorkItem(r, labelLookup))
+      .filter(Boolean);
+    return { workItems, data: workItems, total: workItems.length };
+  }
+
   async getWorkItemById(workItemId: string) {
     if (this.cache) {
       const cached = await this.cache.get<any>(
@@ -214,7 +237,7 @@ export class CoreService {
 
     const targetColumn = targetState
       ? targetState.id
-      : createWorkItemDto.columnId;
+      : createWorkItemDto.columnId || defaultState?.id || 'backlog';
     const isCompleted = targetState
       ? targetState.group === 'completed'
       : isStateCompleted(targetColumn || '');
@@ -227,7 +250,8 @@ export class CoreService {
       rawProject.id,
     );
 
-    const parentId = createWorkItemDto.parentWorkItemId;
+    const parentId =
+      createWorkItemDto.parentWorkItemId ?? createWorkItemDto.parentId;
     let validParentId: string | null = null;
     if (parentId && isUuid(parentId)) {
       const parentItem =
@@ -363,7 +387,10 @@ export class CoreService {
     const existing = await this.workItemRepository.findWorkItemById(workItemId);
     if (!existing) throw new NotFoundException('WorkItem not found');
 
-    const parentId = updateWorkItemDto.parentWorkItemId;
+    const parentId =
+      updateWorkItemDto.parentWorkItemId !== undefined
+        ? updateWorkItemDto.parentWorkItemId
+        : updateWorkItemDto.parentId;
 
     let targetIsCompleted: boolean | undefined;
     let targetColumnId: string | undefined;
@@ -491,6 +518,25 @@ export class CoreService {
           parent.projectId === existing.projectId &&
           parent.id !== workItemId
         ) {
+          // Guard against circular hierarchy (setting a descendant or cyclical ancestor as parent)
+          let curr: any = parent;
+          let isCycle = false;
+          const visited = new Set<string>([workItemId]);
+          while (curr && curr.parentWorkItemId) {
+            if (visited.has(curr.parentWorkItemId)) {
+              isCycle = true;
+              break;
+            }
+            visited.add(curr.parentWorkItemId);
+            curr = await this.workItemRepository.findWorkItemById(
+              curr.parentWorkItemId,
+            );
+          }
+          if (isCycle) {
+            throw new BadRequestException(
+              'Cannot set a descendant or cyclical ancestor as the parent work item',
+            );
+          }
           parentUpdate = { connect: { id: parent.id } };
         } else {
           parentUpdate = { disconnect: true };
@@ -555,6 +601,17 @@ export class CoreService {
         assigneeIds: validAssigneeIds,
       }),
     });
+
+    if (updateWorkItemDto.attachments !== undefined) {
+      if (typeof this.workItemRepository.syncAttachments === 'function') {
+        await this.workItemRepository.syncAttachments(
+          existing.id,
+          existing.projectId,
+          userId,
+          updateWorkItemDto.attachments,
+        );
+      }
+    }
 
     await this.invalidateWorkItemCache(
       existing.projectId,
@@ -764,6 +821,9 @@ export class CoreService {
     if (payload.dueDate !== undefined)
       data.dueDate = payload.dueDate ? new Date(payload.dueDate) : null;
 
+    if (payload.startDate !== undefined)
+      data.startDate = payload.startDate ? new Date(payload.startDate) : null;
+
     if (payload.clearLabels === true) {
       data.labels = [];
     } else if (payload.labels !== undefined && Array.isArray(payload.labels)) {
@@ -790,14 +850,26 @@ export class CoreService {
     bulkDeleteWorkItemDto: BulkDeleteWorkItemDto,
     userId?: string,
   ) {
+    let effectiveProjectId = projectId;
     const rawIds =
       bulkDeleteWorkItemDto.workItemIds || bulkDeleteWorkItemDto.ids || [];
+    if (!effectiveProjectId && rawIds.length > 0) {
+      const firstItem = await this.workItemRepository.findWorkItemById(
+        rawIds[0],
+      );
+      if (firstItem) {
+        effectiveProjectId = firstItem.projectId;
+      }
+    }
+    if (!effectiveProjectId) {
+      throw new BadRequestException('Project ID is required for bulk deletion');
+    }
     const result = await this.workItemRepository.bulkDeleteWorkItems(
-      projectId,
+      effectiveProjectId,
       rawIds,
     );
-    await this.invalidateWorkItemCache(projectId);
-    this.eventDispatcher.emitBulkDeleted(projectId, userId);
+    await this.invalidateWorkItemCache(effectiveProjectId);
+    this.eventDispatcher.emitBulkDeleted(effectiveProjectId, userId);
     return {
       message: `${result.count} work items deleted successfully`,
       count: result.count,

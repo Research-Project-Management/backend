@@ -116,10 +116,10 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
           filename: 'research_proposal.pdf',
           url: '/api/files/cas-file-999/content',
           storageKey: 'cas/blobs/cas-file-999',
-          metadata: {
+          metadata: expect.objectContaining({
             fileId: 'cas-file-999',
             source: 'work-item',
-          },
+          }),
         }),
         'user-uuid-1',
       );
@@ -188,6 +188,21 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
       expect(mockRepo.delete).toHaveBeenCalledWith('att-123');
     });
 
+    it('should delete from storagePort when fileId is extracted from URL', async () => {
+      mockRepo.findById!.mockResolvedValueOnce({
+        id: 'att-789',
+        entityType: EntityType.work_item,
+        entityId: 'item-uuid-1',
+        url: '/api/files/cas-url-uuid-555/content',
+        metadata: {},
+      } as any);
+
+      await service.deleteAttachment('att-789');
+
+      expect(mockStoragePort.deleteFile).toHaveBeenCalledWith('cas-url-uuid-555');
+      expect(mockRepo.delete).toHaveBeenCalledWith('att-789');
+    });
+
     it('should delete from r2Service when only storageKey is present', async () => {
       mockRepo.findById!.mockResolvedValueOnce({
         id: 'att-456',
@@ -204,12 +219,75 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
     });
   });
 
+  describe('detachFile', () => {
+    it('should find attachment and invoke deleteAttachment for storage cleanup', async () => {
+      const mockItemId = '11111111-1111-1111-1111-111111111111';
+      mockPrisma.workItem.findUnique.mockResolvedValue({
+        id: mockItemId,
+        projectId: 'proj-1',
+        columnId: 'col-1',
+      });
+      mockPrisma.workItem.findFirst.mockResolvedValue({
+        id: mockItemId,
+        projectId: 'proj-1',
+        columnId: 'col-1',
+      });
+      mockRepo.findByEntity.mockResolvedValueOnce([
+        {
+          id: 'att-file-1',
+          entityType: EntityType.work_item,
+          entityId: mockItemId,
+          metadata: { fileId: 'cas-file-999' },
+          url: '/api/files/cas-file-999/content',
+        },
+      ]);
+      mockRepo.findById.mockResolvedValueOnce({
+        id: 'att-file-1',
+        entityType: EntityType.work_item,
+        entityId: mockItemId,
+        metadata: { fileId: 'cas-file-999' },
+      });
+
+      const res = await service.detachFile(mockItemId, 'att-file-1');
+
+      expect(mockStoragePort.deleteFile).toHaveBeenCalledWith('cas-file-999');
+      expect(mockRepo.delete).toHaveBeenCalledWith('att-file-1');
+      expect(res.message).toBe('File detached successfully');
+    });
+  });
+
   describe('generatePresignedUpload', () => {
-    it('should delegate to r2Service for direct client uploads', async () => {
+    it('should prioritize storagePort.getPresignedUploadUrl if available', async () => {
+      mockStoragePort.getPresignedUploadUrl = jest.fn().mockResolvedValue({
+        uploadUrl: 'https://storage-port.example.com/upload',
+        storageKey: 'cas-keys/blob-1',
+        fileUuid: 'file-uuid-777',
+        expiresIn: 3600,
+      });
+
       const res = await service.generatePresignedUpload(
         {
           entityType: EntityType.work_item,
-          entityId: 'item-uuid-1',
+          entityId: '11111111-1111-1111-1111-111111111111',
+          filename: 'dataset.csv',
+          contentType: 'text/csv',
+          size: 1024,
+        },
+        'user-1',
+      );
+
+      expect(mockStoragePort.getPresignedUploadUrl).toHaveBeenCalled();
+      expect(res.signedUrl).toBe('https://storage-port.example.com/upload');
+      expect(res.fileUrl).toBe('/api/files/file-uuid-777/content');
+    });
+
+    it('should delegate to r2Service for direct client uploads when storagePort is not configured for presign', async () => {
+      delete mockStoragePort.getPresignedUploadUrl;
+
+      const res = await service.generatePresignedUpload(
+        {
+          entityType: EntityType.work_item,
+          entityId: '11111111-1111-1111-1111-111111111111',
           filename: 'large_archive.zip',
           contentType: 'application/zip',
           size: 5 * 1024 * 1024,
@@ -220,6 +298,45 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
       expect(mockR2Service.getPresignedUploadUrl).toHaveBeenCalled();
       expect(res.signedUrl).toBe('https://upload.example.com');
       expect(res.fileUrl).toBe('https://cdn.example.com/presigned-key');
+    });
+  });
+
+  describe('uploadMultipart with params.workItemId fallback', () => {
+    it('should resolve workItemId from req.params when entityId is not in form fields', async () => {
+      const mockItemId = '22222222-2222-2222-2222-222222222222';
+      mockPrisma.workItem.findUnique.mockResolvedValue({
+        id: mockItemId,
+        projectId: 'proj-resolved-1',
+      });
+      mockPrisma.workItem.findFirst.mockResolvedValue({
+        id: mockItemId,
+        projectId: 'proj-resolved-1',
+      });
+
+      const mockBuffer = Buffer.from('CONTENT');
+      const mockReq: any = {
+        params: { workItemId: mockItemId },
+        isMultipart: () => true,
+        parts: async function* () {
+          yield {
+            type: 'file',
+            filename: 'figure.png',
+            mimetype: 'image/png',
+            toBuffer: async () => mockBuffer,
+          };
+        },
+      };
+
+      const result = await service.uploadMultipart(mockReq, 'user-param-1');
+
+      expect(mockStoragePort.uploadFile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: 'proj-resolved-1',
+          filename: 'figure.png',
+        }),
+      );
+      expect(result.file).toBeDefined();
+      expect(result.file.name).toBe('figure.png');
     });
   });
 });

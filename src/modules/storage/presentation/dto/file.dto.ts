@@ -33,6 +33,36 @@ export class PresignDto {
   size?: number;
 }
 
+export class CompletePresignedDto {
+  @IsString()
+  @IsNotEmpty({ message: 'Storage key is required' })
+  storageKey!: string;
+
+  @IsString()
+  @IsNotEmpty({ message: 'Filename is required' })
+  filename!: string;
+
+  @IsNumber()
+  @IsOptional()
+  size?: number;
+
+  @IsNumber()
+  @IsOptional()
+  sizeBytes?: number;
+
+  @IsString()
+  @IsOptional()
+  mimeType?: string;
+
+  @IsString()
+  @IsOptional()
+  projectId?: string;
+
+  @IsString()
+  @IsOptional()
+  parentId?: string;
+}
+
 export class UploadFileDto {
   @IsString()
   @IsNotEmpty({ message: 'Filename is required' })

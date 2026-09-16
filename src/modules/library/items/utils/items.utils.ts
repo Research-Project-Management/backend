@@ -293,42 +293,29 @@ const HTML_ENTITY_MAP: Record<string, string> = {
   '&deg;': '°',
 };
 
+const HTML_ENTITY_REGEX = /&(?:([a-zA-Z]+)|#(\d+)|#x([0-9a-fA-F]+));/g;
+
 /**
  * Decodes named, decimal, and hexadecimal HTML/XML entities into UTF-8 text.
  */
 export function decodeHtmlEntities(text: string): string {
   if (!text || typeof text !== 'string') return '';
+  if (!text.includes('&')) return text;
 
-  let decoded = text;
-
-  // Replace named entities
-  for (const [entity, char] of Object.entries(HTML_ENTITY_MAP)) {
-    if (decoded.includes(entity)) {
-      decoded = decoded.replaceAll(entity, char);
+  return text.replace(HTML_ENTITY_REGEX, (match, named, dec, hex) => {
+    if (named) {
+      return HTML_ENTITY_MAP[`&${named};`] ?? match;
     }
-  }
-
-  // Replace decimal entities: &#123;
-  decoded = decoded.replace(/&#(\d+);/g, (_, dec) => {
-    try {
+    if (dec) {
       const code = parseInt(dec, 10);
       return Number.isFinite(code) && code > 0 ? String.fromCharCode(code) : '';
-    } catch {
-      return '';
     }
-  });
-
-  // Replace hex entities: &#x1f; or &#X1F;
-  decoded = decoded.replace(/&#x([0-9a-f]+);/gi, (_, hex) => {
-    try {
+    if (hex) {
       const code = parseInt(hex, 16);
       return Number.isFinite(code) && code > 0 ? String.fromCharCode(code) : '';
-    } catch {
-      return '';
     }
+    return match;
   });
-
-  return decoded;
 }
 
 /**

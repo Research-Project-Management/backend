@@ -128,12 +128,26 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     );
 
     try {
-      const fileId = attachment.fileId || attachment.file?.id;
+      const fileId =
+        attachment.fileId ||
+        attachment.file?.id ||
+        attachment.url?.match(
+          /\/api\/(?:v1\/(?:projects\/[^/]+\/)?library\/)?(?:attachments\/)?files\/([a-zA-Z0-9_-]+)/,
+        )?.[1];
 
       if (!fileId) {
         throw new AttachmentStorageException(
           `Could not resolve fileId for attachment ${attachmentId}`,
         );
+      }
+
+      if (!attachment.fileId) {
+        await this.prisma.attachment
+          .update({
+            where: { id: attachment.id },
+            data: { fileId },
+          })
+          .catch(() => {});
       }
 
       // 2. Storage-first reading via Storage Port

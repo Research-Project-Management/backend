@@ -166,6 +166,7 @@ describe('Storage Batch Operations & ZIP Packager Suite', () => {
         mockNodeRepo,
         mockBlobRepo,
         mockDriver,
+        { emit: jest.fn() } as any,
       );
     });
 

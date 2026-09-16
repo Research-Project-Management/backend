@@ -19,8 +19,9 @@ import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
 import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
 import { UploadDirectUseCase } from '../../application/use-cases/upload/upload-direct.use-case';
 import { PresignUploadUseCase } from '../../application/use-cases/upload/presign-upload.use-case';
+import { CompletePresignUseCase } from '../../application/use-cases/upload/complete-presign.use-case';
 import { MultipartUploadUseCase } from '../../application/use-cases/upload/multipart-upload.use-case';
-import { PresignDto } from '../dto/file.dto';
+import { PresignDto, CompletePresignedDto } from '../dto/file.dto';
 import {
   InitiateMultipartDto,
   CompleteMultipartDto,
@@ -40,6 +41,7 @@ export class UploadController {
   constructor(
     private readonly uploadDirectUseCase: UploadDirectUseCase,
     private readonly presignUploadUseCase: PresignUploadUseCase,
+    private readonly completePresignUseCase: CompletePresignUseCase,
     private readonly multipartUploadUseCase: MultipartUploadUseCase,
     @Inject(STORAGE_NODE_REPOSITORY)
     private readonly nodeRepo: IStorageNodeRepository,
@@ -55,6 +57,36 @@ export class UploadController {
       mimeType: dto.mimeType || dto.contentType || 'application/octet-stream',
       sizeBytes: dto.size || 10 * 1024 * 1024,
     });
+  }
+
+  @Post('presign/complete')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Register and finalize a direct presigned upload' })
+  async completePresigned(
+    @CurrentUser('id') userId: string,
+    @Body() dto: CompletePresignedDto,
+  ) {
+    const result = await this.completePresignUseCase.execute({
+      userId,
+      storageKey: dto.storageKey,
+      filename: dto.filename,
+      sizeBytes: dto.size ?? dto.sizeBytes,
+      mimeType: dto.mimeType,
+      projectId: dto.projectId,
+      parentId: dto.parentId,
+    });
+
+    return {
+      ...result,
+      id: result.fileId,
+      file: {
+        id: result.fileId,
+        filename: result.filename,
+        size: result.size,
+        mimeType: result.mimeType,
+        url: result.url,
+      },
+    };
   }
 
   @Post('upload')
@@ -119,9 +151,18 @@ export class UploadController {
     }
 
     const buffer = await data.toBuffer();
-    const filename = data.filename || 'uploaded-file';
-    const mimeType = data.mimetype || 'application/octet-stream';
     const fields = data.fields || {};
+    const fieldFilename =
+      (fields.fileName as any)?.value ||
+      (fields.filename as any)?.value ||
+      (fields.name as any)?.value;
+    const filename =
+      (data.filename && data.filename !== 'blob'
+        ? data.filename
+        : fieldFilename) ||
+      data.filename ||
+      'uploaded-file';
+    const mimeType = data.mimetype || 'application/octet-stream';
 
     const projectId = fields.projectId?.value;
     const parentId = fields.parentId?.value;
@@ -179,12 +220,21 @@ export class UploadController {
         throw new BadRequestException('No file uploaded');
       }
       const buffer = await data.toBuffer();
-      const filename = data.filename || 'uploaded-file';
-      const mimeType = data.mimetype || 'application/octet-stream';
       const fields = data.fields || {};
+      const fieldFilename =
+        (fields.fileName as any)?.value ||
+        (fields.filename as any)?.value ||
+        (fields.name as any)?.value;
+      const filename =
+        (data.filename && data.filename !== 'blob'
+          ? data.filename
+          : fieldFilename) ||
+        data.filename ||
+        'uploaded-file';
+      const mimeType = data.mimetype || 'application/octet-stream';
       const parentId = fields.parentId?.value;
 
-      return this.uploadDirectUseCase.execute({
+      const res = await this.uploadDirectUseCase.execute({
         userId,
         projectId: pageId,
         scope: FileScope.Page,
@@ -193,6 +243,18 @@ export class UploadController {
         mimeType,
         parentId,
       });
+
+      return {
+        ...res,
+        id: res.fileId,
+        file: {
+          id: res.fileId,
+          filename: res.filename,
+          size: res.size,
+          mimeType: res.mimeType,
+          url: res.url,
+        },
+      };
     }
 
     const filename = body?.filename || 'untitled-file';
@@ -204,7 +266,7 @@ export class UploadController {
       buffer = Buffer.from(base64Data, 'base64');
     }
 
-    return this.uploadDirectUseCase.execute({
+    const res = await this.uploadDirectUseCase.execute({
       userId,
       projectId: pageId,
       scope: FileScope.Page,
@@ -213,6 +275,18 @@ export class UploadController {
       mimeType,
       parentId: body?.parentId,
     });
+
+    return {
+      ...res,
+      id: res.fileId,
+      file: {
+        id: res.fileId,
+        filename: res.filename,
+        size: res.size,
+        mimeType: res.mimeType,
+        url: res.url,
+      },
+    };
   }
 
   // -------------------------
@@ -226,11 +300,17 @@ export class UploadController {
     @CurrentUser('id') userId: string,
     @Body() dto: InitiateMultipartDto,
   ) {
+    const totalSize = dto.totalSize ?? dto.sizeBytes ?? dto.size;
+    if (!totalSize || totalSize <= 0) {
+      throw new BadRequestException(
+        'Total file size is required and must be greater than 0',
+      );
+    }
     return this.multipartUploadUseCase.initiate({
       userId,
       filename: dto.filename,
       mimeType: dto.mimeType || 'application/octet-stream',
-      totalSize: dto.totalSize,
+      totalSize,
       projectId: dto.projectId,
       parentId: dto.parentId,
     });

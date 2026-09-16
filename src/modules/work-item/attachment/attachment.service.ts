@@ -72,6 +72,28 @@ export class AttachmentService {
     const storageKey = `attachments/${dto.entityType}/${dto.entityId}/${Date.now()}-${cleanName}`;
     const contentType = dto.contentType || 'application/octet-stream';
 
+    if (this.storagePort?.getPresignedUploadUrl) {
+      try {
+        const presigned = await this.storagePort.getPresignedUploadUrl({
+          userId,
+          filename: cleanName,
+          mimeType: contentType,
+          sizeBytes: dto.size || 0,
+        });
+        return {
+          signedUrl: presigned.uploadUrl,
+          storageKey: presigned.storageKey,
+          fileUrl: `/api/files/${presigned.fileUuid}/content`,
+          entityType: dto.entityType,
+          entityId: dto.entityId,
+        };
+      } catch (err: any) {
+        this.logger.warn(
+          `storagePort.getPresignedUploadUrl failed, falling back to r2Service: ${err?.message}`,
+        );
+      }
+    }
+
     if (this.r2Service?.getPresignedUploadUrl) {
       const presigned = await this.r2Service.getPresignedUploadUrl(
         storageKey,
@@ -123,16 +145,32 @@ export class AttachmentService {
     }
 
     const rawEntityType = fields.entityType || 'work_item';
-    const entityId = fields.entityId;
+    const entityId =
+      fields.entityId ||
+      (fastifyReq.params as any)?.workItemId ||
+      (fastifyReq.params as any)?.id;
     if (!entityId) {
       throw new BadRequestException(
-        'entityId is required in multipart form data',
+        'entityId is required in multipart form data or URL parameter',
       );
     }
 
     const entityType = rawEntityType as EntityType;
+    let resolvedEntityId = entityId;
+    let resolvedProjectId = fields.projectId;
+
+    if (entityType === EntityType.work_item) {
+      const workItem = await this.findWorkItem(entityId);
+      if (workItem) {
+        resolvedEntityId = workItem.id;
+        if (!resolvedProjectId && workItem.projectId) {
+          resolvedProjectId = workItem.projectId;
+        }
+      }
+    }
+
     const cleanName = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
-    const storageKey = `attachments/${entityType}/${entityId}/${Date.now()}-${cleanName}`;
+    const storageKey = `attachments/${entityType}/${resolvedEntityId}/${Date.now()}-${cleanName}`;
 
     let url = '';
     let finalKey = storageKey;
@@ -144,7 +182,7 @@ export class AttachmentService {
         filename,
         buffer,
         mimeType,
-        projectId: fields.projectId,
+        projectId: resolvedProjectId,
         source: 'work-item',
       });
       url = uploadRes.url;
@@ -165,16 +203,18 @@ export class AttachmentService {
     const attachment = await this.repository.create(
       {
         entityType,
-        entityId,
+        entityId: resolvedEntityId,
         filename,
         url,
         storageKey: finalKey,
         size: buffer.length,
         mimeType,
-        projectId: fields.projectId,
+        projectId: resolvedProjectId,
         metadata: {
           ...(fileId ? { fileId } : {}),
           source: 'work-item',
+          category: 'file',
+          name: filename,
         },
       },
       authorId,
@@ -183,11 +223,25 @@ export class AttachmentService {
     this.eventEmitter?.emit('attachment.created', {
       attachmentId: attachment.id,
       entityType,
-      entityId,
+      entityId: resolvedEntityId,
       authorId,
     });
 
-    return attachment;
+    return {
+      ...attachment,
+      id: attachment.id,
+      file: {
+        id: attachment.id,
+        name: filename,
+        filename,
+        url,
+        size: buffer.length,
+        type: mimeType,
+        mimeType,
+        fileId,
+        createdAt: attachment.createdAt,
+      },
+    };
   }
 
   /**
@@ -655,13 +709,32 @@ export class AttachmentService {
     };
   }
 
-  async detachFile(workItemId: string, fileId: string, _authorId?: string) {
+  async detachFile(workItemId: string, fileId: string, authorId?: string) {
     const workItem = await this.findWorkItem(workItemId);
     if (!workItem) {
       throw new NotFoundException(`Work item ${workItemId} not found`);
     }
 
-    await this.repository.delete(fileId);
+    const records = await this.repository.findByEntity(
+      EntityType.work_item,
+      workItem.id,
+    );
+    const target = records.find(
+      (r) =>
+        r.id === fileId ||
+        (r.metadata as any)?.fileId === fileId ||
+        (r.url && r.url.includes(fileId)),
+    );
+
+    if (target) {
+      await this.deleteAttachment(target.id, authorId);
+    } else {
+      try {
+        await this.repository.delete(fileId);
+      } catch {
+        // file may already have been removed
+      }
+    }
 
     const formattedWorkItem = await this.getFormattedWorkItem(workItem.id);
     return {
@@ -795,7 +868,9 @@ export class AttachmentService {
       throw new NotFoundException(`Attachment ${id} not found`);
     }
 
-    const fileId = (attachment.metadata as any)?.fileId;
+    const metaFileId = (attachment.metadata as any)?.fileId;
+    const urlMatch = attachment.url?.match(/\/api\/files\/([a-zA-Z0-9_-]+)/);
+    const fileId = metaFileId || (urlMatch ? urlMatch[1] : undefined);
     if (fileId && this.storagePort?.deleteFile) {
       try {
         await this.storagePort.deleteFile(fileId);

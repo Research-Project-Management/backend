@@ -1,11 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaClient, ProjectLink } from '@prisma/client';
+import { ProjectLink } from '@prisma/client';
+import { PrismaService } from '@/core/database/prisma.service';
 import { CreateProjectLinkDto } from './dto/create-link.dto';
 import { UpdateProjectLinkDto } from './dto/update-link.dto';
 
 @Injectable()
 export class LinkRepository {
-  constructor(private readonly prisma: PrismaClient) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async findMany(projectId: string): Promise<ProjectLink[]> {
     return this.prisma.projectLink.findMany({

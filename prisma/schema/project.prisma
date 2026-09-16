@@ -32,6 +32,12 @@ enum ProjectPriority {
   none        // Không xác định
 }
 
+enum ProjectUpdateStatus {
+  on_track    // Tiến triển đúng kế hoạch (On Track)
+  at_risk     // Có rủi ro / rào cản tiềm ẩn (At Risk)
+  off_track   // Chậm tiến độ nghiêm trọng (Off Track)
+}
+
 model Project {
   id             String                @id @default(uuid()) @db.Uuid
   name           String
@@ -53,7 +59,7 @@ model Project {
 
   createdById    String                @map("created_by_id") @db.Uuid
   createdBy      User                  @relation("ProjectCreator", fields: [createdById], references: [id], onDelete: Cascade)
-  modules        String[]              @default(["work_items", "cycles", "views", "pages"])
+  modules        String[]              @default(["overview", "work_items", "cycles", "views", "pages"])
   settings       Json?                 @default("{}")
 
   // Template liên kết (nếu được tạo từ Project Template)
@@ -85,6 +91,7 @@ model Project {
   aiChats        AiChat[]              @relation("ProjectAiChats")
   stickies       Sticky[]              @relation("ProjectStickies")
   links          ProjectLink[]
+  updates        ProjectUpdate[]
 
   // Academic Library Relations (Project Scope & Collaborative Repository)
   items                Item[]                @relation("ProjectItems")
@@ -196,7 +203,7 @@ model ProjectTemplate {
   createdBy        User      @relation("UserProjectTemplates", fields: [createdById], references: [id], onDelete: Cascade)
 
   // Cấu hình dự án mẫu (Features / Modules)
-  defaultModules   String[]  @default(["work_items", "cycles", "views", "pages"]) @map("default_modules")
+  defaultModules   String[]  @default(["overview", "work_items", "cycles", "views", "pages"]) @map("default_modules")
   settings         Json?     @default("{}")
 
   // Cấu hình khởi tạo khi sinh Project từ Template
@@ -226,4 +233,19 @@ model ProjectLink {
 
   @@index([projectId, createdAt])
   @@map("project_links")
+}
+
+model ProjectUpdate {
+  id          String              @id @default(uuid()) @db.Uuid
+  projectId   String              @map("project_id") @db.Uuid
+  project     Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  status      ProjectUpdateStatus @default(on_track)
+  message     String              @db.Text
+  createdById String              @map("created_by_id") @db.Uuid
+  createdBy   User                @relation("UserProjectUpdates", fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt   DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([projectId, createdAt(sort: Desc)])
+  @@map("project_updates")
 }

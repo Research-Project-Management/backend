@@ -192,20 +192,43 @@ export function validateMagicBytes(
     );
   }
 
-  // 6. SVG script tag inspection (XSS prevention)
+  // 6. SVG comprehensive script and event handler inspection (Stored XSS prevention)
   if (normalizedMime === 'image/svg+xml' || ext === '.svg') {
-    const head = buffer
-      .slice(0, Math.min(buffer.length, 4096))
+    // Scan up to 64KB or full buffer for embedded script tags, event handlers, or foreign objects
+    const scanWindow = buffer
+      .slice(0, Math.min(buffer.length, 65536))
       .toString('utf8');
     if (
-      /<script[\s>]/i.test(head) ||
-      /javascript:/i.test(head) ||
-      /onload[\s=]/i.test(head) ||
-      /onerror[\s=]/i.test(head)
+      /<script[\s>]/i.test(scanWindow) ||
+      /javascript:/i.test(scanWindow) ||
+      /data:text\/html/i.test(scanWindow) ||
+      /on\w+\s*=/i.test(scanWindow) ||
+      /<foreignObject[\s>]/i.test(scanWindow) ||
+      /<iframe[\s>]/i.test(scanWindow) ||
+      /<embed[\s>]/i.test(scanWindow) ||
+      /<object[\s>]/i.test(scanWindow)
     ) {
       throw new BadRequestException(
-        'Security violation: SVG contains potentially malicious script or event handler',
+        'Security violation: SVG contains potentially malicious active content (script, event handler, or foreignObject)',
       );
     }
   }
+}
+
+/**
+ * Detects MIME types that can contain executable scripts or active browser content,
+ * which must be forced to download as attachments or served with strict sandbox CSP
+ * to prevent Stored XSS attacks.
+ */
+export function isDangerousInlineMime(mimeType?: string): boolean {
+  if (!mimeType) return false;
+  const lower = mimeType.toLowerCase();
+  return (
+    lower.includes('svg') ||
+    lower.includes('html') ||
+    lower.includes('xml') ||
+    lower === 'application/xhtml+xml' ||
+    lower.includes('javascript') ||
+    lower.includes('ecmascript')
+  );
 }

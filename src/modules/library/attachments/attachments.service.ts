@@ -29,7 +29,15 @@ import type {
   DeleteSyncEntityCommand,
   UpsertSyncEntityResult,
 } from '../core/types/entity-commands.types';
-import { Inject } from '@nestjs/common';
+import { Inject, Optional } from '@nestjs/common';
+import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
+import {
+  STORAGE_DRIVER,
+  STORAGE_NODE_REPOSITORY,
+} from '@/modules/storage/storage.tokens';
+import { IStorageDriver } from '@/modules/storage/domain/ports/storage-driver.port';
+import { IStorageNodeRepository } from '@/modules/storage/domain/ports/storage-node.repository.port';
+import { PdfThumbnailService } from '@/modules/storage/application/services/pdf-thumbnail.service';
 
 import { calculateFileChecksum } from './utils/attachments.utils';
 
@@ -45,6 +53,17 @@ export class AttachmentsService {
     private readonly libraryTx: TransactionService,
     @Inject(ITEM_EXISTENCE_PORT)
     private readonly itemExistencePort: IItemExistencePort,
+    @Optional()
+    @Inject(STORAGE_PORT)
+    private readonly storagePort?: IStoragePort,
+    @Optional()
+    @Inject(STORAGE_DRIVER)
+    private readonly storageDriver?: IStorageDriver,
+    @Optional()
+    @Inject(STORAGE_NODE_REPOSITORY)
+    private readonly storageNodeRepo?: IStorageNodeRepository,
+    @Optional()
+    private readonly pdfThumbnailService?: PdfThumbnailService,
   ) {}
 
   /**
@@ -76,7 +95,9 @@ export class AttachmentsService {
 
     const resolvedFileId =
       input.fileId ||
-      input.url?.match(/\/api\/files\/([a-zA-Z0-9-]+)\/content/)?.[1] ||
+      input.url?.match(
+        /\/api\/(?:v1\/(?:projects\/[^/]+\/)?library\/)?files\/([a-zA-Z0-9_-]+)/,
+      )?.[1] ||
       null;
 
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
@@ -300,26 +321,46 @@ export class AttachmentsService {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
-    return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      await tx.attachment.delete({ where: { id: attachment.id } });
+    const targetFileId =
+      attachment.fileId ||
+      attachment.url?.match(
+        /\/api\/(?:v1\/(?:projects\/[^/]+\/)?library\/)?files\/([a-zA-Z0-9_-]+)/,
+      )?.[1];
 
-      await helpers.appendChange(userId, {
-        entityType: 'Attachment',
-        entityId: attachment.id,
-        action: 'delete',
-        version: 1,
-        data: { id: attachment.id },
-      });
+    const result = await this.libraryTx.executeInTransaction(
+      async (tx, helpers) => {
+        await tx.attachment.delete({ where: { id: attachment.id } });
 
-      await helpers.publishOutbox(
-        userId,
-        attachment.id,
-        'library.attachment.deleted',
-        { attachmentId: attachment.id },
-      );
+        await helpers.appendChange(userId, {
+          entityType: 'Attachment',
+          entityId: attachment.id,
+          action: 'delete',
+          version: 1,
+          data: { id: attachment.id },
+        });
 
-      return { success: true };
-    });
+        await helpers.publishOutbox(
+          userId,
+          attachment.id,
+          'library.attachment.deleted',
+          { attachmentId: attachment.id },
+        );
+
+        return { success: true };
+      },
+    );
+
+    if (targetFileId && this.storagePort?.deleteFile) {
+      try {
+        await this.storagePort.deleteFile(targetFileId);
+      } catch (err: any) {
+        this.logger.warn(
+          `Failed to delete storage file ${targetFileId} on attachment delete: ${err?.message}`,
+        );
+      }
+    }
+
+    return result;
   }
 
   /**
@@ -589,5 +630,130 @@ export class AttachmentsService {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
     return attachment;
+  }
+
+  /**
+   * Retrieves or on-the-fly generates a WebP thumbnail for a PDF attachment.
+   * Leverages 100% in-process Mozilla PDF.js + @napi-rs/canvas + sharp.
+   */
+  async getThumbnail(
+    userId: string,
+    attachmentId: string,
+    projectId?: string,
+  ): Promise<{ buffer: Buffer; mimeType: string }> {
+    const { attachment } = await this.getItemAttachment(
+      userId,
+      undefined,
+      attachmentId,
+      projectId,
+    );
+
+    if (!attachment) {
+      throw new NotFoundException(`Attachment ${attachmentId} not found`);
+    }
+
+    // 1. Check if cached thumbnail exists in storage driver
+    let blobId: string | null = null;
+    let storageNode: any = null;
+
+    if (attachment.fileId && this.storageNodeRepo) {
+      try {
+        storageNode = await this.storageNodeRepo.findById(attachment.fileId);
+        if (storageNode?.blobId) {
+          blobId = storageNode.blobId;
+        }
+      } catch (err: any) {
+        this.logger.debug(
+          `Could not resolve storage node for attachment ${attachmentId}: ${err?.message}`,
+        );
+      }
+    }
+
+    if (blobId && this.storageDriver) {
+      const thumbKey = `thumbnails/${blobId}.webp`;
+      try {
+        const exists = await this.storageDriver.exists(thumbKey);
+        if (exists) {
+          const { stream } = await this.storageDriver.getStream(thumbKey);
+          const chunks: Buffer[] = [];
+          for await (const chunk of stream) {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+          }
+          return {
+            buffer: Buffer.concat(chunks),
+            mimeType: 'image/webp',
+          };
+        }
+      } catch (err: any) {
+        this.logger.debug(
+          `Failed reading existing thumbnail from storage driver: ${err?.message}`,
+        );
+      }
+    }
+
+    // 2. Fetch the PDF binary buffer
+    let pdfBuffer: Buffer | null = null;
+    if (attachment.fileId && this.storagePort?.readOwnedFile) {
+      try {
+        const fileRecord = await this.storagePort.readOwnedFile({
+          fileId: attachment.fileId,
+          userId,
+        });
+        if (fileRecord?.buffer) {
+          pdfBuffer = fileRecord.buffer;
+        }
+      } catch (err: any) {
+        this.logger.debug(
+          `Failed to read owned file for thumbnail: ${err?.message}`,
+        );
+      }
+    }
+
+    if (!pdfBuffer) {
+      throw new NotFoundException(
+        `No PDF binary available for attachment ${attachmentId}`,
+      );
+    }
+
+    // 3. Generate thumbnail via PdfThumbnailService
+    if (!this.pdfThumbnailService) {
+      throw new NotFoundException('Thumbnail generator service is unavailable');
+    }
+
+    const thumbBuffer =
+      await this.pdfThumbnailService.generateThumbnail(pdfBuffer);
+    if (!thumbBuffer) {
+      throw new NotFoundException(
+        `Failed to generate thumbnail for attachment ${attachmentId}`,
+      );
+    }
+
+    // 4. Cache generated thumbnail in storage driver if blobId is known
+    if (blobId && this.storageDriver) {
+      const thumbKey = `thumbnails/${blobId}.webp`;
+      try {
+        await this.storageDriver.put(thumbKey, thumbBuffer, {
+          mimeType: 'image/webp',
+          size: thumbBuffer.length,
+        });
+        if (storageNode && this.storageNodeRepo) {
+          const currentMeta = storageNode.metadata || {};
+          storageNode.updateMetadata?.({
+            ...currentMeta,
+            thumbnail: `/api/files/r2/${encodeURIComponent(thumbKey)}`,
+          });
+          await this.storageNodeRepo.update(storageNode);
+        }
+      } catch (err: any) {
+        this.logger.warn(
+          `Could not persist generated thumbnail to driver: ${err?.message}`,
+        );
+      }
+    }
+
+    return {
+      buffer: thumbBuffer,
+      mimeType: 'image/webp',
+    };
   }
 }

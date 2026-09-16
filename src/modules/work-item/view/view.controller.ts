@@ -159,7 +159,7 @@ export class ViewController {
     @Req() request: any,
   ) {
     const userRole = request.projectMember?.role;
-    return this.viewService.favorite(projectId, viewId, userId, userRole);
+    return this.viewService.toggleFavorite(projectId, viewId, userId, userRole);
   }
 
   @Get('projects/:projectId/user-favorite-views')

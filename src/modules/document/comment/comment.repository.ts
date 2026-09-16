@@ -35,6 +35,7 @@ export class CommentRepository {
       where: { id: commentId },
       include: {
         author: { select: AUTHOR_SELECT },
+        page: { select: { id: true, projectId: true } },
       },
     });
   }

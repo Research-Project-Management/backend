@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -25,7 +26,7 @@ import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
 
 @ApiTags('Document - Core')
 @ApiBearerAuth('JWT-auth')
-@Controller('api')
+@Controller(['api/v1', 'api'])
 @UseGuards(JwtAuthGuard)
 export class CoreController {
   constructor(private readonly pageService: CoreService) {}
@@ -39,8 +40,12 @@ export class CoreController {
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'List all pages/documents in a project' })
-  async getProjectPages(@Param('projectId') projectId: string) {
-    return this.pageService.getProjectPages(projectId);
+  async getProjectPages(
+    @Param('projectId') projectId: string,
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.pageService.getProjectPages(projectId, status, search);
   }
 
   @Get([

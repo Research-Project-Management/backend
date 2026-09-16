@@ -11,7 +11,8 @@ export const DEFAULT_FILTERS = {
 };
 
 export const DEFAULT_DISPLAY_FILTERS = {
-  group_by: null,
+  group_by: 'state',
+  sub_group_by: 'none',
   order_by: '-created_at',
   type: null,
   sub_issue: true,

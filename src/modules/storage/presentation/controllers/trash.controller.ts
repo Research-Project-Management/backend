@@ -6,6 +6,7 @@ import {
   Delete,
   Param,
   Body,
+  Query,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -65,13 +66,36 @@ export class TrashController {
 
   @Get('trash')
   @ApiOperation({ summary: 'List files and folders currently in trash' })
-  async getTrash(@CurrentUser('id') userId: string) {
+  async getTrash(
+    @CurrentUser('id') userId: string,
+    @Query('limit') limit?: number,
+    @Query('offset') offset?: number,
+    @Query('page') page?: number,
+  ) {
+    const take = limit ? Number(limit) : 100;
+    const skip =
+      offset !== undefined
+        ? Number(offset)
+        : page
+          ? (Number(page) - 1) * take
+          : 0;
+    const currentPage = page ? Number(page) : Math.floor(skip / take) + 1;
+
     const result = await this.listDriveUseCase.execute({
       userId,
       trashedOnly: true,
+      limit: take,
+      offset: skip,
     });
     const files = (result.nodes || []).map((node) => this.mapNodeToDto(node));
-    return { files, items: files, total: result.total, nodes: result.nodes };
+    return {
+      files,
+      items: files,
+      total: result.total,
+      page: currentPage,
+      limit: take,
+      hasMore: skip + files.length < result.total,
+    };
   }
 
   @Post(':id/trash')

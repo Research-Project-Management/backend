@@ -56,7 +56,11 @@ export type PageWithDetails = Prisma.PageGetPayload<{
 }>;
 
 export interface IPageRepository {
-  findProjectPages(projectId: string): Promise<PageListItem[]>;
+  findProjectPages(
+    projectId: string,
+    status?: string,
+    search?: string,
+  ): Promise<PageListItem[]>;
   findProjectPageTree(projectId: string): Promise<PageListItem[]>;
   findPageById(pageId: string): Promise<PageWithDetails | null>;
   findPageBySlug(

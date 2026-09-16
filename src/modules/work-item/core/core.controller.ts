@@ -14,7 +14,9 @@ import {
   MessageEvent,
   Optional,
   BadRequestException,
+  Req,
 } from '@nestjs/common';
+import type { FastifyRequest } from 'fastify';
 import {
   ApiTags,
   ApiBearerAuth,
@@ -23,7 +25,7 @@ import {
 } from '@nestjs/swagger';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Observable, fromEvent, merge } from 'rxjs';
-import { map, filter } from 'rxjs/operators';
+import { map, filter, takeUntil } from 'rxjs/operators';
 import { CoreService } from './core.service';
 import { CreateWorkItemDto } from './dto/create.dto';
 import { UpdateWorkItemDto } from './dto/update.dto';
@@ -58,10 +60,13 @@ export class CoreController {
   })
   streamWorkItemEvents(
     @Param('projectId') projectId: string,
+    @Req() req: FastifyRequest,
   ): Observable<MessageEvent> {
     if (!this.eventEmitter) {
       return new Observable<MessageEvent>();
     }
+
+    const disconnect$ = fromEvent(req.raw, 'close');
 
     const created$ = fromEvent(this.eventEmitter, 'work-item.created');
     const updated$ = fromEvent(this.eventEmitter, 'work-item.updated');
@@ -123,7 +128,19 @@ export class CoreController {
       map((event: any) => ({
         data: event,
       })),
+      takeUntil(disconnect$),
     );
+  }
+
+  @Get('work-items')
+  @ApiOperation({
+    summary: 'Get current user work items across projects with optional filters',
+  })
+  async getUserWorkItems(
+    @CurrentUser('id') userId: string,
+    @Query() queryWorkItemDto: QueryWorkItemDto,
+  ) {
+    return this.workItemService.getUserWorkItems(userId, queryWorkItemDto);
   }
 
   @Get('projects/:projectId/work-items')
@@ -295,9 +312,6 @@ export class CoreController {
   ) {
     const effectiveProjectId =
       projectId || bulkDeleteWorkItemDto.projectId || '';
-    if (!effectiveProjectId) {
-      throw new BadRequestException('Project ID is required for bulk deletion');
-    }
     return this.workItemService.bulkDelete(
       effectiveProjectId,
       bulkDeleteWorkItemDto,

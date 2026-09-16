@@ -35,6 +35,11 @@ export class ForwardSyncDto {
   @IsString()
   @IsOptional()
   pageId?: string;
+
+  @ApiPropertyOptional({ description: 'Raw plaintext SyncTeX data from compilation' })
+  @IsString()
+  @IsOptional()
+  synctex?: string;
 }
 
 export class ReverseSyncDto {
@@ -44,6 +49,7 @@ export class ReverseSyncDto {
   page!: number;
 
   @ApiProperty({ description: 'X coordinate in points on the PDF page' })
+  @IsNumber()
   @IsNumber()
   x!: number;
 
@@ -60,6 +66,11 @@ export class ReverseSyncDto {
   @IsString()
   @IsOptional()
   pageId?: string;
+
+  @ApiPropertyOptional({ description: 'Raw plaintext SyncTeX data from compilation' })
+  @IsString()
+  @IsOptional()
+  synctex?: string;
 }
 
 export interface SyncPoint {
@@ -68,10 +79,12 @@ export interface SyncPoint {
   y: number;
   width?: number;
   height?: number;
+  precision?: 'ground_truth' | 'estimated';
 }
 
 export interface ReverseSyncPoint {
   file: string;
   line: number;
   column: number;
+  precision?: 'ground_truth' | 'estimated';
 }

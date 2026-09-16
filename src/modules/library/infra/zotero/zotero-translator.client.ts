@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { getAcademicUserAgent } from '../../core/constants/academic-client.constants';
 
 /**
  * Represents a single item returned by Zotero Translation Server.
@@ -73,7 +74,7 @@ export class ZoteroTranslatorClient {
   private get timeoutMs(): number {
     return parseInt(process.env.ZOTERO_TRANSLATOR_TIMEOUT_MS || '30000', 10);
   }
-  private readonly userAgent = 'FluxResearchPlatform/1.0 (contact@flux.app)';
+  private readonly userAgent = getAcademicUserAgent('Translator');
 
   /**
    * Translates a URL into structured Zotero/CSL-JSON metadata.

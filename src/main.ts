@@ -9,6 +9,7 @@ import {
   FastifyAdapter,
   NestFastifyApplication,
 } from '@nestjs/platform-fastify';
+import { IoAdapter } from '@nestjs/platform-socket.io';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from '@fastify/helmet';
@@ -25,19 +26,46 @@ import { TransformInterceptor } from './core/interceptors/transform.interceptor'
 import { IdempotencyInterceptor } from './core/idempotency/idempotency.interceptor';
 import { IdempotencyService } from './core/idempotency/idempotency.service';
 
+// Process-level safety nets to prevent unexpected crashes from background socket resets or async events
+const TRANSIENT_NETWORK_ERRORS = [
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'EPIPE',
+  'ERR_STREAM_DESTROYED',
+  'ERR_STREAM_WRITE_AFTER_END',
+  'ECONNABORTED',
+  'ETIMEDOUT',
+  'ECANCELED',
+];
+
+function isTransientNetworkError(err: unknown): boolean {
+  if (!err) return false;
+  const msg = err instanceof Error ? err.stack || err.message : String(err);
+  const code = (err as any)?.code;
+  return (
+    TRANSIENT_NETWORK_ERRORS.some((e) => code === e || msg?.includes(e)) ||
+    false
+  );
+}
+
+process.on('unhandledRejection', (reason: unknown) => {
+  if (isTransientNetworkError(reason)) {
+    console.warn('[Transient Socket Notice (unhandledRejection bypassed)]:', (reason as any)?.message || reason);
+    return;
+  }
+  console.error('[Unhandled Rejection]:', reason instanceof Error ? reason.stack : reason);
+});
+
+process.on('uncaughtException', (error: any) => {
+  if (isTransientNetworkError(error)) {
+    console.warn('[Transient Socket Notice (uncaughtException bypassed)]:', error?.message || error);
+    return;
+  }
+  console.error('[Uncaught Exception]:', error?.stack || error?.message || error);
+});
+
 async function bootstrap() {
   const logger = LoggerService.getInstance('Bootstrap');
-
-  // Process-level safety nets to prevent unexpected crashes from background promises or async events
-  process.on('unhandledRejection', (reason: unknown) => {
-    logger.error(
-      `[Unhandled Rejection]: ${reason instanceof Error ? reason.stack : String(reason)}`,
-    );
-  });
-
-  process.on('uncaughtException', (error: Error) => {
-    logger.error(`[Uncaught Exception]: ${error.stack || error.message}`);
-  });
 
   const maxProxyHops = process.env.TRUST_PROXY_HOPS
     ? parseInt(process.env.TRUST_PROXY_HOPS, 10)
@@ -59,6 +87,7 @@ async function bootstrap() {
     },
   );
   app.useLogger(logger);
+  app.useWebSocketAdapter(new IoAdapter(app));
 
   // Multipart file uploads (Cloudflare R2 / S3 streaming)
   await app.register(multipart, {
@@ -179,10 +208,7 @@ async function bootstrap() {
         return callback(null, true);
       }
 
-      return callback(
-        new Error(`CORS blocked for unauthorized origin: ${origin}`),
-        false,
-      );
+      return callback(null, false);
     },
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
     allowedHeaders: [
@@ -200,6 +226,10 @@ async function bootstrap() {
       'X-Total-Count',
       'Idempotent-Replay',
       'X-Idempotent-Key',
+      'ETag',
+      'Content-Length',
+      'Content-Disposition',
+      'Accept-Ranges',
     ],
     credentials: true,
   });
@@ -261,10 +291,28 @@ async function bootstrap() {
     },
   });
 
+  app.enableShutdownHooks();
+
   const port = Number(process.env.PORT) || 3000;
   const host = process.env.HOST || '0.0.0.0';
-  await app.listen(port, host);
-  logger.log(`🚀 NestJS + Fastify running on http://localhost:${port}`);
-  logger.log(`📚 Swagger Documentation ready at http://localhost:${port}/docs`);
+
+  try {
+    await app.listen(port, host);
+    logger.log(`🚀 NestJS + Fastify running on http://localhost:${port}`);
+    logger.log(`📚 Swagger Documentation ready at http://localhost:${port}/docs`);
+  } catch (err: any) {
+    if (err?.code === 'EADDRINUSE') {
+      logger.error(
+        `❌ Port ${port} is already in use by another process. Please terminate the lingering process or run: Get-NetTCPConnection -LocalPort ${port}`,
+      );
+    } else {
+      logger.error(`❌ Server failed to start on port ${port}: ${err?.message || err}`);
+    }
+    process.exit(1);
+  }
 }
-bootstrap();
+
+bootstrap().catch((err) => {
+  console.error('[Fatal Bootstrap Exception]:', err);
+  process.exit(1);
+});

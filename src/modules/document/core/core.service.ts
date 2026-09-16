@@ -29,12 +29,9 @@ export class CoreService {
 
   private async invalidatePageCache(projectId: string, pageId?: string) {
     if (!this.cache) return;
-    await Promise.all([
-      this.cache.del(DOCUMENT_REDIS_KEYS.projectTree(projectId)),
-      pageId
-        ? this.cache.del(DOCUMENT_REDIS_KEYS.page(pageId))
-        : Promise.resolve(),
-    ]);
+    const tasks = [this.cache.del(DOCUMENT_REDIS_KEYS.projectTree(projectId))];
+    if (pageId) tasks.push(this.cache.del(DOCUMENT_REDIS_KEYS.page(pageId)));
+    await Promise.all(tasks);
   }
 
   private async validateNoCircularParent(
@@ -74,8 +71,12 @@ export class CoreService {
     };
   }
 
-  async getProjectPages(projectId: string) {
-    const pages = await this.pageRepo.findProjectPages(projectId);
+  async getProjectPages(projectId: string, status?: string, search?: string) {
+    const pages = await this.pageRepo.findProjectPages(
+      projectId,
+      status,
+      search,
+    );
     return { pages: pages.map((pageRecord) => this.formatPage(pageRecord)) };
   }
 
@@ -264,29 +265,31 @@ export class CoreService {
           ? slugifyTitle(cleanTitle)
           : undefined;
 
-    const page = await this.pageRepo.updatePage(pageId, {
-      ...(cleanTitle !== undefined && { title: cleanTitle }),
-      ...(cleanSlug !== undefined && { slug: cleanSlug }),
-      ...(dto.icon !== undefined && { icon: dto.icon }),
-      ...(dto.coverImage !== undefined && { coverImage: dto.coverImage }),
-      ...(dto.rank !== undefined && { rank: dto.rank }),
-      ...(dto.labels !== undefined && { labels: dto.labels }),
-      ...(dto.isLocked !== undefined && { isLocked: dto.isLocked }),
-      ...(dto.isPublished !== undefined && { isPublished: dto.isPublished }),
-      ...(dto.content !== undefined && { content: dto.content }),
-      ...(dto.status !== undefined && { status: dto.status }),
-      ...(dto.mainFileId !== undefined && {
-        mainFile: dto.mainFileId
-          ? { connect: { id: dto.mainFileId } }
-          : { disconnect: true },
-      }),
-      ...(dto.pdfThumbnail !== undefined && { pdfThumbnail: dto.pdfThumbnail }),
-      ...(parentPageId !== undefined && {
-        parentPage: parentPageId
-          ? { connect: { id: parentPageId } }
-          : { disconnect: true },
-      }),
-    });
+    const updateData: Record<string, unknown> = {};
+    if (cleanTitle !== undefined) updateData.title = cleanTitle;
+    if (cleanSlug !== undefined) updateData.slug = cleanSlug;
+    if (dto.icon !== undefined) updateData.icon = dto.icon;
+    if (dto.coverImage !== undefined) updateData.coverImage = dto.coverImage;
+    if (dto.rank !== undefined) updateData.rank = dto.rank;
+    if (dto.labels !== undefined) updateData.labels = dto.labels;
+    if (dto.isLocked !== undefined) updateData.isLocked = dto.isLocked;
+    if (dto.isPublished !== undefined) updateData.isPublished = dto.isPublished;
+    if (dto.content !== undefined) updateData.content = dto.content;
+    if (dto.status !== undefined) updateData.status = dto.status;
+    if (dto.pdfThumbnail !== undefined) updateData.pdfThumbnail = dto.pdfThumbnail;
+
+    if (dto.mainFileId !== undefined) {
+      updateData.mainFile = dto.mainFileId
+        ? { connect: { id: dto.mainFileId } }
+        : { disconnect: true };
+    }
+    if (parentPageId !== undefined) {
+      updateData.parentPage = parentPageId
+        ? { connect: { id: parentPageId } }
+        : { disconnect: true };
+    }
+
+    const page = await this.pageRepo.updatePage(pageId, updateData as any);
 
     await this.invalidatePageCache(existing.projectId, pageId);
 
@@ -408,7 +411,8 @@ export class CoreService {
         },
         projectId,
       );
-      return { file: this.formatPage(res.node) };
+      const formatted = this.formatPage(res.node);
+      return { file: formatted, page: formatted };
     }
 
     const parent = await this.pageRepo.findPageById(pageId);
@@ -438,7 +442,8 @@ export class CoreService {
 
     await this.invalidatePageCache(parent.projectId, created.id);
 
-    return { file: this.formatPage(created) };
+    const formatted = this.formatPage(created);
+    return { file: formatted, page: formatted };
   }
 
   async setMainFile(pageId: string, mainFileId: string, projectId?: string) {

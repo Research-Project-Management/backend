@@ -51,6 +51,14 @@ export class HistoryService {
     return { versions };
   }
 
+  async getVersion(pageId: string, versionId: string) {
+    const version = await this.historyRepo.findVersionById(versionId);
+    if (!version || version.pageId !== pageId) {
+      throw new NotFoundException('Version not found');
+    }
+    return { version };
+  }
+
   async createVersion(pageId: string, userId: string, dto: CreateVersionDto) {
     const page = await this.pageService.findPageById(pageId);
 
@@ -110,7 +118,10 @@ export class HistoryService {
       content: parsedContent !== null ? parsedContent : undefined,
       title: version.title || undefined,
     });
-    const page = updateRes.page;
+    const page = updateRes?.page;
+    if (!page) {
+      throw new NotFoundException('Failed to restore page: page not found');
+    }
 
     // Invalidate both version cache and page/tree cache
     await Promise.all([
@@ -118,9 +129,21 @@ export class HistoryService {
       this.invalidatePageTreeCache(page?.projectId),
     ]);
 
+    const pageContentStr =
+      typeof page.content === 'string'
+        ? page.content
+        : JSON.stringify(page.content || '');
+
     return {
       message: 'Version restored successfully',
       page,
+      restored: [
+        {
+          pageId: page.id,
+          content: pageContentStr,
+          title: page.title,
+        },
+      ],
     };
   }
 

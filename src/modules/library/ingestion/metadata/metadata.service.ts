@@ -1,4 +1,5 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { PrismaService } from '@/core/database/prisma.service';
 import {
   METADATA_PROVIDERS,
   MetadataPort,
@@ -11,6 +12,7 @@ import {
   ProviderName,
   ProviderResult,
   ResolvedMetadata,
+  QueryType,
 } from './types/metadata.types';
 import { QueryClassifier } from './classifiers/query.classifier';
 import {
@@ -39,6 +41,7 @@ export class MetadataService implements MetadataPort {
     private readonly cache: MetadataCache,
     private readonly reconciler: ReconciliationService,
     private readonly executor: ExecutorService,
+    @Optional() private readonly prisma?: PrismaService,
   ) {
     for (const provider of providers) {
       this.providerMap.set(provider.id, provider);
@@ -119,6 +122,27 @@ export class MetadataService implements MetadataPort {
           durationMs: Date.now() - startedAt,
         });
         return { ...cached, cached: true };
+      }
+    }
+
+    // 4.5 Tier 3: Local Database Historical Resolution (0ms fallback if item already exists in local DB)
+    if (!request.forceRefresh && this.prisma) {
+      const localResolved = await this.resolveFromLocalDatabase(
+        classified.type,
+        classified.clean,
+        cleanQuery,
+        canonicalId,
+      );
+      if (localResolved) {
+        // Cache in L1/L2
+        await this.cache.set(cacheKey, localResolved, classified.type);
+        this.logResolution({
+          queryType: classified.type,
+          outcome: 'found',
+          cacheOutcome: 'local_db_hit',
+          durationMs: Date.now() - startedAt,
+        });
+        return { ...localResolved, cached: true };
       }
     }
 
@@ -361,5 +385,97 @@ export class MetadataService implements MetadataPort {
 
     const similarity = matches / qTokens.length;
     return similarity >= 0.5;
+  }
+
+  private async resolveFromLocalDatabase(
+    type: string,
+    cleanQuery: string,
+    rawQuery: string,
+    canonicalId: string,
+  ): Promise<ResolvedMetadata | null> {
+    if (!this.prisma) return null;
+
+    try {
+      let whereClause: any = null;
+      if (type === 'DOI') {
+        whereClause = { doi: cleanQuery, deletedAt: null };
+      } else if (type === 'ARXIV') {
+        whereClause = { arxivId: cleanQuery, deletedAt: null };
+      } else if (type === 'PMID') {
+        whereClause = { pmid: cleanQuery, deletedAt: null };
+      }
+
+      if (!whereClause) return null;
+
+      const item = await this.prisma.item.findFirst({
+        where: whereClause,
+        include: {
+          contributors: { orderBy: { orderIndex: 'asc' } },
+        },
+      });
+
+      if (!item || !item.title) return null;
+
+      const authors = item.contributors.map(
+        (c) => c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+      );
+      const creators = item.contributors.map((c) => ({
+        creatorType: (c.creatorType || 'author') as any,
+        fullName:
+          c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+        firstName: c.firstName || '',
+        lastName: c.lastName || '',
+      }));
+
+      const finalMetadata: ItemMetadata = {
+        title: item.title,
+        abstract: item.abstract || undefined,
+        authors: authors.length > 0 ? authors : undefined,
+        creators: creators.length > 0 ? creators : undefined,
+        year: item.year || undefined,
+        publicationDate: item.publicationDate || undefined,
+        journal: item.publicationTitle || undefined,
+        publisher: item.publisher || undefined,
+        volume: item.volume || undefined,
+        issue: item.issue || undefined,
+        pages: item.pages || undefined,
+        doi: item.doi || undefined,
+        arxivId: item.arxivId || undefined,
+        pmid: item.pmid || undefined,
+        isbn: item.isbn || undefined,
+        openAccessPdfUrl: item.openAccessPdfUrl || undefined,
+        provenance: {
+          originProvider: 'local_database' as any,
+          resolvedAt: new Date().toISOString(),
+          canonicalId,
+          confidenceScore: 0.95,
+          isOpenAccess: Boolean(item.openAccessPdfUrl),
+          openAccessPdfUrl: item.openAccessPdfUrl || undefined,
+        },
+      };
+
+      const fieldProvenance: Record<string, FieldProvenance> = {
+        title: {
+          provider: 'local_database' as any,
+          fetchedAt: item.createdAt.toISOString(),
+          identifier: canonicalId,
+          confidence: 0.95,
+        },
+      };
+
+      return {
+        query: rawQuery,
+        queryType: type as QueryType,
+        canonicalId,
+        metadata: finalMetadata,
+        provenance: fieldProvenance,
+        cached: true,
+        resolvedAt: new Date().toISOString(),
+        policyVersion: METADATA_POLICY_VERSION,
+      };
+    } catch (err: any) {
+      this.logger.debug(`Local DB resolution skipped: ${err?.message}`);
+      return null;
+    }
   }
 }

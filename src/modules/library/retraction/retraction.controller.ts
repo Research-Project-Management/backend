@@ -26,6 +26,18 @@ import {
 export class RetractionController {
   constructor(private readonly service: RetractionService) {}
 
+  @Get('database/stats')
+  @ProjectRoles('owner', 'contributor', 'viewer')
+  async getDatabaseStats() {
+    return this.service.getDatabaseStats();
+  }
+
+  @Post('database/seed')
+  @ProjectRoles('owner')
+  async seedDatabase(@Body('force') force?: boolean) {
+    return this.service.seedDatabase(Boolean(force));
+  }
+
   @Get('items')
   @ProjectRoles('owner', 'contributor', 'viewer')
   async getRetractedItems(

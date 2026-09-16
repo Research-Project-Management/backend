@@ -23,6 +23,7 @@ import { StorageRedisCacheService } from './infrastructure/cache/storage-redis-c
 import { StorageAccessPolicy } from './application/policies/storage-access.policy';
 import { UploadDirectUseCase } from './application/use-cases/upload/upload-direct.use-case';
 import { PresignUploadUseCase } from './application/use-cases/upload/presign-upload.use-case';
+import { CompletePresignUseCase } from './application/use-cases/upload/complete-presign.use-case';
 import { MultipartUploadUseCase } from './application/use-cases/upload/multipart-upload.use-case';
 import { ListDriveUseCase } from './application/use-cases/drive/list-drive.use-case';
 import { MoveNodeUseCase } from './application/use-cases/drive/move-node.use-case';
@@ -36,10 +37,14 @@ import { GetFileVersionsUseCase } from './application/use-cases/version/get-file
 import { DownloadFileVersionUseCase } from './application/use-cases/version/download-file-version.use-case';
 import { RevertFileVersionUseCase } from './application/use-cases/version/revert-file-version.use-case';
 
-// Application: Cron Jobs
+// Application: Cron Jobs & Lifecycle Management
 import { TrashRetentionJob } from './application/jobs/trash-retention.cron';
 import { MultipartCleanupJob } from './application/jobs/multipart-cleanup.cron';
 import { OrphanBlobJob } from './application/jobs/orphan-blob.cron';
+import { StorageLifecycleService } from './application/services/storage-lifecycle.service';
+import { StorageEventOutboxService } from './application/services/storage-event-outbox.service';
+import { StorageBackupService } from './application/services/storage-backup.service';
+import { PdfThumbnailService } from './application/services/pdf-thumbnail.service';
 
 // Presentation: Controllers
 import { DriveController } from './presentation/controllers/drive.controller';
@@ -53,8 +58,19 @@ import { VersionController } from './presentation/controllers/version.controller
 import { StorageFacade } from './storage.facade';
 import { R2Service } from './infrastructure/drivers/r2.service';
 
+// Asynchronous Worker & File Processing Pipeline (BullMQ)
+import { BullModule } from '@nestjs/bullmq';
+import { STORAGE_PROCESSING_QUEUE } from './application/queues/storage-queue.types';
+import { StorageQueueProducer } from './application/queues/storage-queue.producer';
+import { StorageQueueConsumer } from './application/queues/storage-queue.consumer';
+
 @Global()
 @Module({
+  imports: [
+    BullModule.registerQueue({
+      name: STORAGE_PROCESSING_QUEUE,
+    }),
+  ],
   controllers: [
     DriveController,
     UploadController,
@@ -101,6 +117,7 @@ import { R2Service } from './infrastructure/drivers/r2.service';
     // 4. Use Cases
     UploadDirectUseCase,
     PresignUploadUseCase,
+    CompletePresignUseCase,
     MultipartUploadUseCase,
     ListDriveUseCase,
     MoveNodeUseCase,
@@ -114,10 +131,14 @@ import { R2Service } from './infrastructure/drivers/r2.service';
     DownloadFileVersionUseCase,
     RevertFileVersionUseCase,
 
-    // 5. Background Jobs
+    // 5. Background Jobs, Lifecycle & Event Services
     TrashRetentionJob,
     MultipartCleanupJob,
     OrphanBlobJob,
+    StorageLifecycleService,
+    StorageEventOutboxService,
+    StorageBackupService,
+    PdfThumbnailService,
 
     // 6. Public Facade & Legacy Port
     StorageFacade,
@@ -125,6 +146,10 @@ import { R2Service } from './infrastructure/drivers/r2.service';
       provide: STORAGE_PORT,
       useExisting: StorageFacade,
     },
+
+    // 7. Background Queue Producer & Consumer
+    StorageQueueProducer,
+    StorageQueueConsumer,
   ],
   exports: [
     StorageFacade,
@@ -134,6 +159,11 @@ import { R2Service } from './infrastructure/drivers/r2.service';
     STORAGE_NODE_REPOSITORY,
     STORAGE_BLOB_REPOSITORY,
     STORAGE_VERSION_REPOSITORY,
+    StorageQueueProducer,
+    StorageLifecycleService,
+    StorageEventOutboxService,
+    StorageBackupService,
+    PdfThumbnailService,
   ],
 })
 export class StorageModule {}

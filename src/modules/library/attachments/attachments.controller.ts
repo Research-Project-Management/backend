@@ -52,10 +52,17 @@ export class AttachmentsController {
   async uploadLibraryFile(
     @CurrentUser('id') userId: string,
     @Req() req: FastifyRequest,
+    @Param('projectId') paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
     if (!this.storagePort?.uploadFile) {
       throw new BadRequestException('Storage service is unavailable');
     }
+
+    const effectiveProjectId =
+      (paramProjectId && paramProjectId !== 'user'
+        ? paramProjectId
+        : undefined) || queryProjectId;
 
     let buffer: Buffer | undefined;
     let filename = 'document.pdf';
@@ -78,6 +85,7 @@ export class AttachmentsController {
 
     const uploaded = await this.storagePort.uploadFile({
       userId,
+      projectId: effectiveProjectId,
       filename,
       buffer,
       mimeType,
@@ -86,8 +94,36 @@ export class AttachmentsController {
 
     return {
       success: true,
+      fileId: uploaded.fileId,
+      url: uploaded.url,
+      filename: uploaded.filename,
+      size: uploaded.size,
+      mimeType: uploaded.mimeType,
       data: uploaded,
     };
+  }
+
+  /**
+   * Generates a presigned upload URL for direct S3/R2 ingestion.
+   */
+  @Post(['attachments/presign', 'presign'])
+  @ProjectRoles('owner', 'contributor')
+  async presign(
+    @CurrentUser('id') userId: string,
+    @Body() dto: { filename: string; mimeType?: string; sizeBytes?: number },
+    @Param('projectId') paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
+  ) {
+    if (!this.storagePort?.getPresignedUploadUrl) {
+      throw new BadRequestException('Presigned upload unavailable');
+    }
+
+    return this.storagePort.getPresignedUploadUrl({
+      userId,
+      filename: dto.filename || 'document.pdf',
+      mimeType: dto.mimeType || 'application/pdf',
+      sizeBytes: dto.sizeBytes || 0,
+    });
   }
 
   /**
@@ -172,6 +208,35 @@ export class AttachmentsController {
     throw new NotFoundException(
       'No content stream available for this attachment',
     );
+  }
+
+  /**
+   * Stream / serve attachment thumbnail by attachment ID.
+   * Cached in browser for 24h (Cache-Control: public, max-age=86400).
+   */
+  @Get([
+    'attachments/:attachmentId/thumbnail',
+    'items/:itemId/attachments/:attachmentId/thumbnail',
+  ])
+  @ProjectRoles('owner', 'contributor', 'viewer')
+  async getAttachmentThumbnail(
+    @CurrentUser('id') userId: string,
+    @Param('attachmentId') attachmentId: string,
+    @Res() res: FastifyReply,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
+  ) {
+    const effectiveProjectId = paramProjectId || queryProjectId;
+    const thumbnail = await this.attachmentsService.getThumbnail(
+      userId,
+      attachmentId,
+      effectiveProjectId,
+    );
+
+    res.header('Content-Type', thumbnail.mimeType || 'image/webp');
+    res.header('Cache-Control', 'public, max-age=86400');
+    res.header('Content-Length', thumbnail.buffer.length);
+    return res.send(thumbnail.buffer);
   }
 
   @Get('items/:itemId/attachments')

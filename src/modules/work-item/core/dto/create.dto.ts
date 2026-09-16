@@ -36,13 +36,13 @@ export class CreateWorkItemDto {
   @IsOptional()
   description?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     description: 'Column ID on the project Kanban board',
     example: 'col-todo',
   })
   @IsString()
-  @IsNotEmpty({ message: 'Column ID is required' })
-  columnId!: string;
+  @IsOptional()
+  columnId?: string;
 
   @ApiPropertyOptional({ description: 'Assignee identifier or name' })
   @IsString()
@@ -106,6 +106,13 @@ export class CreateWorkItemDto {
   @IsString()
   @IsOptional()
   parentWorkItemId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Parent work item ID (alias for parentWorkItemId)',
+  })
+  @IsString()
+  @IsOptional()
+  parentId?: string;
 
   @ApiPropertyOptional({
     description: 'Labels associated with the work item',

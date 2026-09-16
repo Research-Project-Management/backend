@@ -48,6 +48,7 @@ async function main() {
     null as any,
     null as any,
     null as any,
+    grobidClient,
   );
 
   try {
@@ -95,6 +96,22 @@ ER  - `;
     console.log('\n--- 2. Testing GROBID Sidecar (:8070) & Fulltext Extraction ---');
     const grobidAlive = await grobidClient.isAlive();
     console.log(`GROBID Sidecar alive: ${grobidAlive ? '✅ YES' : '❌ NO'}`);
+
+    if (grobidAlive) {
+      // Test 2a: Process Raw Unformatted Citation List via CRF model
+      console.log('Testing GROBID processCitationList (Raw Text String Parsing)...');
+      const rawCitationsSample = `
+Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., Kaiser, L., & Polosukhin, I. (2017). Attention is all you need. Advances in neural information processing systems, 30.
+Devlin, J., Chang, M. W., Lee, K., & Toutanova, K. (2019). BERT: Pre-training of deep bidirectional transformers for language understanding. NAACL-HLT.
+`;
+      const parsedCitations = await itemsService.parseCitations(rawCitationsSample);
+      console.log(`✅ Parsed ${parsedCitations.length} citation(s) from raw unformatted text:`);
+      parsedCitations.forEach((c, idx) => {
+        console.log(`   [${idx + 1}] Title: "${c.title}"`);
+        console.log(`       Authors: ${c.authors?.join(', ')}`);
+        console.log(`       Venue: ${c.journal || ''} (${c.year || ''})`);
+      });
+    }
 
     // Let's test fulltext on Vaswani (Attention) and Devlin (BERT)
     const papersDir = 'c:/flux/zotero/papers';

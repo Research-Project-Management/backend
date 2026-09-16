@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaClient, CycleStatus } from '@prisma/client';
+import { CycleStatus } from '@prisma/client';
+import { PrismaService } from '@/core/database/prisma.service';
 
 @Injectable()
 export class OverviewRepository {
-  constructor(private readonly prisma: PrismaClient) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async getProjectMetadata(projectId: string) {
     return this.prisma.project.findUnique({
@@ -28,6 +29,8 @@ export class OverviewRepository {
         },
         members: {
           select: {
+            id: true,
+            role: true,
             user: {
               select: {
                 id: true,
@@ -181,6 +184,26 @@ export class OverviewRepository {
       },
       orderBy: { createdAt: 'desc' },
       take: limit,
+    });
+  }
+
+  async getLatestStatusUpdate(projectId: string) {
+    return this.prisma.projectUpdate.findFirst({
+      where: { projectId },
+      select: {
+        id: true,
+        status: true,
+        message: true,
+        createdAt: true,
+        createdBy: {
+          select: {
+            id: true,
+            name: true,
+            avatar: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
     });
   }
 }

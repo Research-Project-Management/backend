@@ -11,7 +11,7 @@ import { OverviewService } from './overview.service';
 @ApiTags('Project Overview')
 @ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard)
-@Controller('api/v1/projects')
+@Controller(['api/v1/projects', 'api/projects'])
 export class OverviewController {
   constructor(private readonly overviewService: OverviewService) {}
 

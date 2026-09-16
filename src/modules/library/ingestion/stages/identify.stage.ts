@@ -399,12 +399,13 @@ export class IdentifyStage {
         if (
           this.storagePort?.readOwnedFile &&
           this.pdf?.extractDocumentFromBuffer &&
-          payload.fileId &&
-          scopeId
+          payload.fileId
         ) {
           try {
             const fileRecord = await this.storagePort.readOwnedFile({
               fileId: payload.fileId,
+              projectId:
+                scopeId && scopeId !== 'user' ? scopeId : undefined,
             });
             if (fileRecord?.buffer) {
               fileBuffer = fileRecord.buffer;

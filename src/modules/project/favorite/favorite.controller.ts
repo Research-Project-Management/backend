@@ -19,7 +19,7 @@ import { FavoriteService } from './favorite.service';
 @ApiTags('Project Favorites')
 @ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard)
-@Controller('api/v1/projects')
+@Controller(['api/v1/projects', 'api/projects'])
 export class FavoriteController {
   constructor(private readonly favoriteService: FavoriteService) {}
 

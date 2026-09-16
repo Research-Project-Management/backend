@@ -45,6 +45,23 @@ describe('Document SynctexService (Code <-> PDF 2-Way Navigation)', () => {
       expect(res.success).toBe(true);
       expect(res.result?.page).toBe(3); // 120 / 50 = ceil(2.4) = 3
     });
+
+    it('should reject invalid line and column numbers', async () => {
+      await expect(
+        service.forwardSync({
+          file: 'main.tex',
+          line: 0,
+        }),
+      ).rejects.toThrow();
+
+      await expect(
+        service.forwardSync({
+          file: 'main.tex',
+          line: 10,
+          column: -5,
+        }),
+      ).rejects.toThrow();
+    });
   });
 
   describe('reverseSync', () => {
@@ -60,6 +77,24 @@ describe('Document SynctexService (Code <-> PDF 2-Way Navigation)', () => {
       expect(res.result).toBeDefined();
       expect(res.result?.file).toBe('main.tex');
       expect(res.result?.line).toBeGreaterThan(50); // page 2
+    });
+
+    it('should reject invalid page and negative coordinates', async () => {
+      await expect(
+        service.reverseSync({
+          page: 0,
+          x: 100,
+          y: 250,
+        }),
+      ).rejects.toThrow();
+
+      await expect(
+        service.reverseSync({
+          page: 1,
+          x: -10,
+          y: 250,
+        }),
+      ).rejects.toThrow();
     });
   });
 });

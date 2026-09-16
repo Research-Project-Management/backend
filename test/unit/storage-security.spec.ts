@@ -7,11 +7,14 @@ import {
   validateMagicBytes,
   isBlockedExtension,
   sanitizeFilename,
+  isDangerousInlineMime,
 } from '@/modules/storage/domain/value-objects/file-validator.util';
 import { R2Service } from '@/modules/storage/infrastructure/drivers/r2.service';
 import { StorageAccessPolicy } from '@/modules/storage/application/policies/storage-access.policy';
 import { StorageNode } from '@/modules/storage/domain/entities/storage-node.entity';
 import { FileScope } from '@/modules/storage/domain/value-objects/file-scope.vo';
+import { StreamController } from '@/modules/storage/presentation/controllers/stream.controller';
+import { FileDownloadedEvent } from '@/modules/storage/domain/events/file-downloaded.event';
 import { Readable } from 'stream';
 
 describe('Storage & File Security Suite', () => {
@@ -88,6 +91,62 @@ describe('Storage & File Security Suite', () => {
       expect(() => {
         validateMagicBytes(xssSvg, 'image/svg+xml', 'icon.svg');
       }).toThrow(BadRequestException);
+    });
+
+    it('should reject SVG containing active vectors like foreignObject, event handlers, and javascript: links', () => {
+      const foreignObjectSvg = Buffer.from(
+        '<svg><foreignObject width="100" height="50"><body><div>xss</div></body></foreignObject></svg>',
+      );
+      expect(() => {
+        validateMagicBytes(foreignObjectSvg, 'image/svg+xml', 'icon.svg');
+      }).toThrow(BadRequestException);
+
+      const onloadSvg = Buffer.from(
+        '<svg onload="alert(document.cookie)"><circle r="10"/></svg>',
+      );
+      expect(() => {
+        validateMagicBytes(onloadSvg, 'image/svg+xml', 'icon.svg');
+      }).toThrow(BadRequestException);
+
+      const jsLinkSvg = Buffer.from(
+        '<svg><a href="javascript:alert(1)"><text>click</text></a></svg>',
+      );
+      expect(() => {
+        validateMagicBytes(jsLinkSvg, 'image/svg+xml', 'icon.svg');
+      }).toThrow(BadRequestException);
+
+      const iframeSvg = Buffer.from(
+        '<svg><iframe src="https://attacker.com"></iframe></svg>',
+      );
+      expect(() => {
+        validateMagicBytes(iframeSvg, 'image/svg+xml', 'icon.svg');
+      }).toThrow(BadRequestException);
+    });
+
+    it('should accept clean and authentic SVG graphics without script vectors', () => {
+      const cleanSvg = Buffer.from(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><circle cx="50" cy="50" r="40" stroke="green" fill="yellow"/></svg>',
+      );
+      expect(() => {
+        validateMagicBytes(cleanSvg, 'image/svg+xml', 'diagram.svg');
+      }).not.toThrow();
+    });
+
+    it('should classify active and scriptable MIME types as dangerous inline MIME', () => {
+      expect(isDangerousInlineMime('image/svg+xml')).toBe(true);
+      expect(isDangerousInlineMime('text/html')).toBe(true);
+      expect(isDangerousInlineMime('text/xml')).toBe(true);
+      expect(isDangerousInlineMime('application/xhtml+xml')).toBe(true);
+      expect(isDangerousInlineMime('application/javascript')).toBe(true);
+      expect(isDangerousInlineMime('text/javascript')).toBe(true);
+
+      // Safe research MIME types
+      expect(isDangerousInlineMime('application/pdf')).toBe(false);
+      expect(isDangerousInlineMime('image/png')).toBe(false);
+      expect(isDangerousInlineMime('image/jpeg')).toBe(false);
+      expect(isDangerousInlineMime('text/csv')).toBe(false);
+      expect(isDangerousInlineMime('application/json')).toBe(false);
+      expect(isDangerousInlineMime(undefined)).toBe(false);
     });
   });
 
@@ -256,4 +315,139 @@ describe('Storage & File Security Suite', () => {
       expect(node.id).toBe(fileId);
     });
   });
+
+  describe('StreamController - Security Headers & Audit Logging', () => {
+    let controller: StreamController;
+    let mockStreamBinaryUseCase: any;
+    let mockR2Service: any;
+    let mockNodeRepo: any;
+    let mockBlobRepo: any;
+    let mockDriver: any;
+    let mockEventEmitter: any;
+
+    beforeEach(() => {
+      mockStreamBinaryUseCase = { execute: jest.fn() };
+      mockR2Service = { getObjectStream: jest.fn() };
+      mockNodeRepo = { findById: jest.fn(), list: jest.fn() };
+      mockBlobRepo = { findById: jest.fn() };
+      mockDriver = { getStream: jest.fn() };
+      mockEventEmitter = { emit: jest.fn() };
+
+      controller = new StreamController(
+        mockStreamBinaryUseCase,
+        mockR2Service,
+        mockNodeRepo,
+        mockBlobRepo,
+        mockDriver,
+        mockEventEmitter,
+      );
+    });
+
+    it('should force attachment and CSP sandbox for dangerous inline MIME types (SVG)', async () => {
+      mockStreamBinaryUseCase.execute.mockResolvedValue({
+        statusCode: 200,
+        mimeType: 'image/svg+xml',
+        contentLength: 512,
+        filename: 'vector.svg',
+        stream: Readable.from(['<svg></svg>']),
+      });
+
+      const headers: Record<string, string> = {};
+      const mockReq: any = {
+        url: '/api/files/test-svg-id/content',
+        headers: {},
+        query: {},
+        ip: '127.0.0.1',
+        user: { id: 'user-001' },
+      };
+      const mockRes: any = {
+        status: jest.fn().mockReturnThis(),
+        header: jest.fn((key: string, val: any) => {
+          headers[key] = val;
+          return mockRes;
+        }),
+        send: jest.fn(),
+      };
+
+      await controller.streamFile('test-svg-id', mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(200);
+      expect(headers['Content-Type']).toBe('image/svg+xml');
+      expect(headers['Content-Disposition']).toContain('attachment');
+      expect(headers['Content-Security-Policy']).toBe(
+        "default-src 'none'; sandbox",
+      );
+      expect(headers['X-Content-Type-Options']).toBe('nosniff');
+      expect(headers['X-Frame-Options']).toBe('SAMEORIGIN');
+
+      expect(mockEventEmitter.emit).toHaveBeenCalledWith(
+        'file.downloaded',
+        expect.any(FileDownloadedEvent),
+      );
+    });
+
+    it('should serve safe documents inline without sandbox CSP restriction', async () => {
+      mockStreamBinaryUseCase.execute.mockResolvedValue({
+        statusCode: 200,
+        mimeType: 'application/pdf',
+        contentLength: 2048,
+        filename: 'research_paper.pdf',
+        stream: Readable.from(['fake-pdf']),
+      });
+
+      const headers: Record<string, string> = {};
+      const mockReq: any = {
+        url: '/api/files/test-pdf-id/content',
+        headers: {},
+        query: {},
+        ip: '127.0.0.1',
+        user: { id: 'user-001' },
+      };
+      const mockRes: any = {
+        status: jest.fn().mockReturnThis(),
+        header: jest.fn((key: string, val: any) => {
+          headers[key] = val;
+          return mockRes;
+        }),
+        send: jest.fn(),
+      };
+
+      await controller.streamFile('test-pdf-id', mockReq, mockRes);
+
+      expect(headers['Content-Type']).toBe('application/pdf');
+      expect(headers['Content-Disposition']).toContain('inline');
+      expect(headers['Content-Security-Policy']).toBeUndefined();
+    });
+
+    it('should force attachment when user accesses /download endpoint', async () => {
+      mockStreamBinaryUseCase.execute.mockResolvedValue({
+        statusCode: 200,
+        mimeType: 'application/pdf',
+        contentLength: 2048,
+        filename: 'download_paper.pdf',
+        stream: Readable.from(['fake-pdf']),
+      });
+
+      const headers: Record<string, string> = {};
+      const mockReq: any = {
+        url: '/api/files/test-pdf-id/download',
+        headers: {},
+        query: {},
+        ip: '127.0.0.1',
+      };
+      const mockRes: any = {
+        status: jest.fn().mockReturnThis(),
+        header: jest.fn((key: string, val: any) => {
+          headers[key] = val;
+          return mockRes;
+        }),
+        send: jest.fn(),
+      };
+
+      await controller.streamFile('test-pdf-id', mockReq, mockRes);
+
+      expect(headers['Content-Disposition']).toContain('attachment');
+    });
+  });
 });
+

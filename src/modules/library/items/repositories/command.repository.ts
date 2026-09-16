@@ -3,6 +3,8 @@ import {
   NotFoundException,
   BadRequestException,
   Logger,
+  Inject,
+  Optional,
 } from '@nestjs/common';
 import { Prisma, RagStatus } from '@prisma/client';
 import { PrismaService } from '../../../../core/database/prisma.service';
@@ -21,7 +23,7 @@ import {
   cleanAbstractText,
   sanitizeItemTitle,
 } from '../utils/items.utils';
-import { getFileContentPath } from '@/modules/storage/storage.port';
+import { getFileContentPath, IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 import {
   ITEM_COLUMN_METADATA_FIELDS,
   TYPE_SPECIFIC_EXTRA_FIELDS,
@@ -299,7 +301,12 @@ async function syncTagsForCatalogItem(
 export class CommandRepository {
   private readonly logger = new Logger(CommandRepository.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional()
+    @Inject(STORAGE_PORT)
+    private readonly storagePort?: IStoragePort,
+  ) {}
 
   private getClient(tx?: Prisma.TransactionClient) {
     return tx ?? this.prisma;
@@ -1114,6 +1121,28 @@ export class CommandRepository {
       throw new BadRequestException(
         `Item ${id} must be in trash before it can be permanently purged`,
       );
+    }
+
+    const attachments = await client.attachment.findMany({
+      where: { itemId: id },
+      select: { id: true, fileId: true, url: true },
+    });
+
+    for (const att of attachments) {
+      const fileId =
+        att.fileId ||
+        att.url?.match(
+          /\/api\/(?:v1\/(?:projects\/[^/]+\/)?library\/)?(?:attachments\/)?files\/([a-zA-Z0-9_-]+)/,
+        )?.[1];
+      if (fileId && this.storagePort?.deleteFile) {
+        try {
+          await this.storagePort.deleteFile(fileId);
+        } catch (err: any) {
+          this.logger.warn(
+            `Failed to delete storage file ${fileId} during item purge: ${err?.message}`,
+          );
+        }
+      }
     }
 
     await client.item.delete({

@@ -51,15 +51,25 @@ export class AssetController {
   }
 
   @Get(['assets/:assetId', 'projects/:projectId/assets/:assetId'])
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
   @ApiOperation({ summary: 'Get binary data and metadata of a specific asset' })
-  async getAsset(@Param('assetId') assetId: string) {
-    return this.assetService.getAsset(assetId);
+  async getAsset(
+    @Param('assetId') assetId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.assetService.getAsset(assetId, userId);
   }
 
   @Delete(['assets/:assetId', 'projects/:projectId/assets/:assetId'])
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete a document asset' })
-  async deleteAsset(@Param('assetId') assetId: string) {
-    return this.assetService.deleteAsset(assetId);
+  async deleteAsset(
+    @Param('assetId') assetId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.assetService.deleteAsset(assetId, userId);
   }
 }

@@ -83,15 +83,35 @@ export class DriveController {
     @Query('parentId') parentId?: string,
     @Query('limit') limit?: number,
     @Query('offset') offset?: number,
+    @Query('page') page?: number,
   ) {
+    const take = limit ? Number(limit) : 100;
+    const skip =
+      offset !== undefined
+        ? Number(offset)
+        : page
+          ? (Number(page) - 1) * take
+          : 0;
+    const currentPage = page ? Number(page) : Math.floor(skip / take) + 1;
+
     const result = await this.listDriveUseCase.execute({
       userId,
-      parentId: parentId || null,
-      limit: limit ? Number(limit) : 100,
-      offset: offset ? Number(offset) : 0,
+      parentId:
+        !parentId || parentId === 'null' || parentId === 'root'
+          ? null
+          : parentId,
+      limit: take,
+      offset: skip,
     });
     const files = (result.nodes || []).map((node) => this.mapNodeToDto(node));
-    return { files, items: files, total: result.total, nodes: result.nodes };
+    return {
+      files,
+      items: files,
+      total: result.total,
+      page: currentPage,
+      limit: take,
+      hasMore: skip + files.length < result.total,
+    };
   }
 
   @Get(['shared', 'me/shared'])
@@ -104,6 +124,7 @@ export class DriveController {
       page: 1,
       limit: 100,
       totalPages: 0,
+      hasMore: false,
     };
   }
 
@@ -131,31 +152,71 @@ export class DriveController {
     @Query('parentId') parentId?: string,
     @Query('limit') limit?: number,
     @Query('offset') offset?: number,
+    @Query('page') page?: number,
   ) {
+    const take = limit ? Number(limit) : 100;
+    const skip =
+      offset !== undefined
+        ? Number(offset)
+        : page
+          ? (Number(page) - 1) * take
+          : 0;
+    const currentPage = page ? Number(page) : Math.floor(skip / take) + 1;
+
     const result = await this.listDriveUseCase.execute({
       scope: FileScope.Page,
       projectId: pageId,
       parentId: parentId || null,
-      limit: limit ? Number(limit) : 100,
-      offset: offset ? Number(offset) : 0,
+      limit: take,
+      offset: skip,
     });
     const files = (result.nodes || []).map((node: StorageNode) =>
       this.mapNodeToDto(node),
     );
-    return { files, items: files, total: result.total };
+    return {
+      files,
+      items: files,
+      total: result.total,
+      page: currentPage,
+      limit: take,
+      hasMore: skip + files.length < result.total,
+    };
   }
 
   @Get('starred')
   @ApiOperation({ summary: 'Get starred files' })
-  async getStarredFiles(@CurrentUser('id') userId: string) {
+  async getStarredFiles(
+    @CurrentUser('id') userId: string,
+    @Query('limit') limit?: number,
+    @Query('offset') offset?: number,
+    @Query('page') page?: number,
+  ) {
+    const take = limit ? Number(limit) : 100;
+    const skip =
+      offset !== undefined
+        ? Number(offset)
+        : page
+          ? (Number(page) - 1) * take
+          : 0;
+    const currentPage = page ? Number(page) : Math.floor(skip / take) + 1;
+
     const result = await this.listDriveUseCase.execute({
       userId,
       starredOnly: true,
+      limit: take,
+      offset: skip,
     });
     const files = (result.nodes || []).map((node: StorageNode) =>
       this.mapNodeToDto(node),
     );
-    return { files, items: files, total: result.total };
+    return {
+      files,
+      items: files,
+      total: result.total,
+      page: currentPage,
+      limit: take,
+      hasMore: skip + files.length < result.total,
+    };
   }
 
   @Get(':id')
@@ -197,7 +258,8 @@ export class DriveController {
       parentId: dto.parentId || null,
       authorId: userId,
     });
-    return this.nodeRepo.create(folder);
+    const created = await this.nodeRepo.create(folder);
+    return this.mapNodeToDto(created);
   }
 
   @Post([
@@ -226,18 +288,7 @@ export class DriveController {
       metadata: pageId ? { pageId } : {},
     });
     const created = await this.nodeRepo.create(folder);
-    return {
-      id: created.id,
-      filename: created.name,
-      name: created.name,
-      isFolder: true,
-      parentId: created.parentId,
-      size: 0,
-      mimeType: created.mimeType,
-      url: `/api/files/${encodeURIComponent(created.id)}/content`,
-      createdAt: created.createdAt,
-      updatedAt: created.updatedAt,
-    };
+    return this.mapNodeToDto(created);
   }
 
   @Post('move')
@@ -246,7 +297,11 @@ export class DriveController {
   async moveNode(@Body() dto: MoveFileDto & { fileId?: string; id?: string }) {
     const targetId = dto.fileId || dto.id;
     if (!targetId) throw new NotFoundException('fileId is required');
-    return this.moveNodeUseCase.execute(targetId, dto.parentId || null);
+    const updated = await this.moveNodeUseCase.execute(
+      targetId,
+      dto.parentId || null,
+    );
+    return this.mapNodeToDto(updated);
   }
 
   @Put(':id/move')
@@ -258,7 +313,8 @@ export class DriveController {
   ) {
     const targetFolderId =
       dto.parentId !== undefined ? dto.parentId : (dto.targetFolderId ?? null);
-    return this.moveNodeUseCase.execute(id, targetFolderId);
+    const updated = await this.moveNodeUseCase.execute(id, targetFolderId);
+    return this.mapNodeToDto(updated);
   }
 
   @Put(':id/rename')
@@ -272,7 +328,8 @@ export class DriveController {
     const newName = dto.name || dto.filename;
     if (!newName) throw new NotFoundException('New name is required');
     node.rename(newName);
-    return this.nodeRepo.update(node);
+    const updated = await this.nodeRepo.update(node);
+    return this.mapNodeToDto(updated);
   }
 
   @Put(':id')

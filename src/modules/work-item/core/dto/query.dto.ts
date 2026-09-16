@@ -36,6 +36,11 @@ const toArrayOrString = ({
 };
 
 export class QueryWorkItemDto {
+  @ApiPropertyOptional({ description: 'Filter by project ID' })
+  @IsOptional()
+  @IsString()
+  projectId?: string;
+
   @ApiPropertyOptional({ description: 'Filter by cycle ID(s)' })
   @IsOptional()
   @Transform(toArrayOrString)

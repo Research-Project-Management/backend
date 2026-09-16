@@ -25,7 +25,7 @@ import { AssetService } from '../asset/asset.service';
 import { PrismaService } from '@/core/database/prisma.service';
 import { VersionEventType } from '@prisma/client';
 import * as crypto from 'crypto';
-import { ensureCompilableLatex } from '../core/utils/document.utils';
+import { ensureCompilableLatex, validateSafePath } from '../core/utils/document.utils';
 
 export interface CompilerDiagnostic {
   file: string;
@@ -90,6 +90,20 @@ function extractCitationKeys(text: string): string[] {
     }
   }
   return Array.from(foundKeys);
+}
+
+function toContentString(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (content && typeof content === 'object') {
+    const obj = content as Record<string, unknown>;
+    return (
+      (obj.source as string) ||
+      (obj.text as string) ||
+      (obj.content as string) ||
+      JSON.stringify(content)
+    );
+  }
+  return '';
 }
 
 @Injectable()
@@ -229,8 +243,22 @@ export class CompilerService {
   }
 
   async compile(dto: CompileLatexDto, userId?: string): Promise<CompileResult> {
-    const pageId = dto.page_id || dto.pageId;
-    const projectId = dto.project_id || dto.projectId;
+    let pageId = dto.page_id || dto.pageId;
+    let projectId = dto.project_id || dto.projectId;
+
+    // Resilient fallback: if projectId points to a Page record, resolve actual projectId & pageId
+    if (projectId && (!pageId || pageId === projectId)) {
+      if (this.prisma?.page) {
+        const potentialPage = await this.prisma.page.findUnique({
+          where: { id: projectId },
+          select: { id: true, projectId: true },
+        });
+        if (potentialPage) {
+          pageId = potentialPage.id;
+          projectId = potentialPage.projectId;
+        }
+      }
+    }
 
     if (userId) {
       if (pageId) {
@@ -261,20 +289,21 @@ export class CompilerService {
     const files: Record<string, string> = { ...(dto.files || {}) };
     let documentTitle = 'Flux Document';
 
+    try {
+      validateSafePath(mainFile, 'Main file');
+      for (const fileKey of Object.keys(files)) {
+        validateSafePath(fileKey, 'File key');
+      }
+    } catch (err: any) {
+      throw new BadRequestException(err.message);
+    }
+
     // Server-Authoritative Multi-file Document Assembly
     if (pageId && (!source || Object.keys(files).length === 0)) {
       const rootPage = await this.pageService.findPageById(pageId);
       if (rootPage) {
         documentTitle = rootPage.title;
-        const rawRootContent = rootPage.content;
-        const rootContentStr =
-          typeof rawRootContent === 'string'
-            ? rawRootContent
-            : rawRootContent && typeof rawRootContent === 'object'
-              ? (rawRootContent as any).source ||
-                (rawRootContent as any).text ||
-                JSON.stringify(rawRootContent)
-              : '';
+        const rootContentStr = toContentString(rootPage.content);
 
         if (!source) {
           source = rootContentStr;
@@ -282,15 +311,7 @@ export class CompilerService {
 
         const childPages = rootPage.childPages || [];
         for (const child of childPages) {
-          const childRaw = child.content;
-          const childStr =
-            typeof childRaw === 'string'
-              ? childRaw
-              : childRaw && typeof childRaw === 'object'
-                ? (childRaw as any).source ||
-                  (childRaw as any).text ||
-                  JSON.stringify(childRaw)
-                : '';
+          const childStr = toContentString(child.content);
           const filename = child.title.endsWith('.tex')
             ? child.title
             : `${child.title}.tex`;
@@ -306,8 +327,11 @@ export class CompilerService {
       }
     }
 
-    // Ensure LaTeX boilerplate wrapping if bare manuscript
-    if (source) {
+    // Ensure LaTeX boilerplate wrapping only if bare manuscript and no other files define documentclass
+    const anyFileHasDocClass = Object.values(files).some(
+      (f) => typeof f === 'string' && f.includes('\\documentclass'),
+    );
+    if (source && !anyFileHasDocClass && !source.includes('\\documentclass')) {
       source = ensureCompilableLatex(source, documentTitle);
     }
 
@@ -473,7 +497,7 @@ export class CompilerService {
 
   async syncIncremental(rootPageId: string, dto: SyncIncrementalDto) {
     const dirtyIds = dto.dirtyFileIds || [];
-    if (dirtyIds.length === 0) {
+    if (dirtyIds.length === 0 && !dto.forceAll) {
       return {
         synced: [],
         total: 0,
@@ -486,9 +510,30 @@ export class CompilerService {
       throw new NotFoundException('Page not found');
     }
 
+    if (dto.forceAll) {
+      const pages = this.prisma?.page
+        ? await this.prisma.page.findMany({
+            where: {
+              OR: [{ id: rootPageId }, { parentPageId: rootPageId }],
+              deletedAt: null,
+            },
+            select: { id: true },
+          })
+        : [];
+      const allIds = pages.map((p) => p.id);
+      if (allIds.length === 0) allIds.push(rootPageId);
+
+      return {
+        synced: allIds,
+        total: allIds.length,
+        rootPageId,
+      };
+    }
+
     return {
       synced: dirtyIds,
       total: dirtyIds.length,
+      rootPageId,
     };
   }
 
@@ -574,31 +619,19 @@ export class CompilerService {
     childPages: Array<{ title: string; content?: unknown }>,
     documentClass: string = 'article',
   ): string {
-    let mainContent = '';
-    if (typeof rootContent === 'string') {
-      mainContent = rootContent;
-    } else if (rootContent && typeof rootContent === 'object') {
-      mainContent = JSON.stringify(rootContent);
-    }
-
+    const mainContent = toContentString(rootContent);
     const docClass = /^[a-zA-Z0-9_-]+$/.test(documentClass)
       ? documentClass
       : 'article';
 
-    let source = `\\documentclass{${docClass}}\n\\title{${title}}\n\\begin{document}\n\\maketitle\n\n${mainContent}\n`;
+    const sections = childPages
+      .map(
+        (section) =>
+          `\n\\section{${section.title}}\n${toContentString(section.content)}\n`,
+      )
+      .join('');
 
-    for (const section of childPages) {
-      let secContent = '';
-      if (typeof section.content === 'string') {
-        secContent = section.content;
-      } else if (section.content && typeof section.content === 'object') {
-        secContent = JSON.stringify(section.content);
-      }
-      source += `\n\\section{${section.title}}\n${secContent}\n`;
-    }
-
-    source += `\n\\end{document}\n`;
-    return source;
+    return `\\documentclass{${docClass}}\n\\title{${title}}\n\\begin{document}\n\\maketitle\n\n${mainContent}\n${sections}\n\\end{document}\n`;
   }
 
   /**
