@@ -8,8 +8,10 @@ import {
   IngestionDecision,
   IngestionReviewCase,
   IngestionStatus,
+  Item,
 } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import { isUUID } from 'class-validator';
 
 export interface CreateIngestionRunData {
   id?: string;
@@ -81,18 +83,20 @@ export class IngestionRepository {
     const client = this.getClient(tx);
     const userId =
       typeof scope === 'object' ? scope.userId : data.requesterId || scope;
-    const projectId =
+    const rawProjectId =
       typeof scope === 'object'
         ? scope.projectId
         : scope !== data.requesterId
           ? scope
           : undefined;
+    const safeProjectId =
+      rawProjectId && isUUID(rawProjectId) ? rawProjectId : null;
 
     return client.ingestionRun.create({
       data: {
         id: data.id || randomUUID(),
         userId,
-        projectId: projectId || null,
+        projectId: safeProjectId,
         requesterId: data.requesterId,
         inputParams: data.inputParams,
         inputHash: data.inputHash,
@@ -114,6 +118,7 @@ export class IngestionRepository {
         candidates: IngestionCandidate[];
         decisions: IngestionDecision[];
         reviewCases: IngestionReviewCase[];
+        item?: Item | null;
       })
     | null
   > {
@@ -127,6 +132,7 @@ export class IngestionRepository {
         candidates: { orderBy: { fetchedAt: 'asc' } },
         decisions: { orderBy: { decidedAt: 'desc' } },
         reviewCases: { orderBy: { createdAt: 'desc' } },
+        item: true,
       },
     });
     return run;

@@ -60,7 +60,10 @@ export class SuggestionRepository {
   ): Promise<SuggestionWithAuthor[]> {
     return this.prisma.pageSuggestion.findMany({
       where: {
-        pageId,
+        OR: [
+          { pageId },
+          { projectPageId: pageId },
+        ],
         deletedAt: null,
         ...(status ? { status } : {}),
       },

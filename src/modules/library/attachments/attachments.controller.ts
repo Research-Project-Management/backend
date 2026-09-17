@@ -29,6 +29,12 @@ import { CurrentUser } from '../../../modules/iam/authn/decorators/user.decorato
 import { ProjectRoleGuard } from '../../../modules/iam/authz/guards/role.guard';
 import { ProjectRoles } from '../../../modules/iam/authz/decorators/role.decorator';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
+import { isUUID } from 'class-validator';
+
+const toValidProjectId = (val?: string): string | undefined =>
+  val && val !== 'me' && val !== 'user' && val !== 'personal' && isUUID(val)
+    ? val
+    : undefined;
 
 @Controller(['api/v1/library', 'api/v1/projects/:projectId/library'])
 @UseGuards(JwtAuthGuard, ProjectRoleGuard)
@@ -59,10 +65,7 @@ export class AttachmentsController {
       throw new BadRequestException('Storage service is unavailable');
     }
 
-    const effectiveProjectId =
-      (paramProjectId && paramProjectId !== 'user'
-        ? paramProjectId
-        : undefined) || queryProjectId;
+    const effectiveProjectId = toValidProjectId(paramProjectId || queryProjectId);
 
     let buffer: Buffer | undefined;
     let filename = 'document.pdf';
@@ -104,13 +107,20 @@ export class AttachmentsController {
   }
 
   /**
-   * Generates a presigned upload URL for direct S3/R2 ingestion.
+   * Generates a presigned upload URL for direct S3/R2 ingestion,
+   * or returns instant CAS deduplication if contentHash already exists.
    */
   @Post(['attachments/presign', 'presign'])
   @ProjectRoles('owner', 'contributor')
   async presign(
     @CurrentUser('id') userId: string,
-    @Body() dto: { filename: string; mimeType?: string; sizeBytes?: number },
+    @Body()
+    dto: {
+      filename: string;
+      mimeType?: string;
+      sizeBytes?: number;
+      contentHash?: string;
+    },
     @Param('projectId') paramProjectId?: string,
     @Query('projectId') queryProjectId?: string,
   ) {
@@ -118,12 +128,167 @@ export class AttachmentsController {
       throw new BadRequestException('Presigned upload unavailable');
     }
 
+    const effectiveProjectId = toValidProjectId(
+      paramProjectId || queryProjectId,
+    );
+
     return this.storagePort.getPresignedUploadUrl({
       userId,
       filename: dto.filename || 'document.pdf',
       mimeType: dto.mimeType || 'application/pdf',
       sizeBytes: dto.sizeBytes || 0,
+      contentHash: dto.contentHash,
+      projectId: effectiveProjectId,
+      scope: 'library',
     });
+  }
+
+  /**
+   * Completes a direct-to-storage presigned upload and creates a storage node.
+   */
+  @Post(['attachments/presign/complete', 'presign/complete'])
+  @ProjectRoles('owner', 'contributor')
+  async completePresign(
+    @CurrentUser('id') userId: string,
+    @Body()
+    dto: {
+      storageKey: string;
+      filename: string;
+      mimeType?: string;
+      sizeBytes?: number;
+      contentHash?: string;
+    },
+    @Param('projectId') paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
+  ) {
+    if (!this.storagePort?.completePresignedUpload) {
+      throw new BadRequestException('Presigned upload completion unavailable');
+    }
+
+    const effectiveProjectId = toValidProjectId(
+      paramProjectId || queryProjectId,
+    );
+
+    const completed = await this.storagePort.completePresignedUpload({
+      userId,
+      projectId: effectiveProjectId,
+      storageKey: dto.storageKey,
+      filename: dto.filename,
+      mimeType: dto.mimeType,
+      sizeBytes: dto.sizeBytes,
+      contentHash: dto.contentHash,
+      scope: 'library',
+    });
+
+    return {
+      success: true,
+      fileId: completed.fileId,
+      url: completed.url,
+      filename: completed.filename,
+      size: completed.size,
+      mimeType: completed.mimeType,
+    };
+  }
+
+  /**
+   * Phase 1: Initiate S3/R2 Multipart Upload session for large files (>50MB).
+   */
+  @Post(['attachments/multipart/initiate', 'multipart/initiate'])
+  @ProjectRoles('owner', 'contributor')
+  async initiateMultipart(
+    @CurrentUser('id') userId: string,
+    @Body()
+    dto: {
+      filename: string;
+      mimeType?: string;
+      totalSize: number;
+      expectedHash?: string;
+    },
+    @Param('projectId') paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
+  ) {
+    if (!this.storagePort?.initiateMultipartUpload) {
+      throw new BadRequestException('Multipart upload unavailable');
+    }
+
+    const effectiveProjectId = toValidProjectId(
+      paramProjectId || queryProjectId,
+    );
+
+    return this.storagePort.initiateMultipartUpload({
+      userId,
+      filename: dto.filename || 'document.bin',
+      mimeType: dto.mimeType || 'application/octet-stream',
+      totalSize: dto.totalSize,
+      projectId: effectiveProjectId,
+      scope: 'library',
+      expectedHash: dto.expectedHash,
+    });
+  }
+
+  /**
+   * Phase 2: Get presigned PUT URL for an individual part.
+   */
+  @Get([
+    'attachments/multipart/:sessionId/part-url',
+    'multipart/:sessionId/part-url',
+  ])
+  @ProjectRoles('owner', 'contributor')
+  async getMultipartPartUrl(
+    @Param('sessionId') sessionId: string,
+    @Query('partNumber') partNumberStr: string,
+  ) {
+    if (!this.storagePort?.getMultipartPartUrl) {
+      throw new BadRequestException('Multipart part URL unavailable');
+    }
+
+    const partNumber = parseInt(partNumberStr, 10);
+    if (isNaN(partNumber) || partNumber < 1) {
+      throw new BadRequestException('Invalid partNumber query parameter');
+    }
+
+    const partUrl = await this.storagePort.getMultipartPartUrl(
+      sessionId,
+      partNumber,
+    );
+    return { partNumber, partUrl };
+  }
+
+  /**
+   * Phase 3: Complete multipart upload and assemble object in S3/R2.
+   */
+  @Post(['attachments/multipart/complete', 'multipart/complete'])
+  @ProjectRoles('owner', 'contributor')
+  async completeMultipart(
+    @Body()
+    dto: {
+      sessionId: string;
+      parts: { partNumber: number; eTag: string }[];
+    },
+  ) {
+    if (!this.storagePort?.completeMultipartUpload) {
+      throw new BadRequestException('Multipart completion unavailable');
+    }
+
+    return this.storagePort.completeMultipartUpload({
+      sessionId: dto.sessionId,
+      parts: dto.parts,
+    });
+  }
+
+  /**
+   * Abort multipart upload session and clean up remote parts.
+   */
+  @Delete([
+    'attachments/multipart/:sessionId/abort',
+    'multipart/:sessionId/abort',
+  ])
+  @ProjectRoles('owner', 'contributor')
+  async abortMultipart(@Param('sessionId') sessionId: string) {
+    if (this.storagePort?.abortMultipartUpload) {
+      await this.storagePort.abortMultipartUpload(sessionId);
+    }
+    return { success: true };
   }
 
   /**
@@ -170,7 +335,7 @@ export class AttachmentsController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    const effectiveProjectId = paramProjectId || queryProjectId;
+    const effectiveProjectId = toValidProjectId(paramProjectId || queryProjectId);
     const result = await this.attachmentsService.getItemAttachment(
       userId,
       undefined,
@@ -379,11 +544,10 @@ export class AttachmentsController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    const effectiveProjectId = paramProjectId || queryProjectId;
-    const scopeWhere =
-      effectiveProjectId && effectiveProjectId !== 'user'
-        ? { projectId: effectiveProjectId }
-        : { userId };
+    const effectiveProjectId = toValidProjectId(paramProjectId || queryProjectId);
+    const scopeWhere = effectiveProjectId
+      ? { projectId: effectiveProjectId }
+      : { userId };
 
     let targetUrl = body?.url?.trim();
     if (!targetUrl) {

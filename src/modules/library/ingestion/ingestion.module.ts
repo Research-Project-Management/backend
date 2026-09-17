@@ -37,6 +37,9 @@ import { QueueService } from './services/queue.service';
 import { ZoteroTranslatorClient } from '../infra/zotero/zotero-translator.client';
 
 import { SsrfGuardService } from '../core/services/ssrf-guard.service';
+import { BullModule } from '@nestjs/bullmq';
+import { LIBRARY_INGESTION_QUEUE } from './constants/queue.constants';
+import { IngestionQueueConsumer } from './services/ingestion-queue.consumer';
 import { NotesModule } from '../notes/notes.module';
 
 @Module({
@@ -49,6 +52,9 @@ import { NotesModule } from '../notes/notes.module';
     MetadataModule,
     StorageModule,
     NotesModule,
+    BullModule.registerQueue({
+      name: LIBRARY_INGESTION_QUEUE,
+    }),
   ],
   controllers: [IngestionController],
   providers: [
@@ -80,6 +86,7 @@ import { NotesModule } from '../notes/notes.module';
     UrlCaptureService,
     PipelineService,
     QueueService,
+    IngestionQueueConsumer,
     IngestionService,
     WatchdogService,
     {
@@ -93,6 +100,7 @@ import { NotesModule } from '../notes/notes.module';
     IngestionService,
     PipelineService,
     QueueService,
+    IngestionQueueConsumer,
     UrlCaptureService,
     WatchdogService,
     IngestionPipelineRunner,

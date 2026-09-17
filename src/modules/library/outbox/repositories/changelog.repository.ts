@@ -28,9 +28,13 @@ export class ChangeLogRepository {
 
   async allocateNextSequence(
     scope: { userId?: string; projectId?: string } | string,
-    tx?: Prisma.TransactionClient,
+    _tx?: Prisma.TransactionClient,
   ): Promise<bigint> {
-    const client = this.getClient(tx);
+    // Note: Always use root client (this.prisma) instead of the interactive transaction.
+    // SyncSequence acts as a monotonic sequence generator (analogous to Postgres nextval).
+    // Holding the lock on SyncSequence inside an interactive transaction causes severe row-lock
+    // contention and P2028 timeouts when multiple items are modified or deleted concurrently.
+    const client = this.prisma;
     const userId = typeof scope === 'object' ? scope.userId : scope;
     const projectId = typeof scope === 'object' ? scope.projectId : undefined;
 

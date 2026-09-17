@@ -92,7 +92,23 @@ export class CslJsonMapper {
     };
 
     // Dates
-    if (item.year) {
+    const rawPubDate =
+      item.publicationDate ||
+      item.extraFields?.publicationDate ||
+      item.extraFields?.date;
+    if (
+      typeof rawPubDate === 'string' &&
+      /^\d{4}-\d{2}-\d{2}/.test(rawPubDate)
+    ) {
+      const parts = rawPubDate.slice(0, 10).split('-').map(Number);
+      csl.issued = { 'date-parts': [[parts[0], parts[1], parts[2]]] };
+    } else if (
+      typeof rawPubDate === 'string' &&
+      /^\d{4}-\d{2}/.test(rawPubDate)
+    ) {
+      const parts = rawPubDate.slice(0, 7).split('-').map(Number);
+      csl.issued = { 'date-parts': [[parts[0], parts[1]]] };
+    } else if (item.year) {
       csl.issued = { 'date-parts': [[Number(item.year)]] };
     } else if (item.extraFields?.date) {
       const parsedYear = parseInt(String(item.extraFields.date), 10);
@@ -105,19 +121,56 @@ export class CslJsonMapper {
     const container =
       item.publicationTitle ||
       item.journal ||
+      item.bookTitle ||
+      item.proceedingsTitle ||
       item.extraFields?.bookTitle ||
       item.extraFields?.proceedingsTitle;
     if (container) {
       csl['container-title'] = container;
     }
 
-    if (item.publisher || item.extraFields?.publisher) {
-      csl.publisher = item.publisher || item.extraFields?.publisher;
+    const seriesTitle =
+      item.series ||
+      item.seriesTitle ||
+      item.extraFields?.series ||
+      item.extraFields?.seriesTitle;
+    if (seriesTitle) {
+      csl['collection-title'] = seriesTitle;
     }
 
-    if (item.extraFields?.place || item.extraFields?.publisherPlace) {
-      csl['publisher-place'] =
-        item.extraFields.place || item.extraFields.publisherPlace;
+    const eventTitle =
+      item.conferenceName ||
+      item.extraFields?.conferenceName ||
+      item.extraFields?.meeting;
+    if (eventTitle) {
+      csl['event-title'] = eventTitle;
+    }
+
+    const publisher =
+      item.publisher ||
+      item.extraFields?.publisher ||
+      item.extraFields?.institution ||
+      item.extraFields?.university;
+    if (publisher) {
+      csl.publisher = publisher;
+    }
+
+    const place =
+      item.place ||
+      item.extraFields?.place ||
+      item.extraFields?.publisherPlace ||
+      item.extraFields?.eventPlace;
+    if (place) {
+      csl['publisher-place'] = place;
+    }
+
+    const reportOrPatentNumber =
+      item.extraFields?.reportNumber ||
+      item.extraFields?.patentNumber ||
+      item.extraFields?.applicationNumber ||
+      item.partNumber;
+    if (reportOrPatentNumber) {
+      csl.number = String(reportOrPatentNumber);
     }
 
     // Locators
@@ -146,7 +199,10 @@ export class CslJsonMapper {
     if (item.url) csl.URL = item.url;
     if (item.abstract) csl.abstract = item.abstract;
     if (item.archive) csl.archive = item.archive;
-    if (item.archiveLocation) csl.archive_location = item.archiveLocation;
+    if (item.archiveLocation) {
+      csl['archive-location'] = item.archiveLocation;
+      csl.archive_location = item.archiveLocation;
+    }
     if (item.callNumber) csl['call-number'] = item.callNumber;
     if (item.language) csl.language = item.language;
     if (item.extra) csl.note = item.extra;
@@ -154,10 +210,10 @@ export class CslJsonMapper {
     // Special metadata
     if (rawType === 'preprint') {
       csl.genre = 'Preprint';
-    } else if (rawType === 'thesis' && item.extraFields?.thesisType) {
-      csl.genre = item.extraFields.thesisType;
-    } else if (rawType === 'report' && item.extraFields?.reportType) {
-      csl.genre = item.extraFields.reportType;
+    } else if (rawType === 'thesis') {
+      csl.genre = (item as any).thesisType || item.extraFields?.thesisType;
+    } else if (rawType === 'report') {
+      csl.genre = (item as any).reportType || item.extraFields?.reportType;
     }
 
     // Contributors (Authors, Editors, Translators, etc.)
@@ -191,10 +247,41 @@ export class CslJsonMapper {
         } else if (role === 'director') {
           if (!csl.director) csl.director = [];
           csl.director.push(cslName);
+        } else if (role === 'reviewedauthor' || role === 'reviewed-author') {
+          if (!csl['reviewed-author']) csl['reviewed-author'] = [];
+          csl['reviewed-author'].push(cslName);
+        } else if (
+          role === 'serieseditor' ||
+          role === 'series-editor' ||
+          role === 'collection-editor'
+        ) {
+          if (!csl['collection-editor']) csl['collection-editor'] = [];
+          csl['collection-editor'].push(cslName);
+        } else if (role === 'composer') {
+          if (!csl.composer) csl.composer = [];
+          csl.composer.push(cslName);
+        } else if (role === 'interviewer') {
+          if (!csl.interviewer) csl.interviewer = [];
+          csl.interviewer.push(cslName);
+        } else if (role === 'recipient') {
+          if (!csl.recipient) csl.recipient = [];
+          csl.recipient.push(cslName);
+        } else if (role === 'illustrator') {
+          if (!csl.illustrator) csl.illustrator = [];
+          csl.illustrator.push(cslName);
+        } else if (role === 'contributor') {
+          if (!csl.contributor) csl.contributor = [];
+          csl.contributor.push(cslName);
         } else {
-          // Default fallback to author
-          if (!csl.author) csl.author = [];
-          csl.author.push(cslName);
+          // Default fallback to author only if creatorType was missing/empty
+          if (!contributorItem.creatorType) {
+            if (!csl.author) csl.author = [];
+            csl.author.push(cslName);
+          } else {
+            // Secondary roles belong in contributor list, not primary author
+            if (!csl.contributor) csl.contributor = [];
+            csl.contributor.push(cslName);
+          }
         }
       }
     } else if (Array.isArray(item.authors) && item.authors.length > 0) {

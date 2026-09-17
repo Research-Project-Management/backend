@@ -108,6 +108,27 @@ export interface ItemMetadata {
   repository?: string;
   callNumber?: string;
   libraryCatalog?: string;
+  bookTitle?: string;
+  proceedingsTitle?: string;
+  conferenceName?: string;
+  eventPlace?: string;
+  websiteTitle?: string;
+  websiteType?: string;
+  blogTitle?: string;
+  university?: string;
+  institution?: string;
+  numPages?: string | number;
+  numberOfPages?: number;
+  reportNumber?: string;
+  reportType?: string;
+  thesisType?: string;
+  versionNumber?: string;
+  patentNumber?: string;
+  applicationNumber?: string;
+  assignee?: string;
+  issuingAuthority?: string;
+  distributor?: string;
+  system?: string;
   extraFields?: Record<string, unknown>;
 
   provenance?: Provenance;

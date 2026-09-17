@@ -10,7 +10,13 @@ export class HistoryRepository implements IHistoryRepository {
   /** Summary list — excludes heavy `content` field for version history list view */
   async findPageVersions(pageId: string) {
     const versions = await this.prisma.pageVersion.findMany({
-      where: { pageId },
+      where: {
+        OR: [
+          { pageId },
+          { projectPageId: pageId },
+          { page: { projectId: pageId } },
+        ],
+      },
       select: {
         id: true,
         pageId: true,

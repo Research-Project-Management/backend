@@ -1,9 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { ItemMetadata, CreatorInput } from '../metadata/types/metadata.types';
+import {
+  ItemMetadata,
+  CreatorInput,
+  CreatorType,
+} from '../metadata/types/metadata.types';
 import {
   cleanBibliographicText,
   cleanAbstractText,
   cleanBannedString,
+  cleanCommentText,
   normalizeDoi,
   normalizeArxivId,
   normalizePmid,
@@ -12,7 +17,10 @@ import {
   normalizeIssn,
   normalizeTags as canonicalNormalizeTags,
 } from '../metadata/utils/metadata.utils';
-import { parseCreatorString } from '../../items/utils/items.utils';
+import {
+  parseCreatorString,
+  normalizeAcademicTitleCase,
+} from '../../items/utils/items.utils';
 
 @Injectable()
 export class NormalizationPolicy {
@@ -36,12 +44,20 @@ export class NormalizationPolicy {
     // 1. Title (Only set if present in candidate)
     if (raw.title) {
       const cleanTitle = this.cleanString(raw.title);
-      if (cleanTitle) result.title = this.stripLatexBraces(cleanTitle);
+      if (cleanTitle) {
+        result.title = normalizeAcademicTitleCase(
+          this.stripLatexBraces(cleanTitle),
+        );
+      }
     }
 
     if (raw.shortTitle) {
       const cleanShort = this.cleanString(raw.shortTitle);
-      if (cleanShort) result.shortTitle = this.stripLatexBraces(cleanShort);
+      if (cleanShort) {
+        result.shortTitle = normalizeAcademicTitleCase(
+          this.stripLatexBraces(cleanShort),
+        );
+      }
     }
 
     // 2. Item Type
@@ -153,6 +169,8 @@ export class NormalizationPolicy {
       'seriesTitle',
       'seriesText',
       'seriesNumber',
+      'edition',
+      'repository',
       'type',
       'archiveLocation',
       'storageId',
@@ -179,9 +197,7 @@ export class NormalizationPolicy {
       }
     }
 
-    const rawPages =
-      raw.pages || (pageNum != null ? String(pageNum) : undefined);
-    const pages = this.cleanString(rawPages);
+    const pages = this.cleanString(raw.pages);
     if (pages) result.pages = pages.replace(/--/g, '-');
 
     // 8. Abstract
@@ -224,26 +240,22 @@ export class NormalizationPolicy {
 
     // 11. Notes & Comments (Zotero notes / annote)
     if (Array.isArray(raw.notes) && raw.notes.length > 0) {
-      const cleanNotes = raw.notes
-        .map((n: any) => {
-          if (typeof n === 'string') {
-            const clean = n.trim();
-            return clean ? { content: clean } : null;
-          }
-          if (n && typeof n === 'object' && n.content) {
-            const clean = String(n.content).trim();
-            return clean
-              ? {
-                  content: clean,
-                  source: n.source ? String(n.source).trim() : undefined,
-                }
-              : null;
-          }
-          return null;
-        })
-        .filter((n): n is { content: string; source?: string } =>
-          Boolean(n && n.content),
-        );
+      const cleanNotes: Array<{ content: string; source?: string }> = [];
+      for (const n of raw.notes) {
+        const rawContent = typeof n === 'string' ? n : (n as any)?.content;
+        if (typeof rawContent !== 'string') continue;
+        const clean = cleanCommentText(rawContent);
+        if (!clean) continue;
+        const noteItem: { content: string; source?: string } = {
+          content: rawContent.trim().toLowerCase().startsWith('comment:')
+            ? `Comment: ${clean}`
+            : clean,
+        };
+        if (n && typeof n === 'object' && (n as any).source) {
+          noteItem.source = String((n as any).source).trim();
+        }
+        cleanNotes.push(noteItem);
+      }
 
       if (cleanNotes.length > 0) {
         result.notes = cleanNotes;
@@ -361,6 +373,8 @@ export class NormalizationPolicy {
       'seriesTitle',
       'seriesText',
       'seriesNumber',
+      'edition',
+      'repository',
       'journalAbbr',
       'storageId',
       'archive',
@@ -434,32 +448,49 @@ export class NormalizationPolicy {
     const known = new Set<string>();
 
     const append = (creator: CreatorInput) => {
-      const name = creator.name || creator.fullName || '';
-      const key = `${creator.creatorType || 'author'}:${name.toLocaleLowerCase()}`;
-      if (!name || known.has(key)) return;
-      known.add(key);
-      list.push(creator);
+      const creatorType = (creator.creatorType as CreatorType) || 'author';
+      let firstName = (creator.firstName || '').trim();
+      let lastName = (creator.lastName || '').trim();
+      let fullName = (creator.fullName || creator.name || '').trim();
+
+      // If fullName has a comma (e.g. "Einstein, Albert") or only fullName is supplied, parse it
+      if (fullName && (fullName.includes(',') || (!firstName && !lastName))) {
+        const parsed = parseCreatorString(fullName, 0, creatorType);
+        firstName = parsed.firstName || firstName;
+        lastName = parsed.lastName || lastName;
+        fullName = parsed.fullName || fullName;
+      } else if (!fullName && (firstName || lastName)) {
+        fullName = `${firstName} ${lastName}`.trim();
+      }
+
+      const cleanFirst = this.cleanString(firstName) || '';
+      const cleanLast = this.cleanString(lastName) || '';
+      const cleanFull = this.cleanString(fullName) || '';
+
+      if (!cleanFull && !cleanFirst && !cleanLast) return;
+
+      const effectiveName = cleanFull || `${cleanFirst} ${cleanLast}`.trim();
+      const dedupKey =
+        cleanLast || cleanFirst
+          ? `${creatorType}:${cleanLast.toLowerCase()}:${cleanFirst.toLowerCase()}`
+          : `${creatorType}:${effectiveName.toLowerCase()}`;
+
+      if (known.has(dedupKey)) return;
+      known.add(dedupKey);
+
+      list.push({
+        creatorType,
+        name: effectiveName,
+        fullName: effectiveName,
+        firstName: cleanFirst || undefined,
+        lastName: cleanLast || undefined,
+      });
     };
 
     if (Array.isArray(creatorsInput) && creatorsInput.length > 0) {
       for (const c of creatorsInput) {
         if (!c || typeof c !== 'object') continue;
-        const name = this.cleanString(c.name);
-        const firstName = this.cleanString(c.firstName);
-        const lastName = this.cleanString(c.lastName);
-        const creatorType = this.cleanString(c.creatorType) || 'author';
-
-        if (!name && !firstName && !lastName) continue;
-
-        const effectiveName =
-          name || `${firstName || ''} ${lastName || ''}`.trim();
-
-        append({
-          creatorType,
-          name: effectiveName,
-          firstName: firstName || undefined,
-          lastName: lastName || undefined,
-        });
+        append(c);
       }
     }
 
@@ -467,31 +498,29 @@ export class NormalizationPolicy {
       for (const a of authorsInput) {
         const cleanA = this.cleanString(a);
         if (!cleanA) continue;
-
-        // Split "LastName, FirstName" if present
-        const parts = cleanA.split(',');
-        if (parts.length === 2) {
-          const last = parts[0].trim();
-          const first = parts[1].trim();
-          append({
-            creatorType: 'author',
-            name: `${first} ${last}`,
-            firstName: first,
-            lastName: last,
-          });
-        } else {
-          append({
-            creatorType: 'author',
-            name: cleanA,
-          });
-        }
+        const parsed = parseCreatorString(cleanA, 0, 'author');
+        append({
+          creatorType: 'author',
+          name: parsed.fullName,
+          fullName: parsed.fullName,
+          firstName: parsed.firstName,
+          lastName: parsed.lastName,
+        });
       }
     }
 
     if (Array.isArray(editorsInput)) {
       for (const editor of editorsInput) {
         const cleanEditor = this.cleanString(editor);
-        if (cleanEditor) append({ creatorType: 'editor', name: cleanEditor });
+        if (!cleanEditor) continue;
+        const parsed = parseCreatorString(cleanEditor, 0, 'editor');
+        append({
+          creatorType: 'editor',
+          name: parsed.fullName,
+          fullName: parsed.fullName,
+          firstName: parsed.firstName,
+          lastName: parsed.lastName,
+        });
       }
     }
 

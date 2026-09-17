@@ -315,10 +315,19 @@ export class PipelineService {
       const enrichPatch: Record<string, any> = {};
 
       if (this.items) {
+        // Resolve effective user vs project context
+        const isProject =
+          Boolean(scopeId) &&
+          scopeId !== 'user' &&
+          scopeId !== envelope.userId;
+        const effectiveUserId = envelope.userId || scopeId;
+        const effectiveProjectId = isProject ? scopeId : undefined;
+
         // Fetch current state to build a null-safe patch
         const existing = await this.items.getItem(
-          scopeId,
+          effectiveUserId,
           matchResult.targetItemId,
+          effectiveProjectId,
         );
 
         const p = decision.proposedItem;
@@ -337,7 +346,21 @@ export class PipelineService {
         };
 
         maybeEnrich('abstract', p.abstract);
-        maybeEnrich('title', p.title);
+
+        // Allow title update if existing title is a placeholder, filename, or raw DOI
+        if (p.title && p.title !== 'Untitled Document') {
+          const currentTitle = String((existing as any)?.title || '').trim();
+          if (
+            !currentTitle ||
+            currentTitle === 'Untitled Document' ||
+            currentTitle === 'Uploaded Document' ||
+            /\.pdf$/i.test(currentTitle) ||
+            /^10\.\d{4,9}\//.test(currentTitle)
+          ) {
+            enrichPatch['title'] = p.title;
+          }
+        }
+
         maybeEnrich('journal', p.journal);
         maybeEnrich('publicationTitle', p.publicationTitle);
         maybeEnrich('publicationDate', p.publicationDate);
@@ -387,10 +410,12 @@ export class PipelineService {
 
         if (Object.keys(enrichPatch).length > 0) {
           enrichedItem = await this.items.updateItem(
-            scopeId,
+            effectiveUserId,
             matchResult.targetItemId,
             undefined,
             enrichPatch,
+            undefined,
+            effectiveProjectId,
           );
           this.logger.log(
             `[EXACT_MERGE] Enriched item ${matchResult.targetItemId} with ${Object.keys(enrichPatch).join(', ')}`,
@@ -419,6 +444,7 @@ export class PipelineService {
                 url: getFileContentPath(uploadedFileIdentifier),
                 mimeType: 'application/pdf',
                 size: 0,
+                userId: effectiveUserId,
               },
               scopeId,
             );

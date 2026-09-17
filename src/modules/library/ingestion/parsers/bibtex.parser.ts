@@ -246,6 +246,34 @@ export class BibtexParser {
     return map[cslType] || 'journalArticle';
   }
 
+  private mapBibtexTypeToItemType(bibtexType: string): string {
+    const lower = (bibtexType || '').toLowerCase().trim();
+    const map: Record<string, string> = {
+      article: 'journalArticle',
+      inproceedings: 'conferencePaper',
+      conference: 'conferencePaper',
+      proceedings: 'conferencePaper',
+      incollection: 'bookSection',
+      book: 'book',
+      booklet: 'book',
+      phdthesis: 'thesis',
+      mastersthesis: 'thesis',
+      thesis: 'thesis',
+      techreport: 'report',
+      report: 'report',
+      manual: 'report',
+      misc: 'webpage',
+      online: 'webpage',
+      electronic: 'webpage',
+      www: 'webpage',
+      patent: 'patent',
+      software: 'computerProgram',
+      code: 'computerProgram',
+      unpublished: 'manuscript',
+    };
+    return map[lower] || this.mapCslTypeToItemType(lower);
+  }
+
   /**
    * Resilient regex fallback for non-standard BibTeX dialects
    */
@@ -314,7 +342,7 @@ export class BibtexParser {
 
       entries.push({
         citationKey: citationKey || undefined,
-        itemType: this.mapCslTypeToItemType(rawType),
+        itemType: this.mapBibtexTypeToItemType(rawType),
         title: fields.title || 'Untitled Reference',
         authors,
         editors: editors.length > 0 ? editors : undefined,

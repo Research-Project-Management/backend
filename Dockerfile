@@ -35,7 +35,7 @@ COPY . .
 RUN pnpm exec prisma generate
 
 EXPOSE 3000
-CMD ["sh", "-c", "rm -rf /app/dist/* && pnpm exec prisma generate && pnpm run dev"]
+CMD ["pnpm", "run", "dev"]
 
 # ------------------------------------------------------------------------------
 # 4. Builder Stage: Compile TypeScript & generate production distribution

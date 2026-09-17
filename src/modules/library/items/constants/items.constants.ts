@@ -94,10 +94,26 @@ export const REVERSE_FIELD_ALIASES: Record<string, string> = {
   citationKey: 'citationKey',
 };
 
-export {
+import {
   BASE_FIELD_MAPPINGS,
   REVERSE_BASE_FIELD_MAPPINGS,
 } from '../../types/constants/types.constants';
+
+export { BASE_FIELD_MAPPINGS, REVERSE_BASE_FIELD_MAPPINGS };
+
+export function resolveBaseColumnForField(
+  itemType: string,
+  fieldKey: string,
+): string | undefined {
+  return REVERSE_BASE_FIELD_MAPPINGS[itemType]?.[fieldKey];
+}
+
+export function resolveTypeSpecificFieldForBase(
+  itemType: string,
+  baseColumn: string,
+): string | undefined {
+  return BASE_FIELD_MAPPINGS[itemType]?.[baseColumn];
+}
 
 export const LEGACY_TYPE_SPECIFIC_EXTRA_FIELDS = [
   'edition',

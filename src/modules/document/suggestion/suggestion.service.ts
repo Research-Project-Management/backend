@@ -43,14 +43,14 @@ function applyReplacementToContent(
       lines.splice(startIdx, endIdx - startIdx + 1);
     }
   } else if (suggestion.type === 'insert') {
-    lines.splice(startIdx, 0, suggestion.suggestedText);
+    lines.splice(startIdx, 0, ...suggestion.suggestedText.split('\n'));
   } else {
     // replace
     if (suggestion.originalText && targetSlice.includes(suggestion.originalText)) {
       const replaced = targetSlice.replace(suggestion.originalText, suggestion.suggestedText);
       lines.splice(startIdx, endIdx - startIdx + 1, ...replaced.split('\n'));
     } else {
-      lines.splice(startIdx, endIdx - startIdx + 1, suggestion.suggestedText);
+      lines.splice(startIdx, endIdx - startIdx + 1, ...suggestion.suggestedText.split('\n'));
     }
   }
 
@@ -149,11 +149,20 @@ export class SuggestionService {
 
     const newContent = applyReplacementToContent(currentText, suggestion);
 
+    let finalContent: any = newContent;
+    if (rawContent && typeof rawContent === 'object' && !Array.isArray(rawContent)) {
+      if ('source' in (rawContent as any)) {
+        finalContent = { ...(rawContent as any), source: newContent };
+      } else if ('text' in (rawContent as any)) {
+        finalContent = { ...(rawContent as any), text: newContent };
+      }
+    }
+
     const [updatedPage, updatedSuggestion] = await this.prisma.$transaction([
       this.prisma.page.update({
         where: { id: pageId },
         data: {
-          content: newContent,
+          content: finalContent,
           updatedAt: new Date(),
         },
       }),
@@ -250,13 +259,23 @@ export class SuggestionService {
       text = applyReplacementToContent(text, sugg);
     }
 
+    let finalContent: any = text;
+    const rawContent = page.content;
+    if (rawContent && typeof rawContent === 'object' && !Array.isArray(rawContent)) {
+      if ('source' in (rawContent as any)) {
+        finalContent = { ...(rawContent as any), source: text };
+      } else if ('text' in (rawContent as any)) {
+        finalContent = { ...(rawContent as any), text: text };
+      }
+    }
+
     const ids = pendingList.map((s) => s.id);
 
     await this.prisma.$transaction([
       this.prisma.page.update({
         where: { id: pageId },
         data: {
-          content: text,
+          content: finalContent,
           updatedAt: new Date(),
         },
       }),

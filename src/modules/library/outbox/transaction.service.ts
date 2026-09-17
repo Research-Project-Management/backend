@@ -44,47 +44,54 @@ export class TransactionService {
       tx: Prisma.TransactionClient,
       helpers: TransactionHelpers,
     ) => Promise<T>,
+    options?: { maxWait?: number; timeout?: number },
   ): Promise<T> {
-    return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      const helpers: TransactionHelpers = {
-        appendChange: async (
-          scope: { userId?: string; projectId?: string } | string,
-          entry: AppendChangeEntry,
-        ) => {
-          return this.changeLogRepo.appendChange(scope, entry, tx);
-        },
-        recordTombstone: async (
-          scope: { userId?: string; projectId?: string } | string,
-          entry: RecordTombstoneEntry,
-        ) => {
-          return this.changeLogRepo.recordTombstone(scope, entry, tx);
-        },
-        publishOutbox: async (
-          scope: { userId: string; projectId?: string | null } | string,
-          aggregateId: string,
-          eventType: string,
-          payload: any,
-        ) => {
-          const userId = typeof scope === 'object' ? scope.userId : scope;
-          const projectId =
-            typeof scope === 'object' ? scope.projectId : undefined;
+    return this.prisma.$transaction(
+      async (tx: Prisma.TransactionClient) => {
+        const helpers: TransactionHelpers = {
+          appendChange: async (
+            scope: { userId?: string; projectId?: string } | string,
+            entry: AppendChangeEntry,
+          ) => {
+            return this.changeLogRepo.appendChange(scope, entry, tx);
+          },
+          recordTombstone: async (
+            scope: { userId?: string; projectId?: string } | string,
+            entry: RecordTombstoneEntry,
+          ) => {
+            return this.changeLogRepo.recordTombstone(scope, entry, tx);
+          },
+          publishOutbox: async (
+            scope: { userId: string; projectId?: string | null } | string,
+            aggregateId: string,
+            eventType: string,
+            payload: any,
+          ) => {
+            const userId = typeof scope === 'object' ? scope.userId : scope;
+            const projectId =
+              typeof scope === 'object' ? scope.projectId : undefined;
 
-          return tx.outboxEvent.create({
-            data: {
-              userId,
-              projectId: projectId || null,
-              aggregateId,
-              eventType,
-              payload: payload ?? {},
-              status: OutboxStatus.PENDING,
-              retryCount: 0,
-            },
-          });
-        },
-      };
+            return tx.outboxEvent.create({
+              data: {
+                userId,
+                projectId: projectId || null,
+                aggregateId,
+                eventType,
+                payload: payload ?? {},
+                status: OutboxStatus.PENDING,
+                retryCount: 0,
+              },
+            });
+          },
+        };
 
-      return operation(tx, helpers);
-    });
+        return operation(tx, helpers);
+      },
+      {
+        maxWait: options?.maxWait ?? 10000,
+        timeout: options?.timeout ?? 30000,
+      },
+    );
   }
 
   async getChangesSince(

@@ -6,6 +6,7 @@ import {
   DuplicatePolicy,
   ExistingItemSummary,
 } from '../policies/duplicate.policy';
+import { isUUID } from 'class-validator';
 
 @Injectable()
 export class MatchStage {
@@ -51,12 +52,16 @@ export class MatchStage {
     proposed: ItemMetadata,
   ): Promise<DuplicateMatchResult> {
     const proposedDoi = proposed.doi?.toLowerCase().trim();
+    const validUuid = scopeId && isUUID(scopeId) ? scopeId : null;
+    const scopeFilter = validUuid
+      ? { OR: [{ projectId: validUuid }, { userId: validUuid }] }
+      : {};
 
     // ── Stage 1: Exact DOI lookup ─────────────────────────────────────────────
     if (proposedDoi) {
       const doiMatch = await this.prisma.item.findFirst({
         where: {
-          OR: [{ projectId: scopeId }, { userId: scopeId }],
+          ...scopeFilter,
           doi: proposedDoi,
           deletedAt: null,
         },
@@ -92,7 +97,7 @@ export class MatchStage {
 
     const candidateItems = await this.prisma.item.findMany({
       where: {
-        OR: [{ projectId: scopeId }, { userId: scopeId }],
+        ...scopeFilter,
         deletedAt: null,
         title: { contains: firstSignificantWord, mode: 'insensitive' },
       },

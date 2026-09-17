@@ -25,6 +25,15 @@ export interface GrobidHeaderResult {
   year?: number;
   publicationDate?: string;
   journal?: string;
+  bookTitle?: string;
+  conferenceName?: string;
+  volume?: string;
+  issue?: string;
+  pages?: string;
+  publisher?: string;
+  place?: string;
+  issn?: string;
+  isbn?: string;
   keywords?: string[];
   affiliations?: string[];
   rawTei?: string;
@@ -131,7 +140,14 @@ export class GrobidClient {
   }
 
   private get timeoutMs(): number {
-    return parseInt(process.env.GROBID_TIMEOUT_MS || '120000', 10);
+    return parseInt(process.env.GROBID_TIMEOUT_MS || '25000', 10);
+  }
+
+  private get fulltextTimeoutMs(): number {
+    return parseInt(
+      process.env.GROBID_FULLTEXT_TIMEOUT_MS || '45000',
+      10,
+    );
   }
 
   /**
@@ -296,7 +312,7 @@ export class GrobidClient {
     if (!this.enabled) return null;
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    const timeout = setTimeout(() => controller.abort(), this.fulltextTimeoutMs);
 
     try {
       const formData = new FormData();
@@ -422,6 +438,73 @@ export class GrobidClient {
     );
     if (journalMatch?.[1]) {
       result.journal = this.cleanText(journalMatch[1]);
+    }
+
+    // Monograph / Book / Proceedings Title
+    const bookTitleMatch = teiXml.match(
+      /<title[^>]*level="m"[^>]*>([^<]+)<\/title>/i,
+    );
+    if (bookTitleMatch?.[1]) {
+      result.bookTitle = this.cleanText(bookTitleMatch[1]);
+    }
+
+    // Conference Meeting Name
+    const meetingMatch = teiXml.match(/<meeting[^>]*>([^<]+)<\/meeting>/i);
+    if (meetingMatch?.[1]) {
+      result.conferenceName = this.cleanText(meetingMatch[1]);
+    }
+
+    // Publisher & Publication Place
+    const publisherMatch = teiXml.match(/<publisher[^>]*>([^<]+)<\/publisher>/i);
+    if (publisherMatch?.[1]) {
+      result.publisher = this.cleanText(publisherMatch[1]);
+    }
+    const pubPlaceMatch =
+      teiXml.match(/<pubPlace[^>]*>([^<]+)<\/pubPlace>/i) ??
+      teiXml.match(
+        /<address[^>]*>[\s\S]*?<settlement[^>]*>([^<]+)<\/settlement>[\s\S]*?<\/address>/i,
+      );
+    if (pubPlaceMatch?.[1]) {
+      result.place = this.cleanText(pubPlaceMatch[1]);
+    }
+
+    // Volume, Issue, Pages
+    const volMatch = teiXml.match(
+      /<biblScope[^>]*unit="volume"[^>]*>([^<]+)<\/biblScope>/i,
+    );
+    if (volMatch?.[1]) {
+      result.volume = this.cleanText(volMatch[1]);
+    }
+
+    const issueMatch = teiXml.match(
+      /<biblScope[^>]*unit="issue"[^>]*>([^<]+)<\/biblScope>/i,
+    );
+    if (issueMatch?.[1]) {
+      result.issue = this.cleanText(issueMatch[1]);
+    }
+
+    const pageMatch = teiXml.match(
+      /<biblScope[^>]*unit="page"[^>]*>([^<]+)<\/biblScope>/i,
+    );
+    const pageFromMatch = teiXml.match(
+      /<biblScope[^>]*unit="page"[^>]*from="([^"]*)"(?:\s+to="([^"]*)")?/i,
+    );
+    if (pageMatch?.[1]) {
+      result.pages = this.cleanText(pageMatch[1]);
+    } else if (pageFromMatch?.[1]) {
+      result.pages = pageFromMatch[2]
+        ? `${pageFromMatch[1]}-${pageFromMatch[2]}`
+        : pageFromMatch[1];
+    }
+
+    // ISSN & ISBN
+    const issnMatch = teiXml.match(/<idno[^>]*type="ISSN"[^>]*>([^<]+)<\/idno>/i);
+    if (issnMatch?.[1]) {
+      result.issn = issnMatch[1].trim();
+    }
+    const isbnMatch = teiXml.match(/<idno[^>]*type="ISBN"[^>]*>([^<]+)<\/idno>/i);
+    if (isbnMatch?.[1]) {
+      result.isbn = isbnMatch[1].trim();
     }
 
     // Authors & Creators (Token-level Sequence Labeling with affiliations & emails)

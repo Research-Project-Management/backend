@@ -27,16 +27,40 @@ export class ReconciliationPolicy {
     UserOverride: 100, // Always wins — never overwrite user intent
     DirectIdentifier: 95, // DOI/PMID/arXivId resolved directly from source
     CrossRef: 90, // Publisher-submitted bibliographic authority
+    crossref: 90,
     PubMed: 88, // NLM curated; authoritative for biomedical domain
+    pubmed: 88,
     ZoteroSync: 85, // User's verified Zotero library data
+    zotero: 85,
+    EnrichedProvider: 85, // Automated multi-provider enrichment
+    MetadataResolution: 80, // Resolved provider cascade
     OpenAlex: 78, // Aggregator; strong for enrichment, weaker for core fields
+    openalex: 78,
     arXiv: 65, // ⚠️ Lowered: submission year ≠ publication year; preprint-only fields
+    arxiv: 65,
     OpenLibrary: 65, // Book metadata only; community-maintained
+    openlibrary: 65,
     BibTeX: 60, // User-imported file; quality depends on export source
+    bibtex: 60,
     RIS: 60, // User-imported file; quality depends on export source
+    ris: 60,
     UrlCapture: 50, // Web scraping; lowest structural reliability
+    unpaywall: 55,
     StagedPdf: 40, // GROBID/LocalPDFExtraction; noisy for venue/year fields
   };
+
+  private static getProviderPriority(provider: string): number {
+    if (!provider) return 50;
+    const direct = ReconciliationPolicy.PROVIDER_PRIORITY[provider];
+    if (direct !== undefined) return direct;
+    const lower = provider.toLowerCase();
+    for (const [key, val] of Object.entries(
+      ReconciliationPolicy.PROVIDER_PRIORITY,
+    )) {
+      if (key.toLowerCase() === lower) return val;
+    }
+    return 50;
+  }
 
   /**
    * Reconciles multiple candidates into a single canonical proposal with full field provenance.
@@ -87,9 +111,9 @@ export class ReconciliationPolicy {
       // Sort by effective weight: confidence * provider priority
       const sorted = [...evidences].sort((a, b) => {
         const priorityA =
-          ReconciliationPolicy.PROVIDER_PRIORITY[a.sourceProvider] || 50;
+          ReconciliationPolicy.getProviderPriority(a.sourceProvider);
         const priorityB =
-          ReconciliationPolicy.PROVIDER_PRIORITY[b.sourceProvider] || 50;
+          ReconciliationPolicy.getProviderPriority(b.sourceProvider);
         const scoreA = a.confidence * priorityA;
         const scoreB = b.confidence * priorityB;
         return scoreB - scoreA;
@@ -167,6 +191,18 @@ export class ReconciliationPolicy {
         continue;
       }
 
+      if (field === 'creators' || field === 'authors') {
+        const bestWithContent =
+          sorted.find(
+            (e) =>
+              Array.isArray(e.normalizedValue) && e.normalizedValue.length > 0,
+          ) || best;
+        selectedFields[field] = bestWithContent;
+        proposedItem[field] = bestWithContent.normalizedValue;
+        rejectedFields[field] = sorted.filter((e) => e !== bestWithContent);
+        continue;
+      }
+
       selectedFields[field] = best;
       proposedItem[field] = best.normalizedValue;
       rejectedFields[field] = sorted.slice(1);
@@ -205,6 +241,42 @@ export class ReconciliationPolicy {
     // Ensure itemType exists
     if (!proposedItem.itemType) {
       proposedItem.itemType = 'journalArticle';
+    }
+
+    // Harmonize venue and journal
+    if (proposedItem.publicationTitle && !proposedItem.journal) {
+      proposedItem.journal = proposedItem.publicationTitle;
+    } else if (proposedItem.journal && !proposedItem.publicationTitle) {
+      proposedItem.publicationTitle = proposedItem.journal;
+    }
+
+    // Harmonize creators and authors
+    if (
+      Array.isArray(proposedItem.creators) &&
+      proposedItem.creators.length > 0
+    ) {
+      if (!proposedItem.authors || proposedItem.authors.length === 0) {
+        proposedItem.authors = proposedItem.creators
+          .filter((c: any) => c.creatorType === 'author' || !c.creatorType)
+          .map(
+            (c: any) =>
+              c.name || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+          )
+          .filter(Boolean);
+      }
+    } else if (
+      Array.isArray(proposedItem.authors) &&
+      proposedItem.authors.length > 0
+    ) {
+      if (!proposedItem.creators || proposedItem.creators.length === 0) {
+        proposedItem.creators = proposedItem.authors.map(
+          (authorName: string) => ({
+            creatorType: 'author',
+            name: authorName,
+            fullName: authorName,
+          }),
+        );
+      }
     }
 
     return {

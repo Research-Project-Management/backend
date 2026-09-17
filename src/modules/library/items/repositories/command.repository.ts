@@ -24,35 +24,10 @@ import {
   sanitizeItemTitle,
 } from '../utils/items.utils';
 import { getFileContentPath, IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
-import {
-  ITEM_COLUMN_METADATA_FIELDS,
-  TYPE_SPECIFIC_EXTRA_FIELDS,
-  parseAccessDate,
-} from '../constants/items.constants';
+import { parseAccessDate, ITEM_COLUMN_METADATA_FIELDS, FIELD_ALIASES } from '../constants/items.constants';
 import { CreateItemData, UpdateItemData } from '../types/items.types';
+import { isUUID } from 'class-validator';
 
-function formatExtraMetadataEntries(parsed: Record<string, unknown>): string {
-  const lines: string[] = [];
-  for (const [k, v] of Object.entries(parsed)) {
-    if (
-      v !== null &&
-      v !== undefined &&
-      v !== '' &&
-      !ITEM_COLUMN_METADATA_FIELDS.has(k)
-    ) {
-      let formatted: string;
-      if (typeof v === 'string') {
-        formatted = v;
-      } else if (typeof v === 'number' || typeof v === 'boolean') {
-        formatted = String(v);
-      } else {
-        formatted = JSON.stringify(v);
-      }
-      lines.push(`${k}: ${formatted}`);
-    }
-  }
-  return lines.join('\n');
-}
 
 function cleanSingleIdentifier(
   raw: string | null | undefined,
@@ -101,73 +76,165 @@ export function normalizeItemIdentifiers(data: {
   };
 }
 
+/**
+ * Resolves the Extra plain text field according to Zotero standard.
+ * In Zotero, the Extra field contains user notes and translator variables (e.g. arXiv: ..., PMID: ...).
+ * It is never an internal bucket for dumping unmapped schema or telemetry fields.
+ */
 export function resolveExtraPlainText(
   extraInput?: string | null,
   existingExtra?: string | null,
-  extraFields?: Record<string, unknown> | null,
+  patches?: Record<string, any> | null,
 ): string | undefined {
-  const parseCandidate = (raw: string): string => {
-    const trimmed = raw.trim();
-    if (trimmed.startsWith('{')) {
-      try {
-        const parsed = JSON.parse(trimmed);
-        if (typeof parsed._rawExtra === 'string') {
-          return parsed._rawExtra.trim();
-        }
-        if (parsed && typeof parsed === 'object') {
-          return formatExtraMetadataEntries(parsed as Record<string, unknown>);
-        }
-      } catch {
-        return trimmed;
-      }
-    }
-    return trimmed;
-  };
-
-  let base: string | undefined = undefined;
+  let baseExtra: string | undefined;
   if (extraInput !== undefined && extraInput !== null) {
     if (typeof extraInput === 'string' && extraInput.trim()) {
-      base = parseCandidate(extraInput);
+      const trimmed = extraInput.trim();
+      if (trimmed.startsWith('{')) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (typeof parsed._rawExtra === 'string') {
+            baseExtra = parsed._rawExtra.trim();
+          } else {
+            baseExtra = trimmed;
+          }
+        } catch {
+          baseExtra = trimmed;
+        }
+      } else {
+        baseExtra = trimmed;
+      }
     } else {
-      base = '';
+      baseExtra = '';
     }
   } else if (existingExtra !== undefined && existingExtra !== null) {
-    base = parseCandidate(existingExtra);
+    baseExtra = existingExtra.trim();
   }
 
-  if (
-    extraFields &&
-    typeof extraFields === 'object' &&
-    Object.keys(extraFields).length > 0
-  ) {
-    const formattedFields = formatExtraMetadataEntries(extraFields);
-    if (formattedFields) {
-      if (base) {
-        const baseLines = new Set(
-          base
-            .split(/\r?\n/)
-            .map((l) => l.trim())
-            .filter(Boolean),
-        );
-        const extraLines = formattedFields
-          .split(/\r?\n/)
-          .map((l) => l.trim())
-          .filter(Boolean);
-        for (const line of extraLines) {
-          const key = line.split(':')[0]?.trim()?.toLowerCase();
-          const hasKey = Array.from(baseLines).some((l) =>
-            l.toLowerCase().startsWith(key + ':'),
-          );
-          if (!hasKey) baseLines.add(line);
+  if (patches && typeof patches === 'object' && Object.keys(patches).length > 0) {
+    const lines = baseExtra ? baseExtra.split(/\r?\n/) : [];
+    const patchLookup: Record<string, any> = {};
+    const keyLookup: Record<string, string> = {};
+    const normalizeKey = (k: string) => k.replace(/[\s_-]+/g, '').toLowerCase();
+
+    for (const [k, v] of Object.entries(patches)) {
+      const norm = normalizeKey(k);
+      patchLookup[norm] = v;
+      keyLookup[norm] = k;
+    }
+
+    const updatedLines: string[] = [];
+    const appliedPatches = new Set<string>();
+
+    for (const line of lines) {
+      const match = line.match(/^([a-zA-Z0-9_\s]+):\s*(.*)$/);
+      if (match) {
+        const key = match[1].trim();
+        const norm = normalizeKey(key);
+        if (norm in patchLookup) {
+          appliedPatches.add(norm);
+          const val = patchLookup[norm];
+          if (val !== null && val !== undefined && val !== '') {
+            updatedLines.push(`${key}: ${val}`);
+          }
+          continue;
         }
-        base = Array.from(baseLines).join('\n');
-      } else {
-        base = formattedFields;
+      }
+      updatedLines.push(line);
+    }
+
+    for (const [norm, val] of Object.entries(patchLookup)) {
+      if (!appliedPatches.has(norm) && val !== null && val !== undefined && val !== '') {
+        const origKey = keyLookup[norm] || norm;
+        const capKey = origKey.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (s) => s.toUpperCase());
+        updatedLines.push(`${capKey}: ${val}`);
+      }
+    }
+
+    return updatedLines.filter(Boolean).join('\n');
+  }
+
+  return baseExtra;
+}
+
+export function extractNonColumnExtraFields(
+  data?: Record<string, any> | null,
+  existingExtraFields?: Record<string, any> | null,
+): Record<string, any> {
+  const result: Record<string, any> = { ...(existingExtraFields || {}) };
+  if (!data || typeof data !== 'object') return result;
+
+  const ignoredSystemKeys = new Set([
+    'id',
+    'userId',
+    'projectId',
+    'workspaceId',
+    'createdById',
+    'uploadedById',
+    'createdAt',
+    'updatedAt',
+    'deletedAt',
+    'version',
+    'expectedVersion',
+    'creators',
+    'authors',
+    'contributors',
+    'editors',
+    'tags',
+    'labels',
+    'itemTags',
+    'keywords',
+    'attachments',
+    'notes',
+    'notesList',
+    'collectionId',
+    'collectionIds',
+    'collections',
+    'collectionItems',
+    'userStates',
+    'states',
+    'extraFields',
+    'fileId',
+    'fileUrl',
+    'size',
+    'mimeType',
+    'crossrefEnriched',
+    'ragDocId',
+    'ragIndexedAt',
+    'ragLastAttemptAt',
+    'ragAttempts',
+    'ragError',
+    'ragStatus',
+    'isRetracted',
+    'retractionNature',
+    'retractionDetails',
+    'retractionCheckedAt',
+    'isMyPublication',
+    'publicationConfirmedAt',
+  ]);
+
+  for (const [key, value] of Object.entries(data)) {
+    if (ignoredSystemKeys.has(key)) continue;
+    if (ITEM_COLUMN_METADATA_FIELDS.has(key) || FIELD_ALIASES[key]) continue;
+    if (value !== undefined) {
+      result[key] = value;
+    }
+  }
+
+  if (data.extraFields && typeof data.extraFields === 'object') {
+    for (const [k, v] of Object.entries(data.extraFields)) {
+      if (
+        v !== undefined &&
+        !ignoredSystemKeys.has(k) &&
+        !ITEM_COLUMN_METADATA_FIELDS.has(k) &&
+        !FIELD_ALIASES[k]
+      ) {
+        result[k] = v;
       }
     }
   }
 
-  return base;
+  return result;
 }
 
 export function prepareNotesToCreate(
@@ -319,10 +386,12 @@ export class CommandRepository {
     projectId?: string,
   ) {
     const client = this.getClient(tx);
-    const resolvedFileId =
+    const rawFileId =
       data.fileId ||
       data.fileUrl?.match(/\/api\/files\/([a-zA-Z0-9-]+)\/content/)?.[1] ||
       null;
+    const resolvedFileId =
+      rawFileId && isUUID(rawFileId) ? rawFileId : null;
 
     const notes = prepareNotesToCreate(
       data.notes,
@@ -350,6 +419,37 @@ export class CommandRepository {
       rawTagList,
     );
 
+    const resolvedPubTitle =
+      data.publicationTitle ??
+      data.journal ??
+      (data as any).bookTitle ??
+      (data as any).proceedingsTitle ??
+      (data as any).websiteTitle ??
+      (data as any).blogTitle ??
+      (data as any).dictionaryTitle ??
+      (data as any).encyclopediaTitle ??
+      (data as any).forumTitle ??
+      (data as any).sessionTitle ??
+      (data as any).programTitle ??
+      '';
+
+    const resolvedPublisher =
+      data.publisher ??
+      (data as any).university ??
+      (data as any).institution ??
+      (data as any).repository ??
+      (data as any).company ??
+      (data as any).distributor ??
+      (data as any).label ??
+      (data as any).studio ??
+      (data as any).network ??
+      '';
+
+    const effectiveExtraFields = extractNonColumnExtraFields(
+      data as any,
+      null,
+    );
+
     const createData: any = {
       userId,
       title: sanitizeItemTitle(data.title) || 'Untitled Item',
@@ -357,12 +457,12 @@ export class CommandRepository {
       doi: cleanDoi,
       abstract: data.abstract ?? data.abstractNote ?? '',
       itemType: data.itemType ?? 'journalArticle',
-      publicationTitle: data.publicationTitle ?? data.journal ?? '',
+      publicationTitle: resolvedPubTitle,
       publicationDate:
         data.publicationDate ??
         data.date ??
         (data.year ? String(data.year) : ''),
-      publisher: data.publisher ?? '',
+      publisher: resolvedPublisher,
       place: data.place ?? '',
       volume: data.volume ?? '',
       issue: data.issue ?? '',
@@ -394,13 +494,13 @@ export class CommandRepository {
       referenceCount: data.referenceCount ?? null,
       openAccessPdfUrl: data.openAccessPdfUrl ?? null,
       seriesNumber: data.seriesNumber ?? null,
-      extra:
-        resolveExtraPlainText(data.extra, undefined, data.extraFields) ?? '',
+      extra: resolveExtraPlainText(data.extra, null, effectiveExtraFields) ?? '',
       uploadedById: data.uploadedById || 'system',
       projectId:
-        (projectId && projectId !== 'user' ? projectId : undefined) ||
-        data.projectId ||
-        null,
+        (projectId && projectId !== 'user' && isUUID(projectId)
+          ? projectId
+          : undefined) ||
+        (data.projectId && isUUID(data.projectId) ? data.projectId : null),
       version: 1,
       ...(() => {
         const rawCollectionIds = [
@@ -624,6 +724,9 @@ export class CommandRepository {
         },
         identifiers: true,
         attachments: true,
+        notesList: {
+          where: { deletedAt: null },
+        },
       },
     });
 
@@ -652,7 +755,9 @@ export class CommandRepository {
       where: {
         id,
         deletedAt: null,
-        ...(projectId && projectId !== 'user' ? { projectId } : { userId }),
+        ...(projectId && projectId !== 'user' && isUUID(projectId)
+          ? { projectId }
+          : { userId }),
       } as any,
       include: {
         identifiers: true,
@@ -687,12 +792,42 @@ export class CommandRepository {
       rawAbstract !== undefined
         ? (cleanAbstractText(rawAbstract) ?? rawAbstract)
         : existing.abstract;
+    const effectiveExtraFields = extractNonColumnExtraFields(
+      data as any,
+      null,
+    );
+
     const rawPubDate =
       data.publicationDate !== undefined ? data.publicationDate : data.date;
     const rawPubTitle =
       data.publicationTitle !== undefined
         ? data.publicationTitle
-        : data.journal;
+        : data.journal !== undefined
+          ? data.journal
+          : (data as any).bookTitle !== undefined
+            ? (data as any).bookTitle
+            : (data as any).proceedingsTitle !== undefined
+              ? (data as any).proceedingsTitle
+              : (data as any).websiteTitle !== undefined
+                ? (data as any).websiteTitle
+                : (data as any).blogTitle !== undefined
+                  ? (data as any).blogTitle
+                  : undefined;
+
+    const rawPublisher =
+      data.publisher !== undefined
+        ? data.publisher
+        : (data as any).university !== undefined
+          ? (data as any).university
+          : (data as any).institution !== undefined
+            ? (data as any).institution
+            : (data as any).repository !== undefined
+              ? (data as any).repository
+              : (data as any).company !== undefined
+                ? (data as any).company
+                : (data as any).distributor !== undefined
+                  ? (data as any).distributor
+                  : undefined;
     const rawJournalAbbr =
       data.journalAbbr !== undefined
         ? data.journalAbbr
@@ -715,7 +850,13 @@ export class CommandRepository {
           data.title !== undefined
             ? sanitizeItemTitle(data.title) || existing.title
             : existing.title,
-        year: data.year !== undefined ? data.year : existing.year,
+        year:
+          data.year !== undefined
+            ? data.year
+            : rawPubDate !== undefined
+              ? Number(rawPubDate.match(/\b(18|19|20)\d{2}\b/)?.[0]) ||
+                existing.year
+              : existing.year,
         doi: cleanDoi !== undefined ? cleanDoi : existing.doi,
         abstract: cleanAbstract,
         itemType: data.itemType ?? existing.itemType,
@@ -724,7 +865,8 @@ export class CommandRepository {
 
         publicationDate:
           rawPubDate !== undefined ? rawPubDate : existing.publicationDate,
-        publisher: data.publisher ?? existing.publisher,
+        publisher:
+          rawPublisher !== undefined ? rawPublisher : existing.publisher,
         place: data.place ?? existing.place,
         volume: data.volume ?? existing.volume,
         issue: data.issue ?? existing.issue,
@@ -781,7 +923,11 @@ export class CommandRepository {
             ? data.seriesNumber
             : existing.seriesNumber,
         extra:
-          resolveExtraPlainText(data.extra, existing.extra, data.extraFields) ??
+          resolveExtraPlainText(
+            data.extra,
+            existing.extra,
+            effectiveExtraFields,
+          ) ??
           existing.extra ??
           '',
 
@@ -832,21 +978,34 @@ export class CommandRepository {
                       },
               }
             : {}),
-        ...(data.creators !== undefined
+        ...(data.contributors !== undefined || data.creators !== undefined
           ? {
               contributors: {
                 deleteMany: {},
-                create: (data.creators || []).map((c: any, index: number) => ({
-                  creatorType: c.creatorType || 'author',
-                  firstName: c.firstName || '',
-                  lastName: c.lastName || '',
-                  fullName:
+                create: (
+                  (data.contributors || data.creators) || []
+                ).map((c: any, index: number) => {
+                  const fullName =
                     c.fullName ||
                     [c.firstName, c.lastName].filter(Boolean).join(' ') ||
                     c.name ||
-                    '',
-                  orderIndex: c.orderIndex !== undefined ? c.orderIndex : index,
-                })),
+                    '';
+                  let first = c.firstName || '';
+                  let last = c.lastName || '';
+                  if (!first && !last && fullName) {
+                    const parsed = parseCreatorString(fullName, index);
+                    first = parsed.firstName;
+                    last = parsed.lastName;
+                  }
+                  return {
+                    creatorType: c.creatorType || 'author',
+                    firstName: first,
+                    lastName: last,
+                    fullName,
+                    orderIndex:
+                      c.orderIndex !== undefined ? c.orderIndex : index,
+                  };
+                }),
               },
             }
           : data.authors !== undefined

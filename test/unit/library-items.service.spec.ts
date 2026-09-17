@@ -12,6 +12,11 @@ import { RagProvider } from '@/modules/library/search/providers/rag.provider';
 import { ItemTransformer } from '@/modules/library/items/transformers/item.transformer';
 import { sanitizeItemTitle } from '@/modules/library/items/utils/items.utils';
 import { VersionMismatchException } from '@/modules/library/core/errors/version-mismatch.exception';
+import { ItemsMapper } from '@/modules/library/items/mappers/items.mapper';
+import {
+  resolveExtraPlainText,
+  extractNonColumnExtraFields,
+} from '@/modules/library/items/repositories/command.repository';
 
 describe('Library Items — Authoritative Backend & Sanitization', () => {
   describe('sanitizeItemTitle (Domain Utility)', () => {
@@ -192,6 +197,124 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
         expect.anything(),
         undefined,
       );
+    });
+  });
+
+  describe('Zotero Schema v42 Parity — Mapping & Extra Preservation', () => {
+    describe('ItemsMapper.toDomain', () => {
+      it('should map base publicationTitle to type-specific fields', () => {
+        const bookSection: any = ItemsMapper.toDomain({
+          itemType: 'bookSection',
+          publicationTitle: 'Handbook of AI',
+        });
+        expect(bookSection.bookTitle).toBe('Handbook of AI');
+        expect(bookSection.publicationTitle).toBe('Handbook of AI');
+
+        const confPaper: any = ItemsMapper.toDomain({
+          itemType: 'conferencePaper',
+          publicationTitle: 'Proceedings of NeurIPS 2023',
+        });
+        expect(confPaper.proceedingsTitle).toBe('Proceedings of NeurIPS 2023');
+
+        const webpage: any = ItemsMapper.toDomain({
+          itemType: 'webpage',
+          publicationTitle: 'DeepMind Blog',
+        });
+        expect(webpage.websiteTitle).toBe('DeepMind Blog');
+      });
+
+      it('should map base publisher to university, institution, and repository', () => {
+        const thesis: any = ItemsMapper.toDomain({
+          itemType: 'thesis',
+          publisher: 'MIT',
+        });
+        expect(thesis.university).toBe('MIT');
+        expect(thesis.publisher).toBe('MIT');
+
+        const report: any = ItemsMapper.toDomain({
+          itemType: 'report',
+          publisher: 'RAND Corporation',
+        });
+        expect(report.institution).toBe('RAND Corporation');
+
+        const preprint: any = ItemsMapper.toDomain({
+          itemType: 'preprint',
+          publisher: 'arXiv',
+        });
+        expect(preprint.repository).toBe('arXiv');
+      });
+
+      it('should preserve and project non-column fields from extra plain-text', () => {
+        const rawItem = {
+          itemType: 'book',
+          title: 'Clean Code',
+          extra: 'Edition: 2nd\nnumPages: 464\nConference Name: ACM SIGMOD',
+        };
+        const mapped: any = ItemsMapper.toDomain(rawItem);
+        expect(mapped.edition).toBe('2nd');
+        expect(mapped.numPages).toBe(464);
+        expect(mapped.numberOfPages).toBe(464);
+        expect(mapped.conferenceName).toBe('ACM SIGMOD');
+      });
+
+      it('should synchronize canonical Zotero uppercase and lowercase aliases', () => {
+        const item: any = ItemsMapper.toDomain({
+          itemType: 'journalArticle',
+          doi: '10.1234/test',
+          isbn: '978-3-16-148410-0',
+          issn: '2049-3630',
+          pmid: '12345678',
+          pmcid: 'PMC1234567',
+          arxivId: '2301.00001',
+          publicationDate: '2023-01-01',
+          journalAbbr: 'Nat. Mach. Intell.',
+        });
+        expect(item.DOI).toBe('10.1234/test');
+        expect(item.doi).toBe('10.1234/test');
+        expect(item.ISBN).toBe('978-3-16-148410-0');
+        expect(item.ISSN).toBe('2049-3630');
+        expect(item.PMID).toBe('12345678');
+        expect(item.PMCID).toBe('PMC1234567');
+        expect(item.archiveId).toBe('2301.00001');
+        expect(item.date).toBe('2023-01-01');
+        expect(item.journalAbbreviation).toBe('Nat. Mach. Intell.');
+      });
+    });
+
+    describe('resolveExtraPlainText & extractNonColumnExtraFields', () => {
+      it('should extract non-column fields into extraFields object', () => {
+        const data = {
+          title: 'Paper Title',
+          publisher: 'University Press',
+          edition: '3rd',
+          numPages: 350,
+          conferenceName: 'ICML 2024',
+          eventPlace: 'Vienna, Austria',
+        };
+        const extra = extractNonColumnExtraFields(data);
+        expect(extra.edition).toBe('3rd');
+        expect(extra.numPages).toBe(350);
+        expect(extra.conferenceName).toBe('ICML 2024');
+        expect(extra.eventPlace).toBe('Vienna, Austria');
+        expect(extra.title).toBeUndefined();
+        expect(extra.publisher).toBeUndefined();
+      });
+
+      it('should replace existing extra field in-place without duplicating', () => {
+        const initialExtra = 'Edition: 1st\nLocation: Boston';
+        const updated = resolveExtraPlainText(undefined, initialExtra, {
+          edition: '2nd',
+        });
+        expect(updated).toBe('Edition: 2nd\nLocation: Boston');
+      });
+
+      it('should delete cleared field when null or empty string is passed', () => {
+        const initialExtra = 'Edition: 1st\nLocation: Boston';
+        const updated = resolveExtraPlainText(undefined, initialExtra, {
+          edition: null,
+        });
+        expect(updated).toBe('Location: Boston');
+      });
     });
   });
 });

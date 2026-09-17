@@ -13,6 +13,7 @@ import {
   normalizeDoi,
   cleanBibliographicText,
   cleanAbstractText,
+  cleanCommentText,
   decodeHtmlEntities,
   normalizeTags,
 } from '../utils/metadata.utils';
@@ -170,7 +171,7 @@ export class ArxivProvider implements MetadataProvider {
       /<arxiv:comment[^>]*>([\s\S]*?)<\/arxiv:comment>/i,
     );
     if (commentMatch) {
-      comment = cleanBibliographicText(commentMatch[1]);
+      comment = cleanCommentText(commentMatch[1]);
     }
 
     // License / Rights (e.g. CC BY 4.0 or arXiv perpetual non-exclusive license)
@@ -203,8 +204,8 @@ export class ArxivProvider implements MetadataProvider {
 
     const canonicalArxivId = cleanId.replace(/v\d+$/i, '');
 
-    // Native Zotero arXiv Extra format: arXiv:<id> [<primary_category>]
-    const extra = `arXiv:${canonicalArxivId}${primaryCategory ? ` [${primaryCategory}]` : ''}`;
+    // Native Zotero arXiv Extra format: arXiv: <id> [<primary_category>]
+    const extra = `arXiv: ${canonicalArxivId}${primaryCategory ? ` [${primaryCategory}]` : ''}`;
 
     // PDF link
     const pdfUrl = `https://arxiv.org/pdf/${cleanId}.pdf`;
@@ -229,9 +230,7 @@ export class ArxivProvider implements MetadataProvider {
         year,
         publicationDate,
         journal: journal || 'arXiv preprint',
-        publicationTitle:
-          journal ||
-          (comment ? `arXiv preprint (${comment})` : 'arXiv preprint'),
+        publicationTitle: journal || 'arXiv preprint',
         publisher: 'arXiv',
         abstract,
         language: 'en',
@@ -243,6 +242,9 @@ export class ArxivProvider implements MetadataProvider {
         rights,
         license: rights,
         extra,
+        notes: comment
+          ? [{ content: `Comment: ${comment}`, source: 'arXiv' }]
+          : undefined,
         keywords: keywords.length > 0 ? keywords : undefined,
         tags: keywords.length > 0 ? keywords : undefined,
         itemType: 'preprint',

@@ -47,9 +47,12 @@ export class EnrichStage {
       const title = candidate.normalizedMetadata.title?.trim();
       const isCredibleTitle =
         Boolean(title) &&
-        title!.length >= 12 &&
-        !/\.pdf$/i.test(title!) &&
-        !/^(uploaded document|untitled|document)$/i.test(title!);
+        title!.length >= 10 &&
+        !/\.(pdf|eps|png|jpe?g|svg)$/i.test(title!) &&
+        !/^(uploaded document|untitled|document)$/i.test(title!) &&
+        !/noname\s+manuscript/i.test(title!) &&
+        !/\(will\s+be\s+inserted\s+by\s+the\s+editor\)/i.test(title!) &&
+        !/^\d{4}\s*\d{4,5}(v\d+)?$/i.test(title!);
       const query =
         doi ||
         arxivId ||

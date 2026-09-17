@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
 import { isUUID as isUuid } from 'class-validator';
+import { PrismaService } from '@/core/database/prisma.service';
 import { Prisma, Page, PageStatus } from '@prisma/client';
+import { resolveCanonicalProjectId } from './utils/document.utils';
 import {
   IPageRepository,
   PageWithAuthor,
@@ -16,19 +17,7 @@ export class CoreRepository implements IPageRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   private async resolveProjectId(projectId: string): Promise<string | null> {
-    if (isUuid(projectId)) {
-      return projectId;
-    }
-    const proj = await this.prisma.project
-      .findFirst({
-        where: {
-          identifier: { equals: projectId, mode: 'insensitive' },
-          deletedAt: null,
-        },
-        select: { id: true },
-      })
-      .catch(() => null);
-    return proj?.id ?? null;
+    return resolveCanonicalProjectId(this.prisma, projectId);
   }
 
   async findProjectPages(
@@ -97,14 +86,14 @@ export class CoreRepository implements IPageRepository {
           Array<{ id: string; parentPageId: string | null }>
         >`
           WITH RECURSIVE ancestors AS (
-            SELECT id, "parentPageId", 1 AS depth
-            FROM "Page"
-            WHERE id = ${startPageId}::uuid AND "deletedAt" IS NULL
+            SELECT id, parent_page_id AS "parentPageId", 1 AS depth
+            FROM pages
+            WHERE id = ${startPageId}::uuid AND deleted_at IS NULL
             UNION ALL
-            SELECT p.id, p."parentPageId", a.depth + 1
-            FROM "Page" p
+            SELECT p.id, p.parent_page_id AS "parentPageId", a.depth + 1
+            FROM pages p
             INNER JOIN ancestors a ON p.id = a."parentPageId"
-            WHERE p."deletedAt" IS NULL AND a.depth < 50
+            WHERE p.deleted_at IS NULL AND a.depth < 50
           )
           SELECT id, "parentPageId" FROM ancestors;
         `;

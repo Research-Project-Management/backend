@@ -96,6 +96,7 @@ export interface IngestionRunSnapshot {
   completedAt?: Date | null;
   lastError?: string | null;
   itemId?: string | null;
+  item?: any;
   stages: IngestionStage[];
   candidates: IngestionCandidate[];
   decisions: IngestionDecision[];

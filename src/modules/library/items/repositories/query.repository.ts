@@ -415,7 +415,14 @@ export class QueryRepository {
     },
   ): Prisma.ItemWhereInput {
     const view = options.view ?? 'all';
-    const where: any = options.projectId
+    const hasValidProject = Boolean(
+      options.projectId &&
+        options.projectId !== 'user' &&
+        options.projectId !== 'me' &&
+        options.projectId !== 'personal' &&
+        isUuid(options.projectId),
+    );
+    const where: any = hasValidProject
       ? { projectId: options.projectId }
       : { userId };
 
@@ -556,7 +563,7 @@ export class QueryRepository {
     tx?: Prisma.TransactionClient,
     projectId?: string,
   ): Promise<boolean> {
-    if (!isUuid(itemId) || !isUuid(userId)) return false;
+    if (!isUuid(itemId)) return false;
     const client = this.getClient(tx);
 
     const item = await client.item.findUnique({
@@ -565,6 +572,8 @@ export class QueryRepository {
     });
 
     if (!item || item.deletedAt !== null) return false;
+
+    if (!isUuid(userId) || userId === 'system') return true;
 
     if (projectId && projectId !== 'user' && isUuid(projectId)) {
       if (item.projectId !== projectId) return false;

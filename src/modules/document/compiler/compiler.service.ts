@@ -583,6 +583,7 @@ export class CompilerService {
           version = await tx.pageVersion.create({
             data: {
               pageId,
+              projectPageId: page.parentPageId || null,
               title: updated.title,
               content:
                 typeof updated.content === 'string'

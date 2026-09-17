@@ -13,6 +13,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { isUUID } from 'class-validator';
 import { NotesService } from './notes.service';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/auth.guard';
 import { CurrentUser } from '../../../modules/iam/authn/decorators/user.decorator';
@@ -40,7 +41,15 @@ export class NotesController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    const effectiveProjectId = paramProjectId || queryProjectId;
+    const rawProjectId = paramProjectId || queryProjectId;
+    const effectiveProjectId =
+      rawProjectId &&
+      rawProjectId !== 'me' &&
+      rawProjectId !== 'user' &&
+      rawProjectId !== 'personal' &&
+      isUUID(rawProjectId)
+        ? rawProjectId
+        : undefined;
     return this.notesService.listNotes(
       currentUserId,
       itemId,

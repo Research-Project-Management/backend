@@ -8,6 +8,7 @@ import { NormalizationPolicy } from '../policies/normalization.policy';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 import { PdfProvider } from '../../attachments/providers/pdf.provider';
 import { QueryClassifier } from '../metadata/classifiers/query.classifier';
+import { normalizeAcademicTitleCase } from '../../items/utils/items.utils';
 import { randomUUID } from 'crypto';
 
 @Injectable()
@@ -146,7 +147,7 @@ export class IdentifyStage {
               authors: item.authors,
               editors: item.editors,
               year: item.year,
-              publicationTitle: item.journal || item.publisher,
+              publicationTitle: item.journal,
               journal: item.journal,
               publisher: item.publisher,
               place: item.place,
@@ -310,14 +311,13 @@ export class IdentifyStage {
               editors: editors.length > 0 ? editors : undefined,
               creators: creators.length > 0 ? creators : undefined,
               year,
-              publicationTitle:
-                csl['container-title'] || csl.publisher || undefined,
+              publicationTitle: csl['container-title'] || undefined,
               journal: csl['container-title'] || undefined,
               publisher: csl.publisher || undefined,
               place: csl['publisher-place'] || undefined,
               volume: csl.volume ? String(csl.volume) : undefined,
               issue: csl.issue ? String(csl.issue) : undefined,
-              pages: csl.page || numPages || undefined,
+              pages: csl.page || undefined,
               series: csl['collection-title'] || undefined,
               edition: csl.edition ? String(csl.edition).trim() : undefined,
               doi: csl.DOI || csl.doi || undefined,
@@ -410,7 +410,9 @@ export class IdentifyStage {
             if (fileRecord?.buffer) {
               fileBuffer = fileRecord.buffer;
               const extractedDocument =
-                await this.pdf.extractDocumentFromBuffer(fileRecord.buffer);
+                await this.pdf.extractDocumentFromBuffer(fileRecord.buffer, {
+                  headerOnly: true,
+                });
               extractedMetadata =
                 extractedDocument?.metadata || extractedDocument || {};
 
@@ -446,7 +448,7 @@ export class IdentifyStage {
           }
         }
 
-        // Keep the complete extractor result at the ingestion boundary.  This
+        // Keep the complete extractor result at the ingestion boundary. This
         // is deliberately a projection rather than a hand-maintained list:
         // adding a field to the PDF extractor must not silently discard it
         // before normalization and reconciliation can use it.
@@ -456,29 +458,86 @@ export class IdentifyStage {
           ...extractedItemMetadata
         } = extractedMetadata;
 
-        const filenameDoi = payload.filename
-          ?.match(/10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/)?.[0]
-          ?.replace(/[.,;:)\]]+$/, '');
+        const rawFilenameDoiMatch = payload.filename?.match(
+          /10\.\d{4,9}[/_@][-._;()/:A-Za-z0-9]+/,
+        )?.[0];
+        const filenameDoi = rawFilenameDoiMatch
+          ? rawFilenameDoiMatch
+              .replace(/^(10\.\d{4,9})[_@]/, '$1/')
+              .replace(/[.,;:)\]]+$/, '')
+          : undefined;
+
         const filenameArxivId = payload.filename?.match(
-          /(?:arxiv[:_.-]*)?(\d{4}\.\d{4,5}(?:v\d+)?)/i,
+          /(?:arxiv[:_.-]*)?([0-2]\d{3}\.\d{4,5}(?:v\d+)?)/i,
         )?.[1];
+
+        // Clean and prepare title: avoid leaving raw filename or .pdf extension
+        let resolvedTitle: string | undefined;
+        if (
+          extractedMetadata.title &&
+          typeof extractedMetadata.title === 'string'
+        ) {
+          const t = extractedMetadata.title.trim();
+          const isBannerOrGarbage =
+            /noname\s+manuscript/i.test(t) ||
+            /\(will\s+be\s+inserted\s+by\s+the\s+editor\)/i.test(t) ||
+            /proceedings\s+of\s+the/i.test(t) ||
+            /submitted\s+to/i.test(t) ||
+            /\.(eps|pdf|png|jpe?g|svg)$/i.test(t) ||
+            /^(untitled|document|microsoft word)/i.test(t) ||
+            /^[A-Z]\s+[A-Z]\s+[A-Z]\s+[A-Z]/i.test(t);
+          if (t.length > 3 && !isBannerOrGarbage) {
+            resolvedTitle = normalizeAcademicTitleCase(t);
+          }
+        }
+
+        if (!resolvedTitle && payload.filename) {
+          // Clean filename fallback: strip .pdf, replace underscores/hyphens with spaces
+          const cleanBase = payload.filename
+            .replace(/\.[a-zA-Z0-9]+$/, '')
+            .replace(/[-_]+/g, ' ')
+            .trim();
+          const isArxivPattern =
+            /^\d{4}\s*\d{4,5}(v\d+)?$/i.test(cleanBase) ||
+            /^arxiv/i.test(cleanBase);
+          if (cleanBase.length > 2 && !isArxivPattern) {
+            resolvedTitle = normalizeAcademicTitleCase(cleanBase);
+          }
+        }
+
+        if (!resolvedTitle) {
+          resolvedTitle = 'Uploaded Document';
+        }
 
         const rawFileMetadata = {
           ...extractedItemMetadata,
           doi: extractedMetadata.doi || filenameDoi,
           isbn: extractedMetadata.isbn,
           arxivId: extractedMetadata.arxivId || filenameArxivId,
-          title:
-            extractedMetadata.title || payload.filename || 'Uploaded Document',
-          publisher: extractedMetadata.publisher,
-          pages:
-            extractedMetadata.pages ||
-            (extractedMetadata.numberOfPages
-              ? String(extractedMetadata.numberOfPages)
+          title: resolvedTitle,
+          authors: extractedMetadata.authors?.length
+            ? extractedMetadata.authors
+            : undefined,
+          creators: extractedMetadata.creators?.length
+            ? extractedMetadata.creators
+            : undefined,
+          year: extractedMetadata.year || undefined,
+          publicationDate:
+            extractedMetadata.publicationDate ||
+            (extractedMetadata.year
+              ? String(extractedMetadata.year)
               : undefined),
+          abstract: extractedMetadata.abstract || undefined,
+          publisher: extractedMetadata.publisher,
+          publicationTitle:
+            extractedMetadata.publicationTitle || extractedMetadata.journal,
+          journal: extractedMetadata.journal,
+          pages: extractedMetadata.pages || undefined,
           tags: extractedMetadata.tags || extractedMetadata.keywords,
           fileId: payload.fileId,
           filename: payload.filename,
+          referenceCount: extractedMetadata.referenceCount,
+          citationCount: extractedMetadata.citationCount,
           extraFields: {
             ...(extractedMetadata.extraFields || {}),
             ...(extractedMetadata.numberOfPages
@@ -506,9 +565,11 @@ export class IdentifyStage {
           normalizedMetadata: normalized,
           confidenceScore: extractedMetadata.doi
             ? 0.95
-            : extractedMetadata.isbn
-              ? 0.9
-              : 0.75,
+            : extractedMetadata.arxivId
+              ? 0.92
+              : extractedMetadata.isbn
+                ? 0.9
+                : 0.75,
         });
         break;
       }

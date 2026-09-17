@@ -53,6 +53,9 @@ describe('Document CommentService (Server-Authoritative Sanitization & RBAC)', (
     };
 
     prisma = {
+      page: {
+        findUnique: jest.fn().mockResolvedValue({ parentPageId: null }),
+      },
       pageComment: {
         findUnique: jest.fn(),
       },

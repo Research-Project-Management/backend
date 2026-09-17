@@ -1,9 +1,12 @@
 import { Injectable, Logger, Optional, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { IngestionSubmissionEnvelope } from '../types/submission.types';
 import { PipelineService } from './pipeline.service';
 import { IngestionRepository } from '../ingestion.repository';
 import { IngestionStatus } from '@prisma/client';
+import { LIBRARY_INGESTION_QUEUE, LIBRARY_INGESTION_JOB } from '../constants/queue.constants';
 
 export interface QueuedIngestionJob {
   runId: string;
@@ -31,19 +34,28 @@ export class QueueService implements OnModuleInit {
     private readonly pipeline: PipelineService,
     private readonly repo: IngestionRepository,
     @Optional() private readonly configService?: ConfigService,
+    @Optional()
+    @InjectQueue(LIBRARY_INGESTION_QUEUE)
+    private readonly bullQueue?: Queue,
   ) {
+    if (this.bullQueue && typeof (this.bullQueue as any).on === 'function') {
+      (this.bullQueue as any).on('error', (err: any) => {
+        this.logger.warn(`Ingestion BullMQ queue error notice: ${err?.message || err}`);
+      });
+    }
+
     const configuredConcurrency = Number(
       this.configService?.get('INGESTION_CONCURRENCY') ||
         process.env.INGESTION_CONCURRENCY,
     );
-    // GROBID container default has 2 worker threads; 2 concurrent pipelines prevents saturation
+    // GROBID container default has 2 worker threads; 3 concurrent pipelines prevents saturation
     this.maxConcurrency =
       Number.isInteger(configuredConcurrency) && configuredConcurrency > 0
         ? configuredConcurrency
-        : 2;
+        : 3;
 
     this.logger.log(
-      `QueueService initialized with maxConcurrency=${this.maxConcurrency}`,
+      `QueueService initialized with maxConcurrency=${this.maxConcurrency} (BullMQ: ${Boolean(this.bullQueue)})`,
     );
   }
 
@@ -79,24 +91,53 @@ export class QueueService implements OnModuleInit {
 
   /**
    * Enqueues an ingestion run for asynchronous pipeline execution.
-   * If already running or queued, ignores to avoid duplicate work.
+   * If BullMQ is available, dispatches to Redis distributed queue.
+   * Otherwise falls back to bounded in-memory queue.
    */
-  enqueue(
+  async enqueue(
     runId: string,
     projectId: string,
     envelope: IngestionSubmissionEnvelope,
-  ): boolean {
-    if (this.runningRunIds.has(runId) || this.queuedRunIds.has(runId)) {
+  ): Promise<boolean> {
+    if (this.isProcessingSync(runId)) {
       this.logger.warn(
         `Run ${runId} is already active or queued. Skipping duplicate enqueue.`,
       );
       return false;
     }
 
+    if (this.bullQueue) {
+      try {
+        await this.bullQueue.add(
+          LIBRARY_INGESTION_JOB,
+          { runId, projectId, envelope },
+          {
+            jobId: `ingest-${runId}`,
+            attempts: 3,
+            backoff: {
+              type: 'exponential',
+              delay: 3000,
+            },
+            removeOnComplete: { age: 86400, count: 5000 },
+            removeOnFail: { age: 7 * 86400, count: 2000 },
+          },
+        );
+        this.queuedRunIds.add(runId);
+        this.logger.log(
+          `[BullMQ] Enqueued run ${runId} for project ${projectId} into Redis queue ${LIBRARY_INGESTION_QUEUE}`,
+        );
+        return true;
+      } catch (err: any) {
+        this.logger.error(
+          `Failed to dispatch run ${runId} to BullMQ: ${err?.message || err}. Falling back to in-memory queue.`,
+        );
+      }
+    }
+
     this.queuedRunIds.add(runId);
     this.queue.push({ runId, projectId, envelope });
     this.logger.log(
-      `Enqueued run ${runId} for project ${projectId} (queue length: ${this.queue.length}, active: ${this.activeCount}/${this.maxConcurrency})`,
+      `[In-Memory] Enqueued run ${runId} for project ${projectId} (queue length: ${this.queue.length}, active: ${this.activeCount}/${this.maxConcurrency})`,
     );
 
     this.pump();
@@ -104,19 +145,57 @@ export class QueueService implements OnModuleInit {
   }
 
   /**
-   * Checks if a run is currently executing or waiting in queue.
+   * Synchronous check against local in-memory sets.
    */
-  isProcessing(runId: string): boolean {
+  isProcessingSync(runId: string): boolean {
     return this.runningRunIds.has(runId) || this.queuedRunIds.has(runId);
+  }
+
+  /**
+   * Checks if a run is currently executing or waiting in queue (checks memory and Redis).
+   */
+  async isProcessing(runId: string): Promise<boolean> {
+    if (this.isProcessingSync(runId)) {
+      return true;
+    }
+    if (this.bullQueue) {
+      try {
+        const job = await this.bullQueue.getJob(`ingest-${runId}`);
+        if (job) {
+          const state = await job.getState();
+          return (
+            state === 'active' ||
+            state === 'waiting' ||
+            state === 'delayed' ||
+            state === 'prioritized'
+          );
+        }
+      } catch {
+        // ignore redis error
+      }
+    }
+    return false;
   }
 
   /**
    * Returns current queue metrics.
    */
-  getStats(): IngestionQueueStats {
+  async getStats(): Promise<IngestionQueueStats> {
+    let bullActive = 0;
+    let bullWaiting = 0;
+    if (this.bullQueue) {
+      try {
+        [bullActive, bullWaiting] = await Promise.all([
+          this.bullQueue.getActiveCount(),
+          this.bullQueue.getWaitingCount(),
+        ]);
+      } catch {
+        // ignore
+      }
+    }
     return {
-      activeCount: this.activeCount,
-      queuedCount: this.queue.length,
+      activeCount: this.activeCount + bullActive,
+      queuedCount: this.queue.length + bullWaiting,
       maxConcurrency: this.maxConcurrency,
     };
   }
@@ -148,6 +227,13 @@ export class QueueService implements OnModuleInit {
       this.logger.log(
         `[QUEUE_START] Executing run ${runId} (active: ${this.activeCount}/${this.maxConcurrency}, remaining queued: ${this.queue.length})`,
       );
+      await this.repo
+        .updateRunStatus(projectId, runId, IngestionStatus.DETECTED)
+        .catch((statusErr: any) => {
+          this.logger.warn(
+            `Failed to set DETECTED status for run ${runId}: ${statusErr?.message}`,
+          );
+        });
       await this.pipeline.executePipeline(runId, projectId, envelope);
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       this.logger.log(

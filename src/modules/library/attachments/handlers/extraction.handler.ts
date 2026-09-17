@@ -3,9 +3,10 @@ import { PrismaService } from '../../../../core/database/prisma.service';
 import { PdfProvider } from '../providers/pdf.provider';
 import { SearchService } from '../../search/search.service';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
-import { OutboxEvent } from '@prisma/client';
+import { OutboxEvent, Prisma } from '@prisma/client';
 import { OutboxDispatchHandler } from '../../outbox/types/outbox.types';
 import { AttachmentStorageException } from '../errors/attachments.errors';
+import { parseCreatorString } from '../../items/utils/items.utils';
 
 export const EXTRACTION_EVENT_TYPES = {
   EXTRACTION_REQUESTED: 'library.attachment.extraction_requested',
@@ -224,17 +225,77 @@ export class ExtractionHandler implements OutboxDispatchHandler {
           });
 
           // Synchronize extracted referenceCount & core metadata onto the Item model
-          if (doc.references && doc.references.length > 0) {
+          const currentTitle = String(attachment.item?.title || '').trim();
+          const shouldUpdateTitle =
+            doc.metadata?.title &&
+            (!currentTitle ||
+              currentTitle === 'Untitled Document' ||
+              currentTitle === 'Uploaded Document' ||
+              /\.pdf$/i.test(currentTitle) ||
+              /^10\.\d{4,9}\//.test(currentTitle));
+
+          const itemPatch: Prisma.ItemUpdateInput = {
+            ...(doc.references && doc.references.length > 0
+              ? { referenceCount: doc.references.length }
+              : {}),
+            ...(shouldUpdateTitle ? { title: doc.metadata.title } : {}),
+            ...(!attachment.item?.doi && doc.metadata?.doi
+              ? { doi: doc.metadata.doi }
+              : {}),
+            ...(!attachment.item?.arxivId && doc.metadata?.arxivId
+              ? { arxivId: doc.metadata.arxivId }
+              : {}),
+            ...(!attachment.item?.abstract && doc.metadata?.abstract
+              ? { abstract: doc.metadata.abstract }
+              : {}),
+            ...(!attachment.item?.year && doc.metadata?.year
+              ? { year: doc.metadata.year }
+              : {}),
+            ...(!attachment.item?.publicationTitle && doc.metadata?.journal
+              ? {
+                  publicationTitle: doc.metadata.journal,
+                }
+              : {}),
+          };
+
+          if (Object.keys(itemPatch).length > 0) {
             await this.prisma.item.update({
               where: { id: attachment.itemId },
-              data: {
-                referenceCount: doc.references.length,
-                ...(!attachment.item?.doi && doc.metadata?.doi ? { doi: doc.metadata.doi } : {}),
-                ...(!attachment.item?.arxivId && doc.metadata?.arxivId ? { arxivId: doc.metadata.arxivId } : {}),
-                ...(!attachment.item?.abstract && doc.metadata?.abstract ? { abstract: doc.metadata.abstract } : {}),
-                ...(!attachment.item?.year && doc.metadata?.year ? { year: doc.metadata.year } : {}),
-              },
+              data: itemPatch,
             });
+          }
+
+          if (doc.metadata?.creators && doc.metadata.creators.length > 0) {
+            const count = await this.prisma.contributor.count({
+              where: { itemId: attachment.itemId },
+            });
+            if (count === 0) {
+              await this.prisma.contributor.createMany({
+                data: doc.metadata.creators.map((c, idx) => {
+                  const creatorType = 'author';
+                  const parsed = parseCreatorString(
+                    c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+                    idx,
+                    creatorType as any,
+                  );
+                  const first = c.firstName || parsed.firstName || '';
+                  const last = c.lastName || parsed.lastName || '';
+                  const full =
+                    c.fullName ||
+                    parsed.fullName ||
+                    [first, last].filter(Boolean).join(' ') ||
+                    '';
+                  return {
+                    itemId: attachment.itemId,
+                    orderIndex: idx,
+                    creatorType,
+                    firstName: first,
+                    lastName: last,
+                    fullName: full,
+                  };
+                }),
+              });
+            }
           }
         } catch (provenanceErr: any) {
           this.logger.debug(

@@ -21,6 +21,13 @@ import { IngestionSubmissionDto } from './dto/submission.dto';
 import { UnifiedIngestionDto } from './dto/ingestion.dto';
 import { CaptureUrlDto, ConfirmCapturedUrlDto } from './dto/capture-url.dto';
 
+import { isUUID } from 'class-validator';
+
+const toValidProjectId = (val?: string): string | undefined =>
+  val && val !== 'me' && val !== 'user' && val !== 'personal' && isUUID(val)
+    ? val
+    : undefined;
+
 @Controller([
   'api/v1/library/ingestion',
   'api/v1/projects/:projectId/library/ingestion',
@@ -47,8 +54,9 @@ export class IngestionController {
     @Param('projectId') paramProjectId?: string,
   ) {
     const effectiveIdempotencyKey = idempotencyKeyHeader || dto.idempotencyKey;
-    const effectiveProjectId =
-      paramProjectId || queryProjectId || dto.projectId || undefined;
+    const effectiveProjectId = toValidProjectId(
+      paramProjectId || queryProjectId || dto.projectId,
+    );
 
     let payload: any;
     switch (dto.kind) {
@@ -158,8 +166,9 @@ export class IngestionController {
     @Param('projectId') paramProjectId?: string,
   ) {
     const effectiveIdempotencyKey = idempotencyKeyHeader || dto.idempotencyKey;
-    const effectiveProjectId =
-      paramProjectId || queryProjectId || (dto as any).projectId || undefined;
+    const effectiveProjectId = toValidProjectId(
+      paramProjectId || queryProjectId || (dto as any).projectId,
+    );
     let command: any;
 
     switch (dto.source) {
@@ -231,7 +240,9 @@ export class IngestionController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    const effectiveProjectId = paramProjectId || queryProjectId || undefined;
+    const effectiveProjectId = toValidProjectId(
+      paramProjectId || queryProjectId,
+    );
     return this.ingestionService.captureUrl(dto.url, {
       projectId: effectiveProjectId,
       userId,
@@ -246,8 +257,9 @@ export class IngestionController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    const effectiveProjectId =
-      paramProjectId || queryProjectId || dto.projectId || undefined;
+    const effectiveProjectId = toValidProjectId(
+      paramProjectId || queryProjectId || dto.projectId,
+    );
     return this.ingestionService.confirmCapturedUrl(
       effectiveProjectId || userId,
       userId,

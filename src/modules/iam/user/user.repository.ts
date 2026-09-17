@@ -249,17 +249,29 @@ export class UserRepository implements IUserRepository {
   // ─── 3. Cross-Resource Entity Search (Stubs for Microservice Isolation) ──────
 
   async searchProjects(
-    _userId: string,
-    _query: string,
+    userId: string,
+    query: string,
   ): Promise<
     Array<{ id: string; name: string; avatar: string | null; updatedAt: Date }>
   > {
-    return [];
+    try {
+      return await this.prisma.project.findMany({
+        where: {
+          deletedAt: null,
+          members: { some: { userId } },
+          name: { contains: query, mode: 'insensitive' },
+        },
+        select: { id: true, name: true, avatar: true, updatedAt: true },
+        take: 10,
+      });
+    } catch {
+      return [];
+    }
   }
 
   async searchWorkItems(
-    _userId: string,
-    _query: string,
+    userId: string,
+    query: string,
   ): Promise<
     Array<{
       id: string;
@@ -270,19 +282,57 @@ export class UserRepository implements IUserRepository {
       updatedAt: Date;
     }>
   > {
-    return [];
+    try {
+      const items = await this.prisma.workItem.findMany({
+        where: {
+          deletedAt: null,
+          project: { members: { some: { userId } }, deletedAt: null },
+          OR: [
+            { title: { contains: query, mode: 'insensitive' } },
+            { identifier: { contains: query, mode: 'insensitive' } },
+          ],
+        },
+        select: {
+          id: true,
+          title: true,
+          identifier: true,
+          projectId: true,
+          project: { select: { name: true } },
+          updatedAt: true,
+        },
+        take: 10,
+      });
+      return items.map((i) => ({
+        ...i,
+        identifier: i.identifier || '',
+      }));
+    } catch {
+      return [];
+    }
   }
 
   async searchPapers(
-    _userId: string,
-    _query: string,
+    userId: string,
+    query: string,
   ): Promise<Array<{ id: string; title: string; updatedAt: Date }>> {
-    return [];
+    try {
+      return await this.prisma.item.findMany({
+        where: {
+          userId,
+          deletedAt: null,
+          title: { contains: query, mode: 'insensitive' },
+        },
+        select: { id: true, title: true, updatedAt: true },
+        take: 10,
+      });
+    } catch {
+      return [];
+    }
   }
 
   async searchPages(
-    _userId: string,
-    _query: string,
+    userId: string,
+    query: string,
   ): Promise<
     Array<{
       id: string;
@@ -292,12 +342,30 @@ export class UserRepository implements IUserRepository {
       updatedAt: Date;
     }>
   > {
-    return [];
+    try {
+      return await this.prisma.page.findMany({
+        where: {
+          deletedAt: null,
+          project: { members: { some: { userId } }, deletedAt: null },
+          title: { contains: query, mode: 'insensitive' },
+        },
+        select: {
+          id: true,
+          title: true,
+          projectId: true,
+          project: { select: { name: true } },
+          updatedAt: true,
+        },
+        take: 10,
+      });
+    } catch {
+      return [];
+    }
   }
 
   async searchFiles(
-    _userId: string,
-    _query: string,
+    userId: string,
+    query: string,
   ): Promise<
     Array<{
       id: string;
@@ -308,12 +376,35 @@ export class UserRepository implements IUserRepository {
       updatedAt: Date;
     }>
   > {
-    return [];
+    try {
+      const files = await this.prisma.file.findMany({
+        where: {
+          authorId: userId,
+          trashedAt: null,
+          filename: { contains: query, mode: 'insensitive' },
+        },
+        select: {
+          id: true,
+          filename: true,
+          mimeType: true,
+          size: true,
+          isFolder: true,
+          updatedAt: true,
+        },
+        take: 10,
+      });
+      return files.map((f) => ({
+        ...f,
+        size: Number(f.size),
+      }));
+    } catch {
+      return [];
+    }
   }
 
   async searchStickies(
-    _userId: string,
-    _query: string,
+    userId: string,
+    query: string,
   ): Promise<
     Array<{
       id: string;
@@ -323,7 +414,32 @@ export class UserRepository implements IUserRepository {
       updatedAt: Date;
     }>
   > {
-    return [];
+    try {
+      const stickies = await this.prisma.sticky.findMany({
+        where: {
+          userId,
+          deletedAt: null,
+          OR: [
+            { title: { contains: query, mode: 'insensitive' } },
+            { content: { contains: query, mode: 'insensitive' } },
+          ],
+        },
+        select: {
+          id: true,
+          title: true,
+          content: true,
+          color: true,
+          updatedAt: true,
+        },
+        take: 10,
+      });
+      return stickies.map((s) => ({
+        ...s,
+        title: s.title || 'Untitled Sticky',
+      }));
+    } catch {
+      return [];
+    }
   }
 
   // ─── 4. Resource Statistics & Dashboard Metrics ─────────────────────────────

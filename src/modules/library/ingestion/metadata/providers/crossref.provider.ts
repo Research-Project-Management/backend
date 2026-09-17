@@ -191,7 +191,7 @@ export class CrossRefProvider implements MetadataProvider {
             const lastName = auth.family?.trim();
             let fullName = '';
             if (firstName && lastName) {
-              fullName = `${lastName}, ${firstName}`;
+              fullName = `${firstName} ${lastName}`;
             } else if (lastName) {
               fullName = lastName;
             } else if (firstName) {
@@ -223,6 +223,7 @@ export class CrossRefProvider implements MetadataProvider {
     addCreators(message.chair, 'presenter');
 
     let year: number | null = null;
+    let publicationDate: string | undefined = undefined;
     const pubPrint = message['published-print'] as
       { 'date-parts'?: number[][] } | undefined;
     const pubOnline = message['published-online'] as
@@ -235,6 +236,18 @@ export class CrossRefProvider implements MetadataProvider {
       issued?.['date-parts']?.[0];
     if (dateParts && dateParts[0]) {
       year = Number(dateParts[0]);
+      const y = String(dateParts[0]).padStart(4, '0');
+      if (dateParts[1]) {
+        const m = String(dateParts[1]).padStart(2, '0');
+        if (dateParts[2]) {
+          const d = String(dateParts[2]).padStart(2, '0');
+          publicationDate = `${y}-${m}-${d}`;
+        } else {
+          publicationDate = `${y}-${m}`;
+        }
+      } else {
+        publicationDate = y;
+      }
     }
 
     const containerTitle = message['container-title'];
@@ -306,6 +319,28 @@ export class CrossRefProvider implements MetadataProvider {
         ? collectionTitle
         : undefined;
     const series = cleanBibliographicText(rawSeries);
+
+    const eventObj =
+      typeof message.event === 'object' && message.event !== null
+        ? (message.event as Record<string, unknown>)
+        : undefined;
+    const rawConferenceName =
+      typeof eventObj?.name === 'string' ? eventObj.name : undefined;
+    const conferenceName = cleanBibliographicText(rawConferenceName);
+
+    const rawEventPlace =
+      typeof eventObj?.location === 'string' ? eventObj.location : undefined;
+    const eventPlace = cleanBibliographicText(rawEventPlace);
+
+    const rawProceedings = message['proceedings-title'];
+    const rawProceedingsStr = Array.isArray(rawProceedings)
+      ? typeof rawProceedings[0] === 'string'
+        ? rawProceedings[0]
+        : undefined
+      : typeof rawProceedings === 'string'
+        ? rawProceedings
+        : undefined;
+    const proceedingsTitle = cleanBibliographicText(rawProceedingsStr);
 
     const rawVersion = createHash('md5')
       .update(JSON.stringify(message))
@@ -395,6 +430,14 @@ export class CrossRefProvider implements MetadataProvider {
           ? Number(rawRefByCount)
           : undefined;
 
+    const rawRefCount = message['references-count'];
+    const referenceCount =
+      typeof rawRefCount === 'number'
+        ? rawRefCount
+        : typeof rawRefCount === 'string' && !isNaN(Number(rawRefCount))
+          ? Number(rawRefCount)
+          : undefined;
+
     return {
       provider: this.id,
       metadata: {
@@ -404,7 +447,16 @@ export class CrossRefProvider implements MetadataProvider {
         authors,
         creators,
         year,
+        publicationDate,
+        date: publicationDate,
         journal,
+        publicationTitle: proceedingsTitle || journal,
+        conferenceName:
+          conferenceName && conferenceName !== (proceedingsTitle || journal)
+            ? conferenceName
+            : undefined,
+        proceedingsTitle: proceedingsTitle || journal,
+        place: eventPlace,
         journalAbbr,
         publisher,
         volume,
@@ -416,6 +468,7 @@ export class CrossRefProvider implements MetadataProvider {
         url: rawUrl,
         abstract,
         citationCount,
+        referenceCount,
         language,
         license,
         rights: license,

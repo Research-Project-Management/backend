@@ -119,3 +119,29 @@ export function validateSafePath(rawPath: string, fieldName = 'path'): string {
   return normalized;
 }
 
+import { isUUID as isUuid } from 'class-validator';
+
+/**
+ * Resolves a project identifier (either UUID or slug identifier) to a canonical project UUID.
+ */
+export async function resolveCanonicalProjectId(
+  prisma: { project?: { findFirst: (args: any) => Promise<{ id: string } | null> } },
+  projectId: string,
+): Promise<string | null> {
+  if (isUuid(projectId)) {
+    return projectId;
+  }
+  if (!prisma?.project) {
+    return null;
+  }
+  const proj = await prisma.project
+    .findFirst({
+      where: {
+        identifier: { equals: projectId, mode: 'insensitive' },
+        deletedAt: null,
+      },
+      select: { id: true },
+    })
+    .catch(() => null);
+  return proj?.id ?? null;
+}

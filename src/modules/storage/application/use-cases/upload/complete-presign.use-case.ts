@@ -42,6 +42,7 @@ export interface CompletePresignInput {
   projectId?: string | null;
   parentId?: string | null;
   scope?: FileScope;
+  contentHash?: string;
 }
 
 export interface CompletePresignOutput {
@@ -106,24 +107,36 @@ export class CompletePresignUseCase {
       actualSize,
     );
 
-    // 3. Register physical StorageBlob
-    const blobId = crypto.randomUUID();
-    const hashHex = crypto
-      .createHash('sha256')
-      .update(`${input.storageKey}:${actualSize}`)
-      .digest('hex');
+    // 3. Register physical StorageBlob (Content-Addressable Storage)
+    const hashHex =
+      input.contentHash && /^[a-f0-9]{64}$/i.test(input.contentHash)
+        ? input.contentHash.toLowerCase()
+        : crypto
+            .createHash('sha256')
+            .update(`${input.storageKey}:${actualSize}`)
+            .digest('hex');
     const contentHash = ContentHash.fromHex(hashHex);
 
-    const blob = new StorageBlob({
-      id: blobId,
-      contentHash,
-      sizeBytes: actualSize,
-      s3Key: StorageKey.fromString(input.storageKey),
-      s3Bucket: process.env.R2_BUCKET_NAME || 'flux',
-      status: BlobStatus.READY,
-      refCount: 1,
-    });
-    await this.blobRepo.create(blob);
+    const existingBlob = await this.blobRepo.findByHash(contentHash);
+    let blobId: string;
+
+    if (existingBlob && existingBlob.isReady()) {
+      existingBlob.incrementRef();
+      await this.blobRepo.update(existingBlob);
+      blobId = existingBlob.id;
+    } else {
+      blobId = crypto.randomUUID();
+      const blob = new StorageBlob({
+        id: blobId,
+        contentHash,
+        sizeBytes: actualSize,
+        s3Key: StorageKey.fromString(input.storageKey),
+        s3Bucket: process.env.R2_BUCKET_NAME || 'flux',
+        status: BlobStatus.READY,
+        refCount: 1,
+      });
+      await this.blobRepo.create(blob);
+    }
 
     // 4. Create logical StorageNode
     const fileId = crypto.randomUUID();

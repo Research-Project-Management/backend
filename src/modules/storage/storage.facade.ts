@@ -19,6 +19,8 @@ import { IStorageNodeRepository } from './domain/ports/storage-node.repository.p
 import { IStorageBlobRepository } from './domain/ports/storage-blob.repository.port';
 import { UploadDirectUseCase } from './application/use-cases/upload/upload-direct.use-case';
 import { PresignUploadUseCase } from './application/use-cases/upload/presign-upload.use-case';
+import { CompletePresignUseCase } from './application/use-cases/upload/complete-presign.use-case';
+import { MultipartUploadUseCase } from './application/use-cases/upload/multipart-upload.use-case';
 import { CheckQuotaUseCase } from './application/use-cases/quota/check-quota.use-case';
 import { FileScope } from './domain/value-objects/file-scope.vo';
 
@@ -38,6 +40,10 @@ export class StorageFacade implements IStoragePort {
     private readonly uploadDirectUseCase: UploadDirectUseCase,
     @Optional()
     private readonly presignUploadUseCase?: PresignUploadUseCase,
+    @Optional()
+    private readonly completePresignUseCase?: CompletePresignUseCase,
+    @Optional()
+    private readonly multipartUploadUseCase?: MultipartUploadUseCase,
     @Optional()
     private readonly checkQuotaUseCase?: CheckQuotaUseCase,
   ) {}
@@ -206,11 +212,21 @@ export class StorageFacade implements IStoragePort {
     filename: string;
     mimeType: string;
     sizeBytes: number;
+    contentHash?: string;
+    projectId?: string | null;
+    parentId?: string | null;
+    scope?: any;
   }): Promise<{
     uploadUrl: string;
     storageKey: string;
     fileUuid: string;
     expiresIn: number;
+    deduplicated?: boolean;
+    fileId?: string;
+    url?: string;
+    filename?: string;
+    size?: number;
+    mimeType?: string;
   }> {
     if (this.presignUploadUseCase) {
       return this.presignUploadUseCase.execute(input);
@@ -227,11 +243,107 @@ export class StorageFacade implements IStoragePort {
       expiresInSeconds: 300,
     });
     return {
+      deduplicated: false,
       uploadUrl,
       storageKey,
       fileUuid,
       expiresIn: 300,
     };
+  }
+
+  async completePresignedUpload(input: {
+    userId: string;
+    storageKey: string;
+    filename: string;
+    sizeBytes?: number;
+    mimeType?: string;
+    projectId?: string | null;
+    parentId?: string | null;
+    scope?: any;
+    contentHash?: string;
+  }): Promise<{
+    fileId: string;
+    blobId: string;
+    url: string;
+    filename: string;
+    size: number;
+    mimeType: string;
+  }> {
+    if (!this.completePresignUseCase) {
+      throw new Error('CompletePresignUseCase is not available');
+    }
+    const res = await this.completePresignUseCase.execute({
+      userId: input.userId,
+      storageKey: input.storageKey,
+      filename: input.filename,
+      sizeBytes: input.sizeBytes,
+      mimeType: input.mimeType,
+      projectId: input.projectId,
+      parentId: input.parentId,
+      scope: input.scope,
+      contentHash: input.contentHash,
+    });
+    return {
+      fileId: res.fileId,
+      blobId: res.blobId,
+      url: res.url,
+      filename: res.filename,
+      size: res.size,
+      mimeType: res.mimeType,
+    };
+  }
+
+  async initiateMultipartUpload(input: {
+    userId: string;
+    filename: string;
+    mimeType: string;
+    totalSize: number;
+    projectId?: string | null;
+    parentId?: string | null;
+    scope?: any;
+    expectedHash?: string;
+  }): Promise<{
+    sessionId: string;
+    uploadId: string;
+    partSize: number;
+    totalParts: number;
+  }> {
+    if (!this.multipartUploadUseCase) {
+      throw new Error('MultipartUploadUseCase is not available');
+    }
+    return this.multipartUploadUseCase.initiate(input);
+  }
+
+  async getMultipartPartUrl(
+    sessionId: string,
+    partNumber: number,
+  ): Promise<string> {
+    if (!this.multipartUploadUseCase) {
+      throw new Error('MultipartUploadUseCase is not available');
+    }
+    return this.multipartUploadUseCase.getPartUrl(sessionId, partNumber);
+  }
+
+  async completeMultipartUpload(input: {
+    sessionId: string;
+    parts: { partNumber: number; eTag: string }[];
+  }): Promise<{
+    fileId: string;
+    blobId: string;
+    url: string;
+    filename: string;
+    size: number;
+  }> {
+    if (!this.multipartUploadUseCase) {
+      throw new Error('MultipartUploadUseCase is not available');
+    }
+    return this.multipartUploadUseCase.complete(input);
+  }
+
+  async abortMultipartUpload(sessionId: string): Promise<void> {
+    if (this.multipartUploadUseCase) {
+      await this.multipartUploadUseCase.abort(sessionId);
+    }
   }
 
   async checkQuota(

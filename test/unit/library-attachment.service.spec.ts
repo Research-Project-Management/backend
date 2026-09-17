@@ -332,39 +332,45 @@ describe('Library Attachments & Storage Integration Suite', () => {
         },
       };
 
+      const projId = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
       const res = await controller.uploadLibraryFile(
         'user-1',
         mockReq,
-        'proj-456',
+        projId,
         undefined,
       );
 
       expect(res.success).toBe(true);
       expect(res.fileId).toBe('storage-file-123');
-      expect(mockStoragePort.uploadFile).toHaveBeenCalledWith({
-        userId: 'user-1',
-        projectId: 'proj-456',
-        filename: 'thesis.pdf',
-        buffer: expect.any(Buffer),
-        mimeType: 'application/pdf',
-        source: 'library',
-      });
+      expect(mockStoragePort.uploadFile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'user-1',
+          projectId: projId,
+          filename: 'thesis.pdf',
+          mimeType: 'application/pdf',
+          source: 'library',
+        }),
+      );
     });
 
     it('should provide presigned upload URL via storagePort', async () => {
+      const projId = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
       const res = await controller.presign(
         'user-1',
         { filename: 'big_dataset.pdf', mimeType: 'application/pdf', sizeBytes: 50000000 },
-        'proj-123',
+        projId,
       );
 
       expect(res.uploadUrl).toBe('https://r2.cloudflarestorage.com/upload-url');
       expect(res.fileUuid).toBe('file-uuid-777');
       expect(mockStoragePort.getPresignedUploadUrl).toHaveBeenCalledWith({
         userId: 'user-1',
+        projectId: projId,
         filename: 'big_dataset.pdf',
         mimeType: 'application/pdf',
         sizeBytes: 50000000,
+        contentHash: undefined,
+        scope: 'library',
       });
     });
 

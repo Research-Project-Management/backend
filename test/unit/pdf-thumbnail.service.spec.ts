@@ -6,7 +6,7 @@ jest.mock('unpdf', () => ({
     if (
       !buffer ||
       buffer.length === 0 ||
-      buffer.toString().includes('not-a-valid-pdf')
+      Buffer.from(buffer).toString().includes('not-a-valid-pdf')
     ) {
       throw new Error('Invalid PDF binary stream');
     }

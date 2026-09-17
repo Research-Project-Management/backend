@@ -1,12 +1,16 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { Prisma } from '@prisma/client';
+import { isUUID } from 'class-validator';
 import { VersionMismatchException } from '../core/errors/version-mismatch.exception';
 import { normalizeTags } from '../tags/utils/tags.utils';
 
 import { CreateNoteData, UpdateNoteData } from './types/notes.types';
 
 export { CreateNoteData, UpdateNoteData };
+
+const isUuid = (val: unknown): val is string =>
+  typeof val === 'string' && isUUID(val);
 
 @Injectable()
 export class NotesRepository {
@@ -23,12 +27,18 @@ export class NotesRepository {
     tx?: Prisma.TransactionClient,
   ) {
     const projectId =
-      typeof projectIdOrTx === 'string' ? projectIdOrTx : undefined;
+      typeof projectIdOrTx === 'string' &&
+      projectIdOrTx !== 'user' &&
+      projectIdOrTx !== 'me' &&
+      projectIdOrTx !== 'personal' &&
+      isUuid(projectIdOrTx)
+        ? projectIdOrTx
+        : undefined;
     const client = this.getClient(
       typeof projectIdOrTx === 'object' ? projectIdOrTx : tx,
     );
     const where: Prisma.NoteWhereInput =
-      projectId && projectId !== 'user'
+      projectId
         ? {
             projectId,
             ...(itemId !== undefined ? { itemId } : {}),
@@ -54,7 +64,13 @@ export class NotesRepository {
   ) {
     const client = this.getClient(tx);
     const scopeWhere =
-      projectId && projectId !== 'user' ? { projectId } : { userId };
+      projectId &&
+      projectId !== 'user' &&
+      projectId !== 'me' &&
+      projectId !== 'personal' &&
+      isUuid(projectId)
+        ? { projectId }
+        : { userId };
     return client.note.findFirst({
       where: { id, ...scopeWhere, deletedAt: null },
     });

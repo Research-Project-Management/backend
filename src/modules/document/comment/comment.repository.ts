@@ -22,7 +22,12 @@ export class CommentRepository {
 
   async findComments(pageId: string) {
     return this.prisma.pageComment.findMany({
-      where: { pageId },
+      where: {
+        OR: [
+          { pageId },
+          { projectPageId: pageId },
+        ],
+      },
       orderBy: { createdAt: 'asc' },
       include: {
         author: { select: AUTHOR_SELECT },
@@ -42,6 +47,7 @@ export class CommentRepository {
 
   async createComment(data: {
     pageId: string;
+    projectPageId?: string | null;
     authorId: string;
     content: string;
     status?: CommentStatus;
@@ -51,6 +57,7 @@ export class CommentRepository {
     return this.prisma.pageComment.create({
       data: {
         pageId: data.pageId,
+        projectPageId: data.projectPageId || null,
         authorId: data.authorId,
         content: data.content,
         status: data.status || CommentStatus.open,

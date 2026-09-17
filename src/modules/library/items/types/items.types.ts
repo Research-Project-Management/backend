@@ -234,6 +234,7 @@ export interface UpdateItemInput {
   abstract?: string;
   authors?: string[];
   creators?: CreatorCredit[];
+  contributors?: CreatorCredit[];
   editors?: string[];
   journal?: string;
   publicationTitle?: string;
@@ -424,6 +425,7 @@ export interface UpdateItemData {
   title?: string;
   authors?: string[];
   creators?: CreatorCreditInput[];
+  contributors?: CreatorCreditInput[];
   extraFields?: Record<string, unknown>;
   year?: number | null;
   doi?: string;

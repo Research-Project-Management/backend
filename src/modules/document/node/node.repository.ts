@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/core/database/prisma.service';
 import { isUUID as isUuid } from 'class-validator';
+import { PrismaService } from '@/core/database/prisma.service';
 import { Prisma, Page } from '@prisma/client';
+import { resolveCanonicalProjectId } from '../core/utils/document.utils';
 
 export const NODE_TREE_SELECT = {
   id: true,
@@ -27,19 +28,7 @@ export class NodeRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async resolveProjectId(projectId: string): Promise<string | null> {
-    if (isUuid(projectId)) {
-      return projectId;
-    }
-    const proj = await this.prisma.project
-      .findFirst({
-        where: {
-          identifier: { equals: projectId, mode: 'insensitive' },
-          deletedAt: null,
-        },
-        select: { id: true },
-      })
-      .catch(() => null);
-    return proj?.id ?? null;
+    return resolveCanonicalProjectId(this.prisma, projectId);
   }
 
   async findProjectNodes(projectId: string): Promise<NodeTreeRecord[]> {
@@ -88,14 +77,14 @@ export class NodeRepository {
           }>
         >`
           WITH RECURSIVE ancestors AS (
-            SELECT id, "parentPageId", title, 1 AS depth
-            FROM "Page"
-            WHERE id = ${startNodeId}::uuid AND "deletedAt" IS NULL
+            SELECT id, parent_page_id AS "parentPageId", title, 1 AS depth
+            FROM pages
+            WHERE id = ${startNodeId}::uuid AND deleted_at IS NULL
             UNION ALL
-            SELECT p.id, p."parentPageId", p.title, a.depth + 1
-            FROM "Page" p
+            SELECT p.id, p.parent_page_id AS "parentPageId", p.title, a.depth + 1
+            FROM pages p
             INNER JOIN ancestors a ON p.id = a."parentPageId"
-            WHERE p."deletedAt" IS NULL AND a.depth < 50
+            WHERE p.deleted_at IS NULL AND a.depth < 50
           )
           SELECT id, "parentPageId", title, depth FROM ancestors ORDER BY depth DESC;
         `;

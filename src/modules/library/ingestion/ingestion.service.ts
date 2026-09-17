@@ -93,7 +93,7 @@ export class IngestionService implements IngestionPort {
 
     // 3. Return the durable run immediately and dispatch to IngestionQueueService
     // for bounded concurrency and worker resilience.
-    this.queue.enqueue(runId, projectId, envelope);
+    void this.queue.enqueue(runId, projectId, envelope);
 
     return {
       runId,
@@ -208,7 +208,7 @@ export class IngestionService implements IngestionPort {
 
     const envelope = run.inputParams as unknown as IngestionSubmissionEnvelope;
     if (envelope && typeof envelope === 'object') {
-      this.queue.enqueue(runId, projectId, {
+      void this.queue.enqueue(runId, projectId, {
         ...envelope,
         projectId,
       });

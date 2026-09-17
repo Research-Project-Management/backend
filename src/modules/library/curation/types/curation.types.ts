@@ -39,6 +39,12 @@ export const ALLOWED_MERGE_METADATA_FIELDS = new Set([
   'archiveLocation',
   'callNumber',
   'extra',
+  'arxivId',
+  'archiveId',
+  'citationCount',
+  'referenceCount',
+  'openAccessPdfUrl',
+  'seriesNumber',
 ]);
 
 export interface DuplicateClusterItem {

@@ -375,6 +375,57 @@ export function cleanBannedString(val?: string | null): string | undefined {
 }
 
 /**
+ * Sanitizes and normalizes an author or repository comment (e.g. from arXiv, BibTeX, RIS).
+ * Strips XML/HTML tags, decodes HTML entities, strips stray LaTeX braces,
+ * collapses redundant whitespace, removes embedded 'Comment:' prefix,
+ * and rejects noise, ellipsis, or placeholder strings.
+ */
+export function cleanCommentText(comment?: string | null): string | undefined {
+  if (!comment || typeof comment !== 'string') return undefined;
+
+  let cleaned = stripXmlAndHtmlTags(comment);
+  cleaned = decodeHtmlEntities(cleaned);
+  cleaned = stripLatexBraces(cleaned);
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+
+  if (!cleaned) return undefined;
+
+  // Strip leading redundant 'Comment:' if already embedded in text
+  cleaned = cleaned.replace(/^comments?:\s*/i, '').trim();
+
+  // Reject if string contains no alphanumeric characters (e.g. "...", "…", "--", "[]")
+  if (!/[a-zA-Z0-9\u00C0-\u024F\u1EA0-\u1EF9]/.test(cleaned)) {
+    return undefined;
+  }
+
+  const lower = cleaned.toLowerCase();
+  if (
+    BANNED_STRINGS.has(lower) ||
+    lower === 'nil' ||
+    lower === 'none.' ||
+    lower === 'n/a.' ||
+    lower === 'etc.' ||
+    lower === 'etc' ||
+    lower === 'no comment' ||
+    lower === 'no comments' ||
+    /^(\.{2,}|…|[-_—\s]+|null|undefined|none|n\/?a)$/i.test(cleaned)
+  ) {
+    return undefined;
+  }
+
+  // Reject truncated placeholder comments like "Submitted to ..." or "Accepted for publication in ..."
+  if (
+    /^(?:submitted to|to appear in|accepted in|accepted to)\s*(?:\.{2,}|…|\s*)$/i.test(
+      cleaned,
+    )
+  ) {
+    return undefined;
+  }
+
+  return cleaned;
+}
+
+/**
  * Sanitizes and normalizes an academic paper abstract.
  * 1. Pre-processes JATS XML (<jats:...>), PubMed (<AbstractText>), and HTML tags before stripping.
  * 2. Decodes HTML entities and strips remaining XML/HTML tags and LaTeX braces.
@@ -786,6 +837,177 @@ export function normalizeItemType(type?: string | null): string {
 }
 export const normalizeLibraryItemType = normalizeItemType;
 
+const SPECIAL_CASE_WORDS: Record<string, string> = {
+  arxiv: 'arXiv',
+  biorxiv: 'bioRxiv',
+  medrxiv: 'medRxiv',
+  latex: 'LaTeX',
+  bibtex: 'BibTeX',
+  fmri: 'fMRI',
+  mrna: 'mRNA',
+  't-sne': 't-SNE',
+  pytorch: 'PyTorch',
+  tensorflow: 'TensorFlow',
+  openai: 'OpenAI',
+  chatgpt: 'ChatGPT',
+  ios: 'iOS',
+  macos: 'macOS',
+  phd: 'PhD',
+  ieee: 'IEEE',
+  acm: 'ACM',
+  nature: 'Nature',
+  science: 'Science',
+};
+
+const COMMON_ACADEMIC_ACRONYMS = new Set([
+  'AI', 'ML', 'DL', 'RL', 'NLP', 'CV', 'NLU', 'NLG',
+  'LLM', 'LLMS', 'SLM', 'SLMS', 'VLM', 'VLMS',
+  'CNN', 'CNNS', 'RNN', 'RNNS', 'GNN', 'GNNS', 'GAN', 'GANS',
+  'VAE', 'VAES', 'BERT', 'GPT', 'CLIP', 'LSTM', 'SVM',
+  'RAG', 'COT', 'TOT', 'DQN', 'PPO', 'DDPG', 'SAC',
+  'DNA', 'RNA', 'CRISPR', 'COVID', 'COVID-19', 'SARS', 'MERS', 'HIV', 'PCR',
+  'EEG', 'ECG', 'MRI', 'CT', 'PET',
+  'API', 'APIS', 'REST', 'HTTP', 'HTTPS', 'URL', 'URI', 'SQL', 'NOSQL',
+  'CPU', 'CPUS', 'GPU', 'GPUS', 'TPU', 'TPUS', 'RAM', 'ROM',
+  '2D', '3D', '4D', '5G', '6G',
+  'DOI', 'ISBN', 'ISSN', 'CSL', 'PDF', 'OCR', 'XML', 'HTML', 'JSON',
+  'USA', 'UK', 'EU', 'UN', 'WHO', 'NIH', 'NSF', 'NASA', 'DARPA',
+  'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII',
+]);
+
+const MINOR_WORDS = new Set([
+  'a', 'an', 'the',
+  'and', 'but', 'or', 'nor', 'for', 'yet', 'so',
+  'as', 'at', 'by', 'from', 'in', 'into', 'of', 'off', 'on', 'onto', 'out', 'over', 'per', 'to', 'up', 'via', 'with',
+]);
+
+/**
+ * Normalizes academic paper title casing:
+ * - If title is ALL CAPS or all lowercase, converts to standard academic Title Case.
+ * - If title has shouting uppercase non-acronym words (e.g. "SURVEY OF DEEP LEARNING"), normalizes them.
+ * - Preserves standard academic acronyms (BERT, GPT, LLM, CNN, RNA, etc.) and mixed-case terms (arXiv, mRNA).
+ * - Leaves correctly cased mixed-case titles untouched.
+ */
+export function normalizeAcademicTitleCase(title?: string | null): string {
+  if (!title || typeof title !== 'string') return '';
+  const trimmed = title.trim();
+  if (trimmed.length < 3) return trimmed;
+
+  const isAllUpper =
+    trimmed.length > 3 &&
+    trimmed === trimmed.toUpperCase() &&
+    /[A-Z]/.test(trimmed);
+  const isAllLower =
+    trimmed.length > 3 &&
+    trimmed === trimmed.toLowerCase() &&
+    /[a-z]/.test(trimmed);
+
+  const startsWithLower = /^[a-z]/.test(trimmed);
+
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  const hasShoutingWords = words.some((w) => {
+    const clean = w.replace(/^[^\w]+|[^\w]+$/g, '');
+    return (
+      clean.length >= 4 &&
+      clean === clean.toUpperCase() &&
+      !COMMON_ACADEMIC_ACRONYMS.has(clean) &&
+      /[A-Z]/.test(clean)
+    );
+  });
+
+  const significantWords = words
+    .map((w) => w.replace(/^[^\w]+|[^\w]+$/g, ''))
+    .filter(
+      (w) => w.length >= 4 && !COMMON_ACADEMIC_ACRONYMS.has(w.toUpperCase()),
+    );
+  const isSentenceCase =
+    significantWords.length >= 2 &&
+    significantWords.filter((w) => w === w.toLowerCase()).length /
+      significantWords.length >=
+      0.5;
+
+  if (
+    !isAllUpper &&
+    !isAllLower &&
+    !startsWithLower &&
+    !hasShoutingWords &&
+    !isSentenceCase
+  ) {
+    return trimmed;
+  }
+
+  const formatWord = (
+    word: string,
+    isFirstOrLast: boolean,
+    prevEndsWithColon: boolean,
+  ): string => {
+    const leadingPunct = word.match(/^[^\w]+/)?.[0] || '';
+    const trailingPunct = word.match(/[^\w]+$/)?.[0] || '';
+    const core = word.slice(
+      leadingPunct.length,
+      word.length - (trailingPunct.length || 0),
+    );
+
+    if (!core) return word;
+
+    const lower = core.toLowerCase();
+    const upper = core.toUpperCase();
+
+    if (SPECIAL_CASE_WORDS[lower]) {
+      return `${leadingPunct}${SPECIAL_CASE_WORDS[lower]}${trailingPunct}`;
+    }
+
+    if (COMMON_ACADEMIC_ACRONYMS.has(upper)) {
+      return `${leadingPunct}${upper}${trailingPunct}`;
+    }
+
+    if (core.includes('-')) {
+      const parts = core.split('-');
+      const formattedParts = parts.map((part, idx) => {
+        const pLower = part.toLowerCase();
+        const pUpper = part.toUpperCase();
+        if (SPECIAL_CASE_WORDS[pLower]) return SPECIAL_CASE_WORDS[pLower];
+        if (COMMON_ACADEMIC_ACRONYMS.has(pUpper)) return pUpper;
+        if (idx > 0 && MINOR_WORDS.has(pLower)) return pLower;
+        return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
+      });
+      return `${leadingPunct}${formattedParts.join('-')}${trailingPunct}`;
+    }
+
+    if (MINOR_WORDS.has(lower) && !isFirstOrLast && !prevEndsWithColon) {
+      return `${leadingPunct}${lower}${trailingPunct}`;
+    }
+
+    return `${leadingPunct}${core.charAt(0).toUpperCase() + core.slice(1).toLowerCase()}${trailingPunct}`;
+  };
+
+  const formattedWords: string[] = [];
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    const isFirstOrLast = i === 0 || i === words.length - 1;
+    const prevWord = i > 0 ? words[i - 1] : '';
+    const prevEndsWithColon = /[:—\-\?!]$/.test(prevWord);
+
+    if (!isAllUpper && !isAllLower) {
+      const clean = w.replace(/^[^\w]+|[^\w]+$/g, '');
+      const cleanUpper = clean.toUpperCase();
+      if (
+        clean.length <= 4 ||
+        COMMON_ACADEMIC_ACRONYMS.has(cleanUpper) ||
+        SPECIAL_CASE_WORDS[clean.toLowerCase()] ||
+        clean !== cleanUpper
+      ) {
+        formattedWords.push(w);
+        continue;
+      }
+    }
+
+    formattedWords.push(formatWord(w, isFirstOrLast, prevEndsWithColon));
+  }
+
+  return formattedWords.join(' ');
+}
+
 /**
  * Sanitizes an academic library item title:
  * 1. Strips <script> and <style> tags and their contents
@@ -794,7 +1016,8 @@ export const normalizeLibraryItemType = normalizeItemType;
  * 4. Strips LaTeX curly braces
  * 5. Strips control characters
  * 6. Collapses multiple whitespace into a single space and trims
- * 7. Enforces maximum length of 1000 characters
+ * 7. Normalizes screaming ALL CAPS or all lowercase into standard academic Title Case
+ * 8. Enforces maximum length of 1000 characters
  */
 export function sanitizeItemTitle(title?: string | null): string {
   if (!title || typeof title !== 'string') return '';
@@ -806,6 +1029,7 @@ export function sanitizeItemTitle(title?: string | null): string {
   cleaned = stripLatexBraces(cleaned);
   cleaned = cleaned.replace(/[\x00-\x1F\x7F]/g, '');
   cleaned = cleaned.replace(/\s+/g, ' ').trim();
+  cleaned = normalizeAcademicTitleCase(cleaned);
   if (cleaned.length > 1000) {
     cleaned = cleaned.substring(0, 1000).trim();
   }

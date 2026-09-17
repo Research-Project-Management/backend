@@ -15,6 +15,7 @@ export {
   cleanBibliographicText,
   cleanAbstractText,
   cleanBannedString,
+  cleanCommentText,
 } from '../../../items/utils/items.utils';
 
 export type {

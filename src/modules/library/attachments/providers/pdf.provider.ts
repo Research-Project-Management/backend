@@ -4,6 +4,7 @@ import { isIP } from 'node:net';
 import {
   GrobidClient,
   GrobidCreator,
+  GrobidHeaderResult,
   GrobidReference,
   GrobidSection,
   GrobidFigure,
@@ -17,6 +18,7 @@ export interface ExtractedPdfMetadata {
   doi?: string;
   isbn?: string;
   arxivId?: string;
+  primaryCategory?: string;
   pmid?: string;
   title?: string;
   authors?: string[];
@@ -30,9 +32,18 @@ export interface ExtractedPdfMetadata {
   abstractSections?: Array<{ heading?: string; text: string }>;
   keywords?: string[];
   journal?: string;
+  bookTitle?: string;
+  conferenceName?: string;
+  volume?: string;
+  issue?: string;
+  pages?: string;
+  place?: string;
+  issn?: string;
   creationDate?: string;
   rawText?: string;
   rawTei?: string;
+  referenceCount?: number;
+  citationCount?: number;
 }
 
 export interface ExtractedPdfDocument {
@@ -61,7 +72,7 @@ export class PdfProvider {
 
   async extractDocumentFromBuffer(
     buffer: Buffer,
-    options?: { maxPages?: number },
+    options?: { maxPages?: number; headerOnly?: boolean },
   ): Promise<ExtractedPdfDocument> {
     const pages: Array<{
       pageIndex: number;
@@ -243,75 +254,48 @@ export class PdfProvider {
 
     if (this.grobidClient) {
       try {
-        const fulltextResult =
-          await this.grobidClient.processFulltextDocument(buffer);
-        if (fulltextResult) {
-          const header = fulltextResult.header;
-          if (header.abstract) {
-            const cleanGrobidAbstract = cleanAbstractText(header.abstract);
-            if (cleanGrobidAbstract) {
-              metadata.abstract = cleanGrobidAbstract;
+        const isAlive = await this.grobidClient.isAlive();
+        if (isAlive) {
+          if (options?.headerOnly) {
+            // Fast path: high-speed header extraction (200-500ms) without heavy fulltext CRF
+            const headerResult =
+              await this.grobidClient.processHeaderDocument(buffer);
+            if (headerResult) {
+              this.applyGrobidHeaderResult(metadata, headerResult);
+              this.logger.debug(
+                `GROBID header parsed fast in headerOnly mode: "${metadata.title || 'untitled'}" (DOI: ${metadata.doi || 'none'})`,
+              );
             }
-            metadata.abstractParagraphs = header.abstractParagraphs;
-            metadata.abstractSections = header.abstractSections;
+          } else {
+            // Full-text document pass with automatic graceful fallback to header
+            const fulltextResult =
+              await this.grobidClient.processFulltextDocument(buffer);
+            if (fulltextResult) {
+              this.applyGrobidHeaderResult(metadata, fulltextResult.header);
+              sections = fulltextResult.sections || [];
+              figures = fulltextResult.figures || [];
+              tables = fulltextResult.tables || [];
+              formulas = fulltextResult.formulas || [];
+              references = fulltextResult.references || [];
+              this.logger.debug(
+                `GROBID fulltext parsed: ${sections.length} sections, ${figures.length} figures, ${tables.length} tables, ${formulas.length} formulas, ${references.length} references`,
+              );
+            } else {
+              // Fulltext timed out or failed -> fall back to fast header extraction
+              const headerResult =
+                await this.grobidClient.processHeaderDocument(buffer);
+              if (headerResult) {
+                this.applyGrobidHeaderResult(metadata, headerResult);
+                this.logger.debug(
+                  `GROBID header fallback succeeded after fulltext failure for: "${metadata.title || 'untitled'}"`,
+                );
+              }
+            }
           }
-          if (header.title) {
-            metadata.title = header.title;
-          }
-          if (header.creators && header.creators.length > 0) {
-            metadata.creators = header.creators;
-            metadata.authors = header.creators.map((c) => c.fullName);
-          } else if (header.authors && header.authors.length > 0) {
-            metadata.authors = header.authors;
-          }
-          if (header.doi) {
-            metadata.doi = header.doi;
-          }
-          if (header.arxivId) {
-            metadata.arxivId = header.arxivId;
-          }
-          if (header.keywords && header.keywords.length > 0) {
-            metadata.keywords = header.keywords;
-          }
-          if (header.year) {
-            metadata.year = header.year;
-          }
-          if (header.publicationDate) {
-            metadata.publicationDate = header.publicationDate;
-          }
-          if (header.journal) {
-            metadata.journal = header.journal;
-          }
-          if (header.rawTei) {
-            metadata.rawTei = header.rawTei;
-          }
-
-          sections = fulltextResult.sections || [];
-          figures = fulltextResult.figures || [];
-          tables = fulltextResult.tables || [];
-          formulas = fulltextResult.formulas || [];
-          references = fulltextResult.references || [];
-
-          this.logger.debug(
-            `GROBID fulltext parsed: ${sections.length} sections, ${figures.length} figures, ${tables.length} tables, ${formulas.length} formulas, ${references.length} references`,
-          );
         } else {
-          // Fallback to header + references if fulltext returned null
-          const headerResult =
-            await this.grobidClient.processHeaderDocument(buffer);
-          if (headerResult) {
-            if (headerResult.abstract)
-              metadata.abstract = headerResult.abstract;
-            if (headerResult.title) metadata.title = headerResult.title;
-            if (headerResult.creators && headerResult.creators.length > 0) {
-              metadata.creators = headerResult.creators;
-              metadata.authors = headerResult.creators.map((c) => c.fullName);
-            }
-            if (headerResult.doi) metadata.doi = headerResult.doi;
-            if (headerResult.arxivId) metadata.arxivId = headerResult.arxivId;
-            if (headerResult.rawTei) metadata.rawTei = headerResult.rawTei;
-          }
-          references = await this.grobidClient.processReferences(buffer);
+          this.logger.debug(
+            'GROBID sidecar is not responding; bypassing ML extraction for fast unpdf fallback',
+          );
         }
       } catch (caughtError: unknown) {
         const errorMessage =
@@ -324,6 +308,10 @@ export class PdfProvider {
       }
     }
 
+    if (references && references.length > 0) {
+      metadata.referenceCount = references.length;
+    }
+
     return {
       metadata,
       pages,
@@ -333,6 +321,87 @@ export class PdfProvider {
       tables,
       formulas,
     };
+  }
+
+  private applyGrobidHeaderResult(
+    metadata: ExtractedPdfMetadata,
+    header: GrobidHeaderResult,
+  ): void {
+    if (header.abstract) {
+      const cleanGrobidAbstract = cleanAbstractText(header.abstract);
+      if (cleanGrobidAbstract) {
+        metadata.abstract = cleanGrobidAbstract;
+      }
+      metadata.abstractParagraphs = header.abstractParagraphs;
+      metadata.abstractSections = header.abstractSections;
+    }
+    if (header.title) {
+      const cleanT = header.title.trim();
+      const isTemplateOrBanner =
+        /noname\s+manuscript/i.test(cleanT) ||
+        /\(will\s+be\s+inserted\s+by\s+the\s+editor\)/i.test(cleanT) ||
+        /proceedings\s+of\s+the/i.test(cleanT) ||
+        /submitted\s+to/i.test(cleanT) ||
+        /\.(eps|pdf|png|jpe?g|svg)$/i.test(cleanT) ||
+        /^[A-Z]\s+[A-Z]\s+[A-Z]\s+[A-Z]/i.test(cleanT);
+      if (!isTemplateOrBanner && cleanT.length > 3) {
+        metadata.title = cleanT;
+      }
+    }
+    if (header.creators && header.creators.length > 0) {
+      metadata.creators = header.creators;
+      metadata.authors = header.creators.map((c) => c.fullName);
+    } else if (header.authors && header.authors.length > 0) {
+      metadata.authors = header.authors;
+    }
+    if (header.doi) {
+      metadata.doi = header.doi;
+    }
+    if (header.arxivId) {
+      metadata.arxivId = header.arxivId;
+    }
+    if (header.keywords && header.keywords.length > 0) {
+      metadata.keywords = header.keywords;
+    }
+    if (header.year) {
+      metadata.year = header.year;
+    }
+    if (header.publicationDate) {
+      metadata.publicationDate = header.publicationDate;
+    }
+    if (header.journal) {
+      metadata.journal = header.journal;
+    }
+    if (header.bookTitle) {
+      metadata.bookTitle = header.bookTitle;
+    }
+    if (header.conferenceName) {
+      metadata.conferenceName = header.conferenceName;
+    }
+    if (header.publisher) {
+      metadata.publisher = header.publisher;
+    }
+    if (header.place) {
+      metadata.place = header.place;
+    }
+    if (header.volume) {
+      metadata.volume = header.volume;
+    }
+    if (header.issue) {
+      metadata.issue = header.issue;
+    }
+    if (header.pages) {
+      metadata.pages = header.pages;
+    }
+    if (header.issn) {
+      metadata.issn = header.issn;
+    }
+    if (header.isbn) {
+      metadata.isbn = header.isbn;
+    }
+    if (header.rawTei) {
+      metadata.rawTei = header.rawTei;
+    }
   }
 
   async extractMetadataFromUrl(fileUrl: string): Promise<ExtractedPdfMetadata> {
@@ -383,10 +452,13 @@ export class PdfProvider {
       }
 
       const arxivMatchResult = rawHeaderStream.match(
-        /arXiv:\s*(\d{4}\.\d{4,5}(?:v\d+)?)/i,
+        /arXiv:\s*(\d{4}\.\d{4,5}(?:v\d+)?)(?:\s*\[([a-zA-Z\-]+(?:\.[a-zA-Z\-]+)?)\])?/i,
       );
       if (arxivMatchResult) {
         extractedMetadataResult.arxivId = arxivMatchResult[1];
+        if (arxivMatchResult[2]) {
+          extractedMetadataResult.primaryCategory = arxivMatchResult[2];
+        }
       }
 
       const titleMatchResult = rawHeaderStream.match(/\/Title\s*\(([^)]+)\)/);
@@ -416,7 +488,9 @@ export class PdfProvider {
     if (!text) return null;
 
     const scannedText = text.slice(0, PdfProvider.TEXT_SCAN_LIMIT);
-    const joinedText = scannedText.replace(/(10\.\d{4,9}\/)\s+/g, '$1');
+    const joinedText = scannedText
+      .replace(/(10\.\d{4,9})\s*\/\s*/g, '$1/')
+      .replace(/(10\.\d{4,9}\/)\s+/g, '$1');
     const doiMatches =
       joinedText.match(/10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/g) ?? [];
 
@@ -426,7 +500,9 @@ export class PdfProvider {
       return doi;
     }
 
-    const arxivMatch = scannedText.match(/arxiv:\s*(\d{4}\.\d{4,5}(?:v\d+)?)/i);
+    const arxivMatch = scannedText.match(
+      /(?:arxiv:?\s*|\barxiv\.org\/(?:abs|pdf)\/|\b)([0-2][0-9]{3}\.[0-9]{4,5}(?:v[0-9]+)?)\b/i,
+    );
     return arxivMatch?.[1] ? `10.48550/arXiv.${arxivMatch[1]}` : null;
   }
 
@@ -434,19 +510,24 @@ export class PdfProvider {
     const scannedText = text.slice(0, PdfProvider.TEXT_SCAN_LIMIT);
     const metadata: ExtractedPdfMetadata = {};
     const doi = this.extractFromText(
-      scannedText.replace(/(10\.\d{4,9}\/)\s*\n\s*/g, '$1'),
+      scannedText
+        .replace(/(10\.\d{4,9})\s*\/\s*/g, '$1/')
+        .replace(/(10\.\d{4,9}\/)\s*\n\s*/g, '$1'),
     );
     if (doi) metadata.doi = doi;
 
     const arxivMatch = scannedText.match(
-      /(?:arxiv[:\s._/-]+)(\d{4}\.\d{4,5}(?:v\d+)?)/i,
+      /(?:arxiv[:\s._/-]+)([0-2]\d{3}\.\d{4,5}(?:v\d+)?)(?:\s*\[([a-zA-Z\-]+(?:\.[a-zA-Z\-]+)?)\])?/i,
     );
     if (arxivMatch?.[1]) {
       metadata.arxivId = arxivMatch[1];
+      if (arxivMatch[2]) {
+        metadata.primaryCategory = arxivMatch[2];
+      }
     } else {
       const standalone = scannedText
-        .slice(0, 1500)
-        .match(/\b(1[0-9]{3}\.[0-9]{4,5}(?:v[0-9]+)?)\b/);
+        .slice(0, 2000)
+        .match(/\b([0-2][0-9]{3}\.[0-9]{4,5}(?:v[0-9]+)?)\b/);
       if (standalone?.[1]) metadata.arxivId = standalone[1];
     }
 
@@ -571,9 +652,19 @@ export class PdfProvider {
         }
 
         titleLines.push(currentLine);
-        // Continue if line ends with hyphen or title is short
+        // Continue if line ends with hyphen or next line starts with title continuation words (for, by, and, with, in, on, using, of, to, from)
+        const nextLine = cleanLines[lineIndex + 1];
+        const nextIsContinuation =
+          Boolean(nextLine &&
+          /^(for|by|and|with|in|on|using|via|under|towards|from|to|of)\b/i.test(
+            nextLine.trim(),
+          ));
         const endsWithHyphen = currentLine.trim().endsWith('-');
-        if (!endsWithHyphen && (currentLine.length >= 40 || titleLines.length >= 2)) {
+        if (
+          !endsWithHyphen &&
+          !nextIsContinuation &&
+          (currentLine.length >= 40 || titleLines.length >= 2)
+        ) {
           authorStartIndex = lineIndex + 1;
           break;
         }
@@ -584,9 +675,16 @@ export class PdfProvider {
         .join(' ')
         .replace(/\s+/g, ' ')
         .trim();
-      const candidateTitle = rawTitle
+      let candidateTitle = rawTitle
+        // Fix PDF small-caps drop-cap gaps: "V ERY D EEP C ONVOLUTIONAL N ETWORKS" -> "VERY DEEP CONVOLUTIONAL NETWORKS"
+        .replace(/\b([A-Z])\s+([A-Z]{2,})\b/g, '$1$2')
+        .replace(/\b([B-HJ-Z])\s+([A-Z])\b/g, '$1$2')
+        // Fix spaced hyphens: "Auto - Encoding" -> "Auto-Encoding"
+        .replace(/\b([A-Za-z0-9]+)\s+-\s+([A-Za-z0-9]+)\b/g, '$1-$2')
         .replace(/\b([A-Za-z])\s+([A-Za-z])\b/g, '$1$2')
-        .replace(/-\s+/g, '');
+        .replace(/-\s+/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
       if (candidateTitle.length > 5 && candidateTitle.length < 250) {
         metadata.title = candidateTitle;
       }
@@ -599,6 +697,12 @@ export class PdfProvider {
           lineIndex++
         ) {
           const authorLine = cleanLines[lineIndex];
+          if (
+            /^(for|by|and|with|using|towards|under)\s+[A-Z]/i.test(authorLine.trim())
+          ) {
+            // Ignore title residue mistakenly placed after title break
+            continue;
+          }
           if (
             /@|univ|institute|department|college|laboratory|school|hospital|center|research|microsoft|google/i.test(
               authorLine,

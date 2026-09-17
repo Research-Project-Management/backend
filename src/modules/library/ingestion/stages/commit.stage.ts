@@ -6,6 +6,7 @@ import { LibraryItemSource } from '../../outbox/outbox.events';
 import {
   splitAuthorString,
   cleanAbstractText,
+  cleanCommentText,
   parseCreatorString,
 } from '../../items/utils/items.utils';
 import { normalizeTags } from '../../tags/utils/tags.utils';
@@ -58,23 +59,37 @@ function mergeCreators(metadata: ItemMetadata) {
     firstName?: string,
     lastName?: string,
   ) => {
-    const normalizedName = name.trim();
-    if (!normalizedName) return;
-    const key = `${creatorType}:${normalizedName.toLocaleLowerCase()}`;
-    if (knownCreators.has(key)) return;
-    knownCreators.add(key);
+    const cleanName = (name || '').trim();
+    let finalFirst = firstName?.trim() || '';
+    let finalLast = lastName?.trim() || '';
+    let finalFull = cleanName;
 
-    let finalFirst = firstName?.trim();
-    let finalLast = lastName?.trim();
-    if (!finalFirst && !finalLast) {
-      const parsed = parseCreatorString(normalizedName);
-      finalFirst = parsed.firstName;
-      finalLast = parsed.lastName;
+    if (cleanName.includes(',') || (!finalFirst && !finalLast)) {
+      const parsed = parseCreatorString(
+        cleanName || `${finalFirst} ${finalLast}`.trim(),
+        0,
+        creatorType as any,
+      );
+      finalFirst = parsed.firstName || finalFirst;
+      finalLast = parsed.lastName || finalLast;
+      finalFull = parsed.fullName;
+    } else if (!finalFull) {
+      finalFull = `${finalFirst} ${finalLast}`.trim();
     }
 
+    if (!finalFull && !finalFirst && !finalLast) return;
+
+    const dedupKey =
+      finalLast || finalFirst
+        ? `${creatorType}:${finalLast.toLowerCase()}:${finalFirst.toLowerCase()}`
+        : `${creatorType}:${finalFull.toLowerCase()}`;
+
+    if (knownCreators.has(dedupKey)) return;
+    knownCreators.add(dedupKey);
+
     creators.push({
-      name: normalizedName,
-      fullName: normalizedName,
+      name: finalFull || `${finalFirst} ${finalLast}`.trim(),
+      fullName: finalFull || `${finalFirst} ${finalLast}`.trim(),
       creatorType,
       firstName: finalFirst || '',
       lastName: finalLast || '',
@@ -93,6 +108,8 @@ function mergeCreators(metadata: ItemMetadata) {
           c.lastName || undefined,
         );
       }
+    } else if (c.firstName || c.lastName) {
+      append('', creatorType, c.firstName || undefined, c.lastName || undefined);
     }
   }
 
@@ -171,6 +188,37 @@ export function toItemData(
   const extraFields: Record<string, unknown> = {
     ...(metadata.extraFields || {}),
     ...(metadata.edition ? { edition: metadata.edition } : {}),
+    ...(metadata.repository ? { repository: metadata.repository } : {}),
+    ...(metadata.bookTitle ? { bookTitle: metadata.bookTitle } : {}),
+    ...(metadata.conferenceName &&
+    metadata.conferenceName !==
+      (metadata.publicationTitle ?? metadata.proceedingsTitle ?? metadata.journal)
+      ? { conferenceName: metadata.conferenceName }
+      : {}),
+    ...(metadata.eventPlace ? { eventPlace: metadata.eventPlace } : {}),
+    ...(metadata.websiteTitle ? { websiteTitle: metadata.websiteTitle } : {}),
+    ...(metadata.websiteType ? { websiteType: metadata.websiteType } : {}),
+    ...(metadata.blogTitle ? { blogTitle: metadata.blogTitle } : {}),
+    ...(metadata.university ? { university: metadata.university } : {}),
+    ...(metadata.institution ? { institution: metadata.institution } : {}),
+    ...(metadata.numPages !== undefined ? { numPages: metadata.numPages } : {}),
+    ...(metadata.numberOfPages !== undefined
+      ? { numberOfPages: metadata.numberOfPages }
+      : {}),
+    ...(metadata.reportNumber ? { reportNumber: metadata.reportNumber } : {}),
+    ...(metadata.reportType ? { reportType: metadata.reportType } : {}),
+    ...(metadata.thesisType ? { thesisType: metadata.thesisType } : {}),
+    ...(metadata.versionNumber ? { versionNumber: metadata.versionNumber } : {}),
+    ...(metadata.patentNumber ? { patentNumber: metadata.patentNumber } : {}),
+    ...(metadata.applicationNumber
+      ? { applicationNumber: metadata.applicationNumber }
+      : {}),
+    ...(metadata.assignee ? { assignee: metadata.assignee } : {}),
+    ...(metadata.issuingAuthority
+      ? { issuingAuthority: metadata.issuingAuthority }
+      : {}),
+    ...(metadata.distributor ? { distributor: metadata.distributor } : {}),
+    ...(metadata.system ? { system: metadata.system } : {}),
     ...(metadata.storageId !== undefined
       ? { storageId: metadata.storageId }
       : {}),
@@ -191,28 +239,26 @@ export function toItemData(
     isbn: metadata.isbn,
     year: metadata.year ?? undefined,
     publicationDate: metadata.publicationDate ?? metadata.date,
-    publicationTitle: metadata.publicationTitle ?? metadata.journal,
+    publicationTitle:
+      metadata.publicationTitle ??
+      metadata.journal ??
+      metadata.bookTitle ??
+      metadata.proceedingsTitle ??
+      metadata.websiteTitle ??
+      metadata.blogTitle,
     journal: metadata.journal,
     journalAbbr: metadata.journalAbbr,
-    publisher: metadata.publisher,
-    place: metadata.place,
+    publisher:
+      metadata.publisher ??
+      metadata.institution ??
+      metadata.university,
+    place: metadata.place ?? metadata.eventPlace,
     volume: metadata.volume,
     issue: metadata.issue,
     section: metadata.section,
     partNumber: metadata.partNumber,
     partTitle: metadata.partTitle,
-    pages:
-      metadata.pages ||
-      (metadata.extraFields?.numberOfPages !== undefined &&
-      metadata.extraFields?.numberOfPages !== null &&
-      typeof metadata.extraFields.numberOfPages !== 'object'
-        ? String(metadata.extraFields.numberOfPages)
-        : undefined) ||
-      (metadata.extraFields?.numPages !== undefined &&
-      metadata.extraFields?.numPages !== null &&
-      typeof metadata.extraFields.numPages !== 'object'
-        ? String(metadata.extraFields.numPages)
-        : undefined),
+    pages: metadata.pages || undefined,
     series: metadata.series,
     seriesTitle: metadata.seriesTitle,
     seriesText: metadata.seriesText,
@@ -251,8 +297,8 @@ export function toItemData(
         Array.isArray(metadata.notes) ? [...metadata.notes] : [];
       const potentialComment =
         typeof extraFields.comment === 'string'
-          ? extraFields.comment.trim()
-          : '';
+          ? cleanCommentText(extraFields.comment)
+          : undefined;
       if (potentialComment) {
         const hasExistingCommentNote = consolidatedNotes.some((singleNote) => {
           if (typeof singleNote === 'string') {

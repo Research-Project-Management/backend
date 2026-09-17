@@ -33,12 +33,16 @@ export interface CslItemData {
   interviewer?: CslName[];
   recipient?: CslName[];
   'reviewed-author'?: CslName[];
+  illustrator?: CslName[];
+  contributor?: CslName[];
 
   // Container & Publishing Information
   'container-title'?: string;
   'container-title-short'?: string;
   'collection-title'?: string;
   'collection-number'?: string | number;
+  'event-title'?: string;
+  event?: string;
   publisher?: string;
   'publisher-place'?: string;
   authority?: string;
@@ -50,6 +54,7 @@ export interface CslItemData {
   submitted?: CslDate;
 
   // Locators & Numbers
+  number?: string | number;
   volume?: string | number;
   issue?: string | number;
   'number-of-volumes'?: string | number;
@@ -67,6 +72,7 @@ export interface CslItemData {
   PMCID?: string;
   URL?: string;
   archive?: string;
+  'archive-location'?: string;
   archive_location?: string;
   'call-number'?: string;
 
@@ -78,4 +84,5 @@ export interface CslItemData {
   version?: string;
   language?: string;
   status?: string;
+  [key: string]: unknown;
 }

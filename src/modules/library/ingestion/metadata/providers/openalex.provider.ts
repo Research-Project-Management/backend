@@ -59,7 +59,7 @@ export class OpenAlexProvider implements MetadataProvider {
 
     const cleanArxiv = normalizeArxivId(query, { stripVersion: true });
     if (cleanArxiv) {
-      return this.fetchByDoi(`10.48550/arxiv.${cleanArxiv}`, signal);
+      return this.fetchByArxiv(cleanArxiv, signal);
     }
 
     const cleanPmid = normalizePmid(query);
@@ -120,6 +120,68 @@ export class OpenAlexProvider implements MetadataProvider {
       `pmid:${pmid}`,
       0.95,
     );
+  }
+
+  private async fetchByArxiv(
+    cleanArxiv: string,
+    signal?: AbortSignal,
+  ): Promise<ProviderResult | null> {
+    const rawId = cleanArxiv.replace(/^arxiv:\s*/i, '').trim();
+    const idWithoutVersion = rawId.replace(/v\d+$/i, '');
+
+    let url = `${this.BASE_URL}?filter=locations.landing_page_url:http://arxiv.org/abs/${idWithoutVersion}|https://arxiv.org/abs/${idWithoutVersion}|https://doi.org/10.48550/arxiv.${idWithoutVersion}&per-page=5&mailto=${encodeURIComponent(this.mailto)}`;
+    if (this.apiKey) {
+      url += `&api_key=${encodeURIComponent(this.apiKey)}`;
+    }
+
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': `FluxResearchPlatform/1.0 (mailto:${this.mailto}; https://flux.study)`,
+        Accept: 'application/json',
+      },
+      signal,
+    });
+
+    if (response.status === 404) return null;
+
+    if (!response.ok) {
+      const retryAfterHeader = response.headers.get('retry-after');
+      const retryAfterMs = retryAfterHeader
+        ? parseInt(retryAfterHeader, 10) * 1000
+        : undefined;
+      throw new ProviderFetchError(
+        `OpenAlex arXiv lookup HTTP ${response.status} for ${cleanArxiv}`,
+        response.status,
+        retryAfterMs,
+      );
+    }
+
+    let json: any;
+    try {
+      json = await response.json();
+    } catch {
+      throw new ProviderFetchError(
+        `Failed to parse OpenAlex arXiv JSON for ${cleanArxiv}`,
+        undefined,
+        undefined,
+        false,
+        true,
+      );
+    }
+
+    const results = json?.results;
+    if (!Array.isArray(results) || results.length === 0) {
+      return null;
+    }
+
+    const sorted = [...results].sort(
+      (a, b) => (b.cited_by_count || 0) - (a.cited_by_count || 0),
+    );
+    const item = sorted[0];
+    const itemDoi = typeof item.doi === 'string' ? item.doi : '';
+    const doi = normalizeDoi(itemDoi) || `10.48550/arXiv.${idWithoutVersion}`;
+
+    return this.transformPayload(item, doi, 0.95);
   }
 
   private async fetchByDoi(
@@ -320,36 +382,20 @@ export class OpenAlexProvider implements MetadataProvider {
 
     const citationCount =
       typeof item.cited_by_count === 'number' ? item.cited_by_count : undefined;
+    const referenceCount =
+      typeof item.referenced_works_count === 'number'
+        ? item.referenced_works_count
+        : Array.isArray(item.referenced_works)
+          ? item.referenced_works.length
+          : undefined;
 
     const itemIdStr = typeof item.id === 'string' ? item.id : title;
 
     const rawKeywords: string[] = [];
 
-    // 1. Primary Topic & Curated Topics (OpenAlex v2 - Leiden CWTS taxonomy)
-    const primaryTopic = (item as any).primary_topic;
-    if (primaryTopic && typeof primaryTopic === 'object') {
-      if (typeof primaryTopic.display_name === 'string') {
-        rawKeywords.push(primaryTopic.display_name);
-      }
-      if (typeof primaryTopic.subfield?.display_name === 'string') {
-        rawKeywords.push(primaryTopic.subfield.display_name);
-      }
-    }
-
-    const topics = (item as any).topics;
-    if (Array.isArray(topics)) {
-      for (const t of topics.slice(0, 3)) {
-        if (typeof t?.score === 'number' && t.score < 0.6) continue;
-        if (typeof t?.display_name === 'string')
-          rawKeywords.push(t.display_name);
-        if (typeof t?.subfield?.display_name === 'string')
-          rawKeywords.push(t.subfield.display_name);
-      }
-    }
-
-    // 2. Author / Extracted Keywords
-    if (Array.isArray(item.keywords)) {
-      for (const k of item.keywords) {
+    // 1. Prioritize specific author keywords (up to 3-4 keywords)
+    if (Array.isArray(item.keywords) && item.keywords.length > 0) {
+      for (const k of item.keywords.slice(0, 4)) {
         const text = typeof k === 'string' ? k : k?.keyword || k?.display_name;
         const score =
           typeof k === 'object' && typeof k?.score === 'number' ? k.score : 1.0;
@@ -357,10 +403,15 @@ export class OpenAlexProvider implements MetadataProvider {
           rawKeywords.push(text);
         }
       }
+    } else {
+      // Fallback to single primary topic only
+      const primaryTopic = (item as any).primary_topic;
+      if (primaryTopic && typeof primaryTopic === 'object' && typeof primaryTopic.display_name === 'string') {
+        rawKeywords.push(primaryTopic.display_name);
+      }
     }
 
-    // OpenAlex topics and author keywords are used; concepts are intentionally excluded to prevent Wikipedia pollution
-    const keywords = normalizeTags(rawKeywords);
+    const keywords = normalizeTags(rawKeywords).slice(0, 4);
 
     const creators = authors.map((name, idx) => ({
       orderIndex: idx,
@@ -405,6 +456,7 @@ export class OpenAlexProvider implements MetadataProvider {
         arxivId: rawArxiv,
         pmid: rawPmid,
         journal,
+        publicationTitle: journal,
         volume: biblio.volume || undefined,
         issue: biblio.issue || undefined,
         pages,
@@ -412,6 +464,7 @@ export class OpenAlexProvider implements MetadataProvider {
         issn,
         abstract,
         citationCount,
+        referenceCount,
         itemType,
         url: canonicalUrl,
         language,

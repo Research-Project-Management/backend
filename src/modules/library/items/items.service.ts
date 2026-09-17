@@ -276,16 +276,18 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         payload,
       );
 
-      await this.tagsService.invalidateTagsCache(userId, effectiveProjectId);
-
       return ItemsMapper.toDomain(item);
     };
 
+    let result: any;
     if (context?.tx && context?.helpers) {
-      return execute(context.tx, context.helpers);
+      result = await execute(context.tx, context.helpers);
+    } else {
+      result = await this.libraryTx.executeInTransaction(execute);
     }
 
-    return this.libraryTx.executeInTransaction(execute);
+    await this.tagsService.invalidateTagsCache(userId, effectiveProjectId);
+    return result;
   }
 
   async updateItem(
@@ -490,8 +492,8 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       return deleted;
     }
 
-    return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const deleted = await this.deleteItem(
+    const result = await this.libraryTx.executeInTransaction(async (tx, helpers) => {
+      return this.deleteItem(
         userId,
         id,
         expectedVersion,
@@ -501,9 +503,9 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         },
         projectId,
       );
-      await this.tagsService.invalidateTagsCache(userId, projectId);
-      return deleted;
     });
+    await this.tagsService.invalidateTagsCache(userId, projectId);
+    return result;
   }
 
   async restoreItem(
@@ -512,7 +514,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     expectedVersion?: number,
     projectId?: string,
   ) {
-    return this.libraryTx.executeInTransaction(async (tx, helpers) => {
+    const result = await this.libraryTx.executeInTransaction(async (tx, helpers) => {
       const restored = await this.command.restore(
         userId,
         id,
@@ -534,10 +536,11 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         restoredAt: new Date(),
       });
 
-      await this.tagsService.invalidateTagsCache(userId, projectId);
-
       return ItemsMapper.toDomain(restored);
     });
+
+    await this.tagsService.invalidateTagsCache(userId, projectId);
+    return result;
   }
 
   async purgeItem(
@@ -545,7 +548,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     id: string,
     projectId?: string,
   ): Promise<boolean> {
-    return this.libraryTx.executeInTransaction(async (tx, helpers) => {
+    const result = await this.libraryTx.executeInTransaction(async (tx, helpers) => {
       const purged = await this.command.purge(userId, id, tx, projectId);
 
       await helpers.recordTombstone(userId, {
@@ -558,10 +561,11 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         purgedAt: new Date(),
       });
 
-      await this.tagsService.invalidateTagsCache(userId, projectId);
-
       return purged;
     });
+
+    await this.tagsService.invalidateTagsCache(userId, projectId);
+    return result;
   }
 
   async getRelatedItems(userId: string, itemId: string, projectId?: string) {

@@ -26,6 +26,12 @@ import { JwtAuthGuard } from '../../../modules/iam/authn/guards/auth.guard';
 import { CurrentUser } from '../../../modules/iam/authn/decorators/user.decorator';
 import { ProjectRoleGuard } from '../../../modules/iam/authz/guards/role.guard';
 import { ProjectRoles } from '../../../modules/iam/authz/decorators/role.decorator';
+import { isUUID } from 'class-validator';
+
+const toValidProjectId = (val?: string): string | undefined =>
+  val && val !== 'me' && val !== 'user' && val !== 'personal' && isUUID(val)
+    ? val
+    : undefined;
 
 @ApiTags('Library Collections')
 @ApiBearerAuth('JWT-auth')
@@ -45,7 +51,7 @@ export class CollectionsController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    const effectiveProjectId = paramProjectId || queryProjectId;
+    const effectiveProjectId = toValidProjectId(paramProjectId || queryProjectId);
     return this.collectionsService.getCollections(userId, effectiveProjectId);
   }
 
@@ -57,7 +63,7 @@ export class CollectionsController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    const effectiveProjectId = paramProjectId || queryProjectId;
+    const effectiveProjectId = toValidProjectId(paramProjectId || queryProjectId);
     return this.collectionsService.getCollectionTree(
       userId,
       effectiveProjectId,

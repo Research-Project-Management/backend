@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { Prisma } from '@prisma/client';
+import { isUUID } from 'class-validator';
 import { VersionMismatchException } from '../core/errors/version-mismatch.exception';
 import { CollectionDeleteStrategy } from './types/collections.types';
 
@@ -70,14 +71,19 @@ export class CollectionsRepository {
     tx?: Prisma.TransactionClient,
   ) {
     const projectId =
-      typeof projectIdOrTx === 'string' ? projectIdOrTx : undefined;
+      typeof projectIdOrTx === 'string' &&
+      projectIdOrTx !== 'user' &&
+      projectIdOrTx !== 'me' &&
+      projectIdOrTx !== 'personal' &&
+      isUUID(projectIdOrTx)
+        ? projectIdOrTx
+        : undefined;
     const client = this.getClient(
       typeof projectIdOrTx === 'object' ? projectIdOrTx : tx,
     );
-    const where: Prisma.CollectionWhereInput =
-      projectId && projectId !== 'user'
-        ? { projectId, deletedAt: null }
-        : { userId, deletedAt: null };
+    const where: Prisma.CollectionWhereInput = projectId
+      ? { projectId, deletedAt: null }
+      : { userId, deletedAt: null };
 
     return client.collection.findMany({
       where,

@@ -150,7 +150,7 @@ model UploadSession {
   id           String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   projectId    String?             @map("project_id") @db.Uuid
   userId       String              @map("user_id") @db.Uuid
-  s3UploadId   String              @map("s3_upload_id") @db.VarChar(255)
+  s3UploadId   String              @map("s3_upload_id") @db.VarChar(1024)
   s3Key        String              @map("s3_key") @db.VarChar(512)
   filename     String              @db.VarChar(255)
   mimeType     String              @default("application/octet-stream") @map("mime_type") @db.VarChar(127)

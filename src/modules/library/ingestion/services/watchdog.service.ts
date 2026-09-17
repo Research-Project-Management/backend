@@ -106,6 +106,11 @@ export class WatchdogService
     let deadLettered = 0;
 
     for (const run of orphanedRuns) {
+      // Do not reconcile runs that are actively executing or waiting in queue
+      if (await this.queue?.isProcessing(run.id)) {
+        continue;
+      }
+
       const runScopeId = run.projectId || run.userId;
       const nextAttempt = run.attempts + 1;
       const canRetry = nextAttempt < run.maxRetries;
@@ -127,7 +132,7 @@ export class WatchdogService
           const envelope =
             run.inputParams as unknown as IngestionSubmissionEnvelope;
           if (envelope && typeof envelope === 'object') {
-            this.queue.enqueue(run.id, runScopeId, {
+            await this.queue.enqueue(run.id, runScopeId, {
               ...envelope,
               scopeId: runScopeId,
             });
@@ -179,7 +184,7 @@ export class WatchdogService
         if (!envelope || typeof envelope !== 'object') continue;
 
         const runScopeId = run.projectId || run.userId;
-        const enqueued = this.queue.enqueue(run.id, runScopeId, {
+        const enqueued = await this.queue.enqueue(run.id, runScopeId, {
           ...envelope,
           scopeId: runScopeId,
         });

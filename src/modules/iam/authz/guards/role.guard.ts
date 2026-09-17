@@ -222,13 +222,14 @@ export class RoleGuard implements CanActivate {
           }
         }
       } else if (
-        request.params?.pageId &&
-        isUUID(request.params.pageId) &&
+        (request.params?.pageId || request.params?.nodeId) &&
+        isUUID(request.params.pageId || request.params.nodeId) &&
         prismaAny.page?.findUnique
       ) {
+        const targetId = request.params.pageId || request.params.nodeId;
         const page = await Promise.resolve(
           prismaAny.page.findUnique({
-            where: { id: request.params.pageId },
+            where: { id: targetId },
             select: { projectId: true },
           }),
         ).catch(() => null);

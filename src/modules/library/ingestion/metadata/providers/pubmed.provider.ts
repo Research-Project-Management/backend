@@ -213,7 +213,7 @@ export class PubMedProvider implements MetadataProvider {
           const given = typeof a.given === 'string' ? a.given.trim() : '';
           const fullName =
             family && given
-              ? `${family}, ${given}`
+              ? `${given} ${family}`
               : family || given || a.name || '';
           if (fullName) {
             authors.push(fullName);
@@ -302,6 +302,7 @@ export class PubMedProvider implements MetadataProvider {
         pmcid: resolvedPmcid,
         doi,
         journal,
+        publicationTitle: journal,
         journalAbbr,
         volume,
         issue,

@@ -61,7 +61,7 @@ export class RisParser {
       const family = (c.lastName || c.name || '').trim();
       const given = (c.firstName || '').trim();
       const fullName =
-        family && given ? `${family}, ${given}` : family || given;
+        family && given ? `${given} ${family}` : family || given;
       if (fullName) {
         rawAuthors.push(fullName);
         creators.push({
@@ -138,7 +138,7 @@ export class RisParser {
           const given = a.given?.trim() || '';
           const fullName =
             a.literal?.trim() ||
-            (family && given ? `${family}, ${given}` : family || given);
+            (family && given ? `${given} ${family}` : family || given);
 
           if (fullName) {
             rawAuthors.push(fullName);
@@ -156,7 +156,7 @@ export class RisParser {
           const given = e.given?.trim() || '';
           const fullName =
             e.literal?.trim() ||
-            (family && given ? `${family}, ${given}` : family || given);
+            (family && given ? `${given} ${family}` : family || given);
 
           if (fullName) {
             rawEditors.push(fullName);
@@ -372,6 +372,45 @@ export class RisParser {
     return map[cslType] || 'journalArticle';
   }
 
+  private mapRisTypeToItemType(risType: string): string {
+    const upper = (risType || '').toUpperCase().trim();
+    const map: Record<string, string> = {
+      JOUR: 'journalArticle',
+      JFULL: 'journalArticle',
+      ABST: 'journalArticle',
+      BOOK: 'book',
+      SER: 'book',
+      CONF: 'conferencePaper',
+      CPAPER: 'conferencePaper',
+      PROJ: 'conferencePaper',
+      THES: 'thesis',
+      RPRT: 'report',
+      REPORT: 'report',
+      CHAP: 'bookSection',
+      PAMP: 'document',
+      PAT: 'patent',
+      DATA: 'dataset',
+      COMP: 'computerProgram',
+      ELEC: 'webpage',
+      WEB: 'webpage',
+      ICOMM: 'webpage',
+      MGZN: 'magazineArticle',
+      NEWS: 'newspaperArticle',
+      CASE: 'case',
+      STAT: 'statute',
+      BILL: 'bill',
+      HEAR: 'hearing',
+      GEN: 'document',
+      MANSCPT: 'manuscript',
+      UNPB: 'manuscript',
+      MAP: 'map',
+      SOUND: 'audioRecording',
+      MPCT: 'film',
+      VIDEO: 'videoRecording',
+    };
+    return map[upper] || 'journalArticle';
+  }
+
   /**
    * Resilient line-by-line parser for non-standard RIS dialect variations
    */
@@ -424,7 +463,7 @@ export class RisParser {
 
       if (tag === 'TY') {
         currentRecord = {
-          itemType: 'journalArticle',
+          itemType: this.mapRisTypeToItemType(value),
           rawAuthors: [],
           rawEditors: [],
           rawTags: [],

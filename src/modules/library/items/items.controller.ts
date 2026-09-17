@@ -25,12 +25,18 @@ import { JwtAuthGuard } from '../../../modules/iam/authn/guards/auth.guard';
 import { ProjectRoleGuard } from '../../../modules/iam/authz/guards/role.guard';
 import { ProjectRoles } from '../../../modules/iam/authz/decorators/role.decorator';
 import { CurrentUser } from '../../../modules/iam/authn/decorators/user.decorator';
+import { isUUID } from 'class-validator';
 import {
   CursorPaginationQueryDto,
   CreateItemDto,
   UpdateItemDto,
   ParseCitationsDto,
 } from './dto/items.dto';
+
+const toValidProjectId = (val?: string): string | undefined =>
+  val && val !== 'me' && val !== 'user' && val !== 'personal' && isUUID(val)
+    ? val
+    : undefined;
 
 @ApiTags('Library Items')
 @ApiBearerAuth('JWT-auth')
@@ -68,7 +74,9 @@ export class ItemsController {
     },
     @Param('projectId') projectId?: string,
   ) {
-    const effectiveProjectId = projectId || (query as any)?.projectId;
+    const effectiveProjectId = toValidProjectId(
+      projectId || (query as any)?.projectId,
+    );
     const result = await this.itemsService.listItems(userId, {
       view: query?.view,
       collectionId: query?.collectionId,
@@ -125,7 +133,11 @@ export class ItemsController {
     @CurrentUser('id') userId: string,
     @Param('projectId') projectId?: string,
   ) {
-    const item = await this.itemsService.getItem(userId, id, projectId);
+    const item = await this.itemsService.getItem(
+      userId,
+      id,
+      toValidProjectId(projectId),
+    );
     if (!item) {
       throw new NotFoundException(`Item ${id} not found in library`);
     }
@@ -140,7 +152,11 @@ export class ItemsController {
     @CurrentUser('id') userId: string,
     @Param('projectId') projectId?: string,
   ) {
-    const fulltext = await this.itemsService.getFulltext(userId, id, projectId);
+    const fulltext = await this.itemsService.getFulltext(
+      userId,
+      id,
+      toValidProjectId(projectId),
+    );
     return { success: true, data: fulltext, ...fulltext };
   }
 
@@ -153,15 +169,13 @@ export class ItemsController {
     @Body() body: CreateItemDto,
   ) {
     const {
-      citationCount: _c,
-      referenceCount: _r,
       crossrefEnriched: _cr,
       ...cleanBody
     } = body;
     return this.itemsService.createItem(userId, {
       ...cleanBody,
       uploadedById: userId || 'system',
-      projectId: projectId || cleanBody.projectId,
+      projectId: toValidProjectId(projectId || cleanBody.projectId),
     });
   }
 
@@ -192,8 +206,6 @@ export class ItemsController {
     }
     const {
       expectedVersion: _,
-      citationCount: _c,
-      referenceCount: _r,
       crossrefEnriched: _cr,
       ...updateData
     } = body;
@@ -203,7 +215,7 @@ export class ItemsController {
       expectedVersion,
       updateData,
       undefined,
-      projectId,
+      toValidProjectId(projectId),
     );
   }
 
@@ -228,7 +240,7 @@ export class ItemsController {
     @CurrentUser('id') userId: string,
     @Param('projectId') projectId?: string,
   ) {
-    return this.itemsService.reindexItem(userId, id, projectId);
+    return this.itemsService.reindexItem(userId, id, toValidProjectId(projectId));
   }
 
   @Post(':id/convert-type/preview')
@@ -310,7 +322,7 @@ export class ItemsController {
       id,
       expectedVersion,
       undefined,
-      projectId,
+      toValidProjectId(projectId),
     );
     return { success: true, deleted, id };
   }
@@ -335,7 +347,7 @@ export class ItemsController {
       userId,
       id,
       expectedVersion,
-      projectId,
+      toValidProjectId(projectId),
     );
     return { success: true, data: item, item };
   }
@@ -348,7 +360,11 @@ export class ItemsController {
     @CurrentUser('id') userId: string,
     @Param('projectId') projectId?: string,
   ) {
-    const purged = await this.itemsService.purgeItem(userId, id, projectId);
+    const purged = await this.itemsService.purgeItem(
+      userId,
+      id,
+      toValidProjectId(projectId),
+    );
     return { success: true, purged, id };
   }
 
@@ -360,7 +376,11 @@ export class ItemsController {
     @CurrentUser('id') userId: string,
     @Param('projectId') projectId?: string,
   ) {
-    return this.itemsService.getRelatedItems(userId, id, projectId);
+    return this.itemsService.getRelatedItems(
+      userId,
+      id,
+      toValidProjectId(projectId),
+    );
   }
 
   @Post([':id/relations', ':id/link'])
@@ -373,7 +393,12 @@ export class ItemsController {
     @CurrentUser('id') userId: string,
     @Param('projectId') projectId?: string,
   ) {
-    return this.itemsService.linkItems(userId, id, body, projectId);
+    return this.itemsService.linkItems(
+      userId,
+      id,
+      body,
+      toValidProjectId(projectId),
+    );
   }
 
   @Delete([':id/relations/:targetId', ':id/link/:targetId'])
@@ -385,7 +410,12 @@ export class ItemsController {
     @CurrentUser('id') userId: string,
     @Param('projectId') projectId?: string,
   ) {
-    return this.itemsService.unlinkItems(userId, id, targetItemId, projectId);
+    return this.itemsService.unlinkItems(
+      userId,
+      id,
+      targetItemId,
+      toValidProjectId(projectId),
+    );
   }
 
   @Post(':id/my-publication')

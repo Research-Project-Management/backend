@@ -84,11 +84,19 @@ export class HistoryController {
     return this.historyService.deleteVersion(versionId, pageId);
   }
 
-  @Get(['pages/:pageId/history', 'projects/:projectId/pages/:pageId/history'])
+  @Get([
+    'pages/:pageId/history',
+    'projects/:projectId/pages/:pageId/history',
+    'projects/:projectId/history',
+  ])
   @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
-  @ApiOperation({ summary: 'Get change history (activity log) for a page' })
-  async getHistory(@Param('pageId') pageId: string) {
-    return this.historyService.getHistory(pageId);
+  @ApiOperation({ summary: 'Get change history (activity log) for a page or project' })
+  async getHistory(
+    @Param('pageId') pageId?: string,
+    @Param('projectId') projectId?: string,
+  ) {
+    const id = pageId || projectId;
+    return this.historyService.getHistory(id!);
   }
 
   @Post([

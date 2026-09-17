@@ -91,8 +91,14 @@ export class CommentService {
       throw new UnprocessableEntityException('Comment content cannot be empty');
     }
 
+    const page = await this.prisma.page.findUnique({
+      where: { id: pageId },
+      select: { parentPageId: true },
+    });
+
     const comment = await this.commentRepo.createComment({
       pageId,
+      projectPageId: page?.parentPageId || null,
       authorId: userId,
       content: cleanContent,
       status: dto.status || CommentStatus.open,

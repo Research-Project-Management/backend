@@ -240,56 +240,25 @@ export class AssetService {
     }
 
     // 2. Discover storage files attached to project or page
-    if (this.prisma?.file) {
-      try {
-        const relatedIds = [projectId];
-        if (this.prisma.page) {
-          const page = await this.prisma.page.findUnique({
-            where: { id: projectId },
-            select: { projectId: true },
-          });
-          if (page?.projectId) {
-            relatedIds.push(page.projectId);
-          }
-        }
+    const storageFiles = await this.findRelatedStorageFiles(projectId);
+    for (const sf of storageFiles) {
+      if (seenNames.has(sf.filename)) continue;
+      seenNames.add(sf.filename);
 
-        const storageFiles = await this.prisma.file.findMany({
-          where: {
-            trashedAt: null,
-            isFolder: false,
-            OR: [
-              { linkedToId: { in: relatedIds } },
-              { parentId: { in: relatedIds } },
-            ],
-          },
-          orderBy: { createdAt: 'desc' },
-        });
-
-        const safeStorageFiles = Array.isArray(storageFiles) ? storageFiles : [];
-        for (const sf of safeStorageFiles) {
-          if (seenNames.has(sf.filename)) continue;
-          seenNames.add(sf.filename);
-
-          const meta = (sf.metaData as Record<string, any>) || {};
-          assets.push({
-            id: sf.id,
-            filename: sf.filename,
-            path: meta.path || sf.filename,
-            mimeType: sf.mimeType,
-            sizeBytes: Number(sf.size),
-            fileId: sf.id,
-            storageUrl: sf.url || `/api/files/${encodeURIComponent(sf.id)}/content`,
-            projectId,
-            parentPageId: sf.parentId || null,
-            createdAt: sf.createdAt,
-            updatedAt: sf.updatedAt,
-          });
-        }
-      } catch (err: any) {
-        this.logger.warn(
-          `Failed to scan storage files for project assets: ${err?.message}`,
-        );
-      }
+      const meta = (sf.metaData as Record<string, any>) || {};
+      assets.push({
+        id: sf.id,
+        filename: sf.filename,
+        path: meta.path || sf.filename,
+        mimeType: sf.mimeType,
+        sizeBytes: Number(sf.size),
+        fileId: sf.id,
+        storageUrl: sf.url || `/api/files/${encodeURIComponent(sf.id)}/content`,
+        projectId,
+        parentPageId: sf.parentId || null,
+        createdAt: sf.createdAt,
+        updatedAt: sf.updatedAt,
+      });
     }
 
     return assets;
@@ -451,32 +420,10 @@ export class AssetService {
     }
 
     // 2. Discover storage files attached to project or page (StorageNode)
-    if (this.prisma?.file && this.storagePort?.readOwnedFile) {
+    if (this.storagePort?.readOwnedFile) {
       try {
-        const relatedIds = [projectId];
-        if (this.prisma.page) {
-          const page = await this.prisma.page.findUnique({
-            where: { id: projectId },
-            select: { projectId: true },
-          });
-          if (page?.projectId) {
-            relatedIds.push(page.projectId);
-          }
-        }
-
-        const storageFiles = await this.prisma.file.findMany({
-          where: {
-            trashedAt: null,
-            isFolder: false,
-            OR: [
-              { linkedToId: { in: relatedIds } },
-              { parentId: { in: relatedIds } },
-            ],
-          },
-        });
-
-        const safeStorageFiles = Array.isArray(storageFiles) ? storageFiles : [];
-        for (const f of safeStorageFiles) {
+        const storageFiles = await this.findRelatedStorageFiles(projectId);
+        for (const f of storageFiles) {
           if (fileMap[f.filename]) continue;
 
           try {
@@ -605,6 +552,42 @@ export class AssetService {
           `Access denied: Required role (${requiredRoles.join(', ')}), current role (${member.role})`,
         );
       }
+    }
+  }
+
+  /**
+   * Helper to discover all active storage files attached to a project or root page.
+   */
+  private async findRelatedStorageFiles(projectId: string) {
+    if (!this.prisma?.file) return [];
+    try {
+      const relatedIds = [projectId];
+      if (this.prisma.page) {
+        const page = await this.prisma.page.findUnique({
+          where: { id: projectId },
+          select: { projectId: true },
+        });
+        if (page?.projectId) {
+          relatedIds.push(page.projectId);
+        }
+      }
+
+      const storageFiles = await this.prisma.file.findMany({
+        where: {
+          trashedAt: null,
+          isFolder: false,
+          OR: [
+            { linkedToId: { in: relatedIds } },
+            { parentId: { in: relatedIds } },
+          ],
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      return Array.isArray(storageFiles) ? storageFiles : [];
+    } catch (err: any) {
+      this.logger.warn(`Failed to discover related storage files: ${err?.message}`);
+      return [];
     }
   }
 }

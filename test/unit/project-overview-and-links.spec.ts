@@ -206,8 +206,8 @@ describe('Project Overview & Link Modules', () => {
       expect(result.links).toHaveLength(1);
       expect(result.links[0].title).toBe('Overleaf');
 
-      // Check metrics (backlog + unstarted + started + completed = 5 + 5 + 10 + 20 = 40)
-      expect(result.metrics.totalIssues).toBe(40);
+      // Check metrics (backlog + unstarted + started + completed + cancelled = 5 + 5 + 10 + 20 + 2 = 42)
+      expect(result.metrics.totalIssues).toBe(42);
       expect(result.metrics.completed).toBe(20);
       expect(result.metrics.started).toBe(10);
       expect(result.metrics.unstarted).toBe(5);

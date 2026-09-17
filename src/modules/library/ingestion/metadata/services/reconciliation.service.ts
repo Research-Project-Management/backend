@@ -221,6 +221,14 @@ export class ReconciliationService {
       OpenAlex: 0.97, // Largest open citation graph (300M+ works)
       CrossRef: 0.95, // References data; less complete than OpenAlex for OA
     },
+    referenceCount: {
+      UserOverride: 1.0,
+      OpenAlex: 0.97,
+      CrossRef: 0.95,
+      LocalPDFExtraction: 0.88,
+      PubMed: 0.85,
+      arXiv: 0.7,
+    },
     extraFields: {
       UserOverride: 1.0,
       PubMed: 0.95, // MeSH terms, clinical metadata — gold standard in biomedicine
@@ -327,8 +335,30 @@ export class ReconciliationService {
       'citationKey',
       'explicitCitationKey',
       'tags',
-      'labels',
       'notes',
+      'bookTitle',
+      'proceedingsTitle',
+      'conferenceName',
+      'eventPlace',
+      'websiteTitle',
+      'websiteType',
+      'blogTitle',
+      'university',
+      'institution',
+      'edition',
+      'numPages',
+      'numberOfPages',
+      'reportNumber',
+      'reportType',
+      'thesisType',
+      'versionNumber',
+      'patentNumber',
+      'applicationNumber',
+      'assignee',
+      'issuingAuthority',
+      'distributor',
+      'system',
+      'repository',
     ];
 
     for (const field of allFields) {
