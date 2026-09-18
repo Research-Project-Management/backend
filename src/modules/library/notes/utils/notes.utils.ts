@@ -3,6 +3,8 @@
  */
 
 export interface NoteAnnotationSource {
+  id?: string;
+  attachmentId?: string;
   pageIndex: number;
   annotationSortIndex?: string | null;
   color?: string | null;
@@ -196,16 +198,27 @@ export function formatLiteratureNoteMarkdown(
     return tA - tB;
   });
 
+  // Determine in-text citation prefix (e.g. "Vaswani et al., 2017")
+  const firstCreator = Array.isArray(item.creators) && item.creators.length > 0 ? item.creators[0] : null;
+  const firstAuthorName = firstCreator
+    ? (firstCreator.lastName || firstCreator.fullName?.split(' ').slice(-1)[0] || 'Unknown')
+    : (Array.isArray(item.contributors) && item.contributors.length > 0 ? (item.contributors[0].lastName || 'Unknown') : 'Unknown');
+  const hasMultipleAuthors = (Array.isArray(item.creators) && item.creators.length > 1) || (Array.isArray(item.contributors) && item.contributors.length > 1);
+  const citationYear = item.year ? String(item.year) : 'n.d.';
+  const authorCitationBase = `${firstAuthorName}${hasMultipleAuthors ? ' et al.' : ''}, ${citationYear}`;
+
   // Group by page, then by color within each page
   let currentPage = -1;
   let currentColor: string | null = null;
 
   for (const ann of sorted) {
+    const pageNum = ann.pageIndex + 1;
+
     // New page heading
     if (ann.pageIndex !== currentPage) {
       currentPage = ann.pageIndex;
       currentColor = null;
-      lines.push(`### Page ${currentPage + 1}`);
+      lines.push(`### Page ${pageNum}`);
       lines.push('');
     }
 
@@ -218,8 +231,15 @@ export function formatLiteratureNoteMarkdown(
       lines.push('');
     }
 
+    const citationLabel = `(${authorCitationBase}, p. ${pageNum})`;
+    const backlinkUrl = ann.attachmentId
+      ? `flux://open-pdf/library/items/${ann.attachmentId}?page=${pageNum}&annotation=${ann.id || ''}`
+      : `flux://open-pdf/library/items?page=${pageNum}&annotation=${ann.id || ''}`;
+    const citationLink = `[${citationLabel}](${backlinkUrl})`;
+
     if (ann.quoteText) {
-      lines.push(`> ${ann.quoteText.trim().replace(/\n+/g, '\n> ')}`);
+      lines.push(`> "${ann.quoteText.trim().replace(/\n+/g, '\n> ')}"`);
+      lines.push(`> — ${citationLink}`);
       lines.push('');
     }
 

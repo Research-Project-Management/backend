@@ -251,23 +251,49 @@ export function prepareNotesToCreate(
 
   return notes
     .map((note) => {
-      const content =
+      const noteObj =
+        typeof note === 'object' && note !== null
+          ? (note as Record<string, unknown>)
+          : null;
+      const rawContent =
         typeof note === 'string'
           ? note
-          : (note as { content?: unknown })?.content;
+          : typeof noteObj?.content === 'string'
+            ? noteObj.content
+            : typeof noteObj?.contentMd === 'string'
+              ? noteObj.contentMd
+              : typeof noteObj?.note === 'string'
+                ? noteObj.note
+                : '';
+      // Strip HTML if from Zotero child note (<p>...</p>)
+      const cleanContent = /<\/?[a-z][\s\S]*>/i.test(rawContent)
+        ? rawContent.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+        : rawContent.trim();
       const source =
-        typeof note === 'object' && note
-          ? (note as { source?: unknown }).source
+        typeof noteObj?.source === 'string'
+          ? noteObj.source.trim()
           : undefined;
-      const contentMd = typeof content === 'string' ? content.trim() : '';
+      const contentMd = cleanContent;
       if (!contentMd || seen.has(contentMd)) return null;
       seen.add(contentMd);
 
-      const sourceName = typeof source === 'string' ? source.trim() : '';
+      const sourceName = source || '';
+      const isComment = contentMd.toLowerCase().startsWith('comment:');
+      const noteTitle =
+        typeof noteObj?.title === 'string' && noteObj.title.trim()
+          ? noteObj.title.trim()
+          : isComment
+            ? sourceName
+              ? `Comment (${sourceName})`
+              : 'Comment'
+            : sourceName
+              ? `Imported Note (${sourceName})`
+              : 'Imported Note';
+
       return {
         userId,
         createdById: createdById || userId || 'system',
-        title: sourceName ? `Imported Note (${sourceName})` : 'Imported Note',
+        title: noteTitle,
         contentMd,
         contentJson: {
           type: 'doc',
@@ -278,7 +304,11 @@ export function prepareNotesToCreate(
             },
           ],
         },
-        tags: ['imported', ...(sourceName ? [sourceName] : [])],
+        tags: [
+          'imported',
+          ...(sourceName ? [sourceName] : []),
+          ...(isComment ? ['comment'] : []),
+        ],
         version: 1,
       };
     })
@@ -812,7 +842,17 @@ export class CommandRepository {
                 ? (data as any).websiteTitle
                 : (data as any).blogTitle !== undefined
                   ? (data as any).blogTitle
-                  : undefined;
+                  : (data as any).dictionaryTitle !== undefined
+                    ? (data as any).dictionaryTitle
+                    : (data as any).encyclopediaTitle !== undefined
+                      ? (data as any).encyclopediaTitle
+                      : (data as any).forumTitle !== undefined
+                        ? (data as any).forumTitle
+                        : (data as any).sessionTitle !== undefined
+                          ? (data as any).sessionTitle
+                          : (data as any).programTitle !== undefined
+                            ? (data as any).programTitle
+                            : undefined;
 
     const rawPublisher =
       data.publisher !== undefined
@@ -827,7 +867,13 @@ export class CommandRepository {
                 ? (data as any).company
                 : (data as any).distributor !== undefined
                   ? (data as any).distributor
-                  : undefined;
+                  : (data as any).label !== undefined
+                    ? (data as any).label
+                    : (data as any).studio !== undefined
+                      ? (data as any).studio
+                      : (data as any).network !== undefined
+                        ? (data as any).network
+                        : undefined;
     const rawJournalAbbr =
       data.journalAbbr !== undefined
         ? data.journalAbbr
@@ -843,6 +889,11 @@ export class CommandRepository {
       existing.notesList,
     );
 
+    const parsedYearMatch = rawPubDate !== undefined
+      ? String(rawPubDate).match(/(?:^|[^\d])(1[7-9]\d{2}|20\d{2})(?:[^\d]|$)/)
+      : null;
+    const extractedYear = parsedYearMatch ? parseInt(parsedYearMatch[1], 10) : null;
+
     const updated = await client.item.update({
       where: { id },
       data: {
@@ -853,9 +904,8 @@ export class CommandRepository {
         year:
           data.year !== undefined
             ? data.year
-            : rawPubDate !== undefined
-              ? Number(rawPubDate.match(/\b(18|19|20)\d{2}\b/)?.[0]) ||
-                existing.year
+            : extractedYear !== null
+              ? extractedYear
               : existing.year,
         doi: cleanDoi !== undefined ? cleanDoi : existing.doi,
         abstract: cleanAbstract,
@@ -1375,8 +1425,10 @@ export class CommandRepository {
     const client = this.getClient(tx);
     await client.itemRelation.deleteMany({
       where: {
-        sourceItemId: itemId,
-        targetItemId,
+        OR: [
+          { sourceItemId: itemId, targetItemId },
+          { sourceItemId: targetItemId, targetItemId: itemId },
+        ],
       },
     });
 

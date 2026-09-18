@@ -31,6 +31,7 @@ import { normalizeTags } from '../tags/utils/tags.utils';
 import { TagsService } from '../tags/tags.service';
 import { CollectionsService } from '../collections/collections.service';
 import { TypesService } from '../types/types.service';
+import { ZoteroSchemaValidatorService } from '../types/services/zotero-schema-validator.service';
 import { RagProvider } from '../search/providers/rag.provider';
 import { SemanticSearchService } from '../search/services/semantic-search.service';
 import { ItemsMapper } from './mappers/items.mapper';
@@ -75,6 +76,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     private readonly typesService: TypesService,
     private readonly rag: RagProvider,
     private readonly transformer: ItemTransformer,
+    @Optional() private readonly validator?: ZoteroSchemaValidatorService,
     @Optional() private readonly grobid?: GrobidClient,
     @Optional() private readonly semanticSearch?: SemanticSearchService,
   ) {}
@@ -116,14 +118,11 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       throw new NotFoundException(`Item ${id} not found or access denied`);
     }
 
-    // 1. Look for authoritative grobid_fulltext record in metadataSourceRecord
-    const fulltextRecord = await this.prisma.metadataSourceRecord.findFirst({
-      where: {
-        itemId: id,
-        sourceProvider: 'grobid_fulltext',
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    // 1. Look for authoritative grobid_fulltext record in metadataSourceRecord via QueryRepository
+    const fulltextRecord = await this.query.findMetadataSourceRecord(
+      id,
+      'grobid_fulltext',
+    );
 
     if (
       fulltextRecord?.rawPayload &&
@@ -141,14 +140,11 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       };
     }
 
-    // 2. Fallback to grobid header record if available
-    const headerRecord = await this.prisma.metadataSourceRecord.findFirst({
-      where: {
-        itemId: id,
-        sourceProvider: 'grobid',
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    // 2. Fallback to grobid header record if available via QueryRepository
+    const headerRecord = await this.query.findMetadataSourceRecord(
+      id,
+      'grobid',
+    );
 
     if (headerRecord?.rawPayload && typeof headerRecord.rawPayload === 'object') {
       const payload = headerRecord.rawPayload as Record<string, any>;
@@ -239,15 +235,30 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     }
     data.title = cleanTitle;
 
+    let itemPayload = data;
+    if (this.validator) {
+      const valRes = this.validator.validateAndSanitizeItem(
+        data.itemType,
+        data,
+      );
+      itemPayload = valRes.sanitizedItem as CreateItemData;
+    } else if (
+      data.itemType &&
+      typeof this.typesService?.isValidItemType === 'function' &&
+      !this.typesService.isValidItemType(data.itemType)
+    ) {
+      throw new BadRequestException(`Invalid itemType: ${data.itemType}`);
+    }
+
     const effectiveProjectId =
-      projectId || context?.projectId || data.projectId || undefined;
+      projectId || context?.projectId || itemPayload.projectId || undefined;
     const execute = async (
       tx: Prisma.TransactionClient,
       helpers: TransactionHelpers,
     ) => {
       const item = await this.command.create(
         userId,
-        data,
+        itemPayload,
         tx,
         effectiveProjectId,
       );
@@ -306,12 +317,27 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       data.title = cleanTitle;
     }
 
+    let updatePayload = data;
+    if (this.validator && (data.itemType || data.creators)) {
+      const valRes = this.validator.validateAndSanitizeItem(
+        data.itemType,
+        data,
+      );
+      updatePayload = valRes.sanitizedItem as UpdateItemData;
+    } else if (
+      data.itemType &&
+      typeof this.typesService?.isValidItemType === 'function' &&
+      !this.typesService.isValidItemType(data.itemType)
+    ) {
+      throw new BadRequestException(`Invalid itemType: ${data.itemType}`);
+    }
+
     if (context) {
       const updated = await this.command.update(
         userId,
         id,
         expectedVersion,
-        data,
+        updatePayload,
         context.tx,
         projectId,
       );
@@ -584,7 +610,12 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
   async linkItems(
     userId: string,
     sourceItemId: string,
-    data: { targetItemId: string; relationType?: string; note?: string },
+    data: {
+      targetItemId?: string;
+      targetItemIds?: string[];
+      relationType?: string;
+      note?: string;
+    },
     projectId?: string,
   ) {
     const sourceItem = await this.query.findById(
@@ -596,32 +627,52 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       throw new NotFoundException(`Source item ${sourceItemId} not found`);
     }
 
-    const targetItem = await this.query.findById(
-      userId,
-      data.targetItemId,
-      projectId,
+    const rawIds = [
+      ...(Array.isArray(data.targetItemIds) ? data.targetItemIds : []),
+      ...(data.targetItemId ? [data.targetItemId] : []),
+    ];
+    const targetIds = Array.from(
+      new Set(rawIds.filter((id) => id && id !== sourceItemId)),
     );
-    if (!targetItem) {
-      throw new NotFoundException(`Target item ${data.targetItemId} not found`);
+
+    if (targetIds.length === 0) {
+      throw new BadRequestException(
+        'At least one valid target item ID (different from source) must be provided',
+      );
     }
 
     const type = data.relationType ?? 'related';
     const now = new Date().toISOString();
+    const linkedRelations = [];
 
-    const relation = {
-      id: randomUUID(),
-      targetItemId: data.targetItemId,
-      relationType: type,
-      note: data.note,
-      linkedAt: now,
-    };
+    for (const targetId of targetIds) {
+      const targetItem = await this.query.findById(userId, targetId, projectId);
+      if (!targetItem) continue;
 
-    await this.command.putRelation(sourceItemId, relation);
+      const relation = {
+        id: randomUUID(),
+        targetItemId: targetId,
+        relationType: type,
+        note: data.note,
+        linkedAt: now,
+      };
+
+      await this.command.putRelation(sourceItemId, relation);
+      linkedRelations.push({
+        ...relation,
+        targetTitle: targetItem.title,
+      });
+    }
 
     return {
       success: true,
-      link: relation,
-      message: `Linked "${sourceItem.title}" to "${targetItem.title}"`,
+      link: linkedRelations[0] || null,
+      links: linkedRelations,
+      totalLinked: linkedRelations.length,
+      message:
+        linkedRelations.length === 1
+          ? `Linked "${sourceItem.title}" to "${linkedRelations[0].targetTitle}"`
+          : `Linked ${linkedRelations.length} item(s) to "${sourceItem.title}"`,
     };
   }
 
@@ -928,7 +979,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
 
       const colLower = col.toLowerCase();
       if (droppedSet.has(colLower)) {
-        updatePayload[col] = '';
+        updatePayload[col] = null;
       } else {
         const val =
           this.transformer.getItemFieldValue(projected, col) ??
@@ -1004,84 +1055,63 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         continue;
       }
 
-      await this.prisma.item.create({
-        data: {
-          projectId,
-          userId: project.createdById,
-          uploadedById: userId,
-          title: source.title,
-          year: source.year,
-          doi: source.doi,
-          abstract: source.abstract,
-          itemType: source.itemType || 'journalArticle',
-          publicationTitle: source.publicationTitle,
-          publicationDate: source.publicationDate,
-          publisher: source.publisher,
-          place: source.place,
-          volume: source.volume,
-          issue: source.issue,
-          section: source.section,
-          partNumber: source.partNumber,
-          partTitle: source.partTitle,
-          pages: source.pages,
-          series: source.series,
-          seriesTitle: source.seriesTitle,
-          seriesText: source.seriesText,
-          issn: source.issn,
-          isbn: source.isbn,
-          pmid: source.pmid,
-          pmcid: source.pmcid,
-          url: source.url,
-          language: source.language,
-          journalAbbr: source.journalAbbr,
-          shortTitle: source.shortTitle,
-          rights: source.rights,
-          license: source.license,
-          citationKey: source.citationKey,
-          libraryCatalog: source.libraryCatalog,
-          archive: source.archive,
-          archiveLocation: source.archiveLocation,
-          callNumber: source.callNumber,
-          extra: source.extra,
-          version: 1,
-          contributors:
-            source.contributors && source.contributors.length > 0
-              ? {
-                  create: source.contributors.map((c: any) => ({
-                    creatorType: c.creatorType || 'author',
-                    firstName: c.firstName || '',
-                    lastName: c.lastName || '',
-                    fullName: c.fullName || '',
-                    orderIndex: c.orderIndex ?? 0,
-                  })),
-                }
-              : undefined,
-          identifiers:
-            source.identifiers && source.identifiers.length > 0
-              ? {
-                  create: source.identifiers.map((i: any) => ({
-                    type: i.type,
-                    value: i.value,
-                    canonicalUri: i.canonicalUri,
-                  })),
-                }
-              : undefined,
-          attachments:
-            source.attachments && source.attachments.length > 0
-              ? {
-                  create: source.attachments.map((a: any) => ({
-                    fileId: a.fileId,
-                    filename: a.filename,
-                    mimeType: a.mimeType,
-                    size: a.size,
-                    attachmentType: a.attachmentType,
-                    url: a.url,
-                    storageKey: a.storageKey,
-                  })),
-                }
-              : undefined,
-        },
-      });
+      const createData: CreateItemData = {
+        title: source.title,
+        uploadedById: project.createdById,
+        year: source.year ?? undefined,
+        doi: source.doi ?? undefined,
+        abstract: source.abstract ?? undefined,
+        itemType: source.itemType || 'journalArticle',
+        publicationTitle: source.publicationTitle ?? undefined,
+        publicationDate: source.publicationDate ?? undefined,
+        publisher: source.publisher ?? undefined,
+        place: source.place ?? undefined,
+        volume: source.volume ?? undefined,
+        issue: source.issue ?? undefined,
+        section: source.section ?? undefined,
+        partNumber: source.partNumber ?? undefined,
+        partTitle: source.partTitle ?? undefined,
+        pages: source.pages ?? undefined,
+        series: source.series ?? undefined,
+        seriesTitle: source.seriesTitle ?? undefined,
+        seriesText: source.seriesText ?? undefined,
+        issn: source.issn ?? undefined,
+        isbn: source.isbn ?? undefined,
+        pmid: source.pmid ?? undefined,
+        pmcid: source.pmcid ?? undefined,
+        url: source.url ?? undefined,
+        language: source.language ?? undefined,
+        journalAbbr: source.journalAbbr ?? undefined,
+        shortTitle: source.shortTitle ?? undefined,
+        rights: source.rights ?? undefined,
+        license: source.license ?? undefined,
+        citationKey: source.citationKey ?? undefined,
+        libraryCatalog: source.libraryCatalog ?? undefined,
+        archive: source.archive ?? undefined,
+        archiveLocation: source.archiveLocation ?? undefined,
+        callNumber: source.callNumber ?? undefined,
+        extra: source.extra ?? undefined,
+        creators: source.contributors?.map((c: any) => ({
+          creatorType: c.creatorType || 'author',
+          firstName: c.firstName || '',
+          lastName: c.lastName || '',
+          fullName: c.fullName || '',
+          name: c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+          orderIndex: c.orderIndex ?? 0,
+        })),
+        identifiers: source.identifiers?.map((i: any) => ({
+          type: i.type,
+          value: i.value,
+          canonicalUri: i.canonicalUri,
+        })),
+      };
+
+      await this.createItem(
+        project.createdById,
+        createData,
+        { projectId, source: 'external_sync' },
+        projectId,
+      );
 
       importedCount++;
     }

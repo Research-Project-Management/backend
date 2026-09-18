@@ -2,6 +2,7 @@ import { RetractionDatabaseService } from '../../src/modules/library/retraction/
 import { RetractionScannerProvider } from '../../src/modules/library/retraction/providers/retraction-scanner.provider';
 import { RetractionService } from '../../src/modules/library/retraction/retraction.service';
 import { RetractionRepository } from '../../src/modules/library/retraction/retraction.repository';
+import { RetractionSyncService } from '../../src/modules/library/retraction/services/retraction-sync.service';
 
 describe('Retraction Watch & Offline Retraction Detection', () => {
   let mockPrisma: any;
@@ -9,6 +10,7 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
   let scanner: RetractionScannerProvider;
   let service: RetractionService;
   let repo: RetractionRepository;
+  let syncService: RetractionSyncService;
 
   const retractionWatchSeed = [
     {
@@ -105,7 +107,8 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
 
     scanner = new RetractionScannerProvider(mockPrisma, retractionDb);
     repo = new RetractionRepository(mockPrisma);
-    service = new RetractionService(repo, scanner, retractionDb);
+    syncService = new RetractionSyncService(repo, scanner, retractionDb);
+    service = new RetractionService(repo, scanner, retractionDb, syncService);
   });
 
   describe('RetractionDatabaseService', () => {
@@ -249,6 +252,61 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
 
       const seedResult = await service.seedDatabase(false);
       expect(seedResult.seeded).toBeGreaterThanOrEqual(0);
+    });
+
+    it('should sync stale library items via syncLibrary', async () => {
+      const staleItems = [
+        {
+          id: 'item-stale-1',
+          title: 'Wakefield MMR Paper',
+          doi: '10.1016/s0140-6736(97)11096-0',
+          pmid: null,
+          isRetracted: false,
+          retractionNature: null,
+          retractionCheckedAt: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000),
+        },
+        {
+          id: 'item-stale-2',
+          title: 'Manual flagged item',
+          doi: '10.1016/s0140-6736(97)11096-0',
+          pmid: null,
+          isRetracted: true,
+          retractionNature: 'manual',
+          retractionCheckedAt: null,
+        },
+      ];
+      mockPrisma.item.findMany.mockResolvedValue(staleItems);
+      mockPrisma.item.update.mockResolvedValue({});
+
+      const syncRes = await service.syncLibrary('user-1', undefined, { maxDays: 14 });
+      expect(syncRes.totalEligible).toBe(2);
+      expect(syncRes.scanned).toBe(1);
+      expect(syncRes.newlyRetracted).toBe(1);
+      expect(syncRes.skippedManual).toBe(1);
+    });
+  });
+
+  describe('RetractionSyncService', () => {
+    it('should skip items flagged as manual and re-scan stale items', async () => {
+      const items = [
+        {
+          id: 'stale-clean',
+          title: 'Normal physics paper',
+          doi: '10.1103/physrevlett.120.010001',
+          pmid: null,
+          isRetracted: false,
+          retractionNature: null,
+          retractionCheckedAt: null,
+        },
+      ];
+      mockPrisma.item.findMany.mockResolvedValue(items);
+      mockPrisma.item.update.mockResolvedValue({});
+      await retractionDb.saveClean('10.1103/physrevlett.120.010001');
+
+      const result = await syncService.syncStaleLibraryItems('user-1');
+      expect(result.scanned).toBe(1);
+      expect(result.stillClean).toBe(1);
+      expect(result.newlyRetracted).toBe(0);
     });
   });
 });

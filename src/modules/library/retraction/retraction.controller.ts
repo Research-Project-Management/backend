@@ -72,6 +72,22 @@ export class RetractionController {
     return this.service.checkLibrary(userId, dto, effectiveProjectId);
   }
 
+  @Post('sync')
+  @ProjectRoles('owner', 'contributor')
+  async syncLibrary(
+    @CurrentUser('id') userId: string,
+    @Body('maxDays') maxDays?: number,
+    @Body('limit') limit?: number,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
+  ) {
+    const effectiveProjectId = paramProjectId || queryProjectId;
+    return this.service.syncLibrary(userId, effectiveProjectId, {
+      maxDays: maxDays ? Number(maxDays) : undefined,
+      limit: limit ? Number(limit) : undefined,
+    });
+  }
+
   @Post('items/:itemId/check')
   @ProjectRoles('owner', 'contributor')
   async checkItem(

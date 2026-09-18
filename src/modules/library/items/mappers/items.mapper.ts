@@ -1,5 +1,6 @@
 import { getFileContentPath } from '@/modules/storage/storage.port';
 import { ITEM_COLUMN_METADATA_FIELDS } from '../constants/items.constants';
+import { BASE_FIELD_MAPPINGS } from '../../types/constants/types.constants';
 import { cleanAbstractText, cleanCommentText } from '../utils/items.utils';
 import { resolveCanonicalArxivCategory } from '../../tags/utils/tags.utils';
 
@@ -386,7 +387,7 @@ export class ItemsMapper {
       .map((creator: any) => creator.fullName || creator.name)
       .filter(Boolean);
 
-    // 6. Canonical Tags & Labels Projection
+    // 6. Canonical Tags & Labels Projection (Dual format: strings for UI, Zotero objects for API parity)
     if (Array.isArray(it.itemTags) && it.itemTags.length > 0) {
       const tagNames = it.itemTags
         .map((t: any) => t.tag?.name || t.name)
@@ -394,10 +395,47 @@ export class ItemsMapper {
       it.tags = tagNames;
       it.labels = tagNames;
       it.keywords = tagNames;
+      it.zoteroTags = it.itemTags
+        .map((t: any) => ({
+          tag: t.tag?.name || t.name || '',
+          type: t.tag?.type === 'automatic' ? 1 : 0,
+        }))
+        .filter((zt: any) => Boolean(zt.tag));
     } else {
-      it.tags = it.tags || it.labels || [];
-      it.labels = it.labels || it.tags || [];
-      it.keywords = it.keywords || it.tags || it.labels || [];
+      const rawTags = Array.isArray(it.tags)
+        ? it.tags
+        : Array.isArray(it.labels)
+          ? it.labels
+          : Array.isArray(it.keywords)
+            ? it.keywords
+            : [];
+      const tagNames = rawTags
+        .map((t: any) =>
+          typeof t === 'string'
+            ? t
+            : typeof t?.tag === 'string'
+              ? t.tag
+              : typeof t?.name === 'string'
+                ? t.name
+                : '',
+        )
+        .filter(Boolean);
+      it.tags = tagNames;
+      it.labels = tagNames;
+      it.keywords = tagNames;
+      it.zoteroTags = rawTags
+        .map((t: any) => ({
+          tag: typeof t === 'string' ? t : t?.tag || t?.name || '',
+          type:
+            typeof t === 'object' && t?.type !== undefined
+              ? typeof t.type === 'number'
+                ? t.type
+                : t.type === 'automatic'
+                  ? 1
+                  : 0
+              : 0,
+        }))
+        .filter((zt: any) => Boolean(zt.tag));
     }
 
     // 7. Canonical Collection Targeting Projection
@@ -419,19 +457,29 @@ export class ItemsMapper {
       it.collections = it.collections || [];
     }
 
-    // 8. Canonical Notes Projection (unifying notesList -> notes)
+    // 8. Canonical Notes Projection (unifying notesList -> notes with Zotero HTML child note parity)
     if (Array.isArray(it.notesList) && it.notesList.length > 0) {
-      it.notes = it.notesList.map((n: any) => ({
-        ...n,
-        content: n.content || n.contentMd || '',
-        contentMd: n.contentMd || n.content || '',
-      }));
+      it.notes = it.notesList.map((n: any) => {
+        const text = n.content || n.contentMd || n.note || '';
+        return {
+          ...n,
+          content: text,
+          contentMd: n.contentMd || text,
+          note: n.note || `<p>${text}</p>`,
+          itemType: 'note',
+        };
+      });
     } else if (Array.isArray(it.notes) && it.notes.length > 0) {
-      it.notes = it.notes.map((n: any) => ({
-        ...n,
-        content: n.content || n.contentMd || '',
-        contentMd: n.contentMd || n.content || '',
-      }));
+      it.notes = it.notes.map((n: any) => {
+        const text = n.content || n.contentMd || n.note || '';
+        return {
+          ...n,
+          content: text,
+          contentMd: n.contentMd || text,
+          note: n.note || `<p>${text}</p>`,
+          itemType: 'note',
+        };
+      });
     } else if (
       it.extraFields &&
       typeof it.extraFields.comment === 'string'
@@ -446,6 +494,8 @@ export class ItemsMapper {
             id: `comment-${it.id}`,
             content: formatted,
             contentMd: formatted,
+            note: `<p>${formatted}</p>`,
+            itemType: 'note',
             source: 'arXiv',
             createdAt: it.createdAt || new Date().toISOString(),
             updatedAt: it.updatedAt || new Date().toISOString(),
@@ -458,97 +508,84 @@ export class ItemsMapper {
       it.notes = [];
     }
 
-    // 9. Harmonize Publication Venue, Dates & Field Aliases (Zotero Parity)
-    switch (it.itemType) {
-      case 'bookSection':
-        it.bookTitle = it.bookTitle || it.publicationTitle || '';
-        it.publicationTitle = it.publicationTitle || it.bookTitle || '';
-        break;
-      case 'conferencePaper':
-        it.proceedingsTitle = it.proceedingsTitle || it.publicationTitle || '';
-        it.publicationTitle = it.publicationTitle || it.proceedingsTitle || '';
-        break;
-      case 'webpage':
-        it.websiteTitle = it.websiteTitle || it.publicationTitle || '';
-        it.publicationTitle = it.publicationTitle || it.websiteTitle || '';
-        it.websiteType = it.websiteType || it.type || '';
-        break;
-      case 'blogPost':
-        it.blogTitle = it.blogTitle || it.publicationTitle || '';
-        it.publicationTitle = it.publicationTitle || it.blogTitle || '';
-        it.websiteType = it.websiteType || it.type || '';
-        break;
-      case 'dictionaryEntry':
-        it.dictionaryTitle = it.dictionaryTitle || it.publicationTitle || '';
-        it.publicationTitle = it.publicationTitle || it.dictionaryTitle || '';
-        break;
-      case 'encyclopediaArticle':
-        it.encyclopediaTitle = it.encyclopediaTitle || it.publicationTitle || '';
-        it.publicationTitle = it.publicationTitle || it.encyclopediaTitle || '';
-        break;
-      case 'forumPost':
-        it.forumTitle = it.forumTitle || it.publicationTitle || '';
-        it.publicationTitle = it.publicationTitle || it.forumTitle || '';
-        it.postType = it.postType || it.type || '';
-        break;
-      case 'presentation':
-        it.sessionTitle = it.sessionTitle || it.publicationTitle || '';
-        it.publicationTitle = it.publicationTitle || it.sessionTitle || '';
-        it.presentationType = it.presentationType || it.type || '';
-        break;
-      case 'radioBroadcast':
-      case 'tvBroadcast':
-        it.programTitle = it.programTitle || it.publicationTitle || '';
-        it.publicationTitle = it.publicationTitle || it.programTitle || '';
-        it.network = it.network || it.publisher || '';
-        it.publisher = it.publisher || it.network || '';
-        break;
-      case 'thesis':
-        it.university = it.university || it.publisher || '';
-        it.publisher = it.publisher || it.university || '';
-        if (!it.thesisType && it.type && it.type.toLowerCase() !== 'thesis') {
-          it.thesisType = it.type;
+    // 9. Harmonize Publication Venue, Publisher & Field Aliases (Schema v42 DRY Parity)
+    const baseMap = BASE_FIELD_MAPPINGS[it.itemType];
+    if (baseMap) {
+      // publicationTitle semantic mapping
+      const venueField = baseMap.publicationTitle;
+      if (venueField && venueField !== 'publicationTitle') {
+        it[venueField] = it[venueField] || it.publicationTitle || '';
+        it.publicationTitle = it.publicationTitle || it[venueField] || '';
+      }
+      // publisher semantic mapping
+      const publisherField = baseMap.publisher;
+      if (publisherField && publisherField !== 'publisher') {
+        it[publisherField] = it[publisherField] || it.publisher || '';
+        it.publisher = it.publisher || it[publisherField] || '';
+      }
+      // place semantic mapping (e.g. conference eventPlace)
+      const placeField = baseMap.place;
+      if (placeField && placeField !== 'place') {
+        it[placeField] = it[placeField] || it.place || '';
+        it.place = it.place || it[placeField] || '';
+      }
+      // type semantic mapping (e.g. thesisType, reportType, websiteType, postType, presentationType, genre)
+      const typeField = baseMap.type;
+      if (typeField && typeField !== 'type' && it.type && it.type.toLowerCase() !== it.itemType.toLowerCase()) {
+        it[typeField] = it[typeField] || it.type;
+      }
+      // number semantic mapping (e.g. reportNumber, patentNumber, identifier)
+      const numberField = baseMap.number;
+      if (numberField && numberField !== 'number' && (it as any).number) {
+        it[numberField] = it[numberField] || (it as any).number;
+      }
+    }
+
+    // Default journal mapping for journal articles
+    if (it.itemType === 'journalArticle' || !it.itemType) {
+      it.journal = it.journal || it.publicationTitle || '';
+      it.publicationTitle = it.publicationTitle || it.journal || '';
+    }
+
+    // Specialized preprint & patent handling
+    if (it.itemType === 'preprint') {
+      const isArxiv = Boolean(
+        it.arxivId ||
+        it.archiveId ||
+        it.archiveID ||
+        (it.doi && String(it.doi).includes('arXiv')) ||
+        (it.publicationTitle && /arxiv/i.test(it.publicationTitle)),
+      );
+      if (isArxiv && (it.publisher === 'IEEE' || it.publisher === 'ACM' || it.publisher === 'MIT Press' || !it.publisher)) {
+        it.publisher = 'arXiv';
+      }
+      it.repository = it.repository || it.publisher || (it.publicationTitle && !/^(ieee|acm)$/i.test(it.publicationTitle) ? it.publicationTitle : '') || (isArxiv ? 'arXiv' : '') || '';
+      it.publisher = it.publisher || it.repository || '';
+      if (isArxiv && !it.repository) it.repository = 'arXiv';
+      if (isArxiv && (!it.publicationTitle || /^(ieee|acm)$/i.test(it.publicationTitle))) it.publicationTitle = 'arXiv';
+      it.genre = it.genre || it.type || '';
+      it.archiveID = it.archiveID || (it as any).number || (it.arxivId ? `arXiv:${String(it.arxivId).replace(/^arxiv:\s*/i, '').replace(/v\d+$/i, '')}` : '') || '';
+    } else if (it.itemType === 'patent') {
+      it.issuingAuthority = it.issuingAuthority || it.country || it.authority || '';
+      it.authority = it.authority || it.issuingAuthority || '';
+      it.country = it.country || it.issuingAuthority || '';
+      it.patentNumber = it.patentNumber || (it as any).number || '';
+      it.issueDate = it.issueDate || it.date || it.publicationDate || '';
+      it.priorityDate = it.priorityDate || it.originalDate || '';
+      it.assignee = it.assignee || (it as any).assignee || '';
+    }
+    // Robust year extraction from any date format (e.g. "May 2024", "Spring 2024", "2024-05-18", "15-08-2022", "c2019")
+    if (it.year === undefined || it.year === null || isNaN(Number(it.year)) || Number(it.year) === 0) {
+      const dateCandidate = it.date || it.publicationDate || it.issueDate;
+      if (dateCandidate) {
+        const yearMatch = String(dateCandidate).match(/(?:^|[^\d])(1[7-9]\d{2}|20\d{2})(?:[^\d]|$)/);
+        if (yearMatch) {
+          it.year = parseInt(yearMatch[1], 10);
         }
-        break;
-      case 'report':
-        it.institution = it.institution || it.publisher || '';
-        it.publisher = it.publisher || it.institution || '';
-        if (!it.reportType && it.type && it.type.toLowerCase() !== 'report') {
-          it.reportType = it.type;
-        }
-        it.reportNumber = it.reportNumber || (it as any).number || '';
-        break;
-      case 'preprint':
-        it.repository = it.repository || it.publisher || '';
-        it.publisher = it.publisher || it.repository || '';
-        it.genre = it.genre || it.type || '';
-        it.archiveID = it.archiveID || (it as any).number || '';
-        break;
-      case 'computerProgram':
-        it.company = it.company || it.publisher || '';
-        it.publisher = it.publisher || it.company || '';
-        break;
-      case 'film':
-        it.distributor = it.distributor || it.publisher || '';
-        it.publisher = it.publisher || it.distributor || '';
-        it.genre = it.genre || it.type || '';
-        break;
-      case 'audioRecording':
-        it.label = it.label || it.publisher || '';
-        it.publisher = it.publisher || it.label || '';
-        break;
-      case 'videoRecording':
-        it.studio = it.studio || it.publisher || '';
-        it.publisher = it.publisher || it.studio || '';
-        break;
-      case 'book':
-        // Books use publisher, do not inject journal
-        break;
-      case 'journalArticle':
-      default:
-        it.journal = it.journal || it.publicationTitle || '';
-        it.publicationTitle = it.publicationTitle || it.journal || '';
-        break;
+      }
+    } else if (typeof it.year === 'string') {
+      const parsedNum = parseInt(it.year, 10);
+      it.year = isNaN(parsedNum) ? null : parsedNum;
     }
     it.publicationDate =
       it.publicationDate || it.date || (it.year ? String(it.year) : '');

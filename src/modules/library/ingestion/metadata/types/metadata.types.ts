@@ -89,12 +89,10 @@ export interface ItemMetadata {
   fileUrl?: string;
   fileId?: string;
   filename?: string;
-  storageId?: string;
   openAccessPdfUrl?: string;
   itemType?: string;
   type?: string;
   citationKey?: string;
-  explicitCitationKey?: string;
   extra?: string;
   tags?: string[];
   labels?: string[];

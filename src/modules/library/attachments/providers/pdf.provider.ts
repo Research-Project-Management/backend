@@ -13,6 +13,8 @@ import {
 } from '../../infra/grobid/grobid.client';
 import { SsrfGuardService } from '../../core/services/ssrf-guard.service';
 import { cleanAbstractText } from '../../items/utils/items.utils';
+import { OcrProvider } from './ocr.provider';
+import { OcrPageResult } from '../ocr/ocr.types';
 
 export interface ExtractedPdfMetadata {
   doi?: string;
@@ -26,6 +28,7 @@ export interface ExtractedPdfMetadata {
   year?: number;
   publicationDate?: string;
   publisher?: string;
+  repository?: string;
   numberOfPages?: number;
   abstract?: string;
   abstractParagraphs?: string[];
@@ -46,6 +49,25 @@ export interface ExtractedPdfMetadata {
   citationCount?: number;
 }
 
+export interface OcrPageProvenance {
+  pageIndex: number;
+  confidence: number;
+  orientationAngle: number;
+  skewAngle: number;
+  preprocessed: boolean;
+  textLength: number;
+  lineCount: number;
+  wordCount: number;
+  executionTimeMs: number;
+}
+
+export interface OcrProvenanceData {
+  totalOcrPages: number;
+  avgConfidence: number;
+  executionTimeMs: number;
+  pages: OcrPageProvenance[];
+}
+
 export interface ExtractedPdfDocument {
   metadata: ExtractedPdfMetadata;
   pages: Array<{
@@ -58,6 +80,8 @@ export interface ExtractedPdfDocument {
   figures?: GrobidFigure[];
   tables?: GrobidTable[];
   formulas?: GrobidFormula[];
+  ocrProvenance?: OcrProvenanceData;
+  searchablePdfBuffer?: Buffer;
 }
 
 @Injectable()
@@ -68,17 +92,21 @@ export class PdfProvider {
   constructor(
     @Optional() private readonly grobidClient?: GrobidClient,
     @Optional() private readonly ssrfGuard?: SsrfGuardService,
+    @Optional() private readonly ocrProvider?: OcrProvider,
   ) {}
 
   async extractDocumentFromBuffer(
     buffer: Buffer,
-    options?: { maxPages?: number; headerOnly?: boolean },
+    options?: { maxPages?: number; headerOnly?: boolean; skipGrobid?: boolean },
   ): Promise<ExtractedPdfDocument> {
     const pages: Array<{
       pageIndex: number;
       textContent: string;
       charOffset: number;
     }> = [];
+
+    const ocrPageResults: OcrPageResult[] = [];
+    const imageDimensionsMap = new Map<number, { width: number; height: number }>();
 
     let combinedText = '';
     const unpdfExtractedMetadata: ExtractedPdfMetadata = {};
@@ -147,20 +175,72 @@ export class PdfProvider {
       const totalNumPages = document.numPages;
       unpdfExtractedMetadata.numberOfPages = totalNumPages;
 
-      const maxPagesToExtract =
-        options?.maxPages && options.maxPages > 0
-          ? Math.min(totalNumPages, options.maxPages)
-          : totalNumPages > 25
-            ? 25
+      const configuredLimit = Number.parseInt(
+        process.env.PDF_MAX_INDEX_PAGES || '0',
+        10,
+      );
+      const requestedLimit = options?.headerOnly
+        ? 3
+        : options?.maxPages && options.maxPages > 0
+          ? options.maxPages
+          : configuredLimit > 0
+            ? configuredLimit
             : totalNumPages;
+      const maxPagesToExtract = Math.min(totalNumPages, requestedLimit);
 
       let currentOffset = 0;
+
       for (let pageIndex = 1; pageIndex <= maxPagesToExtract; pageIndex++) {
         const page = await document.getPage(pageIndex);
         const content = await page.getTextContent();
-        const pageText = content.items
+        let pageText = content.items
           .map((it: any) => (it.str || '') + (it.hasEOL ? '\n' : ' '))
           .join('');
+
+        // Smart hybrid & scanned page detection
+        const scanDetection = this.ocrProvider?.detectScannedPage
+          ? await this.ocrProvider.detectScannedPage(page, content)
+          : {
+              isScanned: pageText.replace(/\s/g, '').length < 32,
+              isHybrid: false,
+            };
+
+        const shouldOcr =
+          this.ocrProvider?.enabled &&
+          (scanDetection.isScanned || scanDetection.isHybrid) &&
+          pageIndex <= this.ocrProvider.maxPages;
+
+        if (shouldOcr) {
+          const res = await this.ocrProvider!.recognizePdfPage(
+            page,
+            pageIndex - 1,
+          );
+          if (res) {
+            const rawOcrText = typeof res === 'string' ? res : res.text;
+            if (scanDetection.isHybrid) {
+              if (rawOcrText && rawOcrText.length > pageText.length) {
+                pageText = rawOcrText;
+              }
+            } else if (rawOcrText) {
+              pageText = rawOcrText;
+            }
+            if (typeof res !== 'string' && res.wasOcr) {
+              ocrPageResults.push(res);
+              if (typeof page.getViewport === 'function') {
+                try {
+                  const viewport = page.getViewport({ scale: 2 });
+                  imageDimensionsMap.set(pageIndex - 1, {
+                    width: viewport.width,
+                    height: viewport.height,
+                  });
+                } catch {
+                  // ignore
+                }
+              }
+            }
+          }
+        }
+
         pages.push({
           pageIndex: pageIndex - 1,
           textContent: pageText,
@@ -252,14 +332,33 @@ export class PdfProvider {
     let tables: GrobidTable[] = [];
     let formulas: GrobidFormula[] = [];
 
-    if (this.grobidClient) {
+    // Generate a Searchable Sandwich PDF with invisible text layer if any pages were scanned/OCR'd
+    let grobidBuffer = buffer;
+    let searchablePdfBuffer: Buffer | undefined;
+
+    if (ocrPageResults.length > 0 && this.ocrProvider?.generateSearchablePdf) {
+      try {
+        searchablePdfBuffer = await this.ocrProvider.generateSearchablePdf(
+          buffer,
+          ocrPageResults,
+          imageDimensionsMap,
+        );
+        grobidBuffer = searchablePdfBuffer;
+      } catch (err: any) {
+        this.logger.warn(
+          `Failed to generate sandwich PDF: ${err?.message || err}`,
+        );
+      }
+    }
+
+    if (!options?.skipGrobid && this.grobidClient) {
       try {
         const isAlive = await this.grobidClient.isAlive();
         if (isAlive) {
           if (options?.headerOnly) {
             // Fast path: high-speed header extraction (200-500ms) without heavy fulltext CRF
             const headerResult =
-              await this.grobidClient.processHeaderDocument(buffer);
+              await this.grobidClient.processHeaderDocument(grobidBuffer);
             if (headerResult) {
               this.applyGrobidHeaderResult(metadata, headerResult);
               this.logger.debug(
@@ -269,7 +368,7 @@ export class PdfProvider {
           } else {
             // Full-text document pass with automatic graceful fallback to header
             const fulltextResult =
-              await this.grobidClient.processFulltextDocument(buffer);
+              await this.grobidClient.processFulltextDocument(grobidBuffer);
             if (fulltextResult) {
               this.applyGrobidHeaderResult(metadata, fulltextResult.header);
               sections = fulltextResult.sections || [];
@@ -283,7 +382,7 @@ export class PdfProvider {
             } else {
               // Fulltext timed out or failed -> fall back to fast header extraction
               const headerResult =
-                await this.grobidClient.processHeaderDocument(buffer);
+                await this.grobidClient.processHeaderDocument(grobidBuffer);
               if (headerResult) {
                 this.applyGrobidHeaderResult(metadata, headerResult);
                 this.logger.debug(
@@ -312,6 +411,39 @@ export class PdfProvider {
       metadata.referenceCount = references.length;
     }
 
+    let ocrProvenance: OcrProvenanceData | undefined;
+    if (ocrPageResults.length > 0) {
+      const avgConfidence =
+        ocrPageResults.reduce(
+          (acc: number, p: OcrPageResult) => acc + p.confidence,
+          0,
+        ) / ocrPageResults.length;
+      const totalExecTime = ocrPageResults.reduce(
+        (acc: number, p: OcrPageResult) => acc + p.executionTimeMs,
+        0,
+      );
+
+      ocrProvenance = {
+        totalOcrPages: ocrPageResults.length,
+        avgConfidence: Math.round(avgConfidence * 10) / 10,
+        executionTimeMs: totalExecTime,
+        pages: ocrPageResults.map((p: OcrPageResult) => ({
+          pageIndex: p.pageIndex,
+          confidence: Math.round(p.confidence * 10) / 10,
+          orientationAngle: p.orientationAngle,
+          skewAngle: p.skewAngle,
+          preprocessed: p.preprocessed,
+          textLength: p.text.length,
+          lineCount: p.blocks.reduce(
+            (acc: number, b: any) => acc + (b.lines?.length || 0),
+            0,
+          ),
+          wordCount: p.words.length,
+          executionTimeMs: p.executionTimeMs,
+        })),
+      };
+    }
+
     return {
       metadata,
       pages,
@@ -320,6 +452,8 @@ export class PdfProvider {
       figures,
       tables,
       formulas,
+      ocrProvenance,
+      searchablePdfBuffer,
     };
   }
 

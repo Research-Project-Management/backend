@@ -1,5 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { ItemsService } from '../../items/items.service';
+import { TypesService } from '../../types/types.service';
 import { ItemMetadata } from '../metadata/types/metadata.types';
 import { CreateItemData } from '../../items/types/items.types';
 import { LibraryItemSource } from '../../outbox/outbox.events';
@@ -48,14 +49,14 @@ function extractAuthorString(input: unknown): string {
   return '';
 }
 
-function mergeCreators(metadata: ItemMetadata) {
+function mergeCreators(metadata: ItemMetadata, primaryRole: string = 'author') {
   const initialCreators = metadata.creators || [];
   const creators: any[] = [];
   const knownCreators = new Set<string>();
 
   const append = (
     name: string,
-    creatorType: string = 'author',
+    creatorType: string = primaryRole,
     firstName?: string,
     lastName?: string,
   ) => {
@@ -97,7 +98,7 @@ function mergeCreators(metadata: ItemMetadata) {
   };
 
   for (const c of initialCreators) {
-    const creatorType = c.creatorType || 'author';
+    const creatorType = c.creatorType || primaryRole;
     const rawName = extractAuthorString(c);
     if (rawName) {
       for (const p of splitAuthorString(rawName)) {
@@ -115,7 +116,7 @@ function mergeCreators(metadata: ItemMetadata) {
 
   for (const rawAuthor of metadata.authors || []) {
     for (const author of splitAuthorString(extractAuthorString(rawAuthor))) {
-      append(author, 'author');
+      append(author, primaryRole);
     }
   }
 
@@ -180,6 +181,7 @@ function generateBibtexCitationKey(metadata: ItemMetadata): string | undefined {
 export function toItemData(
   metadata: ItemMetadata,
   options?: CommitStageOptions,
+  primaryRole: string = 'author',
 ): CreateItemData {
   const rawTags = normalizeTags(
     metadata.tags || metadata.keywords || metadata.labels || [],
@@ -219,12 +221,6 @@ export function toItemData(
       : {}),
     ...(metadata.distributor ? { distributor: metadata.distributor } : {}),
     ...(metadata.system ? { system: metadata.system } : {}),
-    ...(metadata.storageId !== undefined
-      ? { storageId: metadata.storageId }
-      : {}),
-    ...(metadata.explicitCitationKey !== undefined
-      ? { explicitCitationKey: metadata.explicitCitationKey }
-      : {}),
   };
 
   return {
@@ -269,7 +265,7 @@ export function toItemData(
     url: metadata.url,
     citationKey: metadata.citationKey || generateBibtexCitationKey(metadata),
     shortTitle: metadata.shortTitle,
-    creators: mergeCreators(metadata),
+    creators: mergeCreators(metadata, primaryRole),
     labels: rawTags,
     keywords: rawTags,
     fileId: options?.fileId || metadata.fileId || undefined,
@@ -330,7 +326,10 @@ export function toItemData(
 
 @Injectable()
 export class CommitStage {
-  constructor(private readonly itemsService: ItemsService) {}
+  constructor(
+    private readonly itemsService: ItemsService,
+    @Optional() private readonly typesService?: TypesService,
+  ) {}
 
   /**
    * Executes canonical Item commit for a reconciled item proposal.
@@ -341,7 +340,11 @@ export class CommitStage {
     metadata: ItemMetadata,
     options?: CommitStageOptions,
   ): Promise<any> {
-    const createData = toItemData(metadata, options);
+    const primaryRole =
+      this.typesService?.getPrimaryCreatorType(
+        metadata.itemType || 'journalArticle',
+      ) || 'author';
+    const createData = toItemData(metadata, options, primaryRole);
 
     const isProject =
       Boolean(scopeId) && scopeId !== 'user' && scopeId !== options?.userId;

@@ -17,6 +17,10 @@ import { GrobidClient } from '../infra/grobid/grobid.client';
 import { AttachmentsRepository } from './attachments.repository';
 import { WebSnapshotService } from './services/web-snapshot.service';
 import { SsrfGuardService } from '../core/services/ssrf-guard.service';
+import { OcrProvider } from './providers/ocr.provider';
+import { OcrPreprocessorService } from './ocr/ocr-preprocessor.service';
+import { OcrWorkerPoolService } from './ocr/ocr-worker-pool.service';
+import { OcrSandwichPdfService } from './ocr/ocr-sandwich-pdf.service';
 
 @Module({
   imports: [CoreModule, OutboxModule, SearchModule, StorageModule, ItemsModule],
@@ -27,6 +31,10 @@ import { SsrfGuardService } from '../core/services/ssrf-guard.service';
     WebSnapshotService,
     SsrfGuardService,
     GrobidClient, // OSS: GROBID client for structured PDF header extraction (Apache 2.0)
+    OcrPreprocessorService,
+    OcrWorkerPoolService,
+    OcrSandwichPdfService,
+    OcrProvider,
     PdfProvider,
     ExtractionHandler,
   ],
@@ -36,6 +44,10 @@ import { SsrfGuardService } from '../core/services/ssrf-guard.service';
     SsrfGuardService,
     PdfProvider,
     GrobidClient,
+    OcrProvider,
+    OcrPreprocessorService,
+    OcrWorkerPoolService,
+    OcrSandwichPdfService,
   ],
 })
 export class AttachmentsModule implements OnModuleInit {

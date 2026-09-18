@@ -29,9 +29,10 @@ export class CreateAnnotationDto {
   @IsOptional()
   @Transform(({ value }) => {
     if (typeof value !== 'string') return value;
-    const lower = value.trim().toLowerCase();
+    const lower = value.toLowerCase();
     if (lower === 'box' || lower === 'area') return AnnotationType.rect;
-    if (lower === 'strike') return AnnotationType.underline;
+    if (lower === 'strikethrough') return AnnotationType.strike;
+    if (lower === 'freetext') return AnnotationType.text;
     return lower as AnnotationType;
   })
   type?: AnnotationType;
@@ -75,6 +76,11 @@ export class CreateAnnotationDto {
   @IsOptional()
   comment?: string;
 
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  tags?: string[];
+
   @IsOptional()
   rectCoords?: Record<string, unknown> | Array<unknown> | null;
 }
@@ -96,6 +102,11 @@ export class UpdateAnnotationDto {
   @MaxLength(5_000)
   @IsOptional()
   comment?: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  tags?: string[];
 
   @IsOptional()
   rectCoords?: Record<string, unknown> | Array<unknown> | null;
@@ -149,6 +160,11 @@ export class UpsertAnnotationItemDto {
   @MaxLength(5_000)
   @IsOptional()
   comment?: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  tags?: string[];
 
   @IsOptional()
   rectCoords?: Record<string, unknown> | Array<unknown> | null;

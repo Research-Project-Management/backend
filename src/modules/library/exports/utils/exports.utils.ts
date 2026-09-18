@@ -51,8 +51,11 @@ export function formatCsvExport(items: CsvExportItem[]): string {
     'authors',
     'year',
     'publicationTitle',
+    'publisher',
     'doi',
     'itemType',
+    'citationKey',
+    'url',
   ];
 
   const escapeCsv = (val: unknown): string => {
@@ -72,8 +75,11 @@ export function formatCsvExport(items: CsvExportItem[]): string {
     escapeCsv((it.authors || []).join('; ')),
     it.year ?? '',
     escapeCsv(it.publicationTitle || ''),
+    escapeCsv(it.publisher || ''),
     escapeCsv(it.doi || ''),
     escapeCsv(it.itemType || ''),
+    escapeCsv(it.citationKey || ''),
+    escapeCsv(it.url || ''),
   ]);
 
   return [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n');

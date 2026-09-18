@@ -19,6 +19,9 @@ export interface CsvExportItem {
   authors?: string[];
   year?: number | null;
   publicationTitle?: string | null;
+  publisher?: string | null;
   doi?: string | null;
   itemType?: string | null;
+  citationKey?: string | null;
+  url?: string | null;
 }

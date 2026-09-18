@@ -444,6 +444,9 @@ export class OpenAlexProvider implements MetadataProvider {
         ? item.publication_date
         : undefined;
 
+    const isPreprint = itemType === 'preprint' || Boolean(rawArxiv);
+    const preprintRepo = isPreprint ? (journal || publisher || 'arXiv') : undefined;
+
     return {
       provider: this.id,
       metadata: {
@@ -456,11 +459,13 @@ export class OpenAlexProvider implements MetadataProvider {
         arxivId: rawArxiv,
         pmid: rawPmid,
         journal,
-        publicationTitle: journal,
+        publicationTitle: journal || preprintRepo,
         volume: biblio.volume || undefined,
         issue: biblio.issue || undefined,
         pages,
-        publisher,
+        publisher: isPreprint ? (preprintRepo || 'arXiv') : publisher,
+        repository: isPreprint ? (preprintRepo || 'arXiv') : undefined,
+        archiveId: rawArxiv ? `arXiv:${rawArxiv.replace(/^arxiv:\s*/i, '').replace(/v\d+$/i, '')}` : undefined,
         issn,
         abstract,
         citationCount,

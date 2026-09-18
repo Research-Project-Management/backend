@@ -75,6 +75,7 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
         findMany: jest.fn(),
         count: jest.fn(),
         getFulltext: jest.fn(),
+        getRelations: jest.fn(),
       };
 
       const mockCommandRepo = {
@@ -82,6 +83,8 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
         update: jest.fn(),
         softDelete: jest.fn(),
         restore: jest.fn(),
+        putRelation: jest.fn(),
+        removeRelation: jest.fn(),
       };
 
       const mockHelpers = {
@@ -197,6 +200,92 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
         expect.anything(),
         undefined,
       );
+    });
+
+    describe('Related Items & Relations (Zotero Benchmark Parity)', () => {
+      const sourceId = '22222222-2222-2222-2222-222222222222';
+      const targetId1 = '33333333-3333-3333-3333-333333333333';
+      const targetId2 = '44444444-4444-4444-4444-444444444444';
+
+      it('should retrieve related items via getRelatedItems', async () => {
+        queryRepo.findById.mockResolvedValueOnce({
+          id: sourceId,
+          title: 'Source Paper',
+        } as any);
+        queryRepo.getRelations.mockResolvedValueOnce([
+          {
+            id: targetId1,
+            title: 'Related Paper 1',
+            relationType: 'related',
+          },
+        ]);
+
+        const res = await service.getRelatedItems(mockUserId, sourceId);
+        expect(res.total).toBe(1);
+        expect(res.relatedItems[0].title).toBe('Related Paper 1');
+      });
+
+      it('should link a single item via linkItems', async () => {
+        queryRepo.findById
+          .mockResolvedValueOnce({ id: sourceId, title: 'Source Paper' } as any)
+          .mockResolvedValueOnce({ id: targetId1, title: 'Target Paper 1' } as any);
+
+        const res = await service.linkItems(mockUserId, sourceId, {
+          targetItemId: targetId1,
+          relationType: 'cites',
+        });
+
+        expect(res.success).toBe(true);
+        expect(res.totalLinked).toBe(1);
+        expect(commandRepo.putRelation).toHaveBeenCalledWith(
+          sourceId,
+          expect.objectContaining({
+            targetItemId: targetId1,
+            relationType: 'cites',
+          }),
+        );
+      });
+
+      it('should link multiple items in batch via linkItems', async () => {
+        queryRepo.findById
+          .mockResolvedValueOnce({ id: sourceId, title: 'Source Paper' } as any)
+          .mockResolvedValueOnce({ id: targetId1, title: 'Target Paper 1' } as any)
+          .mockResolvedValueOnce({ id: targetId2, title: 'Target Paper 2' } as any);
+
+        const res = await service.linkItems(mockUserId, sourceId, {
+          targetItemIds: [targetId1, targetId2],
+          relationType: 'related',
+        });
+
+        expect(res.success).toBe(true);
+        expect(res.totalLinked).toBe(2);
+        expect(commandRepo.putRelation).toHaveBeenCalledTimes(2);
+      });
+
+      it('should reject self-linking', async () => {
+        queryRepo.findById.mockResolvedValueOnce({
+          id: sourceId,
+          title: 'Source Paper',
+        } as any);
+
+        await expect(
+          service.linkItems(mockUserId, sourceId, {
+            targetItemId: sourceId,
+          }),
+        ).rejects.toThrow();
+      });
+
+      it('should unlink items symmetrically via unlinkItems', async () => {
+        queryRepo.findById.mockResolvedValueOnce({
+          id: sourceId,
+          title: 'Source Paper',
+        } as any);
+
+        const res = await service.unlinkItems(mockUserId, sourceId, targetId1);
+        expect(res.success).toBe(true);
+        expect(res.unlinked).toBe(true);
+        expect(commandRepo.removeRelation).toHaveBeenCalledWith(sourceId, targetId1);
+      });
     });
   });
 

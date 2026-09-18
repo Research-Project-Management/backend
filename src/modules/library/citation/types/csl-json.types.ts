@@ -28,6 +28,7 @@ export interface CslItemData {
   translator?: CslName[];
   'container-author'?: CslName[];
   'collection-editor'?: CslName[];
+  'original-author'?: CslName[];
   composer?: CslName[];
   director?: CslName[];
   interviewer?: CslName[];

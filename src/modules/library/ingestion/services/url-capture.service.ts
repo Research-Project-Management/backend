@@ -48,18 +48,19 @@ export class UrlCaptureService {
       typeof contextOrScopeId === 'object'
         ? contextOrScopeId.userId
         : undefined;
+    const effectiveScopeId = scopeId || userId || 'unassigned';
 
     let result: any;
     if (this.urlCaptureProvider?.captureFromUrl) {
       result = await this.urlCaptureProvider.captureFromUrl(url, {
-        scopeId,
+        scopeId: effectiveScopeId,
         userId,
       });
     } else {
       result = {
         title: 'Blog Post',
         url,
-        scopeId,
+        scopeId: effectiveScopeId,
         itemType: 'webpage',
       };
     }
@@ -75,7 +76,7 @@ export class UrlCaptureService {
     await this.prisma.capturePreview.create({
       data: {
         sourceUrl: result.url || url,
-        userId: userId || scopeId,
+        userId: userId || effectiveScopeId,
         canonicalMetadata: metaWithoutToken,
         metadataDigest,
         tokenHash,
@@ -96,6 +97,7 @@ export class UrlCaptureService {
     dto: any,
   ): Promise<any> {
     const targetUserId = userId || scopeId;
+    const projectId = scopeId && scopeId !== targetUserId ? scopeId : undefined;
     if (!dto?.previewToken) {
       throw new BadRequestException('previewToken is required');
     }
@@ -127,7 +129,7 @@ export class UrlCaptureService {
       const verifyRes = this.urlCaptureProvider.verifyPreviewToken(
         preview.canonicalMetadata as any,
         dto.previewToken,
-        { scopeId: targetUserId, userId: targetUserId },
+        { scopeId, userId: targetUserId },
       );
       if (!verifyRes.valid) {
         if (verifyRes.reason === 'token_expired') {
@@ -200,11 +202,12 @@ export class UrlCaptureService {
           }
 
           if (this.itemsService?.createItem) {
-            return this.itemsService.createItem(targetUserId, itemData, {
-              tx,
-              helpers,
-              source: 'url',
-            });
+            return this.itemsService.createItem(
+              targetUserId,
+              itemData,
+              { tx, helpers, source: 'url', projectId },
+              projectId,
+            );
           }
 
           throw new Error(
@@ -228,9 +231,8 @@ export class UrlCaptureService {
         createdItem = await this.itemsService.createItem(
           targetUserId,
           itemData,
-          {
-            source: 'url',
-          },
+          { source: 'url', projectId },
+          projectId,
         );
       } else {
         throw new Error(

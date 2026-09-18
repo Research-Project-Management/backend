@@ -396,6 +396,23 @@ export class IdentifyStage {
       case 'FILE': {
         let extractedMetadata: any = {};
         let fileBuffer: Buffer | undefined;
+
+        // 1. Zotero-style Fast-Path: Sniff DOI and arXiv ID directly from filename (0ms)
+        const rawFilenameDoiMatch = payload.filename?.match(
+          /10\.\d{4,9}[/_@][-._;()/:A-Za-z0-9]+/,
+        )?.[0];
+        const filenameDoi = rawFilenameDoiMatch
+          ? rawFilenameDoiMatch
+              .replace(/^(10\.\d{4,9})[_@]/, '$1/')
+              .replace(/[.,;:)\]]+$/, '')
+          : undefined;
+
+        const filenameArxivId = payload.filename?.match(
+          /(?:arxiv[:_.-]*)?([0-2]\d{3}\.\d{4,5}(?:v\d+)?)/i,
+        )?.[1];
+
+        const hasFastIdentifier = Boolean(filenameDoi || filenameArxivId);
+
         if (
           this.storagePort?.readOwnedFile &&
           this.pdf?.extractDocumentFromBuffer &&
@@ -409,9 +426,13 @@ export class IdentifyStage {
             });
             if (fileRecord?.buffer) {
               fileBuffer = fileRecord.buffer;
+
+              // Fast-path: read first 2 pages with skipGrobid: true (takes ~30-50ms)
               const extractedDocument =
                 await this.pdf.extractDocumentFromBuffer(fileRecord.buffer, {
                   headerOnly: true,
+                  skipGrobid: true,
+                  maxPages: 2,
                 });
               extractedMetadata =
                 extractedDocument?.metadata || extractedDocument || {};
@@ -425,6 +446,30 @@ export class IdentifyStage {
                 extractedMetadata =
                   this.pdf.extractMetadataFromBuffer(fileRecord.buffer) || {};
               }
+
+              const detectedDoi = extractedMetadata.doi || filenameDoi;
+              const detectedArxiv = extractedMetadata.arxivId || filenameArxivId;
+
+              // Only if NEITHER filename nor page 1-2 text revealed a DOI or arXiv ID:
+              // Fallback to GROBID layout CRF model to guess title/authors from raw layout
+              if (!detectedDoi && !detectedArxiv && !hasFastIdentifier) {
+                try {
+                  const grobidDoc =
+                    await this.pdf.extractDocumentFromBuffer(fileRecord.buffer, {
+                      headerOnly: true,
+                      skipGrobid: false,
+                      maxPages: 3,
+                    });
+                  if (grobidDoc?.metadata) {
+                    extractedMetadata = {
+                      ...extractedMetadata,
+                      ...grobidDoc.metadata,
+                    };
+                  }
+                } catch {
+                  // Fallback failure is non-fatal; unpdf text metadata remains
+                }
+              }
             }
           } catch (caughtError: unknown) {
             const errorMessage =
@@ -434,9 +479,6 @@ export class IdentifyStage {
             this.logger.warn(
               `PDF metadata extraction failed for file ${payload.fileId}: ${errorMessage}`,
             );
-            // A damaged or encrypted PDF may still expose its document-info
-            // header. Keep that lightweight fallback so a DOI can be enriched
-            // rather than reducing the entire import to a filename.
             try {
               extractedMetadata =
                 fileBuffer && this.pdf?.extractMetadataFromBuffer
@@ -457,19 +499,6 @@ export class IdentifyStage {
           creationDate: _creationDate,
           ...extractedItemMetadata
         } = extractedMetadata;
-
-        const rawFilenameDoiMatch = payload.filename?.match(
-          /10\.\d{4,9}[/_@][-._;()/:A-Za-z0-9]+/,
-        )?.[0];
-        const filenameDoi = rawFilenameDoiMatch
-          ? rawFilenameDoiMatch
-              .replace(/^(10\.\d{4,9})[_@]/, '$1/')
-              .replace(/[.,;:)\]]+$/, '')
-          : undefined;
-
-        const filenameArxivId = payload.filename?.match(
-          /(?:arxiv[:_.-]*)?([0-2]\d{3}\.\d{4,5}(?:v\d+)?)/i,
-        )?.[1];
 
         // Clean and prepare title: avoid leaving raw filename or .pdf extension
         let resolvedTitle: string | undefined;

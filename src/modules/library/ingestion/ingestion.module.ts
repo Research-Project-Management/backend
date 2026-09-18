@@ -6,6 +6,7 @@ import { AttachmentsModule } from '../attachments/attachments.module';
 import { SearchModule } from '../search/search.module';
 import { MetadataModule } from './metadata/metadata.module';
 import { StorageModule } from '../../storage/storage.module';
+import { TypesModule } from '../types/types.module';
 import { IngestionService } from './ingestion.service';
 import { IngestionController } from './ingestion.controller';
 import { IngestionRepository } from './ingestion.repository';
@@ -52,6 +53,7 @@ import { NotesModule } from '../notes/notes.module';
     MetadataModule,
     StorageModule,
     NotesModule,
+    TypesModule,
     BullModule.registerQueue({
       name: LIBRARY_INGESTION_QUEUE,
     }),

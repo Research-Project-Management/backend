@@ -56,4 +56,24 @@ export interface SchemaRegistrySnapshot {
   reverseBaseFieldMappings: Record<string, Record<string, string>>; // [itemType][typeSpecificField] -> baseField
   creatorRoles: Record<string, string>;
   distinctFieldKeys: string[];
+  cslTypeMap: Record<string, string>; // itemType -> cslType
+  cslCreatorMap: Record<string, string>; // zoteroCreatorType -> cslName
+  cslFieldMap: Record<string, string>; // zoteroField -> cslField
+}
+
+export interface CreatorHarmonizationChange {
+  index: number;
+  originalName: string;
+  fromRole: string;
+  toRole: string;
+  reason: 'preserved' | 'normalized-to-primary' | 'fallback-to-contributor';
+}
+
+export interface SchemaValidationResult {
+  valid: boolean;
+  itemType: string;
+  sanitizedItem: Record<string, any>;
+  warnings: string[];
+  demotedToExtra: Record<string, any>;
+  creatorChanges: CreatorHarmonizationChange[];
 }

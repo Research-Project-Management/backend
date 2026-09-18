@@ -385,11 +385,16 @@ export class ItemsController {
 
   @Post([':id/relations', ':id/link'])
   @ProjectRoles('owner', 'contributor')
-  @ApiOperation({ summary: 'Link two items together' })
+  @ApiOperation({ summary: 'Link two or more items together' })
   async linkItems(
     @Param('id') id: string,
     @Body()
-    body: { targetItemId: string; relationType?: string; note?: string },
+    body: {
+      targetItemId?: string;
+      targetItemIds?: string[];
+      relationType?: string;
+      note?: string;
+    },
     @CurrentUser('id') userId: string,
     @Param('projectId') projectId?: string,
   ) {

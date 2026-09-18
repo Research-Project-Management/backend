@@ -269,6 +269,47 @@ function buildCanonicalSnapshot(): SchemaRegistrySnapshot {
     };
   }
 
+  const cslTypeMap: Record<string, string> = {};
+  if (schema.csl?.types && typeof schema.csl.types === 'object') {
+    for (const [cslType, itemTypeList] of Object.entries(schema.csl.types)) {
+      if (Array.isArray(itemTypeList)) {
+        for (const it of itemTypeList) {
+          cslTypeMap[it] = cslType;
+        }
+      }
+    }
+  }
+
+  const cslCreatorMap: Record<string, string> = {};
+  if (schema.csl?.names && typeof schema.csl.names === 'object') {
+    for (const [creatorType, cslName] of Object.entries(schema.csl.names)) {
+      cslCreatorMap[creatorType] = String(cslName);
+    }
+  }
+
+  const cslFieldMap: Record<string, string> = {};
+  if (schema.csl?.fields && typeof schema.csl.fields === 'object') {
+    for (const [, fieldDict] of Object.entries(schema.csl.fields)) {
+      if (fieldDict && typeof fieldDict === 'object') {
+        for (const [cslField, zoteroFields] of Object.entries(
+          fieldDict as Record<string, any>,
+        )) {
+          if (Array.isArray(zoteroFields)) {
+            for (const zf of zoteroFields) {
+              if (!cslFieldMap[zf]) {
+                cslFieldMap[zf] = cslField;
+              }
+            }
+          } else if (typeof zoteroFields === 'string') {
+            if (!cslFieldMap[zoteroFields]) {
+              cslFieldMap[zoteroFields] = cslField;
+            }
+          }
+        }
+      }
+    }
+  }
+
   return {
     version: LIBRARY_SCHEMA_VERSION,
     source: `zotero-schema-v${LIBRARY_SCHEMA_VERSION}`,
@@ -277,6 +318,9 @@ function buildCanonicalSnapshot(): SchemaRegistrySnapshot {
     baseFieldMappings,
     reverseBaseFieldMappings,
     itemTypes,
+    cslTypeMap,
+    cslCreatorMap,
+    cslFieldMap,
   };
 }
 
@@ -286,3 +330,42 @@ export const ALL_CREATOR_ROLES: Record<string, string> =
 export const BASE_FIELD_MAPPINGS = SCHEMA_V42_DATA.baseFieldMappings;
 export const REVERSE_BASE_FIELD_MAPPINGS =
   SCHEMA_V42_DATA.reverseBaseFieldMappings;
+export const CSL_TYPE_MAP: Record<string, string> =
+  SCHEMA_V42_DATA.cslTypeMap;
+export const CSL_CREATOR_MAP: Record<string, string> =
+  SCHEMA_V42_DATA.cslCreatorMap;
+export const CSL_FIELD_MAP: Record<string, string> =
+  SCHEMA_V42_DATA.cslFieldMap;
+
+export const FIELD_ALIASES: Record<string, string> = {
+  DOI: 'doi',
+  ISBN: 'isbn',
+  ISSN: 'issn',
+  PMID: 'pmid',
+  PMCID: 'pmcid',
+  archiveID: 'arxivId',
+  archiveId: 'arxivId',
+  abstractNote: 'abstract',
+  date: 'publicationDate',
+  journal: 'publicationTitle',
+  journalAbbreviation: 'journalAbbr',
+  accessDate: 'accessedAt',
+  license: 'rights',
+  citeKey: 'citationKey',
+};
+
+export const REVERSE_FIELD_ALIASES: Record<string, string> = {
+  doi: 'DOI',
+  isbn: 'ISBN',
+  issn: 'ISSN',
+  pmid: 'PMID',
+  pmcid: 'PMCID',
+  arxivId: 'archiveId',
+  abstract: 'abstractNote',
+  publicationDate: 'date',
+  publicationTitle: 'journal',
+  journalAbbr: 'journalAbbreviation',
+  accessedAt: 'accessDate',
+  rights: 'license',
+  citationKey: 'citationKey',
+};

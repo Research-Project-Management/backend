@@ -389,6 +389,7 @@ export interface CreateItemData {
   creators?: CreatorCreditInput[];
   extraFields?: Record<string, unknown>;
   identifier?: string;
+  identifiers?: ItemIdentifierInput[];
   arxivId?: string;
   citationCount?: number | null;
   referenceCount?: number | null;

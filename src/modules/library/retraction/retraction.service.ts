@@ -5,6 +5,7 @@ import {
   RetractionDatabaseService,
   RetractionDatabaseStats,
 } from './services/retraction-database.service';
+import { RetractionSyncService, RetractionSyncResult, RetractionSyncOptions } from './services/retraction-sync.service';
 import {
   FlagRetractionDto,
   BatchCheckRetractionDto,
@@ -22,6 +23,7 @@ export class RetractionService {
     private readonly repo: RetractionRepository,
     private readonly scanner: RetractionScannerProvider,
     private readonly retractionDb: RetractionDatabaseService,
+    private readonly syncService: RetractionSyncService,
   ) {}
 
   async checkItem(
@@ -176,5 +178,13 @@ export class RetractionService {
   async seedDatabase(force = false): Promise<{ seeded: number }> {
     const seeded = await this.retractionDb.seedIfEmpty(force);
     return { seeded };
+  }
+
+  async syncLibrary(
+    userId: string,
+    projectId?: string,
+    options?: RetractionSyncOptions,
+  ): Promise<RetractionSyncResult> {
+    return this.syncService.syncStaleLibraryItems(userId, projectId, options);
   }
 }

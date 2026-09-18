@@ -1,4 +1,4 @@
-﻿import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { Prisma, AnnotationType } from '@prisma/client';
 import { VersionMismatchException } from '../core/errors/version-mismatch.exception';
@@ -24,6 +24,7 @@ const ANNOTATION_SELECT = {
   color: true,
   quoteText: true,
   comment: true,
+  tags: true,
   rectCoords: true,
   authorId: true,
   version: true,
@@ -98,6 +99,7 @@ export class AnnotationsRepository {
         color: data.color ?? '#ffeb3b',
         quoteText: data.quoteText ?? '',
         comment: data.comment ?? '',
+        tags: data.tags ?? [],
         rectCoords:
           data.rectCoords != null
             ? (data.rectCoords as Prisma.InputJsonValue)
@@ -136,6 +138,7 @@ export class AnnotationsRepository {
         quoteText:
           data.quoteText !== undefined ? data.quoteText : current.quoteText,
         comment: data.comment !== undefined ? data.comment : current.comment,
+        tags: data.tags !== undefined ? data.tags : current.tags,
         rectCoords:
           data.rectCoords !== undefined
             ? data.rectCoords != null
@@ -221,6 +224,7 @@ export class AnnotationsRepository {
               item.quoteText !== undefined ? item.quoteText : current.quoteText,
             comment:
               item.comment !== undefined ? item.comment : current.comment,
+            tags: item.tags !== undefined ? item.tags : current.tags,
             rectCoords:
               item.rectCoords !== undefined
                 ? item.rectCoords != null
@@ -253,6 +257,7 @@ export class AnnotationsRepository {
             color: item.color ?? '#ffeb3b',
             quoteText: item.quoteText ?? '',
             comment: item.comment ?? '',
+            tags: item.tags ?? [],
             rectCoords:
               item.rectCoords != null
                 ? (item.rectCoords as Prisma.InputJsonValue)

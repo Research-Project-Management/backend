@@ -173,8 +173,6 @@ export class NormalizationPolicy {
       'repository',
       'type',
       'archiveLocation',
-      'storageId',
-      'explicitCitationKey',
     ];
     for (const field of stringFields) {
       const value = this.cleanString(raw[field]);
@@ -263,7 +261,9 @@ export class NormalizationPolicy {
     }
 
     // 12. Citation Key
-    const citKey = this.cleanString(raw.citationKey || raw.explicitCitationKey);
+    const citKey = this.cleanString(
+      raw.citationKey || (raw as any).explicitCitationKey,
+    );
     if (citKey) result.citationKey = citKey;
 
     // 13. Extra Zotero & Extended Metadata
@@ -354,7 +354,6 @@ export class NormalizationPolicy {
       'labels',
       'notes',
       'citationKey',
-      'explicitCitationKey',
       'language',
       'rights',
       'license',
@@ -376,7 +375,6 @@ export class NormalizationPolicy {
       'edition',
       'repository',
       'journalAbbr',
-      'storageId',
       'archive',
       'archiveLocation',
       'libraryCatalog',

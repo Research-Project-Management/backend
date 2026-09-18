@@ -25,6 +25,7 @@ import {
 } from '@nestjs/swagger';
 import { AnnotationType } from '@prisma/client';
 import { AnnotationsService } from './annotations.service';
+import { PdfAnnotationImporterService } from './services/pdf-annotation-importer.service';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/auth.guard';
 import { CurrentUser } from '../../../modules/iam/authn/decorators/user.decorator';
 import {
@@ -38,7 +39,10 @@ import {
 @Controller('api/v1/library/attachments/:attachmentId/annotations')
 @UseGuards(JwtAuthGuard)
 export class AnnotationsController {
-  constructor(private readonly annotationsService: AnnotationsService) {}
+  constructor(
+    private readonly annotationsService: AnnotationsService,
+    private readonly pdfAnnotationImporterService: PdfAnnotationImporterService,
+  ) {}
 
   // ─── GET / ─────────────────────────────────────────────────────────────────
 
@@ -199,6 +203,26 @@ export class AnnotationsController {
       userId,
       attachmentId,
       { upserts: body.upserts, deletes: body.deletes },
+    );
+  }
+
+  // ─── POST /import-external ──────────────────────────────────────────────────
+
+  @Post('import-external')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Import annotations from underlying PDF (/Annots dictionary)',
+  })
+  async importExternalAnnotations(
+    @CurrentUser('id') userId: string,
+    @Param('attachmentId') attachmentId: string,
+  ) {
+    if (!userId) {
+      throw new UnauthorizedException('Authentication required');
+    }
+    return this.pdfAnnotationImporterService.importFromAttachment(
+      userId,
+      attachmentId,
     );
   }
 }

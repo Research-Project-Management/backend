@@ -205,6 +205,44 @@ export class TypesService {
     return normalizeCanonicalItemType(rawType, this.snapshot.itemTypes);
   }
 
+  /**
+   * Get CSL v1.0.2 type equivalent for a Zotero itemType (e.g. journalArticle -> article-journal)
+   */
+  getCslType(itemType: string): string {
+    if (!itemType) return 'document';
+    const normalized = this.normalizeItemType(itemType);
+    return this.snapshot.cslTypeMap?.[normalized] || 'document';
+  }
+
+  /**
+   * Get CSL v1.0.2 creator role equivalent (e.g. director -> director, bookAuthor -> container-author)
+   */
+  getCslCreatorRole(creatorType: string): string {
+    if (!creatorType) return 'author';
+    return this.snapshot.cslCreatorMap?.[creatorType] || creatorType;
+  }
+
+  /**
+   * Get CSL v1.0.2 field equivalent for a Zotero field
+   */
+  getCslField(field: string): string | undefined {
+    return this.snapshot.cslFieldMap?.[field];
+  }
+
+  /**
+   * Get complete CSL item type map
+   */
+  getAllCslTypeMappings(): Record<string, string> {
+    return { ...this.snapshot.cslTypeMap };
+  }
+
+  /**
+   * Get complete CSL creator map
+   */
+  getAllCslCreatorMappings(): Record<string, string> {
+    return { ...this.snapshot.cslCreatorMap };
+  }
+
   private normalizeTypeKey(key: string): string {
     if (this.snapshot.itemTypes[key]) {
       return key;

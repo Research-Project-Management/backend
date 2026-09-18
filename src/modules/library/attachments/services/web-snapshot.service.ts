@@ -9,7 +9,6 @@ import { createHash } from 'crypto';
 import { JSDOM } from 'jsdom';
 import { Readability } from '@mozilla/readability';
 import createDOMPurify from 'dompurify';
-import { MetadataRoutingPolicy } from '../../ingestion/metadata/policies/metadata.policy';
 import { AttachmentsService } from '../attachments.service';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { SsrfGuardService } from '../../core/services/ssrf-guard.service';

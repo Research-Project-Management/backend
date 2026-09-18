@@ -1,4 +1,4 @@
-﻿import { Prisma, AnnotationType } from '@prisma/client';
+import { Prisma, AnnotationType } from '@prisma/client';
 
 export { AnnotationType };
 
@@ -31,6 +31,7 @@ const annotationSelect = {
   color: true,
   quoteText: true,
   comment: true,
+  tags: true,
   rectCoords: true,
   authorId: true,
   version: true,
@@ -68,6 +69,7 @@ export interface CreateAnnotationData {
   color?: string;
   quoteText?: string;
   comment?: string;
+  tags?: string[];
   rectCoords?: unknown;
   authorId: string;
 }
@@ -76,6 +78,7 @@ export interface UpdateAnnotationData {
   color?: string;
   quoteText?: string;
   comment?: string;
+  tags?: string[];
   rectCoords?: unknown;
 }
 
@@ -91,6 +94,7 @@ export interface UpsertAnnotationItem {
   color?: string;
   quoteText?: string;
   comment?: string;
+  tags?: string[];
   rectCoords?: unknown;
   /** Required when id is present (optimistic lock) */
   expectedVersion?: number;

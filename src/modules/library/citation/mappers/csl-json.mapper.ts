@@ -1,77 +1,74 @@
 import { CslItemData, CslName } from '../types/csl-json.types';
+import {
+  CSL_TYPE_MAP,
+  CSL_CREATOR_MAP,
+  SCHEMA_V42_DATA,
+} from '../../types/constants/types.constants';
 
 /**
  * Mapping of 37 Zotero / Flux item types to CSL v1.0.2 specification types.
+ * Derived dynamically from official Zotero Schema v42 specifications (DRY).
  */
-export const ITEM_TYPE_TO_CSL_TYPE: Record<string, string> = {
-  journalArticle: 'article-journal',
-  conferencePaper: 'paper-conference',
-  book: 'book',
-  bookSection: 'chapter',
-  preprint: 'article',
-  report: 'report',
-  thesis: 'thesis',
-  patent: 'patent',
-  webpage: 'webpage',
-  blogPost: 'post-weblog',
-  forumPost: 'post',
-  dataset: 'dataset',
-  computerProgram: 'software',
-  map: 'map',
-  manuscript: 'manuscript',
-  film: 'motion_picture',
-  videoRecording: 'motion_picture',
-  audioRecording: 'song',
-  podcast: 'song',
-  radioBroadcast: 'broadcast',
-  tvBroadcast: 'broadcast',
-  presentation: 'speech',
-  dictionaryEntry: 'entry-dictionary',
-  encyclopediaArticle: 'entry-encyclopedia',
-  case: 'legal_case',
-  hearing: 'hearing',
-  statute: 'legislation',
-  bill: 'bill',
-  interview: 'interview',
-  letter: 'personal_communication',
-  email: 'personal_communication',
-  instantMessage: 'personal_communication',
-  magazineArticle: 'article-magazine',
-  newspaperArticle: 'article-newspaper',
-  standard: 'standard',
-  artwork: 'graphic',
-  document: 'document',
-};
+export const ITEM_TYPE_TO_CSL_TYPE: Record<string, string> = CSL_TYPE_MAP;
+
+const PRIMARY_CREATOR_ROLES: Set<string> = new Set(
+  Object.values(SCHEMA_V42_DATA.itemTypes).map((t) =>
+    t.primaryCreatorType.toLowerCase(),
+  ),
+);
 
 export class CslJsonMapper {
   /**
    * Derives a clean list of author display strings from item contributors or creators.
+   * Handles all 40 Zotero item types by falling back to primary creator roles
+   * (e.g. inventor, programmer, artist, presenter, etc.) when explicit authors are absent.
    */
   static getAuthorNames(item: {
     contributors?: any[];
     creators?: any[];
     authors?: string[];
   }): string[] {
-    if (Array.isArray(item.contributors) && item.contributors.length > 0) {
-      return item.contributors
+    const formatName = (c: any) => {
+      if (c.fullName && c.fullName.trim()) return c.fullName.trim();
+      const combined = `${c.firstName || ''} ${c.lastName || ''}`.trim();
+      return combined || c.name || 'Anonymous';
+    };
+
+    const list =
+      Array.isArray(item.contributors) && item.contributors.length > 0
+        ? item.contributors
+        : Array.isArray(item.creators) && item.creators.length > 0
+          ? item.creators
+          : null;
+
+    if (list) {
+      // 1. Explicit authors
+      const authors = list
         .filter((c) => (c.creatorType || 'author').toLowerCase() === 'author')
-        .map((c) => {
-          if (c.fullName && c.fullName.trim()) return c.fullName.trim();
-          const combined = `${c.firstName || ''} ${c.lastName || ''}`.trim();
-          return combined || c.name || 'Anonymous';
-        })
+        .map(formatName)
         .filter(Boolean);
-    }
-    if (Array.isArray(item.creators) && item.creators.length > 0) {
-      return item.creators
-        .filter((c) => (c.creatorType || 'author').toLowerCase() === 'author')
-        .map((c) => {
-          if (c.fullName && c.fullName.trim()) return c.fullName.trim();
-          const combined = `${c.firstName || ''} ${c.lastName || ''}`.trim();
-          return combined || c.name || 'Anonymous';
-        })
+      if (authors.length > 0) return authors;
+
+      // 2. Primary creator types derived from Zotero Schema v42
+      const primaryCreators = list
+        .filter((c) =>
+          PRIMARY_CREATOR_ROLES.has((c.creatorType || '').toLowerCase()),
+        )
+        .map(formatName)
         .filter(Boolean);
+      if (primaryCreators.length > 0) return primaryCreators;
+
+      // 3. Fallback to editors if available
+      const editors = list
+        .filter((c) => (c.creatorType || '').toLowerCase() === 'editor')
+        .map(formatName)
+        .filter(Boolean);
+      if (editors.length > 0) return editors;
+
+      // 4. Fallback to any non-empty creator
+      return list.map(formatName).filter(Boolean);
     }
+
     if (Array.isArray(item.authors) && item.authors.length > 0) {
       return item.authors.map((a) => String(a).trim()).filter(Boolean);
     }
@@ -123,8 +120,10 @@ export class CslJsonMapper {
       item.journal ||
       item.bookTitle ||
       item.proceedingsTitle ||
+      item.repository ||
       item.extraFields?.bookTitle ||
-      item.extraFields?.proceedingsTitle;
+      item.extraFields?.proceedingsTitle ||
+      item.extraFields?.repository;
     if (container) {
       csl['container-title'] = container;
     }
@@ -148,7 +147,9 @@ export class CslJsonMapper {
 
     const publisher =
       item.publisher ||
+      item.repository ||
       item.extraFields?.publisher ||
+      item.extraFields?.repository ||
       item.extraFields?.institution ||
       item.extraFields?.university;
     if (publisher) {
@@ -216,6 +217,15 @@ export class CslJsonMapper {
       csl.genre = (item as any).reportType || item.extraFields?.reportType;
     }
 
+    // Version
+    const versionNumber =
+      item.versionNumber ||
+      item.extraFields?.versionNumber ||
+      item.extraFields?.version;
+    if (versionNumber) {
+      csl.version = String(versionNumber);
+    }
+
     // Contributors (Authors, Editors, Translators, etc.)
     const rawContributors =
       Array.isArray(item.contributors) && item.contributors.length > 0
@@ -225,6 +235,9 @@ export class CslJsonMapper {
           : null;
 
     if (rawContributors && rawContributors.length > 0) {
+      const typeDef = SCHEMA_V42_DATA.itemTypes[rawType];
+      const primaryRoleForType = (typeDef?.primaryCreatorType || 'author').toLowerCase();
+
       const sortedContributors = [...rawContributors].sort(
         (firstContributor, secondContributor) =>
           (firstContributor.orderIndex ?? 0) -
@@ -232,56 +245,29 @@ export class CslJsonMapper {
       );
 
       for (const contributorItem of sortedContributors) {
-        const role = (contributorItem.creatorType || 'author').toLowerCase();
+        const rawRole = (contributorItem.creatorType || 'author').trim();
+        const lowerRole = rawRole.toLowerCase();
         const cslName = this.formatCslName(contributorItem);
 
-        if (role === 'author') {
+        // Map through CSL_CREATOR_MAP derived dynamically from Zotero Schema v42
+        const cslMappedRole =
+          CSL_CREATOR_MAP[rawRole] ||
+          CSL_CREATOR_MAP[lowerRole];
+
+        if (
+          lowerRole === 'author' ||
+          lowerRole === primaryRoleForType ||
+          cslMappedRole === 'author'
+        ) {
           if (!csl.author) csl.author = [];
           csl.author.push(cslName);
-        } else if (role === 'editor') {
-          if (!csl.editor) csl.editor = [];
-          csl.editor.push(cslName);
-        } else if (role === 'translator') {
-          if (!csl.translator) csl.translator = [];
-          csl.translator.push(cslName);
-        } else if (role === 'director') {
-          if (!csl.director) csl.director = [];
-          csl.director.push(cslName);
-        } else if (role === 'reviewedauthor' || role === 'reviewed-author') {
-          if (!csl['reviewed-author']) csl['reviewed-author'] = [];
-          csl['reviewed-author'].push(cslName);
-        } else if (
-          role === 'serieseditor' ||
-          role === 'series-editor' ||
-          role === 'collection-editor'
-        ) {
-          if (!csl['collection-editor']) csl['collection-editor'] = [];
-          csl['collection-editor'].push(cslName);
-        } else if (role === 'composer') {
-          if (!csl.composer) csl.composer = [];
-          csl.composer.push(cslName);
-        } else if (role === 'interviewer') {
-          if (!csl.interviewer) csl.interviewer = [];
-          csl.interviewer.push(cslName);
-        } else if (role === 'recipient') {
-          if (!csl.recipient) csl.recipient = [];
-          csl.recipient.push(cslName);
-        } else if (role === 'illustrator') {
-          if (!csl.illustrator) csl.illustrator = [];
-          csl.illustrator.push(cslName);
-        } else if (role === 'contributor') {
+        } else if (cslMappedRole) {
+          if (!(csl as any)[cslMappedRole]) (csl as any)[cslMappedRole] = [];
+          (csl as any)[cslMappedRole].push(cslName);
+        } else {
+          // Secondary unknown roles belong in contributor list
           if (!csl.contributor) csl.contributor = [];
           csl.contributor.push(cslName);
-        } else {
-          // Default fallback to author only if creatorType was missing/empty
-          if (!contributorItem.creatorType) {
-            if (!csl.author) csl.author = [];
-            csl.author.push(cslName);
-          } else {
-            // Secondary roles belong in contributor list, not primary author
-            if (!csl.contributor) csl.contributor = [];
-            csl.contributor.push(cslName);
-          }
         }
       }
     } else if (Array.isArray(item.authors) && item.authors.length > 0) {

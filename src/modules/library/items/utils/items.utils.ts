@@ -732,108 +732,23 @@ export function extractYearFromDate(
 }
 
 // ── Bibliographic Item Types ────────────────────────────────────────────────
+import { SCHEMA_V42_DATA } from '../../types/constants/types.constants';
+import { normalizeCanonicalItemType } from '../../types/utils/types.utils';
 
-export const BIBLIOGRAPHIC_ITEM_TYPES = [
-  'artwork',
-  'audioRecording',
-  'bill',
-  'blogPost',
-  'book',
-  'bookSection',
-  'case',
-  'computerProgram',
-  'conferencePaper',
-  'dataset',
-  'dictionaryEntry',
-  'document',
-  'email',
-  'encyclopediaArticle',
-  'film',
-  'forumPost',
-  'hearing',
-  'instantMessage',
-  'interview',
-  'journalArticle',
-  'letter',
-  'magazineArticle',
-  'manuscript',
-  'map',
-  'newspaperArticle',
-  'patent',
-  'podcast',
-  'preprint',
-  'presentation',
-  'radioBroadcast',
-  'report',
-  'standard',
-  'statute',
-  'thesis',
-  'tvBroadcast',
-  'videoRecording',
-  'webpage',
-] as const;
+export const BIBLIOGRAPHIC_ITEM_TYPES = Object.values(SCHEMA_V42_DATA.itemTypes)
+  .filter((t) => t.isBibliographic)
+  .map((t) => t.itemType);
 
-export const SPECIAL_ITEM_TYPES = ['attachment', 'note', 'annotation'] as const;
+export const SPECIAL_ITEM_TYPES = Object.values(SCHEMA_V42_DATA.itemTypes)
+  .filter((t) => t.isSpecial)
+  .map((t) => t.itemType) as ['attachment', 'note', 'annotation'];
 
-export const CANONICAL_ITEM_TYPES = new Set<string>([
-  ...BIBLIOGRAPHIC_ITEM_TYPES,
-  ...SPECIAL_ITEM_TYPES,
-]);
-
-const ITEM_TYPE_ALIASES: Record<string, string> = {
-  paper: 'journalArticle',
-  article: 'journalArticle',
-  journal_article: 'journalArticle',
-  'journal-article': 'journalArticle',
-  conference_paper: 'conferencePaper',
-  'conference-paper': 'conferencePaper',
-  proceeding: 'conferencePaper',
-  proceedings: 'conferencePaper',
-  inproceedings: 'conferencePaper',
-  book_section: 'bookSection',
-  'book-section': 'bookSection',
-  chapter: 'bookSection',
-  incollection: 'bookSection',
-  inbook: 'bookSection',
-  dissertation: 'thesis',
-  phdthesis: 'thesis',
-  mastersthesis: 'thesis',
-  techreport: 'report',
-  software: 'computerProgram',
-  code: 'computerProgram',
-  program: 'computerProgram',
-  data: 'dataset',
-  spec: 'standard',
-  specification: 'standard',
-  rfc: 'standard',
-  web: 'webpage',
-  website: 'webpage',
-  online: 'webpage',
-  audio: 'audioRecording',
-  sound: 'audioRecording',
-  video: 'videoRecording',
-  movie: 'film',
-  tv: 'tvBroadcast',
-  radio: 'radioBroadcast',
-  blog: 'blogPost',
-  forum: 'forumPost',
-  mail: 'email',
-  message: 'instantMessage',
-  talk: 'presentation',
-  slide: 'presentation',
-  slides: 'presentation',
-};
+export const CANONICAL_ITEM_TYPES = new Set<string>(
+  Object.keys(SCHEMA_V42_DATA.itemTypes),
+);
 
 export function normalizeItemType(type?: string | null): string {
-  if (!type) return 'journalArticle';
-  const trimmed = type.trim();
-  if (CANONICAL_ITEM_TYPES.has(trimmed)) return trimmed;
-  const lower = trimmed.toLowerCase();
-  if (ITEM_TYPE_ALIASES[lower]) return ITEM_TYPE_ALIASES[lower];
-  for (const canonical of CANONICAL_ITEM_TYPES) {
-    if (canonical.toLowerCase() === lower) return canonical;
-  }
-  return 'journalArticle';
+  return normalizeCanonicalItemType(type, SCHEMA_V42_DATA.itemTypes);
 }
 export const normalizeLibraryItemType = normalizeItemType;
 

@@ -25,7 +25,7 @@ export class ArxivProvider implements MetadataProvider {
   readonly capabilities: ProviderCapability = {
     queryTypes: ['ARXIV'],
     isAuthoritative: true,
-    timeoutMs: 8000,
+    timeoutMs: 4500,
     maxConcurrency: 2,
   };
 

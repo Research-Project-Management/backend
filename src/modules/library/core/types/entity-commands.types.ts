@@ -91,6 +91,7 @@ export interface UpsertSyncAnnotationCommand {
   comment?: string;
   color?: string;
   type?: string;
+  tags?: string[];
 }
 
 export interface DeleteSyncEntityCommand {

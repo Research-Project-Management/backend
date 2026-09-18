@@ -449,13 +449,26 @@ export class CrossRefProvider implements MetadataProvider {
         year,
         publicationDate,
         date: publicationDate,
-        journal,
-        publicationTitle: proceedingsTitle || journal,
+        journal: itemType === 'journalArticle' ? journal : undefined,
+        publicationTitle:
+          itemType === 'journalArticle'
+            ? journal
+            : itemType === 'conferencePaper'
+              ? (proceedingsTitle || journal)
+              : itemType === 'bookSection'
+                ? (journal || series)
+                : journal,
         conferenceName:
-          conferenceName && conferenceName !== (proceedingsTitle || journal)
-            ? conferenceName
+          itemType === 'conferencePaper'
+            ? conferenceName && conferenceName !== (proceedingsTitle || journal)
+              ? conferenceName
+              : undefined
             : undefined,
-        proceedingsTitle: proceedingsTitle || journal,
+        proceedingsTitle:
+          itemType === 'conferencePaper'
+            ? (proceedingsTitle || journal)
+            : undefined,
+        bookTitle: itemType === 'bookSection' ? (journal || series) : undefined,
         place: eventPlace,
         journalAbbr,
         publisher,

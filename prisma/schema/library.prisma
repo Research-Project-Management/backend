@@ -20,8 +20,10 @@ enum AttachmentType {
 enum AnnotationType {
   highlight
   underline
+  strike
   note
   rect
+  text
   image
 }
 
@@ -330,6 +332,7 @@ model Annotation {
   rectCoords          Json?          @map("rect_coords")
   quoteText           String?        @map("quote_text")
   comment             String?        @default("")
+  tags                String[]       @default([])
   authorId            String         @map("author_id") @db.Uuid
   author              User           @relation("UserAnnotations", fields: [authorId], references: [id], onDelete: Cascade)
   version             Int            @default(1)

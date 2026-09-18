@@ -61,38 +61,10 @@ export const ITEM_COLUMN_METADATA_FIELDS = new Set([
   'openAccessPdfUrl',
 ]);
 
-export const FIELD_ALIASES: Record<string, string> = {
-  DOI: 'doi',
-  ISBN: 'isbn',
-  ISSN: 'issn',
-  PMID: 'pmid',
-  PMCID: 'pmcid',
-  archiveID: 'arxivId',
-  archiveId: 'arxivId',
-  abstractNote: 'abstract',
-  date: 'publicationDate',
-  journal: 'publicationTitle',
-  journalAbbreviation: 'journalAbbr',
-  accessDate: 'accessedAt',
-  license: 'rights',
-  citeKey: 'citationKey',
-};
-
-export const REVERSE_FIELD_ALIASES: Record<string, string> = {
-  doi: 'DOI',
-  isbn: 'ISBN',
-  issn: 'ISSN',
-  pmid: 'PMID',
-  pmcid: 'PMCID',
-  arxivId: 'archiveId',
-  abstract: 'abstractNote',
-  publicationDate: 'date',
-  publicationTitle: 'journal',
-  journalAbbr: 'journalAbbreviation',
-  accessedAt: 'accessDate',
-  rights: 'license',
-  citationKey: 'citationKey',
-};
+export {
+  FIELD_ALIASES,
+  REVERSE_FIELD_ALIASES,
+} from '../../types/constants/types.constants';
 
 import {
   BASE_FIELD_MAPPINGS,
@@ -115,79 +87,16 @@ export function resolveTypeSpecificFieldForBase(
   return BASE_FIELD_MAPPINGS[itemType]?.[baseColumn];
 }
 
-export const LEGACY_TYPE_SPECIFIC_EXTRA_FIELDS = [
-  'edition',
-  'numPages',
-  'numberOfVolumes',
-  'bookTitle',
-  'proceedingsTitle',
-  'conferenceName',
-  'eventPlace',
-  'websiteTitle',
-  'websiteType',
-  'university',
-  'institution',
-  'country',
-  'assignee',
-  'issuingAuthority',
-  'patentNumber',
-  'applicationNumber',
-  'reportNumber',
-  'reportType',
-  'thesisType',
-  'genre',
-  'filingDate',
-  'legalStatus',
-  'versionNumber',
-  'blogTitle',
-  'forumTitle',
-  'postType',
-  'presentationType',
-  'meetingName',
-  'letterType',
-  'manuscriptType',
-  'mapType',
-  'artworkMedium',
-  'artworkSize',
-  'distributor',
-  'runningTime',
-  'programTitle',
-  'episodeNumber',
-  'podcastType',
-  'interviewMedium',
-  'dictionaryTitle',
-  'encyclopediaTitle',
-  'originalDate',
-  'originalPublisher',
-  'originalPlace',
-  'court',
-  'docketNumber',
-  'firstPage',
-  'dateDecided',
-  'reporter',
-  'reporterVolume',
-  'codeNumber',
-  'publicLawNumber',
-  'dateEnacted',
-  'billNumber',
-  'legislativeBody',
-  'programmingLanguage',
-  'standardNumber',
-] as const;
-
-export const ACADEMIC_METRICS_EXTRA_FIELDS = [
-  'storageId',
-  'explicitCitationKey',
-] as const;
-
+/**
+ * Type-specific extra fields purely and deterministically derived from the official
+ * Zotero Schema v42. Eliminates legacy hardcoding, guesswork, and technical debt.
+ */
 export const TYPE_SPECIFIC_EXTRA_FIELDS = [
-  ...new Set([
-    ...LEGACY_TYPE_SPECIFIC_EXTRA_FIELDS,
-    ...ACADEMIC_METRICS_EXTRA_FIELDS,
-    ...Object.values(SCHEMA_V42_DATA.itemTypes)
+  ...new Set(
+    Object.values(SCHEMA_V42_DATA.itemTypes)
       .flatMap((itemType) => itemType.fields.map((field) => field.key))
       .filter((field) => !ITEM_COLUMN_METADATA_FIELDS.has(field)),
-  ]),
+  ),
 ];
 
 export function parseAccessDate(value?: string): Date | undefined {

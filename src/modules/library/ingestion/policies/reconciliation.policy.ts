@@ -7,6 +7,7 @@ import {
 } from '../types/metadata-candidate.types';
 import { ItemMetadata } from '../metadata/types/metadata.types';
 import { normalizeAcademicTags } from '../../tags/utils/tags.utils';
+import { BASE_FIELD_MAPPINGS } from '../../types/constants/types.constants';
 
 @Injectable()
 export class ReconciliationPolicy {
@@ -243,11 +244,32 @@ export class ReconciliationPolicy {
       proposedItem.itemType = 'journalArticle';
     }
 
-    // Harmonize venue and journal
-    if (proposedItem.publicationTitle && !proposedItem.journal) {
-      proposedItem.journal = proposedItem.publicationTitle;
-    } else if (proposedItem.journal && !proposedItem.publicationTitle) {
-      proposedItem.publicationTitle = proposedItem.journal;
+    // Harmonize venue and publisher per Zotero itemType schema (DRY baseField mappings)
+    const baseMap = BASE_FIELD_MAPPINGS[proposedItem.itemType];
+    if (baseMap) {
+      const venueField = baseMap.publicationTitle;
+      if (venueField && venueField !== 'publicationTitle') {
+        if (proposedItem.publicationTitle && !proposedItem[venueField]) {
+          proposedItem[venueField] = proposedItem.publicationTitle;
+        } else if (proposedItem[venueField] && !proposedItem.publicationTitle) {
+          proposedItem.publicationTitle = proposedItem[venueField];
+        }
+      }
+      const publisherField = baseMap.publisher;
+      if (publisherField && publisherField !== 'publisher') {
+        if (proposedItem.publisher && !proposedItem[publisherField]) {
+          proposedItem[publisherField] = proposedItem.publisher;
+        } else if (proposedItem[publisherField] && !proposedItem.publisher) {
+          proposedItem.publisher = proposedItem[publisherField];
+        }
+      }
+    }
+    if (proposedItem.itemType === 'journalArticle' || !proposedItem.itemType) {
+      if (proposedItem.publicationTitle && !proposedItem.journal) {
+        proposedItem.journal = proposedItem.publicationTitle;
+      } else if (proposedItem.journal && !proposedItem.publicationTitle) {
+        proposedItem.publicationTitle = proposedItem.journal;
+      }
     }
 
     // Harmonize creators and authors
@@ -256,11 +278,17 @@ export class ReconciliationPolicy {
       proposedItem.creators.length > 0
     ) {
       if (!proposedItem.authors || proposedItem.authors.length === 0) {
-        proposedItem.authors = proposedItem.creators
-          .filter((c: any) => c.creatorType === 'author' || !c.creatorType)
+        const authorCreators = proposedItem.creators.filter(
+          (c: any) => c.creatorType === 'author' || !c.creatorType,
+        );
+        const effectiveList =
+          authorCreators.length > 0 ? authorCreators : proposedItem.creators;
+        proposedItem.authors = effectiveList
           .map(
             (c: any) =>
-              c.name || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+              c.fullName ||
+              c.name ||
+              `${c.firstName || ''} ${c.lastName || ''}`.trim(),
           )
           .filter(Boolean);
       }
@@ -270,7 +298,8 @@ export class ReconciliationPolicy {
     ) {
       if (!proposedItem.creators || proposedItem.creators.length === 0) {
         proposedItem.creators = proposedItem.authors.map(
-          (authorName: string) => ({
+          (authorName: string, idx: number) => ({
+            orderIndex: idx,
             creatorType: 'author',
             name: authorName,
             fullName: authorName,

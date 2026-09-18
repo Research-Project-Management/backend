@@ -171,6 +171,39 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         await this.searchService.indexAttachmentPages(attachment.id, doc.pages);
       }
 
+      // 4.1. Store OCR provenance and quality stats if any pages were OCR'd
+      if (doc.ocrProvenance && doc.ocrProvenance.totalOcrPages > 0) {
+        try {
+          await this.prisma.metadataSourceRecord.create({
+            data: {
+              itemId: attachment.itemId,
+              sourceProvider: 'ocr_provenance',
+              rawPayload: doc.ocrProvenance as any,
+            },
+          });
+
+          const existingMeta =
+            (attachment.metadata as Record<string, any>) || {};
+          await this.prisma.attachment.update({
+            where: { id: attachment.id },
+            data: {
+              metadata: {
+                ...existingMeta,
+                ocr: {
+                  totalOcrPages: doc.ocrProvenance.totalOcrPages,
+                  avgConfidence: doc.ocrProvenance.avgConfidence,
+                  executionTimeMs: doc.ocrProvenance.executionTimeMs,
+                },
+              },
+            },
+          });
+        } catch (ocrErr: any) {
+          this.logger.warn(
+            `Failed to save OCR provenance: ${ocrErr?.message || ocrErr}`,
+          );
+        }
+      }
+
       // 5. Store authoritative GROBID ML extraction provenance & full-text tree
       if (
         doc.metadata?.rawTei ||

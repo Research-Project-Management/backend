@@ -27,20 +27,20 @@ export interface CitationItemInput {
   title: string;
   creators?: CitationCreator[];
   authors?: string[];
-  publicationTitle?: string;
-  journal?: string;
-  publisher?: string;
-  volume?: string;
-  issue?: string;
-  pages?: string;
-  year?: number;
-  date?: string;
-  doi?: string;
-  url?: string;
-  citationKey?: string;
-  city?: string;
-  edition?: string;
-  abstract?: string;
+  publicationTitle?: string | null;
+  journal?: string | null;
+  publisher?: string | null;
+  volume?: string | null;
+  issue?: string | null;
+  pages?: string | null;
+  year?: number | null;
+  date?: string | null;
+  doi?: string | null;
+  url?: string | null;
+  citationKey?: string | null;
+  city?: string | null;
+  edition?: string | null;
+  abstract?: string | null;
 }
 
 export interface FormattedCitationResult {

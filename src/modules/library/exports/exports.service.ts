@@ -190,17 +190,21 @@ export class ExportsService {
           const authors = CslJsonMapper.getAuthorNames(it);
           const res = this.citationService.formatItem(
             {
+              ...it,
               id: it.id,
               itemType: it.itemType ?? 'journalArticle',
               title: it.title,
               authors,
               publicationTitle: it.publicationTitle ?? undefined,
+              publisher: it.publisher ?? undefined,
               year: it.year ?? undefined,
               volume: it.volume ?? undefined,
+              issue: it.issue ?? undefined,
               pages: it.pages ?? undefined,
               doi: it.doi ?? undefined,
               url: it.url ?? undefined,
               citationKey: it.citationKey ?? undefined,
+              contributors: it.contributors,
             },
             'bibtex',
           );
@@ -222,16 +226,20 @@ export class ExportsService {
           const authors = CslJsonMapper.getAuthorNames(it);
           const res = this.citationService.formatItem(
             {
+              ...it,
               id: it.id,
               itemType: it.itemType ?? 'journalArticle',
               title: it.title,
               authors,
               publicationTitle: it.publicationTitle ?? undefined,
+              publisher: it.publisher ?? undefined,
               year: it.year ?? undefined,
               volume: it.volume ?? undefined,
+              issue: it.issue ?? undefined,
               pages: it.pages ?? undefined,
               doi: it.doi ?? undefined,
               url: it.url ?? undefined,
+              contributors: it.contributors,
             },
             'ris',
           );
@@ -268,8 +276,11 @@ export class ExportsService {
           authors: CslJsonMapper.getAuthorNames(it),
           year: it.year,
           publicationTitle: it.publicationTitle,
+          publisher: it.publisher,
           doi: it.doi,
           itemType: it.itemType,
+          citationKey: it.citationKey,
+          url: it.url,
         }));
 
         return {
@@ -524,12 +535,16 @@ export class ExportsService {
           title: it.title,
           authors,
           publicationTitle: it.publicationTitle ?? undefined,
+          publisher: it.publisher ?? undefined,
           year: it.year ?? undefined,
           volume: it.volume ?? undefined,
+          issue: it.issue ?? undefined,
           pages: it.pages ?? undefined,
           doi: it.doi ?? undefined,
           url: it.url ?? undefined,
           citationKey: it.citationKey ?? undefined,
+          creators: it.contributors,
+          abstract: it.abstract ?? undefined,
         },
         'bibtex',
       );

@@ -87,14 +87,32 @@ export class AnnotationNormalizer {
     if (normalized === 'box' || normalized === 'area') {
       return AnnotationType.rect;
     }
-    if (normalized === 'strike') {
-      return AnnotationType.underline;
+    if (normalized === 'strike' || normalized === 'strikethrough') {
+      return AnnotationType.strike;
+    }
+    if (normalized === 'text' || normalized === 'freetext') {
+      return AnnotationType.text;
     }
     const validTypes = Object.values(AnnotationType) as string[];
     if (validTypes.includes(normalized)) {
       return normalized as AnnotationType;
     }
     return AnnotationType.highlight;
+  }
+
+  /**
+   * Normalizes annotation tags array, trimming and deduplicating.
+   */
+  normalizeTags(tags?: unknown): string[] {
+    if (!Array.isArray(tags)) return [];
+    return Array.from(
+      new Set(
+        tags
+          .filter((t): t is string => typeof t === 'string')
+          .map((t) => t.trim())
+          .filter((t) => t.length > 0 && t.length <= 100),
+      ),
+    );
   }
 
   /**
@@ -106,6 +124,7 @@ export class AnnotationNormalizer {
       color: this.normalizeColor(data.color),
       quoteText: this.normalizeQuote(data.quoteText),
       comment: this.normalizeComment(data.comment),
+      tags: this.normalizeTags(data.tags),
       rectCoords:
         data.rectCoords !== undefined
           ? this.normalizeCoords(data.rectCoords)
@@ -128,6 +147,9 @@ export class AnnotationNormalizer {
     }
     if (data.comment !== undefined) {
       payload.comment = this.normalizeComment(data.comment);
+    }
+    if (data.tags !== undefined) {
+      payload.tags = this.normalizeTags(data.tags);
     }
     if (data.rectCoords !== undefined) {
       payload.rectCoords = this.normalizeCoords(data.rectCoords);

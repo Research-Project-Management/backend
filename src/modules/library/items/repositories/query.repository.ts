@@ -230,6 +230,25 @@ export class QueryRepository {
     });
   }
 
+  /**
+   * Retrieves the latest metadataSourceRecord for an item and provider (e.g. grobid, grobid_fulltext).
+   */
+  async findMetadataSourceRecord(
+    itemId: string,
+    sourceProvider: string,
+    tx?: Prisma.TransactionClient,
+  ) {
+    if (!isUuid(itemId)) return null;
+    const client = this.getClient(tx);
+    return client.metadataSourceRecord.findFirst({
+      where: {
+        itemId,
+        sourceProvider,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   async findMany(
     userId: string,
     options: {
@@ -316,40 +335,7 @@ export class QueryRepository {
             deletedAt: null,
             ...(options.search
               ? {
-                  OR: [
-                    {
-                      title: { contains: options.search, mode: 'insensitive' },
-                    },
-                    {
-                      abstract: {
-                        contains: options.search,
-                        mode: 'insensitive',
-                      },
-                    },
-                    { doi: { contains: options.search, mode: 'insensitive' } },
-                    {
-                      publicationTitle: {
-                        contains: options.search,
-                        mode: 'insensitive',
-                      },
-                    },
-                    {
-                      citationKey: {
-                        contains: options.search,
-                        mode: 'insensitive',
-                      },
-                    },
-                    {
-                      contributors: {
-                        some: {
-                          fullName: {
-                            contains: options.search,
-                            mode: 'insensitive',
-                          },
-                        },
-                      },
-                    },
-                  ],
+                  OR: this.buildSearchCondition(options.search),
                 }
               : {}),
             ...(options.collectionId
@@ -446,23 +432,42 @@ export class QueryRepository {
     }
 
     if (options.search) {
-      where.OR = [
-        { title: { contains: options.search, mode: 'insensitive' } },
-        { abstract: { contains: options.search, mode: 'insensitive' } },
-        { doi: { contains: options.search, mode: 'insensitive' } },
-        { publicationTitle: { contains: options.search, mode: 'insensitive' } },
-        { citationKey: { contains: options.search, mode: 'insensitive' } },
-        {
-          contributors: {
-            some: {
-              fullName: { contains: options.search, mode: 'insensitive' },
-            },
-          },
-        },
-      ];
+      where.OR = this.buildSearchCondition(options.search);
     }
 
     return where as Prisma.ItemWhereInput;
+  }
+
+  /**
+   * Constructs comprehensive search filters covering Zotero fields:
+   * title, abstract, doi, publicationTitle, publisher, citationKey, arxivId,
+   * isbn, issn, extra, and contributor names (fullName, lastName, firstName).
+   */
+  private buildSearchCondition(search: string): Prisma.ItemWhereInput[] {
+    const trimmed = search.trim();
+    return [
+      { title: { contains: trimmed, mode: 'insensitive' } },
+      { abstract: { contains: trimmed, mode: 'insensitive' } },
+      { doi: { contains: trimmed, mode: 'insensitive' } },
+      { publicationTitle: { contains: trimmed, mode: 'insensitive' } },
+      { publisher: { contains: trimmed, mode: 'insensitive' } },
+      { citationKey: { contains: trimmed, mode: 'insensitive' } },
+      { arxivId: { contains: trimmed, mode: 'insensitive' } },
+      { isbn: { contains: trimmed, mode: 'insensitive' } },
+      { issn: { contains: trimmed, mode: 'insensitive' } },
+      { extra: { contains: trimmed, mode: 'insensitive' } },
+      {
+        contributors: {
+          some: {
+            OR: [
+              { fullName: { contains: trimmed, mode: 'insensitive' } },
+              { lastName: { contains: trimmed, mode: 'insensitive' } },
+              { firstName: { contains: trimmed, mode: 'insensitive' } },
+            ],
+          },
+        },
+      },
+    ];
   }
 
   async count(
@@ -746,18 +751,85 @@ export class QueryRepository {
     if (!isUuid(itemId)) return [];
     const client = this.getClient(tx);
     const relations = await client.itemRelation.findMany({
-      where: { sourceItemId: itemId },
-      include: { targetItem: true },
+      where: {
+        OR: [
+          { sourceItemId: itemId, targetItem: { deletedAt: null } },
+          { targetItemId: itemId, sourceItem: { deletedAt: null } },
+        ],
+      },
+      include: {
+        sourceItem: {
+          include: {
+            contributors: {
+              where: { creatorType: 'author' },
+              orderBy: { orderIndex: 'asc' },
+            },
+          },
+        },
+        targetItem: {
+          include: {
+            contributors: {
+              where: { creatorType: 'author' },
+              orderBy: { orderIndex: 'asc' },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
     });
+
     if (relations && relations.length > 0) {
-      return relations.map((r) => ({
-        id: r.id,
-        targetItemId: r.targetItemId,
-        relationType: r.relationType,
-        description: r.description,
-        targetItem: r.targetItem,
-      }));
+      const seenPeerIds = new Set<string>();
+      const result: any[] = [];
+
+      for (const r of relations) {
+        const isOutgoing = r.sourceItemId === itemId;
+        const peerItem = isOutgoing ? r.targetItem : r.sourceItem;
+        if (!peerItem || peerItem.id === itemId) continue;
+        if (seenPeerIds.has(peerItem.id)) continue;
+        seenPeerIds.add(peerItem.id);
+
+        let effectiveRelationType = r.relationType as string;
+        if (!isOutgoing) {
+          // Reciprocal semantic mapping when viewing from target perspective
+          if (r.relationType === 'cites') {
+            effectiveRelationType = 'cited_by';
+          } else if (r.relationType === 'cited_by') {
+            effectiveRelationType = 'cites';
+          } else if (r.relationType === 'is_preprint_of') {
+            effectiveRelationType = 'is_published_version_of';
+          } else if (r.relationType === 'is_published_version_of') {
+            effectiveRelationType = 'is_preprint_of';
+          }
+        }
+
+        const authorNames = (peerItem.contributors || [])
+          .map((c: any) => c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim())
+          .filter(Boolean);
+
+        result.push({
+          id: peerItem.id,
+          relationId: r.id,
+          targetItemId: peerItem.id,
+          title: peerItem.title || 'Untitled Item',
+          authors: authorNames,
+          year: peerItem.year,
+          doi: peerItem.doi,
+          itemType: peerItem.itemType,
+          citationKey: peerItem.citationKey,
+          relationType: effectiveRelationType,
+          direction: isOutgoing ? 'outgoing' : 'incoming',
+          description: r.description || '',
+          linkedAt: r.createdAt ? r.createdAt.toISOString() : undefined,
+          targetItem: peerItem,
+        });
+      }
+
+      if (result.length > 0) {
+        return result;
+      }
     }
+
     const item = await client.item.findUnique({
       where: { id: itemId },
       select: { extra: true },

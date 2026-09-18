@@ -54,6 +54,37 @@ export class RetractionRepository {
     });
   }
 
+  async findStaleItemsForSync(
+    userId: string,
+    staleBefore: Date,
+    projectId?: string,
+    limit = 100,
+  ) {
+    const scopeWhere = this.getScopeWhere(userId, projectId);
+    return this.prisma.item.findMany({
+      where: {
+        ...scopeWhere,
+        OR: [
+          { retractionCheckedAt: null },
+          { retractionCheckedAt: { lt: staleBefore } },
+        ],
+        NOT: {
+          AND: [{ doi: null }, { pmid: null }, { title: '' }],
+        },
+      },
+      select: {
+        id: true,
+        title: true,
+        doi: true,
+        pmid: true,
+        isRetracted: true,
+        retractionNature: true,
+        retractionCheckedAt: true,
+      },
+      take: limit,
+    });
+  }
+
   async updateItemRetraction(
     itemId: string,
     isRetracted: boolean,
