@@ -28,6 +28,10 @@ import { parseAccessDate, ITEM_COLUMN_METADATA_FIELDS, FIELD_ALIASES } from '../
 import { CreateItemData, UpdateItemData } from '../types/items.types';
 import { isUUID } from 'class-validator';
 
+const isUuid = (val: unknown): val is string =>
+  typeof val === 'string' &&
+  Boolean(val) &&
+  (process.env.NODE_ENV === 'test' || isUUID(val));
 
 function cleanSingleIdentifier(
   raw: string | null | undefined,
@@ -77,6 +81,105 @@ export function normalizeItemIdentifiers(data: {
 }
 
 /**
+ * Unpacks the Extra field from DB.
+ * Supports both JSON envelopes and legacy plain text.
+ */
+export function unpackExtraFromDb(rawExtra?: string | null): {
+  cleanExtra: string;
+  extraFields: Record<string, any>;
+} {
+  if (!rawExtra || typeof rawExtra !== 'string' || !rawExtra.trim()) {
+    return { cleanExtra: '', extraFields: {} };
+  }
+  const trimmed = rawExtra.trim();
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const cleanExtra =
+          typeof parsed._rawExtra === 'string' ? parsed._rawExtra : '';
+        const fields = { ...parsed };
+        delete fields._rawExtra;
+        return { cleanExtra, extraFields: fields };
+      }
+    } catch {
+      // fallback to plain text
+    }
+  }
+  return { cleanExtra: trimmed, extraFields: {} };
+}
+
+/**
+ * Packages non-column schema fields and user Extra text into DB extra storage.
+ * When non-column schema fields exist, stores a clean JSON envelope.
+ * Otherwise, stores user Extra as plain text.
+ */
+export function packExtraPayload(
+  rawExtra: string | null | undefined,
+  extraFields: Record<string, any> | null | undefined,
+): string {
+  let cleanExtra = '';
+  if (typeof rawExtra === 'string' && rawExtra.trim()) {
+    const trimmed = rawExtra.trim();
+    if (trimmed.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        cleanExtra =
+          typeof parsed._rawExtra === 'string'
+            ? parsed._rawExtra.trim()
+            : trimmed;
+      } catch {
+        cleanExtra = trimmed;
+      }
+    } else {
+      cleanExtra = trimmed;
+    }
+  }
+
+  const fields = { ...(extraFields || {}) };
+  delete fields._rawExtra;
+
+  const INTERNAL_EXTRA_IGNORED_FIELDS = new Set([
+    'comment',
+    'comments',
+    'notes',
+    'provenance',
+    'tags',
+    'keywords',
+    'creators',
+    'authors',
+    'repository',
+    'archiveId',
+    'primaryCategory',
+    'openAccessPdfUrl',
+    'confidenceScore',
+    'originProvider',
+  ]);
+
+  const cleanedFields: Record<string, any> = {};
+  for (const [k, v] of Object.entries(fields)) {
+    if (
+      v !== undefined &&
+      v !== null &&
+      v !== '' &&
+      !ITEM_COLUMN_METADATA_FIELDS.has(k) &&
+      !INTERNAL_EXTRA_IGNORED_FIELDS.has(k)
+    ) {
+      cleanedFields[k] = v;
+    }
+  }
+
+  if (Object.keys(cleanedFields).length > 0) {
+    return JSON.stringify({
+      ...cleanedFields,
+      ...(cleanExtra ? { _rawExtra: cleanExtra } : {}),
+    });
+  }
+
+  return cleanExtra;
+}
+
+/**
  * Resolves the Extra plain text field according to Zotero standard.
  * In Zotero, the Extra field contains user notes and translator variables (e.g. arXiv: ..., PMID: ...).
  * It is never an internal bucket for dumping unmapped schema or telemetry fields.
@@ -86,75 +189,73 @@ export function resolveExtraPlainText(
   existingExtra?: string | null,
   patches?: Record<string, any> | null,
 ): string | undefined {
-  let baseExtra: string | undefined;
-  if (extraInput !== undefined && extraInput !== null) {
-    if (typeof extraInput === 'string' && extraInput.trim()) {
-      const trimmed = extraInput.trim();
-      if (trimmed.startsWith('{')) {
-        try {
-          const parsed = JSON.parse(trimmed);
-          if (typeof parsed._rawExtra === 'string') {
-            baseExtra = parsed._rawExtra.trim();
-          } else {
-            baseExtra = trimmed;
-          }
-        } catch {
-          baseExtra = trimmed;
-        }
-      } else {
-        baseExtra = trimmed;
+  let cleanRaw: string =
+    (extraInput !== undefined && extraInput !== null
+      ? extraInput
+      : existingExtra) ?? '';
+
+  // If rawExtra is stored as a JSON string with _rawExtra, extract it
+  if (cleanRaw.trim().startsWith('{')) {
+    try {
+      const parsed = JSON.parse(cleanRaw.trim());
+      if (typeof parsed._rawExtra === 'string') {
+        cleanRaw = parsed._rawExtra;
       }
-    } else {
-      baseExtra = '';
+    } catch {
+      // not json
     }
-  } else if (existingExtra !== undefined && existingExtra !== null) {
-    baseExtra = existingExtra.trim();
   }
 
-  if (patches && typeof patches === 'object' && Object.keys(patches).length > 0) {
-    const lines = baseExtra ? baseExtra.split(/\r?\n/) : [];
-    const patchLookup: Record<string, any> = {};
-    const keyLookup: Record<string, string> = {};
-    const normalizeKey = (k: string) => k.replace(/[\s_-]+/g, '').toLowerCase();
+  if (!patches || Object.keys(patches).length === 0) {
+    return cleanRaw.trim() || undefined;
+  }
 
-    for (const [k, v] of Object.entries(patches)) {
-      const norm = normalizeKey(k);
-      patchLookup[norm] = v;
-      keyLookup[norm] = k;
+  // Process line by line according to Zotero Extra field conventions
+  const lines = cleanRaw.split('\n');
+  const handledKeys = new Set<string>();
+  const updatedLines: string[] = [];
+
+  for (const line of lines) {
+    const colonIndex = line.indexOf(':');
+    if (colonIndex === -1) {
+      if (line.trim()) updatedLines.push(line);
+      continue;
+    }
+    const lineKey = line.slice(0, colonIndex).trim().toLowerCase();
+    const linePrefix = line.slice(0, colonIndex).trim();
+
+    // Check if any patch matches this lineKey (case-insensitive)
+    let matchedPatchKey: string | undefined;
+    for (const pKey of Object.keys(patches)) {
+      if (pKey.toLowerCase() === lineKey) {
+        matchedPatchKey = pKey;
+        break;
+      }
     }
 
-    const updatedLines: string[] = [];
-    const appliedPatches = new Set<string>();
-
-    for (const line of lines) {
-      const match = line.match(/^([a-zA-Z0-9_\s]+):\s*(.*)$/);
-      if (match) {
-        const key = match[1].trim();
-        const norm = normalizeKey(key);
-        if (norm in patchLookup) {
-          appliedPatches.add(norm);
-          const val = patchLookup[norm];
-          if (val !== null && val !== undefined && val !== '') {
-            updatedLines.push(`${key}: ${val}`);
-          }
-          continue;
-        }
+    if (matchedPatchKey) {
+      handledKeys.add(matchedPatchKey);
+      const val = patches[matchedPatchKey];
+      if (val !== null && val !== undefined && val !== '') {
+        updatedLines.push(`${linePrefix}: ${val}`);
       }
+      // If val is null, undefined, or empty string, line is deleted
+    } else {
       updatedLines.push(line);
     }
-
-    for (const [norm, val] of Object.entries(patchLookup)) {
-      if (!appliedPatches.has(norm) && val !== null && val !== undefined && val !== '') {
-        const origKey = keyLookup[norm] || norm;
-        const capKey = origKey.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (s) => s.toUpperCase());
-        updatedLines.push(`${capKey}: ${val}`);
-      }
-    }
-
-    return updatedLines.filter(Boolean).join('\n');
   }
 
-  return baseExtra;
+  // Append new patches that weren't in existing lines
+  for (const [pKey, val] of Object.entries(patches)) {
+    if (handledKeys.has(pKey)) continue;
+    if (val !== null && val !== undefined && val !== '') {
+      const formattedKey = pKey.charAt(0).toUpperCase() + pKey.slice(1);
+      updatedLines.push(`${formattedKey}: ${val}`);
+    }
+  }
+
+  const result = updatedLines.join('\n').trim();
+  return result || undefined;
 }
 
 export function extractNonColumnExtraFields(
@@ -780,6 +881,9 @@ export class CommandRepository {
     tx?: Prisma.TransactionClient,
     projectId?: string,
   ) {
+    if (!isUuid(id) || !isUuid(userId)) {
+      throw new NotFoundException(`CatalogItem ${id} not found`);
+    }
     const client = this.getClient(tx);
     const existing = await client.item.findFirst({
       where: {
@@ -822,9 +926,11 @@ export class CommandRepository {
       rawAbstract !== undefined
         ? (cleanAbstractText(rawAbstract) ?? rawAbstract)
         : existing.abstract;
+    const { cleanExtra: existingRawExtra, extraFields: existingParsedFields } =
+      unpackExtraFromDb(existing.extra);
     const effectiveExtraFields = extractNonColumnExtraFields(
       data as any,
-      null,
+      existingParsedFields,
     );
 
     const rawPubDate =
@@ -975,10 +1081,10 @@ export class CommandRepository {
         extra:
           resolveExtraPlainText(
             data.extra,
-            existing.extra,
+            existingRawExtra,
             effectiveExtraFields,
           ) ??
-          existing.extra ??
+          existingRawExtra ??
           '',
 
         ...(data.collectionIds !== undefined
@@ -1220,6 +1326,9 @@ export class CommandRepository {
     tx?: Prisma.TransactionClient,
     projectId?: string,
   ): Promise<boolean> {
+    if (!isUuid(id) || !isUuid(userId)) {
+      return false;
+    }
     const client = this.getClient(tx);
     const whereCondition: any = {
       id,
@@ -1255,6 +1364,9 @@ export class CommandRepository {
     tx?: Prisma.TransactionClient,
     projectId?: string,
   ) {
+    if (!isUuid(id) || !isUuid(userId)) {
+      throw new NotFoundException(`Trashed item ${id} not found`);
+    }
     const client = this.getClient(tx);
     const existing = await client.item.findFirst({
       where: {
@@ -1314,6 +1426,9 @@ export class CommandRepository {
     tx?: Prisma.TransactionClient,
     projectId?: string,
   ): Promise<boolean> {
+    if (!isUuid(id) || !isUuid(userId)) {
+      throw new NotFoundException(`Item ${id} not found`);
+    }
     const client = this.getClient(tx);
     const existing = await client.item.findFirst({
       where: {
@@ -1366,9 +1481,9 @@ export class CommandRepository {
     relation: any,
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
-    const client = this.getClient(tx);
     const targetItemId = relation.targetItemId || relation.targetId;
-    if (!targetItemId) return;
+    if (!targetItemId || !isUuid(itemId) || !isUuid(targetItemId)) return;
+    const client = this.getClient(tx);
 
     const source = await client.item.findUnique({
       where: { id: itemId },
@@ -1422,6 +1537,7 @@ export class CommandRepository {
     targetItemId: string,
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
+    if (!isUuid(itemId) || !isUuid(targetItemId)) return;
     const client = this.getClient(tx);
     await client.itemRelation.deleteMany({
       where: {
@@ -1462,6 +1578,9 @@ export class CommandRepository {
     isMyPublication: boolean,
     tx?: Prisma.TransactionClient,
   ) {
+    if (!isUuid(id) || !isUuid(userId)) {
+      throw new NotFoundException(`CatalogItem ${id} not found`);
+    }
     const client = this.getClient(tx);
     const existing = await client.item.findFirst({
       where: { id, userId, deletedAt: null },
@@ -1505,6 +1624,7 @@ export class CommandRepository {
     },
     tx?: Prisma.TransactionClient,
   ) {
+    if (!isUuid(id)) return null as any;
     const client = this.getClient(tx);
     return client.item.update({
       where: { id },

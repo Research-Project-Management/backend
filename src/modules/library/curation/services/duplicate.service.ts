@@ -224,38 +224,52 @@ export class DuplicateService {
       );
 
       // ── 5. Rewire Item Relations ──────────────────────────────────────────────
-      // Source rewiring
-      await tx.itemRelation.updateMany({
-        where: { sourceItemId: { in: uniqueDupIds } },
-        data: { sourceItemId: primary.id },
-      });
-      // Target rewiring
-      await tx.itemRelation.updateMany({
-        where: { targetItemId: { in: uniqueDupIds } },
-        data: { targetItemId: primary.id },
-      });
-
-      // Remove self-relations
-      await tx.itemRelation.deleteMany({
+      const existingRelations = await tx.itemRelation.findMany({
         where: {
-          sourceItemId: primary.id,
-          targetItemId: primary.id,
+          OR: [
+            { sourceItemId: { in: [primary.id, ...uniqueDupIds] } },
+            { targetItemId: { in: [primary.id, ...uniqueDupIds] } },
+          ],
         },
       });
 
-      // Eliminate duplicate relation rows
-      const allRelations = await tx.itemRelation.findMany({
-        where: {
-          OR: [{ sourceItemId: primary.id }, { targetItemId: primary.id }],
-        },
-      });
-      const seenRelationKeys = new Set<string>();
-      for (const rel of allRelations) {
-        const key = `${rel.sourceItemId}::${rel.targetItemId}::${rel.relationType}`;
-        if (seenRelationKeys.has(key)) {
+      const primaryExistingPairs = new Set<string>();
+      for (const rel of existingRelations) {
+        if (rel.sourceItemId === primary.id || rel.targetItemId === primary.id) {
+          primaryExistingPairs.add(
+            `${rel.sourceItemId}::${rel.targetItemId}::${rel.relationType}`,
+          );
+        }
+      }
+
+      for (const rel of existingRelations) {
+        const isSourceDup = uniqueDupIds.includes(rel.sourceItemId);
+        const isTargetDup = uniqueDupIds.includes(rel.targetItemId);
+
+        if (!isSourceDup && !isTargetDup) continue;
+
+        const newSourceId = isSourceDup ? primary.id : rel.sourceItemId;
+        const newTargetId = isTargetDup ? primary.id : rel.targetItemId;
+
+        // Delete self-relations
+        if (newSourceId === newTargetId) {
+          await tx.itemRelation.delete({ where: { id: rel.id } });
+          continue;
+        }
+
+        const candidateKey = `${newSourceId}::${newTargetId}::${rel.relationType}`;
+        if (primaryExistingPairs.has(candidateKey)) {
+          // Already exists on primary, delete duplicate relation
           await tx.itemRelation.delete({ where: { id: rel.id } });
         } else {
-          seenRelationKeys.add(key);
+          await tx.itemRelation.update({
+            where: { id: rel.id },
+            data: {
+              sourceItemId: newSourceId,
+              targetItemId: newTargetId,
+            },
+          });
+          primaryExistingPairs.add(candidateKey);
         }
       }
 

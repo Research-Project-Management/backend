@@ -2,7 +2,7 @@ import { Injectable, Optional, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { TagsRepository } from './tags.repository';
 import { TransactionService } from '../outbox/transaction.service';
-import { normalizeTags } from './utils/tags.utils';
+import { normalizeTags, cleanSingleTag } from './utils/tags.utils';
 import { RedisCacheService } from '../../../core/cache/redis.service';
 import { LIBRARY_REDIS_KEYS } from '../core/constants/redis-keys.constant';
 import { PrismaService } from '../../../core/database/prisma.service';
@@ -55,11 +55,12 @@ export class TagsService {
     type?: string,
     projectId?: string | null,
   ) {
+    const cleanName = cleanSingleTag(name) || name.trim();
     const result = await this.libraryTx.executeInTransaction(
       async (tx, helpers) => {
         const tag = await this.repo.create(
           userId,
-          name.trim(),
+          cleanName,
           color,
           type,
           projectId,
@@ -129,20 +130,28 @@ export class TagsService {
     return result;
   }
 
-  async assignTag(userId: string, tagId: string, itemId: string) {
+  async assignTag(userId: string, tagId: string, itemId: string, projectId?: string) {
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      // 1. Verify tag belongs to user scope
+      // 1. Verify tag belongs to user/project scope
+      const tagWhere: any =
+        projectId && projectId !== 'user'
+          ? { id: tagId, OR: [{ userId }, { projectId }] }
+          : { id: tagId, userId };
       const tag = await tx.tag.findFirst({
-        where: { id: tagId, userId },
+        where: tagWhere,
         select: { id: true },
       });
       if (!tag) {
         throw new NotFoundException(`Tag ${tagId} not found in library`);
       }
 
-      // 2. Verify item belongs to user scope
+      // 2. Verify item belongs to user/project scope
+      const itemWhere: any =
+        projectId && projectId !== 'user'
+          ? { id: itemId, OR: [{ userId }, { projectId }], deletedAt: null }
+          : { id: itemId, userId, deletedAt: null };
       const item = await tx.item.findFirst({
-        where: { id: itemId, userId, deletedAt: null },
+        where: itemWhere,
         select: { id: true },
       });
       if (!item) {
@@ -166,20 +175,28 @@ export class TagsService {
     });
   }
 
-  async removeTag(userId: string, tagId: string, itemId: string) {
+  async removeTag(userId: string, tagId: string, itemId: string, projectId?: string) {
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      // 1. Verify tag belongs to user scope
+      // 1. Verify tag belongs to user/project scope
+      const tagWhere: any =
+        projectId && projectId !== 'user'
+          ? { id: tagId, OR: [{ userId }, { projectId }] }
+          : { id: tagId, userId };
       const tag = await tx.tag.findFirst({
-        where: { id: tagId, userId },
+        where: tagWhere,
         select: { id: true },
       });
       if (!tag) {
         throw new NotFoundException(`Tag ${tagId} not found in library`);
       }
 
-      // 2. Verify item belongs to user scope
+      // 2. Verify item belongs to user/project scope
+      const itemWhere: any =
+        projectId && projectId !== 'user'
+          ? { id: itemId, OR: [{ userId }, { projectId }], deletedAt: null }
+          : { id: itemId, userId, deletedAt: null };
       const item = await tx.item.findFirst({
-        where: { id: itemId, userId, deletedAt: null },
+        where: itemWhere,
         select: { id: true },
       });
       if (!item) {

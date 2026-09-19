@@ -195,7 +195,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       this.query.count(userId, queryOptions),
       this.query.findMany(userId, {
         ...queryOptions,
-        limit,
+        limit: limit + 1,
       }),
     ]);
 
@@ -208,7 +208,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       nextCursor = rawItems[rawItems.length - 1]?.id;
     }
 
-    const items = rawItems.map((it) => this.mapFlattenedState(it, userId));
+    const items = rawItems.slice(0, limit).map((it) => this.mapFlattenedState(it, userId));
 
     return {
       items,
@@ -743,7 +743,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
   }
 
   async findByDoi(userId: string, doi: string, projectId?: string) {
-    return this.query.findByDoi(userId, doi);
+    return this.query.findByDoi(userId, doi, projectId);
   }
 
   async findSummaryById(userId: string, itemId: string, projectId?: string) {
@@ -796,6 +796,12 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       if (existing.userId && existing.userId !== userId) {
         throw new ForbiddenException(
           `Item ${command.existingId} does not belong to user ${userId}`,
+        );
+      }
+
+      if (!existing.userId && existing.projectId && existing.projectId !== (command as any).projectId) {
+        throw new ForbiddenException(
+          `Item ${command.existingId} does not belong to the specified project`,
         );
       }
 
@@ -1055,9 +1061,29 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         continue;
       }
 
+      const primaryAttachment = source.attachments?.[0];
+      const resolvedFileId = primaryAttachment?.fileId
+        ? String(primaryAttachment.fileId)
+        : (source as any).fileId
+          ? String((source as any).fileId)
+          : undefined;
+      const resolvedFileUrl =
+        primaryAttachment?.url || (source as any).fileUrl || undefined;
+      const resolvedFilename =
+        primaryAttachment?.filename ||
+        primaryAttachment?.name ||
+        (source as any).filename ||
+        undefined;
+      const resolvedMimeType =
+        primaryAttachment?.mimeType || (source as any).mimeType || undefined;
+      const resolvedSize =
+        primaryAttachment?.size || (source as any).size || undefined;
+      const resolvedFileHash =
+        primaryAttachment?.fileHash || (source as any).fileHash || undefined;
+
       const createData: CreateItemData = {
         title: source.title,
-        uploadedById: project.createdById,
+        uploadedById: userId,
         year: source.year ?? undefined,
         doi: source.doi ?? undefined,
         abstract: source.abstract ?? undefined,
@@ -1095,8 +1121,12 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         citationCount: source.citationCount ?? undefined,
         referenceCount: source.referenceCount ?? undefined,
         openAccessPdfUrl: source.openAccessPdfUrl ?? undefined,
-        fileId: (source as any).fileId || ((source.attachments?.[0] as any)?.fileId ? String((source.attachments[0] as any).fileId) : undefined),
-        fileUrl: (source as any).fileUrl ?? undefined,
+        fileId: resolvedFileId,
+        fileUrl: resolvedFileUrl,
+        filename: resolvedFilename,
+        mimeType: resolvedMimeType,
+        size: resolvedSize,
+        fileHash: resolvedFileHash,
         tags: source.itemTags?.map((it: any) => it.tag?.name).filter(Boolean) || [],
         notes: source.notesList?.map((n: any) => ({
           title: n.title,
@@ -1120,7 +1150,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       };
 
       await this.createItem(
-        project.createdById,
+        userId,
         createData,
         { projectId, source: 'external_sync' },
         projectId,

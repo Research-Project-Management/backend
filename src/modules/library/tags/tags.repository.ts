@@ -89,26 +89,21 @@ export class TagsRepository {
         ? projectIdOrTx
         : tx,
     );
-    const existing = await client.tag.findFirst({
-      where: {
-        userId,
-        name,
-      },
-    });
-    if (existing) {
-      return client.tag.update({
-        where: { id: existing.id },
-        data: { color },
-      });
-    }
-    return client.tag.create({
-      data: {
+    const effectiveProjectId =
+      typeof projectIdOrTx === 'string' && projectIdOrTx !== 'user'
+        ? projectIdOrTx
+        : undefined;
+
+    return client.tag.upsert({
+      where: { userId_name: { userId, name } },
+      create: {
         userId,
         name,
         color,
         type,
-        ...(projectId && projectId !== 'user' ? { projectId } : {}),
+        ...(effectiveProjectId ? { projectId: effectiveProjectId } : {}),
       },
+      update: { color },
     });
   }
 

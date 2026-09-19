@@ -40,8 +40,19 @@ import { IStorageNodeRepository } from '@/modules/storage/domain/ports/storage-n
 import { PdfThumbnailService } from '@/modules/storage/application/services/pdf-thumbnail.service';
 
 import { calculateFileChecksum } from './utils/attachments.utils';
+import {
+  formatAttachmentFilename,
+  resolveFileExtension,
+  sanitizeFilenameStem,
+  DEFAULT_RENAME_PATTERN,
+} from './utils/renamer.util';
+import type {
+  RenameAttachmentDto,
+  BatchRenameAttachmentsDto,
+} from './dto/attachments.dto';
 
 export { CreateAttachmentInput, ReplaceAttachmentFileInput };
+
 
 @Injectable()
 export class AttachmentsService {
@@ -756,4 +767,175 @@ export class AttachmentsService {
       mimeType: 'image/webp',
     };
   }
+
+  /**
+   * Renames a single attachment file based on explicit name or parent item metadata pattern (Zotero standard).
+   */
+  async renameAttachment(
+    userId: string,
+    attachmentId: string,
+    dto: RenameAttachmentDto,
+    projectId?: string,
+  ): Promise<{ attachment: any; oldFilename: string; newFilename: string }> {
+    const attachment = await this.prisma.attachment.findFirst({
+      where: {
+        id: attachmentId,
+        deletedAt: null,
+      },
+      include: {
+        item: {
+          include: {
+            contributors: {
+              orderBy: { orderIndex: 'asc' },
+            },
+          },
+        },
+      },
+    });
+
+    if (!attachment) {
+      throw new NotFoundException(`Attachment ${attachmentId} not found`);
+    }
+
+    // Verify item ownership / project access
+    await this.itemExistencePort.assertExists(userId, attachment.itemId, projectId);
+
+    const oldFilename = attachment.filename || attachment.name || 'document.pdf';
+    let newFilename = '';
+
+    if (dto.filename && dto.filename.trim()) {
+      const ext = resolveFileExtension(oldFilename);
+      const cleanStem = sanitizeFilenameStem(dto.filename.replace(/\.[a-zA-Z0-9]+$/, ''));
+      newFilename = `${cleanStem}${ext}`;
+    } else {
+      const pattern = dto.pattern || DEFAULT_RENAME_PATTERN;
+      newFilename = formatAttachmentFilename(pattern, attachment.item, oldFilename);
+    }
+
+    if (oldFilename === newFilename) {
+      return { attachment, oldFilename, newFilename };
+    }
+
+    const updated = await this.prisma.attachment.update({
+      where: { id: attachmentId },
+      data: {
+        filename: newFilename,
+        name: newFilename,
+      },
+    });
+
+    // Also synchronize File node in storage context if fileId exists
+    if (attachment.fileId) {
+      try {
+        await this.prisma.file.update({
+          where: { id: attachment.fileId },
+          data: { filename: newFilename },
+        });
+      } catch (err: any) {
+        this.logger.warn(
+          `Could not sync filename to storage File ${attachment.fileId}: ${err?.message}`,
+        );
+      }
+    }
+
+    return { attachment: updated, oldFilename, newFilename };
+  }
+
+  /**
+   * Batch renames attachment files based on parent item metadata according to a pattern (Zotero standard).
+   */
+  async batchRenameAttachments(
+    userId: string,
+    dto: BatchRenameAttachmentsDto,
+    projectId?: string,
+  ): Promise<{
+    renamedCount: number;
+    results: Array<{
+      attachmentId: string;
+      itemId: string;
+      oldFilename: string;
+      newFilename: string;
+    }>;
+  }> {
+    const pattern = dto.pattern || DEFAULT_RENAME_PATTERN;
+    const whereClause: Prisma.AttachmentWhereInput = {
+      deletedAt: null,
+    };
+
+    if (dto.attachmentIds && dto.attachmentIds.length > 0) {
+      whereClause.id = { in: dto.attachmentIds };
+    } else if (dto.itemIds && dto.itemIds.length > 0) {
+      whereClause.itemId = { in: dto.itemIds };
+    } else {
+      throw new BadRequestException(
+        'Either itemIds or attachmentIds must be provided',
+      );
+    }
+
+    const attachments = await this.prisma.attachment.findMany({
+      where: whereClause,
+      include: {
+        item: {
+          include: {
+            contributors: {
+              orderBy: { orderIndex: 'asc' },
+            },
+          },
+        },
+      },
+    });
+
+    const results: Array<{
+      attachmentId: string;
+      itemId: string;
+      oldFilename: string;
+      newFilename: string;
+    }> = [];
+
+    for (const att of attachments) {
+      try {
+        // Assert scope permission per item
+        await this.itemExistencePort.assertExists(userId, att.itemId, projectId);
+        const oldFilename = att.filename || att.name || 'document.pdf';
+        const newFilename = formatAttachmentFilename(pattern, att.item, oldFilename);
+
+        if (oldFilename !== newFilename) {
+          await this.prisma.attachment.update({
+            where: { id: att.id },
+            data: { filename: newFilename, name: newFilename },
+          });
+
+          if (att.fileId) {
+            try {
+              await this.prisma.file.update({
+                where: { id: att.fileId },
+                data: { filename: newFilename },
+              });
+            } catch (err: any) {
+              this.logger.warn(
+                `Failed to update storage file ${att.fileId}: ${err?.message}`,
+              );
+            }
+          }
+        }
+
+        results.push({
+          attachmentId: att.id,
+          itemId: att.itemId,
+          oldFilename,
+          newFilename,
+        });
+      } catch (err: any) {
+        this.logger.warn(
+          `Failed to rename attachment ${att.id}: ${err?.message}`,
+        );
+      }
+    }
+
+    return {
+      renamedCount: results.filter((r) => r.oldFilename !== r.newFilename).length,
+      results,
+    };
+  }
 }
+

@@ -144,9 +144,14 @@ export class IngestionRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<IngestionRun | null> {
     const client = this.getClient(tx);
+    const userId =
+      typeof _scope === 'object' ? _scope.userId : _scope || undefined;
+    const projectId =
+      typeof _scope === 'object' ? _scope.projectId : undefined;
     return client.ingestionRun.findFirst({
       where: {
         idempotencyKey,
+        ...(projectId ? { projectId } : userId ? { userId } : {}),
       },
     });
   }
@@ -160,10 +165,16 @@ export class IngestionRepository {
       lastError?: string;
       completedAt?: Date;
       executionLog?: Prisma.InputJsonValue;
+      /** Previous status — used to determine if this is a retry (only increment attempts on FAILED_RETRYABLE → RECEIVED transitions) */
+      previousStatus?: IngestionStatus;
     },
     tx?: Prisma.TransactionClient,
   ): Promise<IngestionRun> {
     const client = this.getClient(tx);
+    // Only increment attempts when retrying: transitioning from FAILED_RETRYABLE back to RECEIVED
+    const isRetry =
+      details?.previousStatus === IngestionStatus.FAILED_RETRYABLE &&
+      status === IngestionStatus.RECEIVED;
     return client.ingestionRun.update({
       where: {
         id: runId,
@@ -180,7 +191,7 @@ export class IngestionRepository {
         ...(details?.executionLog !== undefined
           ? { executionLog: details.executionLog }
           : {}),
-        attempts: { increment: 1 },
+        ...(isRetry ? { attempts: { increment: 1 } } : {}),
       },
     });
   }
@@ -414,8 +425,13 @@ export class IngestionRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<IngestionReviewCase[]> {
     const client = this.getClient(tx);
+    const userId =
+      typeof _scope === 'object' ? _scope.userId : _scope || undefined;
+    const projectId =
+      typeof _scope === 'object' ? _scope.projectId : undefined;
     return client.ingestionReviewCase.findMany({
       where: {
+        ...(projectId ? { projectId } : userId ? { userId } : {}),
         ...(options?.status ? { status: options.status } : {}),
       },
       take: options?.limit ?? 50,

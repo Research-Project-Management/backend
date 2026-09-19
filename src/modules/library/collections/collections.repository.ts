@@ -366,6 +366,7 @@ export class CollectionsRepository {
         where: projectId ? { id: c.id, projectId } : { id: c.id, userId },
         data: {
           ...(c.parentId !== undefined ? { parentId: c.parentId } : {}),
+          ...(c.orderIndex !== undefined ? { orderIndex: c.orderIndex } : {}),
         },
       });
     }

@@ -44,7 +44,7 @@ export class IngestionService implements IngestionPort {
   async submit(
     envelope: IngestionSubmissionEnvelope,
   ): Promise<IngestionAcceptedResult> {
-    const projectId = envelope.projectId || envelope.userId || '';
+    const projectId = envelope.projectId ?? '';
     const idempotencyKey = envelope.idempotencyKey?.trim();
 
     const requestHash = createHash('sha256')
@@ -54,7 +54,7 @@ export class IngestionService implements IngestionPort {
     // 1. Idempotency Check & Atomic Claim
     if (idempotencyKey) {
       const existingRun = await this.repo.findRunByIdempotencyKey(
-        projectId,
+        { userId: envelope.userId, projectId: envelope.projectId },
         idempotencyKey,
       );
 
@@ -128,7 +128,34 @@ export class IngestionService implements IngestionPort {
     if (!run) {
       throw new NotFoundException(`Ingestion run '${runId}' not found`);
     }
-    return run as unknown as IngestionRunSnapshot;
+
+    const log = (run.executionLog as any) || {};
+    const logItem =
+      log.item ||
+      (Array.isArray(log.items) && log.items.length > 0
+        ? { id: log.items[0].itemId || run.itemId, title: log.items[0].title }
+        : null);
+    const resolvedItem = run.item || logItem || null;
+    const title =
+      run.item?.title ||
+      log.currentTitle ||
+      (Array.isArray(log.items) && log.items[0]?.title) ||
+      log.item?.title ||
+      null;
+    const itemId =
+      run.itemId ||
+      resolvedItem?.id ||
+      (Array.isArray(log.items) && log.items[0]?.itemId) ||
+      null;
+
+    return {
+      ...run,
+      itemId,
+      item: resolvedItem
+        ? { ...resolvedItem, title: resolvedItem.title || title }
+        : null,
+      title,
+    } as unknown as IngestionRunSnapshot;
   }
 
   async getRunProgress(
@@ -181,6 +208,28 @@ export class IngestionService implements IngestionPort {
           ? 100
           : Math.min(Math.round((processed / total) * 100), 99);
 
+    const title =
+      run.item?.title ||
+      log.currentTitle ||
+      (Array.isArray(log.items) && log.items[0]?.title) ||
+      log.item?.title ||
+      undefined;
+
+    const items =
+      Array.isArray(log.items) && log.items.length > 0
+        ? log.items
+        : title
+          ? [
+              {
+                title,
+                status: (run.status === IngestionStatus.READY
+                  ? 'SUCCEEDED'
+                  : 'FAILED') as 'SUCCEEDED' | 'FAILED',
+                itemId: run.itemId || undefined,
+              },
+            ]
+          : [];
+
     return {
       runId: run.id,
       projectId,
@@ -191,8 +240,8 @@ export class IngestionService implements IngestionPort {
       succeeded,
       duplicates,
       failed,
-      currentTitle: log.currentTitle || undefined,
-      items: Array.isArray(log.items) ? log.items : [],
+      currentTitle: title,
+      items,
       startedAt: run.startedAt.toISOString(),
       completedAt: run.completedAt?.toISOString(),
     };
@@ -242,7 +291,7 @@ export class IngestionService implements IngestionPort {
     if (submissionRes.deduplicated && submissionRes.existingItemId) {
       const item = this.items
         ? await this.items
-            .getItem(projectId, submissionRes.existingItemId)
+            .getItem(envelope.userId!, submissionRes.existingItemId, projectId || undefined)
             .catch(() => undefined)
         : undefined;
 
@@ -281,7 +330,7 @@ export class IngestionService implements IngestionPort {
     const itemId = updatedRun?.itemId ?? undefined;
     const item =
       itemId && this.items
-        ? await this.items.getItem(projectId, itemId).catch(() => undefined)
+        ? await this.items.getItem(envelope.userId!, itemId, projectId || undefined).catch(() => undefined)
         : undefined;
 
     return {

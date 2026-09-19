@@ -1,4 +1,4 @@
-import { CslItemData, CslName } from '../types/csl-json.types';
+import { CslItemData, CslName, CslDate } from '../types/csl-json.types';
 import {
   CSL_TYPE_MAP,
   CSL_CREATOR_MAP,
@@ -205,8 +205,11 @@ export class CslJsonMapper {
       csl.archive_location = item.archiveLocation;
     }
     if (item.callNumber) csl['call-number'] = item.callNumber;
-    if (item.language) csl.language = item.language;
-    if (item.extra) csl.note = item.extra;
+    if (item.extra) {
+      this.parseExtraCslVariables(item.extra, csl);
+    } else if (item.arxivId) {
+      csl.note = `arXiv: ${item.arxivId}`;
+    }
 
     // Special metadata
     if (rawType === 'preprint') {
@@ -339,5 +342,105 @@ export class CslJsonMapper {
     const family = parts.pop() || 'Anonymous';
     const given = parts.join(' ');
     return { family, given };
+  }
+
+  /**
+   * Parses ISO-like date string into CSL Date object.
+   */
+  public static parseCslDate(dateStr: string): CslDate | undefined {
+    if (!dateStr) return undefined;
+    const match = dateStr.trim().match(/^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?/);
+    if (match) {
+      const parts: number[] = [Number(match[1])];
+      if (match[2]) parts.push(Number(match[2]));
+      if (match[3]) parts.push(Number(match[3]));
+      return { 'date-parts': [parts] };
+    }
+    return undefined;
+  }
+
+  /**
+   * Parses CSL variables embedded in Zotero's Extra field.
+   * Conforms strictly to Zotero's parsing specification:
+   * 1. Scans line by line from the top.
+   * 2. Extracts valid CSL variables into target CSL properties.
+   * 3. Stops scanning after encountering 2 consecutive non-key-value lines (Zotero heuristic).
+   * 4. Leaves remaining non-CSL lines (identifiers, notes) in csl.note.
+   */
+  public static parseExtraCslVariables(extraStr: string, csl: CslItemData): void {
+    if (!extraStr || !extraStr.trim()) return;
+
+    const lines = extraStr.split(/\r?\n/);
+    const remainingNotes: string[] = [];
+    let invalidConsecutiveLines = 0;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      const match = trimmed.match(/^([a-zA-Z_][a-zA-Z0-9_\-]*):\s*(.+)$/);
+      if (match && invalidConsecutiveLines < 2) {
+        const rawKey = match[1].toLowerCase().replace(/_/g, '-');
+        const val = match[2].trim();
+
+        if (rawKey === 'original-date' || rawKey === 'originaldate') {
+          const parsed = this.parseCslDate(val);
+          if (parsed) csl['original-date'] = parsed;
+        } else if (rawKey === 'event-date' || rawKey === 'eventdate') {
+          const parsed = this.parseCslDate(val);
+          if (parsed) csl['event-date'] = parsed;
+        } else if (rawKey === 'event-place' || rawKey === 'eventplace') {
+          csl['event-place'] = val;
+        } else if (rawKey === 'event-title' || rawKey === 'eventtitle') {
+          csl['event-title'] = val;
+        } else if (rawKey === 'original-title' || rawKey === 'originaltitle') {
+          csl['original-title'] = val;
+        } else if (rawKey === 'original-publisher' || rawKey === 'originalpublisher') {
+          csl['original-publisher'] = val;
+        } else if (rawKey === 'original-publisher-place' || rawKey === 'originalpublisherplace') {
+          csl['original-publisher-place'] = val;
+        } else if (rawKey === 'status') {
+          csl.status = val;
+        } else if (rawKey === 'article-number' || rawKey === 'articlenumber') {
+          csl.number = val;
+          csl['article-number'] = val;
+        } else if (rawKey === 'medium') {
+          csl.medium = val;
+        } else if (rawKey === 'dimensions') {
+          csl.dimensions = val;
+        } else if (rawKey === 'jurisdiction') {
+          csl.jurisdiction = val;
+        } else if (rawKey === 'annote') {
+          csl.annote = val;
+        } else if (rawKey === 'scale') {
+          csl.scale = val;
+        } else if (rawKey === 'genre' && !csl.genre) {
+          csl.genre = val;
+        } else if (rawKey === 'type' && !csl.type) {
+          csl.type = val;
+        } else if (rawKey === 'chapter-number' || rawKey === 'chapternumber') {
+          csl['chapter-number'] = val;
+        } else if (rawKey === 'collection-title' || rawKey === 'collectiontitle') {
+          csl['collection-title'] = val;
+        } else if (rawKey === 'collection-number' || rawKey === 'collectionnumber') {
+          csl['collection-number'] = val;
+        } else if (rawKey === 'container-title-short') {
+          csl['container-title-short'] = val;
+        } else if (rawKey === 'title-short' && !csl['title-short']) {
+          csl['title-short'] = val;
+        } else if (rawKey === 'archive-place') {
+          csl['archive-place'] = val;
+        } else {
+          remainingNotes.push(trimmed);
+        }
+      } else {
+        invalidConsecutiveLines++;
+        remainingNotes.push(trimmed);
+      }
+    }
+
+    if (remainingNotes.length > 0) {
+      csl.note = remainingNotes.join('\n');
+    }
   }
 }

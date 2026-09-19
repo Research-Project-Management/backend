@@ -15,16 +15,19 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { TagsService } from './tags.service';
 import { CreateTagDto } from './dto/tags.dto';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/auth.guard';
+import { ProjectRoleGuard } from '../../../modules/iam/authz/guards/role.guard';
+import { ProjectRoles } from '../../../modules/iam/authz/decorators/role.decorator';
 import { CurrentUser } from '../../../modules/iam/authn/decorators/user.decorator';
 
 @ApiTags('Library Tags')
 @ApiBearerAuth('JWT-auth')
 @Controller(['api/v1/library/tags', 'api/v1/projects/:projectId/library/tags'])
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class TagsController {
   constructor(private readonly tagsService: TagsService) {}
 
   @Get()
+  @ProjectRoles('owner', 'contributor', 'viewer')
   @ApiOperation({ summary: 'List library tags' })
   async getTags(
     @CurrentUser('id') userId: string,
@@ -40,6 +43,7 @@ export class TagsController {
   }
 
   @Post()
+  @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create or get tag' })
   async createTag(
@@ -58,6 +62,7 @@ export class TagsController {
   }
 
   @Delete('automatic')
+  @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete automatic tags' })
   async deleteAutomaticTags(@CurrentUser('id') userId: string) {
@@ -65,6 +70,7 @@ export class TagsController {
   }
 
   @Delete(':tagId')
+  @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete a tag' })
   async deleteTag(
@@ -78,6 +84,7 @@ export class TagsController {
   }
 
   @Post(':tagId/items/:itemId')
+  @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Assign tag to an item' })
   async assignTag(
@@ -90,6 +97,7 @@ export class TagsController {
   }
 
   @Delete(':tagId/items/:itemId')
+  @ProjectRoles('owner', 'contributor')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Remove tag from an item' })
   async removeTag(

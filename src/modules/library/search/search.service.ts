@@ -47,7 +47,9 @@ export class SearchService {
       meta: {
         cursor: searchResult.nextCursor,
         hasNextPage: searchResult.hasNextPage,
-        totalCount: searchResult.items.length,
+        // NOTE: pageCount reflects items on this page only, NOT the full result set total.
+        // Replace with a dedicated COUNT query from the repository when available.
+        pageCount: searchResult.items.length,
       },
     };
   }
@@ -65,8 +67,17 @@ export class SearchService {
       where: {
         id: attachmentId,
         item: {
-          userId,
           deletedAt: null,
+          OR: [
+            { userId },
+            {
+              project: {
+                members: {
+                  some: { userId },
+                },
+              },
+            },
+          ],
         },
       },
       select: { id: true },

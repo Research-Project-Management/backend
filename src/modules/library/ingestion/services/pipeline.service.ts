@@ -428,13 +428,16 @@ export class PipelineService {
         }
 
         // Attach uploaded file to existing item if a file was provided and not yet attached
-        if (
-          envelope.payload.kind === 'FILE' &&
-          envelope.payload.fileId &&
-          this.attachments
-        ) {
-          const uploadedFileIdentifier = envelope.payload.fileId;
-          const uploadedFilename = envelope.payload.filename || 'document.pdf';
+        const uploadedFileIdentifier =
+          envelope.payload.kind === 'FILE'
+            ? envelope.payload.fileId
+            : (decision.proposedItem as any)?.fileId;
+        const uploadedFilename =
+          envelope.payload.kind === 'FILE'
+            ? envelope.payload.filename || 'document.pdf'
+            : (decision.proposedItem as any)?.filename || 'document.pdf';
+
+        if (uploadedFileIdentifier && this.attachments) {
           try {
             await this.attachments.createAttachment(
               {
@@ -449,7 +452,7 @@ export class PipelineService {
               scopeId,
             );
             this.logger.log(
-              `[EXACT_MERGE] Attached uploaded file ${uploadedFileIdentifier} to item ${matchResult.targetItemId}`,
+              `[EXACT_MERGE] Attached file ${uploadedFileIdentifier} to item ${matchResult.targetItemId}`,
             );
           } catch (attachmentError: unknown) {
             const errorMessage =
@@ -515,6 +518,14 @@ export class PipelineService {
         },
       });
 
+      const exactSourceLabel =
+        (envelope.payload as any).filename ||
+        (envelope.payload as any).url ||
+        (envelope.payload as any).value ||
+        (decision.proposedItem as any)?.filename ||
+        decision.proposedItem?.title ||
+        'Document';
+
       await this.repo.updateRunStatus(scopeId, runId, IngestionStatus.READY, {
         itemId: matchResult.targetItemId,
         completedAt: new Date(),
@@ -529,7 +540,8 @@ export class PipelineService {
           currentTitle: decision.proposedItem?.title || 'Document',
           items: [
             {
-              title: decision.proposedItem?.title || 'Document',
+              title: exactSourceLabel,
+              itemName: decision.proposedItem?.title || 'Document',
               status: 'DUPLICATE',
               itemId: matchResult.targetItemId,
             },
@@ -583,11 +595,11 @@ export class PipelineService {
         fileId:
           envelope.payload.kind === 'FILE'
             ? envelope.payload.fileId
-            : undefined,
+            : (decision.proposedItem as any)?.fileId,
         filename:
           envelope.payload.kind === 'FILE'
             ? envelope.payload.filename
-            : undefined,
+            : (decision.proposedItem as any)?.filename,
       },
     );
 
@@ -597,6 +609,14 @@ export class PipelineService {
       success: true,
       outputSnapshot: { itemId: createdItem?.id },
     });
+
+    const commitSourceLabel =
+      (envelope.payload as any).filename ||
+      (envelope.payload as any).url ||
+      (envelope.payload as any).value ||
+      (decision.proposedItem as any)?.filename ||
+      createdItem?.title ||
+      'Document';
 
     await this.repo.updateRunStatus(scopeId, runId, IngestionStatus.READY, {
       itemId: createdItem?.id,
@@ -612,7 +632,8 @@ export class PipelineService {
         currentTitle: createdItem?.title || 'Document',
         items: [
           {
-            title: createdItem?.title || 'Document',
+            title: commitSourceLabel,
+            itemName: createdItem?.title || 'Document',
             status: 'SUCCEEDED',
             itemId: createdItem?.id,
           },

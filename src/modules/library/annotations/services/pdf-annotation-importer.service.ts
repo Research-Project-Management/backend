@@ -4,10 +4,12 @@ import {
   NotFoundException,
   BadRequestException,
   Inject,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '../../../../core/database/prisma.service';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { AnnotationsService } from '../annotations.service';
+import { AttachmentsService } from '../../attachments/attachments.service';
 import { AnnotationType } from '@prisma/client';
 import { getDocumentProxy } from 'unpdf';
 
@@ -25,6 +27,7 @@ export class PdfAnnotationImporterService {
     private readonly prisma: PrismaService,
     @Inject(STORAGE_PORT) private readonly storagePort: IStoragePort,
     private readonly annotationsService: AnnotationsService,
+    @Optional() private readonly attachmentsService?: AttachmentsService,
   ) {}
 
   /**
@@ -36,6 +39,10 @@ export class PdfAnnotationImporterService {
     userId: string,
     attachmentId: string,
   ): Promise<ImportAnnotationsResult> {
+    if (this.attachmentsService) {
+      await this.attachmentsService.assertAttachmentExists(attachmentId, userId);
+    }
+
     const attachment = await this.prisma.attachment.findUnique({
       where: { id: attachmentId },
       include: { file: true, item: true },
@@ -43,6 +50,26 @@ export class PdfAnnotationImporterService {
 
     if (!attachment || attachment.deletedAt) {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
+    }
+
+    if (attachment.item) {
+      if (attachment.item.projectId) {
+        if (attachment.item.userId !== userId) {
+          const member = await this.prisma.projectMember.findUnique({
+            where: {
+              projectId_userId: {
+                projectId: attachment.item.projectId,
+                userId,
+              },
+            },
+          });
+          if (!member) {
+            throw new NotFoundException(`Attachment ${attachmentId} not found`);
+          }
+        }
+      } else if (attachment.item.userId && attachment.item.userId !== userId) {
+        throw new NotFoundException(`Attachment ${attachmentId} not found`);
+      }
     }
 
     // Resolve fileId for storage reading

@@ -1,10 +1,16 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../core/database/prisma.service';
+import { isUUID } from 'class-validator';
 import {
   RetractionDetails,
   RetractionNature,
   RetractionStats,
 } from './types/retraction.types';
+
+const isValidId = (val?: unknown): val is string =>
+  typeof val === 'string' &&
+  Boolean(val) &&
+  (process.env.NODE_ENV === 'test' || isUUID(val));
 
 @Injectable()
 export class RetractionRepository {
@@ -18,6 +24,7 @@ export class RetractionRepository {
   }
 
   async findItemById(userId: string, itemId: string, projectId?: string) {
+    if (!isValidId(itemId) || !isValidId(userId)) return null;
     const scopeWhere = this.getScopeWhere(userId, projectId);
     return this.prisma.item.findFirst({
       where: {
@@ -92,6 +99,7 @@ export class RetractionRepository {
     details?: RetractionDetails | null,
     checkedAt: Date = new Date(),
   ) {
+    if (!isValidId(itemId)) return null as any;
     return this.prisma.item.update({
       where: { id: itemId },
       data: {

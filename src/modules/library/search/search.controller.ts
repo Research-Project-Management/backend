@@ -6,6 +6,7 @@ import {
   Query,
   Body,
   UseGuards,
+  ForbiddenException,
 } from '@nestjs/common';
 import { SearchService } from './search.service';
 import { SemanticSearchService } from './services/semantic-search.service';
@@ -57,8 +58,12 @@ export class SearchController {
   @Post('index-all')
   async indexAll(
     @CurrentUser('id') userId: string,
+    @CurrentUser() user: any,
     @Query('projectId') projectId?: string,
   ) {
+    if (!user?.isAdmin && !user?.role?.includes('admin')) {
+      throw new ForbiddenException('Admin access required');
+    }
     return this.semanticSearch.indexLibrary(userId, projectId);
   }
 

@@ -133,6 +133,9 @@ export class ItemsController {
     @CurrentUser('id') userId: string,
     @Param('projectId') projectId?: string,
   ) {
+    if (!isUUID(id)) {
+      throw new NotFoundException(`Item ${id} not found in library`);
+    }
     const item = await this.itemsService.getItem(
       userId,
       id,
@@ -314,6 +317,9 @@ export class ItemsController {
     @Headers('if-match') ifMatch?: string,
     @Param('projectId') projectId?: string,
   ) {
+    if (!isUUID(id)) {
+      throw new NotFoundException('Invalid item ID format');
+    }
     const expectedVersion = ifMatch
       ? parseInt(ifMatch.replace(/["']/g, ''), 10)
       : undefined;
@@ -337,6 +343,9 @@ export class ItemsController {
     @Headers('if-match') ifMatch?: string,
     @Param('projectId') projectId?: string,
   ) {
+    if (!isUUID(id)) {
+      throw new NotFoundException(`Trashed item ${id} not found`);
+    }
     const expectedVersion =
       expectedVersionQuery !== undefined
         ? parseInt(expectedVersionQuery, 10)
@@ -360,6 +369,9 @@ export class ItemsController {
     @CurrentUser('id') userId: string,
     @Param('projectId') projectId?: string,
   ) {
+    if (!isUUID(id)) {
+      throw new NotFoundException(`Item ${id} not found`);
+    }
     const purged = await this.itemsService.purgeItem(
       userId,
       id,
@@ -424,6 +436,7 @@ export class ItemsController {
   }
 
   @Post(':id/my-publication')
+  @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Mark an item as my publication' })
   async markMyPublication(
     @Param('id') id: string,
@@ -434,6 +447,7 @@ export class ItemsController {
   }
 
   @Delete(':id/my-publication')
+  @ProjectRoles('owner', 'contributor')
   @ApiOperation({ summary: 'Unmark an item as my publication' })
   async unmarkMyPublication(
     @Param('id') id: string,

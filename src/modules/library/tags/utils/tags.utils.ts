@@ -183,7 +183,7 @@ export const ARXIV_CATEGORY_MAP: Record<string, string> = {
 };
 
 // ── 2. Standard Scientific Acronyms (Preserve Full Upper Case) ─────────────────
-const SCIENTIFIC_ACRONYMS = new Set([
+export const SCIENTIFIC_ACRONYMS = new Set([
   'AI',
   'ML',
   'NLP',
@@ -370,7 +370,8 @@ export function fixMojibake(str: string): string {
 
 /** Strips Wikipedia/Wikidata disambiguation suffixes like "(psychology)", "(mathematics)" */
 export function stripDisambiguationSuffix(str: string): string {
-  return str.replace(/\s*\([^)]*(?:\)|$)/g, '').trim();
+  // Only strip disambiguation at the END of a string that has preceding text
+  return str.replace(/(?<=[\w\d])\s+\([^)]*\)$/g, '').trim();
 }
 
 /** Strips common prefixes and leading/trailing quotes, brackets, dots, ellipses (...) */
@@ -379,7 +380,7 @@ export function stripTagPrefixes(str: string): string {
     .replace(/<[^>]+>/g, '')
     .replace(/[{}]/g, '')
     .replace(
-      /^(?:keywords?|index terms|categories|subject|topics?|terms?)[:—\-\s]+/i,
+      /^(?:tags?|keywords?|index terms?|categor(?:y|ies)|subject(?: areas?)?|topics?|terms?|arxiv)[:—\-\s]+/i,
       '',
     )
     .replace(/^[#"''`([{<•·*—\-\s]+/, '')
@@ -403,6 +404,10 @@ export function toTitleCaseWithAcronyms(str: string): string {
       const upper = word.toUpperCase();
       if (SCIENTIFIC_ACRONYMS.has(upper)) {
         return upper;
+      }
+      // Preserve isolated dash in compounds or category separator " - "
+      if (word === '-') {
+        return '-';
       }
       // Handle hyphenated terms (e.g. Viola-Jones, Zero-Shot, Few-Shot, COVID-19)
       if (word.includes('-')) {
@@ -446,25 +451,27 @@ export function cleanSingleTag(rawTag: string): string | null {
   // 0. Strip XML/HTML tags and braces
   tag = tag.replace(/<[^>]+>/g, '').replace(/[{}]/g, '').trim();
 
-  // 1. Direct arXiv category mapping
+  // 1. Strip Wikipedia disambiguation FIRST before edge quotes/brackets
+  tag = stripDisambiguationSuffix(tag);
+
+  // 2. Strip prefixes (tag:, tags:, category:, arxiv:), quotes, brackets, dots, ellipses
+  tag = stripTagPrefixes(tag);
+  if (!tag) return null;
+
+  // 3. Direct arXiv category mapping (supports cs.cl, cs.CL, cs-cl, cs_cl, [cs.CL])
   const lower = tag.toLowerCase();
   if (ARXIV_CATEGORY_MAP[lower]) {
     return ARXIV_CATEGORY_MAP[lower];
   }
+  const withDot = lower.replace(/[-_]/g, '.');
+  if (ARXIV_CATEGORY_MAP[withDot]) {
+    return ARXIV_CATEGORY_MAP[withDot];
+  }
 
-  // 2. Direct noise blacklist check
+  // 4. Direct noise blacklist check
   if (NOISE_TAG_WORDS.has(lower)) {
     return null;
   }
-
-  // 3. Strip Wikipedia disambiguation FIRST before stripping edge quotes/brackets
-  tag = stripDisambiguationSuffix(tag);
-  if (NOISE_TAG_WORDS.has(tag.toLowerCase())) {
-    return null;
-  }
-
-  // 4. Strip prefixes, leading/trailing punctuation, dots, and ellipses
-  tag = stripTagPrefixes(tag);
 
   // 5. Sanity & garbage checks:
   // Must be 2 - 60 chars

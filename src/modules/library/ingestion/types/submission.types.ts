@@ -25,6 +25,7 @@ export interface UrlSubmissionInput {
   kind: 'URL';
   url: string;
   previewToken?: string;
+  filename?: string;
 }
 
 export interface FileSubmissionInput {

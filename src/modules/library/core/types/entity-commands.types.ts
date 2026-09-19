@@ -3,6 +3,7 @@ export type SyncEntityType =
 
 export interface UpsertSyncCollectionCommand {
   userId: string;
+  projectId?: string;
   existingId?: string;
   name: string;
   description?: string;

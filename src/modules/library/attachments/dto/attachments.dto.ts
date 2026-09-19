@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsArray } from 'class-validator';
 
 export class CreateAttachmentDto {
   @IsString()
@@ -38,3 +38,30 @@ export class ReplaceAttachmentFileDto {
   @IsOptional()
   comment?: string;
 }
+
+export class RenameAttachmentDto {
+  @IsString()
+  @IsOptional()
+  filename?: string;
+
+  @IsString()
+  @IsOptional()
+  pattern?: string;
+}
+
+export class BatchRenameAttachmentsDto {
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  itemIds?: string[];
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  attachmentIds?: string[];
+
+  @IsString()
+  @IsOptional()
+  pattern?: string;
+}
+

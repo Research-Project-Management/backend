@@ -139,7 +139,7 @@ export class NotesController {
     const expectedVersion =
       body.expectedVersion ??
       (ifMatch ? parseInt(ifMatch.replace(/["']/g, ''), 10) : undefined);
-    if (!expectedVersion || isNaN(expectedVersion)) {
+    if (expectedVersion === undefined || isNaN(expectedVersion)) {
       throw new BadRequestException(
         'Optimistic locking requirement: expectedVersion or If-Match header is required',
       );

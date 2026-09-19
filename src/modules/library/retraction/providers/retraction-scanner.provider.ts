@@ -78,17 +78,18 @@ export class RetractionScannerProvider {
     // 3. Online Scan via Crossref / OpenAlex if DOI is available
     if (cleanDoiVal) {
       try {
-        const onlineResult = await this.queryOnlineRetraction(cleanDoiVal);
-        if (onlineResult) {
+        const { retraction, isVerifiedClean } =
+          await this.queryOnlineRetraction(cleanDoiVal);
+        if (retraction) {
           // Save to local retraction database
           await this.retractionDb.saveRetraction(
             cleanDoiVal,
-            onlineResult,
+            retraction,
             cleanPmidVal,
           );
-          return onlineResult;
-        } else {
-          // Record as verified clean to eliminate redundant online calls on future scans
+          return retraction;
+        } else if (isVerifiedClean) {
+          // Record as verified clean only when online API successfully returned 200 with no retraction notices
           await this.retractionDb.saveClean(cleanDoiVal, cleanPmidVal);
         }
       } catch (err: any) {
@@ -101,9 +102,10 @@ export class RetractionScannerProvider {
     return null;
   }
 
-  private async queryOnlineRetraction(
-    doi: string,
-  ): Promise<RetractionDetails | null> {
+  private async queryOnlineRetraction(doi: string): Promise<{
+    retraction: RetractionDetails | null;
+    isVerifiedClean: boolean;
+  }> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3500);
 
@@ -118,10 +120,14 @@ export class RetractionScannerProvider {
         },
       });
 
-      if (!res.ok) return null;
+      if (!res.ok) {
+        return { retraction: null, isVerifiedClean: false };
+      }
       const data: any = await res.json();
       const message = data?.message;
-      if (!message) return null;
+      if (!message) {
+        return { retraction: null, isVerifiedClean: false };
+      }
 
       // Check Crossref update-to relations
       const updateTo = message['update-to'];
@@ -130,13 +136,16 @@ export class RetractionScannerProvider {
           const updateType = (update.type || '').toLowerCase();
           if (updateType === 'retraction') {
             return {
-              nature: 'retraction',
-              reason: update.label || 'Retracted by publisher',
-              noticeUrl: update.doi
-                ? `https://doi.org/${update.doi}`
-                : undefined,
-              date: update.updated?.['date-time'] || undefined,
-              source: 'crossref',
+              retraction: {
+                nature: 'retraction',
+                reason: update.label || 'Retracted by publisher',
+                noticeUrl: update.doi
+                  ? `https://doi.org/${update.doi}`
+                  : undefined,
+                date: update.updated?.['date-time'] || undefined,
+                source: 'crossref',
+              },
+              isVerifiedClean: false,
             };
           }
           if (
@@ -144,12 +153,15 @@ export class RetractionScannerProvider {
             updateType === 'concern'
           ) {
             return {
-              nature: 'expression_of_concern',
-              reason: update.label || 'Publisher issued expression of concern',
-              noticeUrl: update.doi
-                ? `https://doi.org/${update.doi}`
-                : undefined,
-              source: 'crossref',
+              retraction: {
+                nature: 'expression_of_concern',
+                reason: update.label || 'Publisher issued expression of concern',
+                noticeUrl: update.doi
+                  ? `https://doi.org/${update.doi}`
+                  : undefined,
+                source: 'crossref',
+              },
+              isVerifiedClean: false,
             };
           }
         }
@@ -162,19 +174,24 @@ export class RetractionScannerProvider {
           const name = (ass.name || '').toLowerCase();
           if (name === 'retraction' || name === 'retracted') {
             return {
-              nature: 'retraction',
-              reason: ass.value || 'Publisher retraction notice recorded',
-              source: 'crossref',
+              retraction: {
+                nature: 'retraction',
+                reason: ass.value || 'Publisher retraction notice recorded',
+                source: 'crossref',
+              },
+              isVerifiedClean: false,
             };
           }
         }
       }
+
+      // 200 OK received with valid payload and no retraction notices found
+      return { retraction: null, isVerifiedClean: true };
     } catch {
-      // Ignore network timeout/failure
+      // Network timeout, connection abort, or JSON parse failure: transient error, not clean
+      return { retraction: null, isVerifiedClean: false };
     } finally {
       clearTimeout(timeout);
     }
-
-    return null;
   }
 }

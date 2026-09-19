@@ -140,13 +140,20 @@ export class CollectionsService {
     dto: CreateCollectionDto,
     projectId?: string,
   ) {
+    const effectiveProjectId = projectId || dto.projectId || null;
+
     // Normalize parentId from parentId or parent, treating 'root' or empty string as null
     const rawParentId = normalizeParentId(
       dto.parentId !== undefined ? dto.parentId : dto.parent,
     );
 
     if (rawParentId) {
-      const parent = await this.repo.findById(userId, rawParentId);
+      const parent = await this.repo.findById(
+        userId,
+        rawParentId,
+        undefined,
+        effectiveProjectId || undefined,
+      );
       if (!parent) {
         throw new BadRequestException(
           `Parent collection not found: ${rawParentId}`,
@@ -154,7 +161,6 @@ export class CollectionsService {
       }
     }
 
-    const effectiveProjectId = projectId || dto.projectId || null;
     const cleanName = sanitizeCollectionName(dto.name);
     if (!cleanName) {
       throw new UnprocessableEntityException('Collection name cannot be empty');
@@ -173,7 +179,10 @@ export class CollectionsService {
       projectId: effectiveProjectId,
     });
 
-    await this.invalidateCollectionsCache(userId);
+    await this.invalidateCollectionsCache(
+      userId,
+      effectiveProjectId || undefined,
+    );
     return { collection };
   }
 
@@ -298,12 +307,30 @@ export class CollectionsService {
 
     const destinationCollectionId =
       collectionId === 'unfiled' ? null : collectionId;
-    await this.repo.moveItems(userId, destinationCollectionId, itemIds);
+
+    // Verify items belong to the requesting user or project scope before moving
+    const scopeWhere =
+      projectId && projectId !== 'user' ? { projectId } : { userId };
+    const ownedItems = await this.prisma.item.findMany({
+      where: { id: { in: itemIds }, ...scopeWhere },
+      select: { id: true },
+    });
+    const ownedItemIds = ownedItems.map((i) => i.id);
+
+    if (ownedItemIds.length === 0) {
+      return {
+        message: 'No owned items to move',
+        count: 0,
+        targetCollectionId: destinationCollectionId,
+      };
+    }
+
+    await this.repo.moveItems(userId, destinationCollectionId, ownedItemIds);
 
     await this.invalidateCollectionsCache(userId, projectId);
     return {
       message: 'Items moved successfully',
-      count: itemIds.length,
+      count: ownedItemIds.length,
       targetCollectionId: destinationCollectionId,
     };
   }
@@ -417,7 +444,8 @@ export class CollectionsService {
     tx: Prisma.TransactionClient,
     helpers: TransactionHelpers,
   ): Promise<UpsertSyncEntityResult> {
-    const targetUserId = command.userId || (command as any).projectId || '';
+    const targetUserId = command.userId;
+    const targetProjectId = command.projectId || null;
     if (command.existingId) {
       const existing = await tx.collection.findUnique({
         where: { id: command.existingId },
@@ -452,6 +480,7 @@ export class CollectionsService {
       const created = await tx.collection.create({
         data: {
           userId: targetUserId,
+          projectId: targetProjectId,
           name: command.name,
           description: command.description,
           parentId: command.parentCollectionId || null,
@@ -487,7 +516,7 @@ export class CollectionsService {
     tx: Prisma.TransactionClient,
     helpers: TransactionHelpers,
   ): Promise<void> {
-    const targetUserId = command.userId || (command as any).projectId || '';
+    const targetUserId = command.userId || '';
     const { entityId } = command;
     const existing = await tx.collection.findUnique({
       where: { id: entityId },

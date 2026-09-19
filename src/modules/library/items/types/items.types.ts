@@ -382,6 +382,7 @@ export interface CreateItemData {
   filename?: string;
   mimeType?: string;
   size?: number;
+  fileHash?: string;
   collectionId?: string | null;
   collectionIds?: string[] | null;
   uploadedById: string;

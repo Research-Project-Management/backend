@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Delete,
   Body,
   Param,
@@ -23,6 +24,8 @@ import { PrismaService } from '../../../core/database/prisma.service';
 import {
   CreateAttachmentDto,
   ReplaceAttachmentFileDto,
+  RenameAttachmentDto,
+  BatchRenameAttachmentsDto,
 } from './dto/attachments.dto';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/auth.guard';
 import { CurrentUser } from '../../../modules/iam/authn/decorators/user.decorator';
@@ -571,6 +574,41 @@ export class AttachmentsController {
     });
   }
 
+  @Patch(['attachments/:attachmentId/rename', 'items/:itemId/attachments/:attachmentId/rename'])
+  @ProjectRoles('owner', 'contributor')
+  async renameAttachment(
+    @CurrentUser('id') userId: string,
+    @Param('attachmentId') attachmentId: string,
+    @Body() dto: RenameAttachmentDto,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
+  ) {
+    const effectiveProjectId = toValidProjectId(paramProjectId || queryProjectId);
+    return this.attachmentsService.renameAttachment(
+      userId,
+      attachmentId,
+      dto,
+      effectiveProjectId,
+    );
+  }
+
+  @Post(['attachments/batch-rename', 'batch-rename-attachments'])
+  @ProjectRoles('owner', 'contributor')
+  @HttpCode(HttpStatus.OK)
+  async batchRenameAttachments(
+    @CurrentUser('id') userId: string,
+    @Body() dto: BatchRenameAttachmentsDto,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
+  ) {
+    const effectiveProjectId = toValidProjectId(paramProjectId || queryProjectId);
+    return this.attachmentsService.batchRenameAttachments(
+      userId,
+      dto,
+      effectiveProjectId,
+    );
+  }
+
   private async resolveAttachmentItemId(attachmentId: string): Promise<string> {
     const attachment = await this.prisma.attachment.findUnique({
       where: { id: attachmentId },
@@ -582,3 +620,4 @@ export class AttachmentsController {
     return attachment.itemId;
   }
 }
+

@@ -104,6 +104,7 @@ export interface ItemMetadata {
   archiveLocation?: string;
   archiveId?: string;
   repository?: string;
+  genre?: string;
   callNumber?: string;
   libraryCatalog?: string;
   bookTitle?: string;

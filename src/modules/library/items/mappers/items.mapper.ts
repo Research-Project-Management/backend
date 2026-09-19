@@ -1,8 +1,15 @@
 import { getFileContentPath } from '@/modules/storage/storage.port';
-import { ITEM_COLUMN_METADATA_FIELDS } from '../constants/items.constants';
+import {
+  ITEM_COLUMN_METADATA_FIELDS,
+  TYPE_SPECIFIC_EXTRA_FIELDS,
+} from '../constants/items.constants';
 import { BASE_FIELD_MAPPINGS } from '../../types/constants/types.constants';
 import { cleanAbstractText, cleanCommentText } from '../utils/items.utils';
-import { resolveCanonicalArxivCategory } from '../../tags/utils/tags.utils';
+import {
+  resolveCanonicalArxivCategory,
+  normalizeTags,
+  cleanSingleTag,
+} from '../../tags/utils/tags.utils';
 
 export class ItemsMapper {
   /**
@@ -115,8 +122,13 @@ export class ItemsMapper {
         // Not valid json, ignore
       }
     } else if (typeof it.extra === 'string' && it.extra.trim()) {
-      // Parse plain text key-value lines (e.g. Zotero style "Citations: 23526", "Edition: 2nd")
+      // Parse plain text key-value lines (legacy format)
       const lines = it.extra.split(/\r?\n/);
+      const remainingLines: string[] = [];
+      const nonColumnFieldsSet = new Set(
+        TYPE_SPECIFIC_EXTRA_FIELDS.map((f) => f.toLowerCase()),
+      );
+
       for (const line of lines) {
         const match = line.match(/^([a-zA-Z0-9_\s]+):\s*(.+)$/);
         if (match) {
@@ -125,6 +137,7 @@ export class ItemsMapper {
           const camelKey = rawKey
             .replace(/\s+([a-zA-Z])/g, (_: string, c: string) => c.toUpperCase())
             .replace(/^[A-Z]/, (c: string) => c.toLowerCase());
+          const lowerKey = camelKey.toLowerCase();
 
           if (/^citations?(\s*count)?$/i.test(rawKey)) {
             const num = parseInt(val.replace(/,/g, ''), 10);
@@ -138,18 +151,25 @@ export class ItemsMapper {
             extraFields[camelKey] = resolvedNum;
             extraFields.numPages = resolvedNum;
             extraFields.numberOfPages = resolvedNum;
-          } else {
+          } else if (
+            nonColumnFieldsSet.has(lowerKey) ||
+            ITEM_COLUMN_METADATA_FIELDS.has(camelKey)
+          ) {
             let parsedVal: any = val;
             if (/^(true|false)$/i.test(val)) parsedVal = val.toLowerCase() === 'true';
             else if (/^\d+$/.test(val)) parsedVal = parseInt(val, 10);
             extraFields[camelKey] = parsedVal;
+          } else {
+            remainingLines.push(line);
           }
+        } else {
+          remainingLines.push(line);
         }
       }
+      it.extra = remainingLines.join('\n');
     }
-    it.extraFields = extraFields;
 
-    // If _rawExtra key is present, it means the original extra was plain text (e.g. Zotero format).
+    // If _rawExtra key is present, it means the original extra was plain text.
     // Restore it.extra to the original plain text so consumers (export, FE) can access it.
     if (typeof extraFields._rawExtra === 'string') {
       it.extra = extraFields._rawExtra;
@@ -158,19 +178,9 @@ export class ItemsMapper {
       typeof it.extra === 'string' &&
       it.extra.trim().startsWith('{')
     ) {
-      const lines: string[] = [];
-      for (const [k, v] of Object.entries(extraFields)) {
-        if (
-          v !== null &&
-          v !== undefined &&
-          v !== '' &&
-          !ITEM_COLUMN_METADATA_FIELDS.has(k)
-        ) {
-          lines.push(`${k}: ${String(v)}`);
-        }
-      }
-      it.extra = lines.length > 0 ? lines.join('\n') : '';
+      it.extra = '';
     }
+    it.extraFields = extraFields;
 
     // Explicit projection of known academic fields from extraFields (legacy fallback for old records
     // that were stored before dedicated DB columns existed).
@@ -237,9 +247,18 @@ export class ItemsMapper {
         it.rights ?? extraFields.license ?? extraFields.rights ?? null;
     }
 
-    // Project any remaining non-column extraFields onto top-level item properties
+    // Project any remaining non-column extraFields onto top-level item properties (excluding internal/note fields)
     for (const [k, v] of Object.entries(extraFields)) {
-      if (v !== undefined && v !== null && (it as any)[k] === undefined) {
+      if (
+        v !== undefined &&
+        v !== null &&
+        (it as any)[k] === undefined &&
+        k !== 'comment' &&
+        k !== 'comments' &&
+        k !== 'notes' &&
+        k !== 'provenance' &&
+        k !== '_rawExtra'
+      ) {
         (it as any)[k] = v;
       }
     }
@@ -276,9 +295,6 @@ export class ItemsMapper {
       if (it.itemType === 'preprint') {
         it.archiveId = `arXiv:${canonicalCleanId}`;
         it.repository = it.repository || 'arXiv';
-        if (!it.publicationTitle && !it.journal) {
-          it.publicationTitle = 'arXiv';
-        }
       }
 
       const existingExtra = typeof it.extra === 'string' ? it.extra.trim() : '';
@@ -389,17 +405,22 @@ export class ItemsMapper {
 
     // 6. Canonical Tags & Labels Projection (Dual format: strings for UI, Zotero objects for API parity)
     if (Array.isArray(it.itemTags) && it.itemTags.length > 0) {
-      const tagNames = it.itemTags
+      const rawTagNames = it.itemTags
         .map((t: any) => t.tag?.name || t.name)
         .filter(Boolean);
+      const tagNames = normalizeTags(rawTagNames);
       it.tags = tagNames;
       it.labels = tagNames;
       it.keywords = tagNames;
       it.zoteroTags = it.itemTags
-        .map((t: any) => ({
-          tag: t.tag?.name || t.name || '',
-          type: t.tag?.type === 'automatic' ? 1 : 0,
-        }))
+        .map((t: any) => {
+          const rawName = t.tag?.name || t.name || '';
+          const cleanedName = cleanSingleTag(rawName) || rawName;
+          return {
+            tag: cleanedName,
+            type: t.tag?.type === 'automatic' ? 1 : 0,
+          };
+        })
         .filter((zt: any) => Boolean(zt.tag));
     } else {
       const rawTags = Array.isArray(it.tags)
@@ -409,32 +430,33 @@ export class ItemsMapper {
           : Array.isArray(it.keywords)
             ? it.keywords
             : [];
-      const tagNames = rawTags
-        .map((t: any) =>
-          typeof t === 'string'
-            ? t
-            : typeof t?.tag === 'string'
-              ? t.tag
-              : typeof t?.name === 'string'
-                ? t.name
-                : '',
-        )
-        .filter(Boolean);
+      const tagNames = normalizeTags(rawTags);
       it.tags = tagNames;
       it.labels = tagNames;
       it.keywords = tagNames;
       it.zoteroTags = rawTags
-        .map((t: any) => ({
-          tag: typeof t === 'string' ? t : t?.tag || t?.name || '',
-          type:
-            typeof t === 'object' && t?.type !== undefined
-              ? typeof t.type === 'number'
-                ? t.type
-                : t.type === 'automatic'
-                  ? 1
-                  : 0
-              : 0,
-        }))
+        .map((t: any) => {
+          const rawStr =
+            typeof t === 'string'
+              ? t
+              : typeof t?.tag === 'string'
+                ? t.tag
+                : typeof t?.name === 'string'
+                  ? t.name
+                  : '';
+          const cleanedName = cleanSingleTag(rawStr) || rawStr;
+          return {
+            tag: cleanedName,
+            type:
+              typeof t === 'object' && t?.type !== undefined
+                ? typeof t.type === 'number'
+                  ? t.type
+                  : t.type === 'automatic'
+                    ? 1
+                    : 0
+                : 0,
+          };
+        })
         .filter((zt: any) => Boolean(zt.tag));
     }
 
@@ -508,6 +530,11 @@ export class ItemsMapper {
       it.notes = [];
     }
 
+    // Comments belong strictly in notes (child notes), not in extraFields
+    if (it.extraFields && 'comment' in it.extraFields) {
+      delete it.extraFields.comment;
+    }
+
     // 9. Harmonize Publication Venue, Publisher & Field Aliases (Schema v42 DRY Parity)
     const baseMap = BASE_FIELD_MAPPINGS[it.itemType];
     if (baseMap) {
@@ -556,15 +583,49 @@ export class ItemsMapper {
         (it.doi && String(it.doi).includes('arXiv')) ||
         (it.publicationTitle && /arxiv/i.test(it.publicationTitle)),
       );
-      if (isArxiv && (it.publisher === 'IEEE' || it.publisher === 'ACM' || it.publisher === 'MIT Press' || !it.publisher)) {
-        it.publisher = 'arXiv';
-      }
-      it.repository = it.repository || it.publisher || (it.publicationTitle && !/^(ieee|acm)$/i.test(it.publicationTitle) ? it.publicationTitle : '') || (isArxiv ? 'arXiv' : '') || '';
-      it.publisher = it.publisher || it.repository || '';
-      if (isArxiv && !it.repository) it.repository = 'arXiv';
-      if (isArxiv && (!it.publicationTitle || /^(ieee|acm)$/i.test(it.publicationTitle))) it.publicationTitle = 'arXiv';
-      it.genre = it.genre || it.type || '';
-      it.archiveID = it.archiveID || (it as any).number || (it.arxivId ? `arXiv:${String(it.arxivId).replace(/^arxiv:\s*/i, '').replace(/v\d+$/i, '')}` : '') || '';
+      it.repository = it.repository || (isArxiv ? 'arXiv' : '') || '';
+      it.genre = it.genre || it.type || 'Preprint';
+      const cleanArxivNum = it.arxivId
+        ? String(it.arxivId).replace(/^arxiv:\s*/i, '').replace(/v\d+$/i, '').trim()
+        : '';
+      it.archiveID = it.archiveID || (cleanArxivNum ? `arXiv:${cleanArxivNum}` : '') || '';
+      it.archiveId = it.archiveID;
+
+      // In Zotero Schema v42, preprint uses repository, NOT publicationTitle or publisher.
+      it.repository =
+        it.repository ||
+        (it.publisher && !/^arxiv$/i.test(it.publisher.trim())
+          ? it.publisher
+          : '') ||
+        (isArxiv ? 'arXiv' : '') ||
+        '';
+      delete it.publisher;
+      delete it.publicationTitle;
+      delete it.journal;
+    } else if (it.itemType === 'conferencePaper') {
+      it.proceedingsTitle = it.proceedingsTitle || it.publicationTitle || '';
+      it.publicationTitle = it.publicationTitle || it.proceedingsTitle || '';
+      it.eventPlace = it.eventPlace || it.place || '';
+      it.place = it.place || it.eventPlace || '';
+    } else if (it.itemType === 'bookSection') {
+      it.bookTitle = it.bookTitle || it.publicationTitle || '';
+      it.publicationTitle = it.publicationTitle || it.bookTitle || '';
+    } else if (it.itemType === 'thesis') {
+      it.university = it.university || it.publisher || '';
+      it.publisher = it.publisher || it.university || '';
+      it.thesisType = it.thesisType || it.type || it.genre || '';
+    } else if (it.itemType === 'report') {
+      it.institution = it.institution || it.publisher || '';
+      it.publisher = it.publisher || it.institution || '';
+      it.reportType = it.reportType || it.type || '';
+      it.reportNumber = it.reportNumber || (it as any).number || '';
+    } else if (it.itemType === 'webpage') {
+      it.websiteTitle = it.websiteTitle || it.publicationTitle || '';
+      it.publicationTitle = it.publicationTitle || it.websiteTitle || '';
+      it.websiteType = it.websiteType || it.type || '';
+    } else if (it.itemType === 'blogPost') {
+      it.blogTitle = it.blogTitle || it.publicationTitle || '';
+      it.publicationTitle = it.publicationTitle || it.blogTitle || '';
     } else if (it.itemType === 'patent') {
       it.issuingAuthority = it.issuingAuthority || it.country || it.authority || '';
       it.authority = it.authority || it.issuingAuthority || '';

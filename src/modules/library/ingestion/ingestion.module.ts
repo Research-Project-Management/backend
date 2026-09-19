@@ -42,6 +42,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { LIBRARY_INGESTION_QUEUE } from './constants/queue.constants';
 import { IngestionQueueConsumer } from './services/ingestion-queue.consumer';
 import { NotesModule } from '../notes/notes.module';
+import { UrlMetadataScraperService } from './services/url-metadata-scraper.service';
 
 @Module({
   imports: [
@@ -96,6 +97,7 @@ import { NotesModule } from '../notes/notes.module';
       useExisting: IngestionService,
     },
     UrlCaptureProvider,
+    UrlMetadataScraperService,
   ],
   exports: [
     INGESTION_PORT,
@@ -104,6 +106,7 @@ import { NotesModule } from '../notes/notes.module';
     QueueService,
     IngestionQueueConsumer,
     UrlCaptureService,
+    UrlMetadataScraperService,
     WatchdogService,
     IngestionPipelineRunner,
     IngestionWatchdogService,

@@ -34,9 +34,9 @@ export class OverviewService {
     const completed = stateCounts.completed || 0;
     const cancelled = stateCounts.cancelled || 0;
 
-    const totalIssues = backlog + unstarted + started + completed;
-    const totalWorkItems = totalIssues + cancelled;
-    const actionableTotal = totalIssues;
+    const totalIssues = backlog + unstarted + started + completed + cancelled;
+    const totalWorkItems = totalIssues;
+    const actionableTotal = backlog + unstarted + started + completed;
     const completionPercentage =
       actionableTotal > 0
         ? parseFloat(((completed / actionableTotal) * 100).toFixed(1))

@@ -205,12 +205,14 @@ export class QueryRepository {
     });
   }
 
-  async findByDoi(userId: string, doi: string, tx?: Prisma.TransactionClient) {
+  async findByDoi(userId: string, doi: string, projectId?: string, tx?: Prisma.TransactionClient) {
     if (!isUuid(userId)) return null;
     const client = this.getClient(tx);
+    const scopeWhere =
+      projectId && projectId !== 'user' ? { projectId } : { userId };
     return client.item.findFirst({
       where: {
-        userId,
+        ...scopeWhere,
         doi,
         deletedAt: null,
       },
@@ -410,7 +412,7 @@ export class QueryRepository {
     );
     const where: any = hasValidProject
       ? { projectId: options.projectId }
-      : { userId };
+      : { userId, projectId: null };
 
     if (view === 'trash') {
       where.deletedAt = { not: null };

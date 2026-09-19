@@ -10,6 +10,7 @@ import {
   HttpCode,
   HttpStatus,
   Inject,
+  BadRequestException,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/auth.guard';
 import { CurrentUser } from '../../../modules/iam/authn/decorators/user.decorator';
@@ -81,6 +82,7 @@ export class IngestionController {
           kind: 'URL',
           url: dto.url || '',
           previewToken: dto.previewToken,
+          filename: dto.filename,
         };
         break;
       case 'FILE':
@@ -99,11 +101,7 @@ export class IngestionController {
         };
         break;
       default:
-        payload = {
-          kind: 'IDENTIFIER',
-          identifierType: 'DOI',
-          value: '',
-        };
+        throw new BadRequestException('Unknown ingestion kind: ' + dto.kind);
     }
 
     return this.ingestionService.submit({
@@ -127,6 +125,9 @@ export class IngestionController {
     @CurrentUser('id') userId: string,
     @Param('runId') runId: string,
   ) {
+    if (!isUUID(runId)) {
+      throw new BadRequestException('Invalid run ID');
+    }
     return this.ingestionService.getRunStatus(userId, runId);
   }
 
@@ -139,6 +140,9 @@ export class IngestionController {
     @CurrentUser('id') userId: string,
     @Param('runId') runId: string,
   ) {
+    if (!isUUID(runId)) {
+      throw new BadRequestException('Invalid run ID');
+    }
     return this.ingestionService.getRunProgress(userId, runId);
   }
 
@@ -157,7 +161,7 @@ export class IngestionController {
 
   @Post()
   @ProjectRoles('owner', 'contributor')
-  @HttpCode(HttpStatus.OK)
+  @HttpCode(HttpStatus.ACCEPTED)
   async ingestUnified(
     @CurrentUser('id') userId: string,
     @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,

@@ -1,4 +1,9 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { PrismaService } from '../../../../core/database/prisma.service';
 import { LocalEmbeddingService } from './local-embedding.service';
 import { VectorIndexService } from './vector-index.service';
@@ -18,8 +23,19 @@ export class SemanticSearchService {
     private readonly vectorIndex: VectorIndexService,
   ) {}
 
-  private getScopeWhere(userId: string, projectId?: string) {
+  private async getScopeWhere(userId: string, projectId?: string) {
     if (projectId && projectId !== 'user') {
+      const member = await this.prisma.projectMember.findUnique({
+        where: {
+          projectId_userId: { projectId, userId },
+        },
+        select: { id: true },
+      });
+      if (!member) {
+        throw new ForbiddenException(
+          `Access denied: You are not a member of project ${projectId}`,
+        );
+      }
       return { projectId, deletedAt: null };
     }
     return { userId, deletedAt: null };
@@ -33,7 +49,7 @@ export class SemanticSearchService {
     dto: SemanticSearchDto,
   ): Promise<SemanticSearchResponse> {
     const start = Date.now();
-    const scopeWhere = this.getScopeWhere(userId, dto.projectId);
+    const scopeWhere = await this.getScopeWhere(userId, dto.projectId);
 
     // 1. Fetch active library items for the user/project scope
     const items = await this.prisma.item.findMany({
@@ -115,7 +131,7 @@ export class SemanticSearchService {
     limit = 5,
     projectId?: string,
   ): Promise<SemanticSearchResultItem[]> {
-    const scopeWhere = this.getScopeWhere(userId, projectId);
+    const scopeWhere = await this.getScopeWhere(userId, projectId);
 
     // 1. Verify target item exists
     const targetItem = await this.prisma.item.findFirst({
@@ -226,7 +242,7 @@ export class SemanticSearchService {
     userId: string,
     projectId?: string,
   ): Promise<{ indexed: number; total: number }> {
-    const scopeWhere = this.getScopeWhere(userId, projectId);
+    const scopeWhere = await this.getScopeWhere(userId, projectId);
 
     const items = await this.prisma.item.findMany({
       where: scopeWhere,

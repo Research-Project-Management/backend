@@ -8,7 +8,13 @@ import { NormalizationPolicy } from '../policies/normalization.policy';
 import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 import { PdfProvider } from '../../attachments/providers/pdf.provider';
 import { QueryClassifier } from '../metadata/classifiers/query.classifier';
-import { normalizeAcademicTitleCase } from '../../items/utils/items.utils';
+import {
+  normalizeAcademicTitleCase,
+  normalizeArxivId,
+  normalizePmid,
+  normalizeIsbn,
+} from '../../items/utils/items.utils';
+import { UrlMetadataScraperService } from '../services/url-metadata-scraper.service';
 import { randomUUID } from 'crypto';
 
 @Injectable()
@@ -24,6 +30,7 @@ export class IdentifyStage {
     @Inject(STORAGE_PORT)
     private readonly storagePort?: IStoragePort,
     @Optional() private readonly pdf?: PdfProvider,
+    @Optional() private readonly urlScraper?: UrlMetadataScraperService,
   ) {}
 
   /**
@@ -62,7 +69,9 @@ export class IdentifyStage {
             confidenceScore: 1.0,
           });
         } else if (payload.identifierType === 'ARXIV') {
-          const cleanArxiv = payload.value.replace(/^arxiv:\s*/i, '').trim();
+          const cleanArxiv =
+            normalizeArxivId(payload.value) ||
+            payload.value.replace(/^arxiv:\s*/i, '').trim();
           const normalized = this.normalizer.normalize({ arxivId: cleanArxiv });
           candidates.push({
             candidateId: randomUUID(),
@@ -85,7 +94,9 @@ export class IdentifyStage {
             confidenceScore: 1.0,
           });
         } else if (payload.identifierType === 'PMID') {
-          const cleanPmid = payload.value.replace(/^pmid:\s*/i, '').trim();
+          const cleanPmid =
+            normalizePmid(payload.value) ||
+            payload.value.replace(/^pmid:\s*/i, '').trim();
           const normalized = this.normalizer.normalize({ pmid: cleanPmid });
           candidates.push({
             candidateId: randomUUID(),
@@ -108,10 +119,12 @@ export class IdentifyStage {
             confidenceScore: 1.0,
           });
         } else if (payload.identifierType === 'ISBN') {
-          const cleanIsbn = payload.value
-            .replace(/[-\s]/g, '')
-            .replace(/^isbn:?\s*/i, '')
-            .trim();
+          const cleanIsbn =
+            normalizeIsbn(payload.value) ||
+            payload.value
+              .replace(/[-\s]/g, '')
+              .replace(/^isbn:?\s*/i, '')
+              .trim();
           const normalized = this.normalizer.normalize({ isbn: cleanIsbn });
           candidates.push({
             candidateId: randomUUID(),
@@ -361,7 +374,8 @@ export class IdentifyStage {
 
       case 'URL': {
         const classified = QueryClassifier.classify(payload.url);
-        const extractedRaw: Record<string, any> = { url: payload.url };
+        let extractedRaw: Record<string, any> = { url: payload.url };
+
         if (classified.type === 'DOI') {
           extractedRaw.doi = classified.clean;
         } else if (classified.type === 'ARXIV') {
@@ -371,7 +385,59 @@ export class IdentifyStage {
         } else if (classified.type === 'ISBN') {
           extractedRaw.isbn = classified.clean;
         }
+
+        // Active Academic Web & PDF Scraper
+        if (this.urlScraper) {
+          try {
+            const scraped = await this.urlScraper.scrape(payload.url, {
+              scopeId,
+              preferredFilename: payload.filename,
+            });
+
+            extractedRaw = {
+              ...extractedRaw,
+              url: payload.url,
+              title: scraped.title || extractedRaw.title,
+              authors: scraped.authors || extractedRaw.authors,
+              creators: scraped.creators || extractedRaw.creators,
+              doi: scraped.doi || extractedRaw.doi,
+              arxivId: scraped.arxivId || extractedRaw.arxivId,
+              pmid: scraped.pmid || extractedRaw.pmid,
+              isbn: scraped.isbn || extractedRaw.isbn,
+              issn: scraped.issn || extractedRaw.issn,
+              year: scraped.year || extractedRaw.year,
+              publicationDate:
+                scraped.publicationDate || extractedRaw.publicationDate,
+              publicationTitle:
+                scraped.publicationTitle || extractedRaw.publicationTitle,
+              journal: scraped.journal || extractedRaw.journal,
+              publisher: scraped.publisher || extractedRaw.publisher,
+              abstract: scraped.abstract || extractedRaw.abstract,
+              keywords: scraped.keywords || extractedRaw.keywords,
+              fileId: scraped.fileId,
+              filename: scraped.filename || payload.filename,
+              fileUrl:
+                scraped.pdfUrl || (scraped.isPdf ? payload.url : undefined),
+            };
+          } catch (scrapeErr: any) {
+            this.logger.warn(
+              `UrlMetadataScraper error for "${payload.url}": ${scrapeErr?.message}`,
+            );
+          }
+        }
+
         const normalized = this.normalizer.normalize(extractedRaw);
+        if (extractedRaw.fileId) normalized.fileId = extractedRaw.fileId;
+        if (extractedRaw.filename) normalized.filename = extractedRaw.filename;
+        if (extractedRaw.fileUrl) normalized.fileUrl = extractedRaw.fileUrl;
+
+        const hasIdentifier = Boolean(
+          normalized.doi || normalized.arxivId || normalized.pmid,
+        );
+        const hasTitle = Boolean(
+          normalized.title && normalized.title !== 'Untitled Document',
+        );
+
         candidates.push({
           candidateId: randomUUID(),
           sourceKind: 'URL',
@@ -385,10 +451,7 @@ export class IdentifyStage {
             'UrlCapture',
           ),
           normalizedMetadata: normalized,
-          confidenceScore:
-            classified.type !== 'TITLE' && classified.type !== 'URL'
-              ? 0.95
-              : 0.8,
+          confidenceScore: hasIdentifier ? 0.95 : hasTitle ? 0.88 : 0.7,
         });
         break;
       }

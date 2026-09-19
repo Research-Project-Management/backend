@@ -287,7 +287,11 @@ export function toItemData(
     citationCount: metadata.citationCount ?? null,
     referenceCount: metadata.referenceCount ?? null,
     extra: metadata.extra,
-    extraFields,
+    extraFields: (() => {
+      const cleanEf = { ...extraFields };
+      delete cleanEf.comment;
+      return cleanEf;
+    })(),
     notes: (() => {
       const consolidatedNotes: Array<Record<string, unknown> | string> =
         Array.isArray(metadata.notes) ? [...metadata.notes] : [];

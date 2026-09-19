@@ -257,9 +257,14 @@ export class CitationService {
 
     let year: number | string | undefined = metadata.year ?? undefined;
     if (!year && metadata.publicationDate) {
-      const parsedYear = new Date(metadata.publicationDate).getFullYear();
-      if (!isNaN(parsedYear)) {
-        year = parsedYear;
+      const yearMatch = String(metadata.publicationDate).match(/\b(\d{4})\b/);
+      if (yearMatch) {
+        year = parseInt(yearMatch[1], 10);
+      } else {
+        const parsedYear = new Date(metadata.publicationDate).getUTCFullYear();
+        if (!isNaN(parsedYear)) {
+          year = parsedYear;
+        }
       }
     }
 

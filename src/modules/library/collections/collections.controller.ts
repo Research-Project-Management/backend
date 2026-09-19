@@ -11,6 +11,7 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { CollectionsService } from './collections.service';
@@ -98,8 +99,11 @@ export class CollectionsController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    const effectiveProjectId =
-      paramProjectId || queryProjectId || dto.projectId;
+    const rawProjectId = paramProjectId || queryProjectId || dto.projectId;
+    if (rawProjectId && !isUUID(rawProjectId)) {
+      throw new BadRequestException('Invalid project ID');
+    }
+    const effectiveProjectId = toValidProjectId(rawProjectId || undefined);
     return this.collectionsService.createCollection(
       userId,
       dto,
@@ -116,7 +120,11 @@ export class CollectionsController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    const effectiveProjectId = paramProjectId || queryProjectId;
+    const rawProjectId = paramProjectId || queryProjectId;
+    if (rawProjectId && !isUUID(rawProjectId)) {
+      throw new BadRequestException('Invalid project ID');
+    }
+    const effectiveProjectId = rawProjectId;
     return this.collectionsService.getCollectionById(
       userId,
       collectionId,

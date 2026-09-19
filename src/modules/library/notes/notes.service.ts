@@ -204,9 +204,14 @@ export class NotesService implements IItemNotesExtractorPort {
         throw new NotFoundException(`Note ${command.existingId} not found`);
       }
 
+      if (existing.userId !== targetUserId) {
+        throw new ForbiddenException('Not authorized to update this note');
+      }
+
+      // Sync is authoritative: replace tags entirely rather than accumulate
       const mergedNoteTags =
         command.tags !== undefined
-          ? normalizeTags([...(existing.tags || []), ...command.tags])
+          ? normalizeTags(command.tags)
           : existing.tags;
 
       const updated = await tx.note.update({
