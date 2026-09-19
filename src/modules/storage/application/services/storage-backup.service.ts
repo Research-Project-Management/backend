@@ -59,13 +59,21 @@ export class StorageBackupService {
 
     const packager = new ZipPackager();
     let fileCount = 0;
-    const manifest: Array<{ id: string; name: string; size: string; mimeType?: string; path: string }> = [];
+    const manifest: Array<{
+      id: string;
+      name: string;
+      size: string;
+      mimeType?: string;
+      path: string;
+    }> = [];
 
     const addNodeToArchive = async (node: StorageNode, currentPath = '') => {
       if (node.isTrashed()) return;
 
       if (node.isFolder) {
-        const folderPath = currentPath ? `${currentPath}/${node.name}` : node.name;
+        const folderPath = currentPath
+          ? `${currentPath}/${node.name}`
+          : node.name;
         const children = await this.nodeRepo.list({
           projectId,
           parentId: node.id,
@@ -84,7 +92,9 @@ export class StorageBackupService {
               chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
             }
             const buf = Buffer.concat(chunks);
-            const entryPath = currentPath ? `${currentPath}/${node.name}` : node.name;
+            const entryPath = currentPath
+              ? `${currentPath}/${node.name}`
+              : node.name;
             packager.addFile(entryPath, buf, node.updatedAt);
             manifest.push({
               id: node.id,
@@ -95,7 +105,9 @@ export class StorageBackupService {
             });
             fileCount++;
           } catch (err: any) {
-            this.logger.warn(`Failed to read file ${node.id} for backup: ${err.message}`);
+            this.logger.warn(
+              `Failed to read file ${node.id} for backup: ${err.message}`,
+            );
           }
         }
       }
@@ -123,7 +135,10 @@ export class StorageBackupService {
     packager.addFile('backup-manifest.json', manifestBuffer);
 
     const archiveBuffer = packager.build();
-    const sha256 = crypto.createHash('sha256').update(archiveBuffer).digest('hex');
+    const sha256 = crypto
+      .createHash('sha256')
+      .update(archiveBuffer)
+      .digest('hex');
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const backupKey = `backups/projects/${projectId}/backup-${timestamp}.zip`;
 

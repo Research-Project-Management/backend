@@ -1,4 +1,9 @@
-import { Injectable, Inject, Optional, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  Inject,
+  Optional,
+  BadRequestException,
+} from '@nestjs/common';
 import * as crypto from 'crypto';
 import {
   STORAGE_DRIVER,

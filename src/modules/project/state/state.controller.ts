@@ -1,11 +1,4 @@
-import {
-  Controller,
-  Get,
-  Patch,
-  Param,
-  Body,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Patch, Param, Body, UseGuards } from '@nestjs/common';
 import {
   ApiTags,
   ApiBearerAuth,
@@ -30,7 +23,9 @@ export class StateController {
   constructor(private readonly stateService: StateService) {}
 
   @Get('states')
-  @ApiOperation({ summary: 'List all standard project lifecycle states and descriptions' })
+  @ApiOperation({
+    summary: 'List all standard project lifecycle states and descriptions',
+  })
   @ApiResponse({
     status: 200,
     description: 'List of project states',
@@ -42,7 +37,7 @@ export class StateController {
 
   @Get(':projectId/state')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get current lifecycle state of a project' })
   @ApiResponse({
     status: 200,

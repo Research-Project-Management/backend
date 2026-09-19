@@ -33,7 +33,7 @@ export class NotesController {
   constructor(private readonly notesService: NotesService) {}
 
   @Get()
-  @ProjectRoles('owner', 'contributor', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'List library notes for user or project' })
   async listNotes(
     @CurrentUser('id') currentUserId: string,
@@ -58,7 +58,7 @@ export class NotesController {
   }
 
   @Get(':id')
-  @ProjectRoles('owner', 'contributor', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get a library note by ID' })
   async getNote(
     @CurrentUser('id') currentUserId: string,
@@ -80,7 +80,7 @@ export class NotesController {
   }
 
   @Post()
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Create a note in user or project library' })
   async createNote(
     @CurrentUser('id') currentUserId: string,
@@ -98,7 +98,7 @@ export class NotesController {
   }
 
   @Get('items/:itemId')
-  @ProjectRoles('owner', 'contributor', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'List notes for an item' })
   async listNotesByItem(
     @CurrentUser('id') currentUserId: string,
@@ -115,7 +115,7 @@ export class NotesController {
   }
 
   @Post('items/:itemId/from-annotations')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Extract notes from annotations' })
   async extractNotesFromAnnotations(
     @CurrentUser('id') currentUserId: string,
@@ -125,7 +125,7 @@ export class NotesController {
   }
 
   @Patch(':id')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Update a note' })
   async updateNote(
     @CurrentUser('id') currentUserId: string,
@@ -156,7 +156,7 @@ export class NotesController {
   }
 
   @Delete(':id')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Delete a note' })
   async deleteNote(
     @CurrentUser('id') currentUserId: string,

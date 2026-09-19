@@ -18,10 +18,7 @@ export interface ILibraryFacade {
     userId: string,
     citeKeys: string[],
   ): Promise<{ content: string } | null>;
-  getItem(
-    scopeId: string,
-    itemId: string,
-  ): Promise<LibraryItemSummary | null>;
+  getItem(scopeId: string, itemId: string): Promise<LibraryItemSummary | null>;
   countItems(scopeId: string): Promise<number>;
   searchItems(scopeId: string, query: string): Promise<LibraryItemSummary[]>;
 }

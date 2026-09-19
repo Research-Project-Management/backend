@@ -46,7 +46,11 @@ export class RevertFileVersionUseCase {
     versionNumber: number,
     userId: string,
   ): Promise<RevertFileVersionOutput> {
-    const node = await this.accessPolicy.assertCanAccess(userId, fileId, 'write');
+    const node = await this.accessPolicy.assertCanAccess(
+      userId,
+      fileId,
+      'write',
+    );
 
     if (node.isFolder) {
       throw new BadRequestException('Cannot revert a folder');
@@ -65,7 +69,9 @@ export class RevertFileVersionUseCase {
 
     const blob = await this.blobRepo.findById(targetVersion.blobId);
     if (!blob) {
-      throw new NotFoundException('Data blob for target version does not exist');
+      throw new NotFoundException(
+        'Data blob for target version does not exist',
+      );
     }
 
     // 1. Calculate new version number

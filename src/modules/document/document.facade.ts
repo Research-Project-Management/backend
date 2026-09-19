@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { CoreRepository } from './core/core.repository';
+import { PageRepository } from './page/page.repository';
 import {
   PageListItem,
   PageWithDetails,
-} from './core/types/document-repository.interface';
+} from './page/types/page-repository.interface';
 import { PrismaService } from '@/core/database/prisma.service';
 
 export interface DocumentSummary {
@@ -41,7 +41,7 @@ export const DOCUMENT_FACADE = 'DOCUMENT_FACADE';
 @Injectable()
 export class DocumentFacade implements IDocumentFacade {
   constructor(
-    private readonly coreRepository: CoreRepository,
+    private readonly pageRepository: PageRepository,
     private readonly prisma: PrismaService,
   ) {}
 
@@ -49,7 +49,7 @@ export class DocumentFacade implements IDocumentFacade {
     pageId: string,
     projectId?: string,
   ): Promise<PageWithDetails | null> {
-    const page = await this.coreRepository.findPageById(pageId);
+    const page = await this.pageRepository.findPageById(pageId);
     if (!page) return null;
     if (projectId && page.projectId !== projectId) return null;
     return page;
@@ -83,11 +83,11 @@ export class DocumentFacade implements IDocumentFacade {
   }
 
   async getProjectPages(projectId: string): Promise<PageListItem[]> {
-    return this.coreRepository.findProjectPages(projectId);
+    return this.pageRepository.findProjectPages(projectId);
   }
 
   async getProjectPageTree(projectId: string): Promise<PageListItem[]> {
-    return this.coreRepository.findProjectPageTree(projectId);
+    return this.pageRepository.findProjectPageTree(projectId);
   }
 
   async countProjectPages(projectId: string): Promise<number> {

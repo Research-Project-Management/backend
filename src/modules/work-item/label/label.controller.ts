@@ -44,7 +44,7 @@ export class LabelController {
 
   @Get(['projects/:projectId/labels', 'project/:projectId/labels'])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'List all project labels with hierarchical sub-labels',
   })
@@ -59,7 +59,7 @@ export class LabelController {
   @Post(['projects/:projectId/labels', 'project/:projectId/labels'])
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Create a new project label' })
   @ApiResponse({ status: 201, description: 'Label created successfully' })
   async createProjectLabel(
@@ -75,7 +75,7 @@ export class LabelController {
     'project/:projectId/labels/:labelId',
   ])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get details of a specific project label' })
   async getProjectLabelById(
     @Param('projectId') projectId: string,
@@ -89,7 +89,7 @@ export class LabelController {
     'project/:projectId/labels/:labelId',
   ])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary: 'Update project label attributes or parent',
   })
@@ -106,7 +106,7 @@ export class LabelController {
     'project/:projectId/labels/:labelId',
   ])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Update project label (PUT alias)' })
   async putProjectLabel(
     @Param('projectId') projectId: string,
@@ -138,7 +138,7 @@ export class LabelController {
   ])
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Reorder project labels sequence' })
   async reorderProjectLabels(
     @Param('projectId') projectId: string,

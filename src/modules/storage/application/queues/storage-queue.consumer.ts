@@ -1,5 +1,10 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Logger, Inject, Optional, OnApplicationBootstrap } from '@nestjs/common';
+import {
+  Logger,
+  Inject,
+  Optional,
+  OnApplicationBootstrap,
+} from '@nestjs/common';
 import { Job } from 'bullmq';
 import sharp from 'sharp';
 import { createInterface } from 'readline';
@@ -59,15 +64,21 @@ export class StorageQueueConsumer
   async process(job: Job<any>): Promise<any> {
     switch (job.name) {
       case STORAGE_JOB_MAINTENANCE_TRASH: {
-        this.logger.log(`Starting scheduled maintenance: Trash Retention [${job.id}]`);
+        this.logger.log(
+          `Starting scheduled maintenance: Trash Retention [${job.id}]`,
+        );
         return this.trashRetentionJob?.processExpiredTrash();
       }
       case STORAGE_JOB_MAINTENANCE_MULTIPART: {
-        this.logger.log(`Starting scheduled maintenance: Multipart Cleanup [${job.id}]`);
+        this.logger.log(
+          `Starting scheduled maintenance: Multipart Cleanup [${job.id}]`,
+        );
         return this.multipartCleanupJob?.processExpiredSessions();
       }
       case STORAGE_JOB_MAINTENANCE_ORPHAN: {
-        this.logger.log(`Starting scheduled maintenance: Orphan Blob GC [${job.id}]`);
+        this.logger.log(
+          `Starting scheduled maintenance: Orphan Blob GC [${job.id}]`,
+        );
         return this.orphanBlobJob?.processTombstonedBlobs();
       }
       case STORAGE_JOB_PROCESS_FILE:
@@ -85,7 +96,9 @@ export class StorageQueueConsumer
 
     const node = await this.nodeRepo.findById(data.fileId);
     if (!node || node.isTrashed()) {
-      this.logger.warn(`Storage node ${data.fileId} not found or trashed. Skipping.`);
+      this.logger.warn(
+        `Storage node ${data.fileId} not found or trashed. Skipping.`,
+      );
       return;
     }
 
@@ -106,7 +119,9 @@ export class StorageQueueConsumer
       }
 
       await this.nodeRepo.update(node);
-      this.logger.log(`Completed processing job [${job.id}] for file ${data.fileId}`);
+      this.logger.log(
+        `Completed processing job [${job.id}] for file ${data.fileId}`,
+      );
     } catch (err: any) {
       this.logger.error(
         `Failed processing storage job [${job.id}] for ${data.fileId}: ${err?.message}`,
@@ -116,7 +131,10 @@ export class StorageQueueConsumer
     }
   }
 
-  private async processImage(data: StorageProcessingJobData, node: any): Promise<void> {
+  private async processImage(
+    data: StorageProcessingJobData,
+    node: any,
+  ): Promise<void> {
     const { stream } = await this.driver.getStream(data.s3Key);
     const chunks: Buffer[] = [];
     for await (const chunk of stream) {
@@ -150,7 +168,10 @@ export class StorageQueueConsumer
     });
   }
 
-  private async processPdf(data: StorageProcessingJobData, node: any): Promise<void> {
+  private async processPdf(
+    data: StorageProcessingJobData,
+    node: any,
+  ): Promise<void> {
     const { stream } = await this.driver.getStream(data.s3Key);
     const chunks: Buffer[] = [];
     for await (const chunk of stream) {
@@ -168,7 +189,8 @@ export class StorageQueueConsumer
       // In-process WebP thumbnail generation for page 1
       if (this.pdfThumbnailService && data.blobId) {
         try {
-          const thumbBuffer = await this.pdfThumbnailService.generateThumbnail(buffer);
+          const thumbBuffer =
+            await this.pdfThumbnailService.generateThumbnail(buffer);
           if (thumbBuffer) {
             const thumbKey = `thumbnails/${data.blobId}.webp`;
             await this.driver.put(thumbKey, thumbBuffer, {
@@ -199,10 +221,13 @@ export class StorageQueueConsumer
     }
   }
 
-  private async processDataset(data: StorageProcessingJobData, node: any): Promise<void> {
+  private async processDataset(
+    data: StorageProcessingJobData,
+    node: any,
+  ): Promise<void> {
     const { stream } = await this.driver.getStream(data.s3Key);
     const rl = createInterface({
-      input: stream as any,
+      input: stream,
       crlfDelay: Infinity,
     });
 
@@ -212,7 +237,9 @@ export class StorageQueueConsumer
 
     for await (const line of rl) {
       if (lineCount === 0) {
-        header = line.split(/[,\t]/).map((col) => col.trim().replace(/^"|"$/g, ''));
+        header = line
+          .split(/[,\t]/)
+          .map((col) => col.trim().replace(/^"|"$/g, ''));
       } else if (lineCount <= 100) {
         lines.push(line);
       }

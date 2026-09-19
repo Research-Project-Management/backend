@@ -454,9 +454,9 @@ export class CrossRefProvider implements MetadataProvider {
           itemType === 'journalArticle'
             ? journal
             : itemType === 'conferencePaper'
-              ? (proceedingsTitle || journal)
+              ? proceedingsTitle || journal
               : itemType === 'bookSection'
-                ? (journal || series)
+                ? journal || series
                 : journal,
         conferenceName:
           itemType === 'conferencePaper'
@@ -466,9 +466,9 @@ export class CrossRefProvider implements MetadataProvider {
             : undefined,
         proceedingsTitle:
           itemType === 'conferencePaper'
-            ? (proceedingsTitle || journal)
+            ? proceedingsTitle || journal
             : undefined,
-        bookTitle: itemType === 'bookSection' ? (journal || series) : undefined,
+        bookTitle: itemType === 'bookSection' ? journal || series : undefined,
         place: eventPlace,
         journalAbbr,
         publisher,

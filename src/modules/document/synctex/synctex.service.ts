@@ -50,10 +50,14 @@ export class SynctexService {
     error?: string;
   }> {
     if (!dto.line || dto.line < 1 || dto.line > 500_000) {
-      throw new BadRequestException('Line number must be between 1 and 500,000');
+      throw new BadRequestException(
+        'Line number must be between 1 and 500,000',
+      );
     }
     if (dto.column != null && (dto.column < 0 || dto.column > 10_000)) {
-      throw new BadRequestException('Column number must be between 0 and 10,000');
+      throw new BadRequestException(
+        'Column number must be between 0 and 10,000',
+      );
     }
 
     const payload = {
@@ -103,10 +107,14 @@ export class SynctexService {
       throw new BadRequestException('Page number must be between 1 and 5,000');
     }
     if (dto.x != null && (dto.x < 0 || dto.x > 10_000)) {
-      throw new BadRequestException('Coordinate x must be between 0 and 10,000');
+      throw new BadRequestException(
+        'Coordinate x must be between 0 and 10,000',
+      );
     }
     if (dto.y != null && (dto.y < 0 || dto.y > 10_000)) {
-      throw new BadRequestException('Coordinate y must be between 0 and 10,000');
+      throw new BadRequestException(
+        'Coordinate y must be between 0 and 10,000',
+      );
     }
 
     const payload = {

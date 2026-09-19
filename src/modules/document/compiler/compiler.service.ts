@@ -25,7 +25,10 @@ import { AssetService } from '../asset/asset.service';
 import { PrismaService } from '@/core/database/prisma.service';
 import { VersionEventType } from '@prisma/client';
 import * as crypto from 'crypto';
-import { ensureCompilableLatex, validateSafePath } from '../core/utils/document.utils';
+import {
+  ensureCompilableLatex,
+  validateSafePath,
+} from '../core/utils/document.utils';
 
 export interface CompilerDiagnostic {
   file: string;
@@ -550,6 +553,15 @@ export class CompilerService {
       throw new NotFoundException(`Page ${pageId} not found`);
     }
 
+    if (
+      page.isLocked &&
+      (dto.content !== undefined || dto.title !== undefined)
+    ) {
+      throw new ForbiddenException(
+        'This document is locked against modifications',
+      );
+    }
+
     const lastSnapshot = page.versions[0];
     const shouldSnapshot =
       dto.createSnapshot ||
@@ -603,6 +615,14 @@ export class CompilerService {
         return [updated, version] as const;
       },
     );
+
+    if (page.projectId) {
+      await this.pageService.invalidatePageCache(page.projectId, pageId);
+    }
+
+    if (createdVersion && this.cache) {
+      await this.cache.del(DOCUMENT_REDIS_KEYS.pageVersions(pageId));
+    }
 
     const syncResult = await this.syncProject(page.parentPageId || pageId);
 

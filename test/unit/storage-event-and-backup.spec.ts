@@ -26,7 +26,7 @@ describe('Storage Event-Driven Outbox & Automated Backup Pipeline Suite (Phase 5
         getClient: jest.fn().mockReturnValue(mockRedisClient),
         isReady: jest.fn().mockReturnValue(true),
       };
-      outboxService = new StorageEventOutboxService(mockRedisService as any);
+      outboxService = new StorageEventOutboxService(mockRedisService);
     });
 
     it('should dispatch file.uploaded event to Redis Stream and PubSub channel', async () => {
@@ -90,10 +90,22 @@ describe('Storage Event-Driven Outbox & Automated Backup Pipeline Suite (Phase 5
 
     it('should dispatch file.deleted and quota.exceeded events', async () => {
       await outboxService.handleFileDeleted(
-        new FileDeletedEvent('file-003', 'blob-003', 'user-123', 'project-abc', true),
+        new FileDeletedEvent(
+          'file-003',
+          'blob-003',
+          'user-123',
+          'project-abc',
+          true,
+        ),
       );
       await outboxService.handleQuotaExceeded(
-        new QuotaExceededEvent('user-123', 'project-abc', 1024n, 5368709120n, 5368709120n),
+        new QuotaExceededEvent(
+          'user-123',
+          'project-abc',
+          1024n,
+          5368709120n,
+          5368709120n,
+        ),
       );
 
       const recent = outboxService.getRecentEvents();

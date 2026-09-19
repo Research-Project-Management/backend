@@ -125,8 +125,7 @@ export class CslStyleRegistry {
     index: number = 1,
   ): FormattedCitationResult {
     const authors = this.parseAuthors(item);
-    const firstAuthor =
-      authors[0]?.lastName || authors[0]?.name || 'Anonymous';
+    const firstAuthor = authors[0]?.lastName || authors[0]?.name || 'Anonymous';
     const authorStr =
       authors.length > 0
         ? authors.map((a) => a.lastName || a.name || 'Anonymous').join(', ')

@@ -36,7 +36,10 @@ export class ProjectPortfolioOverviewDto {
   @ApiPropertyOptional({ example: '2026-12-31' })
   targetDate?: Date | null;
 
-  @ApiPropertyOptional({ example: 106, description: 'Days remaining until target date (negative if overdue)' })
+  @ApiPropertyOptional({
+    example: 106,
+    description: 'Days remaining until target date (negative if overdue)',
+  })
   daysRemaining?: number | null;
 
   @ApiPropertyOptional({ example: false })
@@ -54,7 +57,10 @@ export class ProjectPortfolioOverviewDto {
   @ApiProperty({ example: 5 })
   backlogWorkItems!: number;
 
-  @ApiProperty({ example: 55.56, description: 'Percentage of completed work items' })
+  @ApiProperty({
+    example: 55.56,
+    description: 'Percentage of completed work items',
+  })
   completionPercentage!: number;
 
   @ApiProperty({ example: 6 })

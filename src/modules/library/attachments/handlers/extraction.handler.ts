@@ -307,9 +307,10 @@ export class ExtractionHandler implements OutboxDispatchHandler {
                 data: doc.metadata.creators.map((c, idx) => {
                   const creatorType = 'author';
                   const parsed = parseCreatorString(
-                    c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+                    c.fullName ||
+                      `${c.firstName || ''} ${c.lastName || ''}`.trim(),
                     idx,
-                    creatorType as any,
+                    creatorType,
                   );
                   const first = c.firstName || parsed.firstName || '';
                   const last = c.lastName || parsed.lastName || '';

@@ -16,6 +16,20 @@ export interface ExportFileResult {
   sizeBytes: number;
 }
 
+function toContentString(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (content && typeof content === 'object') {
+    const obj = content as Record<string, unknown>;
+    return (
+      (obj.source as string) ||
+      (obj.text as string) ||
+      (obj.content as string) ||
+      JSON.stringify(content)
+    );
+  }
+  return '';
+}
+
 @Injectable()
 export class ExportService {
   private readonly logger = new Logger(ExportService.name);
@@ -102,21 +116,12 @@ export class ExportService {
 
   private exportMarkdown(page: any, safeTitle: string): ExportFileResult {
     let md = `# ${page.title}\n\n`;
-
-    if (typeof page.content === 'string') {
-      md += page.content;
-    } else if (page.content) {
-      md += JSON.stringify(page.content, null, 2);
-    }
+    md += toContentString(page.content);
 
     if (page.childPages && page.childPages.length > 0) {
       for (const child of page.childPages) {
         md += `\n\n## ${child.title}\n\n`;
-        if (typeof child.content === 'string') {
-          md += child.content;
-        } else if (child.content) {
-          md += JSON.stringify(child.content, null, 2);
-        }
+        md += toContentString(child.content);
       }
     }
 
@@ -132,13 +137,7 @@ export class ExportService {
   }
 
   private exportLatexSource(page: any, safeTitle: string): ExportFileResult {
-    let source = '';
-    if (typeof page.content === 'string') {
-      source = page.content;
-    } else if (page.content) {
-      source = JSON.stringify(page.content);
-    }
-
+    const source = toContentString(page.content);
     const buffer = Buffer.from(source, 'utf-8');
 
     return {
@@ -153,22 +152,26 @@ export class ExportService {
   private exportLatexBundle(page: any, safeTitle: string): ExportFileResult {
     const files: Record<string, string> = {};
 
-    const mainSource =
-      typeof page.content === 'string'
-        ? page.content
-        : JSON.stringify(page.content || '');
-    files['main.tex'] = mainSource;
+    let mainFileName = 'main.tex';
+    let mainSource = toContentString(page.content);
 
-    if (page.childPages) {
+    if (page.childPages && page.childPages.length > 0) {
       for (const child of page.childPages) {
         const childFilename = child.title.endsWith('.tex')
           ? child.title
           : `${child.title.replace(/[^a-zA-Z0-9_-]/g, '_')}.tex`;
-        files[childFilename] =
-          typeof child.content === 'string'
-            ? child.content
-            : JSON.stringify(child.content || '');
+        const childContent = toContentString(child.content);
+        files[childFilename] = childContent;
+
+        if (page.mainFileId && child.id === page.mainFileId) {
+          mainFileName = childFilename;
+          mainSource = childContent;
+        }
       }
+    }
+
+    if (!files[mainFileName]) {
+      files[mainFileName] = mainSource;
     }
 
     const bundleJson = JSON.stringify(files, null, 2);

@@ -146,8 +146,7 @@ export class IngestionRepository {
     const client = this.getClient(tx);
     const userId =
       typeof _scope === 'object' ? _scope.userId : _scope || undefined;
-    const projectId =
-      typeof _scope === 'object' ? _scope.projectId : undefined;
+    const projectId = typeof _scope === 'object' ? _scope.projectId : undefined;
     return client.ingestionRun.findFirst({
       where: {
         idempotencyKey,
@@ -427,8 +426,7 @@ export class IngestionRepository {
     const client = this.getClient(tx);
     const userId =
       typeof _scope === 'object' ? _scope.userId : _scope || undefined;
-    const projectId =
-      typeof _scope === 'object' ? _scope.projectId : undefined;
+    const projectId = typeof _scope === 'object' ? _scope.projectId : undefined;
     return client.ingestionReviewCase.findMany({
       where: {
         ...(projectId ? { projectId } : userId ? { userId } : {}),

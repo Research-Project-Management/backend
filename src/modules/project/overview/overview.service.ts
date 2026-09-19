@@ -54,8 +54,7 @@ export class OverviewService {
 
       let daysRemaining: number | null = null;
       if (cycle.endDate) {
-        const diffMs =
-          new Date(cycle.endDate).getTime() - new Date().getTime();
+        const diffMs = new Date(cycle.endDate).getTime() - new Date().getTime();
         daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
       }
 

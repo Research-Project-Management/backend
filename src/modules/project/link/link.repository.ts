@@ -36,7 +36,10 @@ export class LinkRepository {
     });
   }
 
-  async update(linkId: string, dto: UpdateProjectLinkDto): Promise<ProjectLink> {
+  async update(
+    linkId: string,
+    dto: UpdateProjectLinkDto,
+  ): Promise<ProjectLink> {
     return this.prisma.projectLink.update({
       where: { id: linkId },
       data: {

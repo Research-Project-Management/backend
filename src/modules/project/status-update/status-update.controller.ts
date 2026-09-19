@@ -28,7 +28,9 @@ export class StatusUpdateController {
   constructor(private readonly service: StatusUpdateService) {}
 
   @Get(':projectId/updates')
-  @ApiOperation({ summary: 'List all status updates for a project (chronological)' })
+  @ApiOperation({
+    summary: 'List all status updates for a project (chronological)',
+  })
   @ApiResponse({ status: 200, description: 'List of status updates' })
   getUpdates(@Param('projectId') projectId: string) {
     return this.service.getUpdates(projectId);
@@ -43,7 +45,10 @@ export class StatusUpdateController {
 
   @Post(':projectId/updates')
   @ApiOperation({ summary: 'Post a new status update for a project' })
-  @ApiResponse({ status: 201, description: 'Status update created successfully' })
+  @ApiResponse({
+    status: 201,
+    description: 'Status update created successfully',
+  })
   createUpdate(
     @Param('projectId') projectId: string,
     @CurrentUser('id') userId: string,
@@ -54,7 +59,10 @@ export class StatusUpdateController {
 
   @Patch(':projectId/updates/:updateId')
   @ApiOperation({ summary: 'Edit an existing status update' })
-  @ApiResponse({ status: 200, description: 'Status update updated successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'Status update updated successfully',
+  })
   updateUpdate(
     @Param('projectId') projectId: string,
     @Param('updateId') updateId: string,
@@ -65,7 +73,10 @@ export class StatusUpdateController {
 
   @Delete(':projectId/updates/:updateId')
   @ApiOperation({ summary: 'Delete a status update' })
-  @ApiResponse({ status: 200, description: 'Status update deleted successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'Status update deleted successfully',
+  })
   deleteUpdate(
     @Param('projectId') projectId: string,
     @Param('updateId') updateId: string,

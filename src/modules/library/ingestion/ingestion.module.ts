@@ -35,9 +35,8 @@ import {
   IngestionPipelineRunner,
 } from './services/pipeline.service';
 import { QueueService } from './services/queue.service';
-import { ZoteroTranslatorClient } from '../infra/zotero/zotero-translator.client';
-
-import { SsrfGuardService } from '../core/services/ssrf-guard.service';
+import { InfraModule } from '../infra/infra.module';
+import { CoreModule as LibraryCoreModule } from '../core/core.module';
 import { BullModule } from '@nestjs/bullmq';
 import { LIBRARY_INGESTION_QUEUE } from './constants/queue.constants';
 import { IngestionQueueConsumer } from './services/ingestion-queue.consumer';
@@ -47,6 +46,8 @@ import { UrlMetadataScraperService } from './services/url-metadata-scraper.servi
 @Module({
   imports: [
     CoreModule,
+    LibraryCoreModule,
+    InfraModule,
     OutboxModule,
     ItemsModule,
     AttachmentsModule,
@@ -84,8 +85,6 @@ import { UrlMetadataScraperService } from './services/url-metadata-scraper.servi
     CommitStage,
 
     // Service & Adapters
-    SsrfGuardService,
-    ZoteroTranslatorClient, // OSS: Zotero Translation Server client (700+ publisher translators)
     UrlCaptureService,
     PipelineService,
     QueueService,
@@ -110,7 +109,6 @@ import { UrlMetadataScraperService } from './services/url-metadata-scraper.servi
     WatchdogService,
     IngestionPipelineRunner,
     IngestionWatchdogService,
-    SsrfGuardService,
     DoiParser,
     BibtexParser,
     RisParser,

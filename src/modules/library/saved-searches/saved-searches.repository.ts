@@ -11,10 +11,12 @@ import { ExecuteSavedSearchOptions } from './types/saved-search.types';
 export class SavedSearchesRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(userId: string, dto: CreateSavedSearchDto) {
+  async create(userId: string, dto: CreateSavedSearchDto, projectId?: string) {
+    const effectiveProjectId = projectId || dto.projectId || null;
     return this.prisma.savedSearch.create({
       data: {
         userId,
+        projectId: effectiveProjectId,
         name: dto.name.trim(),
         description: dto.description?.trim() || '',
         icon: dto.icon || '',
@@ -28,13 +30,14 @@ export class SavedSearchesRepository {
     });
   }
 
-  async findById(userId: string, id: string) {
+  async findById(userId: string, id: string, projectId?: string) {
+    const where: Prisma.SavedSearchWhereInput = {
+      id,
+      deletedAt: null,
+      ...(projectId ? { projectId } : { userId }),
+    };
     return this.prisma.savedSearch.findFirst({
-      where: {
-        id,
-        userId,
-        deletedAt: null,
-      },
+      where,
       include: {
         user: {
           select: { id: true, name: true, avatar: true },
@@ -43,12 +46,13 @@ export class SavedSearchesRepository {
     });
   }
 
-  async findAll(userId: string) {
+  async findAll(userId: string, projectId?: string) {
+    const where: Prisma.SavedSearchWhereInput = {
+      deletedAt: null,
+      ...(projectId ? { projectId } : { userId }),
+    };
     return this.prisma.savedSearch.findMany({
-      where: {
-        userId,
-        deletedAt: null,
-      },
+      where,
       orderBy: [{ isPinned: 'desc' }, { name: 'asc' }],
       include: {
         user: {
@@ -58,13 +62,19 @@ export class SavedSearchesRepository {
     });
   }
 
-  async update(userId: string, id: string, dto: UpdateSavedSearchDto) {
+  async update(
+    userId: string,
+    id: string,
+    dto: UpdateSavedSearchDto,
+    projectId?: string,
+  ) {
+    const where: Prisma.SavedSearchWhereInput = {
+      id,
+      deletedAt: null,
+      ...(projectId ? { projectId } : { userId }),
+    };
     return this.prisma.savedSearch.updateMany({
-      where: {
-        id,
-        userId,
-        deletedAt: null,
-      },
+      where,
       data: {
         ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
         ...(dto.description !== undefined
@@ -96,13 +106,14 @@ export class SavedSearchesRepository {
     });
   }
 
-  async softDelete(userId: string, id: string) {
+  async softDelete(userId: string, id: string, projectId?: string) {
+    const where: Prisma.SavedSearchWhereInput = {
+      id,
+      deletedAt: null,
+      ...(projectId ? { projectId } : { userId }),
+    };
     return this.prisma.savedSearch.updateMany({
-      where: {
-        id,
-        userId,
-        deletedAt: null,
-      },
+      where,
       data: {
         deletedAt: new Date(),
       },

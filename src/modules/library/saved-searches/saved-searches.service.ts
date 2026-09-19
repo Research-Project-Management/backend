@@ -22,16 +22,21 @@ export class SavedSearchesService {
     private readonly evaluator: ConditionEvaluatorEngine,
   ) {}
 
-  async create(userId: string, dto: CreateSavedSearchDto) {
+  async create(userId: string, dto: CreateSavedSearchDto, projectId?: string) {
+    const effectiveProjectId = projectId || dto.projectId;
     let initialCount = 0;
     try {
-      const where = this.evaluator.compile(userId, dto.conditions);
+      const where = this.evaluator.compile(
+        userId,
+        dto.conditions,
+        effectiveProjectId,
+      );
       initialCount = await this.repo.countMatchingItems(where);
     } catch (err: any) {
       this.logger.warn(`Failed to evaluate initial count: ${err?.message}`);
     }
 
-    const created = await this.repo.create(userId, dto);
+    const created = await this.repo.create(userId, dto, effectiveProjectId);
     if (initialCount > 0) {
       await this.repo.updateCachedCount(created.id, initialCount);
       created.cachedCount = initialCount;
@@ -39,26 +44,36 @@ export class SavedSearchesService {
     return created;
   }
 
-  async findAll(userId: string) {
-    return this.repo.findAll(userId);
+  async findAll(userId: string, projectId?: string) {
+    return this.repo.findAll(userId, projectId);
   }
 
-  async findById(userId: string, id: string) {
-    const record = await this.repo.findById(userId, id);
+  async findById(userId: string, id: string, projectId?: string) {
+    const record = await this.repo.findById(userId, id, projectId);
     if (!record) {
       throw new NotFoundException(`Saved search ${id} not found`);
     }
     return record;
   }
 
-  async update(userId: string, id: string, dto: UpdateSavedSearchDto) {
-    await this.findById(userId, id);
-    await this.repo.update(userId, id, dto);
+  async update(
+    userId: string,
+    id: string,
+    dto: UpdateSavedSearchDto,
+    projectId?: string,
+  ) {
+    const existing = await this.findById(userId, id, projectId);
+    await this.repo.update(userId, id, dto, projectId);
 
     // If conditions changed, recalculate cached count
     if (dto.conditions) {
       try {
-        const where = this.evaluator.compile(userId, dto.conditions);
+        const effectiveProjectId = projectId || existing.projectId || undefined;
+        const where = this.evaluator.compile(
+          userId,
+          dto.conditions,
+          effectiveProjectId,
+        );
         const count = await this.repo.countMatchingItems(where);
         await this.repo.updateCachedCount(id, count);
       } catch (err: any) {
@@ -66,21 +81,30 @@ export class SavedSearchesService {
       }
     }
 
-    return this.findById(userId, id);
+    return this.findById(userId, id, projectId);
   }
 
-  async delete(userId: string, id: string) {
-    await this.findById(userId, id);
-    await this.repo.softDelete(userId, id);
+  async delete(userId: string, id: string, projectId?: string) {
+    await this.findById(userId, id, projectId);
+    await this.repo.softDelete(userId, id, projectId);
     return { success: true, id };
   }
 
-  async preview(userId: string, dto: PreviewSavedSearchDto) {
+  async preview(
+    userId: string,
+    dto: PreviewSavedSearchDto,
+    projectId?: string,
+  ) {
     if (!dto.conditions) {
       throw new BadRequestException('Conditions must be provided for preview');
     }
 
-    const where = this.evaluator.compile(userId, dto.conditions);
+    const effectiveProjectId = projectId || dto.projectId;
+    const where = this.evaluator.compile(
+      userId,
+      dto.conditions,
+      effectiveProjectId,
+    );
     const [count, sampleResult] = await Promise.all([
       this.repo.countMatchingItems(where),
       this.repo.findMatchingItems(where, { limit: 5 }),
@@ -92,11 +116,19 @@ export class SavedSearchesService {
     };
   }
 
-  async execute(userId: string, id: string, dto: ExecuteSavedSearchQueryDto) {
-    const savedSearch = await this.findById(userId, id);
+  async execute(
+    userId: string,
+    id: string,
+    dto: ExecuteSavedSearchQueryDto,
+    projectId?: string,
+  ) {
+    const effectiveProjectId = projectId || dto.projectId;
+    const savedSearch = await this.findById(userId, id, effectiveProjectId);
     const conditions = savedSearch.conditions as any;
 
-    const where = this.evaluator.compile(userId, conditions);
+    const queryProjectId =
+      effectiveProjectId || savedSearch.projectId || undefined;
+    const where = this.evaluator.compile(userId, conditions, queryProjectId);
 
     const sortBy = (dto.sortBy || savedSearch.sortBy || 'dateAdded') as any;
     const sortOrder = (dto.sortOrder || savedSearch.sortOrder || 'desc') as any;

@@ -34,6 +34,7 @@ export class SearchService {
       tagId: dto.tagId,
       limit: dto.limit,
       cursor: dto.cursor,
+      projectId: dto.projectId,
     };
 
     const [searchResult, facets] = await Promise.all([

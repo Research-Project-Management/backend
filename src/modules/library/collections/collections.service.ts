@@ -467,7 +467,11 @@ export class CollectionsService {
         },
       });
 
-      await helpers.appendChange(targetUserId, {
+      const effectiveProjectId =
+        (updated as any).projectId || targetProjectId || undefined;
+      const syncScope = { userId: targetUserId, projectId: effectiveProjectId };
+
+      await helpers.appendChange(syncScope, {
         entityType: 'Collection',
         entityId: updated.id,
         action: 'update',
@@ -489,7 +493,12 @@ export class CollectionsService {
         },
       });
 
-      await helpers.appendChange(targetUserId, {
+      const syncScope = {
+        userId: targetUserId,
+        projectId: targetProjectId || undefined,
+      };
+
+      await helpers.appendChange(syncScope, {
         entityType: 'Collection',
         entityId: created.id,
         action: 'create',
@@ -498,10 +507,10 @@ export class CollectionsService {
       });
 
       await helpers.publishOutbox(
-        targetUserId,
+        syncScope,
         created.id,
         'library.collection.created',
-        { collectionId: created.id },
+        { collectionId: created.id, projectId: targetProjectId || undefined },
       );
 
       return { id: created.id, isNew: true, version: created.version };
@@ -527,15 +536,21 @@ export class CollectionsService {
       where: { id: entityId },
       data: { deletedAt: new Date() },
     });
-    await helpers.appendChange(targetUserId, {
+
+    const effectiveProjectId =
+      existing.projectId || (command as any).projectId || undefined;
+    const syncScope = { userId: targetUserId, projectId: effectiveProjectId };
+
+    await helpers.appendChange(syncScope, {
       entityType: 'Collection',
       entityId,
       action: 'delete',
       version: existing.version + 1,
     });
-    await helpers.recordTombstone(targetUserId, {
+    await helpers.recordTombstone(syncScope, {
       entityType: 'Collection',
       entityId,
+      deletedById: targetUserId || undefined,
     });
   }
 

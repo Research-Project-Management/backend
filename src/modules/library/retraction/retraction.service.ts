@@ -5,7 +5,11 @@ import {
   RetractionDatabaseService,
   RetractionDatabaseStats,
 } from './services/retraction-database.service';
-import { RetractionSyncService, RetractionSyncResult, RetractionSyncOptions } from './services/retraction-sync.service';
+import {
+  RetractionSyncService,
+  RetractionSyncResult,
+  RetractionSyncOptions,
+} from './services/retraction-sync.service';
 import {
   FlagRetractionDto,
   BatchCheckRetractionDto,

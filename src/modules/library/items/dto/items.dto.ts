@@ -544,4 +544,3 @@ export class ParseCitationsDto {
   @IsString()
   citations!: string;
 }
-

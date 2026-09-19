@@ -22,9 +22,11 @@ describe('OcrWorkerPoolService', () => {
   it('handles per-job timeout rejection gracefully', async () => {
     // Mock the internal scheduler to simulate a stalled job
     const mockScheduler: any = {
-      addJob: jest.fn().mockImplementation(
-        () => new Promise((resolve) => setTimeout(resolve, 500)),
-      ),
+      addJob: jest
+        .fn()
+        .mockImplementation(
+          () => new Promise((resolve) => setTimeout(resolve, 500)),
+        ),
       terminate: jest.fn().mockResolvedValue(undefined),
     };
 
@@ -32,8 +34,8 @@ describe('OcrWorkerPoolService', () => {
     (service as any).workers = [{}];
 
     // Trigger recognize with a tiny timeout of 50ms
-    await expect(service.recognize(Buffer.from('fake-image'), 50)).rejects.toThrow(
-      /timed out after/,
-    );
+    await expect(
+      service.recognize(Buffer.from('fake-image'), 50),
+    ).rejects.toThrow(/timed out after/);
   });
 });

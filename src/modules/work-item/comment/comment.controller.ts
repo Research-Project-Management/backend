@@ -29,14 +29,14 @@ export class CommentController {
   constructor(private readonly commentService: CommentService) {}
 
   @Get('work-items/:workItemId/comments')
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get all comments for a work item' })
   async getWorkItemComments(@Param('workItemId') workItemId: string) {
     return this.commentService.getWorkItemComments(workItemId);
   }
 
   @Post('work-items/:workItemId/comments')
-  @ProjectRoles('owner', 'contributor', 'commenter')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Add a comment to a work item' })
   async createWorkItemComment(
     @Param('workItemId') workItemId: string,
@@ -51,7 +51,7 @@ export class CommentController {
   }
 
   @Put('work-items/comments/:commentId')
-  @ProjectRoles('owner', 'contributor', 'commenter')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Update a WorkItem comment' })
   async updateWorkItemComment(
     @Param('commentId') commentId: string,
@@ -66,7 +66,7 @@ export class CommentController {
   }
 
   @Delete('work-items/comments/:commentId')
-  @ProjectRoles('owner', 'contributor', 'commenter')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Delete a WorkItem comment' })
   async deleteWorkItemComment(
     @Param('commentId') commentId: string,
@@ -76,7 +76,7 @@ export class CommentController {
   }
 
   @Post('work-items/comments/:commentId/replies')
-  @ProjectRoles('owner', 'contributor', 'commenter')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Reply to a WorkItem comment' })
   async addWorkItemReply(
     @Param('commentId') commentId: string,
@@ -87,7 +87,7 @@ export class CommentController {
   }
 
   @Post('work-items/comments/:commentId/reactions')
-  @ProjectRoles('owner', 'contributor', 'commenter')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'React to a WorkItem comment with emoji' })
   async reactToWorkItemComment(
     @Param('commentId') commentId: string,

@@ -137,7 +137,10 @@ export class SemanticSearchService {
     const targetItem = await this.prisma.item.findFirst({
       where: { id: itemId, ...scopeWhere },
       include: {
-        contributors: { select: { fullName: true }, orderBy: { orderIndex: 'asc' } },
+        contributors: {
+          select: { fullName: true },
+          orderBy: { orderIndex: 'asc' },
+        },
       },
     });
 
@@ -261,7 +264,9 @@ export class SemanticSearchService {
       }
     }
 
-    this.logger.log(`Indexed ${indexed}/${items.length} items in local vector index.`);
+    this.logger.log(
+      `Indexed ${indexed}/${items.length} items in local vector index.`,
+    );
     return { indexed, total: items.length };
   }
 }

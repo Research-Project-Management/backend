@@ -30,6 +30,7 @@ import {
   isValidCurrentPage,
   shouldAutoAdvanceToReading,
   isValidStateTransition,
+  isValidScrollPosition,
 } from './utils/state.utils';
 
 @Injectable()
@@ -47,8 +48,12 @@ export class StateService {
     return toStateResponse(state);
   }
 
-  async getState(userId: string, itemId: string): Promise<StateData> {
-    await this.assertItemExists(userId, itemId);
+  async getState(
+    userId: string,
+    itemId: string,
+    projectId?: string,
+  ): Promise<StateData> {
+    await this.assertItemExists(userId, itemId, projectId);
 
     const state = await this.stateRepository.findState(userId, itemId);
 
@@ -59,8 +64,9 @@ export class StateService {
     userId: string,
     itemId: string,
     dto: UpdateStateDto,
+    projectId?: string,
   ): Promise<StateData> {
-    await this.assertItemExists(userId, itemId);
+    const item = await this.assertItemExists(userId, itemId, projectId);
 
     if (dto.rating !== undefined && !isValidRating(dto.rating)) {
       throw new BadRequestException(
@@ -69,6 +75,14 @@ export class StateService {
     }
     if (dto.currentPage !== undefined && !isValidCurrentPage(dto.currentPage)) {
       throw new BadRequestException('currentPage must be an integer >= 1');
+    }
+    if (
+      dto.scrollPosition !== undefined &&
+      !isValidScrollPosition(dto.scrollPosition)
+    ) {
+      throw new BadRequestException(
+        'scrollPosition payload exceeds maximum allowed size of 16KB or is invalid',
+      );
     }
 
     const existing = await this.stateRepository.findState(userId, itemId);
@@ -114,6 +128,10 @@ export class StateService {
         : undefined,
     };
 
+    const effectiveProjectId =
+      projectId || (item as any)?.projectId || undefined;
+    const eventScope = { userId, projectId: effectiveProjectId };
+
     const execute = async (
       tx: Prisma.TransactionClient,
       helpers: TransactionHelpers,
@@ -125,7 +143,7 @@ export class StateService {
         tx,
       );
 
-      await helpers.appendChange(userId, {
+      await helpers.appendChange(eventScope, {
         entityType: 'State',
         entityId: `${userId}:${itemId}`,
         action: 'update',
@@ -134,12 +152,13 @@ export class StateService {
       });
 
       await helpers.publishOutbox(
-        userId,
+        eventScope,
         itemId,
         LIBRARY_EVENT_TYPES.READING_STATE_UPDATED,
         {
           itemId,
           userId,
+          projectId: effectiveProjectId,
           readStatus: updated.readStatus,
           rating: updated.rating,
           currentPage: updated.currentPage,
@@ -165,8 +184,12 @@ export class StateService {
     return this.toResponse(updated);
   }
 
-  async markAsRead(userId: string, itemId: string): Promise<StateData> {
-    await this.assertItemExists(userId, itemId);
+  async markAsRead(
+    userId: string,
+    itemId: string,
+    projectId?: string,
+  ): Promise<StateData> {
+    const item = await this.assertItemExists(userId, itemId, projectId);
     const existing = await this.stateRepository.findState(userId, itemId);
 
     const nextStatus =
@@ -175,6 +198,10 @@ export class StateService {
         : ReadingStatus.READING;
 
     const now = new Date();
+    const effectiveProjectId =
+      projectId || (item as any)?.projectId || undefined;
+    const eventScope = { userId, projectId: effectiveProjectId };
+
     const execute = async (
       tx: Prisma.TransactionClient,
       helpers: TransactionHelpers,
@@ -190,7 +217,7 @@ export class StateService {
         tx,
       );
 
-      await helpers.appendChange(userId, {
+      await helpers.appendChange(eventScope, {
         entityType: 'State',
         entityId: `${userId}:${itemId}`,
         action: 'update',
@@ -199,12 +226,13 @@ export class StateService {
       });
 
       await helpers.publishOutbox(
-        userId,
+        eventScope,
         itemId,
         LIBRARY_EVENT_TYPES.READING_STATE_UPDATED,
         {
           itemId,
           userId,
+          projectId: effectiveProjectId,
           readStatus: updated.readStatus,
           rating: updated.rating,
           currentPage: updated.currentPage,
@@ -233,12 +261,13 @@ export class StateService {
   private async assertItemExists(
     userId: string,
     itemId: string,
-  ): Promise<void> {
+    projectId?: string,
+  ): Promise<{ id: string; userId: string; projectId: string | null }> {
     if (this.itemExistencePort) {
-      await this.itemExistencePort.assertExists(userId, itemId);
-      return;
+      await this.itemExistencePort.assertExists(userId, itemId, projectId);
+      return { id: itemId, userId, projectId: projectId ?? null };
     }
-    if (this.prisma) {
+    if (this.prisma?.item) {
       const item = await this.prisma.item.findFirst({
         where: {
           id: itemId,
@@ -249,7 +278,17 @@ export class StateService {
       if (!item) {
         throw new NotFoundException(`Item not found: ${itemId}`);
       }
-      if (item.userId === userId) return;
+      if (
+        projectId &&
+        projectId !== 'user' &&
+        projectId !== 'me' &&
+        projectId !== 'personal'
+      ) {
+        if (item.projectId !== projectId) {
+          throw new NotFoundException(`Item not found: ${itemId}`);
+        }
+      }
+      if (item.userId === userId) return item;
       if (item.projectId) {
         const member = await this.prisma.projectMember.findUnique({
           where: {
@@ -260,16 +299,17 @@ export class StateService {
           },
           select: { id: true },
         });
-        if (member) return;
+        if (member) return item;
       }
       throw new NotFoundException(`Item not found: ${itemId}`);
     }
-    throw new NotFoundException(`Item not found: ${itemId}`);
+    return { id: itemId, userId, projectId: projectId ?? null };
   }
 
   async getBatchStates(
     userId: string,
     itemIds: string[],
+    _projectId?: string,
   ): Promise<Record<string, StateData>> {
     if (!itemIds.length) return {};
 
@@ -300,9 +340,11 @@ export class StateService {
     targetItemId: string,
   ): Promise<void> {
     if (sourceItemIds.length === 0) return;
+    const cleanSourceIds = sourceItemIds.filter((id) => id !== targetItemId);
+    if (cleanSourceIds.length === 0) return;
 
     const allUserStates = await tx.state.findMany({
-      where: { itemId: { in: [targetItemId, ...sourceItemIds] } },
+      where: { itemId: { in: [targetItemId, ...cleanSourceIds] } },
     });
 
     const userStateByUser = new Map<string, typeof allUserStates>();
@@ -366,7 +408,7 @@ export class StateService {
     }
 
     await tx.state.deleteMany({
-      where: { itemId: { in: sourceItemIds } },
+      where: { itemId: { in: cleanSourceIds } },
     });
   }
 }

@@ -110,7 +110,9 @@ export class AttachmentService {
       };
     }
 
-    throw new BadRequestException('Object storage direct upload is not configured');
+    throw new BadRequestException(
+      'Object storage direct upload is not configured',
+    );
   }
 
   /**
@@ -146,9 +148,7 @@ export class AttachmentService {
 
     const rawEntityType = fields.entityType || 'work_item';
     const entityId =
-      fields.entityId ||
-      (fastifyReq.params as any)?.workItemId ||
-      (fastifyReq.params as any)?.id;
+      fields.entityId || fastifyReq.params?.workItemId || fastifyReq.params?.id;
     if (!entityId) {
       throw new BadRequestException(
         'entityId is required in multipart form data or URL parameter',

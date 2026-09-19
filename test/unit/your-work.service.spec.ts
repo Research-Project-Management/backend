@@ -106,6 +106,8 @@ describe('YourWorkService', () => {
     const result = await service.getYourWork(undefined, 'user-1');
 
     expect(result.success).toBe(true);
-    expect(activityService.getUserFeed).toHaveBeenCalledWith('user-1', { limit: 20 });
+    expect(activityService.getUserFeed).toHaveBeenCalledWith('user-1', {
+      limit: 20,
+    });
   });
 });

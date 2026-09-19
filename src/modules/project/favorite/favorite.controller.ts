@@ -24,7 +24,9 @@ export class FavoriteController {
   constructor(private readonly favoriteService: FavoriteService) {}
 
   @Get('favorites/ids')
-  @ApiOperation({ summary: 'Get list of project IDs favorited by current user' })
+  @ApiOperation({
+    summary: 'Get list of project IDs favorited by current user',
+  })
   getUserFavorites(@CurrentUser('id') userId: string) {
     return this.favoriteService.getUserFavoriteProjectIds(userId);
   }

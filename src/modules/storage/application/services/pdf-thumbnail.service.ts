@@ -26,7 +26,9 @@ export class PdfThumbnailService {
 
     // Validate PDF magic number (%PDF)
     if (!pdfBuffer.subarray(0, 5).toString('utf-8').startsWith('%PDF')) {
-      this.logger.debug('Buffer does not contain valid PDF magic header (%PDF).');
+      this.logger.debug(
+        'Buffer does not contain valid PDF magic header (%PDF).',
+      );
       return null;
     }
 

@@ -64,4 +64,3 @@ export class BatchRenameAttachmentsDto {
   @IsOptional()
   pattern?: string;
 }
-

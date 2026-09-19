@@ -222,7 +222,11 @@ export class ZoteroSchemaValidatorService {
       this.logger.warn(warningMsg);
       warnings.push(warningMsg);
 
-      if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      if (
+        typeof value === 'string' ||
+        typeof value === 'number' ||
+        typeof value === 'boolean'
+      ) {
         const line = `${key}: ${value}`;
         if (!extraLines.some((l) => l.startsWith(`${key}:`))) {
           extraLines.push(line);
@@ -242,7 +246,9 @@ export class ZoteroSchemaValidatorService {
     rawType: string | undefined | null,
     rawData: Record<string, any>,
   ): SchemaValidationResult {
-    const itemType = this.validateItemType(rawType || rawData.itemType || rawData.type);
+    const itemType = this.validateItemType(
+      rawType || rawData.itemType || rawData.type,
+    );
     const { creators, changes } = this.validateAndHarmonizeCreators(
       itemType,
       rawData.creators,

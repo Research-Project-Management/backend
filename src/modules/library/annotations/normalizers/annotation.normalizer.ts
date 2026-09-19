@@ -55,12 +55,15 @@ export class AnnotationNormalizer {
    */
   normalizeQuote(text?: string | null): string {
     if (!text || typeof text !== 'string') return '';
-    return text
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-      .replace(/[\x00-\x1F\x7F]/g, (c) => (c === '\n' || c === '\t' ? c : ''))
-      .trim()
-      .replace(/\r\n/g, '\n');
+    return (
+      text
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+        // eslint-disable-next-line no-control-regex
+        .replace(/[\x00-\x1F\x7F]/g, (c) => (c === '\n' || c === '\t' ? c : ''))
+        .trim()
+        .replace(/\r\n/g, '\n')
+    );
   }
 
   /**
@@ -68,12 +71,15 @@ export class AnnotationNormalizer {
    */
   normalizeComment(comment?: string | null): string {
     if (!comment || typeof comment !== 'string') return '';
-    return comment
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-      .replace(/<[^>]+>/g, '')
-      .replace(/[\x00-\x1F\x7F]/g, '')
-      .trim();
+    return (
+      comment
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+        .replace(/<[^>]+>/g, '')
+        // eslint-disable-next-line no-control-regex
+        .replace(/[\x00-\x1F\x7F]/g, '')
+        .trim()
+    );
   }
 
   /**

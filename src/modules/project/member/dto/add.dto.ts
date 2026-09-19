@@ -21,7 +21,7 @@ export class AddProjectMemberDto {
 
   @ApiPropertyOptional({
     description:
-      'Role to assign in the project. Defaults to contributor (assignable: contributor, commenter, viewer).',
+      'Role to assign in the project. Defaults to contributor (assignable: coordinator, contributor, reviewer).',
     enum: ProjectMemberRole,
     default: ProjectMemberRole.contributor,
     example: ProjectMemberRole.contributor,

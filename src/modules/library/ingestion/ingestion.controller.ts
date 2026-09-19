@@ -45,7 +45,7 @@ export class IngestionController {
    * Primary Fast-Path Submission Endpoint (202 Accepted)
    */
   @Post('submit')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.ACCEPTED)
   async submit(
     @CurrentUser('id') userId: string,
@@ -101,7 +101,9 @@ export class IngestionController {
         };
         break;
       default:
-        throw new BadRequestException('Unknown ingestion kind: ' + dto.kind);
+        throw new BadRequestException(
+          'Unknown ingestion kind: ' + String((dto as any).kind),
+        );
     }
 
     return this.ingestionService.submit({
@@ -120,7 +122,7 @@ export class IngestionController {
    * Ingestion Run Status Endpoint
    */
   @Get('status/:runId')
-  @ProjectRoles('owner', 'contributor', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   async getStatus(
     @CurrentUser('id') userId: string,
     @Param('runId') runId: string,
@@ -135,7 +137,7 @@ export class IngestionController {
    * Ingestion Run Real-time Progress Endpoint (Zotero-style progress modal)
    */
   @Get('status/:runId/progress')
-  @ProjectRoles('owner', 'contributor', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   async getProgress(
     @CurrentUser('id') userId: string,
     @Param('runId') runId: string,
@@ -150,7 +152,7 @@ export class IngestionController {
    * Ingestion Run Retry Endpoint
    */
   @Post('retry/:runId')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.ACCEPTED)
   async retry(
     @CurrentUser('id') userId: string,
@@ -160,7 +162,7 @@ export class IngestionController {
   }
 
   @Post()
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.ACCEPTED)
   async ingestUnified(
     @CurrentUser('id') userId: string,
@@ -237,7 +239,7 @@ export class IngestionController {
   }
 
   @Post('capture-url')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   async captureUrl(
     @CurrentUser('id') userId: string,
     @Body() dto: CaptureUrlDto,
@@ -254,7 +256,7 @@ export class IngestionController {
   }
 
   @Post('confirm-url')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   async confirmUrl(
     @CurrentUser('id') userId: string,
     @Body() dto: ConfirmCapturedUrlDto,

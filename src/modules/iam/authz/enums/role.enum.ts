@@ -1,23 +1,23 @@
 /**
  * Role Definitions & Hierarchy
- * Evaluated at the Project level across 4 standard roles:
- * - OWNER: Project Leader / PI (full control, member & settings management)
- * - CONTRIBUTOR: Research Member (work items, documents, literature, canvas, AI)
- * - COMMENTER: Advisor / Reviewer (read, comment, annotate, cite)
- * - VIEWER: Guest / Evaluator (read-only)
+ * Evaluated at the Project level across 4 canonical roles:
+ * - OWNER: Project Leader / PI (full administrative and member management authority)
+ * - COORDINATOR: Project Coordinator (work management, cycles, triage, task assignment)
+ * - CONTRIBUTOR: Research Member (work items, documents, literature, file uploads)
+ * - REVIEWER: Advisor / Peer Reviewer (read-only with comments and suggestions)
  */
 export enum Role {
-  OWNER = 'owner', // Chủ trì đề tài / Trưởng nhóm — full control
-  CONTRIBUTOR = 'contributor', // Thành viên nghiên cứu — work items, papers, documents
-  COMMENTER = 'commenter', // GVHD / Reviewer — view and comment
-  VIEWER = 'viewer', // Hội đồng phản biện / Khách — read-only
+  OWNER = 'owner',
+  COORDINATOR = 'coordinator',
+  CONTRIBUTOR = 'contributor',
+  REVIEWER = 'reviewer',
 }
 
 export const RoleHierarchy: Record<Role, number> = {
   [Role.OWNER]: 40,
-  [Role.CONTRIBUTOR]: 30,
-  [Role.COMMENTER]: 20,
-  [Role.VIEWER]: 10,
+  [Role.COORDINATOR]: 30,
+  [Role.CONTRIBUTOR]: 20,
+  [Role.REVIEWER]: 10,
 };
 
 // ─── Human-readable Role Descriptions ─────────────────────────────────────────
@@ -28,22 +28,22 @@ export const ROLE_DESCRIPTIONS: Record<
   [Role.OWNER]: {
     label: 'Chủ nhiệm đề tài / Project Owner',
     description:
-      'Toàn quyền quản lý dự án, cấu hình, quản lý thành viên và xóa dự án.',
+      'Toàn quyền quản lý dự án, cấu hình, độc quyền quản lý thành viên và xóa dự án.',
+  },
+  [Role.COORDINATOR]: {
+    label: 'Điều phối viên / Project Coordinator',
+    description:
+      'Quản lý tiến độ, lập kế hoạch cycles, phân công và kiểm soát work items. Không có quyền quản lý nhân sự.',
   },
   [Role.CONTRIBUTOR]: {
     label: 'Thành viên nghiên cứu / Contributor',
     description:
-      'Tạo và chỉnh sửa work items, soạn thảo LaTeX, tải tài liệu nghiên cứu và canvas.',
+      'Tạo và chỉnh sửa work items, soạn thảo tài liệu/LaTeX, tải tài liệu nghiên cứu.',
   },
-  [Role.COMMENTER]: {
-    label: 'GVHD / Reviewer phản biện / Commenter',
+  [Role.REVIEWER]: {
+    label: 'GVHD / Phản biện / Reviewer',
     description:
-      'Xem toàn bộ dữ liệu, viết nhận xét, ghi chú tài liệu và trích xuất trích dẫn.',
-  },
-  [Role.VIEWER]: {
-    label: 'Hội đồng phản biện / Khách / Viewer',
-    description:
-      'Chỉ có quyền xem dữ liệu đề tài nghiên cứu, không thể chỉnh sửa.',
+      'Xem toàn bộ dữ liệu đề tài, viết nhận xét, ghi chú và đề xuất sửa đổi mà không thay đổi trực tiếp dữ liệu gốc.',
   },
 };
 

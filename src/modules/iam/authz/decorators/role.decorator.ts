@@ -15,7 +15,9 @@ export const MIN_ROLE_KEY = 'min_role';
 export type RoleInput =
   | Role
   | 'owner'
+  | 'coordinator'
   | 'contributor'
+  | 'reviewer'
   | 'commenter'
   | 'viewer'
   | 'member'
@@ -25,8 +27,8 @@ export type RoleInput =
  * Standard @Roles(...) decorator for specifying allowed roles on routes.
  * Usage:
  *   @Roles(Role.OWNER)
- *   @Roles(Role.OWNER, Role.CONTRIBUTOR)
- *   @Roles('owner', 'contributor')
+ *   @Roles(Role.OWNER, Role.COORDINATOR, Role.CONTRIBUTOR)
+ *   @Roles('owner', 'coordinator', 'contributor')
  */
 export const Roles = (...roles: RoleInput[]) =>
   SetMetadata(ROLES_KEY, roles as Role[]);
@@ -34,8 +36,8 @@ export const Roles = (...roles: RoleInput[]) =>
 /**
  * Minimum hierarchy-based role requirement.
  * Usage:
- *   @RequireRole(Role.CONTRIBUTOR) // Allows OWNER and CONTRIBUTOR
- *   @RequireRole(Role.COMMENTER)   // Allows OWNER, CONTRIBUTOR, and COMMENTER
+ *   @RequireRole(Role.CONTRIBUTOR) // Allows OWNER, COORDINATOR, and CONTRIBUTOR
+ *   @RequireRole(Role.REVIEWER)    // Allows OWNER, COORDINATOR, CONTRIBUTOR, and REVIEWER
  */
 export const RequireRole = (minRole: Role) =>
   SetMetadata(MIN_ROLE_KEY, minRole);

@@ -317,9 +317,7 @@ export class PipelineService {
       if (this.items) {
         // Resolve effective user vs project context
         const isProject =
-          Boolean(scopeId) &&
-          scopeId !== 'user' &&
-          scopeId !== envelope.userId;
+          Boolean(scopeId) && scopeId !== 'user' && scopeId !== envelope.userId;
         const effectiveUserId = envelope.userId || scopeId;
         const effectiveProjectId = isProject ? scopeId : undefined;
 

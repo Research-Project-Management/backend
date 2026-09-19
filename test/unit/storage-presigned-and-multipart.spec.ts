@@ -37,10 +37,18 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
       deleteMany: jest.fn(),
       exists: jest.fn().mockResolvedValue(true),
       copy: jest.fn(),
-      getPresignedUploadUrl: jest.fn().mockResolvedValue('https://s3.example.com/put-signed'),
-      getPresignedDownloadUrl: jest.fn().mockResolvedValue('https://s3.example.com/get-signed'),
-      initiateMultipartUpload: jest.fn().mockResolvedValue({ uploadId: 's3-upload-123' }),
-      getPresignedPartUploadUrl: jest.fn().mockResolvedValue('https://s3.example.com/part-signed'),
+      getPresignedUploadUrl: jest
+        .fn()
+        .mockResolvedValue('https://s3.example.com/put-signed'),
+      getPresignedDownloadUrl: jest
+        .fn()
+        .mockResolvedValue('https://s3.example.com/get-signed'),
+      initiateMultipartUpload: jest
+        .fn()
+        .mockResolvedValue({ uploadId: 's3-upload-123' }),
+      getPresignedPartUploadUrl: jest
+        .fn()
+        .mockResolvedValue('https://s3.example.com/part-signed'),
       completeMultipartUpload: jest.fn().mockResolvedValue(undefined),
       abortMultipartUpload: jest.fn().mockResolvedValue(undefined),
       listUploadedParts: jest.fn().mockResolvedValue([]),
@@ -124,12 +132,21 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
         projectId: 'proj-1',
       });
 
-      expect(mockDriver.stat).toHaveBeenCalledWith('uploads/user-100/paper.pdf');
-      expect(mockQuotaRepo.incrementUsage).toHaveBeenCalledWith('user-100', 'proj-1', BigInt(5 * 1024 * 1024));
+      expect(mockDriver.stat).toHaveBeenCalledWith(
+        'uploads/user-100/paper.pdf',
+      );
+      expect(mockQuotaRepo.incrementUsage).toHaveBeenCalledWith(
+        'user-100',
+        'proj-1',
+        BigInt(5 * 1024 * 1024),
+      );
       expect(mockBlobRepo.create).toHaveBeenCalledTimes(1);
       expect(mockNodeRepo.create).toHaveBeenCalledTimes(1);
       expect(mockCache.invalidateFolder).toHaveBeenCalledWith('proj-1', null);
-      expect(mockEvents.emit).toHaveBeenCalledWith('file.uploaded', expect.anything());
+      expect(mockEvents.emit).toHaveBeenCalledWith(
+        'file.uploaded',
+        expect.anything(),
+      );
       expect(mockQueueProducer.queueFileProcessing).toHaveBeenCalledWith(
         expect.objectContaining({
           fileId: result.fileId,

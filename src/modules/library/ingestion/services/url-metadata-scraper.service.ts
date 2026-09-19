@@ -118,7 +118,10 @@ export class UrlMetadataScraperService {
       );
 
       let title: string | undefined;
-      if (meaningfulWords.length >= 2 || (words.length >= 3 && cleanSlug.length >= 10)) {
+      if (
+        meaningfulWords.length >= 2 ||
+        (words.length >= 3 && cleanSlug.length >= 10)
+      ) {
         const rawTitle = words.join(' ');
         title = normalizeAcademicTitleCase(rawTitle);
       }
@@ -151,7 +154,9 @@ export class UrlMetadataScraperService {
         MetadataRoutingPolicy.validateUrl(canonicalUrl);
       }
     } catch (ssrfErr: any) {
-      this.logger.warn(`SSRF rejection for URL "${canonicalUrl}": ${ssrfErr?.message}`);
+      this.logger.warn(
+        `SSRF rejection for URL "${canonicalUrl}": ${ssrfErr?.message}`,
+      );
       return {
         url: canonicalUrl,
         isPdf: false,
@@ -176,7 +181,9 @@ export class UrlMetadataScraperService {
         redirect: 'follow',
       });
     } catch (fetchErr: any) {
-      this.logger.warn(`Failed to fetch URL "${canonicalUrl}": ${fetchErr?.message}`);
+      this.logger.warn(
+        `Failed to fetch URL "${canonicalUrl}": ${fetchErr?.message}`,
+      );
       return {
         url: canonicalUrl,
         isPdf: false,
@@ -187,7 +194,9 @@ export class UrlMetadataScraperService {
     }
 
     if (!response.ok) {
-      this.logger.warn(`HTTP ${response.status} when fetching URL "${canonicalUrl}"`);
+      this.logger.warn(
+        `HTTP ${response.status} when fetching URL "${canonicalUrl}"`,
+      );
       return {
         url: canonicalUrl,
         isPdf: false,
@@ -197,7 +206,9 @@ export class UrlMetadataScraperService {
       };
     }
 
-    const contentType = (response.headers.get('content-type') || '').toLowerCase();
+    const contentType = (
+      response.headers.get('content-type') || ''
+    ).toLowerCase();
     const isPdfContent =
       contentType.includes('application/pdf') ||
       canonicalUrl.toLowerCase().endsWith('.pdf') ||
@@ -218,7 +229,8 @@ export class UrlMetadataScraperService {
           buffer[3] === 0x46;
 
         if (isPdfMagic) {
-          const effectiveFilename = options?.preferredFilename || slugHint.filename;
+          const effectiveFilename =
+            options?.preferredFilename || slugHint.filename;
           let fileId: string | undefined;
 
           // Store PDF via StoragePort if available
@@ -255,21 +267,29 @@ export class UrlMetadataScraperService {
               });
               pdfExtracted = doc?.metadata || {};
             } catch (pdfErr: any) {
-              this.logger.warn(`PdfProvider extraction failed: ${pdfErr?.message}`);
+              this.logger.warn(
+                `PdfProvider extraction failed: ${pdfErr?.message}`,
+              );
             }
           }
 
           // Fast-path DOI sniffing directly from PDF binary buffer (first 64KB)
           let binaryDoi: string | undefined;
-          const scanBuffer = buffer.slice(0, Math.min(buffer.length, 65536)).toString('utf-8');
-          const doiMatch = scanBuffer.match(/\b(10\.\d{4,9}\/[-._;()/:A-Za-z0-9<>+=[\]~]+)\b/i);
+          const scanBuffer = buffer
+            .slice(0, Math.min(buffer.length, 65536))
+            .toString('utf-8');
+          const doiMatch = scanBuffer.match(
+            /\b(10\.\d{4,9}\/[-._;()/:A-Za-z0-9<>+=[\]~]+)\b/i,
+          );
           if (doiMatch) {
             binaryDoi = normalizeDoi(doiMatch[1]);
           }
 
           // Sniff arXiv ID
           let binaryArxiv: string | undefined;
-          const arxivMatch = scanBuffer.match(/\barXiv:\s*(\d{4}\.\d{4,5}(?:v\d+)?)\b/i);
+          const arxivMatch = scanBuffer.match(
+            /\barXiv:\s*(\d{4}\.\d{4,5}(?:v\d+)?)\b/i,
+          );
           if (arxivMatch) {
             binaryArxiv = normalizeArxivId(arxivMatch[1]);
           }
@@ -296,12 +316,14 @@ export class UrlMetadataScraperService {
             arxivId: resolvedArxiv,
             year: pdfExtracted.year,
             publicationDate: pdfExtracted.publicationDate,
-            publicationTitle: pdfExtracted.journal || pdfExtracted.conferenceName,
+            publicationTitle:
+              pdfExtracted.journal || pdfExtracted.conferenceName,
             journal: pdfExtracted.journal,
             publisher: pdfExtracted.publisher,
             abstract: pdfExtracted.abstract,
             keywords: pdfExtracted.keywords,
-            confidence: resolvedDoi || resolvedArxiv ? 0.95 : resolvedTitle ? 0.85 : 0.7,
+            confidence:
+              resolvedDoi || resolvedArxiv ? 0.95 : resolvedTitle ? 0.85 : 0.7,
           };
         }
       } catch (pdfProcessErr: any) {
@@ -345,7 +367,9 @@ export class UrlMetadataScraperService {
               : 0.6,
       };
     } catch (htmlErr: any) {
-      this.logger.warn(`Error parsing HTML from "${canonicalUrl}": ${htmlErr?.message}`);
+      this.logger.warn(
+        `Error parsing HTML from "${canonicalUrl}": ${htmlErr?.message}`,
+      );
       return {
         url: canonicalUrl,
         isPdf: false,
@@ -496,8 +520,7 @@ export class UrlMetadataScraperService {
     }
 
     // 9. Keywords
-    const rawKeywords =
-      metaTags['citation_keywords'] || metaTags['keywords'];
+    const rawKeywords = metaTags['citation_keywords'] || metaTags['keywords'];
     if (rawKeywords) {
       result.keywords = rawKeywords
         .split(/[,;]/)
@@ -536,10 +559,7 @@ export class UrlMetadataScraperService {
     return metaTags;
   }
 
-  private extractAllMetaValues(
-    html: string,
-    targetKeys: string[],
-  ): string[] {
+  private extractAllMetaValues(html: string, targetKeys: string[]): string[] {
     const targets = new Set(targetKeys.map((k) => k.toLowerCase()));
     const values: string[] = [];
 

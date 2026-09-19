@@ -21,7 +21,10 @@ import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
 import { ProjectRoleGuard } from '@/modules/iam/authz/guards/role.guard';
 import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
 import { LabelService } from './label.service';
-import { CreateProjectLabelDto, UpdateProjectLabelDto } from './dto/create-label.dto';
+import {
+  CreateProjectLabelDto,
+  UpdateProjectLabelDto,
+} from './dto/create-label.dto';
 import { AssignProjectLabelsDto } from './dto/assign-label.dto';
 
 @ApiTags('Project Labels')
@@ -61,10 +64,7 @@ export class LabelController {
 
   @Delete('project-labels/:id')
   @ApiOperation({ summary: 'Delete a project label' })
-  deleteLabel(
-    @Param('id') id: string,
-    @CurrentUser('id') userId: string,
-  ) {
+  deleteLabel(@Param('id') id: string, @CurrentUser('id') userId: string) {
     return this.labelService.deleteLabel(id, userId);
   }
 
@@ -72,7 +72,7 @@ export class LabelController {
 
   @Get('projects/:projectId/project-labels')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get labels assigned to a project' })
   getProjectLabels(@Param('projectId') projectId: string) {
     return this.labelService.getProjectLabels(projectId);
@@ -80,7 +80,7 @@ export class LabelController {
 
   @Post('projects/:projectId/project-labels')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Assign labels to a project' })
   assignLabels(
     @Param('projectId') projectId: string,
@@ -91,7 +91,7 @@ export class LabelController {
 
   @Delete('projects/:projectId/project-labels/:labelId')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Remove a label from a project' })
   removeLabel(
     @Param('projectId') projectId: string,

@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  Inject,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, Inject, NotFoundException } from '@nestjs/common';
 import { Readable } from 'stream';
 import {
   STORAGE_DRIVER,
@@ -38,10 +34,17 @@ export class DownloadFileVersionUseCase {
     versionNumber: number,
     userId: string,
   ): Promise<DownloadFileVersionOutput> {
-    const node = await this.accessPolicy.assertCanAccess(userId, fileId, 'read');
+    const node = await this.accessPolicy.assertCanAccess(
+      userId,
+      fileId,
+      'read',
+    );
 
     let blobId: string | null = null;
-    const version = await this.versionRepo.findByFileAndVersion(fileId, versionNumber);
+    const version = await this.versionRepo.findByFileAndVersion(
+      fileId,
+      versionNumber,
+    );
 
     if (version) {
       blobId = version.blobId;

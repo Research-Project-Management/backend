@@ -144,10 +144,7 @@ export class GrobidClient {
   }
 
   private get fulltextTimeoutMs(): number {
-    return parseInt(
-      process.env.GROBID_FULLTEXT_TIMEOUT_MS || '45000',
-      10,
-    );
+    return parseInt(process.env.GROBID_FULLTEXT_TIMEOUT_MS || '45000', 10);
   }
 
   /**
@@ -312,7 +309,10 @@ export class GrobidClient {
     if (!this.enabled) return null;
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.fulltextTimeoutMs);
+    const timeout = setTimeout(
+      () => controller.abort(),
+      this.fulltextTimeoutMs,
+    );
 
     try {
       const formData = new FormData();
@@ -455,7 +455,9 @@ export class GrobidClient {
     }
 
     // Publisher & Publication Place
-    const publisherMatch = teiXml.match(/<publisher[^>]*>([^<]+)<\/publisher>/i);
+    const publisherMatch = teiXml.match(
+      /<publisher[^>]*>([^<]+)<\/publisher>/i,
+    );
     if (publisherMatch?.[1]) {
       result.publisher = this.cleanText(publisherMatch[1]);
     }
@@ -498,11 +500,15 @@ export class GrobidClient {
     }
 
     // ISSN & ISBN
-    const issnMatch = teiXml.match(/<idno[^>]*type="ISSN"[^>]*>([^<]+)<\/idno>/i);
+    const issnMatch = teiXml.match(
+      /<idno[^>]*type="ISSN"[^>]*>([^<]+)<\/idno>/i,
+    );
     if (issnMatch?.[1]) {
       result.issn = issnMatch[1].trim();
     }
-    const isbnMatch = teiXml.match(/<idno[^>]*type="ISBN"[^>]*>([^<]+)<\/idno>/i);
+    const isbnMatch = teiXml.match(
+      /<idno[^>]*type="ISBN"[^>]*>([^<]+)<\/idno>/i,
+    );
     if (isbnMatch?.[1]) {
       result.isbn = isbnMatch[1].trim();
     }

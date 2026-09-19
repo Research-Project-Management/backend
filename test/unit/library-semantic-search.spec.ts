@@ -1,4 +1,7 @@
-import { LocalEmbeddingService, EMBEDDING_DIMENSIONS } from '../../src/modules/library/search/services/local-embedding.service';
+import {
+  LocalEmbeddingService,
+  EMBEDDING_DIMENSIONS,
+} from '../../src/modules/library/search/services/local-embedding.service';
 import { VectorIndexService } from '../../src/modules/library/search/services/vector-index.service';
 import { SemanticSearchService } from '../../src/modules/library/search/services/semantic-search.service';
 
@@ -11,8 +14,10 @@ describe('In-Process Local Embeddings & Semantic Vector Search', () => {
   const mockPapers = [
     {
       id: 'paper-pinn-1',
-      title: 'Physics-informed neural networks for solving partial differential equations',
-      abstract: 'We introduce physics-informed neural networks (PINNs) which are trained to solve supervised learning tasks while respecting physical laws described by nonlinear partial differential equations.',
+      title:
+        'Physics-informed neural networks for solving partial differential equations',
+      abstract:
+        'We introduce physics-informed neural networks (PINNs) which are trained to solve supervised learning tasks while respecting physical laws described by nonlinear partial differential equations.',
       year: 2019,
       doi: '10.1016/j.jcp.2018.10.045',
       itemType: 'journalArticle',
@@ -27,7 +32,8 @@ describe('In-Process Local Embeddings & Semantic Vector Search', () => {
     {
       id: 'paper-transformer-2',
       title: 'Attention is all you need',
-      abstract: 'The dominant sequence transduction models are based on complex recurrent or convolutional neural networks. We propose a new simple network architecture, the Transformer, based solely on attention mechanisms.',
+      abstract:
+        'The dominant sequence transduction models are based on complex recurrent or convolutional neural networks. We propose a new simple network architecture, the Transformer, based solely on attention mechanisms.',
       year: 2017,
       doi: '10.48550/arXiv.1706.03762',
       itemType: 'preprint',
@@ -42,7 +48,8 @@ describe('In-Process Local Embeddings & Semantic Vector Search', () => {
     {
       id: 'paper-covid-3',
       title: 'Clinical characteristics of coronavirus disease 2019 in China',
-      abstract: 'During the initial outbreak of COVID-19, coronavirus spread rapidly. We analyzed clinical data from 1099 patients with laboratory-confirmed Covid-19 from 552 hospitals in 30 provinces.',
+      abstract:
+        'During the initial outbreak of COVID-19, coronavirus spread rapidly. We analyzed clinical data from 1099 patients with laboratory-confirmed Covid-19 from 552 hospitals in 30 provinces.',
       year: 2020,
       doi: '10.1056/NEJMoa2002032',
       itemType: 'journalArticle',
@@ -136,12 +143,24 @@ describe('In-Process Local Embeddings & Semantic Vector Search', () => {
     });
 
     it('should produce higher similarity for related topics than unrelated topics', async () => {
-      const queryVec = await embeddingService.embedText('transformer attention mechanism in deep learning');
-      const relatedVec = await embeddingService.embedText('simple network architecture based solely on attention mechanisms');
-      const unrelatedVec = await embeddingService.embedText('clinical patients admitted with respiratory viral pandemic');
+      const queryVec = await embeddingService.embedText(
+        'transformer attention mechanism in deep learning',
+      );
+      const relatedVec = await embeddingService.embedText(
+        'simple network architecture based solely on attention mechanisms',
+      );
+      const unrelatedVec = await embeddingService.embedText(
+        'clinical patients admitted with respiratory viral pandemic',
+      );
 
-      const simRelated = embeddingService.cosineSimilarity(queryVec, relatedVec);
-      const simUnrelated = embeddingService.cosineSimilarity(queryVec, unrelatedVec);
+      const simRelated = embeddingService.cosineSimilarity(
+        queryVec,
+        relatedVec,
+      );
+      const simUnrelated = embeddingService.cosineSimilarity(
+        queryVec,
+        unrelatedVec,
+      );
 
       expect(simRelated).toBeGreaterThan(simUnrelated);
       expect(simRelated).toBeGreaterThan(0.3);
@@ -162,9 +181,15 @@ describe('In-Process Local Embeddings & Semantic Vector Search', () => {
     });
 
     it('should rank similar items based on cosine similarity', async () => {
-      const vecA = await embeddingService.embedText('quantum computing algorithms');
-      const vecB = await embeddingService.embedText('quantum circuits and qubits optimization');
-      const vecC = await embeddingService.embedText('botany photosynthesis in tropical plants');
+      const vecA = await embeddingService.embedText(
+        'quantum computing algorithms',
+      );
+      const vecB = await embeddingService.embedText(
+        'quantum circuits and qubits optimization',
+      );
+      const vecC = await embeddingService.embedText(
+        'botany photosynthesis in tropical plants',
+      );
 
       await vectorIndex.saveVector('item-a', vecA);
       await vectorIndex.saveVector('item-b', vecB);
@@ -194,7 +219,8 @@ describe('In-Process Local Embeddings & Semantic Vector Search', () => {
 
     it('should perform semantic search and return relevant ranked papers', async () => {
       const res = await semanticSearch.searchSemantic('user-1', {
-        query: 'solving differential equations with neural networks and physics',
+        query:
+          'solving differential equations with neural networks and physics',
         limit: 5,
         threshold: 0.2,
       });
@@ -210,8 +236,10 @@ describe('In-Process Local Embeddings & Semantic Vector Search', () => {
       // Add a second machine learning paper to find as related to transformer
       const relatedPaper = {
         id: 'paper-bert-4',
-        title: 'BERT: Pre-training of deep bidirectional transformers for language understanding',
-        abstract: 'We introduce a new language representation model called BERT which stands for Bidirectional Encoder Representations from Transformers.',
+        title:
+          'BERT: Pre-training of deep bidirectional transformers for language understanding',
+        abstract:
+          'We introduce a new language representation model called BERT which stands for Bidirectional Encoder Representations from Transformers.',
         year: 2019,
         doi: '10.48550/arXiv.1810.04805',
         itemType: 'preprint',

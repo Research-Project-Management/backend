@@ -90,8 +90,10 @@ export class NotesService implements IItemNotesExtractorPort {
             : '',
       };
       const note = await this.repo.create(userId, sanitizedData, tx);
+      const effectiveProjectId = sanitizedData.projectId;
+      const eventScope = { userId, projectId: effectiveProjectId };
 
-      await helpers.appendChange(userId, {
+      await helpers.appendChange(eventScope, {
         entityType: 'Note',
         entityId: note.id,
         action: 'create',
@@ -100,7 +102,7 @@ export class NotesService implements IItemNotesExtractorPort {
       });
 
       await helpers.publishOutbox(
-        userId,
+        eventScope,
         note.id,
         'library.note.created',
         note,
@@ -136,7 +138,11 @@ export class NotesService implements IItemNotesExtractorPort {
         projectId,
       );
 
-      await helpers.appendChange(userId, {
+      const effectiveProjectId =
+        projectId || (updated as any).projectId || undefined;
+      const eventScope = { userId, projectId: effectiveProjectId };
+
+      await helpers.appendChange(eventScope, {
         entityType: 'Note',
         entityId: updated.id,
         action: 'update',
@@ -145,7 +151,7 @@ export class NotesService implements IItemNotesExtractorPort {
       });
 
       await helpers.publishOutbox(
-        userId,
+        eventScope,
         updated.id,
         'library.note.updated',
         updated,
@@ -162,6 +168,7 @@ export class NotesService implements IItemNotesExtractorPort {
     projectId?: string,
   ): Promise<boolean> {
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
+      const existing = await this.repo.findById(userId, id, tx, projectId);
       const deleted = await this.repo.softDelete(
         userId,
         id,
@@ -171,12 +178,16 @@ export class NotesService implements IItemNotesExtractorPort {
       );
 
       if (deleted) {
-        await helpers.recordTombstone(userId, {
+        const effectiveProjectId =
+          projectId || existing?.projectId || undefined;
+        const eventScope = { userId, projectId: effectiveProjectId };
+
+        await helpers.recordTombstone(eventScope, {
           entityType: 'Note',
           entityId: id,
         });
 
-        await helpers.publishOutbox(userId, id, 'library.note.deleted', {
+        await helpers.publishOutbox(eventScope, id, 'library.note.deleted', {
           id,
           deletedAt: new Date(),
         });
@@ -204,7 +215,10 @@ export class NotesService implements IItemNotesExtractorPort {
         throw new NotFoundException(`Note ${command.existingId} not found`);
       }
 
-      if (existing.userId !== targetUserId) {
+      if (
+        existing.userId !== targetUserId &&
+        existing.projectId !== command.projectId
+      ) {
         throw new ForbiddenException('Not authorized to update this note');
       }
 
@@ -224,7 +238,11 @@ export class NotesService implements IItemNotesExtractorPort {
         },
       });
 
-      await helpers.appendChange(targetUserId, {
+      const noteProjectId =
+        command.projectId || existing.projectId || undefined;
+      const syncScope = { userId: targetUserId, projectId: noteProjectId };
+
+      await helpers.appendChange(syncScope, {
         entityType: 'Note',
         entityId: updated.id,
         action: 'update',
@@ -233,9 +251,14 @@ export class NotesService implements IItemNotesExtractorPort {
 
       return { id: updated.id, isNew: false, version: updated.version };
     } else {
+      const noteProjectId =
+        command.projectId || (command as any).projectId || undefined;
+      const syncScope = { userId: targetUserId, projectId: noteProjectId };
+
       const created = await tx.note.create({
         data: {
           userId: targetUserId,
+          projectId: noteProjectId || null,
           createdById: command.userId,
           itemId: command.itemId,
           contentMd: command.contentMd,
@@ -245,7 +268,7 @@ export class NotesService implements IItemNotesExtractorPort {
         },
       });
 
-      await helpers.appendChange(targetUserId, {
+      await helpers.appendChange(syncScope, {
         entityType: 'Note',
         entityId: created.id,
         action: 'create',
@@ -253,7 +276,7 @@ export class NotesService implements IItemNotesExtractorPort {
       });
 
       await helpers.publishOutbox(
-        targetUserId,
+        syncScope,
         created.id,
         'library.note.created',
         { noteId: created.id },
@@ -276,21 +299,33 @@ export class NotesService implements IItemNotesExtractorPort {
     const existing = await tx.note.findFirst({
       where: {
         id: entityId,
-        userId: targetUserId,
+        ...(targetUserId ? { userId: targetUserId } : {}),
         deletedAt: null,
       },
     });
     if (!existing) return;
 
+    const noteProjectId =
+      existing.projectId ||
+      command.projectId ||
+      (command as any).projectId ||
+      undefined;
+    const syncScope = { userId: targetUserId, projectId: noteProjectId };
+
     await tx.note.updateMany({
-      where: { id: entityId, userId: targetUserId, deletedAt: null },
+      where: { id: entityId, deletedAt: null },
       data: { deletedAt: new Date() },
     });
-    await helpers.appendChange(targetUserId, {
+    await helpers.appendChange(syncScope, {
       entityType: 'Note',
       entityId,
       action: 'delete',
       version: existing.version + 1,
+    });
+    await helpers.recordTombstone(syncScope, {
+      entityType: 'Note',
+      entityId,
+      deletedById: targetUserId || undefined,
     });
   }
 
@@ -391,6 +426,7 @@ export class NotesService implements IItemNotesExtractorPort {
 
     const note = await this.createNote(userId, {
       itemId,
+      projectId: (item as any).projectId || undefined,
       title: `Literature Notes — ${item.title?.slice(0, 50) || 'Untitled'}`,
       contentMd: markdown,
       contentJson: buildTipTapDocFromText(markdown),

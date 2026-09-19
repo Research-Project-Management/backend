@@ -36,7 +36,9 @@ export class ForwardSyncDto {
   @IsOptional()
   pageId?: string;
 
-  @ApiPropertyOptional({ description: 'Raw plaintext SyncTeX data from compilation' })
+  @ApiPropertyOptional({
+    description: 'Raw plaintext SyncTeX data from compilation',
+  })
   @IsString()
   @IsOptional()
   synctex?: string;
@@ -67,7 +69,9 @@ export class ReverseSyncDto {
   @IsOptional()
   pageId?: string;
 
-  @ApiPropertyOptional({ description: 'Raw plaintext SyncTeX data from compilation' })
+  @ApiPropertyOptional({
+    description: 'Raw plaintext SyncTeX data from compilation',
+  })
   @IsString()
   @IsOptional()
   synctex?: string;

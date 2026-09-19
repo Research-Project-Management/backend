@@ -1,4 +1,9 @@
-import { Project, ProjectMember, ProjectMemberRole, ProjectLabel } from '@prisma/client';
+import {
+  Project,
+  ProjectMember,
+  ProjectMemberRole,
+  ProjectLabel,
+} from '@prisma/client';
 
 import {
   MinimalUser,

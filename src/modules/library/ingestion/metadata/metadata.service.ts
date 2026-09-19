@@ -445,7 +445,7 @@ export class MetadataService implements MetadataPort {
         isbn: item.isbn || undefined,
         openAccessPdfUrl: item.openAccessPdfUrl || undefined,
         provenance: {
-          originProvider: 'local_database' as any,
+          originProvider: 'local_database',
           resolvedAt: new Date().toISOString(),
           canonicalId,
           confidenceScore: 0.95,

@@ -23,10 +23,7 @@ export class CommentRepository {
   async findComments(pageId: string) {
     return this.prisma.pageComment.findMany({
       where: {
-        OR: [
-          { pageId },
-          { projectPageId: pageId },
-        ],
+        OR: [{ pageId }, { projectPageId: pageId }],
       },
       orderBy: { createdAt: 'asc' },
       include: {

@@ -19,7 +19,8 @@ export class InstantiateProjectTemplateDto {
   name!: string;
 
   @ApiPropertyOptional({
-    description: 'Custom identifier/key for the new project (defaults to generated prefix)',
+    description:
+      'Custom identifier/key for the new project (defaults to generated prefix)',
     example: 'GENAI',
     maxLength: 12,
   })
@@ -27,13 +28,16 @@ export class InstantiateProjectTemplateDto {
   @IsOptional()
   @MaxLength(12)
   @Matches(/^[A-Z0-9_-]+$/, {
-    message: 'Identifier must contain uppercase letters, numbers, hyphens or underscores',
+    message:
+      'Identifier must contain uppercase letters, numbers, hyphens or underscores',
   })
   identifier?: string;
 
   @ApiPropertyOptional({
-    description: 'Custom description for the project (overrides template description if provided)',
-    example: 'Building production recommendation service using modern embeddings.',
+    description:
+      'Custom description for the project (overrides template description if provided)',
+    example:
+      'Building production recommendation service using modern embeddings.',
   })
   @IsString()
   @IsOptional()

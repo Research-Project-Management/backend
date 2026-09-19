@@ -24,7 +24,7 @@ export class OutlineController {
 
   @Get(['pages/:pageId/outline', 'projects/:projectId/pages/:pageId/outline'])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary:
       'Extract structured heading outline / TOC tree from a document and its child sections',

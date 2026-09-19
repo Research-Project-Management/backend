@@ -60,8 +60,7 @@ export class RisParser {
     for (const c of item.creators || []) {
       const family = (c.lastName || c.name || '').trim();
       const given = (c.firstName || '').trim();
-      const fullName =
-        family && given ? `${given} ${family}` : family || given;
+      const fullName = family && given ? `${given} ${family}` : family || given;
       if (fullName) {
         rawAuthors.push(fullName);
         creators.push({

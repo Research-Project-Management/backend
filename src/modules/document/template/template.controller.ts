@@ -41,7 +41,7 @@ export class TemplateController {
 
   @Post('projects/:projectId/templates/:templateId/apply')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Apply a template to create a new manuscript in the project',
@@ -65,7 +65,7 @@ export class TemplateController {
     'projects/:projectId/pages/:pageId/save-as-template',
   ])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Save an existing document as a custom lab/team template',

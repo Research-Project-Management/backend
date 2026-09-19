@@ -10,15 +10,16 @@ import {
 export class ConditionEvaluatorEngine {
   /**
    * Translates a SavedSearchConditionGroup AST into a Prisma ItemWhereInput query.
+   * Scopes to projectId when specified (collaborative library) or userId (personal library).
    */
   compile(
     userId: string,
     group: SavedSearchConditionGroup,
+    projectId?: string,
   ): Prisma.ItemWhereInput {
-    const baseWhere: Prisma.ItemWhereInput = {
-      userId,
-      deletedAt: null,
-    };
+    const baseWhere: Prisma.ItemWhereInput = projectId
+      ? { projectId, deletedAt: null }
+      : { userId, deletedAt: null };
 
     if (
       !group ||
@@ -114,15 +115,43 @@ export class ConditionEvaluatorEngine {
             },
           };
         }
+        if (operator === 'beginsWith') {
+          return {
+            contributors: {
+              some: {
+                fullName: { startsWith: strVal, mode: 'insensitive' },
+              },
+            },
+          };
+        }
+        if (operator === 'endsWith') {
+          return {
+            contributors: {
+              some: {
+                fullName: { endsWith: strVal, mode: 'insensitive' },
+              },
+            },
+          };
+        }
         return null;
 
       case 'year': {
-        const numVal = Number(value);
         if (operator === 'isPresent') {
           return { year: { not: null } };
         }
         if (operator === 'isAbsent') {
           return { year: null };
+        }
+        if (operator === 'isBetween' && Array.isArray(value)) {
+          const [start, end] = value.map(Number);
+          if (Number.isFinite(start) && Number.isFinite(end)) {
+            return { year: { gte: start, lte: end } };
+          }
+          return null;
+        }
+        const numVal = Number(value);
+        if (!Number.isFinite(numVal)) {
+          return null;
         }
         if (operator === 'is') {
           return { year: numVal };
@@ -135,10 +164,6 @@ export class ConditionEvaluatorEngine {
         }
         if (operator === 'isLessThan') {
           return { year: { lt: numVal } };
-        }
-        if (operator === 'isBetween' && Array.isArray(value)) {
-          const [start, end] = value.map(Number);
-          return { year: { gte: start, lte: end } };
         }
         return null;
       }
@@ -155,6 +180,14 @@ export class ConditionEvaluatorEngine {
         }
         if (operator === 'isNot') {
           return { NOT: { itemType: strVal } };
+        }
+        if (operator === 'contains') {
+          return { itemType: { contains: strVal, mode: 'insensitive' } };
+        }
+        if (operator === 'doesNotContain') {
+          return {
+            NOT: { itemType: { contains: strVal, mode: 'insensitive' } },
+          };
         }
         return null;
 
@@ -189,6 +222,28 @@ export class ConditionEvaluatorEngine {
             },
           };
         }
+        if (operator === 'beginsWith') {
+          return {
+            itemTags: {
+              some: {
+                tag: {
+                  name: { startsWith: strVal, mode: 'insensitive' },
+                },
+              },
+            },
+          };
+        }
+        if (operator === 'endsWith') {
+          return {
+            itemTags: {
+              some: {
+                tag: {
+                  name: { endsWith: strVal, mode: 'insensitive' },
+                },
+              },
+            },
+          };
+        }
         return null;
 
       case 'collection':
@@ -210,7 +265,10 @@ export class ConditionEvaluatorEngine {
 
       case 'hasAttachment': {
         const boolVal =
-          value === true || strVal === 'true' || operator === 'isPresent';
+          value === true ||
+          strVal === 'true' ||
+          operator === 'isPresent' ||
+          operator === 'is';
         if (boolVal) {
           return { attachments: { some: {} } };
         }
@@ -222,6 +280,32 @@ export class ConditionEvaluatorEngine {
           return null;
         }
         const targetStatus = (strVal || 'unread') as any;
+        if (operator === 'isNot') {
+          if (targetStatus === 'unread') {
+            return {
+              states: {
+                some: {
+                  userId,
+                  readStatus: { not: 'unread' },
+                },
+              },
+            };
+          }
+          return {
+            OR: [
+              { states: { none: { userId } } },
+              {
+                states: {
+                  some: {
+                    userId,
+                    readStatus: { not: targetStatus },
+                  },
+                },
+              },
+            ],
+          };
+        }
+
         if (targetStatus === 'unread') {
           return {
             OR: [
@@ -244,21 +328,94 @@ export class ConditionEvaluatorEngine {
         if (!userId) {
           return null;
         }
+        if (operator === 'isPresent') {
+          return {
+            states: {
+              some: {
+                userId,
+                rating: { not: null, gt: 0 },
+              },
+            },
+          };
+        }
+        if (operator === 'isAbsent') {
+          return {
+            OR: [
+              { states: { none: { userId } } },
+              {
+                states: {
+                  some: {
+                    userId,
+                    OR: [{ rating: null }, { rating: 0 }],
+                  },
+                },
+              },
+            ],
+          };
+        }
+        if (operator === 'isBetween' && Array.isArray(value)) {
+          const [start, end] = value.map(Number);
+          if (Number.isFinite(start) && Number.isFinite(end)) {
+            return {
+              states: {
+                some: {
+                  userId,
+                  rating: { gte: start, lte: end },
+                },
+              },
+            };
+          }
+          return null;
+        }
+
         const ratingNum = Number(value);
+        if (!Number.isFinite(ratingNum)) {
+          return null;
+        }
+
         if (operator === 'isGreaterThan') {
-          return { states: { some: { userId, rating: { gte: ratingNum } } } };
+          return { states: { some: { userId, rating: { gt: ratingNum } } } };
+        }
+        if (operator === 'isLessThan') {
+          return { states: { some: { userId, rating: { lt: ratingNum } } } };
+        }
+        if (operator === 'isNot') {
+          return {
+            OR: [
+              { states: { none: { userId } } },
+              { states: { some: { userId, NOT: { rating: ratingNum } } } },
+            ],
+          };
         }
         return { states: { some: { userId, rating: ratingNum } } };
       }
 
-      case 'dateAdded':
+      case 'dateAdded': {
+        if (operator === 'isPresent') {
+          return { createdAt: { not: undefined } };
+        }
+        if (operator === 'isAbsent') {
+          return null;
+        }
+        if (operator === 'isBetween' && Array.isArray(value)) {
+          const [d1, d2] = value.map((v) => new Date(String(v)));
+          if (!isNaN(d1.getTime()) && !isNaN(d2.getTime())) {
+            return { createdAt: { gte: d1, lte: d2 } };
+          }
+          return null;
+        }
+        const parsedDate = new Date(strVal);
+        if (isNaN(parsedDate.getTime())) {
+          return null;
+        }
         if (operator === 'isGreaterThan') {
-          return { createdAt: { gt: new Date(strVal) } };
+          return { createdAt: { gt: parsedDate } };
         }
         if (operator === 'isLessThan') {
-          return { createdAt: { lt: new Date(strVal) } };
+          return { createdAt: { lt: parsedDate } };
         }
         return null;
+      }
 
       default:
         return null;

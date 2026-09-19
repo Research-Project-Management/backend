@@ -41,7 +41,7 @@ export class AttachmentController {
 
   @Get('work-items/:workItemId/attachments')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get all attachments for a work item' })
   @ApiParam({ name: 'workItemId', description: 'Work item ID' })
   async getAttachments(@Param('workItemId') workItemId: string) {
@@ -50,7 +50,7 @@ export class AttachmentController {
 
   @Post('work-items/:workItemId/attachments')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Add an attachment to a work item' })
   @ApiParam({ name: 'workItemId', description: 'Work item ID' })
@@ -68,7 +68,7 @@ export class AttachmentController {
 
   @Delete('work-items/:workItemId/attachments/:attachmentId')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Delete an attachment from a work item' })
   @ApiParam({ name: 'workItemId', description: 'Work item ID' })
   @ApiParam({ name: 'attachmentId', description: 'Attachment ID' })
@@ -86,7 +86,7 @@ export class AttachmentController {
 
   @Post('work-items/:workItemId/attach/pages')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Attach a page to a work item' })
   @ApiParam({ name: 'workItemId', description: 'Work item ID' })
@@ -100,7 +100,7 @@ export class AttachmentController {
 
   @Delete('work-items/:workItemId/attach/pages/:pageId')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Detach a page from a work item' })
   @ApiParam({ name: 'workItemId', description: 'Work item ID' })
   @ApiParam({ name: 'pageId', description: 'Page ID' })
@@ -114,7 +114,7 @@ export class AttachmentController {
 
   @Post('work-items/:workItemId/attach/papers')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Attach a research paper to a work item' })
   @ApiParam({ name: 'workItemId', description: 'Work item ID' })
@@ -128,7 +128,7 @@ export class AttachmentController {
 
   @Delete('work-items/:workItemId/attach/papers/:paperId')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Detach a research paper from a work item' })
   @ApiParam({ name: 'workItemId', description: 'Work item ID' })
   @ApiParam({ name: 'paperId', description: 'Paper ID' })
@@ -142,7 +142,7 @@ export class AttachmentController {
 
   @Post('work-items/:workItemId/attach/files')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Attach a file to a work item' })
   @ApiParam({ name: 'workItemId', description: 'Work item ID' })
@@ -156,7 +156,7 @@ export class AttachmentController {
 
   @Delete('work-items/:workItemId/attach/files/:fileId')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Detach a file from a work item' })
   @ApiParam({ name: 'workItemId', description: 'Work item ID' })
   @ApiParam({ name: 'fileId', description: 'File ID' })
@@ -170,7 +170,7 @@ export class AttachmentController {
 
   @Post('work-items/:workItemId/attach/links')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Attach an external link to a work item' })
   @ApiParam({ name: 'workItemId', description: 'Work item ID' })
@@ -184,7 +184,7 @@ export class AttachmentController {
 
   @Delete('work-items/:workItemId/attach/links/:linkIndex')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Detach an external link from a work item' })
   @ApiParam({ name: 'workItemId', description: 'Work item ID' })
   @ApiParam({ name: 'linkIndex', description: 'Link index or ID' })

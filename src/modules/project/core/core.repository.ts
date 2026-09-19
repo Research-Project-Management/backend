@@ -74,7 +74,9 @@ export class CoreRepository {
             }),
       ...(query?.state ? { state: query.state } : {}),
       ...(query?.priority ? { priority: query.priority } : {}),
-      ...(query?.labelId ? { labels: { some: { labelId: query.labelId } } } : {}),
+      ...(query?.labelId
+        ? { labels: { some: { labelId: query.labelId } } }
+        : {}),
     };
 
     return this.prisma.project.findMany({

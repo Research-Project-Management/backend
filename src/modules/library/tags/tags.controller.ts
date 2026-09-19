@@ -27,7 +27,7 @@ export class TagsController {
   constructor(private readonly tagsService: TagsService) {}
 
   @Get()
-  @ProjectRoles('owner', 'contributor', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'List library tags' })
   async getTags(
     @CurrentUser('id') userId: string,
@@ -43,7 +43,7 @@ export class TagsController {
   }
 
   @Post()
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create or get tag' })
   async createTag(
@@ -62,7 +62,7 @@ export class TagsController {
   }
 
   @Delete('automatic')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete automatic tags' })
   async deleteAutomaticTags(@CurrentUser('id') userId: string) {
@@ -70,7 +70,7 @@ export class TagsController {
   }
 
   @Delete(':tagId')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete a tag' })
   async deleteTag(
@@ -84,7 +84,7 @@ export class TagsController {
   }
 
   @Post(':tagId/items/:itemId')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Assign tag to an item' })
   async assignTag(
@@ -97,7 +97,7 @@ export class TagsController {
   }
 
   @Delete(':tagId/items/:itemId')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Remove tag from an item' })
   async removeTag(

@@ -53,7 +53,6 @@ import type {
 
 export { CreateAttachmentInput, ReplaceAttachmentFileInput };
 
-
 @Injectable()
 export class AttachmentsService {
   private readonly logger = new Logger(AttachmentsService.name);
@@ -142,7 +141,9 @@ export class AttachmentsService {
         await this.repo.updateLinkedFile(resolvedFileId, targetItemId, tx);
       }
 
-      await helpers.appendChange(userId, {
+      const eventScope = { userId, projectId: projectId || undefined };
+
+      await helpers.appendChange(eventScope, {
         entityType: 'Attachment',
         entityId: attachment.id,
         action: 'create',
@@ -151,7 +152,7 @@ export class AttachmentsService {
       });
 
       await helpers.publishOutbox(
-        userId,
+        eventScope,
         attachment.id,
         'library.attachment.created',
         attachment,
@@ -159,13 +160,14 @@ export class AttachmentsService {
 
       if (attachment.mimeType === 'application/pdf') {
         await helpers.publishOutbox(
-          userId,
+          eventScope,
           attachment.id,
           'library.attachment.extraction_requested',
           {
             attachmentId: attachment.id,
             itemId: attachment.itemId,
             userId,
+            projectId: projectId || undefined,
           },
         );
       }
@@ -228,13 +230,19 @@ export class AttachmentsService {
         },
       });
 
-      await helpers.appendChange(userId, {
-        entityType: 'Attachment',
-        entityId: attachmentId,
-        action: 'update',
-        version: nextRevisionNumber,
-        data: updatedAttachment,
-      });
+      const effectiveProjectId =
+        projectId || attachment.item?.projectId || undefined;
+
+      await helpers.appendChange(
+        { userId, projectId: effectiveProjectId },
+        {
+          entityType: 'Attachment',
+          entityId: attachmentId,
+          action: 'update',
+          version: nextRevisionNumber,
+          data: updatedAttachment,
+        },
+      );
 
       return updatedAttachment;
     });
@@ -340,9 +348,15 @@ export class AttachmentsService {
 
     const result = await this.libraryTx.executeInTransaction(
       async (tx, helpers) => {
-        await tx.attachment.delete({ where: { id: attachment.id } });
+        const effectiveProjectId =
+          projectId || attachment.item?.projectId || undefined;
+        const eventScope = { userId, projectId: effectiveProjectId };
 
-        await helpers.appendChange(userId, {
+        await tx.attachment.delete({
+          where: { id: attachment.id },
+        });
+
+        await helpers.appendChange(eventScope, {
           entityType: 'Attachment',
           entityId: attachment.id,
           action: 'delete',
@@ -351,10 +365,10 @@ export class AttachmentsService {
         });
 
         await helpers.publishOutbox(
-          userId,
+          eventScope,
           attachment.id,
           'library.attachment.deleted',
-          { attachmentId: attachment.id },
+          { attachmentId: attachment.id, projectId: effectiveProjectId },
         );
 
         return { success: true };
@@ -382,8 +396,10 @@ export class AttachmentsService {
     tx: Prisma.TransactionClient,
     helpers: TransactionHelpers,
   ): Promise<UpsertSyncEntityResult> {
-    const userId =
-      (command as any).userId || (command as any).projectId || 'system';
+    const projectId = command.projectId;
+    const userId = command.userId;
+    const actorId = userId || projectId || 'system';
+
     if (command.existingId) {
       const existing = await tx.attachment.findUnique({
         where: { id: command.existingId },
@@ -396,9 +412,17 @@ export class AttachmentsService {
         );
       }
 
-      if (
-        (existing.item as any).userId &&
-        (existing.item as any).userId !== userId
+      const item = existing.item as any;
+      if (projectId && item?.projectId && item.projectId !== projectId) {
+        throw new ForbiddenException(
+          `Attachment ${command.existingId} does not belong to project ${projectId}`,
+        );
+      } else if (
+        !projectId &&
+        userId &&
+        item?.userId &&
+        !item?.projectId &&
+        item.userId !== userId
       ) {
         throw new ForbiddenException(
           `Attachment ${command.existingId} does not belong to user ${userId}`,
@@ -432,7 +456,11 @@ export class AttachmentsService {
         },
       });
 
-      await helpers.appendChange(userId, {
+      const effectiveProjectId =
+        projectId || (existing.item as any)?.projectId || undefined;
+      const syncScope = { userId: actorId, projectId: effectiveProjectId };
+
+      await helpers.appendChange(syncScope, {
         entityType: 'Attachment',
         entityId: updated.id,
         action: 'update',
@@ -452,8 +480,25 @@ export class AttachmentsService {
         where: { id: parentItemId },
       });
 
-      if (!item || ((item as any).userId && (item as any).userId !== userId)) {
+      if (!item) {
         throw new NotFoundException(`Item ${parentItemId} not found`);
+      }
+
+      const itemAny = item as any;
+      if (projectId && itemAny.projectId && itemAny.projectId !== projectId) {
+        throw new ForbiddenException(
+          `Item ${parentItemId} does not belong to project ${projectId}`,
+        );
+      } else if (
+        !projectId &&
+        userId &&
+        itemAny.userId &&
+        !itemAny.projectId &&
+        itemAny.userId !== userId
+      ) {
+        throw new ForbiddenException(
+          `Item ${parentItemId} does not belong to user ${userId}`,
+        );
       }
 
       const created = await tx.attachment.create({
@@ -481,7 +526,10 @@ export class AttachmentsService {
         },
       });
 
-      await helpers.appendChange(userId, {
+      const effectiveProjectId = projectId || itemAny.projectId || undefined;
+      const syncScope = { userId: actorId, projectId: effectiveProjectId };
+
+      await helpers.appendChange(syncScope, {
         entityType: 'Attachment',
         entityId: created.id,
         action: 'create',
@@ -489,10 +537,10 @@ export class AttachmentsService {
       });
 
       await helpers.publishOutbox(
-        userId,
+        syncScope,
         created.id,
         'library.attachment.created',
-        { attachmentId: created.id },
+        { attachmentId: created.id, projectId: effectiveProjectId },
       );
 
       if (
@@ -500,13 +548,14 @@ export class AttachmentsService {
         command.filename?.toLowerCase().endsWith('.pdf')
       ) {
         await helpers.publishOutbox(
-          userId,
+          syncScope,
           created.id,
           'library.attachment.extraction_requested',
           {
             attachmentId: created.id,
             itemId: created.itemId,
-            userId,
+            userId: actorId,
+            projectId: effectiveProjectId,
           },
         );
       }
@@ -523,22 +572,50 @@ export class AttachmentsService {
     tx: Prisma.TransactionClient,
     helpers: TransactionHelpers,
   ): Promise<void> {
-    const userId = command.userId || (command as any).projectId || 'system';
+    const projectId = command.projectId;
+    const userId = command.userId;
+    const actorId = userId || projectId || 'system';
+
+    const itemWhere: Prisma.ItemWhereInput = {};
+    if (projectId) {
+      itemWhere.projectId = projectId;
+    } else if (userId) {
+      itemWhere.OR = [
+        { userId },
+        {
+          project: {
+            members: {
+              some: { userId },
+            },
+          },
+        },
+      ];
+    }
+
     const existing = await tx.attachment.findFirst({
       where: {
         id: command.entityId,
-        item: { userId },
+        ...(Object.keys(itemWhere).length > 0 ? { item: itemWhere } : {}),
       },
       include: { item: true },
     });
     if (!existing) return;
 
+    const effectiveProjectId =
+      projectId || existing.item?.projectId || undefined;
+    const syncScope = { userId: actorId, projectId: effectiveProjectId };
+
     await tx.attachment.delete({ where: { id: command.entityId } });
-    await helpers.appendChange(userId, {
+    await helpers.appendChange(syncScope, {
       entityType: 'Attachment',
       entityId: command.entityId,
       action: 'delete',
       version: 1,
+    });
+    await helpers.recordTombstone(syncScope, {
+      entityType: 'Attachment',
+      entityId: command.entityId,
+      deletedById: userId || undefined,
     });
   }
 
@@ -798,18 +875,29 @@ export class AttachmentsService {
     }
 
     // Verify item ownership / project access
-    await this.itemExistencePort.assertExists(userId, attachment.itemId, projectId);
+    await this.itemExistencePort.assertExists(
+      userId,
+      attachment.itemId,
+      projectId,
+    );
 
-    const oldFilename = attachment.filename || attachment.name || 'document.pdf';
+    const oldFilename =
+      attachment.filename || attachment.name || 'document.pdf';
     let newFilename = '';
 
     if (dto.filename && dto.filename.trim()) {
       const ext = resolveFileExtension(oldFilename);
-      const cleanStem = sanitizeFilenameStem(dto.filename.replace(/\.[a-zA-Z0-9]+$/, ''));
+      const cleanStem = sanitizeFilenameStem(
+        dto.filename.replace(/\.[a-zA-Z0-9]+$/, ''),
+      );
       newFilename = `${cleanStem}${ext}`;
     } else {
       const pattern = dto.pattern || DEFAULT_RENAME_PATTERN;
-      newFilename = formatAttachmentFilename(pattern, attachment.item, oldFilename);
+      newFilename = formatAttachmentFilename(
+        pattern,
+        attachment.item,
+        oldFilename,
+      );
     }
 
     if (oldFilename === newFilename) {
@@ -895,9 +983,17 @@ export class AttachmentsService {
     for (const att of attachments) {
       try {
         // Assert scope permission per item
-        await this.itemExistencePort.assertExists(userId, att.itemId, projectId);
+        await this.itemExistencePort.assertExists(
+          userId,
+          att.itemId,
+          projectId,
+        );
         const oldFilename = att.filename || att.name || 'document.pdf';
-        const newFilename = formatAttachmentFilename(pattern, att.item, oldFilename);
+        const newFilename = formatAttachmentFilename(
+          pattern,
+          att.item,
+          oldFilename,
+        );
 
         if (oldFilename !== newFilename) {
           await this.prisma.attachment.update({
@@ -933,9 +1029,44 @@ export class AttachmentsService {
     }
 
     return {
-      renamedCount: results.filter((r) => r.oldFilename !== r.newFilename).length,
+      renamedCount: results.filter((r) => r.oldFilename !== r.newFilename)
+        .length,
       results,
     };
   }
-}
 
+  /**
+   * Resolves the parent itemId for an attachment with domain existence check.
+   */
+  async resolveAttachmentItemId(attachmentId: string): Promise<string> {
+    const attachment = await this.repo.findUnique(attachmentId);
+    if (!attachment?.itemId) {
+      throw new NotFoundException(`Attachment ${attachmentId} not found`);
+    }
+    return attachment.itemId;
+  }
+
+  /**
+   * Resolves an item's target URL for capturing web snapshots.
+   */
+  async resolveItemUrl(
+    itemId: string,
+    userId: string,
+    projectId?: string,
+  ): Promise<string> {
+    const scopeWhere = projectId ? { projectId } : { userId };
+    const item = await this.prisma.item.findFirst({
+      where: { id: itemId, ...scopeWhere, deletedAt: null },
+      select: { url: true },
+    });
+    if (!item) {
+      throw new NotFoundException(`Item ${itemId} not found`);
+    }
+    if (!item.url) {
+      throw new BadRequestException(
+        'No URL found on this item to capture a snapshot.',
+      );
+    }
+    return item.url;
+  }
+}

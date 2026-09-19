@@ -20,7 +20,7 @@ export class HistoryController {
 
   @Get('work-items/:workItemId/feed')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary:
       'Get unified collaboration feed for work item (Plane.so 5-tabs: all, activity, comments, transition, history)',
@@ -35,7 +35,7 @@ export class HistoryController {
 
   @Get('work-items/:workItemId/transitions')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary:
       'Get state transitions and time-in-state calculation (Plane.so Transition tab)',
@@ -47,7 +47,7 @@ export class HistoryController {
 
   @Get('work-items/:workItemId/history')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary:
       'Get property changelog history with diff summary (Plane.so History tab)',
@@ -62,7 +62,7 @@ export class HistoryController {
 
   @Get('work-items/:workItemId/activity')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'Get activity events for work item (Plane.so Activity tab)',
   })

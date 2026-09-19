@@ -215,9 +215,9 @@ export class CslJsonMapper {
     if (rawType === 'preprint') {
       csl.genre = 'Preprint';
     } else if (rawType === 'thesis') {
-      csl.genre = (item as any).thesisType || item.extraFields?.thesisType;
+      csl.genre = item.thesisType || item.extraFields?.thesisType;
     } else if (rawType === 'report') {
-      csl.genre = (item as any).reportType || item.extraFields?.reportType;
+      csl.genre = item.reportType || item.extraFields?.reportType;
     }
 
     // Version
@@ -239,7 +239,9 @@ export class CslJsonMapper {
 
     if (rawContributors && rawContributors.length > 0) {
       const typeDef = SCHEMA_V42_DATA.itemTypes[rawType];
-      const primaryRoleForType = (typeDef?.primaryCreatorType || 'author').toLowerCase();
+      const primaryRoleForType = (
+        typeDef?.primaryCreatorType || 'author'
+      ).toLowerCase();
 
       const sortedContributors = [...rawContributors].sort(
         (firstContributor, secondContributor) =>
@@ -254,8 +256,7 @@ export class CslJsonMapper {
 
         // Map through CSL_CREATOR_MAP derived dynamically from Zotero Schema v42
         const cslMappedRole =
-          CSL_CREATOR_MAP[rawRole] ||
-          CSL_CREATOR_MAP[lowerRole];
+          CSL_CREATOR_MAP[rawRole] || CSL_CREATOR_MAP[lowerRole];
 
         if (
           lowerRole === 'author' ||
@@ -367,7 +368,10 @@ export class CslJsonMapper {
    * 3. Stops scanning after encountering 2 consecutive non-key-value lines (Zotero heuristic).
    * 4. Leaves remaining non-CSL lines (identifiers, notes) in csl.note.
    */
-  public static parseExtraCslVariables(extraStr: string, csl: CslItemData): void {
+  public static parseExtraCslVariables(
+    extraStr: string,
+    csl: CslItemData,
+  ): void {
     if (!extraStr || !extraStr.trim()) return;
 
     const lines = extraStr.split(/\r?\n/);
@@ -378,7 +382,7 @@ export class CslJsonMapper {
       const trimmed = line.trim();
       if (!trimmed) continue;
 
-      const match = trimmed.match(/^([a-zA-Z_][a-zA-Z0-9_\-]*):\s*(.+)$/);
+      const match = trimmed.match(/^([a-zA-Z_][a-zA-Z0-9_-]*):\s*(.+)$/);
       if (match && invalidConsecutiveLines < 2) {
         const rawKey = match[1].toLowerCase().replace(/_/g, '-');
         const val = match[2].trim();
@@ -395,9 +399,15 @@ export class CslJsonMapper {
           csl['event-title'] = val;
         } else if (rawKey === 'original-title' || rawKey === 'originaltitle') {
           csl['original-title'] = val;
-        } else if (rawKey === 'original-publisher' || rawKey === 'originalpublisher') {
+        } else if (
+          rawKey === 'original-publisher' ||
+          rawKey === 'originalpublisher'
+        ) {
           csl['original-publisher'] = val;
-        } else if (rawKey === 'original-publisher-place' || rawKey === 'originalpublisherplace') {
+        } else if (
+          rawKey === 'original-publisher-place' ||
+          rawKey === 'originalpublisherplace'
+        ) {
           csl['original-publisher-place'] = val;
         } else if (rawKey === 'status') {
           csl.status = val;
@@ -420,9 +430,15 @@ export class CslJsonMapper {
           csl.type = val;
         } else if (rawKey === 'chapter-number' || rawKey === 'chapternumber') {
           csl['chapter-number'] = val;
-        } else if (rawKey === 'collection-title' || rawKey === 'collectiontitle') {
+        } else if (
+          rawKey === 'collection-title' ||
+          rawKey === 'collectiontitle'
+        ) {
           csl['collection-title'] = val;
-        } else if (rawKey === 'collection-number' || rawKey === 'collectionnumber') {
+        } else if (
+          rawKey === 'collection-number' ||
+          rawKey === 'collectionnumber'
+        ) {
           csl['collection-number'] = val;
         } else if (rawKey === 'container-title-short') {
           csl['container-title-short'] = val;

@@ -23,7 +23,7 @@ export class ExportController {
   constructor(private readonly exportService: ExportService) {}
 
   @Post(['pages/:pageId/export', 'projects/:projectId/pages/:pageId/export'])
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Export document to PDF, Markdown, LaTeX source or bundle',

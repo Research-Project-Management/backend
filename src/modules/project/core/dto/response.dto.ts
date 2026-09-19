@@ -47,7 +47,7 @@ export class ProjectMemberSummaryDto {
 
   @ApiProperty({
     example: 'owner',
-    enum: ['owner', 'contributor', 'commenter', 'viewer'],
+    enum: ['owner', 'coordinator', 'contributor', 'reviewer'],
   })
   role!: string;
 
@@ -140,7 +140,7 @@ export class ProjectResponseDto {
 
   @ApiPropertyOptional({
     example: 'owner',
-    enum: ['owner', 'contributor', 'commenter', 'viewer'],
+    enum: ['owner', 'coordinator', 'contributor', 'reviewer'],
   })
   yourRole?: string | null;
 
@@ -163,7 +163,7 @@ export class ProjectDetailResponseDto {
 
   @ApiPropertyOptional({
     example: 'owner',
-    enum: ['owner', 'contributor', 'commenter', 'viewer'],
+    enum: ['owner', 'coordinator', 'contributor', 'reviewer'],
   })
   yourRole?: string | null;
 

@@ -96,6 +96,22 @@ export class CollaborationGateway
     const { pageId, user } = payload;
     const room = `doc:${pageId}`;
 
+    // Clean up previous room if this socket was attached to another document
+    const previousMeta = this.socketToUser.get(client.id);
+    if (previousMeta && previousMeta.pageId !== pageId) {
+      const oldRoom = `doc:${previousMeta.pageId}`;
+      await client.leave(oldRoom);
+      const remainingUsers = await this.collaborationService.leaveRoom(
+        previousMeta.pageId,
+        previousMeta.userId,
+      );
+      this.server.to(oldRoom).emit('user_left', {
+        userId: previousMeta.userId,
+        activeUsers: remainingUsers,
+        timestamp: Date.now(),
+      });
+    }
+
     await client.join(room);
     this.socketToUser.set(client.id, { pageId, userId: user.id });
 
@@ -103,7 +119,7 @@ export class CollaborationGateway
       id: user.id,
       name: user.name,
       avatar: user.avatar,
-      role: user.role || 'viewer',
+      role: user.role || 'reviewer',
     });
 
     // Notify room of joined user
@@ -133,7 +149,10 @@ export class CollaborationGateway
     await client.leave(room);
     this.socketToUser.delete(client.id);
 
-    const activeUsers = await this.collaborationService.leaveRoom(pageId, userId);
+    const activeUsers = await this.collaborationService.leaveRoom(
+      pageId,
+      userId,
+    );
     this.server.to(room).emit('user_left', {
       userId,
       activeUsers,
@@ -181,18 +200,37 @@ export class CollaborationGateway
   async handleLockState(
     @ConnectedSocket() client: Socket,
     @MessageBody()
-    payload: { pageId: string; isLocked: boolean; lockedBy: string },
+    payload: { pageId: string; isLocked: boolean; lockedBy?: string },
   ) {
+    if (!payload?.pageId) {
+      return { status: 'error', message: 'Missing pageId' };
+    }
+
+    const meta = this.socketToUser.get(client.id);
+    if (!meta || meta.pageId !== payload.pageId) {
+      return {
+        status: 'error',
+        message: 'Unauthorized: Socket is not active in this document room',
+      };
+    }
+
+    const effectiveLockedBy = meta.userId;
     const room = `doc:${payload.pageId}`;
-    this.collaborationService.broadcastLockChange(
+    await this.collaborationService.broadcastLockChange(
       payload.pageId,
       payload.isLocked,
-      payload.lockedBy,
+      effectiveLockedBy,
     );
     this.server.to(room).emit('lock_updated', {
       isLocked: payload.isLocked,
-      lockedBy: payload.lockedBy,
+      lockedBy: effectiveLockedBy,
       timestamp: Date.now(),
     });
+
+    return {
+      status: 'ok',
+      isLocked: payload.isLocked,
+      lockedBy: effectiveLockedBy,
+    };
   }
 }

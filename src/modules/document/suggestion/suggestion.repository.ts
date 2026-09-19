@@ -32,7 +32,9 @@ export interface SuggestionWithAuthor {
 export class SuggestionRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(data: Prisma.PageSuggestionCreateInput): Promise<SuggestionWithAuthor> {
+  async create(
+    data: Prisma.PageSuggestionCreateInput,
+  ): Promise<SuggestionWithAuthor> {
     return this.prisma.pageSuggestion.create({
       data,
       include: {
@@ -60,10 +62,7 @@ export class SuggestionRepository {
   ): Promise<SuggestionWithAuthor[]> {
     return this.prisma.pageSuggestion.findMany({
       where: {
-        OR: [
-          { pageId },
-          { projectPageId: pageId },
-        ],
+        OR: [{ pageId }, { projectPageId: pageId }],
         deletedAt: null,
         ...(status ? { status } : {}),
       },

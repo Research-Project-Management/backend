@@ -82,7 +82,9 @@ export class AssetService {
     }
 
     if (cleanFilename.includes('/') || cleanFilename.includes('\\')) {
-      throw new BadRequestException('Asset filename cannot contain path separators (/ or \\)');
+      throw new BadRequestException(
+        'Asset filename cannot contain path separators (/ or \\)',
+      );
     }
 
     try {
@@ -148,6 +150,23 @@ export class AssetService {
 
     const isImage = mimeType.startsWith('image/');
     const icon = isImage ? 'image' : 'paperclip';
+
+    if (dto.parentPageId) {
+      const parent = await this.prisma.page.findFirst({
+        where: { id: dto.parentPageId, deletedAt: null },
+        select: { id: true, projectId: true },
+      });
+      if (!parent) {
+        throw new NotFoundException(
+          `Parent page ${dto.parentPageId} not found`,
+        );
+      }
+      if (parent.projectId !== projectId) {
+        throw new BadRequestException(
+          'Parent page belongs to a different project',
+        );
+      }
+    }
 
     const page = await this.prisma.page.create({
       data: {
@@ -278,9 +297,9 @@ export class AssetService {
       if (userId && page.projectId) {
         await this.verifyProjectAccess(page.projectId, userId, [
           'owner',
+          'coordinator',
           'contributor',
-          'commenter',
-          'viewer',
+          'reviewer',
         ]);
       }
     }
@@ -294,9 +313,9 @@ export class AssetService {
           if (userId && fileNode.authorId !== userId && fileNode.linkedToId) {
             await this.verifyProjectAccess(fileNode.linkedToId, userId, [
               'owner',
+              'coordinator',
               'contributor',
-              'commenter',
-              'viewer',
+              'reviewer',
             ]);
           }
           let base64 = '';
@@ -323,7 +342,9 @@ export class AssetService {
             sizeBytes: Number(fileNode.size),
             contentBase64: base64,
             fileId: fileNode.id,
-            storageUrl: fileNode.url || `/api/files/${encodeURIComponent(fileNode.id)}/content`,
+            storageUrl:
+              fileNode.url ||
+              `/api/files/${encodeURIComponent(fileNode.id)}/content`,
             projectId: fileNode.linkedToId || '',
             parentPageId: fileNode.parentId || null,
             createdAt: fileNode.createdAt,
@@ -461,7 +482,10 @@ export class AssetService {
   /**
    * Soft-deletes an asset and cleans up underlying storage object if present.
    */
-  async deleteAsset(assetId: string, userId?: string): Promise<{ ok: boolean }> {
+  async deleteAsset(
+    assetId: string,
+    userId?: string,
+  ): Promise<{ ok: boolean }> {
     const page = this.prisma?.page
       ? await this.prisma.page.findFirst({
           where: { id: assetId, deletedAt: null },
@@ -497,7 +521,9 @@ export class AssetService {
             data: { trashedAt: new Date() },
           });
           if (this.cache && fileNode.linkedToId) {
-            await this.cache.del(DOCUMENT_REDIS_KEYS.projectTree(fileNode.linkedToId));
+            await this.cache.del(
+              DOCUMENT_REDIS_KEYS.projectTree(fileNode.linkedToId),
+            );
           }
           return { ok: true };
         }
@@ -586,7 +612,9 @@ export class AssetService {
 
       return Array.isArray(storageFiles) ? storageFiles : [];
     } catch (err: any) {
-      this.logger.warn(`Failed to discover related storage files: ${err?.message}`);
+      this.logger.warn(
+        `Failed to discover related storage files: ${err?.message}`,
+      );
       return [];
     }
   }

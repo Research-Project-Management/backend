@@ -80,11 +80,11 @@ export class CoreService {
     } | null,
     userId?: string,
   ): ProjectMemberRole {
-    if (!userId || !project) return ProjectMemberRole.viewer;
+    if (!userId || !project) return ProjectMemberRole.reviewer;
     if (project.createdById === userId) return ProjectMemberRole.owner;
 
     const member = project.members?.find((m) => m.userId === userId);
-    return (member?.role as ProjectMemberRole) || ProjectMemberRole.viewer;
+    return (member?.role as ProjectMemberRole) || ProjectMemberRole.reviewer;
   }
 
   /**
@@ -140,7 +140,7 @@ export class CoreService {
           ? ProjectMemberRole.owner
           : membershipMap.get(p.id) ||
             p.members?.find((m) => m.userId === userId)?.role ||
-            ProjectMemberRole.viewer;
+            ProjectMemberRole.reviewer;
       const permissions = calculateProjectPermissions(yourRole, p.isActive);
 
       return {
@@ -188,11 +188,7 @@ export class CoreService {
     };
 
     const project = this.cache
-      ? await this.cache.wrap(
-          cacheKey,
-          projectFetch,
-          CACHE_TTL_SECONDS.DETAIL,
-        )
+      ? await this.cache.wrap(cacheKey, projectFetch, CACHE_TTL_SECONDS.DETAIL)
       : await projectFetch();
 
     const isFavorite = await this.favoriteRepo.isFavorite(projectId, userId);
@@ -541,7 +537,7 @@ export class CoreService {
           ? ProjectMemberRole.owner
           : membershipMap.get(p.id) ||
             p.members?.find((m) => m.userId === userId)?.role ||
-            ProjectMemberRole.viewer;
+            ProjectMemberRole.reviewer;
       const permissions = calculateProjectPermissions(yourRole, p.isActive);
 
       return {

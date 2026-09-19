@@ -23,8 +23,16 @@ import {
   cleanAbstractText,
   sanitizeItemTitle,
 } from '../utils/items.utils';
-import { getFileContentPath, IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
-import { parseAccessDate, ITEM_COLUMN_METADATA_FIELDS, FIELD_ALIASES } from '../constants/items.constants';
+import {
+  getFileContentPath,
+  IStoragePort,
+  STORAGE_PORT,
+} from '@/modules/storage/storage.port';
+import {
+  parseAccessDate,
+  ITEM_COLUMN_METADATA_FIELDS,
+  FIELD_ALIASES,
+} from '../constants/items.constants';
 import { CreateItemData, UpdateItemData } from '../types/items.types';
 import { isUUID } from 'class-validator';
 
@@ -368,12 +376,13 @@ export function prepareNotesToCreate(
                 : '';
       // Strip HTML if from Zotero child note (<p>...</p>)
       const cleanContent = /<\/?[a-z][\s\S]*>/i.test(rawContent)
-        ? rawContent.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+        ? rawContent
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
         : rawContent.trim();
       const source =
-        typeof noteObj?.source === 'string'
-          ? noteObj.source.trim()
-          : undefined;
+        typeof noteObj?.source === 'string' ? noteObj.source.trim() : undefined;
       const contentMd = cleanContent;
       if (!contentMd || seen.has(contentMd)) return null;
       seen.add(contentMd);
@@ -521,8 +530,7 @@ export class CommandRepository {
       data.fileId ||
       data.fileUrl?.match(/\/api\/files\/([a-zA-Z0-9-]+)\/content/)?.[1] ||
       null;
-    const resolvedFileId =
-      rawFileId && isUUID(rawFileId) ? rawFileId : null;
+    const resolvedFileId = rawFileId && isUUID(rawFileId) ? rawFileId : null;
 
     const notes = prepareNotesToCreate(
       data.notes,
@@ -576,10 +584,7 @@ export class CommandRepository {
       (data as any).network ??
       '';
 
-    const effectiveExtraFields = extractNonColumnExtraFields(
-      data as any,
-      null,
-    );
+    const effectiveExtraFields = extractNonColumnExtraFields(data as any, null);
 
     const createData: any = {
       userId,
@@ -625,7 +630,8 @@ export class CommandRepository {
       referenceCount: data.referenceCount ?? null,
       openAccessPdfUrl: data.openAccessPdfUrl ?? null,
       seriesNumber: data.seriesNumber ?? null,
-      extra: resolveExtraPlainText(data.extra, null, effectiveExtraFields) ?? '',
+      extra:
+        resolveExtraPlainText(data.extra, null, effectiveExtraFields) ?? '',
       uploadedById: data.uploadedById || 'system',
       projectId:
         (projectId && projectId !== 'user' && isUUID(projectId)
@@ -995,10 +1001,15 @@ export class CommandRepository {
       existing.notesList,
     );
 
-    const parsedYearMatch = rawPubDate !== undefined
-      ? String(rawPubDate).match(/(?:^|[^\d])(1[7-9]\d{2}|20\d{2})(?:[^\d]|$)/)
+    const parsedYearMatch =
+      rawPubDate !== undefined
+        ? String(rawPubDate).match(
+            /(?:^|[^\d])(1[7-9]\d{2}|20\d{2})(?:[^\d]|$)/,
+          )
+        : null;
+    const extractedYear = parsedYearMatch
+      ? parseInt(parsedYearMatch[1], 10)
       : null;
-    const extractedYear = parsedYearMatch ? parseInt(parsedYearMatch[1], 10) : null;
 
     const updated = await client.item.update({
       where: { id },
@@ -1138,30 +1149,30 @@ export class CommandRepository {
           ? {
               contributors: {
                 deleteMany: {},
-                create: (
-                  (data.contributors || data.creators) || []
-                ).map((c: any, index: number) => {
-                  const fullName =
-                    c.fullName ||
-                    [c.firstName, c.lastName].filter(Boolean).join(' ') ||
-                    c.name ||
-                    '';
-                  let first = c.firstName || '';
-                  let last = c.lastName || '';
-                  if (!first && !last && fullName) {
-                    const parsed = parseCreatorString(fullName, index);
-                    first = parsed.firstName;
-                    last = parsed.lastName;
-                  }
-                  return {
-                    creatorType: c.creatorType || 'author',
-                    firstName: first,
-                    lastName: last,
-                    fullName,
-                    orderIndex:
-                      c.orderIndex !== undefined ? c.orderIndex : index,
-                  };
-                }),
+                create: (data.contributors || data.creators || []).map(
+                  (c: any, index: number) => {
+                    const fullName =
+                      c.fullName ||
+                      [c.firstName, c.lastName].filter(Boolean).join(' ') ||
+                      c.name ||
+                      '';
+                    let first = c.firstName || '';
+                    let last = c.lastName || '';
+                    if (!first && !last && fullName) {
+                      const parsed = parseCreatorString(fullName, index);
+                      first = parsed.firstName;
+                      last = parsed.lastName;
+                    }
+                    return {
+                      creatorType: c.creatorType || 'author',
+                      firstName: first,
+                      lastName: last,
+                      fullName,
+                      orderIndex:
+                        c.orderIndex !== undefined ? c.orderIndex : index,
+                    };
+                  },
+                ),
               },
             }
           : data.authors !== undefined

@@ -43,7 +43,7 @@ export class StateController {
     'project/:projectId/columns',
   ])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'List all project work item states with lifecycle groups',
   })
@@ -60,7 +60,7 @@ export class StateController {
     'project/:projectId/states/counts',
   ])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'Get active work item counts by state in a project',
   })
@@ -77,7 +77,7 @@ export class StateController {
     'project/:projectId/states/:stateId',
   ])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get details of a specific state' })
   @ApiResponse({ status: 200, description: 'State details' })
   async getStateById(

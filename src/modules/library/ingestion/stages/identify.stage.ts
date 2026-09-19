@@ -484,8 +484,7 @@ export class IdentifyStage {
           try {
             const fileRecord = await this.storagePort.readOwnedFile({
               fileId: payload.fileId,
-              projectId:
-                scopeId && scopeId !== 'user' ? scopeId : undefined,
+              projectId: scopeId && scopeId !== 'user' ? scopeId : undefined,
             });
             if (fileRecord?.buffer) {
               fileBuffer = fileRecord.buffer;
@@ -511,18 +510,21 @@ export class IdentifyStage {
               }
 
               const detectedDoi = extractedMetadata.doi || filenameDoi;
-              const detectedArxiv = extractedMetadata.arxivId || filenameArxivId;
+              const detectedArxiv =
+                extractedMetadata.arxivId || filenameArxivId;
 
               // Only if NEITHER filename nor page 1-2 text revealed a DOI or arXiv ID:
               // Fallback to GROBID layout CRF model to guess title/authors from raw layout
               if (!detectedDoi && !detectedArxiv && !hasFastIdentifier) {
                 try {
-                  const grobidDoc =
-                    await this.pdf.extractDocumentFromBuffer(fileRecord.buffer, {
+                  const grobidDoc = await this.pdf.extractDocumentFromBuffer(
+                    fileRecord.buffer,
+                    {
                       headerOnly: true,
                       skipGrobid: false,
                       maxPages: 3,
-                    });
+                    },
+                  );
                   if (grobidDoc?.metadata) {
                     extractedMetadata = {
                       ...extractedMetadata,

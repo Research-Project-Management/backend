@@ -111,10 +111,12 @@ export class ReconciliationPolicy {
 
       // Sort by effective weight: confidence * provider priority
       const sorted = [...evidences].sort((a, b) => {
-        const priorityA =
-          ReconciliationPolicy.getProviderPriority(a.sourceProvider);
-        const priorityB =
-          ReconciliationPolicy.getProviderPriority(b.sourceProvider);
+        const priorityA = ReconciliationPolicy.getProviderPriority(
+          a.sourceProvider,
+        );
+        const priorityB = ReconciliationPolicy.getProviderPriority(
+          b.sourceProvider,
+        );
         const scoreA = a.confidence * priorityA;
         const scoreB = b.confidence * priorityB;
         return scoreB - scoreA;

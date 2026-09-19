@@ -69,7 +69,9 @@ export class VectorIndexService {
         });
       }
     } catch (err: any) {
-      this.logger.warn(`Could not persist vector for item ${itemId}: ${err?.message}`);
+      this.logger.warn(
+        `Could not persist vector for item ${itemId}: ${err?.message}`,
+      );
     }
   }
 
@@ -97,7 +99,9 @@ export class VectorIndexService {
         return vec;
       }
     } catch (err: any) {
-      this.logger.debug(`Could not read vector for item ${itemId}: ${err?.message}`);
+      this.logger.debug(
+        `Could not read vector for item ${itemId}: ${err?.message}`,
+      );
     }
 
     return null;

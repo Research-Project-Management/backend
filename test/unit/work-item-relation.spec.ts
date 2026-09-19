@@ -48,10 +48,18 @@ describe('WorkItem Relation Service & DAG Cycle Detection', () => {
   it('should detect direct cycle: A blocks B, and B attempts to block A', async () => {
     mockRelationRepository.findWorkItem.mockImplementation((id: string) => {
       if (id === 'item-A') {
-        return Promise.resolve({ id: 'item-A', projectId: 'proj-1', relations: [] });
+        return Promise.resolve({
+          id: 'item-A',
+          projectId: 'proj-1',
+          relations: [],
+        });
       }
       if (id === 'item-B') {
-        return Promise.resolve({ id: 'item-B', projectId: 'proj-1', relations: [] });
+        return Promise.resolve({
+          id: 'item-B',
+          projectId: 'proj-1',
+          relations: [],
+        });
       }
       return Promise.resolve(null);
     });
@@ -87,10 +95,14 @@ describe('WorkItem Relation Service & DAG Cycle Detection', () => {
     mockPrisma.workItemRelation.findMany.mockImplementation((args: any) => {
       const orClauses = args.where?.OR || [];
       if (orClauses.some((c: any) => c.sourceId === 'item-A')) {
-        return Promise.resolve([{ sourceId: 'item-A', targetId: 'item-B', type: 'blocks' }]);
+        return Promise.resolve([
+          { sourceId: 'item-A', targetId: 'item-B', type: 'blocks' },
+        ]);
       }
       if (orClauses.some((c: any) => c.sourceId === 'item-B')) {
-        return Promise.resolve([{ sourceId: 'item-B', targetId: 'item-C', type: 'blocks' }]);
+        return Promise.resolve([
+          { sourceId: 'item-B', targetId: 'item-C', type: 'blocks' },
+        ]);
       }
       return Promise.resolve([]);
     });

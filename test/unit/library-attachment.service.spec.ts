@@ -69,7 +69,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
         path: 'snapshots/web.html',
         url: '/api/files/snapshots/web.html',
       }),
-    } as any;
+    };
 
     mockPrisma = {
       attachment: {
@@ -190,7 +190,9 @@ describe('Library Attachments & Storage Integration Suite', () => {
       expect(mockPrisma.attachment.delete).toHaveBeenCalledWith({
         where: { id: 'att-1' },
       });
-      expect(mockStoragePort.deleteFile).toHaveBeenCalledWith('storage-file-123');
+      expect(mockStoragePort.deleteFile).toHaveBeenCalledWith(
+        'storage-file-123',
+      );
     });
 
     it('should extract fileId from URL regex if attachment.fileId was not set, and delete from storage', async () => {
@@ -204,7 +206,9 @@ describe('Library Attachments & Storage Integration Suite', () => {
       const result = await service.deleteAttachment('user-1', 'att-2');
 
       expect(result).toEqual({ success: true });
-      expect(mockStoragePort.deleteFile).toHaveBeenCalledWith('storage-file-456');
+      expect(mockStoragePort.deleteFile).toHaveBeenCalledWith(
+        'storage-file-456',
+      );
     });
 
     it('should return cached thumbnail from storage driver if it exists', async () => {
@@ -243,7 +247,9 @@ describe('Library Attachments & Storage Integration Suite', () => {
 
       expect(result.mimeType).toBe('image/webp');
       expect(result.buffer.toString()).toBe('CACHED_WEBP_THUMBNAIL');
-      expect(mockDriver.exists).toHaveBeenCalledWith('thumbnails/blob-123.webp');
+      expect(mockDriver.exists).toHaveBeenCalledWith(
+        'thumbnails/blob-123.webp',
+      );
     });
 
     it('should generate thumbnail on-the-fly and cache when not present in driver', async () => {
@@ -262,7 +268,9 @@ describe('Library Attachments & Storage Integration Suite', () => {
         update: jest.fn().mockResolvedValue(mockNode),
       };
       const mockThumbGenerator: any = {
-        generateThumbnail: jest.fn().mockResolvedValue(Buffer.from('GENERATED_WEBP')),
+        generateThumbnail: jest
+          .fn()
+          .mockResolvedValue(Buffer.from('GENERATED_WEBP')),
       };
 
       const thumbnailService = new AttachmentsService(
@@ -315,7 +323,6 @@ describe('Library Attachments & Storage Integration Suite', () => {
       controller = new AttachmentsController(
         mockAttachmentsService,
         mockWebSnapshotService,
-        mockPrisma,
         mockStoragePort,
       );
     });
@@ -357,7 +364,11 @@ describe('Library Attachments & Storage Integration Suite', () => {
       const projId = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
       const res = await controller.presign(
         'user-1',
-        { filename: 'big_dataset.pdf', mimeType: 'application/pdf', sizeBytes: 50000000 },
+        {
+          filename: 'big_dataset.pdf',
+          mimeType: 'application/pdf',
+          sizeBytes: 50000000,
+        },
         projId,
       );
 
@@ -403,7 +414,9 @@ describe('Library Attachments & Storage Integration Suite', () => {
         'Cache-Control',
         'public, max-age=86400',
       );
-      expect(mockRes.send).toHaveBeenCalledWith(Buffer.from('WEBP_STREAM_DATA'));
+      expect(mockRes.send).toHaveBeenCalledWith(
+        Buffer.from('WEBP_STREAM_DATA'),
+      );
     });
   });
 
@@ -424,12 +437,14 @@ describe('Library Attachments & Storage Integration Suite', () => {
       );
 
       // Mock internal HTML snapshot capture
-      jest.spyOn(snapshotService as any, 'captureHtmlSnapshot').mockResolvedValue({
-        htmlContent: '<html><body>Paper title</body></html>',
-        title: 'Arxiv Paper Snapshot',
-        sizeBytes: 1024,
-        checksum: 'hash-abc',
-      });
+      jest
+        .spyOn(snapshotService as any, 'captureHtmlSnapshot')
+        .mockResolvedValue({
+          htmlContent: '<html><body>Paper title</body></html>',
+          title: 'Arxiv Paper Snapshot',
+          sizeBytes: 1024,
+          checksum: 'hash-abc',
+        });
     });
 
     it('should prioritize uploadFile to record CAS storageNode and fileId', async () => {
@@ -506,7 +521,9 @@ describe('Library Attachments & Storage Integration Suite', () => {
         projectId: undefined,
       });
       expect(mockPdf.extractDocumentFromBuffer).toHaveBeenCalled();
-      expect(candidates[0].normalizedMetadata.title).toBe('Attention Is All You Need');
+      expect(candidates[0].normalizedMetadata.title).toBe(
+        'Attention Is All You Need',
+      );
       expect(candidates[0].normalizedMetadata.doi).toBe('10.1145/transformer');
     });
   });
@@ -579,8 +596,16 @@ describe('Library Attachments & Storage Integration Suite', () => {
         deletedAt: new Date(), // in trash
       });
       mockPrisma.attachment.findMany.mockResolvedValue([
-        { id: 'att-1', fileId: 'storage-file-1', url: '/api/files/storage-file-1/content' },
-        { id: 'att-2', fileId: null, url: '/api/v1/library/files/storage-file-2/content' },
+        {
+          id: 'att-1',
+          fileId: 'storage-file-1',
+          url: '/api/files/storage-file-1/content',
+        },
+        {
+          id: 'att-2',
+          fileId: null,
+          url: '/api/v1/library/files/storage-file-2/content',
+        },
       ]);
 
       const res = await repo.purge('user-1', 'item-to-purge');

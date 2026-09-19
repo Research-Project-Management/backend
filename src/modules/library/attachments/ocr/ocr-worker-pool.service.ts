@@ -25,10 +25,7 @@ export class OcrWorkerPoolService implements OnModuleDestroy {
   private isDestroyed = false;
 
   get concurrency(): number {
-    const parsed = Number.parseInt(
-      process.env.PDF_OCR_CONCURRENCY || '2',
-      10,
-    );
+    const parsed = Number.parseInt(process.env.PDF_OCR_CONCURRENCY || '2', 10);
     return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 4) : 2;
   }
 
@@ -54,7 +51,10 @@ export class OcrWorkerPoolService implements OnModuleDestroy {
       return localTessdata;
     }
     // Fallback to relative path from dist/src
-    const relativeTessdata = path.resolve(__dirname, '../../../../../../tessdata');
+    const relativeTessdata = path.resolve(
+      __dirname,
+      '../../../../../../tessdata',
+    );
     if (fs.existsSync(relativeTessdata)) {
       return relativeTessdata;
     }
@@ -164,10 +164,7 @@ export class OcrWorkerPoolService implements OnModuleDestroy {
       jobPromise.finally(() => clearTimeout(timer));
     });
 
-    const result = (await Promise.race([
-      jobPromise,
-      timeoutPromise,
-    ])) as any;
+    const result = (await Promise.race([jobPromise, timeoutPromise])) as any;
 
     const data = result?.data || {};
     const text = (data.text || '').trim();

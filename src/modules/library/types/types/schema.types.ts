@@ -2,6 +2,53 @@
  * Core Item-Type Schema & Registry Types for Flux Library.
  * Defines the canonical bibliographic item-type registry owned by the Library domain.
  */
+export * from '../../core/types/branded.types';
+
+/**
+ * All 38 authoritative Zotero/CSL Item Types.
+ * Matt Pocock Discriminated Union pattern for canonical bibliographic items.
+ */
+export type CanonicalItemType =
+  | 'journalArticle'
+  | 'preprint'
+  | 'conferencePaper'
+  | 'thesis'
+  | 'report'
+  | 'dataset'
+  | 'presentation'
+  | 'standard'
+  | 'book'
+  | 'bookSection'
+  | 'manuscript'
+  | 'dictionaryEntry'
+  | 'encyclopediaArticle'
+  | 'magazineArticle'
+  | 'newspaperArticle'
+  | 'bill'
+  | 'case'
+  | 'hearing'
+  | 'statute'
+  | 'patent'
+  | 'audioRecording'
+  | 'videoRecording'
+  | 'film'
+  | 'radioBroadcast'
+  | 'tvBroadcast'
+  | 'podcast'
+  | 'artwork'
+  | 'map'
+  | 'blogPost'
+  | 'webpage'
+  | 'forumPost'
+  | 'letter'
+  | 'interview'
+  | 'document'
+  | 'email'
+  | 'instantMessage'
+  | 'computerProgram'
+  | 'annotation'
+  | 'attachment'
+  | 'note';
 
 export interface ItemFieldDefinition {
   key: string;
@@ -22,7 +69,7 @@ export interface CreatorTypeDefinition {
 }
 
 export interface ItemTypeDefinition {
-  itemType: string;
+  itemType: CanonicalItemType;
   label: string;
   category:
     | 'academic'
@@ -76,4 +123,54 @@ export interface SchemaValidationResult {
   warnings: string[];
   demotedToExtra: Record<string, any>;
   creatorChanges: CreatorHarmonizationChange[];
+}
+
+const CANONICAL_ITEM_TYPES_SET = new Set<string>([
+  'journalArticle',
+  'preprint',
+  'conferencePaper',
+  'thesis',
+  'report',
+  'dataset',
+  'presentation',
+  'standard',
+  'book',
+  'bookSection',
+  'manuscript',
+  'dictionaryEntry',
+  'encyclopediaArticle',
+  'magazineArticle',
+  'newspaperArticle',
+  'bill',
+  'case',
+  'hearing',
+  'statute',
+  'patent',
+  'audioRecording',
+  'videoRecording',
+  'film',
+  'radioBroadcast',
+  'tvBroadcast',
+  'podcast',
+  'artwork',
+  'map',
+  'blogPost',
+  'webpage',
+  'forumPost',
+  'letter',
+  'interview',
+  'document',
+  'email',
+  'instantMessage',
+  'computerProgram',
+  'annotation',
+  'attachment',
+  'note',
+]);
+
+/**
+ * Type guard for CanonicalItemType (Matt Pocock Pattern).
+ */
+export function isCanonicalItemType(type: unknown): type is CanonicalItemType {
+  return typeof type === 'string' && CANONICAL_ITEM_TYPES_SET.has(type);
 }

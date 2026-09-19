@@ -37,18 +37,17 @@ export class NotesRepository {
     const client = this.getClient(
       typeof projectIdOrTx === 'object' ? projectIdOrTx : tx,
     );
-    const where: Prisma.NoteWhereInput =
-      projectId
-        ? {
-            projectId,
-            ...(itemId !== undefined ? { itemId } : {}),
-            deletedAt: null,
-          }
-        : {
-            userId,
-            ...(itemId !== undefined ? { itemId } : {}),
-            deletedAt: null,
-          };
+    const where: Prisma.NoteWhereInput = projectId
+      ? {
+          projectId,
+          ...(itemId !== undefined ? { itemId } : {}),
+          deletedAt: null,
+        }
+      : {
+          userId,
+          ...(itemId !== undefined ? { itemId } : {}),
+          deletedAt: null,
+        };
 
     return client.note.findMany({
       where,

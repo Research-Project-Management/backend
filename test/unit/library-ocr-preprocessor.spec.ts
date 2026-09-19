@@ -49,11 +49,20 @@ describe('OcrPreprocessorService', () => {
     ctx.font = '20px Arial';
 
     for (let i = 0; i < 6; i++) {
-      ctx.fillText(`Text line number ${i + 1} with horizontal alignment`, 20, 40 + i * 35);
+      ctx.fillText(
+        `Text line number ${i + 1} with horizontal alignment`,
+        20,
+        40 + i * 35,
+      );
     }
 
     const inputBuffer = canvas.toBuffer('image/png');
-    const detectedAngle = await service.estimateDeskewAngle(inputBuffer, -5, 5, 1);
+    const detectedAngle = await service.estimateDeskewAngle(
+      inputBuffer,
+      -5,
+      5,
+      1,
+    );
 
     // Perfectly horizontal text should have deskew angle close to 0
     expect(Math.abs(detectedAngle)).toBeLessThanOrEqual(1);

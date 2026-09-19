@@ -1,10 +1,4 @@
-import {
-  Controller,
-  Get,
-  Param,
-  Query,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import {
   ApiTags,
   ApiBearerAuth,
@@ -26,7 +20,7 @@ export class ProjectAnalyticsController {
 
   @Get(':projectId/analytics')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get detailed dimensional breakdown for a project' })
   getAnalytics(@Param('projectId') projectId: string) {
     return this.analyticsService.getProjectDetailedBreakdown(projectId);
@@ -34,7 +28,7 @@ export class ProjectAnalyticsController {
 
   @Get(':projectId/analytics/overview')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get high-level portfolio overview for a project' })
   getOverview(@Param('projectId') projectId: string) {
     return this.analyticsService.getProjectOverview(projectId);
@@ -42,7 +36,7 @@ export class ProjectAnalyticsController {
 
   @Get(':projectId/analytics/timeseries')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get daily WorkItem creation and completion trend' })
   @ApiQuery({ name: 'from', required: false, example: '2026-09-01' })
   @ApiQuery({ name: 'to', required: false, example: '2026-09-16' })
@@ -62,7 +56,7 @@ export class ProjectAnalyticsController {
 
   @Get(':projectId/analytics/labels')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get WorkItem distribution by label for a project' })
   getLabelDistribution(@Param('projectId') projectId: string) {
     return this.analyticsService.getLabelDistribution(projectId);

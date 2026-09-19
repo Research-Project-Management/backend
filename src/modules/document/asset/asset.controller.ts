@@ -26,7 +26,7 @@ export class AssetController {
 
   @Post('projects/:projectId/assets')
   @HttpCode(HttpStatus.CREATED)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary:
       'Upload an image, figure, dataset or custom class/style asset to the document project',
@@ -40,7 +40,7 @@ export class AssetController {
   }
 
   @Get('projects/:projectId/assets')
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'List all binary figures and assets in the document project',
   })
@@ -49,7 +49,7 @@ export class AssetController {
   }
 
   @Get(['assets/:assetId', 'projects/:projectId/assets/:assetId'])
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get binary data and metadata of a specific asset' })
   async getAsset(
     @Param('assetId') assetId: string,
@@ -59,7 +59,7 @@ export class AssetController {
   }
 
   @Delete(['assets/:assetId', 'projects/:projectId/assets/:assetId'])
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete a document asset' })
   async deleteAsset(

@@ -44,7 +44,11 @@ import { GlobalExceptionFilter } from './core/filters/exception.filter';
  */
 @Injectable()
 export class MockDevAuthGuard implements CanActivate {
-  private static cachedUser: { id: string; email: string; name: string } | null = null;
+  private static cachedUser: {
+    id: string;
+    email: string;
+    name: string;
+  } | null = null;
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -77,7 +81,10 @@ export class MockDevAuthGuard implements CanActivate {
           };
         }
       } catch (err: any) {
-        console.warn('[Standalone Library] User resolution fallback:', err.message);
+        console.warn(
+          '[Standalone Library] User resolution fallback:',
+          err.message,
+        );
         MockDevAuthGuard.cachedUser = {
           id: '00000000-0000-0000-0000-000000000001',
           email: 'sandbox@flux.local',
@@ -192,7 +199,13 @@ async function bootstrap() {
     origin: true,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'x-workspace-id', 'x-project-id'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'Accept',
+      'x-workspace-id',
+      'x-project-id',
+    ],
   });
 
   // Swagger Documentation
@@ -202,7 +215,10 @@ async function bootstrap() {
       'Isolated backend micro-kernel providing complete Library, Reader State, and Storage capabilities for testing independent of other platform modules.',
     )
     .setVersion('1.0.0')
-    .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'JWT-auth')
+    .addBearerAuth(
+      { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+      'JWT-auth',
+    )
     .build();
 
   const document = SwaggerModule.createDocument(app, swaggerConfig);
@@ -215,7 +231,9 @@ async function bootstrap() {
   console.log(`\n======================================================`);
   console.log(`🚀 [Standalone Library] Server is RUNNING on port ${port}`);
   console.log(`📖 Swagger API Docs: http://localhost:${port}/api/docs`);
-  console.log(`🛡️ Mock Auth: ENABLED (All calls auto-authenticated as Sandbox Tester)`);
+  console.log(
+    `🛡️ Mock Auth: ENABLED (All calls auto-authenticated as Sandbox Tester)`,
+  );
   console.log(`======================================================\n`);
 }
 

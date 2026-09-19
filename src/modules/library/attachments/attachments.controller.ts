@@ -20,7 +20,6 @@ import {
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { AttachmentsService } from './attachments.service';
 import { WebSnapshotService } from './services/web-snapshot.service';
-import { PrismaService } from '../../../core/database/prisma.service';
 import {
   CreateAttachmentDto,
   ReplaceAttachmentFileDto,
@@ -45,7 +44,6 @@ export class AttachmentsController {
   constructor(
     private readonly attachmentsService: AttachmentsService,
     private readonly webSnapshotService: WebSnapshotService,
-    private readonly prisma: PrismaService,
     @Optional()
     @Inject(STORAGE_PORT)
     private readonly storagePort?: IStoragePort,
@@ -56,7 +54,7 @@ export class AttachmentsController {
    * Frontend library uploads files through this gateway without directly referencing StorageModule.
    */
   @Post(['attachments/upload', 'upload', 'files/upload'])
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   async uploadLibraryFile(
     @CurrentUser('id') userId: string,
@@ -68,7 +66,9 @@ export class AttachmentsController {
       throw new BadRequestException('Storage service is unavailable');
     }
 
-    const effectiveProjectId = toValidProjectId(paramProjectId || queryProjectId);
+    const effectiveProjectId = toValidProjectId(
+      paramProjectId || queryProjectId,
+    );
 
     let buffer: Buffer | undefined;
     let filename = 'document.pdf';
@@ -114,7 +114,7 @@ export class AttachmentsController {
    * or returns instant CAS deduplication if contentHash already exists.
    */
   @Post(['attachments/presign', 'presign'])
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   async presign(
     @CurrentUser('id') userId: string,
     @Body()
@@ -150,7 +150,7 @@ export class AttachmentsController {
    * Completes a direct-to-storage presigned upload and creates a storage node.
    */
   @Post(['attachments/presign/complete', 'presign/complete'])
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   async completePresign(
     @CurrentUser('id') userId: string,
     @Body()
@@ -197,7 +197,7 @@ export class AttachmentsController {
    * Phase 1: Initiate S3/R2 Multipart Upload session for large files (>50MB).
    */
   @Post(['attachments/multipart/initiate', 'multipart/initiate'])
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   async initiateMultipart(
     @CurrentUser('id') userId: string,
     @Body()
@@ -236,7 +236,7 @@ export class AttachmentsController {
     'attachments/multipart/:sessionId/part-url',
     'multipart/:sessionId/part-url',
   ])
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   async getMultipartPartUrl(
     @Param('sessionId') sessionId: string,
     @Query('partNumber') partNumberStr: string,
@@ -261,7 +261,7 @@ export class AttachmentsController {
    * Phase 3: Complete multipart upload and assemble object in S3/R2.
    */
   @Post(['attachments/multipart/complete', 'multipart/complete'])
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   async completeMultipart(
     @Body()
     dto: {
@@ -286,7 +286,7 @@ export class AttachmentsController {
     'attachments/multipart/:sessionId/abort',
     'multipart/:sessionId/abort',
   ])
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   async abortMultipart(@Param('sessionId') sessionId: string) {
     if (this.storagePort?.abortMultipartUpload) {
       await this.storagePort.abortMultipartUpload(sessionId);
@@ -298,7 +298,7 @@ export class AttachmentsController {
    * Stream / serve library file content scoped by access.
    */
   @Get(['attachments/files/:fileId/content', 'files/:fileId/content'])
-  @ProjectRoles('owner', 'contributor', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   async streamLibraryFile(
     @Param('fileId') fileId: string,
     @CurrentUser('id') userId: string,
@@ -330,7 +330,7 @@ export class AttachmentsController {
    * Stream / serve attachment content by attachment ID.
    */
   @Get('attachments/:attachmentId/content')
-  @ProjectRoles('owner', 'contributor', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   async streamAttachmentContent(
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
@@ -338,7 +338,9 @@ export class AttachmentsController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    const effectiveProjectId = toValidProjectId(paramProjectId || queryProjectId);
+    const effectiveProjectId = toValidProjectId(
+      paramProjectId || queryProjectId,
+    );
     const result = await this.attachmentsService.getItemAttachment(
       userId,
       undefined,
@@ -386,7 +388,7 @@ export class AttachmentsController {
     'attachments/:attachmentId/thumbnail',
     'items/:itemId/attachments/:attachmentId/thumbnail',
   ])
-  @ProjectRoles('owner', 'contributor', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   async getAttachmentThumbnail(
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
@@ -408,7 +410,7 @@ export class AttachmentsController {
   }
 
   @Get('items/:itemId/attachments')
-  @ProjectRoles('owner', 'contributor', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   async getItemAttachments(
     @CurrentUser('id') userId: string,
     @Param('itemId') itemId: string,
@@ -424,7 +426,7 @@ export class AttachmentsController {
   }
 
   @Get(['attachments/:attachmentId', 'items/:itemId/attachments/:attachmentId'])
-  @ProjectRoles('owner', 'contributor', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   async getItemAttachment(
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
@@ -442,7 +444,7 @@ export class AttachmentsController {
   }
 
   @Post('items/:itemId/attachments')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   async createAttachment(
     @CurrentUser('id') userId: string,
@@ -463,7 +465,7 @@ export class AttachmentsController {
   }
 
   @Get('attachments/:attachmentId/revisions')
-  @ProjectRoles('owner', 'contributor', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   async getRevisions(
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
@@ -480,7 +482,7 @@ export class AttachmentsController {
   }
 
   @Post('attachments/:attachmentId/revisions')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   async addRevision(
     @CurrentUser('id') userId: string,
@@ -499,7 +501,7 @@ export class AttachmentsController {
   }
 
   @Delete('attachments/:attachmentId')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   async deleteAttachment(
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
@@ -518,7 +520,7 @@ export class AttachmentsController {
     'attachments/:attachmentId/set-primary',
     'items/:itemId/attachments/:attachmentId/set-primary',
   ])
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   async setPrimaryAttachment(
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
@@ -538,7 +540,7 @@ export class AttachmentsController {
   }
 
   @Post('items/:itemId/attachments/snapshot')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   async captureSnapshot(
     @CurrentUser('id') userId: string,
@@ -547,26 +549,20 @@ export class AttachmentsController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    const effectiveProjectId = toValidProjectId(paramProjectId || queryProjectId);
+    const effectiveProjectId = toValidProjectId(
+      paramProjectId || queryProjectId,
+    );
     const scopeWhere = effectiveProjectId
       ? { projectId: effectiveProjectId }
       : { userId };
 
     let targetUrl = body?.url?.trim();
     if (!targetUrl) {
-      const item = await this.prisma.item.findFirst({
-        where: { id: itemId, ...scopeWhere, deletedAt: null },
-        select: { url: true, title: true },
-      });
-      if (!item) {
-        throw new NotFoundException(`Item ${itemId} not found`);
-      }
-      if (!item.url) {
-        throw new BadRequestException(
-          'No URL found on this item to capture a snapshot.',
-        );
-      }
-      targetUrl = item.url;
+      targetUrl = await this.attachmentsService.resolveItemUrl(
+        itemId,
+        userId,
+        effectiveProjectId,
+      );
     }
 
     return this.webSnapshotService.captureAndAttach(targetUrl, itemId, userId, {
@@ -574,8 +570,11 @@ export class AttachmentsController {
     });
   }
 
-  @Patch(['attachments/:attachmentId/rename', 'items/:itemId/attachments/:attachmentId/rename'])
-  @ProjectRoles('owner', 'contributor')
+  @Patch([
+    'attachments/:attachmentId/rename',
+    'items/:itemId/attachments/:attachmentId/rename',
+  ])
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   async renameAttachment(
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
@@ -583,7 +582,9 @@ export class AttachmentsController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    const effectiveProjectId = toValidProjectId(paramProjectId || queryProjectId);
+    const effectiveProjectId = toValidProjectId(
+      paramProjectId || queryProjectId,
+    );
     return this.attachmentsService.renameAttachment(
       userId,
       attachmentId,
@@ -593,7 +594,7 @@ export class AttachmentsController {
   }
 
   @Post(['attachments/batch-rename', 'batch-rename-attachments'])
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
   async batchRenameAttachments(
     @CurrentUser('id') userId: string,
@@ -601,7 +602,9 @@ export class AttachmentsController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    const effectiveProjectId = toValidProjectId(paramProjectId || queryProjectId);
+    const effectiveProjectId = toValidProjectId(
+      paramProjectId || queryProjectId,
+    );
     return this.attachmentsService.batchRenameAttachments(
       userId,
       dto,
@@ -610,14 +613,6 @@ export class AttachmentsController {
   }
 
   private async resolveAttachmentItemId(attachmentId: string): Promise<string> {
-    const attachment = await this.prisma.attachment.findUnique({
-      where: { id: attachmentId },
-      select: { itemId: true },
-    });
-    if (!attachment?.itemId) {
-      throw new NotFoundException(`Attachment ${attachmentId} not found`);
-    }
-    return attachment.itemId;
+    return this.attachmentsService.resolveAttachmentItemId(attachmentId);
   }
 }
-

@@ -54,29 +54,79 @@ describe('Library OCR Pipeline (Integration)', () => {
                 confidence: 95.2,
                 bbox: { x0: 50, y0: 80, x1: 400, y1: 120 },
                 words: [
-                  { text: 'Nghiên', confidence: 96, bbox: { x0: 50, y0: 80, x1: 120, y1: 120 } },
-                  { text: 'cứu', confidence: 95, bbox: { x0: 130, y0: 80, x1: 180, y1: 120 } },
-                  { text: 'Trí', confidence: 95, bbox: { x0: 190, y0: 80, x1: 230, y1: 120 } },
-                  { text: 'tuệ', confidence: 94, bbox: { x0: 240, y0: 80, x1: 280, y1: 120 } },
-                  { text: 'Nhân', confidence: 96, bbox: { x0: 290, y0: 80, x1: 340, y1: 120 } },
-                  { text: 'tạo', confidence: 95, bbox: { x0: 350, y0: 80, x1: 400, y1: 120 } },
+                  {
+                    text: 'Nghiên',
+                    confidence: 96,
+                    bbox: { x0: 50, y0: 80, x1: 120, y1: 120 },
+                  },
+                  {
+                    text: 'cứu',
+                    confidence: 95,
+                    bbox: { x0: 130, y0: 80, x1: 180, y1: 120 },
+                  },
+                  {
+                    text: 'Trí',
+                    confidence: 95,
+                    bbox: { x0: 190, y0: 80, x1: 230, y1: 120 },
+                  },
+                  {
+                    text: 'tuệ',
+                    confidence: 94,
+                    bbox: { x0: 240, y0: 80, x1: 280, y1: 120 },
+                  },
+                  {
+                    text: 'Nhân',
+                    confidence: 96,
+                    bbox: { x0: 290, y0: 80, x1: 340, y1: 120 },
+                  },
+                  {
+                    text: 'tạo',
+                    confidence: 95,
+                    bbox: { x0: 350, y0: 80, x1: 400, y1: 120 },
+                  },
                 ],
               },
             ],
           },
         ],
         words: [
-          { text: 'Nghiên', confidence: 96, bbox: { x0: 50, y0: 80, x1: 120, y1: 120 } },
-          { text: 'cứu', confidence: 95, bbox: { x0: 130, y0: 80, x1: 180, y1: 120 } },
-          { text: 'Trí', confidence: 95, bbox: { x0: 190, y0: 80, x1: 230, y1: 120 } },
-          { text: 'tuệ', confidence: 94, bbox: { x0: 240, y0: 80, x1: 280, y1: 120 } },
-          { text: 'Nhân', confidence: 96, bbox: { x0: 290, y0: 80, x1: 340, y1: 120 } },
-          { text: 'tạo', confidence: 95, bbox: { x0: 350, y0: 80, x1: 400, y1: 120 } },
+          {
+            text: 'Nghiên',
+            confidence: 96,
+            bbox: { x0: 50, y0: 80, x1: 120, y1: 120 },
+          },
+          {
+            text: 'cứu',
+            confidence: 95,
+            bbox: { x0: 130, y0: 80, x1: 180, y1: 120 },
+          },
+          {
+            text: 'Trí',
+            confidence: 95,
+            bbox: { x0: 190, y0: 80, x1: 230, y1: 120 },
+          },
+          {
+            text: 'tuệ',
+            confidence: 94,
+            bbox: { x0: 240, y0: 80, x1: 280, y1: 120 },
+          },
+          {
+            text: 'Nhân',
+            confidence: 96,
+            bbox: { x0: 290, y0: 80, x1: 340, y1: 120 },
+          },
+          {
+            text: 'tạo',
+            confidence: 95,
+            bbox: { x0: 350, y0: 80, x1: 400, y1: 120 },
+          },
         ],
       }),
-      generateSearchablePdf: jest.fn().mockImplementation((buf, results) =>
-        sandwichService.generateSearchablePdf(buf, results),
-      ),
+      generateSearchablePdf: jest
+        .fn()
+        .mockImplementation((buf, results) =>
+          sandwichService.generateSearchablePdf(buf, results),
+        ),
     } as any;
 
     pdfProvider = new PdfProvider(undefined, undefined, ocrProvider);
@@ -100,7 +150,8 @@ describe('Library OCR Pipeline (Integration)', () => {
     });
 
     // 3. Run through PdfProvider
-    const result = await pdfProvider.extractDocumentFromBuffer(scannedPdfBuffer);
+    const result =
+      await pdfProvider.extractDocumentFromBuffer(scannedPdfBuffer);
 
     // 4. Assertions
     expect(ocrProvider.detectScannedPage).toHaveBeenCalled();
@@ -109,7 +160,9 @@ describe('Library OCR Pipeline (Integration)', () => {
 
     // Verify page content was replaced with OCR result
     expect(result.pages).toHaveLength(1);
-    expect(result.pages[0].textContent).toContain('Nghiên cứu Trí tuệ Nhân tạo 2026');
+    expect(result.pages[0].textContent).toContain(
+      'Nghiên cứu Trí tuệ Nhân tạo 2026',
+    );
 
     // Verify OCR provenance
     expect(result.ocrProvenance).toBeDefined();
@@ -120,6 +173,8 @@ describe('Library OCR Pipeline (Integration)', () => {
 
     // Verify Searchable Sandwich PDF output
     expect(result.searchablePdfBuffer).toBeDefined();
-    expect(result.searchablePdfBuffer?.length).toBeGreaterThan(scannedPdfBuffer.length);
+    expect(result.searchablePdfBuffer?.length).toBeGreaterThan(
+      scannedPdfBuffer.length,
+    );
   });
 });

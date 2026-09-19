@@ -35,14 +35,15 @@ export class CommentController {
     'projects/:projectId/pages/:pageId/comments',
     'comments',
   ])
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get all comments for a document page' })
   async getComments(
+    @CurrentUser('id') userId: string,
     @Param('pageId') pageId?: string,
     @Query('pageId') queryPageId?: string,
   ) {
     const effectivePageId = pageId || queryPageId || '';
-    return this.commentService.getComments(effectivePageId);
+    return this.commentService.getComments(effectivePageId, userId);
   }
 
   @Post([
@@ -50,7 +51,7 @@ export class CommentController {
     'projects/:projectId/pages/:pageId/comments',
     'comments',
   ])
-  @ProjectRoles('owner', 'contributor', 'commenter')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Add a comment to a manuscript page' })
   async createComment(
     @CurrentUser('id') userId: string,
@@ -61,15 +62,9 @@ export class CommentController {
     return this.commentService.createComment(effectivePageId, userId, dto);
   }
 
-  @Put([
-    'pages/:pageId/comments/:commentId',
-    'comments/:commentId',
-  ])
-  @Patch([
-    'pages/:pageId/comments/:commentId',
-    'comments/:commentId',
-  ])
-  @ProjectRoles('owner', 'contributor', 'commenter')
+  @Put(['pages/:pageId/comments/:commentId', 'comments/:commentId'])
+  @Patch(['pages/:pageId/comments/:commentId', 'comments/:commentId'])
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Update a page comment' })
   async updateComment(
     @Param('commentId') commentId: string,
@@ -83,7 +78,7 @@ export class CommentController {
     'pages/:pageId/comments/:commentId/resolve',
     'comments/:commentId/resolve',
   ])
-  @ProjectRoles('owner', 'contributor', 'commenter')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Resolve or reopen a page comment' })
   async resolveComment(
     @Param('commentId') commentId: string,
@@ -95,11 +90,8 @@ export class CommentController {
     });
   }
 
-  @Delete([
-    'pages/:pageId/comments/:commentId',
-    'comments/:commentId',
-  ])
-  @ProjectRoles('owner', 'contributor', 'commenter')
+  @Delete(['pages/:pageId/comments/:commentId', 'comments/:commentId'])
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Delete a page comment' })
   async deleteComment(
     @Param('commentId') commentId: string,
@@ -114,7 +106,7 @@ export class CommentController {
     'comments/:commentId/reply',
     'comments/:commentId/replies',
   ])
-  @ProjectRoles('owner', 'contributor', 'commenter')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Reply to a page comment' })
   async addReply(
     @Param('commentId') commentId: string,
@@ -128,7 +120,7 @@ export class CommentController {
     'pages/:pageId/comments/:commentId/replies/:replyId',
     'comments/:commentId/replies/:replyId',
   ])
-  @ProjectRoles('owner', 'contributor', 'commenter')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Delete a reply from a page comment' })
   async deleteReply(
     @Param('commentId') commentId: string,

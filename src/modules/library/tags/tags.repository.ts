@@ -94,6 +94,24 @@ export class TagsRepository {
         ? projectIdOrTx
         : undefined;
 
+    if (effectiveProjectId) {
+      const existingProjectTag = await client.tag.findFirst({
+        where: {
+          projectId: effectiveProjectId,
+          name,
+        },
+      });
+      if (existingProjectTag) {
+        if (color && existingProjectTag.color !== color) {
+          return client.tag.update({
+            where: { id: existingProjectTag.id },
+            data: { color },
+          });
+        }
+        return existingProjectTag;
+      }
+    }
+
     return client.tag.upsert({
       where: { userId_name: { userId, name } },
       create: {

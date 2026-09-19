@@ -152,8 +152,7 @@ model RefreshToken {
   id         String         @id @default(uuid()) @db.Uuid
   userId     String         @map("user_id") @db.Uuid
   user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  token      String         @unique
-  tokenHash  String         @unique @default("") @map("token_hash")
+  tokenHash  String         @unique @map("token_hash")
   familyId   String         @default(uuid()) @map("family_id") @db.Uuid
   parentId   String?        @map("parent_id") @db.Uuid
   parent     RefreshToken?  @relation("TokenLineage", fields: [parentId], references: [id], onDelete: SetNull)

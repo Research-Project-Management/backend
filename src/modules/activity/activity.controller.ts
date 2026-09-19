@@ -49,7 +49,7 @@ export class ActivityController {
     'projects/:projectId/activity/feed',
   ])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get project specific activity feed' })
   async getProjectActivityFeed(
     @Param('projectId') projectId: string,

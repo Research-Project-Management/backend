@@ -55,7 +55,7 @@ export class ItemsController {
   ) {}
 
   @Get()
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'List library items' })
   async listItems(
     @CurrentUser('id') userId: string,
@@ -90,7 +90,7 @@ export class ItemsController {
   }
 
   @Post('import')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Import items from personal library into project' })
   async importItems(
     @CurrentUser('id') userId: string,
@@ -110,7 +110,7 @@ export class ItemsController {
   }
 
   @Post('citations/parse')
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'Parse raw unformatted citation strings via GROBID CRF model',
     description:
@@ -126,7 +126,7 @@ export class ItemsController {
   }
 
   @Get(':id')
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get a library item by ID' })
   async getItem(
     @Param('id') id: string,
@@ -148,7 +148,7 @@ export class ItemsController {
   }
 
   @Get(':id/fulltext')
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get fulltext of an item' })
   async getFulltext(
     @Param('id') id: string,
@@ -164,17 +164,14 @@ export class ItemsController {
   }
 
   @Post()
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Create a new library item' })
   async createItem(
     @CurrentUser('id') userId: string,
     @Param('projectId') projectId: string | undefined,
     @Body() body: CreateItemDto,
   ) {
-    const {
-      crossrefEnriched: _cr,
-      ...cleanBody
-    } = body;
+    const { crossrefEnriched: _cr, ...cleanBody } = body;
     return this.itemsService.createItem(userId, {
       ...cleanBody,
       uploadedById: userId || 'system',
@@ -183,7 +180,7 @@ export class ItemsController {
   }
 
   @Patch(':id')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Update a library item' })
   async updateItem(
     @Param('id') id: string,
@@ -207,11 +204,7 @@ export class ItemsController {
         'Optimistic locking requirement: expectedVersion or If-Match header is required',
       );
     }
-    const {
-      expectedVersion: _,
-      crossrefEnriched: _cr,
-      ...updateData
-    } = body;
+    const { expectedVersion: _, crossrefEnriched: _cr, ...updateData } = body;
     return this.itemsService.updateItem(
       userId,
       id,
@@ -223,7 +216,7 @@ export class ItemsController {
   }
 
   @Put(':id')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Replace a library item' })
   async replaceItem(
     @Param('id') id: string,
@@ -236,18 +229,22 @@ export class ItemsController {
   }
 
   @Post(':id/reindex')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Reindex a library item' })
   async reindexItem(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
     @Param('projectId') projectId?: string,
   ) {
-    return this.itemsService.reindexItem(userId, id, toValidProjectId(projectId));
+    return this.itemsService.reindexItem(
+      userId,
+      id,
+      toValidProjectId(projectId),
+    );
   }
 
   @Post(':id/convert-type/preview')
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Preview type conversion of an item' })
   async previewTypeConversion(
     @Param('id') id: string,
@@ -270,7 +267,7 @@ export class ItemsController {
   }
 
   @Post(':id/convert-type')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Convert item type' })
   async convertItemType(
     @Param('id') id: string,
@@ -309,7 +306,7 @@ export class ItemsController {
   }
 
   @Delete(':id')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Delete an item (soft delete)' })
   async deleteItem(
     @Param('id') id: string,
@@ -334,7 +331,7 @@ export class ItemsController {
   }
 
   @Post(':id/restore')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Restore a deleted item' })
   async restoreItem(
     @Param('id') id: string,
@@ -381,7 +378,7 @@ export class ItemsController {
   }
 
   @Get(':id/relations')
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get related items' })
   async getRelatedItems(
     @Param('id') id: string,
@@ -396,7 +393,7 @@ export class ItemsController {
   }
 
   @Post([':id/relations', ':id/link'])
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Link two or more items together' })
   async linkItems(
     @Param('id') id: string,
@@ -419,7 +416,7 @@ export class ItemsController {
   }
 
   @Delete([':id/relations/:targetId', ':id/link/:targetId'])
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Unlink items' })
   async unlinkItems(
     @Param('id') id: string,
@@ -436,7 +433,7 @@ export class ItemsController {
   }
 
   @Post(':id/my-publication')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Mark an item as my publication' })
   async markMyPublication(
     @Param('id') id: string,
@@ -447,7 +444,7 @@ export class ItemsController {
   }
 
   @Delete(':id/my-publication')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Unmark an item as my publication' })
   async unmarkMyPublication(
     @Param('id') id: string,

@@ -22,7 +22,10 @@ import { StorageAccessPolicy } from '../../policies/storage-access.policy';
 import { StorageRedisCacheService } from '../../../infrastructure/cache/storage-redis-cache.service';
 import { ContentHash } from '../../../domain/value-objects/content-hash.vo';
 import { StorageKey } from '../../../domain/value-objects/storage-key.vo';
-import { StorageBlob, BlobStatus } from '../../../domain/entities/storage-blob.entity';
+import {
+  StorageBlob,
+  BlobStatus,
+} from '../../../domain/entities/storage-blob.entity';
 import { StorageVersion } from '../../../domain/entities/storage-version.entity';
 import { FileUploadedEvent } from '../../../domain/events/file-uploaded.event';
 import {

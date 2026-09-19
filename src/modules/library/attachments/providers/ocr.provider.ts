@@ -34,10 +34,7 @@ export class OcrProvider {
   }
 
   get maxPages(): number {
-    const parsed = Number.parseInt(
-      process.env.PDF_OCR_MAX_PAGES || '200',
-      10,
-    );
+    const parsed = Number.parseInt(process.env.PDF_OCR_MAX_PAGES || '200', 10);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 200;
   }
 
@@ -50,7 +47,10 @@ export class OcrProvider {
   ): Promise<PageScanDetection> {
     const content = textContent || (await page.getTextContent());
     const items = content?.items || [];
-    const text = items.map((it: any) => it.str || '').join('').trim();
+    const text = items
+      .map((it: any) => it.str || '')
+      .join('')
+      .trim();
     const textLength = text.length;
 
     // 1. Pure scan: virtually no text layer (< 32 chars)
@@ -90,7 +90,8 @@ export class OcrProvider {
         textLength,
         textDensityRatio: textLength / 2000,
         hasLargeImage: hasImage,
-        reason: 'Hybrid page: sparse text (< 150 chars) with potential scanned document body',
+        reason:
+          'Hybrid page: sparse text (< 150 chars) with potential scanned document body',
       };
     }
 

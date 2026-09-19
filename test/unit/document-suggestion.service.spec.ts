@@ -28,7 +28,8 @@ describe('Document SuggestionService (Track Changes)', () => {
   const mockPage: any = {
     id: mockPageId,
     title: 'Main Paper',
-    content: 'Line 1: Introduction\nLine 2: Methodology\nLine 3: Results\nLine 4: Conclusion',
+    content:
+      'Line 1: Introduction\nLine 2: Methodology\nLine 3: Results\nLine 4: Conclusion',
     parentPageId: null,
     isLocked: false,
   };
@@ -62,6 +63,7 @@ describe('Document SuggestionService (Track Changes)', () => {
 
     const mockCore = {
       findPageById: jest.fn(),
+      checkUserAccess: jest.fn().mockResolvedValue(true),
     };
 
     const mockEmitter = {
@@ -75,6 +77,9 @@ describe('Document SuggestionService (Track Changes)', () => {
       pageSuggestion: {
         update: jest.fn(),
         updateMany: jest.fn(),
+      },
+      pageVersion: {
+        create: jest.fn(),
       },
       $transaction: jest.fn(),
     };
@@ -145,10 +150,16 @@ describe('Document SuggestionService (Track Changes)', () => {
     it('should return list of suggestions from repository', async () => {
       repo.findByPageId.mockResolvedValue([mockSuggestion]);
 
-      const res = await service.getSuggestions(mockPageId, SuggestionStatus.pending);
+      const res = await service.getSuggestions(
+        mockPageId,
+        SuggestionStatus.pending,
+      );
 
       expect(res).toEqual([mockSuggestion]);
-      expect(repo.findByPageId).toHaveBeenCalledWith(mockPageId, SuggestionStatus.pending);
+      expect(repo.findByPageId).toHaveBeenCalledWith(
+        mockPageId,
+        SuggestionStatus.pending,
+      );
     });
   });
 
@@ -159,7 +170,8 @@ describe('Document SuggestionService (Track Changes)', () => {
 
       const updatedPageMock = {
         ...mockPage,
-        content: 'Line 1: Introduction\nLine 2: Advanced Methodology\nLine 3: Results\nLine 4: Conclusion',
+        content:
+          'Line 1: Introduction\nLine 2: Advanced Methodology\nLine 3: Results\nLine 4: Conclusion',
       };
       const updatedSuggestionMock = {
         ...mockSuggestion,
@@ -167,9 +179,16 @@ describe('Document SuggestionService (Track Changes)', () => {
         resolvedById: mockUserId,
       };
 
-      prisma.$transaction.mockResolvedValue([updatedPageMock, updatedSuggestionMock]);
+      prisma.$transaction.mockResolvedValue([
+        updatedPageMock,
+        updatedSuggestionMock,
+      ]);
 
-      const res = await service.acceptSuggestion(mockPageId, mockSuggestionId, mockUserId);
+      const res = await service.acceptSuggestion(
+        mockPageId,
+        mockSuggestionId,
+        mockUserId,
+      );
 
       expect(res.ok).toBe(true);
       expect(res.suggestion.status).toBe(SuggestionStatus.accepted);
@@ -184,6 +203,7 @@ describe('Document SuggestionService (Track Changes)', () => {
     });
 
     it('should throw BadRequestException if suggestion is not pending', async () => {
+      coreService.findPageById.mockResolvedValue(mockPage);
       repo.findById.mockResolvedValue({
         ...mockSuggestion,
         status: SuggestionStatus.accepted,
@@ -195,6 +215,7 @@ describe('Document SuggestionService (Track Changes)', () => {
     });
 
     it('should throw NotFoundException if suggestion belongs to another page', async () => {
+      coreService.findPageById.mockResolvedValue(mockPage);
       repo.findById.mockResolvedValue({
         ...mockSuggestion,
         pageId: 'other-page-id',
@@ -216,7 +237,11 @@ describe('Document SuggestionService (Track Changes)', () => {
       };
       repo.update.mockResolvedValue(rejectedMock);
 
-      const res = await service.rejectSuggestion(mockPageId, mockSuggestionId, mockUserId);
+      const res = await service.rejectSuggestion(
+        mockPageId,
+        mockSuggestionId,
+        mockUserId,
+      );
 
       expect(res.ok).toBe(true);
       expect(res.suggestion.status).toBe(SuggestionStatus.rejected);

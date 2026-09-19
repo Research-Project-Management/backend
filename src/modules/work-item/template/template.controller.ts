@@ -39,7 +39,7 @@ export class TemplateController {
   constructor(private readonly templateService: TemplateService) {}
 
   @Post()
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create a new work item template for a project' })
   @ApiParam({ name: 'projectId', description: 'Project UUID or identifier' })
@@ -56,7 +56,7 @@ export class TemplateController {
   }
 
   @Get()
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'List all work item templates for a project' })
   @ApiParam({ name: 'projectId', description: 'Project UUID or identifier' })
   async getProjectTemplates(
@@ -70,7 +70,7 @@ export class TemplateController {
   }
 
   @Get(':templateId')
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get details of a work item template' })
   @ApiParam({ name: 'projectId', description: 'Project UUID or identifier' })
   @ApiParam({ name: 'templateId', description: 'Template UUID' })
@@ -82,7 +82,7 @@ export class TemplateController {
   }
 
   @Put(':templateId')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Update an existing work item template' })
   @ApiParam({ name: 'projectId', description: 'Project UUID or identifier' })
   @ApiParam({ name: 'templateId', description: 'Template UUID' })
@@ -94,7 +94,11 @@ export class TemplateController {
     @Req() req: any,
     @Body() updateTemplateDto: UpdateTemplateDto,
   ) {
-    const isOwner = req?.role === 'owner' || user?.role === 'owner';
+    const isOwner =
+      req?.role === 'owner' ||
+      req?.role === 'coordinator' ||
+      user?.role === 'owner' ||
+      user?.role === 'coordinator';
     return this.templateService.updateTemplate(
       projectId,
       templateId,
@@ -105,7 +109,7 @@ export class TemplateController {
   }
 
   @Delete(':templateId')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Soft-delete a work item template' })
   @ApiParam({ name: 'projectId', description: 'Project UUID or identifier' })
   @ApiParam({ name: 'templateId', description: 'Template UUID' })
@@ -116,7 +120,11 @@ export class TemplateController {
     @CurrentUser() user: any,
     @Req() req: any,
   ) {
-    const isOwner = req?.role === 'owner' || user?.role === 'owner';
+    const isOwner =
+      req?.role === 'owner' ||
+      req?.role === 'coordinator' ||
+      user?.role === 'owner' ||
+      user?.role === 'coordinator';
     return this.templateService.deleteTemplate(
       projectId,
       templateId,
@@ -126,7 +134,7 @@ export class TemplateController {
   }
 
   @Post(':templateId/instantiate')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary:

@@ -6,7 +6,6 @@ import { CommandRepository } from '@/modules/library/items/repositories/command.
 import { TransactionService } from '@/modules/library/outbox/transaction.service';
 import { PrismaService } from '@/core/database/prisma.service';
 import { TagsService } from '@/modules/library/tags/tags.service';
-import { CollectionsService } from '@/modules/library/collections/collections.service';
 import { TypesService } from '@/modules/library/types/types.service';
 import { RagProvider } from '@/modules/library/search/providers/rag.provider';
 import { ItemTransformer } from '@/modules/library/items/transformers/item.transformer';
@@ -110,7 +109,6 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
           { provide: TransactionService, useValue: mockLibraryTx },
           { provide: PrismaService, useValue: {} },
           { provide: TagsService, useValue: mockTagsService },
-          { provide: CollectionsService, useValue: {} },
           { provide: TypesService, useValue: {} },
           { provide: RagProvider, useValue: {} },
           { provide: ItemTransformer, useValue: {} },
@@ -228,7 +226,10 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
       it('should link a single item via linkItems', async () => {
         queryRepo.findById
           .mockResolvedValueOnce({ id: sourceId, title: 'Source Paper' } as any)
-          .mockResolvedValueOnce({ id: targetId1, title: 'Target Paper 1' } as any);
+          .mockResolvedValueOnce({
+            id: targetId1,
+            title: 'Target Paper 1',
+          } as any);
 
         const res = await service.linkItems(mockUserId, sourceId, {
           targetItemId: targetId1,
@@ -249,8 +250,14 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
       it('should link multiple items in batch via linkItems', async () => {
         queryRepo.findById
           .mockResolvedValueOnce({ id: sourceId, title: 'Source Paper' } as any)
-          .mockResolvedValueOnce({ id: targetId1, title: 'Target Paper 1' } as any)
-          .mockResolvedValueOnce({ id: targetId2, title: 'Target Paper 2' } as any);
+          .mockResolvedValueOnce({
+            id: targetId1,
+            title: 'Target Paper 1',
+          } as any)
+          .mockResolvedValueOnce({
+            id: targetId2,
+            title: 'Target Paper 2',
+          } as any);
 
         const res = await service.linkItems(mockUserId, sourceId, {
           targetItemIds: [targetId1, targetId2],
@@ -284,7 +291,10 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
         const res = await service.unlinkItems(mockUserId, sourceId, targetId1);
         expect(res.success).toBe(true);
         expect(res.unlinked).toBe(true);
-        expect(commandRepo.removeRelation).toHaveBeenCalledWith(sourceId, targetId1);
+        expect(commandRepo.removeRelation).toHaveBeenCalledWith(
+          sourceId,
+          targetId1,
+        );
       });
     });
   });

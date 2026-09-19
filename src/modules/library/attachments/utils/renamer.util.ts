@@ -43,13 +43,19 @@ export const DEFAULT_RENAME_PATTERN =
 /**
  * Extracts author token variations from a list of contributors.
  */
-export function extractAuthorTokens(contributors?: RenamerContributor[] | null): {
+export function extractAuthorTokens(
+  contributors?: RenamerContributor[] | null,
+): {
   authors: string;
   firstAuthor: string;
   allAuthors: string;
   lastNames: string[];
 } {
-  if (!contributors || !Array.isArray(contributors) || contributors.length === 0) {
+  if (
+    !contributors ||
+    !Array.isArray(contributors) ||
+    contributors.length === 0
+  ) {
     return { authors: '', firstAuthor: '', allAuthors: '', lastNames: [] };
   }
 
@@ -131,7 +137,10 @@ export function sanitizeFilenameStem(stem: string, maxLength = 120): string {
 
   // Truncate to maximum stem length safely without splitting characters
   if (cleaned.length > maxLength) {
-    cleaned = cleaned.slice(0, maxLength).trim().replace(/[\s.\-_]+$/, '');
+    cleaned = cleaned
+      .slice(0, maxLength)
+      .trim()
+      .replace(/[\s.\-_]+$/, '');
   }
 
   return cleaned || 'document';
@@ -140,7 +149,10 @@ export function sanitizeFilenameStem(stem: string, maxLength = 120): string {
 /**
  * Preserves or determines the file extension (e.g., '.pdf').
  */
-export function resolveFileExtension(currentFilename?: string, fallback = '.pdf'): string {
+export function resolveFileExtension(
+  currentFilename?: string,
+  fallback = '.pdf',
+): string {
   if (!currentFilename) return fallback;
   const match = currentFilename.match(/(\.[a-zA-Z0-9]{2,10})$/);
   return match ? match[1].toLowerCase() : fallback;
@@ -158,15 +170,25 @@ export function formatAttachmentFilename(
   currentFilename?: string,
 ): string {
   const extension = resolveFileExtension(currentFilename);
-  const effectivePattern = (pattern && pattern.trim()) ? pattern.trim() : DEFAULT_RENAME_PATTERN;
+  const effectivePattern =
+    pattern && pattern.trim() ? pattern.trim() : DEFAULT_RENAME_PATTERN;
 
-  const { authors, firstAuthor, allAuthors, lastNames } = extractAuthorTokens(item.contributors);
+  const { authors, firstAuthor, allAuthors, lastNames } = extractAuthorTokens(
+    item.contributors,
+  );
   const year = extractYearToken(item);
   const title = (item.title || item.shortTitle || '').trim();
-  const journal = (item.publicationTitle || item.journalAbbr || item.publisher || '').trim();
+  const journal = (
+    item.publicationTitle ||
+    item.journalAbbr ||
+    item.publisher ||
+    ''
+  ).trim();
   const citationKey = (item.citationKey || '').trim();
   const itemType = (item.itemType || '').trim();
-  const doi = (item.doi || '').replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '').trim();
+  const doi = (item.doi || '')
+    .replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '')
+    .trim();
 
   let formatted = effectivePattern.replace(
     /\{\{\s*([a-zA-Z0-9_]+)([^}]*)\}\}/g,
@@ -175,11 +197,17 @@ export function formatAttachmentFilename(
       // Parse attributes like suffix=" - ", prefix="...", truncate="100", join=" & "
       const prefixMatch = rawAttrs.match(/prefix=(?:"([^"]*)"|'([^']*)')/);
       const suffixMatch = rawAttrs.match(/suffix=(?:"([^"]*)"|'([^']*)')/);
-      const truncateMatch = rawAttrs.match(/truncate=(?:"(\d+)"|'(\d+)'|(\d+))/);
+      const truncateMatch = rawAttrs.match(
+        /truncate=(?:"(\d+)"|'(\d+)'|(\d+))/,
+      );
       const joinMatch = rawAttrs.match(/join=(?:"([^"]*)"|'([^']*)')/);
 
-      const prefix = prefixMatch ? (prefixMatch[1] ?? prefixMatch[2] ?? '') : '';
-      const suffix = suffixMatch ? (suffixMatch[1] ?? suffixMatch[2] ?? '') : '';
+      const prefix = prefixMatch
+        ? (prefixMatch[1] ?? prefixMatch[2] ?? '')
+        : '';
+      const suffix = suffixMatch
+        ? (suffixMatch[1] ?? suffixMatch[2] ?? '')
+        : '';
       const truncate = truncateMatch
         ? parseInt(truncateMatch[1] ?? truncateMatch[2] ?? truncateMatch[3], 10)
         : 0;
@@ -188,7 +216,11 @@ export function formatAttachmentFilename(
       let value = '';
       if (lowerToken === 'firstcreator') {
         value = firstAuthor;
-      } else if (lowerToken === 'authors' || lowerToken === 'creators' || lowerToken === 'creator') {
+      } else if (
+        lowerToken === 'authors' ||
+        lowerToken === 'creators' ||
+        lowerToken === 'creator'
+      ) {
         if (join && lastNames.length > 0) {
           value = lastNames.join(join);
         } else {

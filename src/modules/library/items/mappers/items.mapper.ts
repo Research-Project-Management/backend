@@ -135,7 +135,9 @@ export class ItemsMapper {
           const rawKey = match[1].trim();
           const val = match[2].trim();
           const camelKey = rawKey
-            .replace(/\s+([a-zA-Z])/g, (_: string, c: string) => c.toUpperCase())
+            .replace(/\s+([a-zA-Z])/g, (_: string, c: string) =>
+              c.toUpperCase(),
+            )
             .replace(/^[A-Z]/, (c: string) => c.toLowerCase());
           const lowerKey = camelKey.toLowerCase();
 
@@ -156,7 +158,8 @@ export class ItemsMapper {
             ITEM_COLUMN_METADATA_FIELDS.has(camelKey)
           ) {
             let parsedVal: any = val;
-            if (/^(true|false)$/i.test(val)) parsedVal = val.toLowerCase() === 'true';
+            if (/^(true|false)$/i.test(val))
+              parsedVal = val.toLowerCase() === 'true';
             else if (/^\d+$/.test(val)) parsedVal = parseInt(val, 10);
             extraFields[camelKey] = parsedVal;
           } else {
@@ -196,15 +199,25 @@ export class ItemsMapper {
     if (!it.arxivId)
       it.arxivId = extraFields.arxivId ?? extraFields.archiveId ?? null;
     if (!it.seriesNumber) it.seriesNumber = extraFields.seriesNumber ?? null;
-    if (!it.edition && extraFields.edition) it.edition = String(extraFields.edition);
+    if (!it.edition && extraFields.edition)
+      it.edition = String(extraFields.edition);
     if (!it.numPages && (extraFields.numPages || extraFields.numberOfPages)) {
       it.numPages = extraFields.numPages || extraFields.numberOfPages;
     }
-    if (!it.numberOfPages && (extraFields.numberOfPages || extraFields.numPages)) {
+    if (
+      !it.numberOfPages &&
+      (extraFields.numberOfPages || extraFields.numPages)
+    ) {
       it.numberOfPages = extraFields.numberOfPages || extraFields.numPages;
     }
-    if (!it.proceedingsTitle && (extraFields.proceedingsTitle || (it.itemType === 'conferencePaper' && it.publicationTitle))) {
-      it.proceedingsTitle = String(extraFields.proceedingsTitle || it.publicationTitle);
+    if (
+      !it.proceedingsTitle &&
+      (extraFields.proceedingsTitle ||
+        (it.itemType === 'conferencePaper' && it.publicationTitle))
+    ) {
+      it.proceedingsTitle = String(
+        extraFields.proceedingsTitle || it.publicationTitle,
+      );
     }
     if (
       !it.conferenceName &&
@@ -252,14 +265,14 @@ export class ItemsMapper {
       if (
         v !== undefined &&
         v !== null &&
-        (it as any)[k] === undefined &&
+        it[k] === undefined &&
         k !== 'comment' &&
         k !== 'comments' &&
         k !== 'notes' &&
         k !== 'provenance' &&
         k !== '_rawExtra'
       ) {
-        (it as any)[k] = v;
+        it[k] = v;
       }
     }
 
@@ -298,7 +311,12 @@ export class ItemsMapper {
       }
 
       const existingExtra = typeof it.extra === 'string' ? it.extra.trim() : '';
-      const catStr = resolveCanonicalArxivCategory(canonicalCleanId, it.tags, extraFields, it);
+      const catStr = resolveCanonicalArxivCategory(
+        canonicalCleanId,
+        it.tags,
+        extraFields,
+        it,
+      );
 
       if (!existingExtra.toLowerCase().includes('arxiv:')) {
         const arxivLine = catStr
@@ -308,7 +326,7 @@ export class ItemsMapper {
       } else {
         // Upgrade existing arxiv line to guarantee native Zotero spacing and [category] syntax
         it.extra = existingExtra.replace(
-          /^arxiv:\s*([^\s\[]+)(?:v\d+)?(?:\s*\[([^\]]+)\])?/im,
+          /^arxiv:\s*([^\s[]+)(?:v\d+)?(?:\s*\[([^\]]+)\])?/im,
           (_: string, id: string, cat?: string) => {
             const canonicalId = id.replace(/v\d+$/i, '').trim();
             const existingCat = cat ? cat.trim() : '';
@@ -502,10 +520,7 @@ export class ItemsMapper {
           itemType: 'note',
         };
       });
-    } else if (
-      it.extraFields &&
-      typeof it.extraFields.comment === 'string'
-    ) {
+    } else if (it.extraFields && typeof it.extraFields.comment === 'string') {
       const commentVal = cleanCommentText(it.extraFields.comment);
       if (commentVal) {
         const formatted = commentVal.toLowerCase().startsWith('comment:')
@@ -558,13 +573,18 @@ export class ItemsMapper {
       }
       // type semantic mapping (e.g. thesisType, reportType, websiteType, postType, presentationType, genre)
       const typeField = baseMap.type;
-      if (typeField && typeField !== 'type' && it.type && it.type.toLowerCase() !== it.itemType.toLowerCase()) {
+      if (
+        typeField &&
+        typeField !== 'type' &&
+        it.type &&
+        it.type.toLowerCase() !== it.itemType.toLowerCase()
+      ) {
         it[typeField] = it[typeField] || it.type;
       }
       // number semantic mapping (e.g. reportNumber, patentNumber, identifier)
       const numberField = baseMap.number;
-      if (numberField && numberField !== 'number' && (it as any).number) {
-        it[numberField] = it[numberField] || (it as any).number;
+      if (numberField && numberField !== 'number' && it.number) {
+        it[numberField] = it[numberField] || it.number;
       }
     }
 
@@ -586,9 +606,13 @@ export class ItemsMapper {
       it.repository = it.repository || (isArxiv ? 'arXiv' : '') || '';
       it.genre = it.genre || it.type || 'Preprint';
       const cleanArxivNum = it.arxivId
-        ? String(it.arxivId).replace(/^arxiv:\s*/i, '').replace(/v\d+$/i, '').trim()
+        ? String(it.arxivId)
+            .replace(/^arxiv:\s*/i, '')
+            .replace(/v\d+$/i, '')
+            .trim()
         : '';
-      it.archiveID = it.archiveID || (cleanArxivNum ? `arXiv:${cleanArxivNum}` : '') || '';
+      it.archiveID =
+        it.archiveID || (cleanArxivNum ? `arXiv:${cleanArxivNum}` : '') || '';
       it.archiveId = it.archiveID;
 
       // In Zotero Schema v42, preprint uses repository, NOT publicationTitle or publisher.
@@ -618,7 +642,7 @@ export class ItemsMapper {
       it.institution = it.institution || it.publisher || '';
       it.publisher = it.publisher || it.institution || '';
       it.reportType = it.reportType || it.type || '';
-      it.reportNumber = it.reportNumber || (it as any).number || '';
+      it.reportNumber = it.reportNumber || it.number || '';
     } else if (it.itemType === 'webpage') {
       it.websiteTitle = it.websiteTitle || it.publicationTitle || '';
       it.publicationTitle = it.publicationTitle || it.websiteTitle || '';
@@ -627,19 +651,27 @@ export class ItemsMapper {
       it.blogTitle = it.blogTitle || it.publicationTitle || '';
       it.publicationTitle = it.publicationTitle || it.blogTitle || '';
     } else if (it.itemType === 'patent') {
-      it.issuingAuthority = it.issuingAuthority || it.country || it.authority || '';
+      it.issuingAuthority =
+        it.issuingAuthority || it.country || it.authority || '';
       it.authority = it.authority || it.issuingAuthority || '';
       it.country = it.country || it.issuingAuthority || '';
-      it.patentNumber = it.patentNumber || (it as any).number || '';
+      it.patentNumber = it.patentNumber || it.number || '';
       it.issueDate = it.issueDate || it.date || it.publicationDate || '';
       it.priorityDate = it.priorityDate || it.originalDate || '';
-      it.assignee = it.assignee || (it as any).assignee || '';
+      it.assignee = it.assignee || it.assignee || '';
     }
     // Robust year extraction from any date format (e.g. "May 2024", "Spring 2024", "2024-05-18", "15-08-2022", "c2019")
-    if (it.year === undefined || it.year === null || isNaN(Number(it.year)) || Number(it.year) === 0) {
+    if (
+      it.year === undefined ||
+      it.year === null ||
+      isNaN(Number(it.year)) ||
+      Number(it.year) === 0
+    ) {
       const dateCandidate = it.date || it.publicationDate || it.issueDate;
       if (dateCandidate) {
-        const yearMatch = String(dateCandidate).match(/(?:^|[^\d])(1[7-9]\d{2}|20\d{2})(?:[^\d]|$)/);
+        const yearMatch = String(dateCandidate).match(
+          /(?:^|[^\d])(1[7-9]\d{2}|20\d{2})(?:[^\d]|$)/,
+        );
         if (yearMatch) {
           it.year = parseInt(yearMatch[1], 10);
         }

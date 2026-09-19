@@ -8,7 +8,9 @@ export class ProjectStateMetadataDto {
   @ApiProperty({ example: 'Lên kế hoạch (Planning)' })
   label!: string;
 
-  @ApiProperty({ example: 'Đang xác định scope, specs, kiến trúc và phân bổ tài nguyên.' })
+  @ApiProperty({
+    example: 'Đang xác định scope, specs, kiến trúc và phân bổ tài nguyên.',
+  })
   description!: string;
 
   @ApiProperty({ example: 2 })

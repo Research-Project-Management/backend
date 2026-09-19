@@ -28,6 +28,7 @@ import { AnnotationsService } from './annotations.service';
 import { PdfAnnotationImporterService } from './services/pdf-annotation-importer.service';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/auth.guard';
 import { CurrentUser } from '../../../modules/iam/authn/decorators/user.decorator';
+import { ProjectRoleGuard } from '../../../modules/iam/authz/guards/role.guard';
 import {
   CreateAnnotationDto,
   UpdateAnnotationDto,
@@ -36,8 +37,11 @@ import {
 
 @ApiTags('Annotations')
 @ApiBearerAuth('JWT-auth')
-@Controller('api/v1/library/attachments/:attachmentId/annotations')
-@UseGuards(JwtAuthGuard)
+@Controller([
+  'api/v1/library/attachments/:attachmentId/annotations',
+  'api/v1/projects/:projectId/library/attachments/:attachmentId/annotations',
+])
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class AnnotationsController {
   constructor(
     private readonly annotationsService: AnnotationsService,

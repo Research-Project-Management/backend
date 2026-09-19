@@ -85,8 +85,6 @@ export interface IStorageDriver {
   abortMultipartUpload(key: string, uploadId: string): Promise<void>;
   listUploadedParts(key: string, uploadId: string): Promise<CompletedPart[]>;
 
-  applyLifecycleRules?(
-    config?: StorageLifecycleConfiguration,
-  ): Promise<void>;
+  applyLifecycleRules?(config?: StorageLifecycleConfiguration): Promise<void>;
   getLifecycleRules?(): Promise<StorageLifecycleConfiguration | null>;
 }

@@ -296,14 +296,7 @@ export class BibtexParser {
       const citationKey = match[2]?.trim() || '';
       const body = match[3] || '';
 
-      const fields: Record<string, string> = {};
-      const fieldRegex = /([a-zA-Z_-]+)\s*=\s*(?:\{([^}]*)\}|"([^"]*)"|(\d+))/g;
-      let fieldMatch: RegExpExecArray | null;
-      while ((fieldMatch = fieldRegex.exec(body)) !== null) {
-        const key = fieldMatch[1].toLowerCase();
-        const value = fieldMatch[2] ?? fieldMatch[3] ?? fieldMatch[4] ?? '';
-        fields[key] = value.trim();
-      }
+      const fields = this.extractBibtexFields(body);
 
       const authors = fields.author
         ? fields.author
@@ -343,12 +336,14 @@ export class BibtexParser {
       entries.push({
         citationKey: citationKey || undefined,
         itemType: this.mapBibtexTypeToItemType(rawType),
-        title: fields.title || 'Untitled Reference',
+        title: this.cleanBibtexField(fields.title) || 'Untitled Reference',
         authors,
         editors: editors.length > 0 ? editors : undefined,
         year: fields.year ? parseInt(fields.year, 10) || null : null,
-        journal: fields.journal || fields.booktitle,
-        publisher: fields.publisher,
+        journal:
+          this.cleanBibtexField(fields.journal || fields.booktitle) ||
+          undefined,
+        publisher: this.cleanBibtexField(fields.publisher) || undefined,
         place: fields.address || fields.place || undefined,
         volume: fields.volume,
         issue: fields.number || fields.issue,
@@ -357,8 +352,10 @@ export class BibtexParser {
         isbn: fields.isbn,
         issn: fields.issn,
         url: fields.url,
-        abstract: fields.abstract,
-        series: fields.series || fields.series_title || undefined,
+        abstract: this.cleanBibtexField(fields.abstract) || undefined,
+        series:
+          this.cleanBibtexField(fields.series || fields.series_title) ||
+          undefined,
         edition: fields.edition || undefined,
         keywords,
         notes,
@@ -370,5 +367,83 @@ export class BibtexParser {
     }
 
     return entries;
+  }
+
+  /**
+   * Helper to clean LaTeX protection braces and normalize whitespace.
+   */
+  private cleanBibtexField(text?: string): string {
+    if (!text) return '';
+    return text.replace(/[{}]/g, '').replace(/\s+/g, ' ').trim();
+  }
+
+  /**
+   * Resilient character scanner for BibTeX entry body.
+   * Handles nested braces (e.g. {Deep Learning with {Attention} Mechanisms}),
+   * escaped characters, and quoted string fields without truncated splits.
+   */
+  private extractBibtexFields(body: string): Record<string, string> {
+    const fields: Record<string, string> = {};
+    let pos = 0;
+    const len = body.length;
+
+    while (pos < len) {
+      const keyMatch = body.slice(pos).match(/^\s*([a-zA-Z_-]+)\s*=\s*/);
+      if (!keyMatch) {
+        pos++;
+        continue;
+      }
+
+      const key = keyMatch[1].toLowerCase();
+      pos += keyMatch[0].length;
+
+      if (pos >= len) break;
+
+      const char = body[pos];
+      let value = '';
+
+      if (char === '{') {
+        pos++;
+        let depth = 1;
+        const start = pos;
+        while (pos < len && depth > 0) {
+          if (body[pos] === '\\') {
+            pos += 2;
+            continue;
+          }
+          if (body[pos] === '{') depth++;
+          else if (body[pos] === '}') depth--;
+          pos++;
+        }
+        value = body.slice(start, depth === 0 ? pos - 1 : pos);
+      } else if (char === '"') {
+        pos++;
+        const start = pos;
+        while (pos < len && body[pos] !== '"') {
+          if (body[pos] === '\\') {
+            pos += 2;
+            continue;
+          }
+          pos++;
+        }
+        value = body.slice(start, pos);
+        if (pos < len && body[pos] === '"') pos++;
+      } else {
+        const bareMatch = body.slice(pos).match(/^([^,\n}\s]+)/);
+        if (bareMatch) {
+          value = bareMatch[1];
+          pos += bareMatch[0].length;
+        }
+      }
+
+      fields[key] = value.trim();
+
+      const commaMatch = body.slice(pos).match(/^\s*,\s*/);
+      if (commaMatch) {
+        pos += commaMatch[0].length;
+      }
+    }
+
+    return fields;
   }
 }

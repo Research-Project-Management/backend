@@ -39,7 +39,7 @@ export class CycleController {
 
   @Get(['projects/:projectId/cycles', 'project/:projectId/cycles'])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get all cycles for a project' })
   @ApiResponse({
     status: 200,
@@ -52,7 +52,7 @@ export class CycleController {
   @Post(['projects/:projectId/cycles', 'project/:projectId/cycles'])
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Create a new cycle in a project' })
   @ApiResponse({ status: 201, description: 'Created cycle object' })
   async createCycle(
@@ -65,7 +65,7 @@ export class CycleController {
 
   @Get(['projects/:projectId/cycles/:cycleId', 'cycles/:cycleId'])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get a cycle by ID with progress stats' })
   @ApiResponse({ status: 200, description: 'Detailed cycle object' })
   async getCycleById(@Param('cycleId') cycleId: string) {
@@ -77,7 +77,7 @@ export class CycleController {
     'cycles/:cycleId/progress',
   ])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get progress statistics for a cycle' })
   @ApiResponse({ status: 200, description: 'Progress statistics object' })
   async getProgress(@Param('cycleId') cycleId: string) {
@@ -86,7 +86,7 @@ export class CycleController {
 
   @Patch(['projects/:projectId/cycles/:cycleId', 'cycles/:cycleId'])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Update a cycle partially' })
   @ApiResponse({ status: 200, description: 'Updated cycle object' })
   async updateCycle(
@@ -98,7 +98,7 @@ export class CycleController {
 
   @Put(['projects/:projectId/cycles/:cycleId', 'cycles/:cycleId'])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Update a cycle completely' })
   @ApiResponse({ status: 200, description: 'Updated cycle object' })
   async replaceCycle(
@@ -111,7 +111,7 @@ export class CycleController {
   @Delete(['projects/:projectId/cycles/:cycleId', 'cycles/:cycleId'])
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Soft-delete a cycle' })
   @ApiResponse({ status: 200, description: 'Cycle deleted confirmation' })
   async deleteCycle(@Param('cycleId') cycleId: string) {
@@ -124,7 +124,7 @@ export class CycleController {
   ])
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Restore a soft-deleted cycle' })
   @ApiResponse({ status: 200, description: 'Cycle restored' })
   async restoreCycle(@Param('cycleId') cycleId: string) {
@@ -137,7 +137,7 @@ export class CycleController {
   ])
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Add a work item to a cycle' })
   @ApiResponse({ status: 200, description: 'Updated cycle object' })
   async addWorkItem(
@@ -156,7 +156,7 @@ export class CycleController {
   ])
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Add multiple work items to a cycle in batch' })
   @ApiResponse({ status: 200, description: 'Batch addition summary' })
   async addWorkItemsBatch(
@@ -174,7 +174,7 @@ export class CycleController {
     'cycles/:cycleId/work-items/:workItemId',
   ])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Remove a work item from a cycle' })
   @ApiResponse({ status: 200, description: 'WorkItem removal confirmation' })
   async removeWorkItem(
@@ -190,7 +190,7 @@ export class CycleController {
   ])
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Complete a cycle and roll incomplete work items' })
   @ApiResponse({
     status: 200,
@@ -206,7 +206,7 @@ export class CycleController {
   @Post('projects/:projectId/cycles/auto-transition')
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary:
       'Auto-start upcoming cycle and complete expired active cycle for a project',
@@ -221,7 +221,7 @@ export class CycleController {
     'cycles/:cycleId/burndown',
   ])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary:
       'Get burndown chart time-series data for a cycle (ideal vs actual points remaining)',
@@ -236,7 +236,7 @@ export class CycleController {
     'cycles/:cycleId/velocity',
   ])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary:
       'Get velocity metric for a completed cycle (committed vs completed work items and points)',

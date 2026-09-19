@@ -30,7 +30,9 @@ export class TemplateController {
   constructor(private readonly templateService: TemplateService) {}
 
   @Get()
-  @ApiOperation({ summary: 'List accessible project templates (owned + public)' })
+  @ApiOperation({
+    summary: 'List accessible project templates (owned + public)',
+  })
   listTemplates(@CurrentUser('id') userId: string) {
     return this.templateService.listTemplates(userId);
   }
@@ -63,10 +65,7 @@ export class TemplateController {
 
   @Delete(':id')
   @ApiOperation({ summary: 'Delete a project template (Creator only)' })
-  deleteTemplate(
-    @Param('id') id: string,
-    @CurrentUser('id') userId: string,
-  ) {
+  deleteTemplate(@Param('id') id: string, @CurrentUser('id') userId: string) {
     return this.templateService.deleteTemplate(id, userId);
   }
 

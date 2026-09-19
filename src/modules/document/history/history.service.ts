@@ -78,7 +78,9 @@ export class HistoryService {
     if (dto.eventType === VersionEventType.auto_save) {
       const latestList = await this.historyRepo.findPageVersions(pageId);
       if (latestList.length > 0) {
-        const latestFull = await this.historyRepo.findVersionById(latestList[0].id);
+        const latestFull = await this.historyRepo.findVersionById(
+          latestList[0].id,
+        );
         if (latestFull && latestFull.content === contentToSave) {
           return { version: latestFull };
         }
@@ -150,7 +152,7 @@ export class HistoryService {
       content: pageContentStr,
       label: `Restored to "${version.label || version.title || 'Previous version'}"`,
       savedById: version.savedById,
-      eventType: VersionEventType.manual_save,
+      eventType: VersionEventType.restore,
       fileName: version.fileName || page.title,
     });
 
@@ -173,13 +175,13 @@ export class HistoryService {
     };
   }
 
-  async deleteVersion(versionId: string, pageId?: string) {
+  async deleteVersion(versionId: string, pageId: string) {
     const version = await this.historyRepo.findVersionById(versionId);
     if (!version) {
       throw new NotFoundException('Version not found');
     }
 
-    if (pageId && version.pageId !== pageId) {
+    if (version.pageId !== pageId) {
       throw new BadRequestException(
         'Version does not belong to the specified page',
       );

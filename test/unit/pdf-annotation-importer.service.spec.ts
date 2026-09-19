@@ -12,7 +12,9 @@ describe('PdfAnnotationImporterService (Zotero 7 Level 5 PDF /Annots Import)', (
   let mockPrisma: any;
   let mockStoragePort: any;
   let mockAnnotationsService: any;
-  const mockGetDocumentProxy = getDocumentProxy as jest.MockedFunction<typeof getDocumentProxy>;
+  const mockGetDocumentProxy = getDocumentProxy as jest.MockedFunction<
+    typeof getDocumentProxy
+  >;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -32,7 +34,11 @@ describe('PdfAnnotationImporterService (Zotero 7 Level 5 PDF /Annots Import)', (
 
     mockAnnotationsService = {
       getAnnotationsByAttachment: jest.fn().mockResolvedValue([]),
-      createAnnotation: jest.fn().mockImplementation((_userId, dto) => Promise.resolve({ id: 'anno-created', ...dto })),
+      createAnnotation: jest
+        .fn()
+        .mockImplementation((_userId, dto) =>
+          Promise.resolve({ id: 'anno-created', ...dto }),
+        ),
     };
 
     service = new PdfAnnotationImporterService(
@@ -140,35 +146,41 @@ describe('PdfAnnotationImporterService (Zotero 7 Level 5 PDF /Annots Import)', (
     // normY = (1000 - 750) / 1000 = 0.25
     // normWidth = (250 - 50) / 500 = 0.4
     // normHeight = (750 - 700) / 1000 = 0.05
-    expect(mockAnnotationsService.createAnnotation).toHaveBeenCalledWith('user-1', {
-      attachmentId: 'att-1',
-      type: AnnotationType.highlight,
-      pageIndex: 0,
-      y: 0.25,
-      x: 0.1,
-      quoteText: 'Important research finding',
-      comment: '',
-      color: '#ffd400',
-      rectCoords: [
-        {
-          x1: 0.1,
-          y1: 0.25,
-          x2: 0.5,
-          y2: 0.3,
-          width: 0.4,
-          height: 0.05,
-        },
-      ],
-      authorId: 'user-1',
-    });
+    expect(mockAnnotationsService.createAnnotation).toHaveBeenCalledWith(
+      'user-1',
+      {
+        attachmentId: 'att-1',
+        type: AnnotationType.highlight,
+        pageIndex: 0,
+        y: 0.25,
+        x: 0.1,
+        quoteText: 'Important research finding',
+        comment: '',
+        color: '#ffd400',
+        rectCoords: [
+          {
+            x1: 0.1,
+            y1: 0.25,
+            x2: 0.5,
+            y2: 0.3,
+            width: 0.4,
+            height: 0.05,
+          },
+        ],
+        authorId: 'user-1',
+      },
+    );
 
     // Verify StrikeOut conversion
-    expect(mockAnnotationsService.createAnnotation).toHaveBeenCalledWith('user-1', expect.objectContaining({
-      type: AnnotationType.strike,
-      pageIndex: 0,
-      quoteText: 'Outdated hypothesis',
-      color: '#ff0000',
-    }));
+    expect(mockAnnotationsService.createAnnotation).toHaveBeenCalledWith(
+      'user-1',
+      expect.objectContaining({
+        type: AnnotationType.strike,
+        pageIndex: 0,
+        quoteText: 'Outdated hypothesis',
+        color: '#ff0000',
+      }),
+    );
   });
 
   it('should skip annotations that already exist (deduplication)', async () => {

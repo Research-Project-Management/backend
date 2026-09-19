@@ -31,7 +31,7 @@ export class RelationController {
 
   @Get('work-items/:workItemId/relations')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get all relations and blockers for a work item' })
   @ApiResponse({ status: 200, description: 'List of enriched relations' })
   async getRelations(@Param('workItemId') workItemId: string) {
@@ -41,7 +41,7 @@ export class RelationController {
   @Post('work-items/:workItemId/relations')
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Add a bidirectional relation to a work item' })
   @ApiResponse({
     status: 201,
@@ -58,7 +58,7 @@ export class RelationController {
 
   @Delete('work-items/:workItemId/relations/:targetWorkItemId')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Remove a bidirectional relation from a work item' })
   @ApiResponse({
     status: 200,
@@ -79,7 +79,7 @@ export class RelationController {
 
   @Get('work-items/:workItemId/relations/violations')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'Get violated timeline-dependency relations for a work item',
   })

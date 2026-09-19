@@ -786,7 +786,11 @@ export class CoreRepository implements IWorkItemRepository {
         if (updated.assigneeId) assigneeIdsToSync.push(updated.assigneeId);
         if (Array.isArray(updated.assigneeIds)) {
           updated.assigneeIds.forEach((id: any) => {
-            if (typeof id === 'string' && id && !assigneeIdsToSync.includes(id)) {
+            if (
+              typeof id === 'string' &&
+              id &&
+              !assigneeIdsToSync.includes(id)
+            ) {
               assigneeIdsToSync.push(id);
             }
           });

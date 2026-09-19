@@ -20,7 +20,9 @@ describe('Storage BullMQ Queue & Worker Suite', () => {
       mockQueue = {
         add: jest.fn().mockResolvedValue({ id: 'proc-f1' } as any),
       };
-      producer = new StorageQueueProducer(mockQueue as Queue<StorageProcessingJobData>);
+      producer = new StorageQueueProducer(
+        mockQueue as Queue<StorageProcessingJobData>,
+      );
     });
 
     it('should enqueue a processing job with exponential backoff and job deduplication ID', async () => {
@@ -66,7 +68,9 @@ describe('Storage BullMQ Queue & Worker Suite', () => {
     });
 
     it('should handle queue.add failure gracefully without crashing', async () => {
-      mockQueue.add = jest.fn().mockRejectedValue(new Error('Redis connection down'));
+      mockQueue.add = jest
+        .fn()
+        .mockRejectedValue(new Error('Redis connection down'));
       await expect(
         producer.queueFileProcessing({
           fileId: 'file-123',

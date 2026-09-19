@@ -68,13 +68,17 @@ describe('Library Citation Service & CSL Style Registry', () => {
       // raw bibtex fallback
       const bibtexFallback = registry.formatFallback(mockItem, 'bibtex', 1);
       expect(bibtexFallback.inText).toBe('\\cite{vaswani2017attention}');
-      expect(bibtexFallback.bibliography).toContain('@article{vaswani2017attention');
+      expect(bibtexFallback.bibliography).toContain(
+        '@article{vaswani2017attention',
+      );
 
       // raw ris fallback
       const risFallback = registry.formatFallback(mockItem, 'ris', 1);
       expect(risFallback.inText).toBe('Attention Is All You Need');
       expect(risFallback.bibliography).toContain('TY  - JOUR');
-      expect(risFallback.bibliography).toContain('TI  - Attention Is All You Need');
+      expect(risFallback.bibliography).toContain(
+        'TI  - Attention Is All You Need',
+      );
     });
   });
 

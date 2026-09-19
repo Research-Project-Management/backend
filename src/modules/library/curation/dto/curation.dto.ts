@@ -21,4 +21,8 @@ export class MergeDuplicatesDto {
   @IsOptional()
   @IsObject()
   fieldSelections?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsUUID('4', { message: 'projectId must be a valid UUID v4' })
+  projectId?: string;
 }

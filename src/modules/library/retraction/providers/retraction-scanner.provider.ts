@@ -155,7 +155,8 @@ export class RetractionScannerProvider {
             return {
               retraction: {
                 nature: 'expression_of_concern',
-                reason: update.label || 'Publisher issued expression of concern',
+                reason:
+                  update.label || 'Publisher issued expression of concern',
                 noticeUrl: update.doi
                   ? `https://doi.org/${update.doi}`
                   : undefined,

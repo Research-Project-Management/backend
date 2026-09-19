@@ -153,9 +153,7 @@ export class UploadController {
     const buffer = await data.toBuffer();
     const fields = data.fields || {};
     const fieldFilename =
-      (fields.fileName as any)?.value ||
-      (fields.filename as any)?.value ||
-      (fields.name as any)?.value;
+      fields.fileName?.value || fields.filename?.value || fields.name?.value;
     const filename =
       (data.filename && data.filename !== 'blob'
         ? data.filename
@@ -222,9 +220,7 @@ export class UploadController {
       const buffer = await data.toBuffer();
       const fields = data.fields || {};
       const fieldFilename =
-        (fields.fileName as any)?.value ||
-        (fields.filename as any)?.value ||
-        (fields.name as any)?.value;
+        fields.fileName?.value || fields.filename?.value || fields.name?.value;
       const filename =
         (data.filename && data.filename !== 'blob'
           ? data.filename

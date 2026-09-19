@@ -54,7 +54,7 @@ export class CoreController {
 
   @Sse('projects/:projectId/work-items/events')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'Stream realtime events for work items in a project',
   })
@@ -134,7 +134,8 @@ export class CoreController {
 
   @Get('work-items')
   @ApiOperation({
-    summary: 'Get current user work items across projects with optional filters',
+    summary:
+      'Get current user work items across projects with optional filters',
   })
   async getUserWorkItems(
     @CurrentUser('id') userId: string,
@@ -145,7 +146,7 @@ export class CoreController {
 
   @Get('projects/:projectId/work-items')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'Get all work items in a project with optional filters',
   })
@@ -161,7 +162,7 @@ export class CoreController {
 
   @Get(['work-items/:workItemId', 'projects/:projectId/work-items/:workItemId'])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get a single work item by ID or identifier' })
   async getWorkItemById(@Param('workItemId') workItemId: string) {
     return this.workItemService.getWorkItemById(workItemId);
@@ -170,7 +171,7 @@ export class CoreController {
   @Post('projects/:projectId/work-items')
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Create a new work item in a project' })
   async createWorkItem(
     @Param('projectId') projectId: string,
@@ -186,7 +187,7 @@ export class CoreController {
 
   @Put(['work-items/:workItemId', 'projects/:projectId/work-items/:workItemId'])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Update a work item' })
   async updateWorkItem(
     @Param('workItemId') workItemId: string,
@@ -206,7 +207,7 @@ export class CoreController {
   ])
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Delete a work item' })
   async deleteWorkItem(
     @Param('workItemId') workItemId: string,
@@ -220,7 +221,7 @@ export class CoreController {
     'projects/:projectId/work-items/:workItemId/assign',
   ])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Assign a work item to a user (or unassign)' })
   async assignWorkItem(
     @Param('workItemId') workItemId: string,
@@ -237,7 +238,7 @@ export class CoreController {
   @Post(['work-items/:workItemId/children', 'work-items/:workItemId/sub-items'])
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary: 'Create a child work item under a parent work item',
   })
@@ -260,7 +261,7 @@ export class CoreController {
   ])
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Reorder a work item in Kanban or List view' })
   async reorderWorkItem(
     @Body('workItemId') workItemIdFromBody: string | undefined,
@@ -281,7 +282,7 @@ export class CoreController {
   @Put(['projects/:projectId/work-items/bulk', 'work-items/bulk'])
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Bulk update multiple work items' })
   async bulkUpdate(
     @Param('projectId') projectId: string,
@@ -303,7 +304,7 @@ export class CoreController {
   ])
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Bulk delete multiple work items' })
   async bulkDelete(
     @Param('projectId') projectId: string,
@@ -322,7 +323,7 @@ export class CoreController {
   @Post('work-items/:workItemId/duplicate')
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Duplicate a work item' })
   async duplicateWorkItem(
     @Param('workItemId') workItemId: string,
@@ -341,7 +342,7 @@ export class CoreController {
 
   @Post('work-items/:workItemId/convert-to-root')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Convert a child work item to a root work item' })
   async convertToRootWorkItem(@Param('workItemId') workItemId: string) {
     return this.workItemService.convertToRootWorkItem(workItemId);

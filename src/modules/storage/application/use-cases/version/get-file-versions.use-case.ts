@@ -33,10 +33,17 @@ export class GetFileVersionsUseCase {
     private readonly accessPolicy: StorageAccessPolicy,
   ) {}
 
-  async execute(fileId: string, userId: string): Promise<GetFileVersionsOutput> {
-    const node = await this.accessPolicy.assertCanAccess(userId, fileId, 'read');
+  async execute(
+    fileId: string,
+    userId: string,
+  ): Promise<GetFileVersionsOutput> {
+    const node = await this.accessPolicy.assertCanAccess(
+      userId,
+      fileId,
+      'read',
+    );
 
-    let versions = await this.versionRepo.findByFileId(fileId);
+    const versions = await this.versionRepo.findByFileId(fileId);
 
     // If no version history exists yet, provide a virtual v1 for the existing file
     if (versions.length === 0) {
@@ -60,7 +67,9 @@ export class GetFileVersionsUseCase {
     }
 
     // Sort descending by versionNumber
-    const sorted = [...versions].sort((a, b) => b.versionNumber - a.versionNumber);
+    const sorted = [...versions].sort(
+      (a, b) => b.versionNumber - a.versionNumber,
+    );
     const maxVersion = sorted[0]?.versionNumber || 1;
 
     const dtos: FileVersionDto[] = sorted.map((v) => ({
@@ -82,7 +91,8 @@ export class GetFileVersionsUseCase {
     return {
       fileId: node.id,
       filename: node.name,
-      currentVersionNumber: dtos.find((d) => d.isCurrent)?.versionNumber ?? maxVersion,
+      currentVersionNumber:
+        dtos.find((d) => d.isCurrent)?.versionNumber ?? maxVersion,
       totalVersions: dtos.length,
       versions: dtos,
     };

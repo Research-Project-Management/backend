@@ -349,5 +349,49 @@ describe('Project Module Security & SSOT Suite', () => {
 
       expect(mockMemberRepo.deleteMember).not.toHaveBeenCalled();
     });
+
+    it('should allow promoting a member to coordinator role', async () => {
+      mockMemberRepo.findMember.mockResolvedValue({
+        userId: 'member-2',
+        role: ProjectMemberRole.contributor,
+      });
+      mockMemberRepo.updateMemberRole.mockResolvedValue({
+        userId: 'member-2',
+        role: ProjectMemberRole.coordinator,
+      });
+
+      const result = await memberService.updateMemberRole('proj-123', 'member-2', {
+        role: ProjectMemberRole.coordinator,
+      });
+
+      expect(result.member.role).toBe(ProjectMemberRole.coordinator);
+      expect(mockMemberRepo.updateMemberRole).toHaveBeenCalledWith(
+        'proj-123',
+        'member-2',
+        ProjectMemberRole.coordinator,
+      );
+    });
+
+    it('should allow assigning a member to reviewer role', async () => {
+      mockMemberRepo.findMember.mockResolvedValue({
+        userId: 'member-3',
+        role: ProjectMemberRole.contributor,
+      });
+      mockMemberRepo.updateMemberRole.mockResolvedValue({
+        userId: 'member-3',
+        role: ProjectMemberRole.reviewer,
+      });
+
+      const result = await memberService.updateMemberRole('proj-123', 'member-3', {
+        role: ProjectMemberRole.reviewer,
+      });
+
+      expect(result.member.role).toBe(ProjectMemberRole.reviewer);
+      expect(mockMemberRepo.updateMemberRole).toHaveBeenCalledWith(
+        'proj-123',
+        'member-3',
+        ProjectMemberRole.reviewer,
+      );
+    });
   });
 });

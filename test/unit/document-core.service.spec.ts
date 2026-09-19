@@ -95,18 +95,37 @@ describe('Document CoreService (Server-Authoritative Invariants)', () => {
       expect(result.page?.title).toBe('Safe Paper Title');
     });
 
-    it('should reject creating a page if user has no contributor/owner role', async () => {
+    it('should reject creating a page if user has no coordinator/contributor/owner role (e.g. reviewer)', async () => {
       repo.findProjectContext.mockResolvedValue({
         id: mockProjectId,
         createdById: 'other-user',
       } as any);
-      repo.findProjectMember.mockResolvedValue({ role: 'viewer' });
+      repo.findProjectMember.mockResolvedValue({ role: 'reviewer' });
 
       await expect(
         service.createPage(mockProjectId, mockUserId, {
           title: 'Unauthorized Doc',
         }),
       ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should allow creating a page if user has coordinator role', async () => {
+      repo.findProjectContext.mockResolvedValue({
+        id: mockProjectId,
+        createdById: 'other-user',
+      } as any);
+      repo.findProjectMember.mockResolvedValue({ role: 'coordinator' });
+      repo.createPage.mockResolvedValue({
+        ...mockPage,
+        id: 'page-coord-uuid',
+        title: 'Coordinator Spec',
+        projectId: mockProjectId,
+      });
+
+      const result = await service.createPage(mockProjectId, mockUserId, {
+        title: 'Coordinator Spec',
+      });
+      expect(result.page?.title).toBe('Coordinator Spec');
     });
 
     it('should reject parent page from a different project', async () => {

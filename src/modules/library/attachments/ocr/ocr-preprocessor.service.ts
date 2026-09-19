@@ -38,9 +38,9 @@ export class OcrPreprocessorService {
 
     let pipeline = sharp(imageBuffer);
     const metadata = await pipeline.metadata();
-    let currentWidth = metadata.width || 1000;
-    let currentHeight = metadata.height || 1400;
-    let orientationAngle = 0;
+    const currentWidth = metadata.width || 1000;
+    const currentHeight = metadata.height || 1400;
+    const orientationAngle = 0;
     let skewAngle = 0;
 
     // 1. Auto-orient
@@ -55,7 +55,7 @@ export class OcrPreprocessorService {
         if (Math.abs(skewAngle) >= 0.5) {
           pipeline = pipeline.rotate(-skewAngle, { background: '#ffffff' });
           this.logger.debug(
-            `Deskew applied: rotated ${-skewAngle.toFixed(1)}° to correct scan skew`,
+            `Deskew applied: rotated ${(-skewAngle).toFixed(1)}° to correct scan skew`,
           );
         }
       } catch (err: any) {

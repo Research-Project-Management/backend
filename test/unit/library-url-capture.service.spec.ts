@@ -59,12 +59,7 @@ describe('UrlCaptureService', () => {
         title: 'Captured article',
       }),
     } as any;
-    const service = new UrlCaptureService(
-      prisma,
-      provider,
-      undefined,
-      items,
-    );
+    const service = new UrlCaptureService(prisma, provider, undefined, items);
 
     await service.confirmCapturedUrl('project-1', 'user-1', {
       previewToken: 'signed-token',

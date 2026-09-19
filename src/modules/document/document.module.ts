@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
-import { CoreModule } from './core/core.module';
-import { NodeModule } from './node/node.module';
+import { PageModule } from './page/page.module';
+import { TreeModule } from './tree/tree.module';
 import { HistoryModule } from './history/history.module';
 import { CompilerModule } from './compiler/compiler.module';
 import { CommentModule } from './comment/comment.module';
@@ -15,8 +15,8 @@ import { DocumentFacade, DOCUMENT_FACADE } from './document.facade';
 
 @Module({
   imports: [
-    CoreModule,
-    NodeModule,
+    PageModule,
+    TreeModule,
     HistoryModule,
     CompilerModule,
     CommentModule,
@@ -36,8 +36,8 @@ import { DocumentFacade, DOCUMENT_FACADE } from './document.facade';
     },
   ],
   exports: [
-    CoreModule,
-    NodeModule,
+    PageModule,
+    TreeModule,
     DocumentFacade,
     DOCUMENT_FACADE,
     HistoryModule,
@@ -53,3 +53,9 @@ import { DocumentFacade, DOCUMENT_FACADE } from './document.facade';
   ],
 })
 export class DocumentModule {}
+
+export const CoreModule = PageModule;
+export type CoreModule = PageModule;
+
+export const NodeModule = TreeModule;
+export type NodeModule = TreeModule;

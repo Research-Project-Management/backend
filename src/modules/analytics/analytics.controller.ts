@@ -20,7 +20,7 @@ export class AnalyticsController {
 
   @Get(['projects/:projectId', 'project/:projectId'])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'Get project dimensional insights (State, Priority, Assignee)',
   })
@@ -30,7 +30,7 @@ export class AnalyticsController {
 
   @Get(['cycles/:cycleId', 'cycle/:cycleId'])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'Get cycle completion metrics (total, completed, inProgress)',
   })
@@ -40,7 +40,7 @@ export class AnalyticsController {
 
   @Get(['projects/:projectId/overview', 'project/:projectId/overview'])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get project aggregate metrics overview' })
   async getProjectOverview(@Param('projectId') projectId: string) {
     return this.analyticsService.getProjectOverview(projectId);
@@ -54,7 +54,7 @@ export class AnalyticsController {
 
   @Get(['projects/:projectId/labels', 'project/:projectId/labels'])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'Get WorkItem count grouped by label for a project',
   })
@@ -64,7 +64,7 @@ export class AnalyticsController {
 
   @Get(['projects/:projectId/timeseries', 'project/:projectId/timeseries'])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get daily WorkItem creation and completion trend' })
   @ApiQuery({
     name: 'from',
@@ -92,7 +92,7 @@ export class AnalyticsController {
 
   @Get(['cycles/:cycleId/burndown', 'cycle/:cycleId/burndown'])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get daily burn-down chart data for a cycle' })
   async getCycleBurndown(@Param('cycleId') cycleId: string) {
     return this.analyticsService.getCycleBurndown(cycleId);
@@ -100,7 +100,7 @@ export class AnalyticsController {
 
   @Get(['cycles/:cycleId/velocity', 'cycle/:cycleId/velocity'])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get story points velocity for a cycle' })
   async getCycleVelocity(@Param('cycleId') cycleId: string) {
     return this.analyticsService.getCycleVelocity(cycleId);

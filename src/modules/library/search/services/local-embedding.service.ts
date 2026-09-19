@@ -10,7 +10,7 @@ export class LocalEmbeddingService implements OnModuleInit {
   private isInitializing = false;
   private modelAvailable = false;
 
-  async onModuleInit(): Promise<void> {
+  onModuleInit(): void {
     // Lazy non-blocking warmup in background
     this.initPipeline().catch((err) => {
       this.logger.debug(
@@ -46,7 +46,9 @@ export class LocalEmbeddingService implements OnModuleInit {
         { quantized: true },
       );
       this.modelAvailable = true;
-      this.logger.log('In-process ONNX embedding pipeline (all-MiniLM-L6-v2) ready.');
+      this.logger.log(
+        'In-process ONNX embedding pipeline (all-MiniLM-L6-v2) ready.',
+      );
     } catch (err: any) {
       this.logger.debug(
         `Using built-in deterministic subword vectorizer fallback: ${err?.message}`,

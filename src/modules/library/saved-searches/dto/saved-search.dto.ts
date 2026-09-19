@@ -45,6 +45,10 @@ export class CreateSavedSearchDto {
   @IsOptional()
   @IsBoolean()
   isPinned?: boolean;
+
+  @IsOptional()
+  @IsString()
+  projectId?: string;
 }
 
 export class UpdateSavedSearchDto {
@@ -88,6 +92,10 @@ export class UpdateSavedSearchDto {
 export class PreviewSavedSearchDto {
   @IsObject()
   conditions!: SavedSearchConditionGroup;
+
+  @IsOptional()
+  @IsString()
+  projectId?: string;
 }
 
 export class ExecuteSavedSearchQueryDto {
@@ -109,4 +117,8 @@ export class ExecuteSavedSearchQueryDto {
   @IsOptional()
   @IsIn(['asc', 'desc'])
   sortOrder?: 'asc' | 'desc';
+
+  @IsOptional()
+  @IsString()
+  projectId?: string;
 }

@@ -26,7 +26,10 @@ export class FavoriteRepository {
     return !!fav;
   }
 
-  async addFavorite(projectId: string, userId: string): Promise<ProjectFavorite> {
+  async addFavorite(
+    projectId: string,
+    userId: string,
+  ): Promise<ProjectFavorite> {
     return this.prisma.projectFavorite.upsert({
       where: {
         projectId_userId: {
@@ -51,7 +54,10 @@ export class FavoriteRepository {
     });
   }
 
-  async batchCheckFavorites(projectIds: string[], userId: string): Promise<Set<string>> {
+  async batchCheckFavorites(
+    projectIds: string[],
+    userId: string,
+  ): Promise<Set<string>> {
     if (!projectIds.length) return new Set();
     const rows = await this.prisma.projectFavorite.findMany({
       where: {

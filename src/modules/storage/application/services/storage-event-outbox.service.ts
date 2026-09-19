@@ -60,7 +60,9 @@ export class StorageEventOutboxService {
     await this.dispatch('file.trashed', {
       fileId: event.fileId,
       authorId: event.authorId,
-      trashedAt: event.trashedAt ? event.trashedAt.toISOString() : new Date().toISOString(),
+      trashedAt: event.trashedAt
+        ? event.trashedAt.toISOString()
+        : new Date().toISOString(),
       projectId: event.projectId ?? null,
     });
   }
@@ -132,9 +134,7 @@ export class StorageEventOutboxService {
       }
     }
 
-    this.logger.debug(
-      `Dispatched storage event [${type}]: ${eventRecord.id}`,
-    );
+    this.logger.debug(`Dispatched storage event [${type}]: ${eventRecord.id}`);
     return eventRecord;
   }
 

@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../../modules/iam/authn/guards/auth.guard';
 import { CurrentUser } from '../../../modules/iam/authn/decorators/user.decorator';
+import { ProjectRoleGuard } from '../../../modules/iam/authz/guards/role.guard';
 import { CitationService } from './citation.service';
 import { FormatCitationDto, FormatBatchCitationDto } from './dto/citation.dto';
 import { normalizeCitationStyleId } from './utils/citation.utils';
@@ -22,7 +23,7 @@ import { normalizeCitationStyleId } from './utils/citation.utils';
   'api/library/citation',
   'api/library/references',
 ])
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class CitationController {
   constructor(private readonly citationService: CitationService) {}
 

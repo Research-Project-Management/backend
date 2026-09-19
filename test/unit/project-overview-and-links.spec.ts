@@ -43,7 +43,7 @@ describe('Project Overview & Link Modules', () => {
           updatedAt: new Date(),
         },
       ];
-      repo.findMany.mockResolvedValue(mockLinks as any);
+      repo.findMany.mockResolvedValue(mockLinks);
 
       const result = await service.getLinks('proj-1');
       expect(result).toEqual(mockLinks);
@@ -61,7 +61,7 @@ describe('Project Overview & Link Modules', () => {
         createdAt: new Date(),
         updatedAt: new Date(),
       };
-      repo.create.mockResolvedValue(created as any);
+      repo.create.mockResolvedValue(created);
 
       const result = await service.createLink('proj-1', 'user-1', dto);
       expect(result).toEqual(created);

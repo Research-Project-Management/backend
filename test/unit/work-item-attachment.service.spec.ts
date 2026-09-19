@@ -199,7 +199,9 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
 
       await service.deleteAttachment('att-789');
 
-      expect(mockStoragePort.deleteFile).toHaveBeenCalledWith('cas-url-uuid-555');
+      expect(mockStoragePort.deleteFile).toHaveBeenCalledWith(
+        'cas-url-uuid-555',
+      );
       expect(mockRepo.delete).toHaveBeenCalledWith('att-789');
     });
 
@@ -214,7 +216,9 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
 
       await service.deleteAttachment('att-456');
 
-      expect(mockR2Service.deleteObject).toHaveBeenCalledWith('legacy/attachments/old.pdf');
+      expect(mockR2Service.deleteObject).toHaveBeenCalledWith(
+        'legacy/attachments/old.pdf',
+      );
       expect(mockRepo.delete).toHaveBeenCalledWith('att-456');
     });
   });

@@ -27,7 +27,7 @@ export class RetractionController {
   constructor(private readonly service: RetractionService) {}
 
   @Get('database/stats')
-  @ProjectRoles('owner', 'contributor', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   async getDatabaseStats() {
     return this.service.getDatabaseStats();
   }
@@ -39,7 +39,7 @@ export class RetractionController {
   }
 
   @Get('items')
-  @ProjectRoles('owner', 'contributor', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   async getRetractedItems(
     @CurrentUser('id') userId: string,
     @Query('projectId') queryProjectId?: string,
@@ -50,7 +50,7 @@ export class RetractionController {
   }
 
   @Get('stats')
-  @ProjectRoles('owner', 'contributor', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   async getStats(
     @CurrentUser('id') userId: string,
     @Query('projectId') queryProjectId?: string,
@@ -61,7 +61,7 @@ export class RetractionController {
   }
 
   @Post('check-all')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   async checkLibrary(
     @CurrentUser('id') userId: string,
     @Body() dto: BatchCheckRetractionDto,
@@ -73,7 +73,7 @@ export class RetractionController {
   }
 
   @Post('sync')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   async syncLibrary(
     @CurrentUser('id') userId: string,
     @Body('maxDays') maxDays?: number,
@@ -89,7 +89,7 @@ export class RetractionController {
   }
 
   @Post('items/:itemId/check')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   async checkItem(
     @CurrentUser('id') userId: string,
     @Param('itemId') itemId: string,
@@ -101,7 +101,7 @@ export class RetractionController {
   }
 
   @Post('items/:itemId/flag')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   async setManualFlag(
     @CurrentUser('id') userId: string,
     @Param('itemId') itemId: string,
@@ -114,7 +114,7 @@ export class RetractionController {
   }
 
   @Delete('items/:itemId/flag')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   async removeManualFlag(
     @CurrentUser('id') userId: string,
     @Param('itemId') itemId: string,

@@ -30,8 +30,24 @@ export function buildBaseSearchWhere(
   userId: string,
   options: SearchOptions,
 ): Prisma.ItemWhereInput {
+  const scopeWhere: Prisma.ItemWhereInput =
+    options.projectId && options.projectId !== 'user'
+      ? { projectId: options.projectId }
+      : {
+          OR: [
+            { userId },
+            {
+              project: {
+                members: {
+                  some: { userId },
+                },
+              },
+            },
+          ],
+        };
+
   return {
-    OR: [{ projectId: userId }, { userId }],
+    ...scopeWhere,
     deletedAt: null,
     ...(options.itemType ? { itemType: options.itemType } : {}),
     ...(options.yearFrom || options.yearTo

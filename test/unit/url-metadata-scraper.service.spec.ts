@@ -11,7 +11,9 @@ describe('UrlMetadataScraperService', () => {
 
   beforeEach(() => {
     ssrfGuard = {
-      assertSafeUrl: jest.fn().mockResolvedValue(new URL('https://example.com')),
+      assertSafeUrl: jest
+        .fn()
+        .mockResolvedValue(new URL('https://example.com')),
     } as any;
 
     storagePort = {
@@ -54,7 +56,9 @@ describe('UrlMetadataScraperService', () => {
 
     const result = await scraper.scrape('http://192.168.1.1/paper.pdf');
     expect(result).not.toBeNull();
-    expect(ssrfGuard.assertSafeUrl).toHaveBeenCalledWith('http://192.168.1.1/paper.pdf');
+    expect(ssrfGuard.assertSafeUrl).toHaveBeenCalledWith(
+      'http://192.168.1.1/paper.pdf',
+    );
     expect(result.fileId).toBeUndefined();
   });
 
@@ -80,16 +84,30 @@ describe('UrlMetadataScraperService', () => {
       text: jest.fn().mockResolvedValueOnce(htmlContent),
     } as any);
 
-    const result = await scraper.scrape('https://proceedings.neurips.cc/paper/7181-attention-is-all-you-need');
+    const result = await scraper.scrape(
+      'https://proceedings.neurips.cc/paper/7181-attention-is-all-you-need',
+    );
     expect(result).not.toBeNull();
     expect(result.title).toBe('Attention Is All You Need');
     expect(result.year).toBe(2017);
     expect(result.doi).toBe('10.5555/3295222.3295349');
     expect(result.creators).toEqual([
-      { firstName: 'Ashish', lastName: 'Vaswani', fullName: 'Ashish Vaswani', creatorType: 'author' },
-      { firstName: 'Noam', lastName: 'Shazeer', fullName: 'Noam Shazeer', creatorType: 'author' },
+      {
+        firstName: 'Ashish',
+        lastName: 'Vaswani',
+        fullName: 'Ashish Vaswani',
+        creatorType: 'author',
+      },
+      {
+        firstName: 'Noam',
+        lastName: 'Shazeer',
+        fullName: 'Noam Shazeer',
+        creatorType: 'author',
+      },
     ]);
-    expect(result.publicationTitle).toBe('Advances in Neural Information Processing Systems (NeurIPS)');
+    expect(result.publicationTitle).toBe(
+      'Advances in Neural Information Processing Systems (NeurIPS)',
+    );
   });
 
   it('scrapes OpenGraph and standard title if academic tags are absent', async () => {
@@ -110,22 +128,37 @@ describe('UrlMetadataScraperService', () => {
       text: jest.fn().mockResolvedValueOnce(htmlContent),
     } as any);
 
-    const result = await scraper.scrape('https://openaccess.thecvf.com/content_cvpr_2016/html/He_Deep_Residual_Learning_2016_CVPR_paper.html');
+    const result = await scraper.scrape(
+      'https://openaccess.thecvf.com/content_cvpr_2016/html/He_Deep_Residual_Learning_2016_CVPR_paper.html',
+    );
     expect(result).not.toBeNull();
     expect(result.title).toBe('Deep Residual Learning for Image Recognition');
-    expect(result.abstract).toBe('Deeper neural networks are more difficult to train.');
+    expect(result.abstract).toBe(
+      'Deeper neural networks are more difficult to train.',
+    );
   });
 
   it('downloads direct PDF, extracts metadata, and saves to storage', async () => {
-    const pdfBuffer = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF');
+    const pdfBuffer = Buffer.from(
+      '%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF',
+    );
 
     global.fetch = jest.fn().mockResolvedValueOnce({
       ok: true,
       headers: new Headers({ 'content-type': 'application/pdf' }),
-      arrayBuffer: jest.fn().mockResolvedValueOnce(pdfBuffer.buffer.slice(pdfBuffer.byteOffset, pdfBuffer.byteOffset + pdfBuffer.byteLength)),
+      arrayBuffer: jest
+        .fn()
+        .mockResolvedValueOnce(
+          pdfBuffer.buffer.slice(
+            pdfBuffer.byteOffset,
+            pdfBuffer.byteOffset + pdfBuffer.byteLength,
+          ),
+        ),
     } as any);
 
-    const result = await scraper.scrape('https://proceedings.neurips.cc/paper/7181-attention-is-all-you-need.pdf?utm_source=chatgpt.com');
+    const result = await scraper.scrape(
+      'https://proceedings.neurips.cc/paper/7181-attention-is-all-you-need.pdf?utm_source=chatgpt.com',
+    );
     expect(result).not.toBeNull();
     expect(storagePort.uploadFile).toHaveBeenCalled();
     expect(result.fileId).toBe('file-storage-id');
@@ -138,15 +171,26 @@ describe('UrlMetadataScraperService', () => {
       metadata: {},
       pages: [],
     });
-    const pdfBuffer = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF');
+    const pdfBuffer = Buffer.from(
+      '%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF',
+    );
 
     global.fetch = jest.fn().mockResolvedValueOnce({
       ok: true,
       headers: new Headers({ 'content-type': 'application/pdf' }),
-      arrayBuffer: jest.fn().mockResolvedValueOnce(pdfBuffer.buffer.slice(pdfBuffer.byteOffset, pdfBuffer.byteOffset + pdfBuffer.byteLength)),
+      arrayBuffer: jest
+        .fn()
+        .mockResolvedValueOnce(
+          pdfBuffer.buffer.slice(
+            pdfBuffer.byteOffset,
+            pdfBuffer.byteOffset + pdfBuffer.byteLength,
+          ),
+        ),
     } as any);
 
-    const result = await scraper.scrape('https://proceedings.neurips.cc/paper/7181-attention-is-all-you-need.pdf?utm_source=chatgpt.com');
+    const result = await scraper.scrape(
+      'https://proceedings.neurips.cc/paper/7181-attention-is-all-you-need.pdf?utm_source=chatgpt.com',
+    );
     expect(result).not.toBeNull();
     expect(result.title).toBe('Attention Is All You Need');
   });

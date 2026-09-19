@@ -160,7 +160,10 @@ describe('Project Sub-Modules Specification (Single Responsibility)', () => {
 
       const result = await favoriteService.toggleFavorite('proj-1', 'user-1');
       expect(result.isFavorite).toBe(true);
-      expect(mockFavoriteRepo.addFavorite).toHaveBeenCalledWith('proj-1', 'user-1');
+      expect(mockFavoriteRepo.addFavorite).toHaveBeenCalledWith(
+        'proj-1',
+        'user-1',
+      );
     });
 
     it('should toggle favorite status from true to false', async () => {
@@ -169,7 +172,10 @@ describe('Project Sub-Modules Specification (Single Responsibility)', () => {
 
       const result = await favoriteService.toggleFavorite('proj-1', 'user-1');
       expect(result.isFavorite).toBe(false);
-      expect(mockFavoriteRepo.removeFavorite).toHaveBeenCalledWith('proj-1', 'user-1');
+      expect(mockFavoriteRepo.removeFavorite).toHaveBeenCalledWith(
+        'proj-1',
+        'user-1',
+      );
     });
   });
 
@@ -330,7 +336,9 @@ describe('Project Sub-Modules Specification (Single Responsibility)', () => {
               update: jest.fn(),
             },
             workItemState: {
-              create: jest.fn().mockResolvedValue({ id: 'state-1', group: 'unstarted' }),
+              create: jest
+                .fn()
+                .mockResolvedValue({ id: 'state-1', group: 'unstarted' }),
             },
             label: {
               create: jest.fn().mockResolvedValue({ id: 'label-1' }),

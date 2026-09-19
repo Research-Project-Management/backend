@@ -10,15 +10,22 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { SynctexService } from './synctex.service';
 import { ForwardSyncDto, ReverseSyncDto } from './dto/synctex.dto';
 import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
+import { ProjectRoleGuard } from '@/modules/iam/authz/guards/role.guard';
+import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
 
 @ApiTags('Document - SyncTeX')
 @ApiBearerAuth('JWT-auth')
 @Controller('api')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class SynctexController {
   constructor(private readonly synctexService: SynctexService) {}
 
-  @Post(['synctex/forward', 'projects/:projectId/synctex/forward', 'compiler/synctex/forward'])
+  @Post([
+    'synctex/forward',
+    'projects/:projectId/synctex/forward',
+    'compiler/synctex/forward',
+  ])
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
@@ -28,7 +35,12 @@ export class SynctexController {
     return this.synctexService.forwardSync(dto);
   }
 
-  @Post(['synctex/reverse', 'projects/:projectId/synctex/reverse', 'compiler/synctex/reverse'])
+  @Post([
+    'synctex/reverse',
+    'projects/:projectId/synctex/reverse',
+    'compiler/synctex/reverse',
+  ])
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:

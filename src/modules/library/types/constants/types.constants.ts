@@ -330,8 +330,7 @@ export const ALL_CREATOR_ROLES: Record<string, string> =
 export const BASE_FIELD_MAPPINGS = SCHEMA_V42_DATA.baseFieldMappings;
 export const REVERSE_BASE_FIELD_MAPPINGS =
   SCHEMA_V42_DATA.reverseBaseFieldMappings;
-export const CSL_TYPE_MAP: Record<string, string> =
-  SCHEMA_V42_DATA.cslTypeMap;
+export const CSL_TYPE_MAP: Record<string, string> = SCHEMA_V42_DATA.cslTypeMap;
 export const CSL_CREATOR_MAP: Record<string, string> =
   SCHEMA_V42_DATA.cslCreatorMap;
 export const CSL_FIELD_MAP: Record<string, string> =

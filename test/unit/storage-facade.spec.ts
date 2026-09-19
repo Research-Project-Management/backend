@@ -262,8 +262,12 @@ describe('StorageFacade & UploadDirectUseCase Integration Suite', () => {
   });
 
   it('should generate presigned download and upload URLs for system consumers', async () => {
-    mockDriver.getPresignedDownloadUrl.mockResolvedValueOnce('https://storage.flux.ai/download/signed-url');
-    mockDriver.getPresignedUploadUrl.mockResolvedValueOnce('https://storage.flux.ai/upload/signed-url');
+    mockDriver.getPresignedDownloadUrl.mockResolvedValueOnce(
+      'https://storage.flux.ai/download/signed-url',
+    );
+    mockDriver.getPresignedUploadUrl.mockResolvedValueOnce(
+      'https://storage.flux.ai/upload/signed-url',
+    );
 
     const content = Buffer.from('%PDF-1.7 Presign Download Test');
     const uploaded = await facade.uploadFile({
@@ -282,7 +286,9 @@ describe('StorageFacade & UploadDirectUseCase Integration Suite', () => {
       mimeType: 'text/csv',
       sizeBytes: 50 * 1024 * 1024,
     });
-    expect(uploadRes.uploadUrl).toBe('https://storage.flux.ai/upload/signed-url');
+    expect(uploadRes.uploadUrl).toBe(
+      'https://storage.flux.ai/upload/signed-url',
+    );
     expect(uploadRes.storageKey).toContain('uploads/user-presign/');
   });
 

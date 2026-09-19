@@ -21,7 +21,9 @@ export class StorageQueueProducer {
   ) {
     if (this.queue && typeof (this.queue as any).on === 'function') {
       (this.queue as any).on('error', (err: any) => {
-        this.logger.warn(`Storage Queue connection notice: ${err?.message || err}`);
+        this.logger.warn(
+          `Storage Queue connection notice: ${err?.message || err}`,
+        );
       });
     }
   }
@@ -45,7 +47,9 @@ export class StorageQueueProducer {
         removeOnComplete: 1000,
         removeOnFail: 5000,
       });
-      this.logger.log(`Enqueued background processing job for file ${data.fileId}`);
+      this.logger.log(
+        `Enqueued background processing job for file ${data.fileId}`,
+      );
     } catch (err: any) {
       this.logger.warn(
         `Failed to enqueue storage processing job for ${data.fileId}: ${err?.message}`,
@@ -111,8 +115,12 @@ export class StorageQueueProducer {
 
   async triggerMaintenance(jobName: string): Promise<void> {
     if (!this.queue) return;
-    await this.queue.add(jobName, {}, {
-      jobId: `manual-${jobName}-${Date.now()}`,
-    });
+    await this.queue.add(
+      jobName,
+      {},
+      {
+        jobId: `manual-${jobName}-${Date.now()}`,
+      },
+    );
   }
 }

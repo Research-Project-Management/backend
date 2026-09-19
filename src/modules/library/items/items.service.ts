@@ -29,7 +29,6 @@ import {
 import { PrismaService } from '../../../core/database/prisma.service';
 import { normalizeTags } from '../tags/utils/tags.utils';
 import { TagsService } from '../tags/tags.service';
-import { CollectionsService } from '../collections/collections.service';
 import { TypesService } from '../types/types.service';
 import { ZoteroSchemaValidatorService } from '../types/services/zotero-schema-validator.service';
 import { RagProvider } from '../search/providers/rag.provider';
@@ -72,7 +71,6 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     private readonly libraryTx: TransactionService,
     private readonly prisma: PrismaService,
     private readonly tagsService: TagsService,
-    private readonly collectionsService: CollectionsService,
     private readonly typesService: TypesService,
     private readonly rag: RagProvider,
     private readonly transformer: ItemTransformer,
@@ -146,7 +144,10 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       'grobid',
     );
 
-    if (headerRecord?.rawPayload && typeof headerRecord.rawPayload === 'object') {
+    if (
+      headerRecord?.rawPayload &&
+      typeof headerRecord.rawPayload === 'object'
+    ) {
       const payload = headerRecord.rawPayload as Record<string, any>;
       return {
         title: payload.title || item.title,
@@ -208,7 +209,9 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       nextCursor = rawItems[rawItems.length - 1]?.id;
     }
 
-    const items = rawItems.slice(0, limit).map((it) => this.mapFlattenedState(it, userId));
+    const items = rawItems
+      .slice(0, limit)
+      .map((it) => this.mapFlattenedState(it, userId));
 
     return {
       items,
@@ -263,13 +266,16 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         effectiveProjectId,
       );
 
-      await helpers.appendChange(userId, {
-        entityType: 'Item',
-        entityId: item.id,
-        action: 'create',
-        version: item.version,
-        data: item,
-      });
+      await helpers.appendChange(
+        { userId, projectId: effectiveProjectId },
+        {
+          entityType: 'Item',
+          entityId: item.id,
+          action: 'create',
+          version: item.version,
+          data: item,
+        },
+      );
 
       const payload = buildItemCreatedOutboxPayload({
         itemId: item.id,
@@ -342,7 +348,11 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         projectId,
       );
 
-      await context.helpers.appendChange(userId, {
+      const effectiveProjectId =
+        projectId || (updated as any).projectId || undefined;
+      const eventScope = { userId, projectId: effectiveProjectId };
+
+      await context.helpers.appendChange(eventScope, {
         entityType: 'Item',
         entityId: id,
         action: 'update',
@@ -351,7 +361,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       });
 
       await context.helpers.publishOutbox(
-        userId,
+        eventScope,
         id,
         LIBRARY_EVENT_TYPES.ITEM_UPDATED,
         updated,
@@ -388,7 +398,10 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         tx,
       );
 
-      await helpers.appendChange(userId, {
+      const effectiveProjectId = (updated as any).projectId || undefined;
+      const eventScope = { userId, projectId: effectiveProjectId };
+
+      await helpers.appendChange(eventScope, {
         entityType: 'Item',
         entityId: id,
         action: 'update',
@@ -397,7 +410,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       });
 
       await helpers.publishOutbox(
-        userId,
+        eventScope,
         id,
         LIBRARY_EVENT_TYPES.ITEM_UPDATED,
         updated,
@@ -463,11 +476,15 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       throw new NotFoundException(`Item ${id} not found in user library`);
     }
 
+    const effectiveProjectId =
+      projectId ?? (item as any).projectId ?? undefined;
+    const eventScope = { userId, projectId: effectiveProjectId };
+
     await this.libraryTx.executeInTransaction(async (_tx, helpers) => {
-      await helpers.publishOutbox(userId, id, 'library.item.reindexed', {
+      await helpers.publishOutbox(eventScope, id, 'library.item.reindexed', {
         itemId: id,
         userId,
-        projectId: projectId ?? undefined,
+        projectId: effectiveProjectId,
       });
     });
 
@@ -499,18 +516,21 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       );
 
       if (deleted) {
-        await context.helpers.recordTombstone(userId, {
+        const eventScope = { userId, projectId: projectId || undefined };
+        await context.helpers.recordTombstone(eventScope, {
           entityType: 'Item',
           entityId: id,
+          deletedById: userId,
         });
 
         await context.helpers.publishOutbox(
-          userId,
+          eventScope,
           id,
           'library.item.deleted',
           {
             id,
             deletedAt: new Date(),
+            projectId,
           },
         );
       }
@@ -518,18 +538,20 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       return deleted;
     }
 
-    const result = await this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      return this.deleteItem(
-        userId,
-        id,
-        expectedVersion,
-        {
-          tx,
-          helpers,
-        },
-        projectId,
-      );
-    });
+    const result = await this.libraryTx.executeInTransaction(
+      async (tx, helpers) => {
+        return this.deleteItem(
+          userId,
+          id,
+          expectedVersion,
+          {
+            tx,
+            helpers,
+          },
+          projectId,
+        );
+      },
+    );
     await this.tagsService.invalidateTagsCache(userId, projectId);
     return result;
   }
@@ -540,30 +562,37 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     expectedVersion?: number,
     projectId?: string,
   ) {
-    const result = await this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const restored = await this.command.restore(
-        userId,
-        id,
-        expectedVersion,
-        tx,
-        projectId,
-      );
+    const result = await this.libraryTx.executeInTransaction(
+      async (tx, helpers) => {
+        const restored = await this.command.restore(
+          userId,
+          id,
+          expectedVersion,
+          tx,
+          projectId,
+        );
 
-      await helpers.appendChange(userId, {
-        entityType: 'Item',
-        entityId: id,
-        action: 'update',
-        version: restored.version,
-        data: restored,
-      });
+        const effectiveProjectId =
+          (restored as any).projectId || projectId || undefined;
+        const eventScope = { userId, projectId: effectiveProjectId };
 
-      await helpers.publishOutbox(userId, id, 'library.item.restored', {
-        id,
-        restoredAt: new Date(),
-      });
+        await helpers.appendChange(eventScope, {
+          entityType: 'Item',
+          entityId: id,
+          action: 'update',
+          version: restored.version,
+          data: restored,
+        });
 
-      return ItemsMapper.toDomain(restored);
-    });
+        await helpers.publishOutbox(eventScope, id, 'library.item.restored', {
+          id,
+          restoredAt: new Date(),
+          projectId: effectiveProjectId,
+        });
+
+        return ItemsMapper.toDomain(restored);
+      },
+    );
 
     await this.tagsService.invalidateTagsCache(userId, projectId);
     return result;
@@ -574,21 +603,24 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     id: string,
     projectId?: string,
   ): Promise<boolean> {
-    const result = await this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      const purged = await this.command.purge(userId, id, tx, projectId);
+    const eventScope = { userId, projectId };
+    const result = await this.libraryTx.executeInTransaction(
+      async (tx, helpers) => {
+        const purged = await this.command.purge(userId, id, tx, projectId);
 
-      await helpers.recordTombstone(userId, {
-        entityType: 'Item',
-        entityId: id,
-      });
+        await helpers.recordTombstone(eventScope, {
+          entityType: 'Item',
+          entityId: id,
+        });
 
-      await helpers.publishOutbox(userId, id, 'library.item.purged', {
-        id,
-        purgedAt: new Date(),
-      });
+        await helpers.publishOutbox(eventScope, id, 'library.item.purged', {
+          id,
+          purgedAt: new Date(),
+        });
 
-      return purged;
-    });
+        return purged;
+      },
+    );
 
     await this.tagsService.invalidateTagsCache(userId, projectId);
     return result;
@@ -799,7 +831,11 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         );
       }
 
-      if (!existing.userId && existing.projectId && existing.projectId !== (command as any).projectId) {
+      if (
+        !existing.userId &&
+        existing.projectId &&
+        existing.projectId !== (command as any).projectId
+      ) {
         throw new ForbiddenException(
           `Item ${command.existingId} does not belong to the specified project`,
         );
@@ -813,6 +849,10 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         ...(command.tags || []),
       ]);
 
+      const itemProjectId =
+        command.projectId || (command as any).projectId || undefined;
+      const syncScope = { userId, projectId: itemProjectId };
+
       const updated = await this.command.update(
         userId,
         command.existingId,
@@ -823,9 +863,10 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
           userId: command.userId,
         },
         tx,
+        itemProjectId,
       );
 
-      await helpers.appendChange(userId, {
+      await helpers.appendChange(syncScope, {
         entityType: 'Item',
         entityId: updated.id,
         action: 'update',
@@ -835,6 +876,10 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
 
       return { id: updated.id, isNew: false, version: updated.version };
     } else {
+      const itemProjectId =
+        command.projectId || (command as any).projectId || undefined;
+      const syncScope = { userId, projectId: itemProjectId };
+
       const created = await this.command.create(
         userId,
         {
@@ -842,9 +887,10 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
           uploadedById: command.userId,
         },
         tx,
+        itemProjectId,
       );
 
-      await helpers.appendChange(userId, {
+      await helpers.appendChange(syncScope, {
         entityType: 'Item',
         entityId: created.id,
         action: 'create',
@@ -853,12 +899,13 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       });
 
       await helpers.publishOutbox(
-        userId,
+        syncScope,
         created.id,
         LIBRARY_EVENT_TYPES.ITEM_CREATED,
         buildItemCreatedOutboxPayload({
           itemId: created.id,
           userId,
+          projectId: itemProjectId,
           title: created.title,
           source: 'external_sync',
         }),
@@ -876,7 +923,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     tx: Prisma.TransactionClient,
     helpers: TransactionHelpers,
   ): Promise<void> {
-    const targetUserId = command.userId || (command as any).projectId || '';
+    const targetUserId = command.userId || '';
     const { entityId, reason, publishOutboxEventType, publishOutboxPayload } =
       command;
     const existing = await tx.item.findUnique({
@@ -890,26 +937,35 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       );
     }
 
+    const itemProjectId =
+      existing.projectId || (command as any).projectId || undefined;
+    const syncScope = { userId: targetUserId, projectId: itemProjectId };
+
     await tx.item.update({
       where: { id: entityId },
       data: { deletedAt: new Date() },
     });
-    await helpers.appendChange(targetUserId, {
+    await helpers.appendChange(syncScope, {
       entityType: 'Item',
       entityId,
       action: 'delete',
       version: existing.version + 1,
       data: { reason },
     });
-    await helpers.recordTombstone(targetUserId, {
+    await helpers.recordTombstone(syncScope, {
       entityType: 'Item',
       entityId,
+      deletedById: targetUserId || undefined,
     });
     await helpers.publishOutbox(
-      targetUserId,
+      syncScope,
       entityId,
       publishOutboxEventType ?? 'library.item.deleted',
-      publishOutboxPayload ?? { itemId: entityId, reason },
+      publishOutboxPayload ?? {
+        itemId: entityId,
+        reason,
+        projectId: itemProjectId,
+      },
     );
   }
 
@@ -1127,13 +1183,15 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         mimeType: resolvedMimeType,
         size: resolvedSize,
         fileHash: resolvedFileHash,
-        tags: source.itemTags?.map((it: any) => it.tag?.name).filter(Boolean) || [],
-        notes: source.notesList?.map((n: any) => ({
-          title: n.title,
-          contentMd: n.contentMd,
-          content: n.contentMd,
-          tags: n.tags || [],
-        })) || [],
+        tags:
+          source.itemTags?.map((it: any) => it.tag?.name).filter(Boolean) || [],
+        notes:
+          source.notesList?.map((n: any) => ({
+            title: n.title,
+            contentMd: n.contentMd,
+            content: n.contentMd,
+            tags: n.tags || [],
+          })) || [],
         creators: source.contributors?.map((c: any) => ({
           creatorType: c.creatorType || 'author',
           firstName: c.firstName || '',

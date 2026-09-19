@@ -5,7 +5,7 @@ import { ProjectMemberRole } from '@prisma/client';
 export class UpdateProjectMemberDto {
   @ApiProperty({
     description:
-      'New role for the project member (owner, contributor, commenter, viewer)',
+      'New role for the project member (owner, coordinator, contributor, reviewer)',
     enum: ProjectMemberRole,
     example: ProjectMemberRole.contributor,
   })

@@ -91,8 +91,10 @@ export const ARXIV_CATEGORY_MAP: Record<string, string> = {
   'math.st': 'Mathematics - Statistical Theory',
 
   // Electrical Engineering and Systems Science
-  'eess.as': 'Electrical Engineering and Systems Science - Audio and Speech Processing',
-  'eess.iv': 'Electrical Engineering and Systems Science - Image and Video Processing',
+  'eess.as':
+    'Electrical Engineering and Systems Science - Audio and Speech Processing',
+  'eess.iv':
+    'Electrical Engineering and Systems Science - Image and Video Processing',
   'eess.sp': 'Electrical Engineering and Systems Science - Signal Processing',
   'eess.sy': 'Electrical Engineering and Systems Science - Systems and Control',
 
@@ -124,7 +126,8 @@ export const ARXIV_CATEGORY_MAP: Record<string, string> = {
   'nlin.cd': 'Nonlinear Sciences - Chaotic Dynamics',
   'nlin.cg': 'Nonlinear Sciences - Cellular Automata and Lattice Gases',
   'nlin.ps': 'Nonlinear Sciences - Pattern Formation and Solitons',
-  'nlin.si': 'Nonlinear Sciences - Exactly Solvable and Solitable Nonlinear Systems',
+  'nlin.si':
+    'Nonlinear Sciences - Exactly Solvable and Solitable Nonlinear Systems',
 
   // Physics & Astrophysics
   'astro-ph': 'Astrophysics',
@@ -134,7 +137,8 @@ export const ARXIV_CATEGORY_MAP: Record<string, string> = {
   'astro-ph.he': 'Astrophysics - High Energy Astrophysical Phenomena',
   'astro-ph.im': 'Astrophysics - Instrumentation and Methods for Astrophysics',
   'astro-ph.sr': 'Astrophysics - Solar and Stellar Astrophysics',
-  'cond-mat.dis-nn': 'Condensed Matter - Disordered Systems and Neural Networks',
+  'cond-mat.dis-nn':
+    'Condensed Matter - Disordered Systems and Neural Networks',
   'cond-mat.mes-hall': 'Condensed Matter - Mesoscale and Nanoscale Physics',
   'cond-mat.mtrl-sci': 'Condensed Matter - Materials Science',
   'cond-mat.other': 'Condensed Matter - Other Condensed Matter',
@@ -449,7 +453,10 @@ export function cleanSingleTag(rawTag: string): string | null {
   if (!tag) return null;
 
   // 0. Strip XML/HTML tags and braces
-  tag = tag.replace(/<[^>]+>/g, '').replace(/[{}]/g, '').trim();
+  tag = tag
+    .replace(/<[^>]+>/g, '')
+    .replace(/[{}]/g, '')
+    .trim();
 
   // 1. Strip Wikipedia disambiguation FIRST before edge quotes/brackets
   tag = stripDisambiguationSuffix(tag);
@@ -745,15 +752,24 @@ export function resolveCanonicalArxivCategory(
   extraFields?: any,
   item?: any,
 ): string | undefined {
-  if (typeof extraFields?.primaryCategory === 'string' && extraFields.primaryCategory.trim()) {
+  if (
+    typeof extraFields?.primaryCategory === 'string' &&
+    extraFields.primaryCategory.trim()
+  ) {
     const raw = extraFields.primaryCategory.trim();
     return CANONICAL_ARXIV_CATEGORIES[raw.toLowerCase()] || raw;
   }
-  if (typeof extraFields?.category === 'string' && extraFields.category.trim()) {
+  if (
+    typeof extraFields?.category === 'string' &&
+    extraFields.category.trim()
+  ) {
     const raw = extraFields.category.trim();
     return CANONICAL_ARXIV_CATEGORIES[raw.toLowerCase()] || raw;
   }
-  if (typeof item?.primaryCategory === 'string' && item.primaryCategory.trim()) {
+  if (
+    typeof item?.primaryCategory === 'string' &&
+    item.primaryCategory.trim()
+  ) {
     const raw = item.primaryCategory.trim();
     return CANONICAL_ARXIV_CATEGORIES[raw.toLowerCase()] || raw;
   }
@@ -761,12 +777,18 @@ export function resolveCanonicalArxivCategory(
   const candidates: string[] = [];
   if (Array.isArray(tags)) {
     for (const t of tags) {
-      if (t) candidates.push(typeof t === 'object' && t.name ? String(t.name) : String(t));
+      if (t)
+        candidates.push(
+          typeof t === 'object' && t.name ? String(t.name) : String(t),
+        );
     }
   }
   if (Array.isArray(item?.keywords)) {
     for (const k of item.keywords) {
-      if (k) candidates.push(typeof k === 'object' && k.name ? String(k.name) : String(k));
+      if (k)
+        candidates.push(
+          typeof k === 'object' && k.name ? String(k.name) : String(k),
+        );
     }
   }
 
@@ -777,8 +799,16 @@ export function resolveCanonicalArxivCategory(
       return CANONICAL_ARXIV_CATEGORIES[lower];
     }
     if (
-      /^[a-z\-]+(?:\.[a-z\-]+)?$/i.test(c.trim()) &&
-      !['pdf', 'oa', 'openaccess', 'arxiv', 'preprint', 'paper', 'article'].includes(lower)
+      /^[a-z-]+(?:\.[a-z-]+)?$/i.test(c.trim()) &&
+      ![
+        'pdf',
+        'oa',
+        'openaccess',
+        'arxiv',
+        'preprint',
+        'paper',
+        'article',
+      ].includes(lower)
     ) {
       return CANONICAL_ARXIV_CATEGORIES[lower] || c.trim();
     }
@@ -797,9 +827,11 @@ export function resolveCanonicalArxivCategory(
   // 3. Keyword heuristics from tags/keywords
   for (const c of candidates) {
     const lower = c.trim().toLowerCase();
-    if (/machine\s*learning|reinforcement\s*learning/i.test(lower)) return 'cs.LG';
+    if (/machine\s*learning|reinforcement\s*learning/i.test(lower))
+      return 'cs.LG';
     if (/computer\s*vision/i.test(lower)) return 'cs.CV';
-    if (/natural\s*language|computation\s*and\s*language/i.test(lower)) return 'cs.CL';
+    if (/natural\s*language|computation\s*and\s*language/i.test(lower))
+      return 'cs.CL';
     if (/artificial\s*intelligence/i.test(lower)) return 'cs.AI';
     if (/robotics/i.test(lower)) return 'cs.RO';
     if (/neural\s*and\s*evolutionary/i.test(lower)) return 'cs.NE';
@@ -821,15 +853,18 @@ export function resolveCanonicalArxivCategory(
   const title = String(item?.title || '').toLowerCase();
   const abs = String(item?.abstract || '').toLowerCase();
   if (arxivId || item?.repository === 'arXiv') {
-    if (/reinforcement\s*learning|deep\s*q-network|atari/i.test(title) || /deep\s*q-network|atari/i.test(abs)) {
+    if (
+      /reinforcement\s*learning|deep\s*q-network|atari/i.test(title) ||
+      /deep\s*q-network|atari/i.test(abs)
+    ) {
       return 'cs.LG';
     }
     if (/machine\s*learning/i.test(title)) return 'cs.LG';
     if (/generative\s*adversarial\s*network/i.test(title)) return 'stat.ML';
-    if (/computer\s*vision|object\s*detection|segmentation/i.test(title)) return 'cs.CV';
+    if (/computer\s*vision|object\s*detection|segmentation/i.test(title))
+      return 'cs.CV';
     if (/language\s*model|transformer|bert|gpt/i.test(title)) return 'cs.CL';
   }
 
   return undefined;
 }
-

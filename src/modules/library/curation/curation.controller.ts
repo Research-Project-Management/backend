@@ -27,7 +27,7 @@ export class CurationController {
   ) {}
 
   @Get('duplicates')
-  @ProjectRoles('owner', 'contributor', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   async getDuplicates(
     @CurrentUser('id') userId: string,
     @Query('projectId') queryProjectId?: string,
@@ -38,16 +38,24 @@ export class CurationController {
   }
 
   @Post('merge')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   async mergeDuplicates(
     @CurrentUser('id') userId: string,
     @Body() dto: MergeDuplicatesDto,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
   ) {
-    return this.duplicateService.mergeDuplicates(userId, dto);
+    const effectiveProjectId =
+      paramProjectId || queryProjectId || dto.projectId;
+    return this.duplicateService.mergeDuplicates(
+      userId,
+      dto,
+      effectiveProjectId,
+    );
   }
 
   @Get(['quality-audit', 'quality', 'integrity'])
-  @ProjectRoles('owner', 'contributor', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   async getQualityAudit(
     @CurrentUser('id') userId: string,
     @Query('projectId') queryProjectId?: string,

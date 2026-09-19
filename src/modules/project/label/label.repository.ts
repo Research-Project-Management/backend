@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { ProjectLabel, ProjectLabelAssignment } from '@prisma/client';
-import { CreateProjectLabelDto, UpdateProjectLabelDto } from './dto/create-label.dto';
+import {
+  CreateProjectLabelDto,
+  UpdateProjectLabelDto,
+} from './dto/create-label.dto';
 
 @Injectable()
 export class LabelRepository {
@@ -14,13 +17,19 @@ export class LabelRepository {
     });
   }
 
-  async findLabelById(id: string, userId: string): Promise<ProjectLabel | null> {
+  async findLabelById(
+    id: string,
+    userId: string,
+  ): Promise<ProjectLabel | null> {
     return this.prisma.projectLabel.findFirst({
       where: { id, userId },
     });
   }
 
-  async findLabelByName(name: string, userId: string): Promise<ProjectLabel | null> {
+  async findLabelByName(
+    name: string,
+    userId: string,
+  ): Promise<ProjectLabel | null> {
     return this.prisma.projectLabel.findUnique({
       where: {
         userId_name: {
@@ -31,7 +40,10 @@ export class LabelRepository {
     });
   }
 
-  async createLabel(userId: string, dto: CreateProjectLabelDto): Promise<ProjectLabel> {
+  async createLabel(
+    userId: string,
+    dto: CreateProjectLabelDto,
+  ): Promise<ProjectLabel> {
     return this.prisma.projectLabel.create({
       data: {
         userId,
@@ -51,7 +63,9 @@ export class LabelRepository {
       data: {
         ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
         ...(dto.color !== undefined ? { color: dto.color } : {}),
-        ...(dto.description !== undefined ? { description: dto.description.trim() || null } : {}),
+        ...(dto.description !== undefined
+          ? { description: dto.description.trim() || null }
+          : {}),
       },
     });
   }
@@ -62,7 +76,9 @@ export class LabelRepository {
     });
   }
 
-  async findProjectLabels(projectId: string): Promise<(ProjectLabelAssignment & { label: ProjectLabel })[]> {
+  async findProjectLabels(
+    projectId: string,
+  ): Promise<(ProjectLabelAssignment & { label: ProjectLabel })[]> {
     return this.prisma.projectLabelAssignment.findMany({
       where: { projectId },
       include: { label: true },
@@ -84,7 +100,10 @@ export class LabelRepository {
     });
   }
 
-  async removeLabelFromProject(projectId: string, labelId: string): Promise<void> {
+  async removeLabelFromProject(
+    projectId: string,
+    labelId: string,
+  ): Promise<void> {
     await this.prisma.projectLabelAssignment.deleteMany({
       where: {
         projectId,
@@ -93,7 +112,10 @@ export class LabelRepository {
     });
   }
 
-  async replaceProjectLabels(projectId: string, labelIds: string[]): Promise<void> {
+  async replaceProjectLabels(
+    projectId: string,
+    labelIds: string[],
+  ): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
       await tx.projectLabelAssignment.deleteMany({
         where: { projectId },

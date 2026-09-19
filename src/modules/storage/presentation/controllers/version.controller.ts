@@ -33,7 +33,9 @@ export class VersionController {
   ) {}
 
   @Get(':fileId/versions')
-  @ApiOperation({ summary: 'Get all historical versions and revisions of a file' })
+  @ApiOperation({
+    summary: 'Get all historical versions and revisions of a file',
+  })
   async getVersions(
     @Param('fileId') fileId: string,
     @CurrentUser('id') userId: string,
@@ -43,7 +45,9 @@ export class VersionController {
 
   @Post(':fileId/versions')
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Upload a new revision/version for an existing file' })
+  @ApiOperation({
+    summary: 'Upload a new revision/version for an existing file',
+  })
   async uploadVersion(
     @Param('fileId') fileId: string,
     @CurrentUser('id') userId: string,
@@ -84,7 +88,9 @@ export class VersionController {
   }
 
   @Get(':fileId/versions/:versionNumber/download')
-  @ApiOperation({ summary: 'Download a specific historical version binary snapshot' })
+  @ApiOperation({
+    summary: 'Download a specific historical version binary snapshot',
+  })
   async downloadVersion(
     @Param('fileId') fileId: string,
     @Param('versionNumber', ParseIntPipe) versionNumber: number,
@@ -110,16 +116,14 @@ export class VersionController {
 
   @Post(':fileId/versions/:versionNumber/revert')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Revert active file content to a specific historical version' })
+  @ApiOperation({
+    summary: 'Revert active file content to a specific historical version',
+  })
   async revertVersion(
     @Param('fileId') fileId: string,
     @Param('versionNumber', ParseIntPipe) versionNumber: number,
     @CurrentUser('id') userId: string,
   ) {
-    return this.revertFileVersionUseCase.execute(
-      fileId,
-      versionNumber,
-      userId,
-    );
+    return this.revertFileVersionUseCase.execute(fileId, versionNumber, userId);
   }
 }

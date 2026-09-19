@@ -7,30 +7,36 @@ import {
   EXTRACTION_EVENT_TYPES,
 } from './handlers/extraction.handler';
 import { CoreModule } from '../../../core/core.module';
+import { CoreModule as LibraryCoreModule } from '../core/core.module';
 import { OutboxModule } from '../outbox/outbox.module';
 import { OutboxWorker } from '../outbox/outbox.worker';
 import { SearchModule } from '../search/search.module';
 import { StorageModule } from '../../storage/storage.module';
 import { ItemsModule } from '../items/items.module';
-import { GrobidClient } from '../infra/grobid/grobid.client';
+import { InfraModule } from '../infra/infra.module';
 
 import { AttachmentsRepository } from './attachments.repository';
 import { WebSnapshotService } from './services/web-snapshot.service';
-import { SsrfGuardService } from '../core/services/ssrf-guard.service';
 import { OcrProvider } from './providers/ocr.provider';
 import { OcrPreprocessorService } from './ocr/ocr-preprocessor.service';
 import { OcrWorkerPoolService } from './ocr/ocr-worker-pool.service';
 import { OcrSandwichPdfService } from './ocr/ocr-sandwich-pdf.service';
 
 @Module({
-  imports: [CoreModule, OutboxModule, SearchModule, StorageModule, ItemsModule],
+  imports: [
+    CoreModule,
+    LibraryCoreModule,
+    InfraModule,
+    OutboxModule,
+    SearchModule,
+    StorageModule,
+    ItemsModule,
+  ],
   controllers: [AttachmentsController],
   providers: [
     AttachmentsRepository,
     AttachmentsService,
     WebSnapshotService,
-    SsrfGuardService,
-    GrobidClient, // OSS: GROBID client for structured PDF header extraction (Apache 2.0)
     OcrPreprocessorService,
     OcrWorkerPoolService,
     OcrSandwichPdfService,
@@ -41,9 +47,7 @@ import { OcrSandwichPdfService } from './ocr/ocr-sandwich-pdf.service';
   exports: [
     AttachmentsService,
     WebSnapshotService,
-    SsrfGuardService,
     PdfProvider,
-    GrobidClient,
     OcrProvider,
     OcrPreprocessorService,
     OcrWorkerPoolService,

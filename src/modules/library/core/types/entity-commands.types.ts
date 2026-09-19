@@ -12,6 +12,7 @@ export interface UpsertSyncCollectionCommand {
 
 export interface UpsertSyncItemCommand {
   userId: string;
+  projectId?: string;
   existingId?: string;
   itemId?: string;
   title: string;
@@ -64,6 +65,7 @@ export interface UpsertSyncItemCommand {
 
 export interface UpsertSyncAttachmentCommand {
   userId?: string;
+  projectId?: string;
   existingId?: string;
   itemId?: string;
   filename: string;
@@ -76,6 +78,7 @@ export interface UpsertSyncAttachmentCommand {
 
 export interface UpsertSyncNoteCommand {
   userId: string;
+  projectId?: string;
   existingId?: string;
   itemId?: string;
   title: string;
@@ -85,6 +88,7 @@ export interface UpsertSyncNoteCommand {
 
 export interface UpsertSyncAnnotationCommand {
   userId: string;
+  projectId?: string;
   existingId?: string;
   attachmentId?: string;
   pageIndex: number;
@@ -97,6 +101,7 @@ export interface UpsertSyncAnnotationCommand {
 
 export interface DeleteSyncEntityCommand {
   userId?: string;
+  projectId?: string;
   entityType: SyncEntityType;
   entityId: string;
   reason?: string;

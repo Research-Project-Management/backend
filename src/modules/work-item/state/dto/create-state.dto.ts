@@ -58,7 +58,8 @@ export class CreateStateDto {
   accentColor?: string;
 
   @ApiPropertyOptional({
-    description: 'Icon identifier or SVG name matching the state group or custom icon',
+    description:
+      'Icon identifier or SVG name matching the state group or custom icon',
     example: 'circle-dot',
   })
   @IsString()

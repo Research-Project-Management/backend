@@ -6,6 +6,12 @@ import { normalizeTags, cleanSingleTag } from './utils/tags.utils';
 import { RedisCacheService } from '../../../core/cache/redis.service';
 import { LIBRARY_REDIS_KEYS } from '../core/constants/redis-keys.constant';
 import { PrismaService } from '../../../core/database/prisma.service';
+import {
+  UserId,
+  TagId,
+  ItemId,
+  ProjectId,
+} from '../core/types/branded.types';
 
 @Injectable()
 export class TagsService {
@@ -16,7 +22,10 @@ export class TagsService {
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
-  async invalidateTagsCache(userId: string, projectId?: string): Promise<void> {
+  async invalidateTagsCache(
+    userId: UserId | string,
+    projectId?: ProjectId | string,
+  ): Promise<void> {
     if (this.cache) {
       await this.cache.delPattern(LIBRARY_REDIS_KEYS.tagsPattern(userId));
       if (projectId && projectId !== 'user') {
@@ -28,8 +37,8 @@ export class TagsService {
   }
 
   async getTags(
-    userId: string,
-    options?: { includeInactive?: boolean; projectId?: string },
+    userId: UserId | string,
+    options?: { includeInactive?: boolean; projectId?: ProjectId | string },
   ) {
     if (this.cache) {
       const scopeKey =
@@ -49,11 +58,11 @@ export class TagsService {
   }
 
   async createOrGetTag(
-    userId: string,
+    userId: UserId | string,
     name: string,
     color?: string,
     type?: string,
-    projectId?: string | null,
+    projectId?: ProjectId | string | null,
   ) {
     const cleanName = cleanSingleTag(name) || name.trim();
     const result = await this.libraryTx.executeInTransaction(
@@ -67,7 +76,16 @@ export class TagsService {
           tx,
         );
 
-        await helpers.appendChange(userId, {
+        const effectiveProjectId =
+          projectId &&
+          projectId !== 'user' &&
+          projectId !== 'me' &&
+          projectId !== 'personal'
+            ? projectId
+            : undefined;
+        const eventScope = { userId, projectId: effectiveProjectId };
+
+        await helpers.appendChange(eventScope, {
           entityType: 'Tag',
           entityId: tag.id,
           action: 'create',
@@ -75,7 +93,12 @@ export class TagsService {
           data: tag,
         });
 
-        await helpers.publishOutbox(userId, tag.id, 'library.tag.created', tag);
+        await helpers.publishOutbox(
+          eventScope,
+          tag.id,
+          'library.tag.created',
+          tag,
+        );
 
         return tag;
       },
@@ -85,26 +108,41 @@ export class TagsService {
     return result;
   }
 
-  async deleteTag(userId: string, tagId: string) {
+  async deleteTag(userId: string, tagId: string, projectId?: string) {
+    const effectiveProjectId =
+      projectId &&
+      projectId !== 'user' &&
+      projectId !== 'me' &&
+      projectId !== 'personal'
+        ? projectId
+        : undefined;
+    const eventScope = { userId, projectId: effectiveProjectId };
+
     const result = await this.libraryTx.executeInTransaction(
       async (tx, helpers) => {
         const deleted = await this.repo.delete(userId, tagId, tx);
         if (deleted) {
-          await helpers.recordTombstone(userId, {
+          await helpers.recordTombstone(eventScope, {
             entityType: 'Tag',
             entityId: tagId,
           });
 
-          await helpers.publishOutbox(userId, tagId, 'library.tag.deleted', {
-            id: tagId,
-            deletedAt: new Date(),
-          });
+          await helpers.publishOutbox(
+            eventScope,
+            tagId,
+            'library.tag.deleted',
+            {
+              id: tagId,
+              deletedAt: new Date(),
+              projectId: effectiveProjectId,
+            },
+          );
         }
         return deleted;
       },
     );
 
-    await this.invalidateTagsCache(userId);
+    await this.invalidateTagsCache(userId, effectiveProjectId);
     return result;
   }
 
@@ -130,7 +168,12 @@ export class TagsService {
     return result;
   }
 
-  async assignTag(userId: string, tagId: string, itemId: string, projectId?: string) {
+  async assignTag(
+    userId: string,
+    tagId: string,
+    itemId: string,
+    projectId?: string,
+  ) {
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
       // 1. Verify tag belongs to user/project scope
       const tagWhere: any =
@@ -160,7 +203,16 @@ export class TagsService {
 
       await this.repo.assignToItem(tagId, itemId, tx);
 
-      await helpers.appendChange(userId, {
+      const effectiveProjectId =
+        projectId &&
+        projectId !== 'user' &&
+        projectId !== 'me' &&
+        projectId !== 'personal'
+          ? projectId
+          : undefined;
+      const eventScope = { userId, projectId: effectiveProjectId };
+
+      await helpers.appendChange(eventScope, {
         entityType: 'ItemTag',
         entityId: `${tagId}:${itemId}`,
         action: 'create',
@@ -168,14 +220,20 @@ export class TagsService {
         data: { tagId, itemId },
       });
 
-      await helpers.publishOutbox(userId, itemId, 'library.item.tagged', {
+      await helpers.publishOutbox(eventScope, itemId, 'library.item.tagged', {
         tagId,
         itemId,
+        projectId: effectiveProjectId,
       });
     });
   }
 
-  async removeTag(userId: string, tagId: string, itemId: string, projectId?: string) {
+  async removeTag(
+    userId: string,
+    tagId: string,
+    itemId: string,
+    projectId?: string,
+  ) {
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
       // 1. Verify tag belongs to user/project scope
       const tagWhere: any =
@@ -205,14 +263,24 @@ export class TagsService {
 
       await this.repo.removeFromItem(tagId, itemId, tx);
 
-      await helpers.recordTombstone(userId, {
+      const effectiveProjectId =
+        projectId &&
+        projectId !== 'user' &&
+        projectId !== 'me' &&
+        projectId !== 'personal'
+          ? projectId
+          : undefined;
+      const eventScope = { userId, projectId: effectiveProjectId };
+
+      await helpers.recordTombstone(eventScope, {
         entityType: 'ItemTag',
         entityId: `${tagId}:${itemId}`,
       });
 
-      await helpers.publishOutbox(userId, itemId, 'library.item.untagged', {
+      await helpers.publishOutbox(eventScope, itemId, 'library.item.untagged', {
         tagId,
         itemId,
+        projectId: effectiveProjectId,
       });
     });
   }

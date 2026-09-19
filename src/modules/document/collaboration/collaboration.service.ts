@@ -2,6 +2,8 @@ import { Injectable, Optional, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RedisCacheService } from '@/core/cache/redis.service';
 import { CursorPositionDto } from './dto/collaboration.dto';
+import { PrismaService } from '@/core/database/prisma.service';
+import { DOCUMENT_REDIS_KEYS } from '../core/constants/redis-keys.constant';
 
 export interface PresenceUser {
   id: string;
@@ -43,6 +45,7 @@ export class CollaborationService {
   constructor(
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly redis?: RedisCacheService,
+    @Optional() private readonly prisma?: PrismaService,
   ) {}
 
   /**
@@ -122,9 +125,34 @@ export class CollaborationService {
   }
 
   /**
-   * Broadcasts document lock state change to all active collaborators.
+   * Broadcasts document lock state change to all active collaborators,
+   * persists isLocked to Postgres, and invalidates Redis cache.
    */
-  broadcastLockChange(pageId: string, isLocked: boolean, lockedBy: string) {
+  async broadcastLockChange(
+    pageId: string,
+    isLocked: boolean,
+    lockedBy: string,
+  ) {
+    if (this.prisma?.page) {
+      try {
+        const updated = await this.prisma.page.update({
+          where: { id: pageId },
+          data: { isLocked },
+          select: { id: true, projectId: true },
+        });
+        if (this.redis) {
+          await Promise.all([
+            this.redis.del(DOCUMENT_REDIS_KEYS.page(pageId)),
+            this.redis.del(DOCUMENT_REDIS_KEYS.projectTree(updated.projectId)),
+          ]);
+        }
+      } catch (err: any) {
+        this.logger.warn(
+          `Failed to persist isLocked state for page ${pageId}: ${err?.message || err}`,
+        );
+      }
+    }
+
     const payload = {
       pageId,
       type: isLocked ? 'page-locked' : 'page-unlocked',

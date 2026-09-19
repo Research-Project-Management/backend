@@ -406,7 +406,11 @@ export class OpenAlexProvider implements MetadataProvider {
     } else {
       // Fallback to single primary topic only
       const primaryTopic = (item as any).primary_topic;
-      if (primaryTopic && typeof primaryTopic === 'object' && typeof primaryTopic.display_name === 'string') {
+      if (
+        primaryTopic &&
+        typeof primaryTopic === 'object' &&
+        typeof primaryTopic.display_name === 'string'
+      ) {
         rawKeywords.push(primaryTopic.display_name);
       }
     }
@@ -445,7 +449,9 @@ export class OpenAlexProvider implements MetadataProvider {
         : undefined;
 
     const isPreprint = itemType === 'preprint' || Boolean(rawArxiv);
-    const preprintRepo = isPreprint ? (journal || publisher || 'arXiv') : undefined;
+    const preprintRepo = isPreprint
+      ? journal || publisher || 'arXiv'
+      : undefined;
 
     return {
       provider: this.id,
@@ -463,9 +469,11 @@ export class OpenAlexProvider implements MetadataProvider {
         volume: biblio.volume || undefined,
         issue: biblio.issue || undefined,
         pages,
-        publisher: isPreprint ? (preprintRepo || 'arXiv') : publisher,
-        repository: isPreprint ? (preprintRepo || 'arXiv') : undefined,
-        archiveId: rawArxiv ? `arXiv:${rawArxiv.replace(/^arxiv:\s*/i, '').replace(/v\d+$/i, '')}` : undefined,
+        publisher: isPreprint ? preprintRepo || 'arXiv' : publisher,
+        repository: isPreprint ? preprintRepo || 'arXiv' : undefined,
+        archiveId: rawArxiv
+          ? `arXiv:${rawArxiv.replace(/^arxiv:\s*/i, '').replace(/v\d+$/i, '')}`
+          : undefined,
         issn,
         abstract,
         citationCount,

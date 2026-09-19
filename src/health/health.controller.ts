@@ -45,7 +45,9 @@ export class HealthController {
   }
 
   @Get('queues')
-  @ApiOperation({ summary: 'Queue & Background Worker Monitoring (Redis & Jobs)' })
+  @ApiOperation({
+    summary: 'Queue & Background Worker Monitoring (Redis & Jobs)',
+  })
   async getQueueMetrics() {
     const isRedisReady = this.redisCache?.isReady() ?? false;
     let redisStats: Record<string, unknown> = { connected: isRedisReady };
@@ -55,7 +57,9 @@ export class HealthController {
         const client = this.redisCache.getClient();
         if (client) {
           const rawInfo = await client.info('stats');
-          const lines = rawInfo.split('\r\n').filter((l) => l && !l.startsWith('#'));
+          const lines = rawInfo
+            .split('\r\n')
+            .filter((l) => l && !l.startsWith('#'));
           const parsedStats: Record<string, string> = {};
           lines.slice(0, 8).forEach((line) => {
             const [k, v] = line.split(':');

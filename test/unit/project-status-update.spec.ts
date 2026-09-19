@@ -53,7 +53,7 @@ describe('StatusUpdateService', () => {
       },
     ];
 
-    repo.findManyByProjectId.mockResolvedValue(mockUpdates as any);
+    repo.findManyByProjectId.mockResolvedValue(mockUpdates);
 
     const result = await service.getUpdates('p-1');
     expect(result).toHaveLength(2);
@@ -74,7 +74,7 @@ describe('StatusUpdateService', () => {
       createdBy: { id: 'user-1', name: 'Alice', avatar: null },
     };
 
-    repo.findLatestByProjectId.mockResolvedValue(mockLatest as any);
+    repo.findLatestByProjectId.mockResolvedValue(mockLatest);
 
     const result = await service.getLatestUpdate('p-1');
     expect(result).not.toBeNull();
@@ -99,7 +99,7 @@ describe('StatusUpdateService', () => {
       createdBy: { id: 'user-1', name: 'Alice', avatar: null },
     };
 
-    repo.create.mockResolvedValue(created as any);
+    repo.create.mockResolvedValue(created);
 
     const result = await service.createUpdate('p-1', 'user-1', dto);
     expect(result.id).toBe('u-3');
@@ -122,7 +122,7 @@ describe('StatusUpdateService', () => {
       createdAt: new Date(),
       updatedAt: new Date(),
       createdBy: { id: 'user-1', name: 'Alice', avatar: null },
-    } as any);
+    });
 
     const result = await service.updateUpdate('p-1', 'u-1', {
       status: ProjectUpdateStatus.at_risk,

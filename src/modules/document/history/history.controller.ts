@@ -27,7 +27,7 @@ export class HistoryController {
   constructor(private readonly historyService: HistoryService) {}
 
   @Get(['pages/:pageId/versions', 'projects/:projectId/pages/:pageId/versions'])
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'List all versions of a page' })
   async getVersions(@Param('pageId') pageId: string) {
     return this.historyService.getVersions(pageId);
@@ -37,7 +37,7 @@ export class HistoryController {
     'pages/:pageId/versions/:versionId',
     'projects/:projectId/pages/:pageId/versions/:versionId',
   ])
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get single version snapshot with content' })
   async getVersion(
     @Param('pageId') pageId: string,
@@ -46,9 +46,12 @@ export class HistoryController {
     return this.historyService.getVersion(pageId, versionId);
   }
 
-  @Post(['pages/:pageId/versions', 'projects/:projectId/pages/:pageId/versions'])
+  @Post([
+    'pages/:pageId/versions',
+    'projects/:projectId/pages/:pageId/versions',
+  ])
   @HttpCode(HttpStatus.CREATED)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Save a new version snapshot of a page' })
   async createVersion(
     @Param('pageId') pageId: string,
@@ -63,7 +66,7 @@ export class HistoryController {
     'projects/:projectId/pages/:pageId/versions/:versionId/restore',
   ])
   @HttpCode(HttpStatus.OK)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Restore page content to a specific version' })
   async restoreVersion(
     @Param('pageId') pageId: string,
@@ -78,8 +81,8 @@ export class HistoryController {
   ])
   @ProjectRoles('owner')
   async deleteVersion(
+    @Param('pageId') pageId: string,
     @Param('versionId') versionId: string,
-    @Param('pageId') pageId?: string,
   ) {
     return this.historyService.deleteVersion(versionId, pageId);
   }
@@ -89,8 +92,10 @@ export class HistoryController {
     'projects/:projectId/pages/:pageId/history',
     'projects/:projectId/history',
   ])
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
-  @ApiOperation({ summary: 'Get change history (activity log) for a page or project' })
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  @ApiOperation({
+    summary: 'Get change history (activity log) for a page or project',
+  })
   async getHistory(
     @Param('pageId') pageId?: string,
     @Param('projectId') projectId?: string,
@@ -104,7 +109,7 @@ export class HistoryController {
     'projects/:projectId/pages/:pageId/history/:eventId/restore',
   ])
   @HttpCode(HttpStatus.OK)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Restore page to a specific history event state' })
   async restoreHistoryEvent(
     @Param('pageId') pageId: string,
@@ -117,7 +122,7 @@ export class HistoryController {
     'pages/:pageId/versions/diff',
     'projects/:projectId/pages/:pageId/versions/diff',
   ])
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'Compute line-by-line visual diff between two version snapshots',
   })

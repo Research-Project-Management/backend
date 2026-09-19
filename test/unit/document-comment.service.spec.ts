@@ -55,6 +55,12 @@ describe('Document CommentService (Server-Authoritative Sanitization & RBAC)', (
     prisma = {
       page: {
         findUnique: jest.fn().mockResolvedValue({ parentPageId: null }),
+        findFirst: jest.fn().mockResolvedValue({
+          id: mockPageId,
+          parentPageId: null,
+          projectId: mockProjectId,
+          authorId: mockUserId,
+        }),
       },
       pageComment: {
         findUnique: jest.fn(),
@@ -220,7 +226,7 @@ describe('Document CommentService (Server-Authoritative Sanitization & RBAC)', (
         authorId: mockUserId,
         page: { projectId: mockProjectId },
       });
-      prisma.projectMember.findUnique.mockResolvedValue({ role: 'viewer' });
+      prisma.projectMember.findUnique.mockResolvedValue({ role: 'reviewer' });
 
       await expect(
         service.deleteComment(mockCommentId, mockOtherUserId),

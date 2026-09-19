@@ -68,6 +68,7 @@ export function sanitizeCollectionName(name?: string | null): string {
   cleaned = cleaned.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
   cleaned = cleaned.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
   cleaned = cleaned.replace(/<[^>]+>/g, '');
+  // eslint-disable-next-line no-control-regex
   cleaned = cleaned.replace(/[\x00-\x1F\x7F]/g, '');
   cleaned = cleaned.replace(/\s+/g, ' ').trim();
   if (cleaned.length > 255) {
@@ -92,6 +93,7 @@ export function sanitizeCollectionDescription(
   cleaned = cleaned.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
   cleaned = cleaned.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
   cleaned = cleaned.replace(/<[^>]+>/g, '');
+  // eslint-disable-next-line no-control-regex
   cleaned = cleaned.replace(/[\x00-\x1F\x7F]/g, '');
   cleaned = cleaned.replace(/\s+/g, ' ').trim();
   if (cleaned.length > 1000) {

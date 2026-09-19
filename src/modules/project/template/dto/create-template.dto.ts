@@ -14,7 +14,9 @@ export class InitialWorkItemDto {
   @IsNotEmpty()
   title!: string;
 
-  @ApiPropertyOptional({ example: 'Initial setup tasks for repo, CI/CD, and docs' })
+  @ApiPropertyOptional({
+    example: 'Initial setup tasks for repo, CI/CD, and docs',
+  })
   @IsString()
   @IsOptional()
   description?: string;
@@ -67,7 +69,8 @@ export class CreateProjectTemplateDto {
 
   @ApiPropertyOptional({
     description: 'Detailed description of the template purpose and workflow',
-    example: 'Template for 2-week agile sprint iterations with pre-configured review states and quality labels.',
+    example:
+      'Template for 2-week agile sprint iterations with pre-configured review states and quality labels.',
     maxLength: 500,
   })
   @IsString()
@@ -100,7 +103,8 @@ export class CreateProjectTemplateDto {
   isPublic?: boolean;
 
   @ApiPropertyOptional({
-    description: 'Enabled feature modules in projects spawned from this template',
+    description:
+      'Enabled feature modules in projects spawned from this template',
     example: ['work_items', 'cycles', 'views', 'pages'],
   })
   @IsArray()
@@ -109,7 +113,8 @@ export class CreateProjectTemplateDto {
   defaultModules?: string[];
 
   @ApiPropertyOptional({
-    description: 'WorkItem states to automatically seed when creating a project from this template',
+    description:
+      'WorkItem states to automatically seed when creating a project from this template',
     type: [InitialStateDto],
   })
   @IsArray()
@@ -117,7 +122,8 @@ export class CreateProjectTemplateDto {
   initialStates?: InitialStateDto[];
 
   @ApiPropertyOptional({
-    description: 'WorkItem labels to automatically seed when creating a project from this template',
+    description:
+      'WorkItem labels to automatically seed when creating a project from this template',
     type: [InitialLabelDto],
   })
   @IsArray()
@@ -125,7 +131,8 @@ export class CreateProjectTemplateDto {
   initialLabels?: InitialLabelDto[];
 
   @ApiPropertyOptional({
-    description: 'Initial checklist/tasks to create when initializing a project from this template',
+    description:
+      'Initial checklist/tasks to create when initializing a project from this template',
     type: [InitialWorkItemDto],
   })
   @IsArray()

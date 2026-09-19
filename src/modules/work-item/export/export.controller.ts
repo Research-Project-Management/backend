@@ -25,7 +25,7 @@ export class ExportController {
     'project/:projectId/work-items/export',
   ])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'Export work items for a project in CSV or JSON format',
   })

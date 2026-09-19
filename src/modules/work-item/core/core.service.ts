@@ -146,8 +146,7 @@ export class CoreService {
       offset,
     );
     const allLabelIds = records.flatMap((r) => r.labels || []);
-    const projectId =
-      query?.projectId || (records[0]?.projectId as string | undefined);
+    const projectId = query?.projectId || records[0]?.projectId;
     const labelLookup = projectId
       ? await this.buildLabelLookup(projectId, allLabelIds)
       : new Map<string, { id: string; name: string; color: string }>();

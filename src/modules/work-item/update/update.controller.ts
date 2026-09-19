@@ -35,7 +35,7 @@ export class UpdateController {
     'work-items/:workItemId/updates',
   ])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get all status updates for a work item' })
   @ApiParam({ name: 'workItemId', description: 'Work item ID' })
   @ApiResponse({
@@ -51,7 +51,7 @@ export class UpdateController {
     'work-items/:workItemId/updates/latest',
   ])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'Get the most recent status update for a work item',
   })
@@ -66,7 +66,7 @@ export class UpdateController {
   ])
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({
     summary:
       'Post a status update (On Track / At Risk / Off Track) on a work item',
@@ -86,7 +86,7 @@ export class UpdateController {
   ])
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Delete a specific status update from a work item' })
   @ApiResponse({ status: 200, description: 'Update deleted successfully' })
   async deleteUpdate(

@@ -32,7 +32,7 @@ export class AssignmentService {
    * Assigns or unassigns a work item to a project member.
    * Business rules:
    * 1. Assignee must be a verified project member.
-   * 2. Assignee must have role 'owner' or 'contributor' (viewers and commenters cannot be assigned).
+   * 2. Assignee must have execution role ('owner', 'coordinator', 'contributor'). Reviewers cannot be assigned.
    * 3. Passing null/empty assigneeId unassigns the work item.
    */
   async assignWorkItem(

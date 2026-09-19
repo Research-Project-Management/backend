@@ -11,7 +11,10 @@ import {
   StorageLifecycleConfiguration,
 } from '../../domain/ports/storage-driver.port';
 import { StorageQueueProducer } from '../queues/storage-queue.producer';
-import { TrashRetentionJob, TrashPurgeResult } from '../jobs/trash-retention.cron';
+import {
+  TrashRetentionJob,
+  TrashPurgeResult,
+} from '../jobs/trash-retention.cron';
 import { MultipartCleanupJob } from '../jobs/multipart-cleanup.cron';
 import { OrphanBlobJob } from '../jobs/orphan-blob.cron';
 import * as fs from 'fs';
@@ -31,7 +34,9 @@ export class StorageLifecycleService implements OnApplicationBootstrap {
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
-    this.logger.log('Initializing Storage Lifecycle & Maintenance subsystem...');
+    this.logger.log(
+      'Initializing Storage Lifecycle & Maintenance subsystem...',
+    );
 
     // 1. Apply bucket-level lifecycle rules (S3 / Tigris standard)
     await this.initializeBucketLifecycle();
@@ -42,7 +47,9 @@ export class StorageLifecycleService implements OnApplicationBootstrap {
 
   async initializeBucketLifecycle(): Promise<void> {
     if (!this.driver.applyLifecycleRules) {
-      this.logger.debug('Storage driver does not support lifecycle rules, skipping');
+      this.logger.debug(
+        'Storage driver does not support lifecycle rules, skipping',
+      );
       return;
     }
 
@@ -59,7 +66,9 @@ export class StorageLifecycleService implements OnApplicationBootstrap {
       }
 
       await this.driver.applyLifecycleRules(config);
-      this.logger.log('Bucket lifecycle configuration initialized successfully');
+      this.logger.log(
+        'Bucket lifecycle configuration initialized successfully',
+      );
     } catch (err: any) {
       this.logger.warn(
         `Failed to initialize bucket lifecycle rules: ${err?.message}`,

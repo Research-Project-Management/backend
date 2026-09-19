@@ -4,7 +4,10 @@ import { DownloadFileVersionUseCase } from '@/modules/storage/application/use-ca
 import { RevertFileVersionUseCase } from '@/modules/storage/application/use-cases/version/revert-file-version.use-case';
 import { StorageVersion } from '@/modules/storage/domain/entities/storage-version.entity';
 import { StorageNode } from '@/modules/storage/domain/entities/storage-node.entity';
-import { StorageBlob, BlobStatus } from '@/modules/storage/domain/entities/storage-blob.entity';
+import {
+  StorageBlob,
+  BlobStatus,
+} from '@/modules/storage/domain/entities/storage-blob.entity';
 import { ContentHash } from '@/modules/storage/domain/value-objects/content-hash.vo';
 import { StorageKey } from '@/modules/storage/domain/value-objects/storage-key.vo';
 import { FileScope } from '@/modules/storage/domain/value-objects/file-scope.vo';
@@ -45,7 +48,9 @@ describe('Storage File & Dataset Versioning Suite', () => {
     };
 
     mockNodeRepo = {
-      findById: jest.fn().mockImplementation(async (id: string) => nodesInDb.get(id) || null),
+      findById: jest
+        .fn()
+        .mockImplementation(async (id: string) => nodesInDb.get(id) || null),
       create: jest.fn().mockImplementation(async (n: StorageNode) => {
         nodesInDb.set(n.id, n);
         return n;
@@ -57,7 +62,9 @@ describe('Storage File & Dataset Versioning Suite', () => {
     };
 
     mockBlobRepo = {
-      findById: jest.fn().mockImplementation(async (id: string) => blobsInDb.get(id) || null),
+      findById: jest
+        .fn()
+        .mockImplementation(async (id: string) => blobsInDb.get(id) || null),
       findByHash: jest.fn().mockImplementation(async (hash: ContentHash) => {
         for (const blob of blobsInDb.values()) {
           if (blob.contentHash.equals(hash)) return blob;
@@ -90,26 +97,32 @@ describe('Storage File & Dataset Versioning Suite', () => {
         const list = versionsInDb.get(fileId) || [];
         return [...list].sort((a, b) => b.versionNumber - a.versionNumber);
       }),
-      findByFileAndVersion: jest.fn().mockImplementation(async (fileId: string, vNum: number) => {
-        const list = versionsInDb.get(fileId) || [];
-        return list.find((v) => v.versionNumber === vNum) || null;
-      }),
-      getLatestVersionNumber: jest.fn().mockImplementation(async (fileId: string) => {
-        const list = versionsInDb.get(fileId) || [];
-        if (list.length === 0) return 0;
-        return Math.max(...list.map((v) => v.versionNumber));
-      }),
+      findByFileAndVersion: jest
+        .fn()
+        .mockImplementation(async (fileId: string, vNum: number) => {
+          const list = versionsInDb.get(fileId) || [];
+          return list.find((v) => v.versionNumber === vNum) || null;
+        }),
+      getLatestVersionNumber: jest
+        .fn()
+        .mockImplementation(async (fileId: string) => {
+          const list = versionsInDb.get(fileId) || [];
+          if (list.length === 0) return 0;
+          return Math.max(...list.map((v) => v.versionNumber));
+        }),
       deleteByFileId: jest.fn().mockImplementation(async (fileId: string) => {
         versionsInDb.delete(fileId);
       }),
     };
 
     mockAccessPolicy = {
-      assertCanAccess: jest.fn().mockImplementation(async (userId: string, fileId: string) => {
-        const node = nodesInDb.get(fileId);
-        if (!node) throw new NotFoundException('File not found');
-        return node;
-      }),
+      assertCanAccess: jest
+        .fn()
+        .mockImplementation(async (userId: string, fileId: string) => {
+          const node = nodesInDb.get(fileId);
+          if (!node) throw new NotFoundException('File not found');
+          return node;
+        }),
     };
 
     mockCache = {
@@ -156,7 +169,9 @@ describe('Storage File & Dataset Versioning Suite', () => {
   describe('UploadNewVersionUseCase', () => {
     it('should upload version 2 for an existing file and backfill version 1', async () => {
       // Setup initial file
-      const initialHash = ContentHash.fromBuffer(Buffer.from('version-1-content'));
+      const initialHash = ContentHash.fromBuffer(
+        Buffer.from('version-1-content'),
+      );
       const initialBlob = new StorageBlob({
         id: 'blob-initial-1',
         contentHash: initialHash,
@@ -182,19 +197,24 @@ describe('Storage File & Dataset Versioning Suite', () => {
       nodesInDb.set(fileNode.id, fileNode);
 
       // Upload version 2 (with PDF magic bytes %PDF-1.5)
-      const v2Buffer = Buffer.from('%PDF-1.5 Updated research paper content with new experiments');
+      const v2Buffer = Buffer.from(
+        '%PDF-1.5 Updated research paper content with new experiments',
+      );
       const result = await uploadNewVersionUseCase.execute({
         fileId: fileNode.id,
         userId: 'author-user-1',
         buffer: v2Buffer,
         filename: 'neural_networks.pdf',
         mimeType: 'application/pdf',
-        changeComment: 'Bổ sung bảng so sánh thực nghiệm (Added experiment comparisons)',
+        changeComment:
+          'Bổ sung bảng so sánh thực nghiệm (Added experiment comparisons)',
       });
 
       expect(result.versionNumber).toBe(2);
       expect(result.fileId).toBe(fileNode.id);
-      expect(result.changeComment).toBe('Bổ sung bảng so sánh thực nghiệm (Added experiment comparisons)');
+      expect(result.changeComment).toBe(
+        'Bổ sung bảng so sánh thực nghiệm (Added experiment comparisons)',
+      );
 
       // StorageNode should now point to new blob
       const updatedNode = nodesInDb.get(fileNode.id)!;
@@ -207,7 +227,10 @@ describe('Storage File & Dataset Versioning Suite', () => {
       expect(versions.map((v) => v.versionNumber).sort()).toEqual([1, 2]);
 
       // Verify domain event emitted for AI indexing
-      expect(mockEventEmitter.emit).toHaveBeenCalledWith('file.uploaded', expect.anything());
+      expect(mockEventEmitter.emit).toHaveBeenCalledWith(
+        'file.uploaded',
+        expect.anything(),
+      );
     });
 
     it('should leverage CAS deduplication when uploading identical revision content', async () => {
@@ -222,7 +245,9 @@ describe('Storage File & Dataset Versioning Suite', () => {
       });
       nodesInDb.set(fileNode.id, fileNode);
 
-      const identicalBuffer = Buffer.from('id,feature_a,feature_b\n1,0.95,0.88\n');
+      const identicalBuffer = Buffer.from(
+        'id,feature_a,feature_b\n1,0.95,0.88\n',
+      );
       const identicalHash = ContentHash.fromBuffer(identicalBuffer);
       const existingBlob = new StorageBlob({
         id: 'blob-existing-csv',
@@ -353,7 +378,11 @@ describe('Storage File & Dataset Versioning Suite', () => {
         }),
       ]);
 
-      const result = await downloadFileVersionUseCase.execute(fileId, 1, 'user-1');
+      const result = await downloadFileVersionUseCase.execute(
+        fileId,
+        1,
+        'user-1',
+      );
 
       expect(result.filename).toBe('quantum_sim_v1.py');
       expect(result.versionNumber).toBe(1);
@@ -369,7 +398,9 @@ describe('Storage File & Dataset Versioning Suite', () => {
         id: 'blob-v1',
         contentHash: ContentHash.fromBuffer(Buffer.from('v1')),
         sizeBytes: 50n,
-        s3Key: StorageKey.forBlob('1111111111111111111111111111111111111111111111111111111111111111'),
+        s3Key: StorageKey.forBlob(
+          '1111111111111111111111111111111111111111111111111111111111111111',
+        ),
         s3Bucket: 'flux',
         status: BlobStatus.READY,
         refCount: 1,
@@ -405,7 +436,11 @@ describe('Storage File & Dataset Versioning Suite', () => {
         }),
       ]);
 
-      const result = await revertFileVersionUseCase.execute(fileId, 1, 'user-1');
+      const result = await revertFileVersionUseCase.execute(
+        fileId,
+        1,
+        'user-1',
+      );
 
       expect(result.revertedToVersion).toBe(1);
       expect(result.newVersionNumber).toBe(3);

@@ -9,17 +9,24 @@ import {
 } from 'class-validator';
 
 export class CreateSuggestionDto {
-  @ApiProperty({ description: 'Type of suggested edit', enum: ['insert', 'delete', 'replace'] })
+  @ApiProperty({
+    description: 'Type of suggested edit',
+    enum: ['insert', 'delete', 'replace'],
+  })
   @IsString()
   @IsIn(['insert', 'delete', 'replace'])
   type!: 'insert' | 'delete' | 'replace';
 
-  @ApiPropertyOptional({ description: 'Original text to be replaced or deleted' })
+  @ApiPropertyOptional({
+    description: 'Original text to be replaced or deleted',
+  })
   @IsString()
   @IsOptional()
   originalText?: string;
 
-  @ApiPropertyOptional({ description: 'Suggested text to be inserted or substituted' })
+  @ApiPropertyOptional({
+    description: 'Suggested text to be inserted or substituted',
+  })
   @IsString()
   @IsOptional()
   suggestedText?: string;
@@ -46,14 +53,19 @@ export class CreateSuggestionDto {
   @IsOptional()
   toColumn?: number;
 
-  @ApiPropertyOptional({ description: 'Reason or explanation for this suggestion' })
+  @ApiPropertyOptional({
+    description: 'Reason or explanation for this suggestion',
+  })
   @IsString()
   @IsOptional()
   description?: string;
 }
 
 export class ResolveSuggestionDto {
-  @ApiProperty({ description: 'Action to perform on the suggestion', enum: ['accept', 'reject'] })
+  @ApiProperty({
+    description: 'Action to perform on the suggestion',
+    enum: ['accept', 'reject'],
+  })
   @IsString()
   @IsIn(['accept', 'reject'])
   action!: 'accept' | 'reject';

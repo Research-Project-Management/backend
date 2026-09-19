@@ -19,6 +19,7 @@ import { TypesModule } from './types/types.module';
 import { StateModule } from './state/state.module';
 import { ExportsModule } from './exports/exports.module';
 import { RetractionModule } from './retraction/retraction.module';
+import { InfraModule } from './infra/infra.module';
 import { LibraryFacade, LIBRARY_FACADE } from './library.facade';
 
 /**
@@ -31,6 +32,7 @@ import { LibraryFacade, LIBRARY_FACADE } from './library.facade';
     ConfigModule,
     AppCoreModule,
     CoreModule,
+    InfraModule,
 
     TypesModule,
     ItemsModule,
@@ -60,6 +62,7 @@ import { LibraryFacade, LIBRARY_FACADE } from './library.facade';
     LibraryFacade,
     LIBRARY_FACADE,
     CoreModule,
+    InfraModule,
     TypesModule,
     ItemsModule,
     StateModule,

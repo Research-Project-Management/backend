@@ -347,7 +347,9 @@ export class DriveController {
     const updatedMeta = {
       ...currentMeta,
       ...(dto.metaData || {}),
-      ...(dto.description !== undefined ? { description: dto.description } : {}),
+      ...(dto.description !== undefined
+        ? { description: dto.description }
+        : {}),
     };
     (node as any)._metadata = updatedMeta;
     (node as any)._updatedAt = new Date();

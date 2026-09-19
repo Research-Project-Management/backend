@@ -106,7 +106,10 @@ export class PdfProvider {
     }> = [];
 
     const ocrPageResults: OcrPageResult[] = [];
-    const imageDimensionsMap = new Map<number, { width: number; height: number }>();
+    const imageDimensionsMap = new Map<
+      number,
+      { width: number; height: number }
+    >();
 
     let combinedText = '';
     const unpdfExtractedMetadata: ExtractedPdfMetadata = {};
@@ -211,7 +214,7 @@ export class PdfProvider {
           pageIndex <= this.ocrProvider.maxPages;
 
         if (shouldOcr) {
-          const res = await this.ocrProvider!.recognizePdfPage(
+          const res = await this.ocrProvider.recognizePdfPage(
             page,
             pageIndex - 1,
           );
@@ -586,7 +589,7 @@ export class PdfProvider {
       }
 
       const arxivMatchResult = rawHeaderStream.match(
-        /arXiv:\s*(\d{4}\.\d{4,5}(?:v\d+)?)(?:\s*\[([a-zA-Z\-]+(?:\.[a-zA-Z\-]+)?)\])?/i,
+        /arXiv:\s*(\d{4}\.\d{4,5}(?:v\d+)?)(?:\s*\[([a-zA-Z-]+(?:\.[a-zA-Z-]+)?)\])?/i,
       );
       if (arxivMatchResult) {
         extractedMetadataResult.arxivId = arxivMatchResult[1];
@@ -651,7 +654,7 @@ export class PdfProvider {
     if (doi) metadata.doi = doi;
 
     const arxivMatch = scannedText.match(
-      /(?:arxiv[:\s._/-]+)([0-2]\d{3}\.\d{4,5}(?:v\d+)?)(?:\s*\[([a-zA-Z\-]+(?:\.[a-zA-Z\-]+)?)\])?/i,
+      /(?:arxiv[:\s._/-]+)([0-2]\d{3}\.\d{4,5}(?:v\d+)?)(?:\s*\[([a-zA-Z-]+(?:\.[a-zA-Z-]+)?)\])?/i,
     );
     if (arxivMatch?.[1]) {
       metadata.arxivId = arxivMatch[1];
@@ -749,8 +752,7 @@ export class PdfProvider {
         )
       )
         return false;
-      if (/^\d+\s*\|\s*[a-z]/i.test(lineItem))
-        return false;
+      if (/^\d+\s*\|\s*[a-z]/i.test(lineItem)) return false;
       return true;
     });
 
@@ -788,11 +790,12 @@ export class PdfProvider {
         titleLines.push(currentLine);
         // Continue if line ends with hyphen or next line starts with title continuation words (for, by, and, with, in, on, using, of, to, from)
         const nextLine = cleanLines[lineIndex + 1];
-        const nextIsContinuation =
-          Boolean(nextLine &&
+        const nextIsContinuation = Boolean(
+          nextLine &&
           /^(for|by|and|with|in|on|using|via|under|towards|from|to|of)\b/i.test(
             nextLine.trim(),
-          ));
+          ),
+        );
         const endsWithHyphen = currentLine.trim().endsWith('-');
         if (
           !endsWithHyphen &&
@@ -809,7 +812,7 @@ export class PdfProvider {
         .join(' ')
         .replace(/\s+/g, ' ')
         .trim();
-      let candidateTitle = rawTitle
+      const candidateTitle = rawTitle
         // Fix PDF small-caps drop-cap gaps: "V ERY D EEP C ONVOLUTIONAL N ETWORKS" -> "VERY DEEP CONVOLUTIONAL NETWORKS"
         .replace(/\b([A-Z])\s+([A-Z]{2,})\b/g, '$1$2')
         .replace(/\b([B-HJ-Z])\s+([A-Z])\b/g, '$1$2')
@@ -832,7 +835,9 @@ export class PdfProvider {
         ) {
           const authorLine = cleanLines[lineIndex];
           if (
-            /^(for|by|and|with|using|towards|under)\s+[A-Z]/i.test(authorLine.trim())
+            /^(for|by|and|with|using|towards|under)\s+[A-Z]/i.test(
+              authorLine.trim(),
+            )
           ) {
             // Ignore title residue mistakenly placed after title break
             continue;

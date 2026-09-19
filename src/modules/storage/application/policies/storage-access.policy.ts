@@ -68,7 +68,7 @@ export class StorageAccessPolicy {
         if (action === 'read') return node;
         if (
           action === 'write' &&
-          ['owner', 'contributor'].includes(membership.role)
+          ['owner', 'coordinator', 'contributor'].includes(membership.role)
         )
           return node;
         if (action === 'delete' && membership.role === 'owner') return node;

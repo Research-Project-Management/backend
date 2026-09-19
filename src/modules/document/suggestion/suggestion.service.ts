@@ -2,12 +2,16 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
   Logger,
   Optional,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '@/core/database/prisma.service';
-import { SuggestionRepository, SuggestionWithAuthor } from './suggestion.repository';
+import {
+  SuggestionRepository,
+  SuggestionWithAuthor,
+} from './suggestion.repository';
 import { CreateSuggestionDto } from './dto/suggestion.dto';
 import { SuggestionStatus } from '@prisma/client';
 import { CoreService } from '../core/core.service';
@@ -36,7 +40,10 @@ function applyReplacementToContent(
   const targetSlice = lines.slice(startIdx, endIdx + 1).join('\n');
 
   if (suggestion.type === 'delete') {
-    if (suggestion.originalText && targetSlice.includes(suggestion.originalText)) {
+    if (
+      suggestion.originalText &&
+      targetSlice.includes(suggestion.originalText)
+    ) {
       const replaced = targetSlice.replace(suggestion.originalText, '');
       lines.splice(startIdx, endIdx - startIdx + 1, ...replaced.split('\n'));
     } else {
@@ -46,11 +53,21 @@ function applyReplacementToContent(
     lines.splice(startIdx, 0, ...suggestion.suggestedText.split('\n'));
   } else {
     // replace
-    if (suggestion.originalText && targetSlice.includes(suggestion.originalText)) {
-      const replaced = targetSlice.replace(suggestion.originalText, suggestion.suggestedText);
+    if (
+      suggestion.originalText &&
+      targetSlice.includes(suggestion.originalText)
+    ) {
+      const replaced = targetSlice.replace(
+        suggestion.originalText,
+        suggestion.suggestedText,
+      );
       lines.splice(startIdx, endIdx - startIdx + 1, ...replaced.split('\n'));
     } else {
-      lines.splice(startIdx, endIdx - startIdx + 1, ...suggestion.suggestedText.split('\n'));
+      lines.splice(
+        startIdx,
+        endIdx - startIdx + 1,
+        ...suggestion.suggestedText.split('\n'),
+      );
     }
   }
 
@@ -88,6 +105,13 @@ export class SuggestionService {
       throw new NotFoundException(`Page ${pageId} not found`);
     }
 
+    const hasAccess = await this.coreService.checkUserAccess(pageId, userId);
+    if (!hasAccess) {
+      throw new ForbiddenException(
+        'You do not have permission to propose suggestions on this document',
+      );
+    }
+
     const suggestion = await this.suggestionRepo.create({
       page: { connect: { id: pageId } },
       projectPageId: page.parentPageId || null,
@@ -115,28 +139,64 @@ export class SuggestionService {
 
   async getSuggestions(
     pageId: string,
-    status?: SuggestionStatus,
+    userIdOrStatus?: string | SuggestionStatus,
+    maybeStatus?: SuggestionStatus,
   ): Promise<SuggestionWithAuthor[]> {
+    let userId: string | undefined;
+    let status: SuggestionStatus | undefined;
+
+    if (
+      userIdOrStatus === SuggestionStatus.pending ||
+      userIdOrStatus === SuggestionStatus.accepted ||
+      userIdOrStatus === SuggestionStatus.rejected
+    ) {
+      status = userIdOrStatus;
+    } else {
+      userId = userIdOrStatus;
+      status = maybeStatus;
+    }
+
+    if (userId) {
+      const hasAccess = await this.coreService.checkUserAccess(pageId, userId);
+      if (!hasAccess) {
+        throw new ForbiddenException(
+          'You do not have permission to view suggestions on this document',
+        );
+      }
+    }
     return this.suggestionRepo.findByPageId(pageId, status);
   }
 
-  async acceptSuggestion(
-    pageId: string,
-    suggestionId: string,
-    userId: string,
-  ) {
-    const suggestion = await this.suggestionRepo.findById(suggestionId);
-    if (!suggestion || suggestion.pageId !== pageId) {
-      throw new NotFoundException(`Suggestion ${suggestionId} not found for this page`);
-    }
-
-    if (suggestion.status !== SuggestionStatus.pending) {
-      throw new BadRequestException(`Suggestion is already ${suggestion.status}`);
-    }
-
+  async acceptSuggestion(pageId: string, suggestionId: string, userId: string) {
     const page = await this.coreService.findPageById(pageId);
     if (!page) {
       throw new NotFoundException(`Page ${pageId} not found`);
+    }
+
+    const hasAccess = await this.coreService.checkUserAccess(pageId, userId);
+    if (!hasAccess) {
+      throw new ForbiddenException(
+        'You do not have permission to modify suggestions on this document',
+      );
+    }
+
+    const suggestion = await this.suggestionRepo.findById(suggestionId);
+    if (!suggestion || suggestion.pageId !== pageId) {
+      throw new NotFoundException(
+        `Suggestion ${suggestionId} not found for this page`,
+      );
+    }
+
+    if (suggestion.status !== SuggestionStatus.pending) {
+      throw new BadRequestException(
+        `Suggestion is already ${suggestion.status}`,
+      );
+    }
+
+    if (page.isLocked) {
+      throw new ForbiddenException(
+        'This document is locked against modifications',
+      );
     }
 
     const rawContent = page.content;
@@ -144,13 +204,19 @@ export class SuggestionService {
       typeof rawContent === 'string'
         ? rawContent
         : rawContent && typeof rawContent === 'object'
-          ? (rawContent as any).source || (rawContent as any).text || JSON.stringify(rawContent)
+          ? (rawContent as any).source ||
+            (rawContent as any).text ||
+            JSON.stringify(rawContent)
           : '';
 
     const newContent = applyReplacementToContent(currentText, suggestion);
 
     let finalContent: any = newContent;
-    if (rawContent && typeof rawContent === 'object' && !Array.isArray(rawContent)) {
+    if (
+      rawContent &&
+      typeof rawContent === 'object' &&
+      !Array.isArray(rawContent)
+    ) {
       if ('source' in (rawContent as any)) {
         finalContent = { ...(rawContent as any), source: newContent };
       } else if ('text' in (rawContent as any)) {
@@ -179,6 +245,20 @@ export class SuggestionService {
           },
         },
       }),
+      this.prisma.pageVersion.create({
+        data: {
+          pageId,
+          projectPageId: page.parentPageId || null,
+          title: page.title,
+          content:
+            typeof finalContent === 'string'
+              ? finalContent
+              : JSON.stringify(finalContent || ''),
+          label: `Accepted suggestion by ${suggestion.author?.name || 'collaborator'}: ${suggestion.description || suggestion.type}`,
+          savedById: userId,
+          eventType: 'collaborative_checkpoint',
+        },
+      }),
     ]);
 
     await this.invalidateCache(pageId, page.projectId);
@@ -197,18 +277,25 @@ export class SuggestionService {
     };
   }
 
-  async rejectSuggestion(
-    pageId: string,
-    suggestionId: string,
-    userId: string,
-  ) {
+  async rejectSuggestion(pageId: string, suggestionId: string, userId: string) {
+    const hasAccess = await this.coreService.checkUserAccess(pageId, userId);
+    if (!hasAccess) {
+      throw new ForbiddenException(
+        'You do not have permission to resolve suggestions on this document',
+      );
+    }
+
     const suggestion = await this.suggestionRepo.findById(suggestionId);
     if (!suggestion || suggestion.pageId !== pageId) {
-      throw new NotFoundException(`Suggestion ${suggestionId} not found for this page`);
+      throw new NotFoundException(
+        `Suggestion ${suggestionId} not found for this page`,
+      );
     }
 
     if (suggestion.status !== SuggestionStatus.pending) {
-      throw new BadRequestException(`Suggestion is already ${suggestion.status}`);
+      throw new BadRequestException(
+        `Suggestion is already ${suggestion.status}`,
+      );
     }
 
     const updated = await this.suggestionRepo.update(suggestionId, {
@@ -231,6 +318,18 @@ export class SuggestionService {
   }
 
   async acceptAllSuggestions(pageId: string, userId: string) {
+    const page = await this.coreService.findPageById(pageId);
+    if (!page) {
+      throw new NotFoundException(`Page ${pageId} not found`);
+    }
+
+    const hasAccess = await this.coreService.checkUserAccess(pageId, userId);
+    if (!hasAccess) {
+      throw new ForbiddenException(
+        'You do not have permission to modify suggestions on this document',
+      );
+    }
+
     const pendingList = await this.suggestionRepo.findByPageId(
       pageId,
       SuggestionStatus.pending,
@@ -240,19 +339,25 @@ export class SuggestionService {
       return { ok: true, acceptedCount: 0 };
     }
 
-    // Sort descending by line so earlier line positions aren't invalidated by earlier edits
-    const sorted = [...pendingList].sort((a, b) => b.fromLine - a.fromLine);
-
-    const page = await this.coreService.findPageById(pageId);
-    if (!page) {
-      throw new NotFoundException(`Page ${pageId} not found`);
+    if (page.isLocked) {
+      throw new ForbiddenException(
+        'This document is locked against modifications',
+      );
     }
+
+    // Sort descending by line and column so earlier positions aren't invalidated by earlier edits
+    const sorted = [...pendingList].sort(
+      (a, b) =>
+        b.fromLine - a.fromLine || (b.fromColumn ?? 1) - (a.fromColumn ?? 1),
+    );
 
     let text =
       typeof page.content === 'string'
         ? page.content
         : page.content && typeof page.content === 'object'
-          ? (page.content as any).source || (page.content as any).text || JSON.stringify(page.content)
+          ? (page.content as any).source ||
+            (page.content as any).text ||
+            JSON.stringify(page.content)
           : '';
 
     for (const sugg of sorted) {
@@ -261,7 +366,11 @@ export class SuggestionService {
 
     let finalContent: any = text;
     const rawContent = page.content;
-    if (rawContent && typeof rawContent === 'object' && !Array.isArray(rawContent)) {
+    if (
+      rawContent &&
+      typeof rawContent === 'object' &&
+      !Array.isArray(rawContent)
+    ) {
       if ('source' in (rawContent as any)) {
         finalContent = { ...(rawContent as any), source: text };
       } else if ('text' in (rawContent as any)) {
@@ -287,6 +396,20 @@ export class SuggestionService {
           resolvedAt: new Date(),
         },
       }),
+      this.prisma.pageVersion.create({
+        data: {
+          pageId,
+          projectPageId: page.parentPageId || null,
+          title: page.title,
+          content:
+            typeof finalContent === 'string'
+              ? finalContent
+              : JSON.stringify(finalContent || ''),
+          label: `Accepted all pending suggestions (${ids.length} changes)`,
+          savedById: userId,
+          eventType: 'collaborative_checkpoint',
+        },
+      }),
     ]);
 
     await this.invalidateCache(pageId, page.projectId);
@@ -302,6 +425,13 @@ export class SuggestionService {
   }
 
   async rejectAllSuggestions(pageId: string, userId: string) {
+    const hasAccess = await this.coreService.checkUserAccess(pageId, userId);
+    if (!hasAccess) {
+      throw new ForbiddenException(
+        'You do not have permission to resolve suggestions on this document',
+      );
+    }
+
     const pendingList = await this.suggestionRepo.findByPageId(
       pageId,
       SuggestionStatus.pending,

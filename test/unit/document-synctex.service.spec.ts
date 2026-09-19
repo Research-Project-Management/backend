@@ -31,7 +31,9 @@ describe('Document SynctexService (Code <-> PDF 2-Way Navigation)', () => {
 
       expect(res.success).toBe(false);
       expect(res.fallback).toBe(false);
-      expect(res.error).toBe('SyncTeX data not available. Please compile document first.');
+      expect(res.error).toBe(
+        'SyncTeX data not available. Please compile document first.',
+      );
     });
 
     it('should parse ground truth coordinates when compiler service returns synctex', async () => {
@@ -87,7 +89,9 @@ describe('Document SynctexService (Code <-> PDF 2-Way Navigation)', () => {
 
       expect(res.success).toBe(false);
       expect(res.fallback).toBe(false);
-      expect(res.error).toBe('SyncTeX data not available. Please compile document first.');
+      expect(res.error).toBe(
+        'SyncTeX data not available. Please compile document first.',
+      );
     });
 
     it('should parse source line when compiler service returns reverse synctex', async () => {

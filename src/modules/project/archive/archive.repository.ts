@@ -68,7 +68,9 @@ export class ArchiveRepository {
     });
   }
 
-  async findArchivedProjectsByUser(userId: string): Promise<ProjectWithMembers[]> {
+  async findArchivedProjectsByUser(
+    userId: string,
+  ): Promise<ProjectWithMembers[]> {
     if (!isUuid(userId)) return [];
 
     return this.prisma.project.findMany({

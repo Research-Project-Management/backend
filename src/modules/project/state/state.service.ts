@@ -26,13 +26,17 @@ export class StateService {
   /**
    * Get the current state and allowed transitions for a project.
    */
-  async getProjectCurrentState(projectId: string): Promise<ProjectCurrentStateResponseDto> {
+  async getProjectCurrentState(
+    projectId: string,
+  ): Promise<ProjectCurrentStateResponseDto> {
     const project = await this.stateRepo.findProjectState(projectId);
     if (!project) {
       throw new NotFoundException(`Project with ID "${projectId}" not found`);
     }
 
-    const stateMeta = PROJECT_STATES_CATALOG.find((s) => s.state === project.state);
+    const stateMeta = PROJECT_STATES_CATALOG.find(
+      (s) => s.state === project.state,
+    );
     const allowedTransitions = ALLOWED_STATE_TRANSITIONS[project.state] || [];
 
     return {
@@ -66,8 +70,13 @@ export class StateService {
       );
     }
 
-    const updated = await this.stateRepo.updateProjectState(projectId, targetState);
-    const stateMeta = PROJECT_STATES_CATALOG.find((s) => s.state === targetState);
+    const updated = await this.stateRepo.updateProjectState(
+      projectId,
+      targetState,
+    );
+    const stateMeta = PROJECT_STATES_CATALOG.find(
+      (s) => s.state === targetState,
+    );
     const allowedTransitions = ALLOWED_STATE_TRANSITIONS[targetState] || [];
 
     return {

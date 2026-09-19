@@ -25,7 +25,9 @@ export class ProjectAnalyticsRepository {
     });
   }
 
-  async getWorkItemsCountsByStateGroup(projectId: string): Promise<Record<string, number>> {
+  async getWorkItemsCountsByStateGroup(
+    projectId: string,
+  ): Promise<Record<string, number>> {
     // Query work items with their state group
     const rows = await this.prisma.workItem.findMany({
       where: {
@@ -82,7 +84,8 @@ export class ProjectAnalyticsRepository {
     const completed = cycle.workItems.filter(
       (w) => w.state?.group === 'completed',
     ).length;
-    const progressPercentage = total > 0 ? Math.round((completed / total) * 100) : 0;
+    const progressPercentage =
+      total > 0 ? Math.round((completed / total) * 100) : 0;
 
     return {
       id: cycle.id,

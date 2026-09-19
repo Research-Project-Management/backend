@@ -66,15 +66,18 @@ export class AnnotationsService {
 
   async createAnnotation(userId: string, data: CreateAnnotationData) {
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      await this.attachmentsService.assertAttachmentExists(
+      const attachment = await this.attachmentsService.assertAttachmentExists(
         data.attachmentId,
         userId,
         tx,
       );
+      const effectiveProjectId = attachment?.item?.projectId || undefined;
+      const eventScope = { userId, projectId: effectiveProjectId };
+
       const normalized = this.normalizer.normalizeCreateData(data);
       const annotation = await this.annotationsRepo.create(normalized, tx);
 
-      await helpers.appendChange(userId, {
+      await helpers.appendChange(eventScope, {
         entityType: 'Annotation',
         entityId: annotation.id,
         action: 'create',
@@ -83,7 +86,7 @@ export class AnnotationsService {
       });
 
       await helpers.publishOutbox(
-        userId,
+        eventScope,
         annotation.id,
         'library.annotation.created',
         annotation,
@@ -103,11 +106,13 @@ export class AnnotationsService {
       const existing = await this.annotationsRepo.findById(id, tx);
       if (!existing) throw new NotFoundException(`Annotation ${id} not found`);
 
-      await this.attachmentsService.assertAttachmentExists(
+      const attachment = await this.attachmentsService.assertAttachmentExists(
         existing.attachmentId,
         userId,
         tx,
       );
+      const effectiveProjectId = attachment?.item?.projectId || undefined;
+      const eventScope = { userId, projectId: effectiveProjectId };
 
       this.assertCanModifyAnnotation(userId, existing);
 
@@ -120,7 +125,7 @@ export class AnnotationsService {
         existing,
       );
 
-      await helpers.appendChange(userId, {
+      await helpers.appendChange(eventScope, {
         entityType: 'Annotation',
         entityId: updated.id,
         action: 'update',
@@ -129,7 +134,7 @@ export class AnnotationsService {
       });
 
       await helpers.publishOutbox(
-        userId,
+        eventScope,
         updated.id,
         'library.annotation.updated',
         updated,
@@ -144,11 +149,13 @@ export class AnnotationsService {
       const existing = await this.annotationsRepo.findById(id, tx);
       if (!existing) throw new NotFoundException(`Annotation ${id} not found`);
 
-      await this.attachmentsService.assertAttachmentExists(
+      const attachment = await this.attachmentsService.assertAttachmentExists(
         existing.attachmentId,
         userId,
         tx,
       );
+      const effectiveProjectId = attachment?.item?.projectId || undefined;
+      const eventScope = { userId, projectId: effectiveProjectId };
 
       this.assertCanModifyAnnotation(userId, existing);
 
@@ -160,15 +167,20 @@ export class AnnotationsService {
       );
 
       if (deleted) {
-        await helpers.recordTombstone(userId, {
+        await helpers.recordTombstone(eventScope, {
           entityType: 'Annotation',
           entityId: id,
         });
 
-        await helpers.publishOutbox(userId, id, 'library.annotation.deleted', {
+        await helpers.publishOutbox(
+          eventScope,
           id,
-          deletedAt: new Date(),
-        });
+          'library.annotation.deleted',
+          {
+            id,
+            deletedAt: new Date(),
+          },
+        );
       }
 
       return deleted;
@@ -187,11 +199,13 @@ export class AnnotationsService {
     }
 
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      await this.attachmentsService.assertAttachmentExists(
+      const attachment = await this.attachmentsService.assertAttachmentExists(
         attachmentId,
         userId,
         tx,
       );
+      const effectiveProjectId = attachment?.item?.projectId || undefined;
+      const eventScope = { userId, projectId: effectiveProjectId };
 
       const result = await this.annotationsRepo.batchUpsert(
         attachmentId,
@@ -203,14 +217,14 @@ export class AnnotationsService {
 
       // Outbox events for created
       for (const annotation of result.created) {
-        await helpers.appendChange(userId, {
+        await helpers.appendChange(eventScope, {
           entityType: 'Annotation',
           entityId: annotation.id,
           action: 'create',
           version: annotation.version,
         });
         await helpers.publishOutbox(
-          userId,
+          eventScope,
           annotation.id,
           'library.annotation.created',
           annotation,
@@ -219,14 +233,14 @@ export class AnnotationsService {
 
       // Outbox events for updated
       for (const annotation of result.updated) {
-        await helpers.appendChange(userId, {
+        await helpers.appendChange(eventScope, {
           entityType: 'Annotation',
           entityId: annotation.id,
           action: 'update',
           version: annotation.version,
         });
         await helpers.publishOutbox(
-          userId,
+          eventScope,
           annotation.id,
           'library.annotation.updated',
           annotation,
@@ -235,14 +249,19 @@ export class AnnotationsService {
 
       // Tombstones for deleted
       for (const id of result.deleted) {
-        await helpers.recordTombstone(userId, {
+        await helpers.recordTombstone(eventScope, {
           entityType: 'Annotation',
           entityId: id,
         });
-        await helpers.publishOutbox(userId, id, 'library.annotation.deleted', {
+        await helpers.publishOutbox(
+          eventScope,
           id,
-          deletedAt: new Date(),
-        });
+          'library.annotation.deleted',
+          {
+            id,
+            deletedAt: new Date(),
+          },
+        );
       }
 
       return result;
@@ -268,11 +287,14 @@ export class AnnotationsService {
         );
       }
 
-      await this.attachmentsService.assertAttachmentExists(
+      const attachment = await this.attachmentsService.assertAttachmentExists(
         existing.attachmentId,
         userId,
         tx,
       );
+      const effectiveProjectId =
+        command.projectId || attachment?.item?.projectId || undefined;
+      const syncScope = { userId, projectId: effectiveProjectId };
 
       const updated = await tx.annotation.update({
         where: { id: command.existingId },
@@ -285,7 +307,7 @@ export class AnnotationsService {
         },
       });
 
-      await helpers.appendChange(userId, {
+      await helpers.appendChange(syncScope, {
         entityType: 'Annotation',
         entityId: updated.id,
         action: 'update',
@@ -300,11 +322,14 @@ export class AnnotationsService {
         );
       }
 
-      await this.attachmentsService.assertAttachmentExists(
+      const attachment = await this.attachmentsService.assertAttachmentExists(
         command.attachmentId,
         userId,
         tx,
       );
+      const effectiveProjectId =
+        command.projectId || attachment?.item?.projectId || undefined;
+      const syncScope = { userId, projectId: effectiveProjectId };
 
       const created = await tx.annotation.create({
         data: {
@@ -320,7 +345,7 @@ export class AnnotationsService {
         },
       });
 
-      await helpers.appendChange(userId, {
+      await helpers.appendChange(syncScope, {
         entityType: 'Annotation',
         entityId: created.id,
         action: 'create',
@@ -328,7 +353,7 @@ export class AnnotationsService {
       });
 
       await helpers.publishOutbox(
-        userId,
+        syncScope,
         created.id,
         'library.annotation.created',
         { annotationId: created.id },
@@ -350,22 +375,35 @@ export class AnnotationsService {
     });
     if (!existing) return;
 
-    await this.attachmentsService.assertAttachmentExists(
-      existing.attachmentId,
-      userId,
-      tx,
-    );
+    let effectiveProjectId = command.projectId || (command as any).projectId;
+    try {
+      const attachment = await this.attachmentsService.assertAttachmentExists(
+        existing.attachmentId,
+        userId !== 'system' ? userId : undefined,
+        tx,
+      );
+      effectiveProjectId =
+        effectiveProjectId || attachment?.item?.projectId || undefined;
+    } catch {
+      // Attachment or item may be deleted or inaccessible during cascade sync
+    }
+    const syncScope = { userId: command.userId, projectId: effectiveProjectId };
 
     await tx.annotation.update({
       where: { id: entityId },
       data: { deletedAt: new Date() },
     });
 
-    await helpers.appendChange(userId, {
+    await helpers.appendChange(syncScope, {
       entityType: 'Annotation',
       entityId,
       action: 'delete',
       version: existing.version + 1,
+    });
+    await helpers.recordTombstone(syncScope, {
+      entityType: 'Annotation',
+      entityId,
+      deletedById: command.userId || undefined,
     });
   }
 

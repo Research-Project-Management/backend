@@ -69,7 +69,7 @@ function mergeCreators(metadata: ItemMetadata, primaryRole: string = 'author') {
       const parsed = parseCreatorString(
         cleanName || `${finalFirst} ${finalLast}`.trim(),
         0,
-        creatorType as any,
+        creatorType,
       );
       finalFirst = parsed.firstName || finalFirst;
       finalLast = parsed.lastName || finalLast;
@@ -110,7 +110,12 @@ function mergeCreators(metadata: ItemMetadata, primaryRole: string = 'author') {
         );
       }
     } else if (c.firstName || c.lastName) {
-      append('', creatorType, c.firstName || undefined, c.lastName || undefined);
+      append(
+        '',
+        creatorType,
+        c.firstName || undefined,
+        c.lastName || undefined,
+      );
     }
   }
 
@@ -194,7 +199,9 @@ export function toItemData(
     ...(metadata.bookTitle ? { bookTitle: metadata.bookTitle } : {}),
     ...(metadata.conferenceName &&
     metadata.conferenceName !==
-      (metadata.publicationTitle ?? metadata.proceedingsTitle ?? metadata.journal)
+      (metadata.publicationTitle ??
+        metadata.proceedingsTitle ??
+        metadata.journal)
       ? { conferenceName: metadata.conferenceName }
       : {}),
     ...(metadata.eventPlace ? { eventPlace: metadata.eventPlace } : {}),
@@ -210,7 +217,9 @@ export function toItemData(
     ...(metadata.reportNumber ? { reportNumber: metadata.reportNumber } : {}),
     ...(metadata.reportType ? { reportType: metadata.reportType } : {}),
     ...(metadata.thesisType ? { thesisType: metadata.thesisType } : {}),
-    ...(metadata.versionNumber ? { versionNumber: metadata.versionNumber } : {}),
+    ...(metadata.versionNumber
+      ? { versionNumber: metadata.versionNumber }
+      : {}),
     ...(metadata.patentNumber ? { patentNumber: metadata.patentNumber } : {}),
     ...(metadata.applicationNumber
       ? { applicationNumber: metadata.applicationNumber }
@@ -245,9 +254,7 @@ export function toItemData(
     journal: metadata.journal,
     journalAbbr: metadata.journalAbbr,
     publisher:
-      metadata.publisher ??
-      metadata.institution ??
-      metadata.university,
+      metadata.publisher ?? metadata.institution ?? metadata.university,
     place: metadata.place ?? metadata.eventPlace,
     volume: metadata.volume,
     issue: metadata.issue,

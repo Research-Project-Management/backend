@@ -103,6 +103,7 @@ model PageComment {
   deletedAt     DateTime?     @map("deleted_at") @db.Timestamptz(6)
 
   @@index([pageId, status])
+  @@index([projectPageId])
   @@index([authorId])
   @@map("page_comments")
 }
@@ -130,6 +131,7 @@ model PageSuggestion {
   deletedAt     DateTime?        @map("deleted_at") @db.Timestamptz(6)
 
   @@index([pageId, status])
+  @@index([projectPageId])
   @@index([authorId])
   @@map("page_suggestions")
 }

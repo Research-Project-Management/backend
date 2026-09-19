@@ -48,7 +48,10 @@ import { AppService } from './app.service';
           if (parsed.username && parsed.username !== 'default') {
             username = decodeURIComponent(parsed.username);
           }
-          if (parsed.protocol === 'rediss:' || redisUrl.startsWith('rediss://')) {
+          if (
+            parsed.protocol === 'rediss:' ||
+            redisUrl.startsWith('rediss://')
+          ) {
             isTls = true;
           }
         } catch {

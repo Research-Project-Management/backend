@@ -205,7 +205,12 @@ export class QueryRepository {
     });
   }
 
-  async findByDoi(userId: string, doi: string, projectId?: string, tx?: Prisma.TransactionClient) {
+  async findByDoi(
+    userId: string,
+    doi: string,
+    projectId?: string,
+    tx?: Prisma.TransactionClient,
+  ) {
     if (!isUuid(userId)) return null;
     const client = this.getClient(tx);
     const scopeWhere =
@@ -405,10 +410,10 @@ export class QueryRepository {
     const view = options.view ?? 'all';
     const hasValidProject = Boolean(
       options.projectId &&
-        options.projectId !== 'user' &&
-        options.projectId !== 'me' &&
-        options.projectId !== 'personal' &&
-        isUuid(options.projectId),
+      options.projectId !== 'user' &&
+      options.projectId !== 'me' &&
+      options.projectId !== 'personal' &&
+      isUuid(options.projectId),
     );
     const where: any = hasValidProject
       ? { projectId: options.projectId }
@@ -806,7 +811,10 @@ export class QueryRepository {
         }
 
         const authorNames = (peerItem.contributors || [])
-          .map((c: any) => c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim())
+          .map(
+            (c: any) =>
+              c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+          )
           .filter(Boolean);
 
         result.push({

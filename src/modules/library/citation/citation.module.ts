@@ -9,7 +9,13 @@ import { CitationController } from './citation.controller';
 import { DoiContentNegotiationService } from './services/doi-content-negotiation.service';
 import { CslEngineService } from './services/csl-engine.service';
 @Module({
-  imports: [CoreModule, ItemsModule, MetadataModule, AnnotationsModule, TypesModule],
+  imports: [
+    CoreModule,
+    ItemsModule,
+    MetadataModule,
+    AnnotationsModule,
+    TypesModule,
+  ],
   controllers: [CitationController],
   providers: [CitationService, DoiContentNegotiationService, CslEngineService],
   exports: [CitationService, DoiContentNegotiationService, CslEngineService],

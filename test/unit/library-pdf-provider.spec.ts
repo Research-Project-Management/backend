@@ -22,13 +22,19 @@ describe('PdfProvider', () => {
       numPages: 30,
       getPage: jest.fn(async (pageNumber: number) => ({
         getTextContent: jest.fn().mockResolvedValue({
-          items: [{ str: `Page ${pageNumber} contains enough searchable text for indexing.` }],
+          items: [
+            {
+              str: `Page ${pageNumber} contains enough searchable text for indexing.`,
+            },
+          ],
         }),
       })),
     });
 
     const provider = new PdfProvider();
-    const result = await provider.extractDocumentFromBuffer(Buffer.from('%PDF fixture'));
+    const result = await provider.extractDocumentFromBuffer(
+      Buffer.from('%PDF fixture'),
+    );
 
     expect(result.pages).toHaveLength(30);
     expect(result.pages[29].textContent).toContain('Page 30');
@@ -46,11 +52,15 @@ describe('PdfProvider', () => {
     const ocr = {
       enabled: true,
       maxPages: 50,
-      recognizePdfPage: jest.fn().mockResolvedValue('Scanned article text from OCR'),
+      recognizePdfPage: jest
+        .fn()
+        .mockResolvedValue('Scanned article text from OCR'),
     };
 
     const provider = new PdfProvider(undefined, undefined, ocr as any);
-    const result = await provider.extractDocumentFromBuffer(Buffer.from('%PDF scan'));
+    const result = await provider.extractDocumentFromBuffer(
+      Buffer.from('%PDF scan'),
+    );
 
     expect(ocr.recognizePdfPage).toHaveBeenCalledWith(page, 0);
     expect(result.pages[0].textContent).toBe('Scanned article text from OCR');

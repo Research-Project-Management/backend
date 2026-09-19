@@ -21,6 +21,7 @@ export interface ProjectSettingsWithAssignee {
 
 export const ELIGIBLE_ASSIGNEE_ROLES: readonly ProjectMemberRole[] = [
   ProjectMemberRole.owner,
+  ProjectMemberRole.coordinator,
   ProjectMemberRole.contributor,
 ] as const;
 

@@ -1,0 +1,482 @@
+﻿import { Test, TestingModule } from '@nestjs/testing';
+import { NotesService } from '@/modules/library/notes/notes.service';
+import { NotesRepository } from '@/modules/library/notes/notes.repository';
+import { AnnotationsService } from '@/modules/library/annotations/annotations.service';
+import { AnnotationsRepository } from '@/modules/library/annotations/annotations.repository';
+import { TagsService } from '@/modules/library/tags/tags.service';
+import { TagsRepository } from '@/modules/library/tags/tags.repository';
+import { AttachmentsService } from '@/modules/library/attachments/attachments.service';
+import {
+  TransactionService,
+  TransactionHelpers,
+} from '@/modules/library/outbox/transaction.service';
+import { PrismaService } from '@/core/database/prisma.service';
+import {
+  ITEM_READ_PORT,
+  ITEM_EXISTENCE_PORT,
+} from '@/modules/library/items/ports/items.ports';
+
+describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
+  const mockUserId = '11111111-1111-4111-8111-111111111111';
+  const mockProjectId = '22222222-2222-4222-8222-222222222222';
+  const mockItemId = '33333333-3333-4333-8333-333333333333';
+  const mockAttachmentId = '44444444-4444-4444-8444-444444444444';
+  const mockNoteId = '55555555-5555-4555-8555-555555555555';
+  const mockAnnotationId = '66666666-6666-4666-8666-666666666666';
+  const mockTagId = '77777777-7777-4777-8777-777777777777';
+
+  let mockHelpers: jest.Mocked<TransactionHelpers>;
+  let mockLibraryTx: { executeInTransaction: jest.Mock };
+
+  beforeEach(() => {
+    mockHelpers = {
+      appendChange: jest.fn().mockResolvedValue({} as any),
+      recordTombstone: jest.fn().mockResolvedValue({} as any),
+      publishOutbox: jest.fn().mockResolvedValue({} as any),
+    };
+
+    mockLibraryTx = {
+      executeInTransaction: jest
+        .fn()
+        .mockImplementation((cb: any) => cb({}, mockHelpers)),
+    };
+  });
+
+  describe('NotesService Multi-Tenant Scoping', () => {
+    let service: NotesService;
+    let repo: jest.Mocked<NotesRepository>;
+
+    beforeEach(async () => {
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          NotesService,
+          {
+            provide: NotesRepository,
+            useValue: {
+              create: jest.fn(),
+              update: jest.fn(),
+              findById: jest.fn(),
+              softDelete: jest.fn(),
+              findMany: jest.fn(),
+            },
+          },
+          { provide: TransactionService, useValue: mockLibraryTx },
+          { provide: PrismaService, useValue: {} },
+          {
+            provide: ITEM_READ_PORT,
+            useValue: {
+              findById: jest.fn().mockResolvedValue({
+                id: mockItemId,
+                projectId: mockProjectId,
+              }),
+            },
+          },
+          {
+            provide: ITEM_EXISTENCE_PORT,
+            useValue: { assertExists: jest.fn().mockResolvedValue(undefined) },
+          },
+        ],
+      }).compile();
+
+      service = module.get<NotesService>(NotesService);
+      repo = module.get(NotesRepository);
+    });
+
+    it('should propagate projectId to appendChange and publishOutbox on createNote', async () => {
+      repo.create.mockResolvedValue({
+        id: mockNoteId,
+        version: 1,
+        title: 'Project Note',
+        projectId: mockProjectId,
+      } as any);
+
+      await service.createNote(mockUserId, {
+        title: 'Project Note',
+        projectId: mockProjectId,
+        itemId: mockItemId,
+        createdById: mockUserId,
+      });
+
+      expect(mockHelpers.appendChange).toHaveBeenCalledWith(
+        { userId: mockUserId, projectId: mockProjectId },
+        expect.objectContaining({
+          entityType: 'Note',
+          entityId: mockNoteId,
+          action: 'create',
+        }),
+      );
+
+      expect(mockHelpers.publishOutbox).toHaveBeenCalledWith(
+        { userId: mockUserId, projectId: mockProjectId },
+        mockNoteId,
+        'library.note.created',
+        expect.anything(),
+      );
+    });
+
+    it('should propagate projectId to appendChange and publishOutbox on updateNote', async () => {
+      repo.update.mockResolvedValue({
+        id: mockNoteId,
+        version: 2,
+        title: 'Updated Note',
+        projectId: mockProjectId,
+      } as any);
+
+      await service.updateNote(
+        mockUserId,
+        mockNoteId,
+        1,
+        { title: 'Updated Note' },
+        mockProjectId,
+      );
+
+      expect(mockHelpers.appendChange).toHaveBeenCalledWith(
+        { userId: mockUserId, projectId: mockProjectId },
+        expect.objectContaining({
+          entityType: 'Note',
+          entityId: mockNoteId,
+          action: 'update',
+          version: 2,
+        }),
+      );
+
+      expect(mockHelpers.publishOutbox).toHaveBeenCalledWith(
+        { userId: mockUserId, projectId: mockProjectId },
+        mockNoteId,
+        'library.note.updated',
+        expect.anything(),
+      );
+    });
+
+    it('should propagate projectId to recordTombstone and publishOutbox on deleteNote', async () => {
+      repo.findById.mockResolvedValue({
+        id: mockNoteId,
+        projectId: mockProjectId,
+      } as any);
+      repo.softDelete.mockResolvedValue(true);
+
+      await service.deleteNote(mockUserId, mockNoteId, 1, mockProjectId);
+
+      expect(mockHelpers.recordTombstone).toHaveBeenCalledWith(
+        { userId: mockUserId, projectId: mockProjectId },
+        expect.objectContaining({
+          entityType: 'Note',
+          entityId: mockNoteId,
+        }),
+      );
+
+      expect(mockHelpers.publishOutbox).toHaveBeenCalledWith(
+        { userId: mockUserId, projectId: mockProjectId },
+        mockNoteId,
+        'library.note.deleted',
+        expect.anything(),
+      );
+    });
+
+    it('should pass projectId syncScope to appendChange in upsertFromSync', async () => {
+      const mockTx = {
+        note: {
+          findUnique: jest.fn().mockResolvedValue({
+            id: mockNoteId,
+            userId: mockUserId,
+            projectId: mockProjectId,
+            tags: [],
+          }),
+          update: jest.fn().mockResolvedValue({
+            id: mockNoteId,
+            version: 3,
+            projectId: mockProjectId,
+          }),
+        },
+      } as any;
+
+      await service.upsertFromSync(
+        {
+          userId: mockUserId,
+          projectId: mockProjectId,
+          existingId: mockNoteId,
+          title: 'Synced Note',
+          contentMd: 'Synced content',
+        },
+        mockTx,
+        mockHelpers,
+      );
+
+      expect(mockHelpers.appendChange).toHaveBeenCalledWith(
+        { userId: mockUserId, projectId: mockProjectId },
+        expect.objectContaining({
+          entityType: 'Note',
+          entityId: mockNoteId,
+          action: 'update',
+          version: 3,
+        }),
+      );
+    });
+
+    it('should record tombstone with projectId in deleteFromSync', async () => {
+      const mockTx = {
+        note: {
+          findFirst: jest.fn().mockResolvedValue({
+            id: mockNoteId,
+            version: 1,
+            projectId: mockProjectId,
+          }),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+      } as any;
+
+      await service.deleteFromSync(
+        {
+          userId: mockUserId,
+          projectId: mockProjectId,
+          entityId: mockNoteId,
+          entityType: 'Note',
+        },
+        mockTx,
+        mockHelpers,
+      );
+
+      expect(mockHelpers.appendChange).toHaveBeenCalledWith(
+        { userId: mockUserId, projectId: mockProjectId },
+        expect.objectContaining({
+          entityType: 'Note',
+          entityId: mockNoteId,
+          action: 'delete',
+        }),
+      );
+
+      expect(mockHelpers.recordTombstone).toHaveBeenCalledWith(
+        { userId: mockUserId, projectId: mockProjectId },
+        expect.objectContaining({
+          entityType: 'Note',
+          entityId: mockNoteId,
+        }),
+      );
+    });
+  });
+
+  describe('AnnotationsService Multi-Tenant Scoping', () => {
+    let service: AnnotationsService;
+    let repo: jest.Mocked<AnnotationsRepository>;
+    let attachmentsService: jest.Mocked<AttachmentsService>;
+
+    beforeEach(async () => {
+      attachmentsService = {
+        assertAttachmentExists: jest.fn().mockResolvedValue({
+          id: mockAttachmentId,
+          item: { id: mockItemId, projectId: mockProjectId },
+        }),
+      } as any;
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          AnnotationsService,
+          {
+            provide: AnnotationsRepository,
+            useValue: {
+              create: jest.fn(),
+              update: jest.fn(),
+              findById: jest.fn(),
+              softDelete: jest.fn(),
+              findByAttachment: jest.fn(),
+            },
+          },
+          { provide: TransactionService, useValue: mockLibraryTx },
+          { provide: AttachmentsService, useValue: attachmentsService },
+        ],
+      }).compile();
+
+      service = module.get<AnnotationsService>(AnnotationsService);
+      repo = module.get(AnnotationsRepository);
+    });
+
+    it('should inherit projectId from parent item on createAnnotation', async () => {
+      repo.create.mockResolvedValue({
+        id: mockAnnotationId,
+        version: 1,
+      } as any);
+
+      await service.createAnnotation(mockUserId, {
+        authorId: mockUserId,
+        attachmentId: mockAttachmentId,
+        pageIndex: 1,
+        quoteText: 'Deep neural networks learn representations',
+      });
+
+      expect(mockHelpers.appendChange).toHaveBeenCalledWith(
+        { userId: mockUserId, projectId: mockProjectId },
+        expect.objectContaining({
+          entityType: 'Annotation',
+          entityId: mockAnnotationId,
+          action: 'create',
+        }),
+      );
+
+      expect(mockHelpers.publishOutbox).toHaveBeenCalledWith(
+        { userId: mockUserId, projectId: mockProjectId },
+        mockAnnotationId,
+        'library.annotation.created',
+        expect.anything(),
+      );
+    });
+
+    it('should inherit projectId on deleteAnnotation and record tombstone', async () => {
+      repo.findById.mockResolvedValue({
+        id: mockAnnotationId,
+        attachmentId: mockAttachmentId,
+        authorId: mockUserId,
+      } as any);
+      repo.softDelete.mockResolvedValue(true);
+
+      await service.deleteAnnotation(mockUserId, mockAnnotationId);
+
+      expect(mockHelpers.recordTombstone).toHaveBeenCalledWith(
+        { userId: mockUserId, projectId: mockProjectId },
+        expect.objectContaining({
+          entityType: 'Annotation',
+          entityId: mockAnnotationId,
+        }),
+      );
+
+      expect(mockHelpers.publishOutbox).toHaveBeenCalledWith(
+        { userId: mockUserId, projectId: mockProjectId },
+        mockAnnotationId,
+        'library.annotation.deleted',
+        expect.anything(),
+      );
+    });
+
+    it('should record tombstone and appendChange with syncScope on deleteFromSync', async () => {
+      const mockTx = {
+        annotation: {
+          findUnique: jest.fn().mockResolvedValue({
+            id: mockAnnotationId,
+            attachmentId: mockAttachmentId,
+            version: 1,
+          }),
+          update: jest.fn().mockResolvedValue({}),
+        },
+      } as any;
+
+      await service.deleteFromSync(
+        {
+          userId: mockUserId,
+          projectId: mockProjectId,
+          entityId: mockAnnotationId,
+          entityType: 'Annotation',
+        },
+        mockTx,
+        mockHelpers,
+      );
+
+      expect(mockHelpers.appendChange).toHaveBeenCalledWith(
+        { userId: mockUserId, projectId: mockProjectId },
+        expect.objectContaining({
+          entityType: 'Annotation',
+          entityId: mockAnnotationId,
+          action: 'delete',
+        }),
+      );
+
+      expect(mockHelpers.recordTombstone).toHaveBeenCalledWith(
+        { userId: mockUserId, projectId: mockProjectId },
+        expect.objectContaining({
+          entityType: 'Annotation',
+          entityId: mockAnnotationId,
+        }),
+      );
+    });
+  });
+
+  describe('TagsService Multi-Tenant Scoping', () => {
+    let service: TagsService;
+    let repo: jest.Mocked<TagsRepository>;
+
+    beforeEach(async () => {
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          TagsService,
+          {
+            provide: TagsRepository,
+            useValue: {
+              create: jest.fn(),
+              delete: jest.fn(),
+              assignToItem: jest.fn(),
+              removeFromItem: jest.fn(),
+              findUnique: jest.fn(),
+            },
+          },
+          { provide: TransactionService, useValue: mockLibraryTx },
+          { provide: PrismaService, useValue: {} },
+        ],
+      }).compile();
+
+      service = module.get<TagsService>(TagsService);
+      repo = module.get(TagsRepository);
+      jest.spyOn(service, 'invalidateTagsCache').mockResolvedValue(undefined);
+    });
+
+    it('should propagate projectId on createOrGetTag', async () => {
+      repo.create.mockResolvedValue({
+        id: mockTagId,
+        name: 'physics',
+        projectId: mockProjectId,
+      } as any);
+
+      await service.createOrGetTag(
+        mockUserId,
+        'physics',
+        '#00ff00',
+        'custom',
+        mockProjectId,
+      );
+
+      expect(mockHelpers.appendChange).toHaveBeenCalledWith(
+        { userId: mockUserId, projectId: mockProjectId },
+        expect.objectContaining({
+          entityType: 'Tag',
+          entityId: mockTagId,
+          action: 'create',
+        }),
+      );
+
+      expect(mockHelpers.publishOutbox).toHaveBeenCalledWith(
+        { userId: mockUserId, projectId: mockProjectId },
+        mockTagId,
+        'library.tag.created',
+        expect.anything(),
+      );
+    });
+
+    it('should propagate projectId on assignTag and removeTag', async () => {
+      const mockTx = {
+        tag: { findFirst: jest.fn().mockResolvedValue({ id: mockTagId }) },
+        item: { findFirst: jest.fn().mockResolvedValue({ id: mockItemId }) },
+      };
+      mockLibraryTx.executeInTransaction.mockImplementation((cb: any) =>
+        cb(mockTx, mockHelpers),
+      );
+
+      await service.assignTag(mockUserId, mockTagId, mockItemId, mockProjectId);
+
+      expect(mockHelpers.appendChange).toHaveBeenCalledWith(
+        { userId: mockUserId, projectId: mockProjectId },
+        expect.objectContaining({
+          entityType: 'ItemTag',
+          entityId: `${mockTagId}:${mockItemId}`,
+          action: 'create',
+        }),
+      );
+
+      await service.removeTag(mockUserId, mockTagId, mockItemId, mockProjectId);
+
+      expect(mockHelpers.recordTombstone).toHaveBeenCalledWith(
+        { userId: mockUserId, projectId: mockProjectId },
+        expect.objectContaining({
+          entityType: 'ItemTag',
+          entityId: `${mockTagId}:${mockItemId}`,
+        }),
+      );
+    });
+  });
+});

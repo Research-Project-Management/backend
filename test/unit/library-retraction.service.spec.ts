@@ -16,9 +16,11 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
     {
       doi: '10.1016/s0140-6736(97)11096-0',
       pmid: '9500320',
-      title: 'Ileal-lymphoid-nodular hyperplasia, non-specific colitis, and pervasive developmental disorder in children',
+      title:
+        'Ileal-lymphoid-nodular hyperplasia, non-specific colitis, and pervasive developmental disorder in children',
       nature: 'retraction',
-      reason: 'Data falsification and non-reproducible findings (Wakefield MMR autism)',
+      reason:
+        'Data falsification and non-reproducible findings (Wakefield MMR autism)',
       noticeUrl: 'https://doi.org/10.1016/S0140-6736(10)60175-4',
       retractionDate: '2010-02-06T00:00:00.000Z',
       source: 'retraction_watch',
@@ -26,7 +28,8 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
     {
       doi: '10.1016/s0140-6736(20)31180-6',
       pmid: '32450107',
-      title: 'Hydroxychloroquine or chloroquine with or without a macrolide for treatment of COVID-19',
+      title:
+        'Hydroxychloroquine or chloroquine with or without a macrolide for treatment of COVID-19',
       nature: 'retraction',
       reason: 'Surgisphere fraudulent registry',
       noticeUrl: 'https://doi.org/10.1016/S0140-6736(20)31324-6',
@@ -75,7 +78,10 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
         findMany: jest.fn(async ({ where }: any) => {
           const list: any[] = [];
           for (const v of recordsMap.values()) {
-            if (where?.isRetracted !== undefined && v.isRetracted !== where.isRetracted) {
+            if (
+              where?.isRetracted !== undefined &&
+              v.isRetracted !== where.isRetracted
+            ) {
               continue;
             }
             list.push(v);
@@ -113,7 +119,9 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
 
   describe('RetractionDatabaseService', () => {
     it('should identify retracted papers in 0ms from in-memory index without DB roundtrip', async () => {
-      const result = await retractionDb.checkRetraction('10.1016/s0140-6736(97)11096-0');
+      const result = await retractionDb.checkRetraction(
+        '10.1016/s0140-6736(97)11096-0',
+      );
       expect(result).not.toBeNull();
       expect(result).not.toBe(false);
       if (result) {
@@ -199,7 +207,10 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
         retractionNature: null,
       };
       mockPrisma.item.findFirst.mockResolvedValue(mockItem);
-      mockPrisma.item.update.mockResolvedValue({ ...mockItem, isRetracted: true });
+      mockPrisma.item.update.mockResolvedValue({
+        ...mockItem,
+        isRetracted: true,
+      });
 
       const checkResult = await service.checkItem('user-1', 'item-123');
 
@@ -278,7 +289,9 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
       mockPrisma.item.findMany.mockResolvedValue(staleItems);
       mockPrisma.item.update.mockResolvedValue({});
 
-      const syncRes = await service.syncLibrary('user-1', undefined, { maxDays: 14 });
+      const syncRes = await service.syncLibrary('user-1', undefined, {
+        maxDays: 14,
+      });
       expect(syncRes.totalEligible).toBe(2);
       expect(syncRes.scanned).toBe(1);
       expect(syncRes.newlyRetracted).toBe(1);

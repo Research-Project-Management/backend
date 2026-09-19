@@ -50,7 +50,8 @@ export class CoreController {
 
   @Get()
   @ApiOperation({
-    summary: 'List user projects (My Projects & Shared with Me) with multi-dimensional filtering',
+    summary:
+      'List user projects (My Projects & Shared with Me) with multi-dimensional filtering',
   })
   @ApiResponse({
     status: 200,
@@ -81,7 +82,7 @@ export class CoreController {
 
   @Get(':projectId')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get project detail by ID' })
   @ApiResponse({
     status: 200,

@@ -9,7 +9,8 @@ export class UpdateProjectStateDto {
     example: ProjectState.execution,
   })
   @IsEnum(ProjectState, {
-    message: 'State must be one of: draft, planning, execution, monitoring, completed, cancelled',
+    message:
+      'State must be one of: draft, planning, execution, monitoring, completed, cancelled',
   })
   @IsNotEmpty({ message: 'State is required' })
   state!: ProjectState;

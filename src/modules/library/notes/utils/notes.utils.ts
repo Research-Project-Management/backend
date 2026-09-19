@@ -112,6 +112,7 @@ export function buildTipTapDocFromText(text: string): Record<string, unknown> {
 export function sanitizeNoteTitle(title?: string | null): string {
   if (!title || typeof title !== 'string') return 'Untitled Note';
   let cleaned = stripNoteHtml(title).trim();
+  // eslint-disable-next-line no-control-regex
   cleaned = cleaned.replace(/[\x00-\x1F\x7F]/g, '');
   cleaned = cleaned.replace(/\s+/g, ' ').trim();
   if (cleaned.length > 255) {
@@ -199,11 +200,20 @@ export function formatLiteratureNoteMarkdown(
   });
 
   // Determine in-text citation prefix (e.g. "Vaswani et al., 2017")
-  const firstCreator = Array.isArray(item.creators) && item.creators.length > 0 ? item.creators[0] : null;
+  const firstCreator =
+    Array.isArray(item.creators) && item.creators.length > 0
+      ? item.creators[0]
+      : null;
   const firstAuthorName = firstCreator
-    ? (firstCreator.lastName || firstCreator.fullName?.split(' ').slice(-1)[0] || 'Unknown')
-    : (Array.isArray(item.contributors) && item.contributors.length > 0 ? (item.contributors[0].lastName || 'Unknown') : 'Unknown');
-  const hasMultipleAuthors = (Array.isArray(item.creators) && item.creators.length > 1) || (Array.isArray(item.contributors) && item.contributors.length > 1);
+    ? firstCreator.lastName ||
+      firstCreator.fullName?.split(' ').slice(-1)[0] ||
+      'Unknown'
+    : Array.isArray(item.contributors) && item.contributors.length > 0
+      ? item.contributors[0].lastName || 'Unknown'
+      : 'Unknown';
+  const hasMultipleAuthors =
+    (Array.isArray(item.creators) && item.creators.length > 1) ||
+    (Array.isArray(item.contributors) && item.contributors.length > 1);
   const citationYear = item.year ? String(item.year) : 'n.d.';
   const authorCitationBase = `${firstAuthorName}${hasMultipleAuthors ? ' et al.' : ''}, ${citationYear}`;
 

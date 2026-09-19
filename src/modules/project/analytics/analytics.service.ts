@@ -10,13 +10,16 @@ export class ProjectAnalyticsService {
    * Calculate high-level portfolio overview metrics for a project:
    * % complete, work item counts by group, timeline deadline status.
    */
-  async getProjectOverview(projectId: string): Promise<ProjectPortfolioOverviewDto> {
+  async getProjectOverview(
+    projectId: string,
+  ): Promise<ProjectPortfolioOverviewDto> {
     const project = await this.analyticsRepo.getProjectWithMetadata(projectId);
     if (!project) {
       throw new NotFoundException(`Project with ID "${projectId}" not found`);
     }
 
-    const stateCounts = await this.analyticsRepo.getWorkItemsCountsByStateGroup(projectId);
+    const stateCounts =
+      await this.analyticsRepo.getWorkItemsCountsByStateGroup(projectId);
     const activeCycle = await this.analyticsRepo.getActiveCycle(projectId);
 
     const backlog = stateCounts.backlog || 0;
@@ -25,10 +28,13 @@ export class ProjectAnalyticsService {
     const completed = stateCounts.completed || 0;
     const cancelled = stateCounts.cancelled || 0;
 
-    const totalWorkItems = backlog + unstarted + started + completed + cancelled;
+    const totalWorkItems =
+      backlog + unstarted + started + completed + cancelled;
     const actionableTotal = totalWorkItems - cancelled;
     const completionPercentage =
-      actionableTotal > 0 ? Number(((completed / actionableTotal) * 100).toFixed(1)) : 0;
+      actionableTotal > 0
+        ? Number(((completed / actionableTotal) * 100).toFixed(1))
+        : 0;
 
     // Timeline calculations
     let daysRemaining: number | null = null;
@@ -70,7 +76,10 @@ export class ProjectAnalyticsService {
 
     const byPriority: Record<string, number> = {};
     const byStateGroup: Record<string, number> = {};
-    const byState: Record<string, { id: string; name: string; color: string; count: number }> = {};
+    const byState: Record<
+      string,
+      { id: string; name: string; color: string; count: number }
+    > = {};
     const byAssignee: Record<string, number> = {};
 
     for (const item of items) {
@@ -156,12 +165,11 @@ export class ProjectAnalyticsService {
   async getLabelDistribution(
     projectId: string,
   ): Promise<{ labels: { label: string; count: number }[] }> {
-    const items = await this.analyticsRepo.findProjectWorkItemsByLabel(projectId);
+    const items =
+      await this.analyticsRepo.findProjectWorkItemsByLabel(projectId);
     const labelCount: Record<string, number> = {};
     for (const item of items) {
-      const labels: string[] = Array.isArray(item.labels)
-        ? (item.labels as string[])
-        : [];
+      const labels: string[] = Array.isArray(item.labels) ? item.labels : [];
       for (const label of labels) {
         if (label) labelCount[label] = (labelCount[label] || 0) + 1;
       }

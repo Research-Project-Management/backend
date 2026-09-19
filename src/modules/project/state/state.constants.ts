@@ -11,7 +11,8 @@ export const PROJECT_STATES_CATALOG: ProjectStateMetadata[] = [
   {
     state: 'draft',
     label: 'Bản nháp (Draft)',
-    description: 'Dự án đang trong giai đoạn phác thảo ý tưởng, chưa chốt duyệt kế hoạch.',
+    description:
+      'Dự án đang trong giai đoạn phác thảo ý tưởng, chưa chốt duyệt kế hoạch.',
     order: 1,
   },
   {
@@ -23,19 +24,22 @@ export const PROJECT_STATES_CATALOG: ProjectStateMetadata[] = [
   {
     state: 'execution',
     label: 'Đang triển khai (Execution / In Progress)',
-    description: 'Đội ngũ đang tích cực thực thi, viết mã và hoàn thiện các work-items.',
+    description:
+      'Đội ngũ đang tích cực thực thi, viết mã và hoàn thiện các work-items.',
     order: 3,
   },
   {
     state: 'monitoring',
     label: 'Giám sát & Đánh giá (Monitoring / Review)',
-    description: 'Kiểm thử, thử nghiệm beta, nghiệm thu chất lượng trước khi hoàn thành.',
+    description:
+      'Kiểm thử, thử nghiệm beta, nghiệm thu chất lượng trước khi hoàn thành.',
     order: 4,
   },
   {
     state: 'completed',
     label: 'Hoàn thành (Completed)',
-    description: 'Dự án đã nghiệm thu thành công và hoàn tất toàn bộ mục tiêu đề ra.',
+    description:
+      'Dự án đã nghiệm thu thành công và hoàn tất toàn bộ mục tiêu đề ra.',
     order: 5,
   },
   {

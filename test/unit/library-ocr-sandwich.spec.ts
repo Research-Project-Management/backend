@@ -46,10 +46,9 @@ describe('OcrSandwichPdfService', () => {
     };
 
     // 3. Generate Sandwich PDF
-    const resultBuffer = await service.generateSearchablePdf(
-      originalBuffer,
-      [mockPageResult],
-    );
+    const resultBuffer = await service.generateSearchablePdf(originalBuffer, [
+      mockPageResult,
+    ]);
 
     expect(resultBuffer).toBeDefined();
     expect(resultBuffer.length).toBeGreaterThan(originalBuffer.length);
@@ -104,10 +103,9 @@ describe('OcrSandwichPdfService', () => {
     };
 
     // Should not throw WinAnsi error, and return a valid PDF document
-    const resultBuffer = await service.generateSearchablePdf(
-      originalBuffer,
-      [mockVietnameseResult],
-    );
+    const resultBuffer = await service.generateSearchablePdf(originalBuffer, [
+      mockVietnameseResult,
+    ]);
 
     expect(resultBuffer).toBeDefined();
     expect(resultBuffer.length).toBeGreaterThan(originalBuffer.length);

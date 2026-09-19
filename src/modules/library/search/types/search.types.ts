@@ -9,6 +9,7 @@ export interface SearchOptions {
   sortOrder?: 'asc' | 'desc';
   limit?: number;
   cursor?: string;
+  projectId?: string;
 }
 
 export interface FacetResult {

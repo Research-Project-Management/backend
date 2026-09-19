@@ -31,7 +31,7 @@ export class ArchiveController {
   constructor(private readonly archiveService: ArchiveService) {}
 
   @Post(':workItemId/archive')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Archive a work item (hides from active Kanban/List views)',
@@ -48,7 +48,7 @@ export class ArchiveController {
   }
 
   @Post(':workItemId/restore')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Restore an archived work item to active boards' })
   @ApiParam({
@@ -63,7 +63,7 @@ export class ArchiveController {
   }
 
   @Post('bulk-archive')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Bulk archive multiple work items' })
   async bulkArchive(
@@ -74,7 +74,7 @@ export class ArchiveController {
   }
 
   @Post('bulk-restore')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Bulk restore multiple archived work items' })
   async bulkRestore(
@@ -85,7 +85,7 @@ export class ArchiveController {
   }
 
   @Get('projects/:projectId/archived')
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'List archived work items of a project' })
   @ApiParam({ name: 'projectId', description: 'Project UUID or identifier' })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })

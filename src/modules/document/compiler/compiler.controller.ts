@@ -47,7 +47,7 @@ export class CompilerController {
     'compiler/sync-project/:pageId',
   ])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Sync all page files to compiler workspace' })
   async syncProject(@Param('pageId') pageId: string) {
@@ -61,7 +61,7 @@ export class CompilerController {
     'compiler/sync-incremental/:pageId',
   ])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Incrementally sync only dirty/changed files to compiler',
@@ -80,7 +80,7 @@ export class CompilerController {
     'compiler/save-and-sync/:pageId',
   ])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
@@ -101,7 +101,7 @@ export class CompilerController {
     'compiler/build/:pageId',
   ])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
@@ -121,7 +121,7 @@ export class CompilerController {
     'compiler/rollback/:pageId/:versionId',
   ])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:

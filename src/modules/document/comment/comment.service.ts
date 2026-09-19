@@ -80,7 +80,36 @@ export class CommentService {
     };
   }
 
-  async getComments(pageId: string) {
+  async getComments(pageId: string, userId?: string) {
+    if (!pageId) {
+      return { comments: [] };
+    }
+
+    const page = await this.prisma.page.findFirst({
+      where: { id: pageId, deletedAt: null },
+      select: { id: true, projectId: true, authorId: true },
+    });
+
+    if (!page) {
+      throw new NotFoundException('Page not found');
+    }
+
+    if (userId && page.projectId) {
+      const isCreator = page.authorId === userId;
+      if (!isCreator) {
+        const member = await this.prisma.projectMember.findUnique({
+          where: {
+            projectId_userId: { projectId: page.projectId, userId },
+          },
+        });
+        if (!member) {
+          throw new ForbiddenException(
+            'You do not have permission to view comments on this page',
+          );
+        }
+      }
+    }
+
     const comments = await this.commentRepo.findComments(pageId);
     return { comments };
   }
@@ -91,14 +120,34 @@ export class CommentService {
       throw new UnprocessableEntityException('Comment content cannot be empty');
     }
 
-    const page = await this.prisma.page.findUnique({
-      where: { id: pageId },
-      select: { parentPageId: true },
+    const page = await this.prisma.page.findFirst({
+      where: { id: pageId, deletedAt: null },
+      select: { id: true, parentPageId: true, projectId: true, authorId: true },
     });
+
+    if (!page) {
+      throw new NotFoundException('Page not found');
+    }
+
+    if (userId && page.projectId) {
+      const isCreator = page.authorId === userId;
+      if (!isCreator) {
+        const member = await this.prisma.projectMember.findUnique({
+          where: {
+            projectId_userId: { projectId: page.projectId, userId },
+          },
+        });
+        if (!member) {
+          throw new ForbiddenException(
+            'You do not have permission to comment on this document',
+          );
+        }
+      }
+    }
 
     const comment = await this.commentRepo.createComment({
       pageId,
-      projectPageId: page?.parentPageId || null,
+      projectPageId: page.parentPageId || null,
       authorId: userId,
       content: cleanContent,
       status: dto.status || CommentStatus.open,

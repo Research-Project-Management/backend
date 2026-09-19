@@ -162,7 +162,11 @@ export class DuplicateService {
   /**
    * Non-destructive, atomic merge of duplicate items into a primary item.
    */
-  async mergeDuplicates(userId: string, dto: MergeDuplicatesDto) {
+  async mergeDuplicates(
+    userId: string,
+    dto: MergeDuplicatesDto,
+    projectId?: string,
+  ) {
     if (!dto.primaryItemId) {
       throw new BadRequestException('primaryItemId is required');
     }
@@ -188,8 +192,13 @@ export class DuplicateService {
       }
     }
 
+    const effectiveProjectId = projectId || dto.projectId;
     const allItemIds = [dto.primaryItemId, ...uniqueDupIds];
-    const items = await this.itemReadPort.findByIds(userId, allItemIds);
+    const items = await this.itemReadPort.findByIds(
+      userId,
+      allItemIds,
+      effectiveProjectId,
+    );
 
     if (items.length !== allItemIds.length) {
       throw new NotFoundException(
@@ -235,7 +244,10 @@ export class DuplicateService {
 
       const primaryExistingPairs = new Set<string>();
       for (const rel of existingRelations) {
-        if (rel.sourceItemId === primary.id || rel.targetItemId === primary.id) {
+        if (
+          rel.sourceItemId === primary.id ||
+          rel.targetItemId === primary.id
+        ) {
           primaryExistingPairs.add(
             `${rel.sourceItemId}::${rel.targetItemId}::${rel.relationType}`,
           );
@@ -311,7 +323,9 @@ export class DuplicateService {
         },
       });
 
-      await helpers.appendChange(userId, {
+      const eventScope = { userId, projectId: effectiveProjectId };
+
+      await helpers.appendChange(eventScope, {
         entityType: 'Item',
         entityId: updatedPrimary.id,
         action: 'update',
@@ -320,7 +334,7 @@ export class DuplicateService {
       });
 
       await helpers.publishOutbox(
-        userId,
+        eventScope,
         primary.id,
         LIBRARY_EVENT_TYPES.ITEM_MERGED,
         {
@@ -328,6 +342,7 @@ export class DuplicateService {
           duplicateItemIds: uniqueDupIds,
           mergedCount: duplicates.length,
           mergedAt: now.toISOString(),
+          projectId: effectiveProjectId,
         },
       );
 
@@ -351,12 +366,12 @@ export class DuplicateService {
           },
         });
 
-        await helpers.recordTombstone(userId, {
+        await helpers.recordTombstone(eventScope, {
           entityType: 'Item',
           entityId: dup.id,
         });
 
-        await helpers.appendChange(userId, {
+        await helpers.appendChange(eventScope, {
           entityType: 'Item',
           entityId: dup.id,
           action: 'delete',
@@ -365,13 +380,14 @@ export class DuplicateService {
         });
 
         await helpers.publishOutbox(
-          userId,
+          eventScope,
           dup.id,
           'library.item.merged_into',
           {
             duplicateId: dup.id,
             primaryId: primary.id,
             userId,
+            projectId: effectiveProjectId,
           },
         );
       }

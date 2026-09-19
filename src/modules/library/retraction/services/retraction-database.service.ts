@@ -1,6 +1,10 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../../../../core/database/prisma.service';
-import { RetractionDetails, RetractionNature, RetractionSource } from '../types/retraction.types';
+import {
+  RetractionDetails,
+  RetractionNature,
+  RetractionSource,
+} from '../types/retraction.types';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -37,10 +41,12 @@ export class RetractionDatabaseService implements OnModuleInit {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async onModuleInit(): Promise<void> {
+  onModuleInit(): void {
     // Non-blocking initialization of seed data and memory cache
     this.initializeDataset().catch((err) => {
-      this.logger.warn(`Failed to initialize Retraction Watch dataset: ${err.message}`);
+      this.logger.warn(
+        `Failed to initialize Retraction Watch dataset: ${err.message}`,
+      );
     });
   }
 
@@ -63,11 +69,16 @@ export class RetractionDatabaseService implements OnModuleInit {
     try {
       const existingCount = await this.prisma.retractionRecord.count();
       if (existingCount > 0 && !force) {
-        this.logger.log(`Retraction database already populated (${existingCount} records).`);
+        this.logger.log(
+          `Retraction database already populated (${existingCount} records).`,
+        );
         return existingCount;
       }
 
-      const seedPath = path.resolve(__dirname, '../data/retraction-watch-seed.json');
+      const seedPath = path.resolve(
+        __dirname,
+        '../data/retraction-watch-seed.json',
+      );
       if (!fs.existsSync(seedPath)) {
         this.logger.warn(`Retraction seed file not found at ${seedPath}`);
         return existingCount;
@@ -76,7 +87,9 @@ export class RetractionDatabaseService implements OnModuleInit {
       const raw = fs.readFileSync(seedPath, 'utf8');
       const seedData: RetractionSeedItem[] = JSON.parse(raw);
 
-      this.logger.log(`Seeding ${seedData.length} Retraction Watch records into PostgreSQL...`);
+      this.logger.log(
+        `Seeding ${seedData.length} Retraction Watch records into PostgreSQL...`,
+      );
       let seeded = 0;
 
       for (const item of seedData) {
@@ -92,7 +105,9 @@ export class RetractionDatabaseService implements OnModuleInit {
             nature: item.nature,
             reason: item.reason || '',
             noticeUrl: item.noticeUrl || null,
-            retractionDate: item.retractionDate ? new Date(item.retractionDate) : null,
+            retractionDate: item.retractionDate
+              ? new Date(item.retractionDate)
+              : null,
             source: item.source || 'retraction_watch',
             rawMetadata: item as any,
           },
@@ -102,7 +117,9 @@ export class RetractionDatabaseService implements OnModuleInit {
             nature: item.nature,
             reason: item.reason || '',
             noticeUrl: item.noticeUrl || null,
-            retractionDate: item.retractionDate ? new Date(item.retractionDate) : null,
+            retractionDate: item.retractionDate
+              ? new Date(item.retractionDate)
+              : null,
             source: item.source || 'retraction_watch',
             rawMetadata: item as any,
           },
@@ -110,10 +127,14 @@ export class RetractionDatabaseService implements OnModuleInit {
         seeded++;
       }
 
-      this.logger.log(`Successfully seeded ${seeded} Retraction Watch records.`);
+      this.logger.log(
+        `Successfully seeded ${seeded} Retraction Watch records.`,
+      );
       return seeded;
     } catch (err: any) {
-      this.logger.error(`Error seeding Retraction Watch dataset: ${err?.message}`);
+      this.logger.error(
+        `Error seeding Retraction Watch dataset: ${err?.message}`,
+      );
       return 0;
     }
   }
@@ -207,7 +228,10 @@ export class RetractionDatabaseService implements OnModuleInit {
         // Handle negative cache: verified clean
         if (!record.isRetracted) {
           if (cleanDoi) {
-            this.cleanDoiCache.set(cleanDoi, Date.now() + this.CLEAN_CACHE_TTL_MS);
+            this.cleanDoiCache.set(
+              cleanDoi,
+              Date.now() + this.CLEAN_CACHE_TTL_MS,
+            );
           }
           return false;
         }
@@ -216,7 +240,9 @@ export class RetractionDatabaseService implements OnModuleInit {
           nature: (record.nature as RetractionNature) || 'retraction',
           reason: record.reason || '',
           noticeUrl: record.noticeUrl || undefined,
-          date: record.retractionDate ? record.retractionDate.toISOString() : undefined,
+          date: record.retractionDate
+            ? record.retractionDate.toISOString()
+            : undefined,
           source: (record.source as RetractionSource) || 'retraction_watch',
         };
 
@@ -295,14 +321,18 @@ export class RetractionDatabaseService implements OnModuleInit {
         },
       });
     } catch (err: any) {
-      this.logger.debug(`Could not save clean record for ${cleanDoi}: ${err.message}`);
+      this.logger.debug(
+        `Could not save clean record for ${cleanDoi}: ${err.message}`,
+      );
     }
   }
 
   /**
    * Ingests an array of retraction records (e.g. from an updated dataset dump).
    */
-  async importRecords(records: RetractionSeedItem[]): Promise<{ imported: number; total: number }> {
+  async importRecords(
+    records: RetractionSeedItem[],
+  ): Promise<{ imported: number; total: number }> {
     let imported = 0;
     const batchSize = 100;
 
@@ -323,7 +353,9 @@ export class RetractionDatabaseService implements OnModuleInit {
               nature: r.nature,
               reason: r.reason || '',
               noticeUrl: r.noticeUrl || null,
-              retractionDate: r.retractionDate ? new Date(r.retractionDate) : null,
+              retractionDate: r.retractionDate
+                ? new Date(r.retractionDate)
+                : null,
               source: r.source || 'retraction_watch',
               rawMetadata: r as any,
             },
@@ -332,7 +364,9 @@ export class RetractionDatabaseService implements OnModuleInit {
               nature: r.nature,
               reason: r.reason || '',
               noticeUrl: r.noticeUrl || null,
-              retractionDate: r.retractionDate ? new Date(r.retractionDate) : null,
+              retractionDate: r.retractionDate
+                ? new Date(r.retractionDate)
+                : null,
               source: r.source || 'retraction_watch',
             },
           });
@@ -358,15 +392,16 @@ export class RetractionDatabaseService implements OnModuleInit {
    * Returns statistics about the local retraction database and memory index.
    */
   async getDatabaseStats(): Promise<RetractionDatabaseStats> {
-    const [totalRecords, retractedCount, cleanCount, sources] = await Promise.all([
-      this.prisma.retractionRecord.count(),
-      this.prisma.retractionRecord.count({ where: { isRetracted: true } }),
-      this.prisma.retractionRecord.count({ where: { isRetracted: false } }),
-      this.prisma.retractionRecord.groupBy({
-        by: ['source'],
-        _count: true,
-      }),
-    ]);
+    const [totalRecords, retractedCount, cleanCount, sources] =
+      await Promise.all([
+        this.prisma.retractionRecord.count(),
+        this.prisma.retractionRecord.count({ where: { isRetracted: true } }),
+        this.prisma.retractionRecord.count({ where: { isRetracted: false } }),
+        this.prisma.retractionRecord.groupBy({
+          by: ['source'],
+          _count: true,
+        }),
+      ]);
 
     const sourceBreakdown: Record<string, number> = {};
     for (const s of sources) {

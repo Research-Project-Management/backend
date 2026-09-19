@@ -17,7 +17,10 @@ export class FavoriteService {
     return this.favoriteRepo.isFavorite(projectId, userId);
   }
 
-  async addFavorite(projectId: string, userId: string): Promise<{ isFavorite: boolean }> {
+  async addFavorite(
+    projectId: string,
+    userId: string,
+  ): Promise<{ isFavorite: boolean }> {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
       select: { id: true },
@@ -30,12 +33,18 @@ export class FavoriteService {
     return { isFavorite: true };
   }
 
-  async removeFavorite(projectId: string, userId: string): Promise<{ isFavorite: boolean }> {
+  async removeFavorite(
+    projectId: string,
+    userId: string,
+  ): Promise<{ isFavorite: boolean }> {
     await this.favoriteRepo.removeFavorite(projectId, userId);
     return { isFavorite: false };
   }
 
-  async toggleFavorite(projectId: string, userId: string): Promise<{ isFavorite: boolean }> {
+  async toggleFavorite(
+    projectId: string,
+    userId: string,
+  ): Promise<{ isFavorite: boolean }> {
     const isFav = await this.favoriteRepo.isFavorite(projectId, userId);
     if (isFav) {
       await this.favoriteRepo.removeFavorite(projectId, userId);
@@ -53,7 +62,10 @@ export class FavoriteService {
     }
   }
 
-  async batchCheckFavorites(projectIds: string[], userId: string): Promise<Set<string>> {
+  async batchCheckFavorites(
+    projectIds: string[],
+    userId: string,
+  ): Promise<Set<string>> {
     return this.favoriteRepo.batchCheckFavorites(projectIds, userId);
   }
 }

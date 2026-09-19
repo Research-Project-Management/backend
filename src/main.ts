@@ -50,18 +50,30 @@ function isTransientNetworkError(err: unknown): boolean {
 
 process.on('unhandledRejection', (reason: unknown) => {
   if (isTransientNetworkError(reason)) {
-    console.warn('[Transient Socket Notice (unhandledRejection bypassed)]:', (reason as any)?.message || reason);
+    console.warn(
+      '[Transient Socket Notice (unhandledRejection bypassed)]:',
+      (reason as any)?.message || reason,
+    );
     return;
   }
-  console.error('[Unhandled Rejection]:', reason instanceof Error ? reason.stack : reason);
+  console.error(
+    '[Unhandled Rejection]:',
+    reason instanceof Error ? reason.stack : reason,
+  );
 });
 
 process.on('uncaughtException', (error: any) => {
   if (isTransientNetworkError(error)) {
-    console.warn('[Transient Socket Notice (uncaughtException bypassed)]:', error?.message || error);
+    console.warn(
+      '[Transient Socket Notice (uncaughtException bypassed)]:',
+      error?.message || error,
+    );
     return;
   }
-  console.error('[Uncaught Exception]:', error?.stack || error?.message || error);
+  console.error(
+    '[Uncaught Exception]:',
+    error?.stack || error?.message || error,
+  );
 });
 
 async function bootstrap() {
@@ -299,14 +311,18 @@ async function bootstrap() {
   try {
     await app.listen(port, host);
     logger.log(`🚀 NestJS + Fastify running on http://localhost:${port}`);
-    logger.log(`📚 Swagger Documentation ready at http://localhost:${port}/docs`);
+    logger.log(
+      `📚 Swagger Documentation ready at http://localhost:${port}/docs`,
+    );
   } catch (err: any) {
     if (err?.code === 'EADDRINUSE') {
       logger.error(
         `❌ Port ${port} is already in use by another process. Please terminate the lingering process or run: Get-NetTCPConnection -LocalPort ${port}`,
       );
     } else {
-      logger.error(`❌ Server failed to start on port ${port}: ${err?.message || err}`);
+      logger.error(
+        `❌ Server failed to start on port ${port}: ${err?.message || err}`,
+      );
     }
     process.exit(1);
   }

@@ -6,7 +6,12 @@ import {
 import { PrismaService } from '@/core/database/prisma.service';
 import { ProjectTemplate } from '@prisma/client';
 import { TemplateRepository } from './template.repository';
-import { CreateProjectTemplateDto, InitialStateDto, InitialLabelDto, InitialWorkItemDto } from './dto/create-template.dto';
+import {
+  CreateProjectTemplateDto,
+  InitialStateDto,
+  InitialLabelDto,
+  InitialWorkItemDto,
+} from './dto/create-template.dto';
 import { InstantiateProjectTemplateDto } from './dto/instantiate-template.dto';
 import { deriveProjectPrefix } from '../core/utils/identifier.util';
 import { DEFAULT_WORK_ITEM_STATES } from '@/modules/work-item/state/types/state.types';
@@ -44,15 +49,22 @@ export class TemplateService {
   ): Promise<ProjectTemplate> {
     const template = await this.getTemplateById(id);
     if (template.createdById !== userId) {
-      throw new ForbiddenException('Only the template creator can modify this template');
+      throw new ForbiddenException(
+        'Only the template creator can modify this template',
+      );
     }
     return this.templateRepo.updateTemplate(id, dto);
   }
 
-  async deleteTemplate(id: string, userId: string): Promise<{ message: string }> {
+  async deleteTemplate(
+    id: string,
+    userId: string,
+  ): Promise<{ message: string }> {
     const template = await this.getTemplateById(id);
     if (template.createdById !== userId) {
-      throw new ForbiddenException('Only the template creator can delete this template');
+      throw new ForbiddenException(
+        'Only the template creator can delete this template',
+      );
     }
     await this.templateRepo.deleteTemplate(id);
     return { message: 'Project template deleted successfully' };
@@ -82,7 +94,7 @@ export class TemplateService {
           coverImage: template.coverImage || null,
           createdById: userId,
           templateId: template.id,
-          modules: (template.defaultModules as string[]) || [
+          modules: template.defaultModules || [
             'work_items',
             'cycles',
             'views',
@@ -100,8 +112,10 @@ export class TemplateService {
       });
 
       // 2. Seed initial workflow states
-      const rawStates = (template.initialStates as unknown as InitialStateDto[]) || [];
-      const statesToSeed = rawStates.length > 0 ? rawStates : DEFAULT_WORK_ITEM_STATES;
+      const rawStates =
+        (template.initialStates as unknown as InitialStateDto[]) || [];
+      const statesToSeed =
+        rawStates.length > 0 ? rawStates : DEFAULT_WORK_ITEM_STATES;
 
       const createdStates = await Promise.all(
         statesToSeed.map((st, idx) =>
@@ -117,10 +131,12 @@ export class TemplateService {
         ),
       );
 
-      const defaultState = createdStates.find((s) => s.group === 'unstarted') || createdStates[0];
+      const defaultState =
+        createdStates.find((s) => s.group === 'unstarted') || createdStates[0];
 
       // 3. Seed initial labels
-      const rawLabels = (template.initialLabels as unknown as InitialLabelDto[]) || [];
+      const rawLabels =
+        (template.initialLabels as unknown as InitialLabelDto[]) || [];
       const labelMap = new Map<string, string>();
 
       for (const lbl of rawLabels) {
@@ -136,7 +152,8 @@ export class TemplateService {
       }
 
       // 4. Seed initial work items
-      const rawWorkItems = (template.initialWorkItems as unknown as InitialWorkItemDto[]) || [];
+      const rawWorkItems =
+        (template.initialWorkItems as unknown as InitialWorkItemDto[]) || [];
       let sequence = 0;
 
       for (const wi of rawWorkItems) {

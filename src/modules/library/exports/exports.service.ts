@@ -418,14 +418,25 @@ export class ExportsService {
     userId: string,
     itemId: string,
     rawPdfBuffer?: Buffer,
+    projectId?: string,
   ): Promise<{ filename: string; buffer: Uint8Array }> {
     const item: any = this.itemReadPort
-      ? await this.itemReadPort.findById(userId, itemId)
+      ? await this.itemReadPort.findById(userId, itemId, projectId)
       : await this.prisma.item.findFirst({
           where: {
             id: itemId,
-            userId,
             deletedAt: null,
+            OR: [
+              { userId },
+              {
+                project: {
+                  members: {
+                    some: { userId },
+                  },
+                },
+              },
+            ],
+            ...(projectId ? { projectId } : {}),
           },
           include: {
             attachments: true,
@@ -451,13 +462,7 @@ export class ExportsService {
             userId,
             pdfAttachment.id,
           )
-        : await this.prisma.annotation.findMany({
-            where: {
-              attachmentId: pdfAttachment?.id,
-              deletedAt: null,
-            },
-            orderBy: { pageIndex: 'asc' },
-          });
+        : [];
 
     // If no buffer passed, create minimal placeholder PDF if empty, or throw
     let bufferToUse = rawPdfBuffer;
@@ -492,6 +497,7 @@ export class ExportsService {
   async exportByCitationKeys(
     userId: string,
     keys: string[],
+    projectId?: string,
   ): Promise<{
     content: string;
     count: number;
@@ -506,11 +512,24 @@ export class ExportsService {
       .map((k) => k.trim().toLowerCase())
       .filter(Boolean);
 
+    const scopeWhere: any = projectId
+      ? { projectId, deletedAt: null }
+      : {
+          deletedAt: null,
+          OR: [
+            { userId },
+            {
+              project: {
+                members: {
+                  some: { userId },
+                },
+              },
+            },
+          ],
+        };
+
     const items = await this.prisma.item.findMany({
-      where: {
-        userId,
-        deletedAt: null,
-      },
+      where: scopeWhere,
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
       },

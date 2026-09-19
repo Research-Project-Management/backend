@@ -37,7 +37,7 @@ export class ViewController {
 
   @Get('projects/:projectId/views')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary:
       'List all saved views in a project (public views and caller private views)',
@@ -57,7 +57,7 @@ export class ViewController {
   @Post('projects/:projectId/views')
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Create a new saved view in a project' })
   @ApiResponse({ status: 201, description: 'Created saved view object' })
   async createView(
@@ -70,7 +70,7 @@ export class ViewController {
 
   @Get('projects/:projectId/views/:viewId')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get details of a specific saved view' })
   @ApiResponse({ status: 200, description: 'Saved view detail' })
   async getView(
@@ -85,7 +85,7 @@ export class ViewController {
 
   @Patch('projects/:projectId/views/:viewId')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Update a saved view (PATCH)' })
   @ApiResponse({ status: 200, description: 'Updated saved view object' })
   async patchView(
@@ -107,7 +107,7 @@ export class ViewController {
 
   @Put('projects/:projectId/views/:viewId')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Update a saved view (PUT alias)' })
   @ApiResponse({ status: 200, description: 'Updated saved view object' })
   async updateView(
@@ -130,7 +130,7 @@ export class ViewController {
   @Delete('projects/:projectId/views/:viewId')
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Delete a saved view' })
   @ApiResponse({ status: 200, description: 'Saved view deleted confirmation' })
   async deleteView(
@@ -146,7 +146,7 @@ export class ViewController {
   @Post('projects/:projectId/views/:viewId/favorite')
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Add a saved view to personal favorites' })
   @ApiResponse({
     status: 200,
@@ -164,7 +164,7 @@ export class ViewController {
 
   @Get('projects/:projectId/user-favorite-views')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get list of favorite view IDs for the user' })
   @ApiResponse({
     status: 200,
@@ -180,7 +180,7 @@ export class ViewController {
   @Post('projects/:projectId/user-favorite-views')
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'Add a view to favorites via user-favorite-views collection',
   })
@@ -201,7 +201,7 @@ export class ViewController {
   ])
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Remove a saved view from personal favorites' })
   @ApiResponse({
     status: 200,
@@ -219,7 +219,7 @@ export class ViewController {
 
   @Get('projects/:projectId/views/:viewId/work-items')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary:
       'Execute saved view query directly to retrieve matching work items',

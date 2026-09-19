@@ -23,6 +23,10 @@ export class SearchItemsQueryDto {
   @IsOptional()
   @IsString()
   tagId?: string;
+
+  @IsOptional()
+  @IsString()
+  projectId?: string;
 }
 
 export const SearchQueryDto = SearchItemsQueryDto;

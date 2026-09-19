@@ -1,10 +1,10 @@
 // -- 2. Project Context (Collaborative Research Microservice) ----------------
 
 enum ProjectMemberRole {
-  owner       // Truong nhom nghien cuu - toan quyen quan ly
-  contributor // Thanh vien nghien cuu - tao/sua work-item, upload paper, viet tai lieu
-  commenter   // GVHD / Reviewer - xem + binh luan, khong tao/sua noi dung
-  viewer      // Hoi dong phan bien - chi xem (read-only)
+  owner       // Truong nhom / Chu nhiem de tai — toan quyen toi cao & doc quyen nhan su
+  coordinator // Dieu phoi vien — quan ly cycles, work items (khong quan ly nhan su)
+  contributor // Thanh vien nghien cuu — tao/sua work items, tai lieu, upload paper
+  reviewer    // GVHD / Hoi dong phan bien — read-only, comment va suggestion
 }
 
 enum InvitationStatus {

@@ -110,7 +110,12 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
       const localDriver = new LocalStorageDriver('./test-storage');
       await localDriver.applyLifecycleRules({
         rules: [
-          { id: 'local-temp', prefix: 'tmp/', status: 'Enabled', expirationDays: 1 },
+          {
+            id: 'local-temp',
+            prefix: 'tmp/',
+            status: 'Enabled',
+            expirationDays: 1,
+          },
         ],
       });
 
@@ -228,7 +233,10 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
       });
 
       mockNodeRepo.findExpiredTrash.mockResolvedValue([expiredFolder]);
-      mockNodeRepo.findSubtreeNodes.mockResolvedValue([expiredFolder, childFile]);
+      mockNodeRepo.findSubtreeNodes.mockResolvedValue([
+        expiredFolder,
+        childFile,
+      ]);
       mockBlobRepo.findById.mockResolvedValue(childBlob);
 
       const result = await job.processExpiredTrash(30);
@@ -340,9 +348,15 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
       mockDriver = { getStream: jest.fn() };
       mockNodeRepo = { findById: jest.fn(), update: jest.fn() };
       mockBlobRepo = { findById: jest.fn() };
-      mockTrashJob = { processExpiredTrash: jest.fn().mockResolvedValue({ purgedCount: 3 }) };
-      mockMultipartJob = { processExpiredSessions: jest.fn().mockResolvedValue(2) };
-      mockOrphanJob = { processTombstonedBlobs: jest.fn().mockResolvedValue(1) };
+      mockTrashJob = {
+        processExpiredTrash: jest.fn().mockResolvedValue({ purgedCount: 3 }),
+      };
+      mockMultipartJob = {
+        processExpiredSessions: jest.fn().mockResolvedValue(2),
+      };
+      mockOrphanJob = {
+        processTombstonedBlobs: jest.fn().mockResolvedValue(1),
+      };
 
       consumer = new StorageQueueConsumer(
         mockDriver,

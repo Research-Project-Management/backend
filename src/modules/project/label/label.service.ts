@@ -5,7 +5,10 @@ import {
 } from '@nestjs/common';
 import { ProjectLabel } from '@prisma/client';
 import { LabelRepository } from './label.repository';
-import { CreateProjectLabelDto, UpdateProjectLabelDto } from './dto/create-label.dto';
+import {
+  CreateProjectLabelDto,
+  UpdateProjectLabelDto,
+} from './dto/create-label.dto';
 
 @Injectable()
 export class LabelService {
@@ -15,8 +18,14 @@ export class LabelService {
     return this.labelRepo.findLabelsByUser(userId);
   }
 
-  async createLabel(userId: string, dto: CreateProjectLabelDto): Promise<ProjectLabel> {
-    const existing = await this.labelRepo.findLabelByName(dto.name.trim(), userId);
+  async createLabel(
+    userId: string,
+    dto: CreateProjectLabelDto,
+  ): Promise<ProjectLabel> {
+    const existing = await this.labelRepo.findLabelByName(
+      dto.name.trim(),
+      userId,
+    );
     if (existing) {
       throw new ConflictException(`Project label "${dto.name}" already exists`);
     }
@@ -34,9 +43,14 @@ export class LabelService {
     }
 
     if (dto.name && dto.name.trim() !== label.name) {
-      const existing = await this.labelRepo.findLabelByName(dto.name.trim(), userId);
+      const existing = await this.labelRepo.findLabelByName(
+        dto.name.trim(),
+        userId,
+      );
       if (existing && existing.id !== id) {
-        throw new ConflictException(`Project label "${dto.name}" already exists`);
+        throw new ConflictException(
+          `Project label "${dto.name}" already exists`,
+        );
       }
     }
 

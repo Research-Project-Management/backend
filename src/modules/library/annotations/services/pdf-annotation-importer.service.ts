@@ -40,7 +40,10 @@ export class PdfAnnotationImporterService {
     attachmentId: string,
   ): Promise<ImportAnnotationsResult> {
     if (this.attachmentsService) {
-      await this.attachmentsService.assertAttachmentExists(attachmentId, userId);
+      await this.attachmentsService.assertAttachmentExists(
+        attachmentId,
+        userId,
+      );
     }
 
     const attachment = await this.prisma.attachment.findUnique({
@@ -134,7 +137,10 @@ export class PdfAnnotationImporterService {
           continue;
         }
 
-        const viewport = typeof page.getViewport === 'function' ? page.getViewport({ scale: 1.0 }) : null;
+        const viewport =
+          typeof page.getViewport === 'function'
+            ? page.getViewport({ scale: 1.0 })
+            : null;
         const [vx1 = 0, vy1 = 0, vx2 = 612, vy2 = 792] = page.view || [];
         const pageWidth = viewport?.width || Math.abs(vx2 - vx1) || 612;
         const pageHeight = viewport?.height || Math.abs(vy2 - vy1) || 792;
@@ -173,7 +179,8 @@ export class PdfAnnotationImporterService {
 
           // Check if duplicate exists on this page
           const isDuplicate = existingAnnotations.some((ea) => {
-            if (ea.pageIndex !== pageIndex || ea.type !== mappedType) return false;
+            if (ea.pageIndex !== pageIndex || ea.type !== mappedType)
+              return false;
             const eaRects = Array.isArray(ea.rectCoords)
               ? (ea.rectCoords as any[])
               : [];
@@ -191,7 +198,7 @@ export class PdfAnnotationImporterService {
           const contentText =
             annot.contents ||
             (typeof annot.contentsObj === 'object'
-              ? (annot.contentsObj as any)?.str
+              ? annot.contentsObj?.str
               : '') ||
             '';
 
@@ -202,8 +209,15 @@ export class PdfAnnotationImporterService {
             y: normY1,
             x: normX1,
             color: colorHex,
-            quoteText: contentText || (mappedType === AnnotationType.highlight ? 'Imported Highlight' : undefined),
-            comment: contentText && mappedType !== AnnotationType.highlight ? contentText : '',
+            quoteText:
+              contentText ||
+              (mappedType === AnnotationType.highlight
+                ? 'Imported Highlight'
+                : undefined),
+            comment:
+              contentText && mappedType !== AnnotationType.highlight
+                ? contentText
+                : '',
             rectCoords: [normalizedRect],
             authorId: userId,
           });
@@ -212,7 +226,7 @@ export class PdfAnnotationImporterService {
           existingAnnotations.push({
             pageIndex,
             type: mappedType,
-            rectCoords: [normalizedRect] as any,
+            rectCoords: [normalizedRect],
           });
 
           imported++;
@@ -267,9 +281,15 @@ export class PdfAnnotationImporterService {
     }
 
     const hasFloat = colorArr.some((c) => c > 0 && c <= 1);
-    const r = Math.round(hasFloat && colorArr[0] <= 1 ? colorArr[0] * 255 : colorArr[0]);
-    const g = Math.round(hasFloat && colorArr[1] <= 1 ? colorArr[1] * 255 : colorArr[1]);
-    const b = Math.round(hasFloat && colorArr[2] <= 1 ? colorArr[2] * 255 : colorArr[2]);
+    const r = Math.round(
+      hasFloat && colorArr[0] <= 1 ? colorArr[0] * 255 : colorArr[0],
+    );
+    const g = Math.round(
+      hasFloat && colorArr[1] <= 1 ? colorArr[1] * 255 : colorArr[1],
+    );
+    const b = Math.round(
+      hasFloat && colorArr[2] <= 1 ? colorArr[2] * 255 : colorArr[2],
+    );
 
     const hex = (val: number) =>
       Math.max(0, Math.min(255, val)).toString(16).padStart(2, '0');

@@ -6,7 +6,10 @@ import { IngestionSubmissionEnvelope } from '../types/submission.types';
 import { PipelineService } from './pipeline.service';
 import { IngestionRepository } from '../ingestion.repository';
 import { IngestionStatus } from '@prisma/client';
-import { LIBRARY_INGESTION_QUEUE, LIBRARY_INGESTION_JOB } from '../constants/queue.constants';
+import {
+  LIBRARY_INGESTION_QUEUE,
+  LIBRARY_INGESTION_JOB,
+} from '../constants/queue.constants';
 
 export interface QueuedIngestionJob {
   runId: string;
@@ -40,7 +43,9 @@ export class QueueService implements OnModuleInit {
   ) {
     if (this.bullQueue && typeof (this.bullQueue as any).on === 'function') {
       (this.bullQueue as any).on('error', (err: any) => {
-        this.logger.warn(`Ingestion BullMQ queue error notice: ${err?.message || err}`);
+        this.logger.warn(
+          `Ingestion BullMQ queue error notice: ${err?.message || err}`,
+        );
       });
     }
 

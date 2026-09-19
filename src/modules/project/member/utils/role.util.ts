@@ -12,7 +12,9 @@ export function isOwner(role: ProjectMemberRole): boolean {
  */
 export function isExecutionRole(role: ProjectMemberRole): boolean {
   return (
-    role === ProjectMemberRole.owner || role === ProjectMemberRole.contributor
+    role === ProjectMemberRole.owner ||
+    role === ProjectMemberRole.coordinator ||
+    role === ProjectMemberRole.contributor
   );
 }
 

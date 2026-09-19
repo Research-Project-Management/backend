@@ -1,4 +1,4 @@
-﻿import {
+import {
   StateData,
   ReadingStatus,
   VALID_STATE_TRANSITIONS,
@@ -50,6 +50,36 @@ export function shouldAutoAdvanceToReading(
   return advancedPage || hasScroll;
 }
 
+export const MAX_SCROLL_POSITION_BYTES = 16384; // 16 KB
+
+/**
+ * Safely converts Date, ISO string, or null into an ISO string or null without throwing.
+ */
+export function formatStateDate(val?: unknown): string | null {
+  if (!val) return null;
+  if (val instanceof Date) return val.toISOString();
+  if (typeof val === 'string') {
+    const d = new Date(val);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  }
+  return null;
+}
+
+/**
+ * Validates whether scrollPosition is within safe size and structural limits (max 16KB).
+ */
+export function isValidScrollPosition(scrollPosition: unknown): boolean {
+  if (scrollPosition === undefined || scrollPosition === null) return true;
+  if (typeof scrollPosition !== 'object') return false;
+  try {
+    const serialized = JSON.stringify(scrollPosition);
+    if (!serialized) return false;
+    return Buffer.byteLength(serialized, 'utf8') <= MAX_SCROLL_POSITION_BYTES;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Normalizes raw database state or null into standard StateData response object.
  */
@@ -59,8 +89,8 @@ export function toStateResponse(
     rating?: number | null;
     currentPage?: number | null;
     scrollPosition?: unknown;
-    lastOpenedAt?: Date | null;
-    lastReadAt?: Date | null;
+    lastOpenedAt?: Date | string | null;
+    lastReadAt?: Date | string | null;
   } | null,
 ): StateData {
   return {
@@ -71,8 +101,8 @@ export function toStateResponse(
       state?.scrollPosition !== undefined && state?.scrollPosition !== null
         ? (state.scrollPosition as Record<string, unknown> | Array<unknown>)
         : null,
-    lastOpenedAt: state?.lastOpenedAt ? state.lastOpenedAt.toISOString() : null,
-    lastReadAt: state?.lastReadAt ? state.lastReadAt.toISOString() : null,
+    lastOpenedAt: formatStateDate(state?.lastOpenedAt),
+    lastReadAt: formatStateDate(state?.lastReadAt),
   };
 }
 

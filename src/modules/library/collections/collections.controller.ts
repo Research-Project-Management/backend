@@ -45,26 +45,30 @@ export class CollectionsController {
   constructor(private readonly collectionsService: CollectionsService) {}
 
   @Get()
-  @ProjectRoles('owner', 'contributor', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'List all collections for user or project' })
   async getCollections(
     @CurrentUser('id') userId: string,
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    const effectiveProjectId = toValidProjectId(paramProjectId || queryProjectId);
+    const effectiveProjectId = toValidProjectId(
+      paramProjectId || queryProjectId,
+    );
     return this.collectionsService.getCollections(userId, effectiveProjectId);
   }
 
   @Get('tree')
-  @ProjectRoles('owner', 'contributor', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get collection tree for user or project' })
   async getCollectionTree(
     @CurrentUser('id') userId: string,
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    const effectiveProjectId = toValidProjectId(paramProjectId || queryProjectId);
+    const effectiveProjectId = toValidProjectId(
+      paramProjectId || queryProjectId,
+    );
     return this.collectionsService.getCollectionTree(
       userId,
       effectiveProjectId,
@@ -72,7 +76,7 @@ export class CollectionsController {
   }
 
   @Patch('reorder')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Reorder collections' })
   async reorderCollections(
@@ -90,7 +94,7 @@ export class CollectionsController {
   }
 
   @Post()
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create collection' })
   async createCollection(
@@ -112,7 +116,7 @@ export class CollectionsController {
   }
 
   @Get(':collectionId')
-  @ProjectRoles('owner', 'contributor', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get collection by ID' })
   async getCollectionById(
     @CurrentUser('id') userId: string,
@@ -133,7 +137,7 @@ export class CollectionsController {
   }
 
   @Put(':collectionId')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Update collection' })
   async updateCollection(
     @CurrentUser('id') userId: string,
@@ -152,7 +156,7 @@ export class CollectionsController {
   }
 
   @Delete(':collectionId')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Delete collection' })
   async deleteCollection(
     @CurrentUser('id') userId: string,
@@ -171,7 +175,7 @@ export class CollectionsController {
   }
 
   @Post(':collectionId/move-items')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Move items to collection' })
   async moveItems(
@@ -191,7 +195,7 @@ export class CollectionsController {
   }
 
   @Post(':collectionId/items')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Assign items to collection' })
   async assignItemsToCollection(
@@ -211,7 +215,7 @@ export class CollectionsController {
   }
 
   @Delete(':collectionId/items/:itemId')
-  @ProjectRoles('owner', 'contributor')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Detach item from collection' })
   async detachItemFromCollection(
     @CurrentUser('id') userId: string,

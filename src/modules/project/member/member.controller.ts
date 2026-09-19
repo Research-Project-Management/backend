@@ -40,7 +40,7 @@ export class MemberController {
 
   @Get(':projectId/members')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'List project members with filtering and pagination',
   })
@@ -54,7 +54,7 @@ export class MemberController {
 
   @Get(':projectId/members/:userId')
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get details of a specific project member' })
   @ApiResponse({ status: 200, description: 'Member details' })
   async getMember(
@@ -139,7 +139,7 @@ export class MemberController {
   @Post(':projectId/leave')
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Leave project (Single-Owner protected)' })
   @ApiResponse({ status: 200, description: 'Left project successfully' })
   async leaveProject(

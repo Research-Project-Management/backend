@@ -17,7 +17,9 @@ export class OcrSandwichPdfService {
     pageResults: OcrPageResult[],
     imageDimensionsMap?: Map<number, { width: number; height: number }>,
   ): Promise<Buffer> {
-    const ocrPages = pageResults.filter((p) => p.wasOcr && (p.words.length > 0 || p.blocks.length > 0));
+    const ocrPages = pageResults.filter(
+      (p) => p.wasOcr && (p.words.length > 0 || p.blocks.length > 0),
+    );
     if (ocrPages.length === 0) {
       return originalPdfBuffer;
     }
@@ -53,8 +55,14 @@ export class OcrSandwichPdfService {
             const sanitized = this.sanitizeForPdf(word.text);
             if (!sanitized) continue;
 
-            const boxWidth = Math.max(1, (word.bbox.x1 - word.bbox.x0) * scaleX);
-            const boxHeight = Math.max(1, (word.bbox.y1 - word.bbox.y0) * scaleY);
+            const boxWidth = Math.max(
+              1,
+              (word.bbox.x1 - word.bbox.x0) * scaleX,
+            );
+            const boxHeight = Math.max(
+              1,
+              (word.bbox.y1 - word.bbox.y0) * scaleY,
+            );
             const pdfX = Math.max(0, word.bbox.x0 * scaleX);
             // Invert Y coordinate (PDF origin is bottom-left, image is top-left)
             const pdfY = Math.max(0, pdfHeight - word.bbox.y1 * scaleY);
@@ -79,7 +87,10 @@ export class OcrSandwichPdfService {
               const sanitized = this.sanitizeForPdf(line.text);
               if (!sanitized) continue;
 
-              const boxHeight = Math.max(1, (line.bbox.y1 - line.bbox.y0) * scaleY);
+              const boxHeight = Math.max(
+                1,
+                (line.bbox.y1 - line.bbox.y0) * scaleY,
+              );
               const pdfX = Math.max(0, line.bbox.x0 * scaleX);
               const pdfY = Math.max(0, pdfHeight - line.bbox.y1 * scaleY);
               const fontSize = Math.max(2, Math.min(boxHeight * 0.85, 36));

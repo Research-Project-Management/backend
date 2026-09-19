@@ -72,7 +72,6 @@ export class AuthnRepository implements IRefreshTokenRepository {
     return this.prisma.refreshToken.create({
       data: {
         userId: data.userId,
-        token: tokenHash,
         tokenHash,
         familyId: data.familyId,
         parentId: data.parentId ?? null,
@@ -100,19 +99,17 @@ export class AuthnRepository implements IRefreshTokenRepository {
   }
 
   async findRefreshToken(tokenHash: string) {
+    const normalized = this.normalizeTokenHash(tokenHash);
     return this.prisma.refreshToken.findFirst({
-      where: {
-        OR: [{ tokenHash }, { token: tokenHash }],
-      },
+      where: { tokenHash: normalized },
       include: { user: true },
     });
   }
 
   async findByTokenHash(tokenHash: string): Promise<RefreshToken | null> {
+    const normalized = this.normalizeTokenHash(tokenHash);
     return this.prisma.refreshToken.findFirst({
-      where: {
-        OR: [{ tokenHash }, { token: tokenHash }],
-      },
+      where: { tokenHash: normalized },
     });
   }
 
@@ -150,7 +147,6 @@ export class AuthnRepository implements IRefreshTokenRepository {
       return tx.refreshToken.create({
         data: {
           userId: params.userId,
-          token: newTokenHash,
           tokenHash: newTokenHash,
           familyId: params.familyId,
           parentId: params.oldTokenId,
@@ -189,10 +185,9 @@ export class AuthnRepository implements IRefreshTokenRepository {
   }
 
   async revokeRefreshToken(token: string) {
+    const tokenHash = this.normalizeTokenHash(token);
     return this.prisma.refreshToken.updateMany({
-      where: {
-        OR: [{ token }, { tokenHash: token }],
-      },
+      where: { tokenHash },
       data: {
         isRevoked: true,
         revokedAt: new Date(),

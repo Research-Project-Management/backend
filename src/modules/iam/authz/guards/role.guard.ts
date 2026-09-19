@@ -81,10 +81,19 @@ export class RoleGuard implements CanActivate {
       const isRoleAllowed = requiredRoles.some((r) => {
         const normalized = String(r).toLowerCase();
         if (normalized === 'member') {
-          return role === Role.OWNER || role === Role.CONTRIBUTOR;
+          return (
+            role === Role.OWNER ||
+            role === Role.COORDINATOR ||
+            role === Role.CONTRIBUTOR ||
+            role === Role.REVIEWER
+          );
         }
         if (normalized === 'admin') {
           return role === Role.OWNER;
+        }
+        // Legacy compatibility: map commenter/viewer to reviewer
+        if (normalized === 'commenter' || normalized === 'viewer') {
+          return role === Role.REVIEWER;
         }
         return normalized === role.toLowerCase();
       });
@@ -195,10 +204,7 @@ export class RoleGuard implements CanActivate {
             resolvedProjectId = pageComment.page.projectId;
           }
         }
-      } else if (
-        request.params?.assetId &&
-        isUUID(request.params.assetId)
-      ) {
+      } else if (request.params?.assetId && isUUID(request.params.assetId)) {
         if (prismaAny.page?.findUnique) {
           const page = await Promise.resolve(
             prismaAny.page.findUnique({
@@ -222,11 +228,20 @@ export class RoleGuard implements CanActivate {
           }
         }
       } else if (
-        (request.params?.pageId || request.params?.nodeId) &&
-        isUUID(request.params.pageId || request.params.nodeId) &&
+        (request.params?.pageId ||
+          request.params?.nodeId ||
+          request.body?.pageId) &&
+        isUUID(
+          request.params?.pageId ||
+            request.params?.nodeId ||
+            request.body?.pageId,
+        ) &&
         prismaAny.page?.findUnique
       ) {
-        const targetId = request.params.pageId || request.params.nodeId;
+        const targetId =
+          request.params?.pageId ||
+          request.params?.nodeId ||
+          request.body?.pageId;
         const page = await Promise.resolve(
           prismaAny.page.findUnique({
             where: { id: targetId },

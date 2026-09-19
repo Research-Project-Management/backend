@@ -34,7 +34,7 @@ export class CollaborationController {
   ) {}
 
   @Sse('projects/:projectId/pages/:pageId/collaboration/stream')
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'Real-time SSE event stream for live cursors, presence and locks',
   })
@@ -58,9 +58,10 @@ export class CollaborationController {
   }
 
   @Sse('pages/:pageId/collaboration/stream')
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
-    summary: 'Real-time SSE event stream for live cursors, presence and locks (direct page route)',
+    summary:
+      'Real-time SSE event stream for live cursors, presence and locks (direct page route)',
   })
   streamCollaborationEventsDirect(
     @Param('pageId') pageId: string,
@@ -73,7 +74,7 @@ export class CollaborationController {
     'pages/:pageId/collaboration/presence',
     'projects/:projectId/pages/:pageId/collaboration/presence',
   ])
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'Get current active users viewing or editing this document',
   })
@@ -86,7 +87,7 @@ export class CollaborationController {
     'pages/:pageId/collaboration/heartbeat',
     'projects/:projectId/pages/:pageId/collaboration/heartbeat',
   ])
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Send presence heartbeat & broadcast cursor position',
@@ -98,7 +99,7 @@ export class CollaborationController {
     @Req() req: any,
     @Body() dto: HeartbeatDto,
   ) {
-    const role = req.role || 'viewer';
+    const role = req.role || 'reviewer';
     const activeUsers = await this.collaborationService.updatePresence(
       pageId,
       {
@@ -117,7 +118,7 @@ export class CollaborationController {
     'pages/:pageId/collaboration/leave',
     'projects/:projectId/pages/:pageId/collaboration/leave',
   ])
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Explicitly signal leaving document room' })
   async leaveRoom(

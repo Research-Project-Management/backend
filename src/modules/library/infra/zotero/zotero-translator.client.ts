@@ -182,10 +182,7 @@ export class ZoteroTranslatorClient {
    *
    * POST /import
    */
-  async importData(
-    data: string,
-    formatHint?: string,
-  ): Promise<ZoteroItem[]> {
+  async importData(data: string, formatHint?: string): Promise<ZoteroItem[]> {
     if (!this.enabled || !data?.trim()) return [];
 
     const controller = new AbortController();
@@ -294,7 +291,9 @@ export class ZoteroTranslatorClient {
       const parsed = await response.json();
       return Array.isArray(parsed) ? (parsed as ZoteroItem[]) : [];
     } catch (err: any) {
-      this.logger.debug(`Zotero /search failed for ${identifier}: ${err?.message}`);
+      this.logger.debug(
+        `Zotero /search failed for ${identifier}: ${err?.message}`,
+      );
       return [];
     } finally {
       clearTimeout(timeout);

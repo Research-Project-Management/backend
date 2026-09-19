@@ -33,7 +33,7 @@ export class PropertyController {
     'project/:projectId/user-properties',
   ])
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary:
       'Get user project view preferences and display properties (Plane.so user-properties)',
@@ -55,7 +55,7 @@ export class PropertyController {
   ])
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectRoleGuard)
-  @ProjectRoles('owner', 'contributor', 'commenter', 'viewer')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary:
       'Update user project view preferences and display properties (Plane.so user-properties)',

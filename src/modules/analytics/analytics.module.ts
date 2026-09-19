@@ -7,13 +7,7 @@ import { CacheModule } from '@/core/cache/cache.module';
 @Module({
   imports: [YourWorkModule, CacheModule],
   controllers: [AnalyticsController],
-  providers: [
-    AnalyticsService,
-    AnalyticsRepository,
-  ],
-  exports: [
-    AnalyticsService,
-    YourWorkModule,
-  ],
+  providers: [AnalyticsService, AnalyticsRepository],
+  exports: [AnalyticsService, YourWorkModule],
 })
 export class AnalyticsModule {}

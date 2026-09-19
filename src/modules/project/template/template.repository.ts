@@ -10,15 +10,9 @@ export class TemplateRepository {
   async findAccessibleTemplates(userId: string): Promise<ProjectTemplate[]> {
     return this.prisma.projectTemplate.findMany({
       where: {
-        OR: [
-          { createdById: userId },
-          { isPublic: true },
-        ],
+        OR: [{ createdById: userId }, { isPublic: true }],
       },
-      orderBy: [
-        { isPublic: 'desc' },
-        { createdAt: 'desc' },
-      ],
+      orderBy: [{ isPublic: 'desc' }, { createdAt: 'desc' }],
     });
   }
 
@@ -48,9 +42,12 @@ export class TemplateRepository {
           'stickies',
           'storage',
         ],
-        initialStates: (dto.initialStates || []) as unknown as Prisma.InputJsonValue,
-        initialLabels: (dto.initialLabels || []) as unknown as Prisma.InputJsonValue,
-        initialWorkItems: (dto.initialWorkItems || []) as unknown as Prisma.InputJsonValue,
+        initialStates: (dto.initialStates ||
+          []) as unknown as Prisma.InputJsonValue,
+        initialLabels: (dto.initialLabels ||
+          []) as unknown as Prisma.InputJsonValue,
+        initialWorkItems: (dto.initialWorkItems ||
+          []) as unknown as Prisma.InputJsonValue,
       },
     });
   }
@@ -63,19 +60,34 @@ export class TemplateRepository {
       where: { id },
       data: {
         ...(data.name !== undefined ? { name: data.name.trim() } : {}),
-        ...(data.description !== undefined ? { description: data.description?.trim() || null } : {}),
+        ...(data.description !== undefined
+          ? { description: data.description?.trim() || null }
+          : {}),
         ...(data.avatar !== undefined ? { avatar: data.avatar } : {}),
-        ...(data.coverImage !== undefined ? { coverImage: data.coverImage } : {}),
+        ...(data.coverImage !== undefined
+          ? { coverImage: data.coverImage }
+          : {}),
         ...(data.isPublic !== undefined ? { isPublic: data.isPublic } : {}),
-        ...(data.defaultModules !== undefined ? { defaultModules: data.defaultModules } : {}),
+        ...(data.defaultModules !== undefined
+          ? { defaultModules: data.defaultModules }
+          : {}),
         ...(data.initialStates !== undefined
-          ? { initialStates: data.initialStates as unknown as Prisma.InputJsonValue }
+          ? {
+              initialStates:
+                data.initialStates as unknown as Prisma.InputJsonValue,
+            }
           : {}),
         ...(data.initialLabels !== undefined
-          ? { initialLabels: data.initialLabels as unknown as Prisma.InputJsonValue }
+          ? {
+              initialLabels:
+                data.initialLabels as unknown as Prisma.InputJsonValue,
+            }
           : {}),
         ...(data.initialWorkItems !== undefined
-          ? { initialWorkItems: data.initialWorkItems as unknown as Prisma.InputJsonValue }
+          ? {
+              initialWorkItems:
+                data.initialWorkItems as unknown as Prisma.InputJsonValue,
+            }
           : {}),
       },
     });

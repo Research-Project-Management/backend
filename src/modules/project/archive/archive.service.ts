@@ -10,7 +10,10 @@ import { ProjectMemberRole, EntityType } from '@prisma/client';
 import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
 import { RedisCacheService } from '@/core/cache/redis.service';
 import { CACHE_KEYS } from '../core/constants/cache.constant';
-import { EnrichedProject, ProjectWithMembers } from '../core/types/project.type';
+import {
+  EnrichedProject,
+  ProjectWithMembers,
+} from '../core/types/project.type';
 import { calculateProjectPermissions } from '../core/utils/permission.util';
 import { CoreRepository } from '../core/core.repository';
 
@@ -60,7 +63,7 @@ export class ArchiveService {
           ? ProjectMemberRole.owner
           : membershipMap.get(p.id) ||
             p.members?.find((m) => m.userId === userId)?.role ||
-            ProjectMemberRole.viewer;
+            ProjectMemberRole.reviewer;
       const permissions = calculateProjectPermissions(yourRole, p.isActive);
 
       return {

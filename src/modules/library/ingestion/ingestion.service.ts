@@ -222,9 +222,8 @@ export class IngestionService implements IngestionPort {
           ? [
               {
                 title,
-                status: (run.status === IngestionStatus.READY
-                  ? 'SUCCEEDED'
-                  : 'FAILED') as 'SUCCEEDED' | 'FAILED',
+                status:
+                  run.status === IngestionStatus.READY ? 'SUCCEEDED' : 'FAILED',
                 itemId: run.itemId || undefined,
               },
             ]
@@ -291,7 +290,11 @@ export class IngestionService implements IngestionPort {
     if (submissionRes.deduplicated && submissionRes.existingItemId) {
       const item = this.items
         ? await this.items
-            .getItem(envelope.userId!, submissionRes.existingItemId, projectId || undefined)
+            .getItem(
+              envelope.userId!,
+              submissionRes.existingItemId,
+              projectId || undefined,
+            )
             .catch(() => undefined)
         : undefined;
 
@@ -330,7 +333,9 @@ export class IngestionService implements IngestionPort {
     const itemId = updatedRun?.itemId ?? undefined;
     const item =
       itemId && this.items
-        ? await this.items.getItem(envelope.userId!, itemId, projectId || undefined).catch(() => undefined)
+        ? await this.items
+            .getItem(envelope.userId!, itemId, projectId || undefined)
+            .catch(() => undefined)
         : undefined;
 
     return {
