@@ -9,12 +9,9 @@ import {
 import { TreeRepository, TreeRecord, NodeTreeRecord } from './tree.repository';
 import { MoveNodeDto, CreateChildNodeDto, NodeTreeItem } from './dto/tree.dto';
 import { RedisCacheService } from '@/core/cache/redis.service';
-import { DOCUMENT_REDIS_KEYS } from '../core/constants/redis-keys.constant';
+import { DOCUMENT_REDIS_KEYS } from '../page/constants/page-redis-keys.constant';
 import { PageStatus, Prisma } from '@prisma/client';
-import {
-  sanitizeDocumentTitle,
-  slugifyTitle,
-} from '../core/utils/document.utils';
+import { sanitizeDocumentTitle, slugifyTitle } from '../page/utils/page.utils';
 
 @Injectable()
 export class TreeService {
@@ -270,6 +267,3 @@ export class TreeService {
     return { children };
   }
 }
-
-export const NodeService = TreeService;
-export type NodeService = TreeService;

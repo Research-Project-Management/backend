@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { ProjectWithMembers } from '../core/types/project.type';
 import { isUuid } from '@/core/utils/uuid.util';
-import { USER_SELECT } from '../core/core.repository';
+import { USER_SELECT, mapProjectWithMembers } from '../core/core.repository';
 
 @Injectable()
 export class ArchiveRepository {
@@ -17,7 +17,7 @@ export class ArchiveRepository {
   }
 
   async archiveProject(projectId: string): Promise<ProjectWithMembers> {
-    return this.prisma.project.update({
+    const project = await this.prisma.project.update({
       where: { id: projectId },
       data: {
         isArchived: true,
@@ -40,10 +40,11 @@ export class ArchiveRepository {
         },
       },
     });
+    return mapProjectWithMembers(project);
   }
 
   async unarchiveProject(projectId: string): Promise<ProjectWithMembers> {
-    return this.prisma.project.update({
+    const project = await this.prisma.project.update({
       where: { id: projectId },
       data: {
         isArchived: false,
@@ -66,6 +67,7 @@ export class ArchiveRepository {
         },
       },
     });
+    return mapProjectWithMembers(project);
   }
 
   async findArchivedProjectsByUser(
@@ -73,7 +75,7 @@ export class ArchiveRepository {
   ): Promise<ProjectWithMembers[]> {
     if (!isUuid(userId)) return [];
 
-    return this.prisma.project.findMany({
+    const projects = await this.prisma.project.findMany({
       where: {
         OR: [{ createdById: userId }, { members: { some: { userId } } }],
         isArchived: true,
@@ -97,5 +99,6 @@ export class ArchiveRepository {
       },
       orderBy: { archivedAt: 'desc' },
     });
+    return projects.map(mapProjectWithMembers);
   }
 }

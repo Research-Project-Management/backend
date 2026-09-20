@@ -26,31 +26,50 @@ enum SecurityEventType {
   password_reset_completed
   oauth_account_linked
   oauth_account_unlinked
+  email_verification_requested
+  email_verified
+  account_deactivated
   mfa_enabled
   mfa_disabled
 }
 
+enum VerificationTokenType {
+  email_verification
+  password_reset
+}
+
+enum ThemePreference {
+  light
+  dark
+  system
+}
+
+enum CitationStyle {
+  apa
+  mla
+  chicago
+  harvard
+  ieee
+  vancouver
+  bibtex
+}
+
 model User {
-  id         String     @id @default(uuid()) @db.Uuid
-  email      String?    @unique
-  password   String?
-  name       String     @default("User")
-  avatar     String?
-  isVerified Boolean    @default(false) @map("is_verified")
-  status     UserStatus @default(active)
+  id         String     @id @default(uuid(7)) @db.Uuid
+  email      String     @unique
+  password   String?    @map("password_hash")
+  status     UserStatus @default(pending_verification)
   createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt  DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt  DateTime?  @map("deleted_at") @db.Timestamptz(6)
 
-  // Backward compatibility OAuth IDs
-  googleId   String?    @unique @map("google_id")
-  githubId   String?    @unique @map("github_id")
-
   // IAM Internal Relations (100% Isolated)
-  federatedIdentities FederatedIdentity[]
-  refreshTokens       RefreshToken[]
-  securityAuditLogs   SecurityAuditLog[]    @relation("AuditActor")
+  profile             UserProfile?
   settings            UserSettings?
+  accounts            UserAccount[]
+  refreshTokens       RefreshToken[]
+  verificationTokens  VerificationToken[]
+  auditLogs           AuditLog[]            @relation("AuditActor")
 
   // Collaborative Project Relations (Clean & Two-Tier)
   createdProjects     Project[]             @relation("ProjectCreator")
@@ -86,23 +105,6 @@ model User {
   // Sticky Notes & Canvas Relations
   stickies            Sticky[]              @relation("UserStickies")
 
-  // Academic Library Relations (Personal Scope & Curation)
-  items                  Item[]                @relation("UserItems")
-  collections            Collection[]          @relation("UserCollections")
-  tags                   Tag[]                 @relation("UserTags")
-  annotations            Annotation[]          @relation("UserAnnotations")
-  notes                  Note[]                @relation("UserNotes")
-  itemStates             State[]               @relation("UserItemStates")
-  savedSearches          SavedSearch[]         @relation("UserSavedSearches")
-  capturePreviews        CapturePreview[]
-  idempotencyRecords     IdempotencyRecord[]   @relation("UserIdempotencyRecords")
-  syncSequence           SyncSequence?         @relation("UserSyncSequence")
-  libraryChanges         LibraryChange[]       @relation("UserLibraryChanges")
-  tombstones             Tombstone[]           @relation("UserTombstones")
-  deletedTombstones      Tombstone[]           @relation("TombstoneDeletedBy")
-  outboxEvents           OutboxEvent[]         @relation("UserOutboxEvents")
-  ingestionRuns          IngestionRun[]        @relation("UserIngestionRuns")
-  ingestionReviewCases   IngestionReviewCase[] @relation("UserIngestionReviewCases")
 
   // Document Relations (Page & Document Collaboration)
   authoredPages           Page[]           @relation("PageAuthor")
@@ -114,24 +116,42 @@ model User {
   @@map("users")
 }
 
+model UserProfile {
+  userId         String    @id @map("user_id") @db.Uuid
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name           String    @default("User")
+  avatar         String?   @map("avatar_url")
+  bio            String?   @default("")
+  institution    String?
+  department     String?
+  academicTitle  String?   @map("academic_title")
+  orcidId        String?   @map("orcid_id")
+  website        String?
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([name])
+  @@index([institution])
+  @@map("user_profiles")
+}
+
 model UserSettings {
-  id              String   @id @default(uuid()) @db.Uuid
-  userId          String   @unique @map("user_id") @db.Uuid
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  theme           String   @default("system")
-  citationStyle   String   @default("apa") @map("citation_style")
-  locale          String   @default("en")
-  editorConfig    Json     @default("{}") @map("editor_config")
-  notifications   Json     @default("{}")
-  aiPreferences   Json     @default("{}") @map("ai_preferences")
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  userId          String          @id @map("user_id") @db.Uuid
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  theme           ThemePreference @default(system)
+  citationStyle   CitationStyle   @default(apa) @map("citation_style")
+  locale          String          @default("en")
+  editorConfig    Json            @default("{}") @map("editor_config")
+  notifications   Json            @default("{}")
+  aiPreferences   Json            @default("{}") @map("ai_preferences")
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@map("user_settings")
 }
 
-model FederatedIdentity {
-  id                String       @id @default(uuid()) @db.Uuid
+model UserAccount {
+  id                String       @id @default(uuid(7)) @db.Uuid
   userId            String       @map("user_id") @db.Uuid
   user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   provider          AuthProvider
@@ -143,17 +163,16 @@ model FederatedIdentity {
 
   @@unique([provider, providerSubjectId])
   @@unique([userId, provider])
-  @@index([userId])
   @@index([email])
-  @@map("federated_identities")
+  @@map("user_accounts")
 }
 
 model RefreshToken {
-  id         String         @id @default(uuid()) @db.Uuid
+  id         String         @id @default(uuid(7)) @db.Uuid
   userId     String         @map("user_id") @db.Uuid
   user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   tokenHash  String         @unique @map("token_hash")
-  familyId   String         @default(uuid()) @map("family_id") @db.Uuid
+  familyId   String         @default(uuid(7)) @map("family_id") @db.Uuid
   parentId   String?        @map("parent_id") @db.Uuid
   parent     RefreshToken?  @relation("TokenLineage", fields: [parentId], references: [id], onDelete: SetNull)
   children   RefreshToken[] @relation("TokenLineage")
@@ -166,16 +185,14 @@ model RefreshToken {
   lastUsedAt DateTime       @default(now()) @map("last_used_at") @db.Timestamptz(6)
   createdAt  DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  @@index([userId])
-  @@index([userId, isRevoked, expiresAt])
-  @@index([userId, revokedAt, expiresAt])
+  @@index([parentId])
   @@index([familyId])
-  @@index([tokenHash])
+  @@index([userId, isRevoked, expiresAt])
   @@map("refresh_tokens")
 }
 
-model SecurityAuditLog {
-  id         String            @id @default(uuid()) @db.Uuid
+model AuditLog {
+  id         String            @id @default(uuid(7)) @db.Uuid
   actorId    String?           @map("actor_id") @db.Uuid
   actor      User?             @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
   eventType  SecurityEventType @map("event_type")
@@ -188,5 +205,19 @@ model SecurityAuditLog {
 
   @@index([actorId, occurredAt])
   @@index([eventType, occurredAt])
-  @@map("security_audit_logs")
+  @@map("audit_logs")
 }
+
+model VerificationToken {
+  id        String                @id @default(uuid(7)) @db.Uuid
+  userId    String                @map("user_id") @db.Uuid
+  user      User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String                @unique @map("token_hash")
+  type      VerificationTokenType @default(email_verification)
+  expiresAt DateTime              @map("expires_at") @db.Timestamptz(6)
+  createdAt DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([userId, type])
+  @@map("verification_tokens")
+}
+

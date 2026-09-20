@@ -50,6 +50,9 @@ export class CommentRepository {
     status?: CommentStatus;
     line?: number;
     lineEnd?: number;
+    yjsAnchorStart?: string | null;
+    yjsAnchorEnd?: string | null;
+    selectedText?: string | null;
   }) {
     return this.prisma.pageComment.create({
       data: {
@@ -60,6 +63,9 @@ export class CommentRepository {
         status: data.status || CommentStatus.open,
         line: data.line,
         lineEnd: data.lineEnd,
+        yjsAnchorStart: data.yjsAnchorStart || null,
+        yjsAnchorEnd: data.yjsAnchorEnd || null,
+        selectedText: data.selectedText || null,
       },
       include: {
         author: { select: AUTHOR_SELECT },

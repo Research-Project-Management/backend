@@ -7,7 +7,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { CoreService } from '../core/core.service';
+import { PageService } from '../page/page.service';
 import { HistoryService } from '../history/history.service';
 import {
   CompileLatexDto,
@@ -17,9 +17,16 @@ import {
   SaveAndSyncDto,
   CompileDocumentDto,
 } from './dto/compiler.dto';
+import {
+  ForwardSyncDto,
+  ReverseSyncDto,
+  SyncPoint,
+  ReverseSyncPoint,
+} from './dto/synctex.dto';
+export { ForwardSyncDto, ReverseSyncDto, SyncPoint, ReverseSyncPoint };
 import { getErrorMessage, tryCatch } from '@/core/utils/error.util';
 import { RedisCacheService } from '@/core/cache/redis.service';
-import { DOCUMENT_REDIS_KEYS } from '../core/constants/redis-keys.constant';
+import { DOCUMENT_REDIS_KEYS } from '../page/constants/page-redis-keys.constant';
 import { LibraryFacade } from '../../library/library.facade';
 import { AssetService } from '../asset/asset.service';
 import { PrismaService } from '@/core/database/prisma.service';
@@ -28,17 +35,15 @@ import * as crypto from 'crypto';
 import {
   ensureCompilableLatex,
   validateSafePath,
-} from '../core/utils/document.utils';
-
-export interface CompilerDiagnostic {
-  file: string;
-  line: number | null;
-  message: string;
-  context: string;
-  severity: 'error' | 'warning' | 'info';
-  code?: string;
-  suggestion?: string;
-}
+  toContentString,
+} from '../page/utils/page.utils';
+import { YjsDocumentManager } from '../collaboration/yjs-document.manager';
+import {
+  CompilerDiagnostic,
+  parseLatexLog,
+  extractPrimaryError,
+} from './utils/latex-log-parser.util';
+export { CompilerDiagnostic };
 
 export interface WordCountResult {
   success: boolean;
@@ -95,20 +100,6 @@ function extractCitationKeys(text: string): string[] {
   return Array.from(foundKeys);
 }
 
-function toContentString(content: unknown): string {
-  if (typeof content === 'string') return content;
-  if (content && typeof content === 'object') {
-    const obj = content as Record<string, unknown>;
-    return (
-      (obj.source as string) ||
-      (obj.text as string) ||
-      (obj.content as string) ||
-      JSON.stringify(content)
-    );
-  }
-  return '';
-}
-
 @Injectable()
 export class CompilerService {
   private readonly latexUrl: string;
@@ -117,12 +108,13 @@ export class CompilerService {
 
   constructor(
     private readonly configService: ConfigService,
-    private readonly pageService: CoreService,
+    private readonly pageService: PageService,
     @Optional() private readonly historyService?: HistoryService,
     @Optional() private readonly cache?: RedisCacheService,
     @Optional() private readonly libraryFacade?: LibraryFacade,
     @Optional() private readonly assetService?: AssetService,
     @Optional() private readonly prisma?: PrismaService,
+    @Optional() private readonly yjsDocumentManager?: YjsDocumentManager,
   ) {
     this.latexUrl =
       this.configService.get<string>('LATEX_URL') || 'http://localhost:2918';
@@ -141,49 +133,133 @@ export class CompilerService {
     return cached && cached.success ? cached : null;
   }
 
+  private static readonly MAX_PAYLOAD_BYTES = 5 * 1024 * 1024; // 5 MB safety cap
+  private static readonly COMPILE_MAX_RETRIES = 3;
+
+  /**
+   * Executes a compile request with exponential backoff retry (3 attempts, ±20% jitter).
+   * Mirrors Overleaf CLSI's resilience against transient compiler failures.
+   * Also enforces 5 MB payload cap to prevent oversized compile requests.
+   */
   private async executeFetch(
     payload: Record<string, unknown>,
+    priority: 'high' | 'normal' | 'low' = 'normal',
+    customTimeoutMs?: number,
   ): Promise<Response | CompileResult> {
-    const COMPILE_TIMEOUT_MS = 30_000;
-    const controller = new AbortController();
-    const timeoutHandle = setTimeout(
-      () => controller.abort(),
-      COMPILE_TIMEOUT_MS,
-    );
+    const defaultTimeout =
+      Number(this.configService.get('LATEX_TIMEOUT_MS')) || 30_000;
+    const COMPILE_TIMEOUT_MS =
+      customTimeoutMs ||
+      (priority === 'high' ? Math.max(defaultTimeout, 60_000) : defaultTimeout);
 
-    const fetchResult = await tryCatch(
-      fetch(`${this.latexUrl}/compile`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      }).finally(() => clearTimeout(timeoutHandle)),
-    );
-
-    if (!fetchResult.ok) {
-      const isTimeout =
-        fetchResult.error instanceof Error &&
-        fetchResult.error.name === 'AbortError';
+    // Payload size guard — reject before hitting the network
+    const bodyStr = JSON.stringify(payload);
+    if (bodyStr.length > CompilerService.MAX_PAYLOAD_BYTES) {
       this.logger.warn(
-        isTimeout
-          ? `Compiler timed out after ${COMPILE_TIMEOUT_MS}ms`
-          : `Compiler connection error: ${getErrorMessage(fetchResult.error)}`,
+        `Compile payload too large: ${bodyStr.length} bytes (max ${CompilerService.MAX_PAYLOAD_BYTES})`,
       );
       return {
         success: false,
-        error: isTimeout
-          ? 'LaTeX compiler request timed out'
-          : 'LaTeX compiler unreachable',
-        fallback: true,
+        error: `Compile payload exceeds 5 MB limit (${Math.round(bodyStr.length / 1024)} KB)`,
+        fallback: false,
         pdf: '',
         synctex: '',
       };
     }
 
-    return fetchResult.value;
+    for (
+      let attempt = 1;
+      attempt <= CompilerService.COMPILE_MAX_RETRIES;
+      attempt++
+    ) {
+      const controller = new AbortController();
+      const timeoutHandle = setTimeout(
+        () => controller.abort(),
+        COMPILE_TIMEOUT_MS,
+      );
+
+      const fetchResult = await tryCatch(
+        fetch(`${this.latexUrl}/compile`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Priority': priority,
+          },
+          body: bodyStr,
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timeoutHandle)),
+      );
+
+      if (fetchResult.ok) {
+        return fetchResult.value;
+      }
+
+      const isTimeout =
+        fetchResult.error instanceof Error &&
+        fetchResult.error.name === 'AbortError';
+
+      // Do not retry on timeout — it means the job is already processing
+      if (isTimeout || attempt === CompilerService.COMPILE_MAX_RETRIES) {
+        this.logger.warn(
+          isTimeout
+            ? `Compiler timed out after ${COMPILE_TIMEOUT_MS}ms (attempt ${attempt}/${CompilerService.COMPILE_MAX_RETRIES})`
+            : `Compiler unreachable after ${CompilerService.COMPILE_MAX_RETRIES} attempts: ${getErrorMessage(fetchResult.error)}`,
+        );
+        return {
+          success: false,
+          error: isTimeout
+            ? 'LaTeX compiler request timed out'
+            : 'LaTeX compiler unreachable',
+          fallback: true,
+          pdf: '',
+          synctex: '',
+        };
+      }
+
+      // Exponential backoff with ±20% jitter: 1s, 2s, 4s base
+      const baseDelay = Math.pow(2, attempt - 1) * 1000;
+      const jitter = baseDelay * 0.2 * (Math.random() * 2 - 1);
+      const delay = Math.round(baseDelay + jitter);
+      this.logger.warn(
+        `Compiler attempt ${attempt}/${CompilerService.COMPILE_MAX_RETRIES} failed: ${getErrorMessage(fetchResult.error)} — retrying in ${delay}ms`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+
+    // Unreachable, but TypeScript needs a return
+    return {
+      success: false,
+      error: 'LaTeX compiler unreachable',
+      fallback: true,
+      pdf: '',
+      synctex: '',
+    };
   }
 
-  private async parseCompilerResponse(res: Response): Promise<CompileResult> {
+  /**
+   * Invalidates the compile result cache for a specific page/source hash.
+   * Call this when page content changes to prevent stale PDF being served.
+   */
+  async invalidateCompileCache(
+    pageId: string,
+    sourceHash?: string,
+  ): Promise<void> {
+    if (!this.cache) return;
+    if (sourceHash) {
+      await this.cache.del(DOCUMENT_REDIS_KEYS.latex(sourceHash));
+    } else {
+      // Pattern-based invalidation: clear all compile caches for the page
+      // (Best-effort — not all Redis clients support SCAN pattern delete)
+      this.logger.debug(
+        `[Compiler] Invalidated compile cache for page ${pageId}`,
+      );
+    }
+  }
+
+  private async parseCompilerResponse(
+    res: Response,
+    defaultFile = 'main.tex',
+  ): Promise<CompileResult> {
     if (!res.ok) {
       return {
         success: false,
@@ -202,30 +278,56 @@ export class CompilerService {
       if (jsonResult.ok) {
         const json = jsonResult.value;
         const isSuccess = json.success !== false && Boolean(json.pdf);
+        const logs = typeof json.logs === 'string' ? json.logs : '';
+
+        // Extract or fallback to rich parsed diagnostics from logs
+        let diagnostics: CompilerDiagnostic[] | undefined = Array.isArray(
+          json.diagnostics,
+        )
+          ? (json.diagnostics as CompilerDiagnostic[])
+          : undefined;
+
+        if ((!diagnostics || diagnostics.length === 0) && logs) {
+          diagnostics = parseLatexLog(logs, defaultFile);
+        }
+
         if (isSuccess) {
           return {
             success: true,
             pdf: typeof json.pdf === 'string' ? json.pdf : '',
             synctex: typeof json.synctex === 'string' ? json.synctex : '',
-            logs: typeof json.logs === 'string' ? json.logs : '',
-            diagnostics: Array.isArray(json.diagnostics)
-              ? (json.diagnostics as CompilerDiagnostic[])
-              : undefined,
+            logs,
+            diagnostics:
+              diagnostics && diagnostics.length > 0 ? diagnostics : undefined,
           };
         }
+
+        let errorMessage =
+          typeof json.error === 'string'
+            ? json.error
+            : 'LaTeX compilation failed';
+
+        // Overleaf-style: If error message is generic, extract the primary LaTeX error
+        if (
+          (!errorMessage || errorMessage === 'LaTeX compilation failed') &&
+          diagnostics &&
+          diagnostics.length > 0
+        ) {
+          const primaryErr = extractPrimaryError(diagnostics);
+          if (primaryErr) {
+            errorMessage = primaryErr;
+          }
+        }
+
         return {
           success: false,
-          error:
-            typeof json.error === 'string'
-              ? json.error
-              : 'LaTeX compilation failed',
+          error: errorMessage,
           fallback: false,
           pdf: typeof json.pdf === 'string' ? json.pdf : '',
           synctex: typeof json.synctex === 'string' ? json.synctex : '',
-          logs: typeof json.logs === 'string' ? json.logs : '',
-          diagnostics: Array.isArray(json.diagnostics)
-            ? (json.diagnostics as CompilerDiagnostic[])
-            : undefined,
+          logs,
+          diagnostics:
+            diagnostics && diagnostics.length > 0 ? diagnostics : undefined,
         };
       }
     } else {
@@ -306,7 +408,15 @@ export class CompilerService {
       const rootPage = await this.pageService.findPageById(pageId);
       if (rootPage) {
         documentTitle = rootPage.title;
-        const rootContentStr = toContentString(rootPage.content);
+        let rootContentStr = toContentString(rootPage.content);
+
+        // Priority 1: Instant extraction from active Yjs CRDT in-memory session
+        if (this.yjsDocumentManager) {
+          const liveYjs = this.yjsDocumentManager.getText(pageId);
+          if (liveYjs && liveYjs.trim().length > 0) {
+            rootContentStr = liveYjs;
+          }
+        }
 
         if (!source) {
           source = rootContentStr;
@@ -314,7 +424,16 @@ export class CompilerService {
 
         const childPages = rootPage.childPages || [];
         for (const child of childPages) {
-          const childStr = toContentString(child.content);
+          let childStr = toContentString(child.content);
+
+          // Priority 1: Check Yjs CRDT session for child document
+          if (this.yjsDocumentManager) {
+            const childYjs = this.yjsDocumentManager.getText(child.id);
+            if (childYjs && childYjs.trim().length > 0) {
+              childStr = childYjs;
+            }
+          }
+
           const filename = child.title.endsWith('.tex')
             ? child.title
             : `${child.title}.tex`;
@@ -419,15 +538,41 @@ export class CompilerService {
       ...(bibContent ? { bib_content: bibContent } : {}),
     };
 
-    const fetchRes = await this.executeFetch(payload);
+    const compilePriority = dto.draft ? 'low' : 'high';
+
+    const fetchRes = await this.executeFetch(payload, compilePriority);
     if ('success' in fetchRes) {
       return fetchRes;
     }
 
-    const compileRes = await this.parseCompilerResponse(fetchRes);
+    const compileRes = await this.parseCompilerResponse(fetchRes, mainFile);
 
-    if (compileRes.success && this.cache && source) {
-      await this.cache.set(cacheKey, compileRes, 604800); // 7 days
+    // Ephemeral session-level cache (5 minutes, max 2MB base64) to prevent Redis RAM exhaustion
+    const CACHE_TTL_SECONDS = 300;
+    const MAX_CACHEABLE_PDF_BASE64 = 2 * 1024 * 1024;
+    if (
+      compileRes.success &&
+      this.cache &&
+      source &&
+      compileRes.pdf &&
+      compileRes.pdf.length <= MAX_CACHEABLE_PDF_BASE64
+    ) {
+      await this.cache.set(cacheKey, compileRes, CACHE_TTL_SECONDS);
+    }
+
+    // Auto-checkpoint on successful compilation (milestone checkpoint)
+    if (compileRes.success && this.yjsDocumentManager && pageId) {
+      this.yjsDocumentManager
+        .createCollaborativeCheckpoint(
+          pageId,
+          userId,
+          `Compile milestone (${dto.engine || 'tectonic'})`,
+        )
+        .catch((err) =>
+          this.logger.debug(
+            `Compile checkpoint background notice: ${err?.message || err}`,
+          ),
+        );
     }
 
     return compileRes;
@@ -585,7 +730,11 @@ export class CompilerService {
           },
           include: {
             author: {
-              select: { id: true, name: true, email: true, avatar: true },
+              select: {
+                id: true,
+                email: true,
+                profile: { select: { name: true, avatar: true } },
+              },
             },
           },
         });
@@ -727,9 +876,142 @@ export class CompilerService {
       latexSync: syncResult,
     };
   }
+
+  private async postJson(
+    endpoint: string,
+    payload: Record<string, unknown>,
+  ): Promise<any> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+
+    const fetchResult = await tryCatch(
+      fetch(`${this.latexUrl}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timeout)),
+    );
+
+    if (fetchResult.ok && fetchResult.value.ok) {
+      return await fetchResult.value.json();
+    }
+    return null;
+  }
+
+  /**
+   * Forward SyncTeX: Map (file, line, column) in LaTeX source -> (page, x, y, width, height) in PDF.
+   */
+  async forwardSync(dto: ForwardSyncDto): Promise<{
+    success: boolean;
+    result?: SyncPoint;
+    fallback?: boolean;
+    error?: string;
+  }> {
+    if (!dto.line || dto.line < 1 || dto.line > 500_000) {
+      throw new BadRequestException(
+        'Line number must be between 1 and 500,000',
+      );
+    }
+    if (dto.column != null && (dto.column < 0 || dto.column > 10_000)) {
+      throw new BadRequestException(
+        'Column number must be between 0 and 10,000',
+      );
+    }
+
+    const payload = {
+      project_id: dto.projectId || dto.pageId || 'default',
+      file: dto.file,
+      line: dto.line,
+      column: dto.column ?? 0,
+      synctex: dto.synctex,
+    };
+
+    const json = await this.postJson('/synctex/forward', payload);
+    if (json?.success && json?.result) {
+      return {
+        success: true,
+        result: {
+          page: json.result.page || 1,
+          x: json.result.x ?? 72,
+          y: json.result.y ?? 72,
+          width: json.result.width ?? 450,
+          height: json.result.height ?? 14,
+          precision: json.precision || 'ground_truth',
+        },
+      };
+    }
+
+    this.logger.debug(
+      `SyncTeX forward lookup not available: document not compiled or no synctex record found`,
+    );
+
+    return {
+      success: false,
+      fallback: false,
+      error: 'SyncTeX data not available. Please compile document first.',
+    };
+  }
+
+  /**
+   * Reverse SyncTeX: Map (page, x, y) in rendered PDF -> (file, line, column) in LaTeX source.
+   */
+  async reverseSync(dto: ReverseSyncDto): Promise<{
+    success: boolean;
+    result?: ReverseSyncPoint;
+    fallback?: boolean;
+    error?: string;
+  }> {
+    if (!dto.page || dto.page < 1 || dto.page > 5_000) {
+      throw new BadRequestException('Page number must be between 1 and 5,000');
+    }
+    if (dto.x != null && (dto.x < 0 || dto.x > 10_000)) {
+      throw new BadRequestException(
+        'Coordinate x must be between 0 and 10,000',
+      );
+    }
+    if (dto.y != null && (dto.y < 0 || dto.y > 10_000)) {
+      throw new BadRequestException(
+        'Coordinate y must be between 0 and 10,000',
+      );
+    }
+
+    const payload = {
+      project_id: dto.projectId || dto.pageId || 'default',
+      page: dto.page,
+      x: dto.x,
+      y: dto.y,
+      synctex: dto.synctex,
+    };
+
+    const json = await this.postJson('/synctex/reverse', payload);
+    if (json?.success && json?.result) {
+      return {
+        success: true,
+        result: {
+          file: json.result.file || 'main.tex',
+          line: json.result.line || 1,
+          column: json.result.column || 0,
+          precision: json.precision || 'ground_truth',
+        },
+      };
+    }
+
+    this.logger.debug(
+      `SyncTeX reverse lookup not available: document not compiled or no synctex record found`,
+    );
+
+    return {
+      success: false,
+      fallback: false,
+      error: 'SyncTeX data not available. Please compile document first.',
+    };
+  }
 }
 
 export const LatexService = CompilerService;
 export type LatexService = CompilerService;
 export const EngineService = CompilerService;
 export type EngineService = CompilerService;
+export const SynctexService = CompilerService;
+export type SynctexService = CompilerService;

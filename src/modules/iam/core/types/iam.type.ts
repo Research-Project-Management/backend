@@ -16,7 +16,7 @@ export interface AuthenticatedUser {
   readonly email: string;
   readonly name: string;
   readonly avatar: string | null;
-  readonly isVerified: boolean;
+  readonly status: string;
 }
 
 export interface JwtPayload {

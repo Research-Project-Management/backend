@@ -18,6 +18,7 @@ import '@fastify/multipart';
 import { AiService } from './ai.service';
 import { AiQueryDto, GetDocumentsBulkDto } from './dto/ai.dto';
 import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
+import { VerifiedEmailGuard } from '@/modules/iam/authn/guards/verified-email.guard';
 import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
 import { Public } from '@/modules/iam/authn/decorators/public.decorator';
 import { BypassEnvelope } from '@/core/decorators/bypass.decorator';
@@ -54,6 +55,7 @@ export class AiController {
     'chat/project',
     'project/chat',
   ])
+  @UseGuards(VerifiedEmailGuard)
   @BypassEnvelope()
   @ApiOperation({
     summary: 'Stream unified AI Copilot execution responses via SSE',
@@ -131,6 +133,7 @@ export class AiController {
    * Document upload to Vector Store with multi-tenant isolation
    */
   @Post('documents/upload')
+  @UseGuards(VerifiedEmailGuard)
   @ApiOperation({
     summary:
       'Upload document to AI engine vector store with multi-tenant isolation',

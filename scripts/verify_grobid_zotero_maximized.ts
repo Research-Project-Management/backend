@@ -8,10 +8,10 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { ZoteroTranslatorClient } from '../src/modules/library/infra/zotero/zotero-translator.client';
 import { GrobidClient } from '../src/modules/library/infra/grobid/grobid.client';
-import { PdfProvider } from '../src/modules/library/attachments/providers/pdf.provider';
-import { AttachmentExtractionHandler } from '../src/modules/library/attachments/handlers/extraction.handler';
-import { ItemsService } from '../src/modules/library/items/items.service';
-import { QueryRepository } from '../src/modules/library/items/repositories/query.repository';
+import { PdfProvider } from '../src/modules/library/content/infrastructure/providers/pdf.provider';
+import { AttachmentExtractionHandler } from '../src/modules/library/content/application/handlers/extraction.handler';
+import { ItemsService } from '../src/modules/library/catalog/application/services/items.service';
+import { QueryRepository } from '../src/modules/library/catalog/infrastructure/repositories/query.repository';
 
 async function main() {
   console.log('======================================================================');

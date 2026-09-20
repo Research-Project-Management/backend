@@ -342,6 +342,82 @@ export class MemberService {
     return this.removeMember(projectId, userId, userId);
   }
 
+  /**
+   * Transfer project ownership to another existing member.
+   * Enforces:
+   * 1. Actor cannot transfer ownership to themselves.
+   * 2. Project must exist.
+   * 3. Actor must be an active owner.
+   * 4. Target user must be an existing member of the project.
+   * Invalidation: Evicts role/permission/detail caches for both previous and new owners.
+   */
+  async transferOwnership(
+    projectId: string,
+    actorId: string,
+    newOwnerId: string,
+  ): Promise<{
+    message: string;
+    previousOwner: ProjectMemberWithUser;
+    newOwner: ProjectMemberWithUser;
+  }> {
+    if (actorId === newOwnerId) {
+      throw new BadRequestException('Cannot transfer ownership to yourself');
+    }
+
+    const project = await this.memberRepo.findProject(projectId);
+    if (!project) {
+      throw new NotFoundException('Project not found');
+    }
+
+    const currentMember = await this.memberRepo.findMember(projectId, actorId);
+    if (!currentMember || !isOwner(currentMember.role)) {
+      throw new ForbiddenException(
+        'Only the current project owner can transfer ownership',
+      );
+    }
+
+    const targetMember = await this.memberRepo.findMember(
+      projectId,
+      newOwnerId,
+    );
+    if (!targetMember) {
+      throw new NotFoundException(
+        'Target user is not a member of this project',
+      );
+    }
+
+    const result = await this.memberRepo.transferOwnership(
+      projectId,
+      actorId,
+      newOwnerId,
+    );
+
+    await Promise.all([
+      this.invalidateMemberCaches(projectId, actorId),
+      this.invalidateMemberCaches(projectId, newOwnerId),
+    ]);
+
+    this.eventEmitter?.emit(
+      'project.ownership_transferred',
+      new DomainActivityEvent({
+        entityType: 'project' as unknown as EntityType,
+        entityId: projectId,
+        verb: 'ownership_transferred',
+        field: 'owner',
+        oldValue: actorId,
+        newValue: newOwnerId,
+        actorId,
+        projectId,
+      }),
+    );
+
+    return {
+      message: 'Project ownership transferred successfully',
+      previousOwner: result.previousOwner,
+      newOwner: result.newOwner,
+    };
+  }
+
   private async invalidateMemberCaches(
     projectId: string,
     userId: string,

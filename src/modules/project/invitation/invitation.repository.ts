@@ -5,10 +5,29 @@ import { isUuid } from '@/core/utils/uuid.util';
 
 const USER_SELECT = {
   id: true,
-  name: true,
   email: true,
-  avatar: true,
+  profile: {
+    select: {
+      name: true,
+      avatar: true,
+    },
+  },
 } as const;
+
+function mapUser<
+  T extends {
+    id: string;
+    email: string | null;
+    profile?: { name: string; avatar: string | null } | null;
+  },
+>(user: T) {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.profile?.name ?? 'User',
+    avatar: user.profile?.avatar ?? null,
+  };
+}
 
 const PROJECT_SELECT = {
   id: true,
@@ -162,10 +181,11 @@ export class InvitationRepository {
   async findUserById(userId: string) {
     if (!isUuid(userId)) return null;
 
-    return this.prisma.user.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: USER_SELECT,
     });
+    return user ? mapUser(user) : null;
   }
 
   /**
@@ -175,13 +195,14 @@ export class InvitationRepository {
     if (!email) return null;
     const normalizedEmail = email.trim().toLowerCase();
 
-    return this.prisma.user.findFirst({
+    const user = await this.prisma.user.findFirst({
       where: {
         email: { equals: normalizedEmail, mode: 'insensitive' },
         deletedAt: null,
       },
       select: USER_SELECT,
     });
+    return user ? mapUser(user) : null;
   }
 
   /**
@@ -191,10 +212,11 @@ export class InvitationRepository {
     const validIds = userIds.filter(isUuid);
     if (validIds.length === 0) return [];
 
-    return this.prisma.user.findMany({
+    const users = await this.prisma.user.findMany({
       where: { id: { in: validIds } },
       select: USER_SELECT,
     });
+    return users.map(mapUser);
   }
 
   /**

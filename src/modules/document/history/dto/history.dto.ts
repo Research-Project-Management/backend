@@ -1,4 +1,5 @@
-import { IsEnum, IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsOptional, IsString, IsInt, Min, Max } from 'class-validator';
+import { Type } from 'class-transformer';
 import { VersionEventType } from '@prisma/client';
 
 export class CreateVersionDto {
@@ -35,6 +36,33 @@ export class CreateVersionDto {
   projectId?: string;
 }
 
+export class UpdateVersionDto {
+  @IsString()
+  @IsOptional()
+  label?: string;
+
+  @IsString()
+  @IsOptional()
+  title?: string;
+}
+
+export class VersionQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  limit?: number;
+
+  @IsOptional()
+  @IsString()
+  cursor?: string;
+
+  @IsOptional()
+  @IsEnum(VersionEventType)
+  eventType?: VersionEventType;
+}
+
 export interface DiffChunk {
   type: 'added' | 'deleted' | 'unchanged';
   value: string;
@@ -46,6 +74,8 @@ export interface VersionDiffResult {
   toVersionId: string;
   fromLabel?: string;
   toLabel?: string;
+  fromContent: string;
+  toContent: string;
   chunks: DiffChunk[];
   stats: {
     addedLines: number;

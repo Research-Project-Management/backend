@@ -39,7 +39,7 @@ describe('StatusUpdateService', () => {
         createdById: 'user-1',
         createdAt: new Date(),
         updatedAt: new Date(),
-        createdBy: { id: 'user-1', name: 'Alice', avatar: null },
+        createdBy: { id: 'user-1', profile: { name: 'Alice', avatar: null } },
       },
       {
         id: 'u-2',
@@ -49,7 +49,7 @@ describe('StatusUpdateService', () => {
         createdById: 'user-2',
         createdAt: new Date(Date.now() - 100000),
         updatedAt: new Date(Date.now() - 100000),
-        createdBy: { id: 'user-2', name: 'Bob', avatar: null },
+        createdBy: { id: 'user-2', profile: { name: 'Bob', avatar: null } },
       },
     ];
 
@@ -71,7 +71,7 @@ describe('StatusUpdateService', () => {
       createdById: 'user-1',
       createdAt: new Date(),
       updatedAt: new Date(),
-      createdBy: { id: 'user-1', name: 'Alice', avatar: null },
+      createdBy: { id: 'user-1', profile: { name: 'Alice', avatar: null } },
     };
 
     repo.findLatestByProjectId.mockResolvedValue(mockLatest);
@@ -96,7 +96,7 @@ describe('StatusUpdateService', () => {
       createdById: 'user-1',
       createdAt: new Date(),
       updatedAt: new Date(),
-      createdBy: { id: 'user-1', name: 'Alice', avatar: null },
+      createdBy: { id: 'user-1', profile: { name: 'Alice', avatar: null } },
     };
 
     repo.create.mockResolvedValue(created);
@@ -121,7 +121,7 @@ describe('StatusUpdateService', () => {
       createdById: 'user-1',
       createdAt: new Date(),
       updatedAt: new Date(),
-      createdBy: { id: 'user-1', name: 'Alice', avatar: null },
+      createdBy: { id: 'user-1', profile: { name: 'Alice', avatar: null } },
     });
 
     const result = await service.updateUpdate('p-1', 'u-1', {

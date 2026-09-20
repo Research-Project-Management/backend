@@ -23,12 +23,13 @@ jest.mock('@mozilla/readability', () => ({
   })),
 }));
 
-import { AttachmentsService } from '@/modules/library/attachments/attachments.service';
-import { AttachmentsController } from '@/modules/library/attachments/attachments.controller';
-import { WebSnapshotService } from '@/modules/library/attachments/services/web-snapshot.service';
-import { IdentifyStage } from '@/modules/library/ingestion/stages/identify.stage';
-import { ExtractionHandler } from '@/modules/library/attachments/handlers/extraction.handler';
-import { CommandRepository } from '@/modules/library/items/repositories/command.repository';
+import { fromPartial, fromAny } from '@total-typescript/shoehorn';
+import { AttachmentsService } from '@/modules/library/content/application/services/attachments.service';
+import { AttachmentsController } from '@/modules/library/content/presentation/attachments.controller';
+import { WebSnapshotService } from '@/modules/library/content/application/services/web-snapshot.service';
+import { IdentifyStage } from '@/modules/library/processing/infrastructure/stages/identify.stage';
+import { ExtractionHandler } from '@/modules/library/content/application/handlers/extraction.handler';
+import { CommandRepository } from '@/modules/library/catalog/infrastructure/repositories/command.repository';
 import { IStoragePort } from '@/modules/storage/storage.port';
 
 describe('Library Attachments & Storage Integration Suite', () => {
@@ -438,7 +439,10 @@ describe('Library Attachments & Storage Integration Suite', () => {
 
       // Mock internal HTML snapshot capture
       jest
-        .spyOn(snapshotService as any, 'captureHtmlSnapshot')
+        .spyOn(
+          fromPartial<{ captureHtmlSnapshot: any }>(snapshotService),
+          'captureHtmlSnapshot',
+        )
         .mockResolvedValue({
           htmlContent: '<html><body>Paper title</body></html>',
           title: 'Arxiv Paper Snapshot',
@@ -564,12 +568,14 @@ describe('Library Attachments & Storage Integration Suite', () => {
         file: null,
       });
 
-      await handler.handle({
-        id: 'event-1',
-        aggregateId: 'att-1',
-        eventType: 'library.attachment.extraction_requested',
-        payload: { attachmentId: 'att-1' },
-      } as any);
+      await handler.handle(
+        fromPartial({
+          id: 'event-1',
+          aggregateId: 'att-1',
+          eventType: 'library.attachment.extraction_requested',
+          payload: { attachmentId: 'att-1' },
+        }),
+      );
 
       expect(mockStoragePort.readOwnedFile).toHaveBeenCalledWith({
         fileId: 'storage-file-123',

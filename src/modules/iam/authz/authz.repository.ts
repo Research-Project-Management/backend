@@ -65,10 +65,7 @@ export class AuthzRepository implements IAuthzRepository {
   /**
    * Fetches full member context including user details.
    */
-  async findMemberContext(
-    projectId: string,
-    userId: string,
-  ): Promise<any | null> {
+  async findMemberContext(projectId: string, userId: string): Promise<any> {
     if (!projectId || !userId || !isUUID(projectId) || !isUUID(userId)) {
       return null;
     }
@@ -76,7 +73,7 @@ export class AuthzRepository implements IAuthzRepository {
     const prismaAny = this.prisma as any;
     if (!prismaAny.projectMember) return null;
 
-    return prismaAny.projectMember.findUnique({
+    return await prismaAny.projectMember.findUnique({
       where: {
         projectId_userId: {
           projectId,

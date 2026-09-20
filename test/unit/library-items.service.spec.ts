@@ -1,21 +1,22 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { UnprocessableEntityException } from '@nestjs/common';
-import { ItemsService } from '@/modules/library/items/items.service';
-import { QueryRepository } from '@/modules/library/items/repositories/query.repository';
-import { CommandRepository } from '@/modules/library/items/repositories/command.repository';
-import { TransactionService } from '@/modules/library/outbox/transaction.service';
+import { fromPartial } from '@total-typescript/shoehorn';
+import { ItemsService } from '@/modules/library/catalog/application/services/items.service';
+import { QueryRepository } from '@/modules/library/catalog/infrastructure/repositories/query.repository';
+import { CommandRepository } from '@/modules/library/catalog/infrastructure/repositories/command.repository';
+import { TransactionService } from '@/modules/library/shared-kernel/outbox/transaction.service';
 import { PrismaService } from '@/core/database/prisma.service';
-import { TagsService } from '@/modules/library/tags/tags.service';
-import { TypesService } from '@/modules/library/types/types.service';
-import { RagProvider } from '@/modules/library/search/providers/rag.provider';
-import { ItemTransformer } from '@/modules/library/items/transformers/item.transformer';
-import { sanitizeItemTitle } from '@/modules/library/items/utils/items.utils';
-import { VersionMismatchException } from '@/modules/library/core/errors/version-mismatch.exception';
-import { ItemsMapper } from '@/modules/library/items/mappers/items.mapper';
+import { TagsService } from '@/modules/library/catalog/application/services/tags.service';
+import { TypesService } from '@/modules/library/catalog/application/services/types.service';
+import { RagProvider } from '@/modules/library/discovery/infrastructure/providers/rag.provider';
+import { ItemTransformer } from '@/modules/library/catalog/infrastructure/mappers/item.transformer';
+import { sanitizeItemTitle } from '@/modules/library/catalog/application/utils/items.utils';
+import { VersionMismatchException } from '@/modules/library/shared-kernel/core/errors/version-mismatch.exception';
+import { ItemsMapper } from '@/modules/library/catalog/infrastructure/mappers/items.mapper';
 import {
   resolveExtraPlainText,
   extractNonColumnExtraFields,
-} from '@/modules/library/items/repositories/command.repository';
+} from '@/modules/library/catalog/infrastructure/repositories/command.repository';
 
 describe('Library Items — Authoritative Backend & Sanitization', () => {
   describe('sanitizeItemTitle (Domain Utility)', () => {
@@ -94,7 +95,7 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
       const mockLibraryTx = {
         executeInTransaction: jest
           .fn()
-          .mockImplementation((cb) => cb({} as any, mockHelpers)),
+          .mockImplementation((cb) => cb(fromPartial({}), mockHelpers)),
       };
 
       const mockTagsService = {
@@ -148,7 +149,7 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
         version: 1,
         doi: '10.1145/3065386',
       };
-      commandRepo.create.mockResolvedValue(createdItem as any);
+      commandRepo.create.mockResolvedValue(fromPartial(createdItem));
 
       const result = await service.createItem(mockUserId, {
         title: '<script>evil()</script>Attention Is All You Need',
@@ -182,7 +183,7 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
         title: 'Clean Updated Title',
         version: 2,
       };
-      commandRepo.update.mockResolvedValue(updatedItem as any);
+      commandRepo.update.mockResolvedValue(fromPartial(updatedItem));
 
       await service.updateItem(mockUserId, 'item-123', 1, {
         title: ' <b>Clean</b> Updated {Title} ',
@@ -206,10 +207,12 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
       const targetId2 = '44444444-4444-4444-4444-444444444444';
 
       it('should retrieve related items via getRelatedItems', async () => {
-        queryRepo.findById.mockResolvedValueOnce({
-          id: sourceId,
-          title: 'Source Paper',
-        } as any);
+        queryRepo.findById.mockResolvedValueOnce(
+          fromPartial({
+            id: sourceId,
+            title: 'Source Paper',
+          }),
+        );
         queryRepo.getRelations.mockResolvedValueOnce([
           {
             id: targetId1,
@@ -225,11 +228,15 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
 
       it('should link a single item via linkItems', async () => {
         queryRepo.findById
-          .mockResolvedValueOnce({ id: sourceId, title: 'Source Paper' } as any)
-          .mockResolvedValueOnce({
-            id: targetId1,
-            title: 'Target Paper 1',
-          } as any);
+          .mockResolvedValueOnce(
+            fromPartial({ id: sourceId, title: 'Source Paper' }),
+          )
+          .mockResolvedValueOnce(
+            fromPartial({
+              id: targetId1,
+              title: 'Target Paper 1',
+            }),
+          );
 
         const res = await service.linkItems(mockUserId, sourceId, {
           targetItemId: targetId1,
@@ -249,15 +256,21 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
 
       it('should link multiple items in batch via linkItems', async () => {
         queryRepo.findById
-          .mockResolvedValueOnce({ id: sourceId, title: 'Source Paper' } as any)
-          .mockResolvedValueOnce({
-            id: targetId1,
-            title: 'Target Paper 1',
-          } as any)
-          .mockResolvedValueOnce({
-            id: targetId2,
-            title: 'Target Paper 2',
-          } as any);
+          .mockResolvedValueOnce(
+            fromPartial({ id: sourceId, title: 'Source Paper' }),
+          )
+          .mockResolvedValueOnce(
+            fromPartial({
+              id: targetId1,
+              title: 'Target Paper 1',
+            }),
+          )
+          .mockResolvedValueOnce(
+            fromPartial({
+              id: targetId2,
+              title: 'Target Paper 2',
+            }),
+          );
 
         const res = await service.linkItems(mockUserId, sourceId, {
           targetItemIds: [targetId1, targetId2],
@@ -270,10 +283,12 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
       });
 
       it('should reject self-linking', async () => {
-        queryRepo.findById.mockResolvedValueOnce({
-          id: sourceId,
-          title: 'Source Paper',
-        } as any);
+        queryRepo.findById.mockResolvedValueOnce(
+          fromPartial({
+            id: sourceId,
+            title: 'Source Paper',
+          }),
+        );
 
         await expect(
           service.linkItems(mockUserId, sourceId, {
@@ -283,10 +298,12 @@ describe('Library Items — Authoritative Backend & Sanitization', () => {
       });
 
       it('should unlink items symmetrically via unlinkItems', async () => {
-        queryRepo.findById.mockResolvedValueOnce({
-          id: sourceId,
-          title: 'Source Paper',
-        } as any);
+        queryRepo.findById.mockResolvedValueOnce(
+          fromPartial({
+            id: sourceId,
+            title: 'Source Paper',
+          }),
+        );
 
         const res = await service.unlinkItems(mockUserId, sourceId, targetId1);
         expect(res.success).toBe(true);

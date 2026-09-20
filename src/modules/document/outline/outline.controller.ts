@@ -39,7 +39,7 @@ export class OutlineController {
     summary:
       'Parse heading outline on-the-fly from provided text source buffer',
   })
-  async parseRawOutline(@Body() dto: ExtractOutlineDto) {
+  parseRawOutline(@Body() dto: ExtractOutlineDto) {
     const entries = this.outlineService.parseOutlineFromSource(
       dto.source || '',
       'buffer.tex',

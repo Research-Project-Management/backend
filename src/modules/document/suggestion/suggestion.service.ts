@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  ConflictException,
   Logger,
   Optional,
 } from '@nestjs/common';
@@ -14,16 +15,24 @@ import {
 } from './suggestion.repository';
 import { CreateSuggestionDto } from './dto/suggestion.dto';
 import { SuggestionStatus } from '@prisma/client';
-import { CoreService } from '../core/core.service';
+import { PageService } from '../page/page.service';
 import { RedisCacheService } from '@/core/cache/redis.service';
-import { DOCUMENT_REDIS_KEYS } from '../core/constants/redis-keys.constant';
+import { DOCUMENT_REDIS_KEYS } from '../page/constants/page-redis-keys.constant';
+import { YjsDocumentManager } from '../collaboration/yjs-document.manager';
+import { CollaborationGateway } from '../collaboration/collaboration.gateway';
+import { getErrorMessage } from '@/core/utils/error.util';
+import { toContentString } from '../page/utils/page.utils';
 
-function applyReplacementToContent(
+/**
+ * Deep, safe replacement algorithm protecting document integrity against line drift.
+ * Pure function: testable in total isolation (Matt Pocock design principle).
+ */
+export function applyReplacementSafely(
   contentStr: string,
   suggestion: {
     type: string;
-    originalText: string;
-    suggestedText: string;
+    originalText?: string | null;
+    suggestedText?: string | null;
     fromLine: number;
     toLine: number;
   },
@@ -31,44 +40,65 @@ function applyReplacementToContent(
   const lines = contentStr.split('\n');
   const startIdx = Math.max(0, suggestion.fromLine - 1);
   const endIdx = Math.min(lines.length - 1, suggestion.toLine - 1);
+  const suggestedText = suggestion.suggestedText || '';
+  const original = suggestion.originalText || '';
 
-  if (startIdx > lines.length - 1) {
-    return contentStr;
+  // 1. Pure insert without original text anchor
+  if (suggestion.type === 'insert' && !original) {
+    const insertIdx = Math.min(lines.length, startIdx);
+    lines.splice(insertIdx, 0, ...suggestedText.split('\n'));
+    return lines.join('\n');
   }
 
-  // Extract target text in line range
-  const targetSlice = lines.slice(startIdx, endIdx + 1).join('\n');
-
-  if (suggestion.type === 'delete') {
-    if (
-      suggestion.originalText &&
-      targetSlice.includes(suggestion.originalText)
-    ) {
-      const replaced = targetSlice.replace(suggestion.originalText, '');
-      lines.splice(startIdx, endIdx - startIdx + 1, ...replaced.split('\n'));
-    } else {
-      lines.splice(startIdx, endIdx - startIdx + 1);
-    }
-  } else if (suggestion.type === 'insert') {
-    lines.splice(startIdx, 0, ...suggestion.suggestedText.split('\n'));
-  } else {
-    // replace
-    if (
-      suggestion.originalText &&
-      targetSlice.includes(suggestion.originalText)
-    ) {
-      const replaced = targetSlice.replace(
-        suggestion.originalText,
-        suggestion.suggestedText,
-      );
-      lines.splice(startIdx, endIdx - startIdx + 1, ...replaced.split('\n'));
-    } else {
+  // 2. When originalText is specified (replace or delete)
+  if (original) {
+    // 2a. Direct match at specified line range
+    const targetSlice = lines.slice(startIdx, endIdx + 1).join('\n');
+    if (targetSlice.includes(original)) {
+      const replacement = suggestion.type === 'delete' ? '' : suggestedText;
+      const replacedSlice = targetSlice.replace(original, replacement);
       lines.splice(
         startIdx,
         endIdx - startIdx + 1,
-        ...suggestion.suggestedText.split('\n'),
+        ...replacedSlice.split('\n'),
       );
+      return lines.join('\n');
     }
+
+    // 2b. Line drift compensation: Search within a sliding window (±15 lines) around expected position
+    const windowStart = Math.max(0, startIdx - 15);
+    const windowEnd = Math.min(lines.length - 1, endIdx + 15);
+    const windowSlice = lines.slice(windowStart, windowEnd + 1).join('\n');
+    if (windowSlice.includes(original)) {
+      const replacement = suggestion.type === 'delete' ? '' : suggestedText;
+      const replacedSlice = windowSlice.replace(original, replacement);
+      lines.splice(
+        windowStart,
+        windowEnd - windowStart + 1,
+        ...replacedSlice.split('\n'),
+      );
+      return lines.join('\n');
+    }
+
+    // 2c. Full document fallback search
+    if (contentStr.includes(original)) {
+      const replacement = suggestion.type === 'delete' ? '' : suggestedText;
+      return contentStr.replace(original, replacement);
+    }
+
+    // 2d. Conflict detection: originalText is missing/modified by another collaborator
+    const preview =
+      original.length > 35 ? `${original.slice(0, 32)}...` : original;
+    throw new ConflictException(
+      `Cannot apply suggestion: the original text "${preview}" has been modified or removed by another collaborator.`,
+    );
+  }
+
+  // 3. Line-based replace/delete without originalText
+  if (suggestion.type === 'delete') {
+    lines.splice(startIdx, endIdx - startIdx + 1);
+  } else {
+    lines.splice(startIdx, endIdx - startIdx + 1, ...suggestedText.split('\n'));
   }
 
   return lines.join('\n');
@@ -80,19 +110,20 @@ export class SuggestionService {
 
   constructor(
     private readonly suggestionRepo: SuggestionRepository,
-    private readonly coreService: CoreService,
+    private readonly pageService: PageService,
     private readonly prisma: PrismaService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly cache?: RedisCacheService,
+    @Optional() private readonly yjsManager?: YjsDocumentManager,
+    @Optional() private readonly collaborationGateway?: CollaborationGateway,
   ) {}
 
   private async invalidateCache(pageId: string, projectId?: string | null) {
-    if (!this.cache) return;
-    const tasks = [this.cache.del(DOCUMENT_REDIS_KEYS.page(pageId))];
     if (projectId) {
-      tasks.push(this.cache.del(DOCUMENT_REDIS_KEYS.projectTree(projectId)));
+      await this.pageService.invalidatePageCache(projectId, pageId);
+    } else if (this.cache) {
+      await this.cache.del(DOCUMENT_REDIS_KEYS.page(pageId));
     }
-    await Promise.all(tasks);
   }
 
   async createSuggestion(
@@ -100,15 +131,27 @@ export class SuggestionService {
     userId: string,
     dto: CreateSuggestionDto,
   ): Promise<SuggestionWithAuthor> {
-    const page = await this.coreService.findPageById(pageId);
+    const page = await this.pageService.findPageById(pageId);
     if (!page) {
       throw new NotFoundException(`Page ${pageId} not found`);
     }
 
-    const hasAccess = await this.coreService.checkUserAccess(pageId, userId);
+    const hasAccess = await this.pageService.checkUserAccess(pageId, userId);
     if (!hasAccess) {
       throw new ForbiddenException(
         'You do not have permission to propose suggestions on this document',
+      );
+    }
+
+    if (page.isLocked) {
+      throw new ForbiddenException(
+        'This document is locked against modifications',
+      );
+    }
+
+    if (dto.fromLine > dto.toLine) {
+      throw new BadRequestException(
+        'Starting line (fromLine) cannot be greater than ending line (toLine)',
       );
     }
 
@@ -127,6 +170,15 @@ export class SuggestionService {
       status: SuggestionStatus.pending,
     });
 
+    this.collaborationGateway?.broadcastRoomEvent(
+      pageId,
+      'suggestion:created',
+      {
+        pageId,
+        suggestion,
+      },
+    );
+
     this.eventEmitter?.emit('document.collaboration.event', {
       pageId,
       type: 'suggestion-created',
@@ -139,7 +191,7 @@ export class SuggestionService {
 
   async getSuggestions(
     pageId: string,
-    userIdOrStatus?: string | SuggestionStatus,
+    userIdOrStatus?: string,
     maybeStatus?: SuggestionStatus,
   ): Promise<SuggestionWithAuthor[]> {
     let userId: string | undefined;
@@ -157,7 +209,7 @@ export class SuggestionService {
     }
 
     if (userId) {
-      const hasAccess = await this.coreService.checkUserAccess(pageId, userId);
+      const hasAccess = await this.pageService.checkUserAccess(pageId, userId);
       if (!hasAccess) {
         throw new ForbiddenException(
           'You do not have permission to view suggestions on this document',
@@ -168,12 +220,12 @@ export class SuggestionService {
   }
 
   async acceptSuggestion(pageId: string, suggestionId: string, userId: string) {
-    const page = await this.coreService.findPageById(pageId);
+    const page = await this.pageService.findPageById(pageId);
     if (!page) {
       throw new NotFoundException(`Page ${pageId} not found`);
     }
 
-    const hasAccess = await this.coreService.checkUserAccess(pageId, userId);
+    const hasAccess = await this.pageService.checkUserAccess(pageId, userId);
     if (!hasAccess) {
       throw new ForbiddenException(
         'You do not have permission to modify suggestions on this document',
@@ -199,19 +251,39 @@ export class SuggestionService {
       );
     }
 
-    const rawContent = page.content;
-    const currentText =
-      typeof rawContent === 'string'
-        ? rawContent
-        : rawContent && typeof rawContent === 'object'
-          ? (rawContent as any).source ||
-            (rawContent as any).text ||
-            JSON.stringify(rawContent)
-          : '';
+    // 1. Read live text from in-memory Yjs if active, otherwise fallback to Postgres
+    let currentText = '';
+    const hasLiveYjs = Boolean(this.yjsManager?.hasActiveSession(pageId));
+    if (hasLiveYjs) {
+      currentText = this.yjsManager!.getText(pageId);
+    } else {
+      const rawContent = page.content;
+      currentText =
+        typeof rawContent === 'string'
+          ? rawContent
+          : rawContent && typeof rawContent === 'object'
+            ? (rawContent as any).source ||
+              (rawContent as any).text ||
+              JSON.stringify(rawContent)
+            : '';
+    }
 
-    const newContent = applyReplacementToContent(currentText, suggestion);
+    const newContent = applyReplacementSafely(currentText, suggestion);
+
+    // 2. If Yjs is active, perform atomic replace in Y.Doc and broadcast yjs:update to all clients
+    if (hasLiveYjs) {
+      const update = await this.yjsManager!.replaceText(
+        pageId,
+        newContent,
+        userId,
+      );
+      if (update && this.collaborationGateway) {
+        this.collaborationGateway.broadcastYjsUpdate(pageId, update);
+      }
+    }
 
     let finalContent: any = newContent;
+    const rawContent = page.content;
     if (
       rawContent &&
       typeof rawContent === 'object' &&
@@ -241,7 +313,16 @@ export class SuggestionService {
         },
         include: {
           author: {
-            select: { id: true, name: true, email: true, avatar: true },
+            select: {
+              id: true,
+              email: true,
+              profile: {
+                select: {
+                  name: true,
+                  avatar: true,
+                },
+              },
+            },
           },
         },
       }),
@@ -263,6 +344,27 @@ export class SuggestionService {
 
     await this.invalidateCache(pageId, page.projectId);
 
+    const formattedSuggestion = {
+      ...updatedSuggestion,
+      author: {
+        id: updatedSuggestion.author.id,
+        email: updatedSuggestion.author.email,
+        name: updatedSuggestion.author.profile?.name ?? 'User',
+        avatar: updatedSuggestion.author.profile?.avatar ?? null,
+      },
+    };
+
+    // Realtime broadcast to room doc:pageId
+    this.collaborationGateway?.broadcastRoomEvent(
+      pageId,
+      'suggestion:accepted',
+      {
+        pageId,
+        suggestion: formattedSuggestion,
+        resolvedBy: userId,
+      },
+    );
+
     this.eventEmitter?.emit('document.collaboration.event', {
       pageId,
       type: 'suggestion-accepted',
@@ -278,7 +380,7 @@ export class SuggestionService {
   }
 
   async rejectSuggestion(pageId: string, suggestionId: string, userId: string) {
-    const hasAccess = await this.coreService.checkUserAccess(pageId, userId);
+    const hasAccess = await this.pageService.checkUserAccess(pageId, userId);
     if (!hasAccess) {
       throw new ForbiddenException(
         'You do not have permission to resolve suggestions on this document',
@@ -304,6 +406,17 @@ export class SuggestionService {
       resolvedAt: new Date(),
     });
 
+    this.collaborationGateway?.broadcastRoomEvent(
+      pageId,
+      'suggestion:rejected',
+      {
+        pageId,
+        suggestion: updated,
+        suggestionId,
+        resolvedBy: userId,
+      },
+    );
+
     this.eventEmitter?.emit('document.collaboration.event', {
       pageId,
       type: 'suggestion-rejected',
@@ -318,12 +431,12 @@ export class SuggestionService {
   }
 
   async acceptAllSuggestions(pageId: string, userId: string) {
-    const page = await this.coreService.findPageById(pageId);
+    const page = await this.pageService.findPageById(pageId);
     if (!page) {
       throw new NotFoundException(`Page ${pageId} not found`);
     }
 
-    const hasAccess = await this.coreService.checkUserAccess(pageId, userId);
+    const hasAccess = await this.pageService.checkUserAccess(pageId, userId);
     if (!hasAccess) {
       throw new ForbiddenException(
         'You do not have permission to modify suggestions on this document',
@@ -351,17 +464,35 @@ export class SuggestionService {
         b.fromLine - a.fromLine || (b.fromColumn ?? 1) - (a.fromColumn ?? 1),
     );
 
-    let text =
-      typeof page.content === 'string'
-        ? page.content
-        : page.content && typeof page.content === 'object'
-          ? (page.content as any).source ||
-            (page.content as any).text ||
-            JSON.stringify(page.content)
-          : '';
+    const hasLiveYjs = Boolean(this.yjsManager?.hasActiveSession(pageId));
+    let text = '';
+    if (hasLiveYjs) {
+      text = this.yjsManager!.getText(pageId);
+    } else {
+      text = toContentString(page.content);
+    }
 
+    const appliedIds: string[] = [];
     for (const sugg of sorted) {
-      text = applyReplacementToContent(text, sugg);
+      try {
+        text = applyReplacementSafely(text, sugg);
+        appliedIds.push(sugg.id);
+      } catch (err) {
+        this.logger.warn(
+          `Skipping conflicting suggestion ${sugg.id} during accept-all: ${getErrorMessage(err)}`,
+        );
+      }
+    }
+
+    if (appliedIds.length === 0) {
+      return { ok: true, acceptedCount: 0 };
+    }
+
+    if (hasLiveYjs) {
+      const update = await this.yjsManager!.replaceText(pageId, text, userId);
+      if (update && this.collaborationGateway) {
+        this.collaborationGateway.broadcastYjsUpdate(pageId, update);
+      }
     }
 
     let finalContent: any = text;
@@ -378,8 +509,6 @@ export class SuggestionService {
       }
     }
 
-    const ids = pendingList.map((s) => s.id);
-
     await this.prisma.$transaction([
       this.prisma.page.update({
         where: { id: pageId },
@@ -389,7 +518,7 @@ export class SuggestionService {
         },
       }),
       this.prisma.pageSuggestion.updateMany({
-        where: { id: { in: ids } },
+        where: { id: { in: appliedIds } },
         data: {
           status: SuggestionStatus.accepted,
           resolvedById: userId,
@@ -405,7 +534,7 @@ export class SuggestionService {
             typeof finalContent === 'string'
               ? finalContent
               : JSON.stringify(finalContent || ''),
-          label: `Accepted all pending suggestions (${ids.length} changes)`,
+          label: `Accepted all pending suggestions (${appliedIds.length} changes)`,
           savedById: userId,
           eventType: 'collaborative_checkpoint',
         },
@@ -414,18 +543,34 @@ export class SuggestionService {
 
     await this.invalidateCache(pageId, page.projectId);
 
+    this.collaborationGateway?.broadcastRoomEvent(
+      pageId,
+      'suggestions:accepted-all',
+      {
+        pageId,
+        count: appliedIds.length,
+        acceptedIds: appliedIds,
+        resolvedBy: userId,
+      },
+    );
+
     this.eventEmitter?.emit('document.collaboration.event', {
       pageId,
       type: 'suggestions-accepted-all',
-      count: ids.length,
+      count: appliedIds.length,
       timestamp: Date.now(),
     });
 
-    return { ok: true, acceptedCount: ids.length };
+    return { ok: true, acceptedCount: appliedIds.length };
   }
 
   async rejectAllSuggestions(pageId: string, userId: string) {
-    const hasAccess = await this.coreService.checkUserAccess(pageId, userId);
+    const page = await this.pageService.findPageById(pageId);
+    if (!page) {
+      throw new NotFoundException(`Page ${pageId} not found`);
+    }
+
+    const hasAccess = await this.pageService.checkUserAccess(pageId, userId);
     if (!hasAccess) {
       throw new ForbiddenException(
         'You do not have permission to resolve suggestions on this document',
@@ -446,6 +591,19 @@ export class SuggestionService {
       ids,
       SuggestionStatus.rejected,
       userId,
+    );
+
+    await this.invalidateCache(pageId, page.projectId);
+
+    this.collaborationGateway?.broadcastRoomEvent(
+      pageId,
+      'suggestions:rejected-all',
+      {
+        pageId,
+        count: ids.length,
+        rejectedIds: ids,
+        resolvedBy: userId,
+      },
     );
 
     this.eventEmitter?.emit('document.collaboration.event', {

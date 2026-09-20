@@ -6,7 +6,6 @@ import {
   AttachmentType,
   WorkItemPriority,
   CycleStatus,
-  StickyScope,
   PageStatus,
 } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
@@ -51,7 +50,7 @@ async function main() {
       password: passwordHash,
       name: 'Dr. Evelyn Vance',
       avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-      isVerified: true,
+      status: 'active',
     },
   });
 
@@ -61,7 +60,7 @@ async function main() {
       password: passwordHash,
       name: 'Alex Chen',
       avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
-      isVerified: true,
+      status: 'active',
     },
   });
 
@@ -238,17 +237,15 @@ async function main() {
 
   console.log(`📋 Created sprint cycle and work items.`);
 
-  // 8. Create Collaboration Stickies
+  // 8. Create Personal Stickies
   await prisma.sticky.create({
     data: {
       title: 'Lab Meeting Notes',
       content: 'Remember to submit camera-ready preprint to arXiv by Friday 5 PM EST.',
       color: 'yellow-1',
-      scope: StickyScope.project,
       positionX: 40,
       positionY: 80,
       order: 0,
-      projectId: project.id,
       userId: adminUser.id,
     },
   });
@@ -258,7 +255,6 @@ async function main() {
       title: 'Cluster GPU Allocation',
       content: 'Nodes A100-node[01-04] reserved for Reynolds number 10,000 simulations.',
       color: 'cyan-1',
-      scope: StickyScope.personal,
       positionX: 320,
       positionY: 80,
       order: 1,
@@ -266,7 +262,7 @@ async function main() {
     },
   });
 
-  console.log(`📌 Created collaboration stickies.`);
+  console.log(`📌 Created personal stickies.`);
   console.log('✅ Database seeding finished successfully!');
   console.log('--------------------------------------------------');
   console.log('🔑 Demo Login Credentials:');

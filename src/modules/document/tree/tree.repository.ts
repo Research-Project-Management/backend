@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { isUUID as isUuid } from 'class-validator';
 import { PrismaService } from '@/core/database/prisma.service';
 import { Prisma, Page } from '@prisma/client';
-import { resolveCanonicalProjectId } from '../core/utils/document.utils';
+import { resolveCanonicalProjectId } from '../page/utils/page.utils';
 
 export const TREE_NODE_SELECT = {
   id: true,
@@ -176,6 +176,3 @@ export class TreeRepository {
     });
   }
 }
-
-export const NodeRepository = TreeRepository;
-export type NodeRepository = TreeRepository;

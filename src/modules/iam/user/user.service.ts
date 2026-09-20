@@ -54,6 +54,14 @@ export class UserService {
     const user = await this.userRepo.updateProfile(userId, {
       ...(dto.name !== undefined && { name: dto.name }),
       ...(dto.avatar !== undefined && { avatar: dto.avatar }),
+      ...(dto.bio !== undefined && { bio: dto.bio }),
+      ...(dto.institution !== undefined && { institution: dto.institution }),
+      ...(dto.department !== undefined && { department: dto.department }),
+      ...(dto.academicTitle !== undefined && {
+        academicTitle: dto.academicTitle,
+      }),
+      ...(dto.orcidId !== undefined && { orcidId: dto.orcidId }),
+      ...(dto.website !== undefined && { website: dto.website }),
     });
 
     return { user: sanitizeUser(user) };
@@ -83,12 +91,61 @@ export class UserService {
   }
 
   /**
-   * Soft-delete user account and revoke all active sessions.
+   * Deactivate user account with Purpose-Based Selective Erasure (GDPR compliant).
+   * - Enforces suspension check (suspended accounts cannot self-deactivate).
+   * - Enforces Sole-Owner Protection: blocks deactivation if user is the sole owner of active collaborative projects.
+   * - Auto-archives solo projects owned by this user.
+   * - Anonymizes email to release it for future signups.
+   * - Clears credentials and unlinks external OAuth accounts.
+   * - Revokes all active refresh tokens.
    */
   async deleteMe(userId: string) {
-    await this.userRepo.softDelete(userId);
-    await this.userRepo.revokeAllUserRefreshTokens(userId);
-    return { success: true, message: 'Account deleted successfully' };
+    const user = await this.userRepo.findById(userId);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    if (user.status === 'suspended') {
+      throw new BadRequestException(
+        'Suspended accounts cannot be deactivated. Please contact support.',
+      );
+    }
+    if (user.status === 'deactivated') {
+      throw new BadRequestException('Account is already deactivated.');
+    }
+
+    // Check project ownership governance
+    const ownedProjects = await this.userRepo.findOwnedProjects(userId);
+
+    // Block deactivation if user owns active collaborative projects (memberCount > 1)
+    const blockingProjects = ownedProjects.filter(
+      (p) => !p.isArchived && p.memberCount > 1,
+    );
+
+    if (blockingProjects.length > 0) {
+      throw new BadRequestException({
+        code: 'SOLE_OWNER_OF_ACTIVE_PROJECTS',
+        message:
+          'Cannot deactivate account while being the sole owner of active collaborative projects. Please transfer ownership or delete the projects first.',
+        blockingProjects: blockingProjects.map((p) => ({
+          id: p.id,
+          name: p.name,
+          identifier: p.identifier,
+          memberCount: p.memberCount,
+        })),
+      });
+    }
+
+    // Auto-archive solo projects (memberCount <= 1) to protect intellectual work without blocking user
+    const soloProjectsToArchive = ownedProjects
+      .filter((p) => !p.isArchived && p.memberCount <= 1)
+      .map((p) => p.id);
+
+    if (soloProjectsToArchive.length > 0) {
+      await this.userRepo.archiveProjects(soloProjectsToArchive);
+    }
+
+    await this.userRepo.deactivateAccount(userId);
+    return { success: true, message: 'Account deactivated successfully' };
   }
 
   // ─── 2. Settings & Preferences ──────────────────────────────────────────────

@@ -1,8 +1,8 @@
-import { RetractionDatabaseService } from '../../src/modules/library/retraction/services/retraction-database.service';
-import { RetractionScannerProvider } from '../../src/modules/library/retraction/providers/retraction-scanner.provider';
-import { RetractionService } from '../../src/modules/library/retraction/retraction.service';
-import { RetractionRepository } from '../../src/modules/library/retraction/retraction.repository';
-import { RetractionSyncService } from '../../src/modules/library/retraction/services/retraction-sync.service';
+import { RetractionDatabaseService } from '../../src/modules/library/processing/application/services/retraction-database.service';
+import { RetractionScannerProvider } from '../../src/modules/library/processing/infrastructure/providers/retraction-scanner.provider';
+import { RetractionService } from '../../src/modules/library/processing/application/services/retraction.service';
+import { RetractionRepository } from '../../src/modules/library/processing/infrastructure/repositories/retraction.repository';
+import { RetractionSyncService } from '../../src/modules/library/processing/application/services/retraction-sync.service';
 
 describe('Retraction Watch & Offline Retraction Detection', () => {
   let mockPrisma: any;

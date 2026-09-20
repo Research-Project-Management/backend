@@ -25,4 +25,7 @@ export const IAM_REDIS_KEYS = {
 
   /** Email verification token cache: iam:verify:{token} */
   emailVerify: (token: string): string => `iam:verify:${token}`,
+
+  /** Refresh token rotation grace period cache: iam:grace:{tokenHash} */
+  graceToken: (tokenHash: string): string => `iam:grace:${tokenHash}`,
 } as const;

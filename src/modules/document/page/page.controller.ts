@@ -178,6 +178,3 @@ export class PageController {
     );
   }
 }
-
-export const CoreController = PageController;
-export type CoreController = PageController;

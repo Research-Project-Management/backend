@@ -1,13 +1,13 @@
-import { UrlMetadataScraperService } from '../../src/modules/library/ingestion/services/url-metadata-scraper.service';
-import { SsrfGuardService } from '../../src/modules/library/core/services/ssrf-guard.service';
+import { UrlMetadataScraperService } from '../../src/modules/library/processing/application/services/url-metadata-scraper.service';
+import { SsrfGuardService } from '../../src/modules/library/shared-kernel/core/services/ssrf-guard.service';
 import { IStoragePort } from '../../src/modules/storage/storage.port';
-import { PdfProvider } from '../../src/modules/library/attachments/providers/pdf.provider';
+import { IContentFacade } from '../../src/modules/library/content/content.facade';
 
 describe('UrlMetadataScraperService', () => {
   let scraper: UrlMetadataScraperService;
   let ssrfGuard: jest.Mocked<SsrfGuardService>;
   let storagePort: jest.Mocked<IStoragePort>;
-  let pdfProvider: jest.Mocked<PdfProvider>;
+  let contentFacade: jest.Mocked<IContentFacade>;
 
   beforeEach(() => {
     ssrfGuard = {
@@ -27,7 +27,7 @@ describe('UrlMetadataScraperService', () => {
       }),
     } as any;
 
-    pdfProvider = {
+    contentFacade = {
       extractDocumentFromBuffer: jest.fn().mockResolvedValue({
         metadata: {
           title: 'Extracted PDF Title',
@@ -40,7 +40,7 @@ describe('UrlMetadataScraperService', () => {
 
     scraper = new UrlMetadataScraperService(
       storagePort,
-      pdfProvider,
+      contentFacade,
       ssrfGuard,
     );
   });
@@ -167,7 +167,7 @@ describe('UrlMetadataScraperService', () => {
   });
 
   it('falls back to humanized filename slug when PDF extraction returns untitled', async () => {
-    pdfProvider.extractDocumentFromBuffer.mockResolvedValueOnce({
+    contentFacade.extractDocumentFromBuffer.mockResolvedValueOnce({
       metadata: {},
       pages: [],
     });

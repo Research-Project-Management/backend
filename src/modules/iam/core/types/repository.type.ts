@@ -34,7 +34,7 @@ export interface IUserRepository {
   }): Promise<User>;
   updateProfile(
     id: string,
-    data: Partial<Pick<User, 'name' | 'avatar' | 'isVerified'>>,
+    data: { name?: string; avatar?: string | null },
   ): Promise<User>;
   softDelete(id: string): Promise<void>;
 }
@@ -50,7 +50,7 @@ export interface IFederatedIdentityRepository {
     providerSubjectId: string;
     email: string | null;
     profileData: unknown;
-    user: User;
+    user: User & { profile?: { name: string; avatar: string | null } | null };
   } | null>;
   findByUserId(userId: string): Promise<
     Array<{

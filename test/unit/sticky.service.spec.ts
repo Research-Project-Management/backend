@@ -11,9 +11,11 @@ describe('StickyService', () => {
 
   const mockUser = {
     id: '11111111-1111-1111-1111-111111111111',
-    name: 'Researcher',
     email: 'researcher@flux.app',
-    avatar: null,
+    profile: {
+      name: 'Researcher',
+      avatar: null,
+    },
   };
 
   const mockSticky = {

@@ -29,6 +29,7 @@ import { RefreshTokenDto } from './dto/refresh.dto';
 import { ForgotPasswordDto } from './dto/forgot.dto';
 import { OAuthExchangeDto } from './dto/oauth.dto';
 import { ResetPasswordDto } from './dto/reset.dto';
+import { VerifyEmailDto, ResendVerificationDto } from './dto/verify-email.dto';
 import {
   AuthnResponseDto,
   TokenRefreshResponseDto,
@@ -87,6 +88,46 @@ export class AuthnController {
       reply.header('Set-Cookie', buildRefreshTokenCookie(result.refreshToken));
     }
     return result;
+  }
+
+  @Public()
+  @Post('verify-email')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Verify user email with cryptographic verification token',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Email verified successfully, session initiated',
+    type: AuthnResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description: 'Invalid or expired verification token',
+  })
+  async verifyEmail(
+    @Body() dto: VerifyEmailDto,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<AuthnResponseDto> {
+    const result = await this.authnService.verifyEmail(dto.token);
+    if (result?.refreshToken) {
+      reply.header('Set-Cookie', buildRefreshTokenCookie(result.refreshToken));
+    }
+    return result;
+  }
+
+  @Public()
+  @Post('resend-verification')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Resend email verification token' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Verification email resent if account is pending verification',
+    type: MessageResponseDto,
+  })
+  async resendVerification(
+    @Body() dto: ResendVerificationDto,
+  ): Promise<MessageResponseDto> {
+    return this.authnService.resendVerification(dto.email);
   }
 
   @Public()

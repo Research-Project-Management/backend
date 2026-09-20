@@ -63,6 +63,11 @@ import { BullModule } from '@nestjs/bullmq';
 import { STORAGE_PROCESSING_QUEUE } from './application/queues/storage-queue.types';
 import { StorageQueueProducer } from './application/queues/storage-queue.producer';
 import { StorageQueueConsumer } from './application/queues/storage-queue.consumer';
+import { shouldRunWorkerConsumers } from '../../core/utils/worker-mode.util';
+
+const storageWorkerProviders = shouldRunWorkerConsumers()
+  ? [StorageQueueConsumer]
+  : [];
 
 @Global()
 @Module({
@@ -149,7 +154,7 @@ import { StorageQueueConsumer } from './application/queues/storage-queue.consume
 
     // 7. Background Queue Producer & Consumer
     StorageQueueProducer,
-    StorageQueueConsumer,
+    ...storageWorkerProviders,
   ],
   exports: [
     StorageFacade,

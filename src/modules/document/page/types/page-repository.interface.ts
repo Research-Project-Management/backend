@@ -4,7 +4,13 @@
  * Implements clean repository boundaries decoupling Prisma models from services.
  */
 
-import { Page, PageVersion, PageComment, Prisma } from '@prisma/client';
+import {
+  Page,
+  PageVersion,
+  PageComment,
+  Prisma,
+  VersionEventType,
+} from '@prisma/client';
 
 export const USER_MINIMAL_SELECT = {
   id: true,
@@ -110,12 +116,37 @@ export type PageVersionSummary = Prisma.PageVersionGetPayload<{
   savedBy?: { id: string; name: string; avatar?: string | null };
 };
 
+export interface VersionQueryOptions {
+  limit?: number;
+  cursor?: string;
+  eventType?: VersionEventType;
+}
+
+export interface PaginatedPageVersions {
+  versions: PageVersionSummary[];
+  total: number;
+  nextCursor?: string | null;
+}
+
 export interface IHistoryRepository {
-  findPageVersions(pageId: string): Promise<PageVersionSummary[]>;
-  findVersionById(versionId: string): Promise<PageVersion | null>;
+  findPageVersions(
+    pageId: string,
+    options?: VersionQueryOptions,
+  ): Promise<PaginatedPageVersions>;
+  findVersionById(versionId: string): Promise<
+    | (PageVersion & {
+        savedBy?: { id: string; name: string; avatar?: string | null };
+      })
+    | null
+  >;
   createVersion(
     data:
       Prisma.PageVersionCreateInput | Prisma.PageVersionUncheckedCreateInput,
+  ): Promise<PageVersion>;
+  updateVersion(
+    versionId: string,
+    data:
+      Prisma.PageVersionUpdateInput | Prisma.PageVersionUncheckedUpdateInput,
   ): Promise<PageVersion>;
   deleteVersion(versionId: string): Promise<PageVersion>;
 }

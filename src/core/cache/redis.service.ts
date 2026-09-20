@@ -317,6 +317,122 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
     await this.del(`${entityType}:${entityId}`);
     await this.delPattern(`${entityType}:${entityId}:*`);
   }
+
+  // ─── Sorted Set Operations (for op logs, leaderboards, time-series) ──────────
+
+  /**
+   * ZADD key score member — add a member with a score to a sorted set.
+   * Returns the number of elements added.
+   */
+  async zadd(key: string, score: number, member: string): Promise<number> {
+    if (!this.isReady() || !this.redisClient) return 0;
+    try {
+      return await this.redisClient.zadd(key, score, member);
+    } catch (err: unknown) {
+      this.logger.debug(
+        `ZADD failed for key "${key}": ${getErrorMessage(err)}`,
+      );
+      return 0;
+    }
+  }
+
+  /**
+   * ZRANGEBYSCORE key min max [WITHSCORES] — returns members with scores between min and max.
+   */
+  async zrangebyscore(
+    key: string,
+    min: number | '-inf',
+    max: number | '+inf',
+  ): Promise<Array<{ member: string; score: number }>> {
+    if (!this.isReady() || !this.redisClient) return [];
+    try {
+      const raw = await this.redisClient.zrangebyscore(
+        key,
+        min,
+        max,
+        'WITHSCORES',
+      );
+      const results: Array<{ member: string; score: number }> = [];
+      for (let i = 0; i < raw.length; i += 2) {
+        results.push({ member: raw[i], score: Number(raw[i + 1]) });
+      }
+      return results;
+    } catch (err: unknown) {
+      this.logger.debug(
+        `ZRANGEBYSCORE failed for key "${key}": ${getErrorMessage(err)}`,
+      );
+      return [];
+    }
+  }
+
+  /**
+   * ZREMRANGEBYRANK key start stop — removes members with rank between start and stop.
+   * Use to cap sorted set size (e.g., keep only latest N ops).
+   */
+  async zremrangebyrank(
+    key: string,
+    start: number,
+    stop: number,
+  ): Promise<number> {
+    if (!this.isReady() || !this.redisClient) return 0;
+    try {
+      return await this.redisClient.zremrangebyrank(key, start, stop);
+    } catch (err: unknown) {
+      this.logger.debug(
+        `ZREMRANGEBYRANK failed for key "${key}": ${getErrorMessage(err)}`,
+      );
+      return 0;
+    }
+  }
+
+  /**
+   * ZREMRANGEBYSCORE key min max — removes members with score between min and max.
+   * Used for oplog compaction after snapshot creation.
+   */
+  async zremrangebyscore(
+    key: string,
+    min: number | '-inf',
+    max: number | '+inf',
+  ): Promise<number> {
+    if (!this.isReady() || !this.redisClient) return 0;
+    try {
+      return await this.redisClient.zremrangebyscore(key, min, max);
+    } catch (err: unknown) {
+      this.logger.debug(
+        `ZREMRANGEBYSCORE failed for key "${key}": ${getErrorMessage(err)}`,
+      );
+      return 0;
+    }
+  }
+
+  /**
+   * EXPIRE key seconds — set TTL on any key type (including sorted sets).
+   */
+  async expire(key: string, seconds: number): Promise<void> {
+    if (!this.isReady() || !this.redisClient) return;
+    try {
+      await this.redisClient.expire(key, seconds);
+    } catch (err: unknown) {
+      this.logger.debug(
+        `EXPIRE failed for key "${key}": ${getErrorMessage(err)}`,
+      );
+    }
+  }
+
+  /**
+   * ZCARD key — returns the number of members in the sorted set.
+   */
+  async zcard(key: string): Promise<number> {
+    if (!this.isReady() || !this.redisClient) return 0;
+    try {
+      return await this.redisClient.zcard(key);
+    } catch (err: unknown) {
+      this.logger.debug(
+        `ZCARD failed for key "${key}": ${getErrorMessage(err)}`,
+      );
+      return 0;
+    }
+  }
 }
 
 export const RedisService = RedisCacheService;

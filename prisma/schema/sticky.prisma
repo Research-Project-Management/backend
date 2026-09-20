@@ -1,29 +1,19 @@
 // -- 6. Sticky Note Context (Sticky Microservice) -----------------------------
 
-enum StickyScope {
-  personal
-  project
-}
-
 model Sticky {
   id          String      @id @default(uuid()) @db.Uuid
   title       String?     @default("")
   content     String      @default("")
   color       String      @default("yellow-1")
-  scope       StickyScope @default(personal)
   positionX   Float       @default(0) @map("position_x")
   positionY   Float       @default(0) @map("position_y")
   order       Int         @default(0)
   userId      String      @map("user_id") @db.Uuid
   user        User        @relation("UserStickies", fields: [userId], references: [id], onDelete: Cascade)
-  projectId   String?     @map("project_id") @db.Uuid
-  project     Project?    @relation("ProjectStickies", fields: [projectId], references: [id], onDelete: Cascade)
   createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt   DateTime?   @map("deleted_at") @db.Timestamptz(6)
 
-  @@index([userId, scope, order])
-  @@index([projectId, scope, order])
-  @@index([userId])
+  @@index([userId, order])
   @@map("stickies")
 }

@@ -3,7 +3,7 @@ import { DocumentAiIngestionService } from '@/modules/ai/ingestion/services/docu
 import { ScientificChunkingService } from '@/modules/ai/ingestion/services/scientific-chunking.service';
 import { FileUploadedEvent } from '@/modules/storage/domain/events/file-uploaded.event';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
-import { PdfProvider } from '@/modules/library/attachments/providers/pdf.provider';
+import { IContentFacade } from '@/modules/library/content/content.facade';
 import { EngineService } from '@/modules/ai/engine/engine.service';
 import { PrismaService } from '@/core/database/prisma.service';
 
@@ -12,7 +12,7 @@ describe('Storage AI RAG Ingestion Pipeline Suite', () => {
   let ingestionService: DocumentAiIngestionService;
   let mockPrisma: any;
   let mockStoragePort: jest.Mocked<IStoragePort>;
-  let mockPdfProvider: any;
+  let mockContentFacade: any;
   let mockEngineService: any;
   let chunkingService: ScientificChunkingService;
 
@@ -31,7 +31,7 @@ describe('Storage AI RAG Ingestion Pipeline Suite', () => {
       uploadBuffer: jest.fn(),
     };
 
-    mockPdfProvider = {
+    mockContentFacade = {
       extractDocumentFromBuffer: jest.fn(),
     };
 
@@ -44,7 +44,7 @@ describe('Storage AI RAG Ingestion Pipeline Suite', () => {
     ingestionService = new DocumentAiIngestionService(
       mockPrisma as PrismaService,
       mockStoragePort,
-      mockPdfProvider as PdfProvider,
+      mockContentFacade as IContentFacade,
       chunkingService,
       mockEngineService as EngineService,
     );
@@ -99,7 +99,7 @@ describe('Storage AI RAG Ingestion Pipeline Suite', () => {
       buffer: Buffer.from('%PDF-1.7 sample quantum paper data'),
     });
 
-    mockPdfProvider.extractDocumentFromBuffer.mockResolvedValue({
+    mockContentFacade.extractDocumentFromBuffer.mockResolvedValue({
       metadata: {
         title: 'Quantum Advantage in Scientific Simulation',
         authors: ['Alice Researcher', 'Bob Physicist'],
@@ -134,7 +134,7 @@ describe('Storage AI RAG Ingestion Pipeline Suite', () => {
     });
 
     // Verify PDF extraction
-    expect(mockPdfProvider.extractDocumentFromBuffer).toHaveBeenCalled();
+    expect(mockContentFacade.extractDocumentFromBuffer).toHaveBeenCalled();
 
     // Verify AI Engine vector upload
     expect(mockEngineService.uploadDocument).toHaveBeenCalledWith(
@@ -219,7 +219,7 @@ describe('Storage AI RAG Ingestion Pipeline Suite', () => {
       buffer: Buffer.from('%PDF-1.7 sample data'),
     });
 
-    mockPdfProvider.extractDocumentFromBuffer.mockResolvedValue({
+    mockContentFacade.extractDocumentFromBuffer.mockResolvedValue({
       metadata: {
         title: 'Offline Scientific Paper',
         authors: ['Carol Scientist'],

@@ -17,9 +17,9 @@ export class IdentityRepository implements IFederatedIdentityRepository {
     providerSubjectId: string;
     email: string | null;
     profileData: unknown;
-    user: User;
+    user: User & { profile?: { name: string; avatar: string | null } | null };
   } | null> {
-    return this.prisma.federatedIdentity.findUnique({
+    return this.prisma.userAccount.findUnique({
       where: {
         provider_providerSubjectId: {
           provider,
@@ -27,13 +27,22 @@ export class IdentityRepository implements IFederatedIdentityRepository {
         },
       },
       include: {
-        user: true,
+        user: {
+          include: {
+            profile: {
+              select: {
+                name: true,
+                avatar: true,
+              },
+            },
+          },
+        },
       },
     });
   }
 
   async findByUserId(userId: string) {
-    return this.prisma.federatedIdentity.findMany({
+    return this.prisma.userAccount.findMany({
       where: { userId },
       select: {
         id: true,
@@ -52,7 +61,7 @@ export class IdentityRepository implements IFederatedIdentityRepository {
     email?: string;
     profileData?: Record<string, unknown>;
   }) {
-    return this.prisma.federatedIdentity.upsert({
+    return this.prisma.userAccount.upsert({
       where: {
         provider_providerSubjectId: {
           provider: data.provider,
@@ -76,7 +85,7 @@ export class IdentityRepository implements IFederatedIdentityRepository {
   }
 
   async unlinkIdentity(userId: string, provider: AuthProvider): Promise<void> {
-    await this.prisma.federatedIdentity.deleteMany({
+    await this.prisma.userAccount.deleteMany({
       where: {
         userId,
         provider,

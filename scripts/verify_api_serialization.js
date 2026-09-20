@@ -2,7 +2,7 @@ require('dotenv').config({ path: 'd:/project/flux/backend/.env' });
 const { PrismaClient } = require('@prisma/client');
 const { PrismaPg } = require('@prisma/adapter-pg');
 const { Pool } = require('pg');
-const { ItemsMapper } = require('../dist/modules/library/items/mappers/items.mapper.js');
+const { ItemsMapper } = require('../dist/modules/library/catalog/items/mappers/items.mapper.js');
 
 async function main() {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });

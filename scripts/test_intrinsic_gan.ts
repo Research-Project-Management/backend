@@ -3,7 +3,7 @@ dotenv.config();
 
 import * as fs from 'fs';
 import { GrobidClient } from '../src/modules/library/infra/grobid/grobid.client';
-import { PdfProvider } from '../src/modules/library/attachments/providers/pdf.provider';
+import { PdfProvider } from '../src/modules/library/content/infrastructure/providers/pdf.provider';
 
 async function main() {
   console.log('======================================================================');

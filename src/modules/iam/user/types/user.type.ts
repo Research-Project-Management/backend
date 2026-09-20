@@ -1,18 +1,48 @@
-import { AuthProvider, Prisma, User } from '@prisma/client';
+import {
+  AuthProvider,
+  CitationStyle,
+  Prisma,
+  ThemePreference,
+  User,
+  UserProfile,
+} from '@prisma/client';
 
-export type SanitizedUser = Omit<User, 'password'>;
+export type UserWithProfile = User & { profile?: UserProfile | null };
 
-export interface UserSettingsData {
-  theme?: 'light' | 'dark' | 'system';
-  language?: string;
-  notifications?: {
-    email?: boolean;
-    inApp?: boolean;
-    digest?: boolean;
-  };
-  preferences?: Record<string, unknown>;
+export type SanitizedUser = Omit<User, 'password'> & {
+  name: string;
+  avatar: string | null;
+  profile?: UserProfile | null;
+};
+
+/**
+ * Strict Domain Model for User Settings (Read/Output).
+ * Guaranteed non-null fields governed by database invariants and schema defaults.
+ */
+export interface UserSettingsEntity {
+  theme: ThemePreference;
+  citationStyle: CitationStyle;
+  locale: string;
+  editorConfig: Prisma.JsonValue;
+  notifications: Record<string, unknown>;
+  aiPreferences: Prisma.JsonValue;
+}
+
+/**
+ * Mutation payload for updating settings (Write/PATCH).
+ * Fields are legitimately optional as clients submit partial modifications.
+ */
+export interface UpdateUserSettingsInput {
+  theme?: ThemePreference | 'light' | 'dark' | 'system';
+  citationStyle?: CitationStyle;
+  locale?: string;
+  editorConfig?: Prisma.InputJsonValue;
+  notifications?: Prisma.InputJsonValue;
+  aiPreferences?: Prisma.InputJsonValue;
   [key: string]: unknown;
 }
+
+export type UserSettingsData = UserSettingsEntity;
 
 export interface UserStatsResult {
   projectsCount: number;
@@ -33,31 +63,59 @@ export interface FederatedIdentityLinkData {
   profileData?: Record<string, unknown>;
 }
 
+export interface OwnedProjectInfo {
+  id: string;
+  name: string;
+  identifier: string;
+  isArchived: boolean;
+  memberCount: number;
+}
+
 export interface IUserRepository {
-  findById(id: string): Promise<User | null>;
-  findByEmail(email: string): Promise<User | null>;
+  findById(id: string): Promise<UserWithProfile | null>;
+  findByEmail(email: string): Promise<UserWithProfile | null>;
   createWithLocalAuth(data: {
     email: string;
     passwordHash: string;
     name: string;
     avatar?: string;
-  }): Promise<User>;
+  }): Promise<UserWithProfile>;
   updateProfile(
     id: string,
-    data: Partial<Pick<User, 'name' | 'avatar' | 'isVerified'>>,
-  ): Promise<User>;
+    data: {
+      name?: string;
+      avatar?: string | null;
+      bio?: string | null;
+      institution?: string | null;
+      department?: string | null;
+      academicTitle?: string | null;
+      orcidId?: string | null;
+      website?: string | null;
+    },
+  ): Promise<UserWithProfile>;
   updateUser(id: string, data: Prisma.UserUpdateInput): Promise<User>;
   softDelete(id: string): Promise<void>;
+  deactivateAccount(id: string): Promise<void>;
   revokeAllUserRefreshTokens(userId: string): Promise<number>;
   searchUsers(
     query: string,
     excludeUserId?: string,
     projectId?: string,
-  ): Promise<Array<Pick<User, 'id' | 'name' | 'email' | 'avatar' | 'status'>>>;
-  getUserSettings(userId: string): Promise<UserSettingsData>;
+  ): Promise<
+    Array<{
+      id: string;
+      name: string;
+      email: string;
+      avatar: string | null;
+      status: User['status'];
+    }>
+  >;
+  findOwnedProjects(userId: string): Promise<OwnedProjectInfo[]>;
+  archiveProjects(projectIds: string[]): Promise<number>;
+  getUserSettings(userId: string): Promise<UserSettingsEntity>;
   updateUserSettings(
     userId: string,
-    settings: Partial<UserSettingsData>,
-  ): Promise<UserSettingsData>;
+    settings: UpdateUserSettingsInput,
+  ): Promise<UserSettingsEntity>;
   getUserStats(userId: string): Promise<UserStatsResult>;
 }

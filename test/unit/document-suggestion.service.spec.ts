@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { SuggestionService } from '@/modules/document/suggestion/suggestion.service';
 import { SuggestionRepository } from '@/modules/document/suggestion/suggestion.repository';
-import { CoreService } from '@/modules/document/core/core.service';
+import { PageService } from '@/modules/document/page/page.service';
 import { PrismaService } from '@/core/database/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SuggestionStatus } from '@prisma/client';
@@ -10,7 +10,7 @@ import { NotFoundException, BadRequestException } from '@nestjs/common';
 describe('Document SuggestionService (Track Changes)', () => {
   let service: SuggestionService;
   let repo: jest.Mocked<SuggestionRepository>;
-  let coreService: jest.Mocked<CoreService>;
+  let pageService: jest.Mocked<PageService>;
   let prisma: any;
   let eventEmitter: jest.Mocked<EventEmitter2>;
 
@@ -61,7 +61,7 @@ describe('Document SuggestionService (Track Changes)', () => {
       updateStatusMany: jest.fn(),
     };
 
-    const mockCore = {
+    const mockPageService = {
       findPageById: jest.fn(),
       checkUserAccess: jest.fn().mockResolvedValue(true),
     };
@@ -88,7 +88,7 @@ describe('Document SuggestionService (Track Changes)', () => {
       providers: [
         SuggestionService,
         { provide: SuggestionRepository, useValue: mockRepo },
-        { provide: CoreService, useValue: mockCore },
+        { provide: PageService, useValue: mockPageService },
         { provide: PrismaService, useValue: prisma },
         { provide: EventEmitter2, useValue: mockEmitter },
       ],
@@ -96,13 +96,13 @@ describe('Document SuggestionService (Track Changes)', () => {
 
     service = module.get<SuggestionService>(SuggestionService);
     repo = module.get(SuggestionRepository);
-    coreService = module.get(CoreService);
+    pageService = module.get(PageService);
     eventEmitter = module.get(EventEmitter2);
   });
 
   describe('createSuggestion', () => {
     it('should create a pending suggestion and emit collaboration event', async () => {
-      coreService.findPageById.mockResolvedValue(mockPage);
+      pageService.findPageById.mockResolvedValue(mockPage);
       repo.create.mockResolvedValue(mockSuggestion);
 
       const res = await service.createSuggestion(mockPageId, mockUserId, {
@@ -133,7 +133,7 @@ describe('Document SuggestionService (Track Changes)', () => {
     });
 
     it('should throw NotFoundException if page does not exist', async () => {
-      coreService.findPageById.mockResolvedValue(null);
+      pageService.findPageById.mockResolvedValue(null);
 
       await expect(
         service.createSuggestion('non-existent-page', mockUserId, {
@@ -166,7 +166,7 @@ describe('Document SuggestionService (Track Changes)', () => {
   describe('acceptSuggestion', () => {
     it('should apply atomic line replacement to page content and mark suggestion accepted', async () => {
       repo.findById.mockResolvedValue(mockSuggestion);
-      coreService.findPageById.mockResolvedValue(mockPage);
+      pageService.findPageById.mockResolvedValue(mockPage);
 
       const updatedPageMock = {
         ...mockPage,
@@ -203,7 +203,7 @@ describe('Document SuggestionService (Track Changes)', () => {
     });
 
     it('should throw BadRequestException if suggestion is not pending', async () => {
-      coreService.findPageById.mockResolvedValue(mockPage);
+      pageService.findPageById.mockResolvedValue(mockPage);
       repo.findById.mockResolvedValue({
         ...mockSuggestion,
         status: SuggestionStatus.accepted,
@@ -215,7 +215,7 @@ describe('Document SuggestionService (Track Changes)', () => {
     });
 
     it('should throw NotFoundException if suggestion belongs to another page', async () => {
-      coreService.findPageById.mockResolvedValue(mockPage);
+      pageService.findPageById.mockResolvedValue(mockPage);
       repo.findById.mockResolvedValue({
         ...mockSuggestion,
         pageId: 'other-page-id',
@@ -264,6 +264,7 @@ describe('Document SuggestionService (Track Changes)', () => {
 
   describe('rejectAllSuggestions', () => {
     it('should update all pending suggestions to rejected', async () => {
+      pageService.findPageById.mockResolvedValue(mockPage);
       repo.findByPageId.mockResolvedValue([mockSuggestion]);
       repo.updateStatusMany.mockResolvedValue(1);
 

@@ -1,20 +1,22 @@
-﻿import { Test, TestingModule } from '@nestjs/testing';
-import { NotesService } from '@/modules/library/notes/notes.service';
-import { NotesRepository } from '@/modules/library/notes/notes.repository';
-import { AnnotationsService } from '@/modules/library/annotations/annotations.service';
-import { AnnotationsRepository } from '@/modules/library/annotations/annotations.repository';
-import { TagsService } from '@/modules/library/tags/tags.service';
-import { TagsRepository } from '@/modules/library/tags/tags.repository';
-import { AttachmentsService } from '@/modules/library/attachments/attachments.service';
+import { Test, TestingModule } from '@nestjs/testing';
+import { fromPartial } from '@total-typescript/shoehorn';
+import { Prisma } from '@prisma/client';
+import { NotesService } from '@/modules/library/content/application/services/notes.service';
+import { NotesRepository } from '@/modules/library/content/infrastructure/repositories/notes.repository';
+import { AnnotationsService } from '@/modules/library/content/application/services/annotations.service';
+import { AnnotationsRepository } from '@/modules/library/content/infrastructure/repositories/annotations.repository';
+import { TagsService } from '@/modules/library/catalog/application/services/tags.service';
+import { TagsRepository } from '@/modules/library/catalog/infrastructure/repositories/tags.repository';
+import { AttachmentsService } from '@/modules/library/content/application/services/attachments.service';
 import {
   TransactionService,
   TransactionHelpers,
-} from '@/modules/library/outbox/transaction.service';
+} from '@/modules/library/shared-kernel/outbox/transaction.service';
 import { PrismaService } from '@/core/database/prisma.service';
 import {
   ITEM_READ_PORT,
   ITEM_EXISTENCE_PORT,
-} from '@/modules/library/items/ports/items.ports';
+} from '@/modules/library/catalog/domain/ports/items.ports';
 
 describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
   const mockUserId = '11111111-1111-4111-8111-111111111111';
@@ -30,9 +32,9 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
 
   beforeEach(() => {
     mockHelpers = {
-      appendChange: jest.fn().mockResolvedValue({} as any),
-      recordTombstone: jest.fn().mockResolvedValue({} as any),
-      publishOutbox: jest.fn().mockResolvedValue({} as any),
+      appendChange: jest.fn().mockResolvedValue(fromPartial({})),
+      recordTombstone: jest.fn().mockResolvedValue(fromPartial({})),
+      publishOutbox: jest.fn().mockResolvedValue(fromPartial({})),
     };
 
     mockLibraryTx = {
@@ -83,12 +85,14 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
     });
 
     it('should propagate projectId to appendChange and publishOutbox on createNote', async () => {
-      repo.create.mockResolvedValue({
-        id: mockNoteId,
-        version: 1,
-        title: 'Project Note',
-        projectId: mockProjectId,
-      } as any);
+      repo.create.mockResolvedValue(
+        fromPartial({
+          id: mockNoteId,
+          version: 1,
+          title: 'Project Note',
+          projectId: mockProjectId,
+        }),
+      );
 
       await service.createNote(mockUserId, {
         title: 'Project Note',
@@ -115,12 +119,14 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
     });
 
     it('should propagate projectId to appendChange and publishOutbox on updateNote', async () => {
-      repo.update.mockResolvedValue({
-        id: mockNoteId,
-        version: 2,
-        title: 'Updated Note',
-        projectId: mockProjectId,
-      } as any);
+      repo.update.mockResolvedValue(
+        fromPartial({
+          id: mockNoteId,
+          version: 2,
+          title: 'Updated Note',
+          projectId: mockProjectId,
+        }),
+      );
 
       await service.updateNote(
         mockUserId,
@@ -149,10 +155,12 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
     });
 
     it('should propagate projectId to recordTombstone and publishOutbox on deleteNote', async () => {
-      repo.findById.mockResolvedValue({
-        id: mockNoteId,
-        projectId: mockProjectId,
-      } as any);
+      repo.findById.mockResolvedValue(
+        fromPartial({
+          id: mockNoteId,
+          projectId: mockProjectId,
+        }),
+      );
       repo.softDelete.mockResolvedValue(true);
 
       await service.deleteNote(mockUserId, mockNoteId, 1, mockProjectId);
@@ -174,7 +182,7 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
     });
 
     it('should pass projectId syncScope to appendChange in upsertFromSync', async () => {
-      const mockTx = {
+      const mockTx = fromPartial<Prisma.TransactionClient>({
         note: {
           findUnique: jest.fn().mockResolvedValue({
             id: mockNoteId,
@@ -188,7 +196,7 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
             projectId: mockProjectId,
           }),
         },
-      } as any;
+      });
 
       await service.upsertFromSync(
         {
@@ -214,7 +222,7 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
     });
 
     it('should record tombstone with projectId in deleteFromSync', async () => {
-      const mockTx = {
+      const mockTx = fromPartial<Prisma.TransactionClient>({
         note: {
           findFirst: jest.fn().mockResolvedValue({
             id: mockNoteId,
@@ -223,7 +231,7 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
           }),
           updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         },
-      } as any;
+      });
 
       await service.deleteFromSync(
         {
@@ -261,12 +269,12 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
     let attachmentsService: jest.Mocked<AttachmentsService>;
 
     beforeEach(async () => {
-      attachmentsService = {
+      attachmentsService = fromPartial({
         assertAttachmentExists: jest.fn().mockResolvedValue({
           id: mockAttachmentId,
           item: { id: mockItemId, projectId: mockProjectId },
         }),
-      } as any;
+      });
 
       const module: TestingModule = await Test.createTestingModule({
         providers: [
@@ -291,10 +299,12 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
     });
 
     it('should inherit projectId from parent item on createAnnotation', async () => {
-      repo.create.mockResolvedValue({
-        id: mockAnnotationId,
-        version: 1,
-      } as any);
+      repo.create.mockResolvedValue(
+        fromPartial({
+          id: mockAnnotationId,
+          version: 1,
+        }),
+      );
 
       await service.createAnnotation(mockUserId, {
         authorId: mockUserId,
@@ -321,11 +331,13 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
     });
 
     it('should inherit projectId on deleteAnnotation and record tombstone', async () => {
-      repo.findById.mockResolvedValue({
-        id: mockAnnotationId,
-        attachmentId: mockAttachmentId,
-        authorId: mockUserId,
-      } as any);
+      repo.findById.mockResolvedValue(
+        fromPartial({
+          id: mockAnnotationId,
+          attachmentId: mockAttachmentId,
+          authorId: mockUserId,
+        }),
+      );
       repo.softDelete.mockResolvedValue(true);
 
       await service.deleteAnnotation(mockUserId, mockAnnotationId);
@@ -347,7 +359,7 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
     });
 
     it('should record tombstone and appendChange with syncScope on deleteFromSync', async () => {
-      const mockTx = {
+      const mockTx = fromPartial<Prisma.TransactionClient>({
         annotation: {
           findUnique: jest.fn().mockResolvedValue({
             id: mockAnnotationId,
@@ -356,7 +368,7 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
           }),
           update: jest.fn().mockResolvedValue({}),
         },
-      } as any;
+      });
 
       await service.deleteFromSync(
         {
@@ -417,11 +429,13 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
     });
 
     it('should propagate projectId on createOrGetTag', async () => {
-      repo.create.mockResolvedValue({
-        id: mockTagId,
-        name: 'physics',
-        projectId: mockProjectId,
-      } as any);
+      repo.create.mockResolvedValue(
+        fromPartial({
+          id: mockTagId,
+          name: 'physics',
+          projectId: mockProjectId,
+        }),
+      );
 
       await service.createOrGetTag(
         mockUserId,

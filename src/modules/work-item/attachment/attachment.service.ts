@@ -337,7 +337,16 @@ export class AttachmentService {
       where: { id: basic.id },
       include: {
         assignee: {
-          select: { id: true, name: true, email: true, avatar: true },
+          select: {
+            id: true,
+            email: true,
+            profile: {
+              select: {
+                name: true,
+                avatar: true,
+              },
+            },
+          },
         },
         cycle: { select: { id: true, name: true } },
         parentWorkItem: { select: { id: true, title: true, identifier: true } },
@@ -351,7 +360,16 @@ export class AttachmentService {
             rank: true,
             assigneeId: true,
             assignee: {
-              select: { id: true, name: true, email: true, avatar: true },
+              select: {
+                id: true,
+                email: true,
+                profile: {
+                  select: {
+                    name: true,
+                    avatar: true,
+                  },
+                },
+              },
             },
             dueDate: true,
           },

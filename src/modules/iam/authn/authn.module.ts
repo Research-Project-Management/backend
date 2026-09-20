@@ -10,6 +10,7 @@ import { AuthnService } from './authn.service';
 import { AuthnController } from './authn.controller';
 import { AuthnRepository } from './authn.repository';
 import { AuthGuard, JwtAuthGuard } from './guards/auth.guard';
+import { VerifiedEmailGuard } from './guards/verified-email.guard';
 import { CacheModule } from '@/core/cache/cache.module';
 import { UserModule } from '../user/user.module';
 
@@ -37,7 +38,20 @@ import { UserModule } from '../user/user.module';
     }),
   ],
   controllers: [AuthnController],
-  providers: [AuthnService, AuthnRepository, AuthGuard, JwtAuthGuard],
-  exports: [AuthnService, AuthnRepository, JwtModule, AuthGuard, JwtAuthGuard],
+  providers: [
+    AuthnService,
+    AuthnRepository,
+    AuthGuard,
+    JwtAuthGuard,
+    VerifiedEmailGuard,
+  ],
+  exports: [
+    AuthnService,
+    AuthnRepository,
+    JwtModule,
+    AuthGuard,
+    JwtAuthGuard,
+    VerifiedEmailGuard,
+  ],
 })
 export class AuthnModule {}

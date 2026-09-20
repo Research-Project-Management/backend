@@ -87,18 +87,24 @@ export class OverviewService {
         lead: projectMeta.createdBy
           ? {
               id: projectMeta.createdBy.id,
-              name: projectMeta.createdBy.name,
-              avatar: projectMeta.createdBy.avatar,
+              name:
+                projectMeta.createdBy.profile?.name ??
+                (projectMeta.createdBy as any).name ??
+                'Lead',
+              avatar:
+                projectMeta.createdBy.profile?.avatar ??
+                (projectMeta.createdBy as any).avatar ??
+                null,
             }
           : null,
         members: (projectMeta.members || []).map((m: any) => ({
           id: m.user?.id || m.id,
-          name: m.user?.name || 'Member',
-          avatar: m.user?.avatar || null,
+          name: m.user?.profile?.name || m.user?.name || 'Member',
+          avatar: m.user?.profile?.avatar || m.user?.avatar || null,
           role: m.role || 'contributor',
         })),
       },
-      links: (projectMeta.links || []).map((link) => ({
+      links: (projectMeta.links || []).map((link: any) => ({
         id: link.id,
         projectId: link.projectId,
         title: link.title,
@@ -119,7 +125,7 @@ export class OverviewService {
         completionPercentage,
       },
       activeCycle: activeCycleDto,
-      recentActivities: (recentActivities || []).map((act) => ({
+      recentActivities: (recentActivities || []).map((act: any) => ({
         id: act.id,
         verb: act.verb,
         field: act.field,
@@ -130,8 +136,8 @@ export class OverviewService {
         createdAt: act.createdAt,
         actor: {
           id: act.actor?.id,
-          name: act.actor?.name || null,
-          avatar: act.actor?.avatar || null,
+          name: act.actor?.profile?.name || null,
+          avatar: act.actor?.profile?.avatar || null,
         },
       })),
       currentUpdate: latestStatusUpdate
@@ -142,8 +148,8 @@ export class OverviewService {
             createdAt: latestStatusUpdate.createdAt,
             author: {
               id: latestStatusUpdate.createdBy.id,
-              name: latestStatusUpdate.createdBy.name,
-              avatar: latestStatusUpdate.createdBy.avatar,
+              name: latestStatusUpdate.createdBy.profile?.name ?? 'User',
+              avatar: latestStatusUpdate.createdBy.profile?.avatar ?? null,
             },
           }
         : null,

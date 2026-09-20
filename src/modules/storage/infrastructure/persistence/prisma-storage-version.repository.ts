@@ -1,7 +1,35 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { IStorageVersionRepository } from '../../domain/ports/storage-version.repository.port';
-import { StorageVersion } from '../../domain/entities/storage-version.entity';
+import {
+  StorageVersion,
+  StorageVersionAuthor,
+} from '../../domain/entities/storage-version.entity';
+
+const AUTHOR_SELECT = {
+  id: true,
+  email: true,
+  profile: {
+    select: {
+      name: true,
+      avatar: true,
+    },
+  },
+} as const;
+
+function mapAuthor(user: {
+  id: string;
+  email: string | null;
+  profile?: { name: string; avatar: string | null } | null;
+} | null): StorageVersionAuthor | null {
+  if (!user) return null;
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.profile?.name ?? 'User',
+    avatar: user.profile?.avatar ?? null,
+  };
+}
 
 @Injectable()
 export class PrismaStorageVersionRepository implements IStorageVersionRepository {
@@ -25,7 +53,7 @@ export class PrismaStorageVersionRepository implements IStorageVersionRepository
 
     const user = await this.prisma.user.findUnique({
       where: { id: created.createdById },
-      select: { id: true, name: true, avatar: true, email: true },
+      select: AUTHOR_SELECT,
     });
 
     return new StorageVersion({
@@ -37,7 +65,7 @@ export class PrismaStorageVersionRepository implements IStorageVersionRepository
       createdById: created.createdById,
       createdAt: created.createdAt,
       sizeBytes: created.blob?.sizeBytes ?? 0n,
-      author: user,
+      author: mapAuthor(user),
     });
   }
 
@@ -55,9 +83,9 @@ export class PrismaStorageVersionRepository implements IStorageVersionRepository
     const authorIds = Array.from(new Set(records.map((r) => r.createdById)));
     const users = await this.prisma.user.findMany({
       where: { id: { in: authorIds } },
-      select: { id: true, name: true, avatar: true, email: true },
+      select: AUTHOR_SELECT,
     });
-    const userMap = new Map(users.map((u) => [u.id, u]));
+    const userMap = new Map(users.map((u) => [u.id, mapAuthor(u)]));
 
     return records.map(
       (r) =>
@@ -90,7 +118,7 @@ export class PrismaStorageVersionRepository implements IStorageVersionRepository
 
     const user = await this.prisma.user.findUnique({
       where: { id: record.createdById },
-      select: { id: true, name: true, avatar: true, email: true },
+      select: AUTHOR_SELECT,
     });
 
     return new StorageVersion({
@@ -102,7 +130,7 @@ export class PrismaStorageVersionRepository implements IStorageVersionRepository
       createdById: record.createdById,
       createdAt: record.createdAt,
       sizeBytes: record.blob?.sizeBytes ?? 0n,
-      author: user,
+      author: mapAuthor(user),
     });
   }
 

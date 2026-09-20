@@ -16,35 +16,46 @@ export class AuthnRepository implements IRefreshTokenRepository {
     return crypto.createHash('sha256').update(token).digest('hex');
   }
 
-  async findUserByEmail(email: string): Promise<User | null> {
+  async findUserByEmail(email: string): Promise<(User & { profile?: { name: string; avatar: string | null } | null }) | null> {
     return this.prisma.user.findUnique({
       where: { email: email.toLowerCase() },
-    });
-  }
-
-  async findUserById(id: string): Promise<User | null> {
-    return this.prisma.user.findUnique({
-      where: { id },
-    });
-  }
-
-  async findUserByOAuth(
-    providerField: 'googleId' | 'githubId',
-    profileId: string,
-    email?: string,
-  ): Promise<User | null> {
-    return this.prisma.user.findFirst({
-      where: {
-        OR: [
-          { [providerField]: profileId },
-          ...(email ? [{ email: email.toLowerCase() }] : []),
-        ],
+      include: {
+        profile: {
+          select: {
+            name: true,
+            avatar: true,
+          },
+        },
       },
     });
   }
 
-  async createUser(data: Prisma.UserCreateInput): Promise<User> {
-    return this.prisma.user.create({ data });
+  async findUserById(id: string): Promise<(User & { profile?: { name: string; avatar: string | null } | null }) | null> {
+    return this.prisma.user.findUnique({
+      where: { id },
+      include: {
+        profile: {
+          select: {
+            name: true,
+            avatar: true,
+          },
+        },
+      },
+    });
+  }
+
+  async createUser(data: Prisma.UserCreateInput): Promise<User & { profile?: { name: string; avatar: string | null } | null }> {
+    return this.prisma.user.create({
+      data,
+      include: {
+        profile: {
+          select: {
+            name: true,
+            avatar: true,
+          },
+        },
+      },
+    });
   }
 
   async updateUser(id: string, data: Prisma.UserUpdateInput): Promise<User> {
@@ -102,7 +113,18 @@ export class AuthnRepository implements IRefreshTokenRepository {
     const normalized = this.normalizeTokenHash(tokenHash);
     return this.prisma.refreshToken.findFirst({
       where: { tokenHash: normalized },
-      include: { user: true },
+      include: {
+        user: {
+          include: {
+            profile: {
+              select: {
+                name: true,
+                avatar: true,
+              },
+            },
+          },
+        },
+      },
     });
   }
 

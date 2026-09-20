@@ -5,14 +5,33 @@ import {
   ProjectMinimal,
   UserWorkItem,
   UserProfileData,
+  UserMinimal,
 } from './types/your-work.types';
 
 const USER_SELECT = {
   id: true,
-  name: true,
   email: true,
-  avatar: true,
+  profile: {
+    select: {
+      name: true,
+      avatar: true,
+    },
+  },
 } as const;
+
+function mapUserMinimal(user: {
+  id: string;
+  email: string | null;
+  profile?: { name: string; avatar: string | null } | null;
+} | null): UserMinimal | null {
+  if (!user) return null;
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.profile?.name ?? null,
+    avatar: user.profile?.avatar ?? null,
+  };
+}
 
 @Injectable()
 export class YourWorkRepository implements IYourWorkRepository {
@@ -26,7 +45,7 @@ export class YourWorkRepository implements IYourWorkRepository {
       ? { id: projectId, deletedAt: null }
       : { members: { some: { userId } }, deletedAt: null };
 
-    return this.prisma.workItem.findMany({
+    const items = await this.prisma.workItem.findMany({
       where: {
         project: projectFilter,
         deletedAt: null,
@@ -54,20 +73,40 @@ export class YourWorkRepository implements IYourWorkRepository {
       },
       orderBy: { updatedAt: 'desc' },
     });
+
+    return items.map((item) => ({
+      ...item,
+      author: mapUserMinimal(item.author)!,
+      assignee: mapUserMinimal(item.assignee),
+    }));
   }
 
   async findUserProfile(userId: string): Promise<UserProfileData | null> {
     if (!userId) return null;
-    return this.prisma.user.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
         id: true,
-        name: true,
         email: true,
-        avatar: true,
         createdAt: true,
+        profile: {
+          select: {
+            name: true,
+            avatar: true,
+          },
+        },
       },
     });
+
+    if (!user) return null;
+
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.profile?.name ?? null,
+      avatar: user.profile?.avatar ?? null,
+      createdAt: user.createdAt,
+    };
   }
 
   async findUserProjects(

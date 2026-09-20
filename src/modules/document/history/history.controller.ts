@@ -1,7 +1,8 @@
-import {
+﻿import {
   Controller,
   Get,
   Post,
+  Patch,
   Delete,
   Body,
   Param,
@@ -10,10 +11,21 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  Optional,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { HistoryService } from './history.service';
-import { CreateVersionDto } from './dto/history.dto';
+import { HistoryOpLogService } from './history-oplog.service';
+import {
+  CreateVersionDto,
+  UpdateVersionDto,
+  VersionQueryDto,
+} from './dto/history.dto';
 import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
 import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
 import { ProjectRoleGuard } from '@/modules/iam/authz/guards/role.guard';
@@ -24,13 +36,21 @@ import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
 @Controller('api')
 @UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class HistoryController {
-  constructor(private readonly historyService: HistoryService) {}
+  constructor(
+    private readonly historyService: HistoryService,
+    @Optional() private readonly opLogService?: HistoryOpLogService,
+  ) {}
 
   @Get(['pages/:pageId/versions', 'projects/:projectId/pages/:pageId/versions'])
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
-  @ApiOperation({ summary: 'List all versions of a page' })
-  async getVersions(@Param('pageId') pageId: string) {
-    return this.historyService.getVersions(pageId);
+  @ApiOperation({
+    summary: 'List all versions of a page (supports pagination)',
+  })
+  async getVersions(
+    @Param('pageId') pageId: string,
+    @Query() query: VersionQueryDto,
+  ) {
+    return this.historyService.getVersions(pageId, query);
   }
 
   @Get([
@@ -44,6 +64,20 @@ export class HistoryController {
     @Param('versionId') versionId: string,
   ) {
     return this.historyService.getVersion(pageId, versionId);
+  }
+
+  @Patch([
+    'pages/:pageId/versions/:versionId',
+    'projects/:projectId/pages/:pageId/versions/:versionId',
+  ])
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @ApiOperation({ summary: 'Update version label or milestone name' })
+  async updateVersion(
+    @Param('pageId') pageId: string,
+    @Param('versionId') versionId: string,
+    @Body() dto: UpdateVersionDto,
+  ) {
+    return this.historyService.updateVersion(pageId, versionId, dto);
   }
 
   @Post([
@@ -67,12 +101,15 @@ export class HistoryController {
   ])
   @HttpCode(HttpStatus.OK)
   @ProjectRoles('owner', 'coordinator', 'contributor')
-  @ApiOperation({ summary: 'Restore page content to a specific version' })
+  @ApiOperation({
+    summary: 'Restore page content to a specific version (Collaborative)',
+  })
   async restoreVersion(
     @Param('pageId') pageId: string,
     @Param('versionId') versionId: string,
+    @CurrentUser('id') userId: string,
   ) {
-    return this.historyService.restoreVersion(pageId, versionId);
+    return this.historyService.restoreVersion(pageId, versionId, userId);
   }
 
   @Delete([
@@ -114,8 +151,9 @@ export class HistoryController {
   async restoreHistoryEvent(
     @Param('pageId') pageId: string,
     @Param('eventId') eventId: string,
+    @CurrentUser('id') userId: string,
   ) {
-    return this.historyService.restoreVersion(pageId, eventId);
+    return this.historyService.restoreVersion(pageId, eventId, userId);
   }
 
   @Get([
@@ -141,5 +179,78 @@ export class HistoryController {
       fromVersionId,
       toVersionId,
     );
+  }
+
+  // ─── Op Log Endpoints (Overleaf-style keystroke-level history) ───────────────
+
+  @Get(['pages/:pageId/timeline', 'projects/:projectId/pages/:pageId/timeline'])
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  @ApiOperation({
+    summary:
+      'Get keystroke-level op log timeline metadata for time-machine scrubbing',
+  })
+  @ApiQuery({
+    name: 'from',
+    required: false,
+    description: 'ISO 8601 start timestamp',
+  })
+  @ApiQuery({
+    name: 'to',
+    required: false,
+    description: 'ISO 8601 end timestamp',
+  })
+  async getTimeline(
+    @Param('pageId') pageId: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    if (!this.opLogService) {
+      return {
+        pageId,
+        entries: [],
+        totalOps: 0,
+        oldestMs: null,
+        newestMs: null,
+      };
+    }
+    const fromMs = from ? new Date(from).getTime() : undefined;
+    const toMs = to ? new Date(to).getTime() : undefined;
+    if (from && isNaN(fromMs!))
+      throw new BadRequestException('Invalid "from" timestamp');
+    if (to && isNaN(toMs!))
+      throw new BadRequestException('Invalid "to" timestamp');
+    return this.opLogService.getTimeline(pageId, fromMs, toMs);
+  }
+
+  @Get(['pages/:pageId/at', 'projects/:projectId/pages/:pageId/at'])
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  @ApiOperation({
+    summary:
+      'Reconstruct document content at a specific point in time (time-machine)',
+  })
+  @ApiQuery({
+    name: 't',
+    required: true,
+    description: 'ISO 8601 target timestamp',
+  })
+  async getContentAt(@Param('pageId') pageId: string, @Query('t') t: string) {
+    if (!t)
+      throw new BadRequestException(
+        'Query param "t" (ISO timestamp) is required',
+      );
+    const targetMs = new Date(t).getTime();
+    if (isNaN(targetMs)) throw new BadRequestException('Invalid timestamp "t"');
+
+    if (!this.opLogService) {
+      return { pageId, content: '', targetMs, source: 'unavailable' };
+    }
+
+    const content = await this.opLogService.replayToPoint(pageId, targetMs);
+    return {
+      pageId,
+      content,
+      targetMs,
+      reconstructedAt: new Date(targetMs).toISOString(),
+    };
   }
 }

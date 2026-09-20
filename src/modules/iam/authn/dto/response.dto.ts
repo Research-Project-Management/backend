@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { UserStatus } from '@prisma/client';
 
 export class UserSummaryResponseDto {
   @ApiProperty({
@@ -24,8 +25,18 @@ export class UserSummaryResponseDto {
   })
   avatar?: string | null;
 
-  @ApiProperty({ description: 'Email verification status', example: true })
-  isVerified!: boolean;
+  @ApiProperty({
+    description: 'User account status',
+    enum: UserStatus,
+    example: 'active',
+  })
+  status!: UserStatus;
+
+  @ApiPropertyOptional({
+    description: 'Email verification status (derived)',
+    example: true,
+  })
+  isVerified?: boolean;
 
   @ApiPropertyOptional({ description: 'User creation timestamp' })
   createdAt?: Date;

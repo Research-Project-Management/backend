@@ -23,8 +23,12 @@ export class OverviewRepository {
         createdBy: {
           select: {
             id: true,
-            name: true,
-            avatar: true,
+            profile: {
+              select: {
+                name: true,
+                avatar: true,
+              },
+            },
           },
         },
         members: {
@@ -34,8 +38,12 @@ export class OverviewRepository {
             user: {
               select: {
                 id: true,
-                name: true,
-                avatar: true,
+                profile: {
+                  select: {
+                    name: true,
+                    avatar: true,
+                  },
+                },
               },
             },
           },
@@ -177,8 +185,12 @@ export class OverviewRepository {
         actor: {
           select: {
             id: true,
-            name: true,
-            avatar: true,
+            profile: {
+              select: {
+                name: true,
+                avatar: true,
+              },
+            },
           },
         },
       },
@@ -198,8 +210,12 @@ export class OverviewRepository {
         createdBy: {
           select: {
             id: true,
-            name: true,
-            avatar: true,
+            profile: {
+              select: {
+                name: true,
+                avatar: true,
+              },
+            },
           },
         },
       },

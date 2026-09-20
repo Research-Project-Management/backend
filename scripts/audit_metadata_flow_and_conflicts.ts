@@ -4,8 +4,8 @@ dotenv.config();
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
-import { ItemsService } from '../src/modules/library/items/items.service';
-import { QueryRepository } from '../src/modules/library/items/repositories/query.repository';
+import { ItemsService } from '../src/modules/library/catalog/application/services/items.service';
+import { QueryRepository } from '../src/modules/library/catalog/infrastructure/repositories/query.repository';
 import { GrobidClient } from '../src/modules/library/infra/grobid/grobid.client';
 
 async function main() {

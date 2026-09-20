@@ -1,55 +1,40 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { CoreModule as AppCoreModule } from '../../core/core.module';
-import { CoreModule } from './core/core.module';
-import { ItemsModule } from './items/items.module';
-import { CurationModule } from './curation/curation.module';
-import { CollectionsModule } from './collections/collections.module';
-import { TagsModule } from './tags/tags.module';
-import { AttachmentsModule } from './attachments/attachments.module';
-import { AnnotationsModule } from './annotations/annotations.module';
-import { NotesModule } from './notes/notes.module';
-import { SearchModule } from './search/search.module';
-import { CitationModule } from './citation/citation.module';
-import { IngestionModule } from './ingestion/ingestion.module';
-import { OutboxModule } from './outbox/outbox.module';
-import { SavedSearchesModule } from './saved-searches/saved-searches.module';
 
-import { TypesModule } from './types/types.module';
-import { StateModule } from './state/state.module';
-import { ExportsModule } from './exports/exports.module';
-import { RetractionModule } from './retraction/retraction.module';
-import { InfraModule } from './infra/infra.module';
+// Bounded Context Modules
+import { SharedKernelModule } from './shared-kernel/shared-kernel.module';
+import { CatalogModule } from './catalog/catalog.module';
+import { ContentModule } from './content/content.module';
+import { ProcessingModule } from './processing/processing.module';
+import { DiscoveryModule } from './discovery/discovery.module';
+
 import { LibraryFacade, LIBRARY_FACADE } from './library.facade';
 
 /**
- * Pure Composition Root for the Library Module.
- * Wires canonical feature modules and the central CoreModule.
- * Exposes LibraryFacade for clean, decoupled inter-module queries.
+ * Macro Composition Root for the Library Module.
+ *
+ * Clean Architecture & DDD structure:
+ * Consists of exactly 4 Bounded Contexts + 1 Shared Kernel:
+ * 1. CatalogModule (Core Domain — Items, Collections, Tags, Types, State, Saved Searches)
+ * 2. ContentModule (Supporting Domain — Attachments, Annotations, Notes)
+ * 3. ProcessingModule (Supporting Domain — Ingestion Pipeline, Metadata Resolution, Curation, Retraction)
+ * 4. DiscoveryModule (Generic Domain — Search, Citation CSL, Exports)
+ * 5. SharedKernelModule (Shared Infrastructure, Outbox, Integration Event Bus)
+ *
+ * Zero submodule clutter. Each Bounded Context is a self-contained unit.
  */
 @Module({
   imports: [
     ConfigModule,
     AppCoreModule,
-    CoreModule,
-    InfraModule,
 
-    TypesModule,
-    ItemsModule,
-    StateModule,
-    CurationModule,
-    RetractionModule,
-    CollectionsModule,
-    TagsModule,
-    AttachmentsModule,
-    AnnotationsModule,
-    NotesModule,
-    OutboxModule,
-    SearchModule,
-    CitationModule,
-    ExportsModule,
-    IngestionModule,
-    SavedSearchesModule,
+    // Bounded Contexts
+    SharedKernelModule,
+    CatalogModule,
+    ContentModule,
+    ProcessingModule,
+    DiscoveryModule,
   ],
   providers: [
     LibraryFacade,
@@ -59,26 +44,16 @@ import { LibraryFacade, LIBRARY_FACADE } from './library.facade';
     },
   ],
   exports: [
+    // Public Facades
     LibraryFacade,
     LIBRARY_FACADE,
-    CoreModule,
-    InfraModule,
-    TypesModule,
-    ItemsModule,
-    StateModule,
-    CurationModule,
-    RetractionModule,
-    CollectionsModule,
-    TagsModule,
-    AttachmentsModule,
-    AnnotationsModule,
-    NotesModule,
-    OutboxModule,
-    SearchModule,
-    CitationModule,
-    ExportsModule,
-    IngestionModule,
-    SavedSearchesModule,
+
+    // Bounded Context Modules
+    SharedKernelModule,
+    CatalogModule,
+    ContentModule,
+    ProcessingModule,
+    DiscoveryModule,
   ],
 })
 export class LibraryModule {}

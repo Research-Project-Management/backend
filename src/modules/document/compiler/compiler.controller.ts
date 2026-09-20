@@ -16,6 +16,7 @@ import {
   SaveAndSyncDto,
   CompileDocumentDto,
 } from './dto/compiler.dto';
+import { ForwardSyncDto, ReverseSyncDto } from './dto/synctex.dto';
 import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
 import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
 import { ProjectRoleGuard } from '@/modules/iam/authz/guards/role.guard';
@@ -141,6 +142,38 @@ export class CompilerController {
   })
   async wordCount(@Body() dto: WordCountDto) {
     return this.compilerService.getWordCount(dto.source);
+  }
+
+  @Post([
+    'synctex/forward',
+    'projects/:projectId/synctex/forward',
+    'compiler/synctex/forward',
+  ])
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Forward SyncTeX: map LaTeX source line/column to PDF page coordinates',
+  })
+  async forwardSync(@Body() dto: ForwardSyncDto) {
+    return this.compilerService.forwardSync(dto);
+  }
+
+  @Post([
+    'synctex/reverse',
+    'projects/:projectId/synctex/reverse',
+    'compiler/synctex/reverse',
+  ])
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Reverse SyncTeX: map clicked PDF page coordinates to LaTeX source line/column',
+  })
+  async reverseSync(@Body() dto: ReverseSyncDto) {
+    return this.compilerService.reverseSync(dto);
   }
 }
 

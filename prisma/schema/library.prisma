@@ -135,10 +135,8 @@ model Item {
   isMyPublication     Boolean     @default(false) @map("is_my_publication")
   publicationConfirmedAt DateTime? @map("publication_confirmed_at") @db.Timestamptz(6)
   userId              String      @map("user_id") @db.Uuid
-  user                User        @relation("UserItems", fields: [userId], references: [id], onDelete: Cascade)
   uploadedById        String?     @default("system") @map("uploaded_by_id")
   projectId           String?     @map("project_id") @db.Uuid
-  project             Project?    @relation("ProjectItems", fields: [projectId], references: [id], onDelete: Cascade)
   deletedAt           DateTime?   @map("deleted_at") @db.Timestamptz(6)
   version             Int         @default(1)
   createdAt           DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -209,9 +207,7 @@ model Collection {
   parent      Collection?  @relation("CollectionHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
   children    Collection[] @relation("CollectionHierarchy")
   userId      String       @map("user_id") @db.Uuid
-  user      User         @relation("UserCollections", fields: [userId], references: [id], onDelete: Cascade)
-  projectId String?      @map("project_id") @db.Uuid
-  project   Project?     @relation("ProjectCollections", fields: [projectId], references: [id], onDelete: Cascade)
+  projectId   String?      @map("project_id") @db.Uuid
   deletedAt DateTime?    @map("deleted_at") @db.Timestamptz(6)
   version   Int          @default(1)
   createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -244,9 +240,7 @@ model Tag {
   color     String?
   type      String?   @default("manual")
   userId    String    @map("user_id") @db.Uuid
-  user      User      @relation("UserTags", fields: [userId], references: [id], onDelete: Cascade)
   projectId String?   @map("project_id") @db.Uuid
-  project   Project?  @relation("ProjectTags", fields: [projectId], references: [id], onDelete: Cascade)
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -282,7 +276,6 @@ model Attachment {
   url                String                     @default("")
   fileHash           String?                    @default("") @map("file_hash")
   fileId             String?                    @map("file_id") @db.Uuid
-  file               File?                      @relation(fields: [fileId], references: [id], onDelete: SetNull)
   storageKey         String?                    @map("storage_key")
   mimeType           String                     @default("application/pdf") @map("mime_type")
   size               Int                        @default(0)
@@ -334,7 +327,6 @@ model Annotation {
   comment             String?        @default("")
   tags                String[]       @default([])
   authorId            String         @map("author_id") @db.Uuid
-  author              User           @relation("UserAnnotations", fields: [authorId], references: [id], onDelete: Cascade)
   version             Int            @default(1)
   createdAt           DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -367,10 +359,8 @@ model Note {
   contentJson Json?     @map("content_json")
   tags        String[]  @default([])
   userId      String    @map("user_id") @db.Uuid
-  user        User      @relation("UserNotes", fields: [userId], references: [id], onDelete: Cascade)
   createdById String?   @map("created_by_id") @db.Uuid
   projectId   String?   @map("project_id") @db.Uuid
-  project     Project?  @relation("ProjectNotes", fields: [projectId], references: [id], onDelete: Cascade)
   version     Int       @default(1)
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -400,7 +390,6 @@ model ItemRelation {
 model State {
   id             String     @id @default(uuid()) @db.Uuid
   userId         String     @map("user_id") @db.Uuid
-  user           User       @relation("UserItemStates", fields: [userId], references: [id], onDelete: Cascade)
   itemId         String     @map("item_id") @db.Uuid
   item           Item       @relation(fields: [itemId], references: [id], onDelete: Cascade)
   readStatus     ReadStatus @default(unread) @map("read_status")
@@ -434,9 +423,7 @@ model SavedSearch {
   version         Int       @default(1)
   deletedAt       DateTime? @map("deleted_at") @db.Timestamptz(6)
   userId          String    @map("user_id") @db.Uuid
-  user            User      @relation("UserSavedSearches", fields: [userId], references: [id], onDelete: Cascade)
   projectId       String?   @map("project_id") @db.Uuid
-  project         Project?  @relation("ProjectSavedSearches", fields: [projectId], references: [id], onDelete: Cascade)
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -494,9 +481,7 @@ model ItemRevision {
 model IdempotencyRecord {
   id             String    @id @default(uuid()) @db.Uuid
   userId         String    @map("user_id") @db.Uuid
-  user           User      @relation("UserIdempotencyRecords", fields: [userId], references: [id], onDelete: Cascade)
   projectId      String?   @map("project_id") @db.Uuid
-  project        Project?  @relation("ProjectIdempotencyRecords", fields: [projectId], references: [id], onDelete: Cascade)
   idempotencyKey String    @map("idempotency_key")
   requestHash    String?   @map("request_hash")
   statusCode     Int?      @map("status_code")
@@ -516,9 +501,7 @@ model IdempotencyRecord {
 model SyncSequence {
   id              String   @id @default(uuid()) @db.Uuid
   userId          String?  @unique @map("user_id") @db.Uuid
-  user            User?    @relation("UserSyncSequence", fields: [userId], references: [id], onDelete: Cascade)
   projectId       String?  @unique @map("project_id") @db.Uuid
-  project         Project? @relation("ProjectSyncSequence", fields: [projectId], references: [id], onDelete: Cascade)
   currentSequence BigInt   @default(0) @map("current_sequence")
 
   @@map("sync_sequences")
@@ -528,9 +511,7 @@ model LibraryChange {
   id          String   @id @default(uuid()) @db.Uuid
   seq         BigInt
   userId      String?  @map("user_id") @db.Uuid
-  user        User?    @relation("UserLibraryChanges", fields: [userId], references: [id], onDelete: Cascade)
   projectId   String?  @map("project_id") @db.Uuid
-  project     Project? @relation("ProjectLibraryChanges", fields: [projectId], references: [id], onDelete: Cascade)
   entityType  String   @map("entity_type")
   entityId    String   @map("entity_id")
   action      String
@@ -546,14 +527,11 @@ model LibraryChange {
 model Tombstone {
   id          String    @id @default(uuid()) @db.Uuid
   userId      String?   @map("user_id") @db.Uuid
-  user        User?     @relation("UserTombstones", fields: [userId], references: [id], onDelete: Cascade)
   projectId   String?   @map("project_id") @db.Uuid
-  project     Project?  @relation("ProjectTombstones", fields: [projectId], references: [id], onDelete: Cascade)
   entityType  String    @map("entity_type")
   entityId    String    @map("entity_id")
   seq         BigInt
   deletedById String?   @map("deleted_by_id") @db.Uuid
-  deletedBy   User?     @relation("TombstoneDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
   deletedAt   DateTime  @default(now()) @map("deleted_at") @db.Timestamptz(6)
 
   @@index([userId, entityType, entityId])
@@ -564,9 +542,7 @@ model Tombstone {
 model OutboxEvent {
   id             String       @id @default(uuid()) @db.Uuid
   userId         String       @map("user_id") @db.Uuid
-  user           User         @relation("UserOutboxEvents", fields: [userId], references: [id], onDelete: Cascade)
   projectId      String?      @map("project_id") @db.Uuid
-  project        Project?     @relation("ProjectOutboxEvents", fields: [projectId], references: [id], onDelete: Cascade)
   aggregateId    String       @map("aggregate_id")
   eventType      String       @map("event_type")
   payload        Json
@@ -591,9 +567,7 @@ model OutboxEvent {
 model IngestionRun {
   id              String               @id @default(uuid()) @db.Uuid
   userId          String               @map("user_id") @db.Uuid
-  user            User                 @relation("UserIngestionRuns", fields: [userId], references: [id], onDelete: Cascade)
   projectId       String?              @map("project_id") @db.Uuid
-  project         Project?             @relation("ProjectIngestionRuns", fields: [projectId], references: [id], onDelete: Cascade)
   requesterId     String?              @map("requester_id")
   inputParams     Json                 @map("input_params")
   inputHash       String               @map("input_hash")
@@ -667,9 +641,7 @@ model IngestionDecision {
 model IngestionReviewCase {
   id             String       @id @default(uuid()) @db.Uuid
   userId         String?      @map("user_id") @db.Uuid
-  user           User?        @relation("UserIngestionReviewCases", fields: [userId], references: [id], onDelete: Cascade)
   projectId      String?      @map("project_id") @db.Uuid
-  project        Project?     @relation("ProjectIngestionReviewCases", fields: [projectId], references: [id], onDelete: Cascade)
   ingestionRunId String       @map("ingestion_run_id") @db.Uuid
   ingestionRun   IngestionRun @relation(fields: [ingestionRunId], references: [id], onDelete: Cascade)
   targetItemId   String?      @map("target_item_id") @db.Uuid
@@ -689,7 +661,6 @@ model IngestionReviewCase {
 model CapturePreview {
   id                String    @id @default(uuid()) @db.Uuid
   userId            String    @map("user_id") @db.Uuid
-  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   sourceUrl         String    @map("source_url")
   canonicalMetadata Json      @map("canonical_metadata")
   metadataDigest    String    @map("metadata_digest")

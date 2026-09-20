@@ -5,19 +5,18 @@
  */
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
-import { Prisma, User } from '@prisma/client';
+import { CitationStyle, Prisma, ThemePreference, User } from '@prisma/client';
 import {
   IUserRepository,
-  UserSettingsData,
+  OwnedProjectInfo,
+  UpdateUserSettingsInput,
+  UserSettingsEntity,
   UserStatsResult,
+  UserWithProfile,
 } from './types/user.type';
 import { formatBytes } from './utils/user.util';
 
-function isUuid(str: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-    str,
-  );
-}
+import { isUuid } from '@/core/utils/uuid.util';
 
 @Injectable()
 export class UserRepository implements IUserRepository {
@@ -28,20 +27,22 @@ export class UserRepository implements IUserRepository {
   /**
    * Find a user by UUID.
    */
-  async findById(id: string): Promise<User | null> {
+  async findById(id: string): Promise<UserWithProfile | null> {
     if (!id || !isUuid(id)) return null;
     return this.prisma.user.findUnique({
       where: { id },
+      include: { profile: true },
     });
   }
 
   /**
    * Find a user by email address (case-insensitive).
    */
-  async findByEmail(email: string): Promise<User | null> {
+  async findByEmail(email: string): Promise<UserWithProfile | null> {
     if (!email) return null;
     return this.prisma.user.findUnique({
       where: { email: email.toLowerCase().trim() },
+      include: { profile: true },
     });
   }
 
@@ -53,29 +54,76 @@ export class UserRepository implements IUserRepository {
     passwordHash: string;
     name: string;
     avatar?: string;
-  }): Promise<User> {
+  }): Promise<UserWithProfile> {
     return this.prisma.user.create({
       data: {
         email: data.email.toLowerCase().trim(),
         password: data.passwordHash,
-        name: data.name,
-        avatar: data.avatar ?? null,
-        status: 'active',
+        status: 'pending_verification',
+        settings: {
+          create: {},
+        },
+        profile: {
+          create: {
+            name: data.name,
+            avatar: data.avatar ?? null,
+          },
+        },
       },
+      include: { profile: true },
     });
   }
 
   /**
-   * Update basic profile fields (name, avatar, isVerified).
+   * Update basic profile fields (name, avatar, and academic metadata).
    */
   async updateProfile(
     id: string,
-    data: Partial<Pick<User, 'name' | 'avatar' | 'isVerified'>>,
-  ): Promise<User> {
-    return this.prisma.user.update({
-      where: { id },
-      data,
+    data: {
+      name?: string;
+      avatar?: string | null;
+      bio?: string | null;
+      institution?: string | null;
+      department?: string | null;
+      academicTitle?: string | null;
+      orcidId?: string | null;
+      website?: string | null;
+    },
+  ): Promise<UserWithProfile> {
+    await this.prisma.userProfile.upsert({
+      where: { userId: id },
+      create: {
+        userId: id,
+        name: data.name ?? 'User',
+        avatar: data.avatar ?? null,
+        bio: data.bio ?? '',
+        institution: data.institution ?? null,
+        department: data.department ?? null,
+        academicTitle: data.academicTitle ?? null,
+        orcidId: data.orcidId ?? null,
+        website: data.website ?? null,
+      },
+      update: {
+        ...(data.name !== undefined ? { name: data.name } : {}),
+        ...(data.avatar !== undefined ? { avatar: data.avatar } : {}),
+        ...(data.bio !== undefined ? { bio: data.bio } : {}),
+        ...(data.institution !== undefined
+          ? { institution: data.institution }
+          : {}),
+        ...(data.department !== undefined
+          ? { department: data.department }
+          : {}),
+        ...(data.academicTitle !== undefined
+          ? { academicTitle: data.academicTitle }
+          : {}),
+        ...(data.orcidId !== undefined ? { orcidId: data.orcidId } : {}),
+        ...(data.website !== undefined ? { website: data.website } : {}),
+      },
     });
+
+    const user = await this.findById(id);
+    if (!user) throw new Error('User not found');
+    return user;
   }
 
   /**
@@ -89,15 +137,64 @@ export class UserRepository implements IUserRepository {
   }
 
   /**
-   * Soft-delete a user account by setting deletedAt timestamp.
+   * Soft-delete a user account (delegates to deactivateAccount).
    */
   async softDelete(id: string): Promise<void> {
-    await this.prisma.user.update({
-      where: { id },
-      data: {
-        deletedAt: new Date(),
-        status: 'deactivated',
-      },
+    return this.deactivateAccount(id);
+  }
+
+  /**
+   * Deactivate and anonymize user account (GDPR Purpose-Based Selective Erasure).
+   * - Frees the real email by mutating it to anonymized_<id>@deleted.flux
+   * - Wipes password hash and unlinks third-party OAuth accounts
+   * - Sets deletedAt timestamp and deactivated status
+   * - Revokes all active refresh tokens
+   * - Preserves academic research contributions and historical author identity
+   */
+  async deactivateAccount(id: string): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      // 1. Delete third-party federated OAuth accounts
+      await tx.userAccount.deleteMany({
+        where: { userId: id },
+      });
+
+      // 2. Anonymize user profile
+      await tx.userProfile.updateMany({
+        where: { userId: id },
+        data: {
+          name: 'Deactivated User',
+          avatar: null,
+          bio: '',
+          institution: null,
+          department: null,
+          academicTitle: null,
+          orcidId: null,
+          website: null,
+        },
+      });
+
+      // 3. Anonymize email and clear password
+      await tx.user.update({
+        where: { id },
+        data: {
+          email: `anonymized_${id}@deleted.flux`,
+          password: null,
+          deletedAt: new Date(),
+          status: 'deactivated',
+        },
+      });
+
+      // 4. Revoke all active refresh tokens
+      await tx.refreshToken.updateMany({
+        where: {
+          userId: id,
+          isRevoked: false,
+        },
+        data: {
+          isRevoked: true,
+          revokedAt: new Date(),
+        },
+      });
     });
   }
 
@@ -125,10 +222,18 @@ export class UserRepository implements IUserRepository {
     query: string,
     excludeUserId?: string,
     projectId?: string,
-  ): Promise<Array<Pick<User, 'id' | 'name' | 'email' | 'avatar' | 'status'>>> {
+  ): Promise<
+    Array<{
+      id: string;
+      name: string;
+      email: string;
+      avatar: string | null;
+      status: User['status'];
+    }>
+  > {
     const cleanQuery = query?.trim() ?? '';
 
-    return this.prisma.user.findMany({
+    const users = await this.prisma.user.findMany({
       where: {
         deletedAt: null,
         ...(projectId ? { projectMembers: { some: { projectId } } } : {}),
@@ -137,7 +242,11 @@ export class UserRepository implements IUserRepository {
           cleanQuery
             ? {
                 OR: [
-                  { name: { contains: cleanQuery, mode: 'insensitive' } },
+                  {
+                    profile: {
+                      name: { contains: cleanQuery, mode: 'insensitive' },
+                    },
+                  },
                   { email: { contains: cleanQuery, mode: 'insensitive' } },
                 ],
               }
@@ -146,13 +255,87 @@ export class UserRepository implements IUserRepository {
       },
       select: {
         id: true,
-        name: true,
         email: true,
-        avatar: true,
         status: true,
+        profile: {
+          select: {
+            name: true,
+            avatar: true,
+          },
+        },
       },
       take: 20,
     });
+
+    return users.map((u) => ({
+      id: u.id,
+      email: u.email,
+      status: u.status,
+      name: u.profile?.name ?? 'User',
+      avatar: u.profile?.avatar ?? null,
+    }));
+  }
+
+  /**
+   * Find all non-deleted projects where the user is an owner,
+   * including the total member count and archive status.
+   */
+  async findOwnedProjects(userId: string): Promise<OwnedProjectInfo[]> {
+    if (!userId || !isUuid(userId)) return [];
+
+    const memberships = await this.prisma.projectMember.findMany({
+      where: {
+        userId,
+        role: 'owner',
+        project: {
+          deletedAt: null,
+        },
+      },
+      select: {
+        project: {
+          select: {
+            id: true,
+            name: true,
+            identifier: true,
+            isArchived: true,
+            _count: {
+              select: {
+                members: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    return memberships.map((m) => ({
+      id: m.project.id,
+      name: m.project.name,
+      identifier: m.project.identifier,
+      isArchived: m.project.isArchived,
+      memberCount: m.project._count.members,
+    }));
+  }
+
+  /**
+   * Bulk archive projects by IDs.
+   */
+  async archiveProjects(projectIds: string[]): Promise<number> {
+    const validIds = projectIds.filter((id) => isUuid(id));
+    if (validIds.length === 0) return 0;
+
+    const result = await this.prisma.project.updateMany({
+      where: {
+        id: { in: validIds },
+        deletedAt: null,
+      },
+      data: {
+        isArchived: true,
+        archivedAt: new Date(),
+      },
+    });
+
+    return result.count;
   }
 
   // ─── 2. Personal Preferences & Settings ─────────────────────────────────────
@@ -160,19 +343,19 @@ export class UserRepository implements IUserRepository {
   /**
    * Retrieve personal settings and preferences.
    */
-  async getUserSettings(userId: string): Promise<UserSettingsData> {
-    const settings = await this.prisma.userSettings.findUnique({
+  async getUserSettings(userId: string): Promise<UserSettingsEntity> {
+    let settings = await this.prisma.userSettings.findUnique({
       where: { userId },
     });
+
     if (!settings) {
-      return {
-        theme: 'system',
-        citationStyle: 'apa',
-        locale: 'en',
-      };
+      settings = await this.prisma.userSettings.create({
+        data: { userId },
+      });
     }
+
     return {
-      theme: (settings.theme as 'light' | 'dark' | 'system') || 'system',
+      theme: settings.theme,
       citationStyle: settings.citationStyle,
       locale: settings.locale,
       editorConfig: settings.editorConfig ?? {},
@@ -186,8 +369,8 @@ export class UserRepository implements IUserRepository {
    */
   async updateUserSettings(
     userId: string,
-    settings: Partial<UserSettingsData>,
-  ): Promise<UserSettingsData> {
+    settings: UpdateUserSettingsInput,
+  ): Promise<UserSettingsEntity> {
     const existing = await this.prisma.userSettings.findUnique({
       where: { userId },
     });
@@ -196,9 +379,10 @@ export class UserRepository implements IUserRepository {
       const created = await this.prisma.userSettings.create({
         data: {
           userId,
-          theme: settings.theme || 'system',
-          citationStyle: (settings.citationStyle as string) || 'apa',
-          locale: (settings.locale as string) || 'en',
+          theme: (settings.theme as ThemePreference) || ThemePreference.system,
+          citationStyle:
+            (settings.citationStyle as CitationStyle) || CitationStyle.apa,
+          locale: settings.locale || 'en',
           editorConfig: (settings.editorConfig as Prisma.InputJsonValue) ?? {},
           notifications:
             (settings.notifications as Prisma.InputJsonValue) ?? {},
@@ -207,7 +391,7 @@ export class UserRepository implements IUserRepository {
         },
       });
       return {
-        theme: (created.theme as 'light' | 'dark' | 'system') || 'system',
+        theme: created.theme,
         citationStyle: created.citationStyle,
         locale: created.locale,
         editorConfig: created.editorConfig ?? {},
@@ -221,23 +405,23 @@ export class UserRepository implements IUserRepository {
       data: {
         ...(settings.theme ? { theme: settings.theme } : {}),
         ...(settings.citationStyle
-          ? { citationStyle: settings.citationStyle as string }
+          ? { citationStyle: settings.citationStyle }
           : {}),
-        ...(settings.locale ? { locale: settings.locale as string } : {}),
-        ...(settings.editorConfig
+        ...(settings.locale ? { locale: settings.locale } : {}),
+        ...(settings.editorConfig !== undefined
           ? { editorConfig: settings.editorConfig }
           : {}),
-        ...(settings.notifications
+        ...(settings.notifications !== undefined
           ? { notifications: settings.notifications }
           : {}),
-        ...(settings.aiPreferences
+        ...(settings.aiPreferences !== undefined
           ? { aiPreferences: settings.aiPreferences }
           : {}),
       },
     });
 
     return {
-      theme: (updated.theme as 'light' | 'dark' | 'system') || 'system',
+      theme: updated.theme,
       citationStyle: updated.citationStyle,
       locale: updated.locale,
       editorConfig: updated.editorConfig ?? {},
@@ -444,11 +628,11 @@ export class UserRepository implements IUserRepository {
 
   // ─── 4. Resource Statistics & Dashboard Metrics ─────────────────────────────
 
-  async getUserStats(_userId: string): Promise<UserStatsResult> {
+  getUserStats(_userId: string): Promise<UserStatsResult> {
     const plan = 'free';
     const storageQuotaBytes = 5 * 1024 * 1024 * 1024;
 
-    return {
+    return Promise.resolve({
       projectsCount: 0,
       filesCount: 0,
       storageUsedBytes: 0,
@@ -457,6 +641,6 @@ export class UserRepository implements IUserRepository {
       stickiesCount: 0,
       workItemsCount: 0,
       plan,
-    };
+    });
   }
 }

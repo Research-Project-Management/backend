@@ -1,23 +1,28 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { SynctexService } from '@/modules/document/synctex/synctex.service';
+import { CompilerService } from '@/modules/document/compiler/compiler.service';
+import { PageService } from '@/modules/document/page/page.service';
 import { ConfigService } from '@nestjs/config';
 
-describe('Document SynctexService (Code <-> PDF 2-Way Navigation)', () => {
-  let service: SynctexService;
+describe('Document CompilerService - SyncTeX (Code <-> PDF 2-Way Navigation)', () => {
+  let service: CompilerService;
 
   beforeEach(async () => {
     const mockConfig = {
       get: jest.fn().mockReturnValue('http://localhost:2918'),
     };
+    const mockPageService = {
+      findPageById: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        SynctexService,
+        CompilerService,
         { provide: ConfigService, useValue: mockConfig },
+        { provide: PageService, useValue: mockPageService },
       ],
     }).compile();
 
-    service = module.get<SynctexService>(SynctexService);
+    service = module.get<CompilerService>(CompilerService);
   });
 
   describe('forwardSync', () => {

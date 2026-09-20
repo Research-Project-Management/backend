@@ -1,12 +1,17 @@
-import { User } from '@prisma/client';
+import { User, UserProfile } from '@prisma/client';
 import { SanitizedUser } from '../types/user.type';
 
 export function sanitizeUser(
-  user: User | null | undefined,
+  user: (User & { profile?: UserProfile | null }) | null | undefined,
 ): SanitizedUser | null {
   if (!user) return null;
-  const { password, ...rest } = user;
-  return rest;
+  const { password, profile, ...rest } = user as any;
+  return {
+    ...rest,
+    name: profile?.name ?? 'User',
+    avatar: profile?.avatar ?? null,
+    profile: profile ?? null,
+  };
 }
 
 export function formatBytes(bytes: number): string {

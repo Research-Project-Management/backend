@@ -21,6 +21,7 @@ import { MemberService } from './member.service';
 import { AddProjectMemberDto, BulkAddProjectMembersDto } from './dto/add.dto';
 import { UpdateProjectMemberDto } from './dto/update.dto';
 import { QueryProjectMembersDto } from './dto/query.dto';
+import { TransferOwnershipDto } from './dto/transfer.dto';
 import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
 import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
 import { ProjectRoleGuard } from '@/modules/iam/authz/guards/role.guard';
@@ -147,5 +148,28 @@ export class MemberController {
     @CurrentUser('id') userId: string,
   ) {
     return this.memberService.leaveProject(projectId, userId);
+  }
+
+  @Post(':projectId/transfer-ownership')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('owner')
+  @ApiOperation({
+    summary: 'Transfer project ownership to another existing member',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Project ownership transferred successfully',
+  })
+  async transferOwnership(
+    @Param('projectId') projectId: string,
+    @CurrentUser('id') actorId: string,
+    @Body() dto: TransferOwnershipDto,
+  ) {
+    return this.memberService.transferOwnership(
+      projectId,
+      actorId,
+      dto.newOwnerId,
+    );
   }
 }

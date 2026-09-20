@@ -22,6 +22,7 @@ import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
 import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
 import { ProjectRoleGuard } from '@/modules/iam/authz/guards/role.guard';
 import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
+import { VerifiedEmailGuard } from '@/modules/iam/authn/guards/verified-email.guard';
 import type { AuthenticatedUser } from '@/modules/iam/core/types/iam.type';
 
 @ApiTags('Project Invitations')
@@ -99,7 +100,7 @@ export class InvitationController {
   }
 
   @Post(':projectId/invitations')
-  @UseGuards(ProjectRoleGuard)
+  @UseGuards(ProjectRoleGuard, VerifiedEmailGuard)
   @ProjectRoles('owner')
   @ApiOperation({ summary: 'Invite a user to a project via email' })
   @ApiResponse({ status: 201, description: 'Invitation sent successfully' })

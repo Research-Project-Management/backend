@@ -13,7 +13,6 @@ export enum CompilerEngine {
   PDFLATEX = 'pdflatex',
   XELATEX = 'xelatex',
   LUALATEX = 'lualatex',
-  TYPST = 'typst',
 }
 
 export const LatexEngine = CompilerEngine;
@@ -119,7 +118,7 @@ export class SaveAndSyncDto {
 
 export class CompileDocumentDto {
   @ApiPropertyOptional({
-    description: 'Compiler Engine (pdflatex, xelatex, lualatex, typst)',
+    description: 'Compiler Engine (pdflatex, xelatex, lualatex)',
     enum: CompilerEngine,
     default: CompilerEngine.PDFLATEX,
   })

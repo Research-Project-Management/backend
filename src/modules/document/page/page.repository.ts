@@ -223,7 +223,7 @@ export class PageRepository implements IPageRepository {
   ): Promise<PageWithAuthor> {
     return this.prisma.page.update({
       where: { id: pageId },
-      data: data as Prisma.PageUpdateInput,
+      data: data,
       include: {
         author: { select: USER_MINIMAL_SELECT },
       },
@@ -308,6 +308,3 @@ export class PageRepository implements IPageRepository {
     });
   }
 }
-
-export const CoreRepository = PageRepository;
-export type CoreRepository = PageRepository;

@@ -89,23 +89,9 @@ model Project {
   templates      WorkItemTemplate[]
   activityEvents ActivityEvent[]
   aiChats        AiChat[]              @relation("ProjectAiChats")
-  stickies       Sticky[]              @relation("ProjectStickies")
   links          ProjectLink[]
   updates        ProjectUpdate[]
 
-  // Academic Library Relations (Project Scope & Collaborative Repository)
-  items                Item[]                @relation("ProjectItems")
-  collections          Collection[]          @relation("ProjectCollections")
-  tags                 Tag[]                 @relation("ProjectTags")
-  notes                Note[]                @relation("ProjectNotes")
-  savedSearches        SavedSearch[]         @relation("ProjectSavedSearches")
-  idempotencyRecords   IdempotencyRecord[]   @relation("ProjectIdempotencyRecords")
-  syncSequence         SyncSequence?         @relation("ProjectSyncSequence")
-  libraryChanges       LibraryChange[]       @relation("ProjectLibraryChanges")
-  tombstones           Tombstone[]           @relation("ProjectTombstones")
-  outboxEvents         OutboxEvent[]         @relation("ProjectOutboxEvents")
-  ingestionRuns        IngestionRun[]        @relation("ProjectIngestionRuns")
-  ingestionReviewCases IngestionReviewCase[] @relation("ProjectIngestionReviewCases")
 
   @@index([createdById])
   @@index([state, priority])

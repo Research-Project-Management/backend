@@ -3,6 +3,8 @@ import {
   NotFoundException,
   ForbiddenException,
   UnprocessableEntityException,
+  Optional,
+  Logger,
 } from '@nestjs/common';
 import { CommentRepository } from './comment.repository';
 import {
@@ -12,19 +14,26 @@ import {
 } from './dto/comment.dto';
 import { CommentStatus, Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import * as Y from 'yjs';
 import {
   parseCommentReplies,
   CommentReply,
   CommentAuthor,
 } from './types/comment.types';
 import { PrismaService } from '@/core/database/prisma.service';
-import { sanitizeCommentContent } from '../core/utils/document.utils';
+import { sanitizeCommentContent } from '../page/utils/page.utils';
+import { CollaborationGateway } from '../collaboration/collaboration.gateway';
+import { YjsDocumentManager } from '../collaboration/yjs-document.manager';
 
 @Injectable()
 export class CommentService {
+  private readonly logger = new Logger(CommentService.name);
+
   constructor(
     private readonly commentRepo: CommentRepository,
     private readonly prisma: PrismaService,
+    @Optional() private readonly collaborationGateway?: CollaborationGateway,
+    @Optional() private readonly yjsManager?: YjsDocumentManager,
   ) {}
 
   private async assertCanModifyComment(
@@ -153,6 +162,14 @@ export class CommentService {
       status: dto.status || CommentStatus.open,
       line: dto.line,
       lineEnd: dto.lineEnd,
+      yjsAnchorStart: dto.yjsAnchorStart || null,
+      yjsAnchorEnd: dto.yjsAnchorEnd || null,
+      selectedText: dto.selectedText || null,
+    });
+
+    this.collaborationGateway?.broadcastRoomEvent(pageId, 'comment:created', {
+      pageId,
+      comment,
     });
 
     return { comment };
@@ -163,7 +180,11 @@ export class CommentService {
     userId: string,
     dto: UpdateCommentDto,
   ) {
-    await this.assertCanModifyComment(commentId, userId, 'update');
+    const existing = await this.assertCanModifyComment(
+      commentId,
+      userId,
+      'update',
+    );
 
     let cleanContent: string | undefined;
     if (dto.content !== undefined) {
@@ -181,13 +202,38 @@ export class CommentService {
       isEdited: true,
     });
 
+    const targetPageId = comment.pageId || existing.pageId;
+    this.collaborationGateway?.broadcastRoomEvent(
+      targetPageId,
+      'comment:updated',
+      {
+        pageId: targetPageId,
+        comment,
+      },
+    );
+
     return { comment };
   }
 
   async deleteComment(commentId: string, userId: string) {
-    await this.assertCanModifyComment(commentId, userId, 'delete');
+    const existing = await this.assertCanModifyComment(
+      commentId,
+      userId,
+      'delete',
+    );
 
     await this.commentRepo.deleteComment(commentId);
+
+    this.collaborationGateway?.broadcastRoomEvent(
+      existing.pageId,
+      'comment:deleted',
+      {
+        pageId: existing.pageId,
+        commentId,
+        deletedBy: userId,
+      },
+    );
+
     return { success: true };
   }
 
@@ -224,6 +270,18 @@ export class CommentService {
     const comment = await this.commentRepo.updateComment(commentId, {
       replies: replies as unknown as Prisma.InputJsonValue,
     });
+
+    const targetPageId = comment.pageId || existing.pageId;
+    this.collaborationGateway?.broadcastRoomEvent(
+      targetPageId,
+      'comment:replied',
+      {
+        pageId: targetPageId,
+        commentId,
+        reply: newReply,
+        comment,
+      },
+    );
 
     return { comment };
   }
@@ -269,7 +327,109 @@ export class CommentService {
       replies: filteredReplies as unknown as Prisma.InputJsonValue,
     });
 
+    this.collaborationGateway?.broadcastRoomEvent(
+      existing.pageId,
+      'comment:reply-deleted',
+      {
+        pageId: existing.pageId,
+        commentId,
+        replyId,
+        comment,
+      },
+    );
+
     return { comment };
+  }
+
+  /**
+   * Resolves Yjs relative positions (yjsAnchorStart/End) for all open comments on a page
+   * to current absolute character indices and line numbers.
+   *
+   * Use this endpoint to re-anchor comments in the frontend after receiving
+   * a `comment:anchors-shifted` event from the collaboration gateway.
+   * Falls back to stored line/lineEnd numbers if no Yjs session is active.
+   */
+  async resolveAllAnchors(pageId: string): Promise<
+    Array<{
+      commentId: string;
+      anchorStart: { charIndex: number; line: number } | null;
+      anchorEnd: { charIndex: number; line: number } | null;
+      selectedText: string | null;
+      hasYjsAnchor: boolean;
+    }>
+  > {
+    const comments = await this.commentRepo.findComments(pageId);
+    const session = this.yjsManager?.hasActiveSession(pageId)
+      ? await this.yjsManager.getOrCreateDoc(pageId)
+      : null;
+
+    return comments.map((comment: any) => {
+      let anchorStart: { charIndex: number; line: number } | null = null;
+      let anchorEnd: { charIndex: number; line: number } | null = null;
+      const hasYjsAnchor =
+        Boolean(comment.yjsAnchorStart) || Boolean(comment.yjsAnchorEnd);
+
+      if (session && comment.yjsAnchorStart) {
+        try {
+          const relPos = Y.createRelativePositionFromJSON(
+            JSON.parse(comment.yjsAnchorStart),
+          );
+          const absPos = Y.createAbsolutePositionFromRelativePosition(
+            relPos,
+            session.doc,
+          );
+          if (absPos !== null) {
+            const textBefore = session.yText.toJSON().slice(0, absPos.index);
+            const line = textBefore.split('\n').length;
+            anchorStart = { charIndex: absPos.index, line };
+          }
+        } catch (err: any) {
+          this.logger.debug(
+            `[Comment] Failed to resolve yjsAnchorStart for comment ${comment.id}: ${err?.message}`,
+          );
+          // Fallback to stored line number
+          if (comment.line != null) {
+            anchorStart = { charIndex: -1, line: comment.line };
+          }
+        }
+      } else if (comment.line != null) {
+        anchorStart = { charIndex: -1, line: comment.line };
+      }
+
+      if (session && comment.yjsAnchorEnd) {
+        try {
+          const relPos = Y.createRelativePositionFromJSON(
+            JSON.parse(comment.yjsAnchorEnd),
+          );
+          const absPos = Y.createAbsolutePositionFromRelativePosition(
+            relPos,
+            session.doc,
+          );
+          if (absPos !== null) {
+            const textBefore = session.yText.toJSON().slice(0, absPos.index);
+            const line = textBefore.split('\n').length;
+            anchorEnd = { charIndex: absPos.index, line };
+          }
+        } catch (err: any) {
+          this.logger.debug(
+            `[Comment] Failed to resolve yjsAnchorEnd for comment ${comment.id}: ${err?.message}`,
+          );
+          if (comment.lineEnd != null) {
+            anchorEnd = { charIndex: -1, line: comment.lineEnd };
+          }
+        }
+      } else if (comment.lineEnd != null) {
+        anchorEnd = { charIndex: -1, line: comment.lineEnd };
+      }
+
+      return {
+        commentId: comment.id,
+        anchorStart,
+        anchorEnd,
+        selectedText: comment.selectedText ?? null,
+        hasYjsAnchor,
+      };
+    });
   }
 
   // Backward-compatible aliases

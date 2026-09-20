@@ -3,21 +3,35 @@ import {
   NotFoundException,
   BadRequestException,
   Optional,
+  Logger,
 } from '@nestjs/common';
 import { HistoryRepository } from './history.repository';
-import { PageService } from '../core/core.service';
-import { CreateVersionDto } from './dto/history.dto';
+import { PageService } from '../page/page.service';
+import {
+  CreateVersionDto,
+  UpdateVersionDto,
+  VersionQueryDto,
+  VersionDiffResult,
+} from './dto/history.dto';
 import { VersionEventType, Prisma } from '@prisma/client';
 import { tryCatchSync } from '@/core/utils/error.util';
 import { RedisCacheService } from '@/core/cache/redis.service';
-import { DOCUMENT_REDIS_KEYS } from '../core/constants/redis-keys.constant';
+import { DOCUMENT_REDIS_KEYS } from '../page/constants/page-redis-keys.constant';
+import { YjsDocumentManager } from '../collaboration/yjs-document.manager';
+import { CollaborationGateway } from '../collaboration/collaboration.gateway';
+import { VersionQueryOptions } from '../page/types/page-repository.interface';
+import { toContentString } from '../page/utils/page.utils';
 
 @Injectable()
 export class HistoryService {
+  private readonly logger = new Logger(HistoryService.name);
+
   constructor(
     private readonly historyRepo: HistoryRepository,
     private readonly pageService: PageService,
     @Optional() private readonly cache?: RedisCacheService,
+    @Optional() private readonly yjsManager?: YjsDocumentManager,
+    @Optional() private readonly collaborationGateway?: CollaborationGateway,
   ) {}
 
   private async invalidateVersionCache(pageId: string) {
@@ -33,22 +47,22 @@ export class HistoryService {
     await this.cache.del(DOCUMENT_REDIS_KEYS.projectTree(projectId));
   }
 
-  async getVersions(pageId: string) {
+  async getVersions(pageId: string, options?: VersionQueryDto) {
+    const isDefaultQuery =
+      !options || (!options.cursor && !options.eventType && !options.limit);
     const cacheKey = DOCUMENT_REDIS_KEYS.pageVersions(pageId);
 
-    if (this.cache) {
+    if (this.cache && isDefaultQuery) {
       return this.cache.wrap(
         cacheKey,
         async () => {
-          const versions = await this.historyRepo.findPageVersions(pageId);
-          return { versions };
+          return this.historyRepo.findPageVersions(pageId, options);
         },
         3600,
       );
     }
 
-    const versions = await this.historyRepo.findPageVersions(pageId);
-    return { versions };
+    return this.historyRepo.findPageVersions(pageId, options);
   }
 
   async getVersion(pageId: string, versionId: string) {
@@ -57,6 +71,26 @@ export class HistoryService {
       throw new NotFoundException('Version not found');
     }
     return { version };
+  }
+
+  async updateVersion(
+    pageId: string,
+    versionId: string,
+    dto: UpdateVersionDto,
+  ) {
+    const existing = await this.historyRepo.findVersionById(versionId);
+    if (!existing || existing.pageId !== pageId) {
+      throw new NotFoundException('Version not found');
+    }
+
+    const updated = await this.historyRepo.updateVersion(versionId, {
+      ...(dto.label !== undefined ? { label: dto.label } : {}),
+      ...(dto.title !== undefined ? { title: dto.title } : {}),
+    });
+
+    await this.invalidateVersionCache(pageId);
+
+    return { version: updated };
   }
 
   async createVersion(pageId: string, userId: string, dto: CreateVersionDto) {
@@ -68,18 +102,16 @@ export class HistoryService {
 
     const effectiveProjectPageId = dto.projectPageId || dto.rootPageId || null;
     const contentToSave =
-      dto.content !== undefined
-        ? dto.content
-        : typeof page.content === 'string'
-          ? page.content
-          : JSON.stringify(page.content || '');
+      dto.content !== undefined ? dto.content : toContentString(page.content);
 
     // Deduplicate auto_save if content has not changed from the latest snapshot
     if (dto.eventType === VersionEventType.auto_save) {
-      const latestList = await this.historyRepo.findPageVersions(pageId);
-      if (latestList.length > 0) {
+      const latestResult = await this.historyRepo.findPageVersions(pageId, {
+        limit: 1,
+      });
+      if (latestResult.versions.length > 0) {
         const latestFull = await this.historyRepo.findVersionById(
-          latestList[0].id,
+          latestResult.versions[0].id,
         );
         if (latestFull && latestFull.content === contentToSave) {
           return { version: latestFull };
@@ -103,7 +135,7 @@ export class HistoryService {
     return { version };
   }
 
-  async restoreVersion(pageId: string, versionId: string) {
+  async restoreVersion(pageId: string, versionId: string, userId?: string) {
     const version = await this.historyRepo.findVersionById(versionId);
 
     if (!version) {
@@ -114,6 +146,31 @@ export class HistoryService {
       throw new BadRequestException(
         'Version does not belong to the specified page',
       );
+    }
+
+    const contentStr =
+      typeof version.content === 'string'
+        ? version.content
+        : JSON.stringify(version.content || '');
+
+    // 1. Realtime CRDT Collaborative Restore (Overleaf-grade):
+    // Injects a replacement transaction directly into in-memory Y.Doc,
+    // updates Redis L2 snapshot, and broadcasts update binary to all online collaborators.
+    if (this.yjsManager) {
+      try {
+        const update = await this.yjsManager.replaceText(
+          pageId,
+          contentStr,
+          userId,
+        );
+        if (update && this.collaborationGateway) {
+          this.collaborationGateway.broadcastYjsUpdate(pageId, update);
+        }
+      } catch (err: any) {
+        this.logger.warn(
+          `[HistoryService] Failed to perform Yjs collaborative restore for ${pageId}: ${err?.message || err}`,
+        );
+      }
     }
 
     let parsedContent: Prisma.InputJsonValue | string | null = version.content;
@@ -129,7 +186,7 @@ export class HistoryService {
       }
     }
 
-    // Route through PageService (correct domain) — ensures cache + event are handled
+    // 2. Persist to PostgreSQL via PageService
     const updateRes = await this.pageService.updatePage(pageId, {
       content: parsedContent !== null ? parsedContent : undefined,
       title: version.title || undefined,
@@ -139,19 +196,16 @@ export class HistoryService {
       throw new NotFoundException('Failed to restore page: page not found');
     }
 
-    const pageContentStr =
-      typeof page.content === 'string'
-        ? page.content
-        : JSON.stringify(page.content || '');
+    const pageContentStr = toContentString(page.content);
 
-    // Append-only history pattern: record a restore event snapshot so we never lose history
+    // 3. Append-only history pattern: record a restore event snapshot so we never lose history
     await this.historyRepo.createVersion({
       page: { connect: { id: pageId } },
       projectPageId: page.parentPageId || page.id,
       title: page.title,
       content: pageContentStr,
       label: `Restored to "${version.label || version.title || 'Previous version'}"`,
-      savedById: version.savedById,
+      savedById: userId || version.savedById,
       eventType: VersionEventType.restore,
       fileName: version.fileName || page.title,
     });
@@ -198,30 +252,64 @@ export class HistoryService {
   }
 
   async getHistory(pageId: string) {
-    const { versions } = await this.getVersions(pageId);
-    return { history: versions, events: versions };
+    const result = await this.getVersions(pageId);
+    return { history: result.versions, events: result.versions };
   }
 
   /**
-   * Computes line-by-line visual diff comparing two saved snapshot versions.
+   * Computes line-by-line visual diff comparing two saved snapshot versions,
+   * or comparing a snapshot against the current draft ('current').
    */
   async compareVersions(
     pageId: string,
     fromVersionId: string,
     toVersionId: string,
-  ) {
-    const fromVer = await this.historyRepo.findVersionById(fromVersionId);
-    if (!fromVer || fromVer.pageId !== pageId) {
-      throw new NotFoundException(`Source version ${fromVersionId} not found`);
+  ): Promise<VersionDiffResult> {
+    let fromText = '';
+    let fromLabel = '';
+
+    if (fromVersionId === 'current') {
+      fromLabel = 'Current Draft';
+      const liveText = this.yjsManager?.getText(pageId);
+      if (liveText !== undefined && liveText !== '') {
+        fromText = liveText;
+      } else {
+        const page = await this.pageService.findPageById(pageId);
+        if (!page) throw new NotFoundException(`Page ${pageId} not found`);
+        fromText = toContentString(page.content);
+      }
+    } else {
+      const fromVer = await this.historyRepo.findVersionById(fromVersionId);
+      if (!fromVer || fromVer.pageId !== pageId) {
+        throw new NotFoundException(
+          `Source version ${fromVersionId} not found`,
+        );
+      }
+      fromText = fromVer.content || '';
+      fromLabel = fromVer.label || fromVer.createdAt.toISOString();
     }
 
-    const toVer = await this.historyRepo.findVersionById(toVersionId);
-    if (!toVer || toVer.pageId !== pageId) {
-      throw new NotFoundException(`Target version ${toVersionId} not found`);
-    }
+    let toText = '';
+    let toLabel = '';
 
-    const fromText = fromVer.content || '';
-    const toText = toVer.content || '';
+    if (toVersionId === 'current') {
+      toLabel = 'Current Draft';
+      const liveText = this.yjsManager?.getText(pageId);
+      if (liveText !== undefined && liveText !== '') {
+        toText = liveText;
+      } else {
+        const page = await this.pageService.findPageById(pageId);
+        if (!page) throw new NotFoundException(`Page ${pageId} not found`);
+        toText = toContentString(page.content);
+      }
+    } else {
+      const toVer = await this.historyRepo.findVersionById(toVersionId);
+      if (!toVer || toVer.pageId !== pageId) {
+        throw new NotFoundException(`Target version ${toVersionId} not found`);
+      }
+      toText = toVer.content || '';
+      toLabel = toVer.label || toVer.createdAt.toISOString();
+    }
 
     const fromLines = fromText.split('\n');
     const toLines = toText.split('\n');
@@ -307,8 +395,10 @@ export class HistoryService {
     return {
       fromVersionId,
       toVersionId,
-      fromLabel: fromVer.label || fromVer.createdAt.toISOString(),
-      toLabel: toVer.label || toVer.createdAt.toISOString(),
+      fromLabel,
+      toLabel,
+      fromContent: fromText,
+      toContent: toText,
       chunks,
       stats: {
         addedLines,

@@ -66,7 +66,6 @@ model File {
   authorId     String         @map("author_id") @db.Uuid
   author       User           @relation("UserFiles", fields: [authorId], references: [id], onDelete: Cascade)
   sharedWith   FileShare[]
-  attachments  Attachment[]
   versions     FileVersion[]
 
   trashedAt    DateTime?      @map("trashed_at") @db.Timestamptz(6)

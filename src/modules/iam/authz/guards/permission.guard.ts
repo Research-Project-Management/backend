@@ -213,20 +213,46 @@ export class PermissionGuard implements CanActivate {
         const cachedRole = await this.redis.get<Role>(cacheKey);
         if (cachedRole) return cachedRole;
       } catch (err) {
-        this.logger.warn(`Redis role cache lookup failed: ${err}`);
+        this.logger.warn(
+          `Redis role cache lookup failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
 
     const prismaAny = this.prisma as any;
+    if (prismaAny.projectMember?.findUnique) {
+      // 1. Query ProjectMember record first (SSOT for member role)
+      const member = await Promise.resolve(
+        prismaAny.projectMember.findUnique({
+          where: {
+            projectId_userId: {
+              projectId,
+              userId,
+            },
+          },
+        }),
+      ).catch(() => null);
+
+      if (member) {
+        const role = member.role as unknown as Role;
+        if (this.redis) {
+          await this.redis
+            .set(cacheKey, role, PermissionGuard.ROLE_CACHE_TTL)
+            .catch(() => {});
+        }
+        return role;
+      }
+    }
+
     if (!prismaAny.project) return null;
 
-    // 1. Creator -> OWNER
-    const project = await prismaAny.project
-      .findFirst({
+    // 2. Fallback: Creator -> OWNER
+    const project = await Promise.resolve(
+      prismaAny.project.findFirst({
         where: { id: projectId, deletedAt: null },
         select: { id: true, createdById: true },
-      })
-      .catch(() => null);
+      }),
+    ).catch(() => null);
 
     if (project && project.createdById === userId) {
       if (this.redis) {
@@ -235,30 +261,6 @@ export class PermissionGuard implements CanActivate {
           .catch(() => {});
       }
       return Role.OWNER;
-    }
-
-    if (!prismaAny.projectMember) return null;
-
-    // 2. ProjectMember
-    const member = await prismaAny.projectMember
-      .findUnique({
-        where: {
-          projectId_userId: {
-            projectId,
-            userId,
-          },
-        },
-      })
-      .catch(() => null);
-
-    if (member) {
-      const role = member.role as unknown as Role;
-      if (this.redis) {
-        await this.redis
-          .set(cacheKey, role, PermissionGuard.ROLE_CACHE_TTL)
-          .catch(() => {});
-      }
-      return role;
     }
 
     return null;

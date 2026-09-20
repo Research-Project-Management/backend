@@ -28,6 +28,30 @@ export interface SuggestionWithAuthor {
   };
 }
 
+const AUTHOR_SELECT = {
+  id: true,
+  email: true,
+  profile: {
+    select: {
+      name: true,
+      avatar: true,
+    },
+  },
+} as const;
+
+function mapSuggestion(s: any): SuggestionWithAuthor {
+  const { author, ...rest } = s;
+  return {
+    ...rest,
+    author: {
+      id: author.id,
+      email: author.email,
+      name: author.profile?.name ?? 'User',
+      avatar: author.profile?.avatar ?? null,
+    },
+  };
+}
+
 @Injectable()
 export class SuggestionRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -35,32 +59,34 @@ export class SuggestionRepository {
   async create(
     data: Prisma.PageSuggestionCreateInput,
   ): Promise<SuggestionWithAuthor> {
-    return this.prisma.pageSuggestion.create({
+    const res = await this.prisma.pageSuggestion.create({
       data,
       include: {
         author: {
-          select: { id: true, name: true, email: true, avatar: true },
+          select: AUTHOR_SELECT,
         },
       },
-    }) as unknown as Promise<SuggestionWithAuthor>;
+    });
+    return mapSuggestion(res);
   }
 
   async findById(id: string): Promise<SuggestionWithAuthor | null> {
-    return this.prisma.pageSuggestion.findFirst({
+    const res = await this.prisma.pageSuggestion.findFirst({
       where: { id, deletedAt: null },
       include: {
         author: {
-          select: { id: true, name: true, email: true, avatar: true },
+          select: AUTHOR_SELECT,
         },
       },
-    }) as unknown as Promise<SuggestionWithAuthor | null>;
+    });
+    return res ? mapSuggestion(res) : null;
   }
 
   async findByPageId(
     pageId: string,
     status?: SuggestionStatus,
   ): Promise<SuggestionWithAuthor[]> {
-    return this.prisma.pageSuggestion.findMany({
+    const list = await this.prisma.pageSuggestion.findMany({
       where: {
         OR: [{ pageId }, { projectPageId: pageId }],
         deletedAt: null,
@@ -69,25 +95,27 @@ export class SuggestionRepository {
       orderBy: [{ fromLine: 'asc' }, { createdAt: 'desc' }],
       include: {
         author: {
-          select: { id: true, name: true, email: true, avatar: true },
+          select: AUTHOR_SELECT,
         },
       },
-    }) as unknown as Promise<SuggestionWithAuthor[]>;
+    });
+    return list.map(mapSuggestion);
   }
 
   async update(
     id: string,
     data: Prisma.PageSuggestionUpdateInput,
   ): Promise<SuggestionWithAuthor> {
-    return this.prisma.pageSuggestion.update({
+    const res = await this.prisma.pageSuggestion.update({
       where: { id },
       data,
       include: {
         author: {
-          select: { id: true, name: true, email: true, avatar: true },
+          select: AUTHOR_SELECT,
         },
       },
-    }) as unknown as Promise<SuggestionWithAuthor>;
+    });
+    return mapSuggestion(res);
   }
 
   async updateStatusMany(

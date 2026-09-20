@@ -9,7 +9,7 @@ import {
   FastifyAdapter,
   NestFastifyApplication,
 } from '@nestjs/platform-fastify';
-import { IoAdapter } from '@nestjs/platform-socket.io';
+import { RedisIoAdapter } from './core/adapters/redis-io.adapter';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from '@fastify/helmet';
@@ -99,7 +99,10 @@ async function bootstrap() {
     },
   );
   app.useLogger(logger);
-  app.useWebSocketAdapter(new IoAdapter(app));
+  const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+  const redisIoAdapter = new RedisIoAdapter(app);
+  await redisIoAdapter.connectToRedis(redisUrl);
+  app.useWebSocketAdapter(redisIoAdapter);
 
   // Multipart file uploads (Cloudflare R2 / S3 streaming)
   await app.register(multipart, {

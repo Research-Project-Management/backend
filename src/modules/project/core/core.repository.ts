@@ -11,6 +11,7 @@ import {
   ProjectWithMembers,
   ProjectOverview,
   AllocatedIdentifier,
+  MinimalUser,
 } from './types/project.type';
 import { isUuid } from '@/core/utils/uuid.util';
 import { DEFAULT_WORK_ITEM_STATES } from '@/modules/work-item/state/types/state.types';
@@ -19,10 +20,59 @@ import { ProjectQueryDto } from './dto/query.dto';
 
 export const USER_SELECT = {
   id: true,
-  name: true,
   email: true,
-  avatar: true,
+  profile: {
+    select: {
+      name: true,
+      avatar: true,
+    },
+  },
 } as const;
+
+export function mapMinimalUser(user: {
+  id: string;
+  email: string | null;
+  profile?: { name: string; avatar: string | null } | null;
+}): MinimalUser {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.profile?.name ?? 'User',
+    avatar: user.profile?.avatar ?? null,
+  };
+}
+
+export function mapProjectWithMembers<
+  T extends {
+    createdBy?: {
+      id: string;
+      email: string | null;
+      profile?: { name: string; avatar: string | null } | null;
+    } | null;
+    members?: Array<{
+      user: {
+        id: string;
+        email: string | null;
+        profile?: { name: string; avatar: string | null } | null;
+      };
+    }>;
+  },
+>(project: T): any {
+  return {
+    ...project,
+    ...(project.createdBy
+      ? { createdBy: mapMinimalUser(project.createdBy) }
+      : {}),
+    ...(project.members
+      ? {
+          members: project.members.map((m) => ({
+            ...m,
+            user: mapMinimalUser(m.user),
+          })),
+        }
+      : {}),
+  };
+}
 
 export interface CreateProjectInput {
   name: string;
@@ -79,7 +129,7 @@ export class CoreRepository {
         : {}),
     };
 
-    return this.prisma.project.findMany({
+    const projects = await this.prisma.project.findMany({
       where,
       include: {
         members: {
@@ -99,6 +149,7 @@ export class CoreRepository {
       },
       orderBy: { updatedAt: 'desc' },
     });
+    return projects.map(mapProjectWithMembers);
   }
 
   /**
@@ -130,7 +181,7 @@ export class CoreRepository {
   async findProjectById(projectId: string): Promise<ProjectWithMembers | null> {
     if (!isUuid(projectId)) return null;
 
-    return this.prisma.project.findFirst({
+    const project = await this.prisma.project.findFirst({
       where: { id: projectId, deletedAt: null },
       include: {
         createdBy: { select: USER_SELECT },
@@ -150,6 +201,7 @@ export class CoreRepository {
         },
       },
     });
+    return project ? mapProjectWithMembers(project) : null;
   }
 
   /**
@@ -158,7 +210,7 @@ export class CoreRepository {
   async findProjectByIdentifier(
     identifier: string,
   ): Promise<ProjectWithMembers | null> {
-    return this.prisma.project.findFirst({
+    const project = await this.prisma.project.findFirst({
       where: {
         identifier: { equals: identifier.trim(), mode: 'insensitive' },
         deletedAt: null,
@@ -176,6 +228,7 @@ export class CoreRepository {
         },
       },
     });
+    return project ? mapProjectWithMembers(project) : null;
   }
 
   /**
@@ -189,7 +242,7 @@ export class CoreRepository {
       data.identifier?.trim().toUpperCase() ||
       deriveProjectPrefix(data.identifier, data.name);
 
-    return this.prisma.project.create({
+    const project = await this.prisma.project.create({
       data: {
         name: data.name.trim(),
         identifier,
@@ -248,6 +301,7 @@ export class CoreRepository {
         },
       },
     });
+    return mapProjectWithMembers(project);
   }
 
   /**
@@ -257,7 +311,7 @@ export class CoreRepository {
     projectId: string,
     data: Prisma.ProjectUpdateInput,
   ): Promise<ProjectWithMembers> {
-    return this.prisma.project.update({
+    const project = await this.prisma.project.update({
       where: { id: projectId },
       data,
       include: {
@@ -273,6 +327,7 @@ export class CoreRepository {
         },
       },
     });
+    return mapProjectWithMembers(project);
   }
 
   /**
@@ -289,7 +344,7 @@ export class CoreRepository {
    * Restore a soft-deleted project.
    */
   async restoreProject(projectId: string): Promise<ProjectWithMembers> {
-    return this.prisma.project.update({
+    const project = await this.prisma.project.update({
       where: { id: projectId },
       data: { deletedAt: null, isActive: true },
       include: {
@@ -305,13 +360,14 @@ export class CoreRepository {
         },
       },
     });
+    return mapProjectWithMembers(project);
   }
 
   /**
    * Archive a project.
    */
   async archiveProject(projectId: string): Promise<ProjectWithMembers> {
-    return this.prisma.project.update({
+    const project = await this.prisma.project.update({
       where: { id: projectId },
       data: {
         isArchived: true,
@@ -334,13 +390,14 @@ export class CoreRepository {
         },
       },
     });
+    return mapProjectWithMembers(project);
   }
 
   /**
    * Restore/unarchive an archived project back to active.
    */
   async unarchiveProject(projectId: string): Promise<ProjectWithMembers> {
-    return this.prisma.project.update({
+    const project = await this.prisma.project.update({
       where: { id: projectId },
       data: {
         isArchived: false,
@@ -363,6 +420,7 @@ export class CoreRepository {
         },
       },
     });
+    return mapProjectWithMembers(project);
   }
 
   /**
@@ -373,7 +431,7 @@ export class CoreRepository {
   ): Promise<ProjectWithMembers[]> {
     if (!isUuid(userId)) return [];
 
-    return this.prisma.project.findMany({
+    const projects = await this.prisma.project.findMany({
       where: {
         OR: [{ createdById: userId }, { members: { some: { userId } } }],
         isArchived: true,
@@ -397,6 +455,7 @@ export class CoreRepository {
       },
       orderBy: { updatedAt: 'desc' },
     });
+    return projects.map(mapProjectWithMembers);
   }
 
   /**
@@ -616,6 +675,37 @@ export class CoreRepository {
     projectId: string,
   ): Promise<AllocatedIdentifier> {
     return this.allocateNextWorkItemSequence(projectId);
+  }
+
+  /**
+   * Fetch user status and count how many active projects they own.
+   */
+  async getUserStatusAndOwnedProjectCount(userId: string): Promise<{
+    status: string;
+    ownedProjectCount: number;
+  } | null> {
+    if (!isUuid(userId)) return null;
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        status: true,
+        projectMembers: {
+          where: {
+            role: ProjectMemberRole.owner,
+            project: { deletedAt: null },
+          },
+          select: { id: true },
+        },
+      },
+    });
+
+    if (!user) return null;
+
+    return {
+      status: user.status,
+      ownedProjectCount: user.projectMembers.length,
+    };
   }
 }
 

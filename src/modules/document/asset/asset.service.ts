@@ -10,10 +10,10 @@ import {
 import { PrismaService } from '@/core/database/prisma.service';
 import { UploadAssetDto, DocumentAssetItem } from './dto/asset.dto';
 import { PageStatus, Prisma } from '@prisma/client';
-import { slugifyTitle, validateSafePath } from '../core/utils/document.utils';
+import { slugifyTitle, validateSafePath } from '../page/utils/page.utils';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { RedisCacheService } from '@/core/cache/redis.service';
-import { DOCUMENT_REDIS_KEYS } from '../core/constants/redis-keys.constant';
+import { DOCUMENT_REDIS_KEYS } from '../page/constants/page-redis-keys.constant';
 
 const ASSET_EXTENSIONS = new Set([
   'png',

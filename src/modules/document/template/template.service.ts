@@ -1,16 +1,8 @@
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
-import { CoreService } from '../core/core.service';
-import {
-  CreateTemplateDto,
-  ApplyTemplateDto,
-  SaveAsTemplateDto,
-} from './dto/template.dto';
+import { PageService } from '../page/page.service';
+import { ApplyTemplateDto, SaveAsTemplateDto } from './dto/template.dto';
+import { getErrorMessage } from '@/core/utils/error.util';
 
 export interface DocumentTemplateItem {
   id: string;
@@ -244,7 +236,7 @@ export class TemplateService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly coreService: CoreService,
+    private readonly pageService: PageService,
   ) {}
 
   /**
@@ -258,7 +250,7 @@ export class TemplateService {
       );
     }
 
-    return presets;
+    return Promise.resolve(presets);
   }
 
   /**
@@ -271,7 +263,7 @@ export class TemplateService {
     if (!found) {
       throw new NotFoundException(`Template '${idOrSlug}' not found`);
     }
-    return found;
+    return Promise.resolve(found);
   }
 
   /**
@@ -288,7 +280,7 @@ export class TemplateService {
     const title = dto.title || `${template.name} Document`;
 
     // 1. Create root manuscript page
-    const rootPageResult = await this.coreService.createPage(
+    const rootPageResult = await this.pageService.createPage(
       projectId,
       userId,
       {
@@ -308,7 +300,7 @@ export class TemplateService {
     if (template.files && Object.keys(template.files).length > 0) {
       for (const [filename, fileContent] of Object.entries(template.files)) {
         try {
-          const childResult = await this.coreService.createPage(
+          const childResult = await this.pageService.createPage(
             projectId,
             userId,
             {
@@ -321,7 +313,7 @@ export class TemplateService {
           childPages.push(childResult.page);
         } catch (err) {
           this.logger.warn(
-            `Failed to create auxiliary template file ${filename}: ${err}`,
+            `Failed to create auxiliary template file ${filename}: ${getErrorMessage(err)}`,
           );
         }
       }
@@ -347,7 +339,7 @@ export class TemplateService {
     userId: string,
     dto: SaveAsTemplateDto,
   ) {
-    const rootPage = await this.coreService.findPageById(pageId);
+    const rootPage = await this.pageService.findPageById(pageId);
     if (!rootPage) {
       throw new NotFoundException('Page not found');
     }

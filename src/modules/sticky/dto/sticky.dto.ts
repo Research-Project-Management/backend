@@ -37,20 +37,6 @@ export class CreateStickyDto {
   @IsObject()
   @IsOptional()
   position?: { x: number; y: number };
-
-  @ApiPropertyOptional({ description: 'Associated project ID' })
-  @IsUUID('4')
-  @IsOptional()
-  projectId?: string;
-
-  @ApiPropertyOptional({
-    description: 'Scope of sticky note',
-    enum: ['personal', 'project'],
-  })
-  @IsString()
-  @IsOptional()
-  @IsIn(['personal', 'project'])
-  scope?: 'personal' | 'project';
 }
 
 export class UpdateStickyDto extends PartialType(CreateStickyDto) {
@@ -74,13 +60,6 @@ export class ReorderStickiesDto {
 }
 
 export class GetStickiesQueryDto {
-  @ApiPropertyOptional({
-    description: 'Optional project ID to filter stickies',
-  })
-  @IsUUID('4')
-  @IsOptional()
-  projectId?: string;
-
   @ApiPropertyOptional({
     description: 'Optional search keyword for title and content',
   })

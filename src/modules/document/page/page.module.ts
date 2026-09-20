@@ -21,6 +21,3 @@ import { CoreModule as AppCoreModule } from '@/core/core.module';
   exports: [PageService, PageRepository, DocumentFacade, DOCUMENT_FACADE],
 })
 export class PageModule {}
-
-export const CoreModule = PageModule;
-export type CoreModule = PageModule;

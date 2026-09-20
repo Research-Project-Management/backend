@@ -19,8 +19,8 @@ export class StatusUpdateService {
       updatedAt: item.updatedAt,
       author: {
         id: item.createdBy.id,
-        name: item.createdBy.name,
-        avatar: item.createdBy.avatar,
+        name: item.createdBy.profile?.name ?? 'User',
+        avatar: item.createdBy.profile?.avatar ?? null,
       },
     }));
   }
@@ -39,8 +39,8 @@ export class StatusUpdateService {
       updatedAt: item.updatedAt,
       author: {
         id: item.createdBy.id,
-        name: item.createdBy.name,
-        avatar: item.createdBy.avatar,
+        name: item.createdBy.profile?.name ?? 'User',
+        avatar: item.createdBy.profile?.avatar ?? null,
       },
     };
   }
@@ -61,8 +61,8 @@ export class StatusUpdateService {
       updatedAt: item.updatedAt,
       author: {
         id: item.createdBy.id,
-        name: item.createdBy.name,
-        avatar: item.createdBy.avatar,
+        name: item.createdBy.profile?.name ?? 'User',
+        avatar: item.createdBy.profile?.avatar ?? null,
       },
     };
   }
@@ -90,8 +90,8 @@ export class StatusUpdateService {
       updatedAt: item.updatedAt,
       author: {
         id: item.createdBy.id,
-        name: item.createdBy.name,
-        avatar: item.createdBy.avatar,
+        name: item.createdBy.profile?.name ?? 'User',
+        avatar: item.createdBy.profile?.avatar ?? null,
       },
     };
   }

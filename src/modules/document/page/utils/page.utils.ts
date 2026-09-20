@@ -15,9 +15,28 @@ export function sanitizeDocumentTitle(rawTitle: string): string {
     .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
     .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
     .replace(/<[^>]*>/g, '')
+    // eslint-disable-next-line no-control-regex
     .replace(/[\x00-\x1F\x7F]/g, '')
     .trim();
   return sanitized.length > 0 ? sanitized.slice(0, 255) : 'Untitled Document';
+}
+
+/**
+ * Universal content string extractor:
+ * Safely extracts raw text/source string from either plain string or structured editor/CRDT objects.
+ */
+export function toContentString(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (content && typeof content === 'object') {
+    const obj = content as Record<string, unknown>;
+    return (
+      (obj.source as string) ||
+      (obj.text as string) ||
+      (obj.content as string) ||
+      JSON.stringify(content)
+    );
+  }
+  return '';
 }
 
 export function slugifyTitle(title: string): string {

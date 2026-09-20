@@ -137,6 +137,19 @@ export class CommentController {
   deletePageComment = this.deleteComment.bind(this);
   addPageReply = this.addReply.bind(this);
   deletePageReply = this.deleteReply.bind(this);
+
+  @Get([
+    'pages/:pageId/comments/resolve-anchors',
+    'projects/:projectId/pages/:pageId/comments/resolve-anchors',
+  ])
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  @ApiOperation({
+    summary:
+      'Resolve Yjs relative position anchors for all open comments — call after receiving comment:anchors-shifted event',
+  })
+  async resolveAnchors(@Param('pageId') pageId: string) {
+    return this.commentService.resolveAllAnchors(pageId);
+  }
 }
 
 export const PageCommentController = CommentController;

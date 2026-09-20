@@ -46,7 +46,7 @@ export class AssignmentRepository implements IAssignmentRepository {
       ? { id: workItemId, deletedAt: null }
       : { identifier: workItemId, deletedAt: null };
 
-    return this.prismaService.workItem.findFirst({
+    const item = await this.prismaService.workItem.findFirst({
       where: whereClause,
       include: {
         project: {
@@ -58,13 +58,29 @@ export class AssignmentRepository implements IAssignmentRepository {
         assignee: {
           select: {
             id: true,
-            name: true,
             email: true,
-            avatar: true,
+            profile: {
+              select: {
+                name: true,
+                avatar: true,
+              },
+            },
           },
         },
       },
     });
+    if (!item) return null;
+    return {
+      ...item,
+      assignee: item.assignee
+        ? {
+            id: item.assignee.id,
+            email: item.assignee.email,
+            name: item.assignee.profile?.name ?? 'User',
+            avatar: item.assignee.profile?.avatar ?? null,
+          }
+        : null,
+    };
   }
 
   async findProjectMember(
@@ -82,9 +98,13 @@ export class AssignmentRepository implements IAssignmentRepository {
         user: {
           select: {
             id: true,
-            name: true,
             email: true,
-            avatar: true,
+            profile: {
+              select: {
+                name: true,
+                avatar: true,
+              },
+            },
           },
         },
       },
@@ -101,7 +121,7 @@ export class AssignmentRepository implements IAssignmentRepository {
       };
     })[]
   > {
-    return this.prismaService.projectMember.findMany({
+    const members = await this.prismaService.projectMember.findMany({
       where: {
         projectId,
         role: {
@@ -112,9 +132,13 @@ export class AssignmentRepository implements IAssignmentRepository {
         user: {
           select: {
             id: true,
-            name: true,
             email: true,
-            avatar: true,
+            profile: {
+              select: {
+                name: true,
+                avatar: true,
+              },
+            },
           },
         },
       },
@@ -122,6 +146,16 @@ export class AssignmentRepository implements IAssignmentRepository {
         joinedAt: 'asc',
       },
     });
+
+    return members.map((m) => ({
+      ...m,
+      user: {
+        id: m.user.id,
+        email: m.user.email,
+        name: m.user.profile?.name ?? 'User',
+        avatar: m.user.profile?.avatar ?? null,
+      },
+    }));
   }
 
   async assignWorkItem(
@@ -274,11 +308,30 @@ export class AssignmentRepository implements IAssignmentRepository {
 
     const users = await this.prismaService.user.findMany({
       where: { id: { in: userIds } },
-      select: { id: true, name: true, email: true, avatar: true },
+      select: {
+        id: true,
+        email: true,
+        profile: {
+          select: {
+            name: true,
+            avatar: true,
+          },
+        },
+      },
     });
 
     // Preserve the original order (important: primary assignee is first)
-    const userMap = new Map(users.map((userItem) => [userItem.id, userItem]));
+    const userMap = new Map(
+      users.map((u) => [
+        u.id,
+        {
+          id: u.id,
+          email: u.email,
+          name: u.profile?.name ?? 'User',
+          avatar: u.profile?.avatar ?? null,
+        },
+      ]),
+    );
     return userIds
       .map((id) => userMap.get(id))
       .filter(

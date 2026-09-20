@@ -310,22 +310,48 @@ export class RoleGuard implements CanActivate {
           return { role: cachedRole, member: null };
         }
       } catch (err) {
-        this.logger.warn(`Redis role cache lookup failed: ${err}`);
+        this.logger.warn(
+          `Redis role cache lookup failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
 
     const prismaAny = this.prisma as any;
+    if (prismaAny.projectMember?.findUnique) {
+      // 1. Query ProjectMember table first (SSOT for member role)
+      const member = await Promise.resolve(
+        prismaAny.projectMember.findUnique({
+          where: {
+            projectId_userId: {
+              projectId,
+              userId,
+            },
+          },
+        }),
+      ).catch(() => null);
+
+      if (member) {
+        const role = member.role as unknown as Role;
+        if (this.redis) {
+          await this.redis
+            .set(cacheKey, role, RoleGuard.ROLE_CACHE_TTL)
+            .catch(() => {});
+        }
+        return { role, member };
+      }
+    }
+
     if (!prismaAny.project) {
       return { role: null, member: null };
     }
 
-    // 1. Check if user is the Project Creator -> OWNER
-    const project = await prismaAny.project
-      .findFirst({
+    // 2. Fallback: Check if user is the Project Creator -> OWNER
+    const project = await Promise.resolve(
+      prismaAny.project.findFirst({
         where: { id: projectId, deletedAt: null },
         select: { id: true, createdById: true },
-      })
-      .catch(() => null);
+      }),
+    ).catch(() => null);
 
     if (project && project.createdById === userId) {
       if (this.redis) {
@@ -334,32 +360,6 @@ export class RoleGuard implements CanActivate {
           .catch(() => {});
       }
       return { role: Role.OWNER, member: null };
-    }
-
-    if (!prismaAny.projectMember) {
-      return { role: null, member: null };
-    }
-
-    // 2. Query ProjectMember table
-    const member = await prismaAny.projectMember
-      .findUnique({
-        where: {
-          projectId_userId: {
-            projectId,
-            userId,
-          },
-        },
-      })
-      .catch(() => null);
-
-    if (member) {
-      const role = member.role as unknown as Role;
-      if (this.redis) {
-        await this.redis
-          .set(cacheKey, role, RoleGuard.ROLE_CACHE_TTL)
-          .catch(() => {});
-      }
-      return { role, member };
     }
 
     return { role: null, member: null };

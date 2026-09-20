@@ -79,7 +79,7 @@ export class CollaborationController {
     summary: 'Get current active users viewing or editing this document',
   })
   async getActiveUsers(@Param('pageId') pageId: string) {
-    const activeUsers = this.collaborationService.getActiveUsers(pageId);
+    const activeUsers = await this.collaborationService.getActiveUsers(pageId);
     return { activeUsers };
   }
 

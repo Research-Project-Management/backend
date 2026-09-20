@@ -4,9 +4,10 @@ import {
   BadRequestException,
   Logger,
 } from '@nestjs/common';
-import { CoreService } from '../core/core.service';
+import { PageService } from '../page/page.service';
 import { CompilerService } from '../compiler/compiler.service';
 import { DocumentExportFormat, ExportDocumentDto } from './dto/export.dto';
+import { toContentString } from '../page/utils/page.utils';
 
 export interface ExportFileResult {
   filename: string;
@@ -16,38 +17,63 @@ export interface ExportFileResult {
   sizeBytes: number;
 }
 
-function toContentString(content: unknown): string {
-  if (typeof content === 'string') return content;
-  if (content && typeof content === 'object') {
-    const obj = content as Record<string, unknown>;
-    return (
-      (obj.source as string) ||
-      (obj.text as string) ||
-      (obj.content as string) ||
-      JSON.stringify(content)
-    );
-  }
-  return '';
-}
+export type ExportStrategyHandler = (
+  page: any,
+  userId: string,
+  safeTitle: string,
+) => Promise<ExportFileResult> | ExportFileResult;
 
 @Injectable()
 export class ExportService {
   private readonly logger = new Logger(ExportService.name);
+  private readonly strategies = new Map<string, ExportStrategyHandler>();
 
   constructor(
-    private readonly coreService: CoreService,
+    private readonly pageService: PageService,
     private readonly compilerService: CompilerService,
-  ) {}
+  ) {
+    this.registerDefaultStrategies();
+  }
 
   /**
-   * Dispatches and orchestrates document export into the requested format.
+   * Register a custom or specialized exporter strategy (Open/Closed Principle).
+   */
+  registerStrategy(format: string, handler: ExportStrategyHandler) {
+    this.strategies.set(format.toLowerCase(), handler);
+  }
+
+  private registerDefaultStrategies() {
+    this.registerStrategy(DocumentExportFormat.PDF, (page, userId, title) =>
+      this.exportPdf(page, userId, title),
+    );
+    this.registerStrategy(DocumentExportFormat.MARKDOWN, (page, _, title) =>
+      this.exportMarkdown(page, title),
+    );
+    this.registerStrategy(DocumentExportFormat.LATEX_SOURCE, (page, _, title) =>
+      this.exportLatexSource(page, title),
+    );
+    this.registerStrategy(
+      DocumentExportFormat.LATEX_SOURCE_UNDERSCORE,
+      (page, _, title) => this.exportLatexSource(page, title),
+    );
+    this.registerStrategy(DocumentExportFormat.LATEX_BUNDLE, (page, _, title) =>
+      this.exportLatexBundle(page, title),
+    );
+    this.registerStrategy(
+      DocumentExportFormat.LATEX_BUNDLE_UNDERSCORE,
+      (page, _, title) => this.exportLatexBundle(page, title),
+    );
+  }
+
+  /**
+   * Dispatches and orchestrates document export into the requested format via registered strategy.
    */
   async exportDocument(
     pageId: string,
     userId: string,
     dto: ExportDocumentDto,
   ): Promise<ExportFileResult> {
-    const page = await this.coreService.findPageById(pageId);
+    const page = await this.pageService.findPageById(pageId);
     if (!page) {
       throw new NotFoundException(`Document ${pageId} not found`);
     }
@@ -56,26 +82,12 @@ export class ExportService {
       .toLowerCase()
       .replace(/[^a-z0-9_-]/g, '_');
 
-    switch (dto.format) {
-      case DocumentExportFormat.PDF:
-        return this.exportPdf(page, userId, safeTitle);
-
-      case DocumentExportFormat.MARKDOWN:
-        return this.exportMarkdown(page, safeTitle);
-
-      case DocumentExportFormat.LATEX_SOURCE:
-      case DocumentExportFormat.LATEX_SOURCE_UNDERSCORE:
-        return this.exportLatexSource(page, safeTitle);
-
-      case DocumentExportFormat.LATEX_BUNDLE:
-      case DocumentExportFormat.LATEX_BUNDLE_UNDERSCORE:
-        return this.exportLatexBundle(page, safeTitle);
-
-      default:
-        throw new BadRequestException(
-          `Unsupported export format: ${dto.format}`,
-        );
+    const strategy = this.strategies.get((dto.format || '').toLowerCase());
+    if (!strategy) {
+      throw new BadRequestException(`Unsupported export format: ${dto.format}`);
     }
+
+    return await strategy(page, userId, safeTitle);
   }
 
   private async exportPdf(

@@ -3,6 +3,18 @@ import { PrismaService } from '@/core/database/prisma.service';
 import { CreateProjectStatusUpdateDto } from './dto/create-status-update.dto';
 import { UpdateProjectStatusUpdateDto } from './dto/update-status-update.dto';
 
+const CREATED_BY_SELECT = {
+  select: {
+    id: true,
+    profile: {
+      select: {
+        name: true,
+        avatar: true,
+      },
+    },
+  },
+} as const;
+
 @Injectable()
 export class StatusUpdateRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -11,13 +23,7 @@ export class StatusUpdateRepository {
     return this.prisma.projectUpdate.findMany({
       where: { projectId },
       include: {
-        createdBy: {
-          select: {
-            id: true,
-            name: true,
-            avatar: true,
-          },
-        },
+        createdBy: CREATED_BY_SELECT,
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -27,13 +33,7 @@ export class StatusUpdateRepository {
     return this.prisma.projectUpdate.findFirst({
       where: { projectId },
       include: {
-        createdBy: {
-          select: {
-            id: true,
-            name: true,
-            avatar: true,
-          },
-        },
+        createdBy: CREATED_BY_SELECT,
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -43,13 +43,7 @@ export class StatusUpdateRepository {
     return this.prisma.projectUpdate.findUnique({
       where: { id: updateId },
       include: {
-        createdBy: {
-          select: {
-            id: true,
-            name: true,
-            avatar: true,
-          },
-        },
+        createdBy: CREATED_BY_SELECT,
       },
     });
   }
@@ -67,13 +61,7 @@ export class StatusUpdateRepository {
         message: dto.message,
       },
       include: {
-        createdBy: {
-          select: {
-            id: true,
-            name: true,
-            avatar: true,
-          },
-        },
+        createdBy: CREATED_BY_SELECT,
       },
     });
   }
@@ -86,13 +74,7 @@ export class StatusUpdateRepository {
         ...(dto.message !== undefined ? { message: dto.message } : {}),
       },
       include: {
-        createdBy: {
-          select: {
-            id: true,
-            name: true,
-            avatar: true,
-          },
-        },
+        createdBy: CREATED_BY_SELECT,
       },
     });
   }

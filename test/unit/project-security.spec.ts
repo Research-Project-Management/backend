@@ -360,9 +360,13 @@ describe('Project Module Security & SSOT Suite', () => {
         role: ProjectMemberRole.coordinator,
       });
 
-      const result = await memberService.updateMemberRole('proj-123', 'member-2', {
-        role: ProjectMemberRole.coordinator,
-      });
+      const result = await memberService.updateMemberRole(
+        'proj-123',
+        'member-2',
+        {
+          role: ProjectMemberRole.coordinator,
+        },
+      );
 
       expect(result.member.role).toBe(ProjectMemberRole.coordinator);
       expect(mockMemberRepo.updateMemberRole).toHaveBeenCalledWith(
@@ -382,9 +386,13 @@ describe('Project Module Security & SSOT Suite', () => {
         role: ProjectMemberRole.reviewer,
       });
 
-      const result = await memberService.updateMemberRole('proj-123', 'member-3', {
-        role: ProjectMemberRole.reviewer,
-      });
+      const result = await memberService.updateMemberRole(
+        'proj-123',
+        'member-3',
+        {
+          role: ProjectMemberRole.reviewer,
+        },
+      );
 
       expect(result.member.role).toBe(ProjectMemberRole.reviewer);
       expect(mockMemberRepo.updateMemberRole).toHaveBeenCalledWith(
@@ -392,6 +400,87 @@ describe('Project Module Security & SSOT Suite', () => {
         'member-3',
         ProjectMemberRole.reviewer,
       );
+    });
+
+    describe('transferOwnership - Atomic Ownership Transfer & Security', () => {
+      it('should reject transfer when actor tries to transfer to themselves', async () => {
+        await expect(
+          memberService.transferOwnership('proj-123', 'owner-1', 'owner-1'),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should reject transfer when project does not exist', async () => {
+        mockMemberRepo.findProject.mockResolvedValue(null);
+
+        await expect(
+          memberService.transferOwnership('proj-123', 'owner-1', 'member-2'),
+        ).rejects.toThrow(NotFoundException);
+      });
+
+      it('should reject transfer when actor is not an owner', async () => {
+        mockMemberRepo.findProject.mockResolvedValue({ id: 'proj-123' });
+        mockMemberRepo.findMember.mockResolvedValueOnce({
+          userId: 'member-1',
+          role: ProjectMemberRole.coordinator,
+        });
+
+        await expect(
+          memberService.transferOwnership('proj-123', 'member-1', 'member-2'),
+        ).rejects.toThrow(ForbiddenException);
+      });
+
+      it('should reject transfer when target user is not a project member', async () => {
+        mockMemberRepo.findProject.mockResolvedValue({ id: 'proj-123' });
+        mockMemberRepo.findMember
+          .mockResolvedValueOnce({
+            userId: 'owner-1',
+            role: ProjectMemberRole.owner,
+          })
+          .mockResolvedValueOnce(null);
+
+        await expect(
+          memberService.transferOwnership('proj-123', 'owner-1', 'stranger-2'),
+        ).rejects.toThrow(NotFoundException);
+      });
+
+      it('should successfully transfer ownership, demote previous owner to coordinator, and elevate target to owner', async () => {
+        mockMemberRepo.findProject.mockResolvedValue({ id: 'proj-123' });
+        mockMemberRepo.findMember
+          .mockResolvedValueOnce({
+            userId: 'owner-1',
+            role: ProjectMemberRole.owner,
+          })
+          .mockResolvedValueOnce({
+            userId: 'member-2',
+            role: ProjectMemberRole.contributor,
+          });
+
+        mockMemberRepo.transferOwnership = jest.fn().mockResolvedValue({
+          previousOwner: {
+            userId: 'owner-1',
+            role: ProjectMemberRole.coordinator,
+          },
+          newOwner: {
+            userId: 'member-2',
+            role: ProjectMemberRole.owner,
+          },
+        });
+
+        const result = await memberService.transferOwnership(
+          'proj-123',
+          'owner-1',
+          'member-2',
+        );
+
+        expect(result.message).toBe('Project ownership transferred successfully');
+        expect(result.previousOwner.role).toBe(ProjectMemberRole.coordinator);
+        expect(result.newOwner.role).toBe(ProjectMemberRole.owner);
+        expect(mockMemberRepo.transferOwnership).toHaveBeenCalledWith(
+          'proj-123',
+          'owner-1',
+          'member-2',
+        );
+      });
     });
   });
 });

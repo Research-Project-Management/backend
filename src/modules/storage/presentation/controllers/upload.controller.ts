@@ -50,12 +50,23 @@ export class UploadController {
   @Post('presign')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Generate presigned URL for direct upload' })
-  async presign(@CurrentUser('id') userId: string, @Body() dto: PresignDto) {
+  async presign(@CurrentUser() user: any, @Body() dto: PresignDto) {
+    const userId = user?.id || user?.sub;
+    const isUnverified =
+      user?.status === 'pending_verification' || user?.isVerified === false;
+    const requestedSize = dto.size || 10 * 1024 * 1024;
+
+    if (isUnverified && requestedSize > 5 * 1024 * 1024) {
+      throw new BadRequestException(
+        'Unverified accounts are limited to uploading files up to 5MB. Please verify your email address.',
+      );
+    }
+
     return this.presignUploadUseCase.execute({
       userId,
       filename: dto.filename,
       mimeType: dto.mimeType || dto.contentType || 'application/octet-stream',
-      sizeBytes: dto.size || 10 * 1024 * 1024,
+      sizeBytes: requestedSize,
     });
   }
 
@@ -151,6 +162,16 @@ export class UploadController {
     }
 
     const buffer = await data.toBuffer();
+    const user = (req as any).user;
+    const isUnverified =
+      user?.status === 'pending_verification' || user?.isVerified === false;
+
+    if (isUnverified && buffer.length > 5 * 1024 * 1024) {
+      throw new BadRequestException(
+        'Unverified accounts are limited to uploading files up to 5MB. Please verify your email address.',
+      );
+    }
+
     const fields = data.fields || {};
     const fieldFilename =
       fields.fileName?.value || fields.filename?.value || fields.name?.value;

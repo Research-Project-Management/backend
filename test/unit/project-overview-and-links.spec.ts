@@ -144,8 +144,22 @@ describe('Project Overview & Link Modules', () => {
         priority: ProjectPriority.high,
         startDate: new Date('2026-01-01'),
         targetDate: new Date('2026-12-31'),
-        createdBy: { id: 'u-1', name: 'Dr. John', avatar: null },
-        members: [{ user: { id: 'u-1', name: 'Dr. John', avatar: null } }],
+        createdBy: {
+          id: 'u-1',
+          name: 'Dr. John',
+          profile: { name: 'Dr. John', avatar: null },
+          avatar: null,
+        },
+        members: [
+          {
+            user: {
+              id: 'u-1',
+              name: 'Dr. John',
+              profile: { name: 'Dr. John', avatar: null },
+              avatar: null,
+            },
+          },
+        ],
         links: [
           {
             id: 'l-1',
@@ -189,7 +203,7 @@ describe('Project Overview & Link Modules', () => {
           oldIdentifier: null,
           newIdentifier: null,
           createdAt: new Date(),
-          actor: { id: 'u-2', name: 'Bob', avatar: null },
+          actor: { id: 'u-2', profile: { name: 'Bob', avatar: null } },
         },
       ]);
 

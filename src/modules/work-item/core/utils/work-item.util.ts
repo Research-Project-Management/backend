@@ -79,29 +79,25 @@ export const formatWorkItem = (
   const assignee = record.assignee
     ? {
         id: record.assignee.id,
-        name: record.assignee.name,
+        name:
+          record.assignee.profile?.name ?? record.assignee.name ?? 'User',
         email: record.assignee.email,
-        avatar: record.assignee.avatar,
+        avatar:
+          record.assignee.profile?.avatar ?? record.assignee.avatar ?? null,
       }
     : null;
 
   const assignees: UserMinimal[] =
     Array.isArray(record.assignees) && record.assignees.length > 0
-      ? record.assignees.map((a: any) =>
-          a.user
-            ? {
-                id: a.user.id,
-                name: a.user.name,
-                email: a.user.email,
-                avatar: a.user.avatar,
-              }
-            : {
-                id: a.id,
-                name: a.name,
-                email: a.email,
-                avatar: a.avatar,
-              },
-        )
+      ? record.assignees.map((a: any) => {
+          const u = a.user || a;
+          return {
+            id: u.id,
+            name: u.profile?.name ?? u.name ?? 'User',
+            email: u.email,
+            avatar: u.profile?.avatar ?? u.avatar ?? null,
+          };
+        })
       : assignee
         ? [assignee]
         : [];

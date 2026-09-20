@@ -32,7 +32,6 @@ export class StickyRepository implements IStickyRepository {
 
     const where: Prisma.StickyWhereInput = {
       userId,
-      projectId: null,
       deletedAt: null,
     };
 
@@ -65,7 +64,6 @@ export class StickyRepository implements IStickyRepository {
     return this.prisma.sticky.count({
       where: {
         userId,
-        projectId: null,
         deletedAt: null,
       },
     });
@@ -73,44 +71,6 @@ export class StickyRepository implements IStickyRepository {
 
   async countPersonalStickies(userId: string): Promise<number> {
     return this.countStickiesByUserId(userId);
-  }
-
-  async findStickiesByProjectId(
-    projectId: string,
-    search?: string,
-  ): Promise<StickyWithUser[]> {
-    if (!isUUID(projectId)) return [];
-
-    const where: Prisma.StickyWhereInput = {
-      projectId,
-      deletedAt: null,
-    };
-
-    if (search && search.trim()) {
-      const q = search.trim();
-      where.OR = [
-        { title: { contains: q, mode: 'insensitive' } },
-        { content: { contains: q, mode: 'insensitive' } },
-      ];
-    }
-
-    return this.prisma.sticky.findMany({
-      where,
-      include: {
-        user: { select: USER_MINIMAL_SELECT },
-      },
-      orderBy: { order: 'asc' },
-    });
-  }
-
-  async countStickiesByProjectId(projectId: string): Promise<number> {
-    if (!isUUID(projectId)) return 0;
-    return this.prisma.sticky.count({
-      where: {
-        projectId,
-        deletedAt: null,
-      },
-    });
   }
 
   async createSticky(

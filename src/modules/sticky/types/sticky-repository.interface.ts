@@ -8,9 +8,13 @@ import { Sticky, Prisma } from '@prisma/client';
 
 export const USER_MINIMAL_SELECT = {
   id: true,
-  name: true,
   email: true,
-  avatar: true,
+  profile: {
+    select: {
+      name: true,
+      avatar: true,
+    },
+  },
 } as const;
 
 export type StickyWithUser = Prisma.StickyGetPayload<{
@@ -26,11 +30,6 @@ export interface IStickyRepository {
     search?: string,
   ): Promise<StickyWithUser[]>;
   countStickiesByUserId(userId: string): Promise<number>;
-  findStickiesByProjectId(
-    projectId: string,
-    search?: string,
-  ): Promise<StickyWithUser[]>;
-  countStickiesByProjectId(projectId: string): Promise<number>;
   createSticky(
     data: Prisma.StickyCreateInput | Prisma.StickyUncheckedCreateInput,
   ): Promise<StickyWithUser>;

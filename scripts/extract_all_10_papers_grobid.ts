@@ -7,8 +7,8 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { GrobidClient } from '../src/modules/library/infra/grobid/grobid.client';
-import { PdfProvider } from '../src/modules/library/attachments/providers/pdf.provider';
-import { AttachmentExtractionHandler } from '../src/modules/library/attachments/handlers/extraction.handler';
+import { PdfProvider } from '../src/modules/library/content/infrastructure/providers/pdf.provider';
+import { AttachmentExtractionHandler } from '../src/modules/library/content/application/handlers/extraction.handler';
 
 async function main() {
   console.log('======================================================================');

@@ -1,6 +1,6 @@
-import { MetadataCache } from '../../src/modules/library/ingestion/metadata/cache/metadata.cache';
-import { MetadataService } from '../../src/modules/library/ingestion/metadata/metadata.service';
-import { ResolvedMetadata } from '../../src/modules/library/ingestion/metadata/types/metadata.types';
+import { MetadataCache } from '../../src/modules/library/processing/infrastructure/cache/metadata.cache';
+import { MetadataService } from '../../src/modules/library/processing/application/services/metadata.service';
+import { ResolvedMetadata } from '../../src/modules/library/processing/domain/types/metadata.types';
 
 describe('Multi-Tier Metadata Cache & Local Database Resolution', () => {
   describe('MetadataCache (L1 Memory LRU + L2 Redis)', () => {

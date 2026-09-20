@@ -53,18 +53,46 @@ export class ExportService {
       ];
     }
 
-    const workItems = await this.prisma.workItem.findMany({
+    const USER_SELECT = {
+      id: true,
+      email: true,
+      profile: {
+        select: {
+          name: true,
+        },
+      },
+    } as const;
+
+    const rawWorkItems = await this.prisma.workItem.findMany({
       where,
       include: {
         author: {
-          select: { id: true, name: true, email: true },
+          select: USER_SELECT,
         },
         assignee: {
-          select: { id: true, name: true, email: true },
+          select: USER_SELECT,
         },
       },
       orderBy: [{ rank: 'asc' }, { createdAt: 'desc' }],
     });
+
+    const workItems = rawWorkItems.map((item) => ({
+      ...item,
+      author: item.author
+        ? {
+            id: item.author.id,
+            email: item.author.email,
+            name: item.author.profile?.name ?? 'User',
+          }
+        : null,
+      assignee: item.assignee
+        ? {
+            id: item.assignee.id,
+            email: item.assignee.email,
+            name: item.assignee.profile?.name ?? 'User',
+          }
+        : null,
+    }));
 
     const timestamp = new Date().toISOString().slice(0, 10);
     const safeKey = (project.identifier || project.name || 'work-items')

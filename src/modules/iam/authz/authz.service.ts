@@ -56,27 +56,27 @@ export class AuthzService {
       const cachedRole = await this.redis.get<Role>(cacheKey);
       if (cachedRole) return cachedRole;
     } catch (err) {
-      this.logger.warn(`Redis getRole cache miss/error: ${err}`);
+      this.logger.warn(
+        `Redis getRole cache miss/error: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
 
-    // 1. Check if user is Project Creator -> OWNER
-    const project = await this.repo.findProjectContext(projectId);
-
-    if (project && project.createdById === userId) {
-      await this.redis
-        .set(cacheKey, Role.OWNER, AuthzService.ROLE_CACHE_TTL)
-        .catch(() => {});
-      return Role.OWNER;
-    }
-
-    // 2. Query ProjectMember record
+    // 1. Query ProjectMember record first (SSOT for project membership and roles)
     const role = await this.repo.findMemberRole(projectId, userId);
-
     if (role) {
       await this.redis
         .set(cacheKey, role, AuthzService.ROLE_CACHE_TTL)
         .catch(() => {});
       return role;
+    }
+
+    // 2. Fallback check if user is Project Creator -> OWNER
+    const project = await this.repo.findProjectContext(projectId);
+    if (project && project.createdById === userId) {
+      await this.redis
+        .set(cacheKey, Role.OWNER, AuthzService.ROLE_CACHE_TTL)
+        .catch(() => {});
+      return Role.OWNER;
     }
 
     return null;

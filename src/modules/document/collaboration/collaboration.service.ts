@@ -3,7 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RedisCacheService } from '@/core/cache/redis.service';
 import { CursorPositionDto } from './dto/collaboration.dto';
 import { PrismaService } from '@/core/database/prisma.service';
-import { DOCUMENT_REDIS_KEYS } from '../core/constants/redis-keys.constant';
+import { DOCUMENT_REDIS_KEYS } from '../page/constants/page-redis-keys.constant';
 
 export interface PresenceUser {
   id: string;
@@ -50,6 +50,7 @@ export class CollaborationService {
 
   /**
    * Registers/updates a user's presence & cursor location in a document room.
+   * Persists to distributed Redis Hash (flux:collab:presence:{pageId}) with sliding TTL.
    */
   async updatePresence(
     pageId: string,
@@ -76,10 +77,23 @@ export class CollaborationService {
       lastHeartbeat: now,
     };
 
+    // Update in-memory fallback
     room.set(user.id, presenceUser);
-
-    // Clean up stale users in this room
     this.cleanStaleUsers(pageId, now);
+
+    // Distributed Redis Hash update
+    const redisClient = this.redis?.getClient();
+    if (this.redis?.isReady() && redisClient) {
+      try {
+        const key = DOCUMENT_REDIS_KEYS.presence(pageId);
+        await redisClient.hset(key, user.id, JSON.stringify(presenceUser));
+        await redisClient.expire(key, 60); // 60s sliding window
+      } catch (err: any) {
+        this.logger.warn(
+          `Redis updatePresence failed for page ${pageId}: ${err?.message || err}`,
+        );
+      }
+    }
 
     // Emit event for real-time SSE stream
     this.eventEmitter?.emit('document.collaboration.event', {
@@ -93,7 +107,7 @@ export class CollaborationService {
   }
 
   /**
-   * Explicitly leaves a document room.
+   * Explicitly leaves a document room. Removes from Redis Hash.
    */
   async leaveRoom(pageId: string, userId: string): Promise<PresenceUser[]> {
     const room = this.presenceRooms.get(pageId);
@@ -102,25 +116,79 @@ export class CollaborationService {
       if (room.size === 0) {
         this.presenceRooms.delete(pageId);
       }
-
-      this.eventEmitter?.emit('document.collaboration.event', {
-        pageId,
-        type: 'user-left',
-        userId,
-        timestamp: Date.now(),
-      });
     }
+
+    const redisClient = this.redis?.getClient();
+    if (this.redis?.isReady() && redisClient) {
+      try {
+        const key = DOCUMENT_REDIS_KEYS.presence(pageId);
+        await redisClient.hdel(key, userId);
+      } catch (err: any) {
+        this.logger.warn(
+          `Redis leaveRoom failed for page ${pageId}: ${err?.message || err}`,
+        );
+      }
+    }
+
+    this.eventEmitter?.emit('document.collaboration.event', {
+      pageId,
+      type: 'user-left',
+      userId,
+      timestamp: Date.now(),
+    });
 
     return this.getActiveUsers(pageId);
   }
 
   /**
    * Retrieves list of active users in a document room.
+   * Reads from Redis Hash with in-memory fallback, pruning stale entries.
    */
-  getActiveUsers(pageId: string): PresenceUser[] {
+  async getActiveUsers(pageId: string): Promise<PresenceUser[]> {
+    const now = Date.now();
+    const redisClient = this.redis?.getClient();
+
+    if (this.redis?.isReady() && redisClient) {
+      try {
+        const key = DOCUMENT_REDIS_KEYS.presence(pageId);
+        const data = await redisClient.hgetall(key);
+        if (data && Object.keys(data).length > 0) {
+          const activeUsers: PresenceUser[] = [];
+          const staleUserIds: string[] = [];
+
+          for (const [userId, rawJson] of Object.entries(data)) {
+            try {
+              const u: PresenceUser = JSON.parse(rawJson);
+              if (
+                now - u.lastHeartbeat <=
+                CollaborationService.PRESENCE_TIMEOUT_MS
+              ) {
+                activeUsers.push(u);
+              } else {
+                staleUserIds.push(userId);
+              }
+            } catch {
+              staleUserIds.push(userId);
+            }
+          }
+
+          if (staleUserIds.length > 0) {
+            await redisClient.hdel(key, ...staleUserIds).catch(() => {});
+          }
+
+          return activeUsers;
+        }
+      } catch (err: any) {
+        this.logger.warn(
+          `Redis getActiveUsers failed for page ${pageId}: ${err?.message || err}`,
+        );
+      }
+    }
+
+    // In-memory fallback
     const room = this.presenceRooms.get(pageId);
     if (!room) return [];
-    this.cleanStaleUsers(pageId, Date.now());
+    this.cleanStaleUsers(pageId, now);
     return Array.from(room.values());
   }
 

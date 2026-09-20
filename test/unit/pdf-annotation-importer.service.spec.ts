@@ -3,7 +3,7 @@ jest.mock('unpdf', () => ({
 }));
 
 import { NotFoundException, BadRequestException } from '@nestjs/common';
-import { PdfAnnotationImporterService } from '@/modules/library/annotations/services/pdf-annotation-importer.service';
+import { PdfAnnotationImporterService } from '@/modules/library/content/application/services/pdf-annotation-importer.service';
 import { AnnotationType } from '@prisma/client';
 import { getDocumentProxy } from 'unpdf';
 

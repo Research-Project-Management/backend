@@ -1,9 +1,9 @@
 import {
   LocalEmbeddingService,
   EMBEDDING_DIMENSIONS,
-} from '../../src/modules/library/search/services/local-embedding.service';
-import { VectorIndexService } from '../../src/modules/library/search/services/vector-index.service';
-import { SemanticSearchService } from '../../src/modules/library/search/services/semantic-search.service';
+} from '../../src/modules/library/discovery/application/services/local-embedding.service';
+import { VectorIndexService } from '../../src/modules/library/discovery/application/services/vector-index.service';
+import { SemanticSearchService } from '../../src/modules/library/discovery/application/services/semantic-search.service';
 
 describe('In-Process Local Embeddings & Semantic Vector Search', () => {
   let embeddingService: LocalEmbeddingService;

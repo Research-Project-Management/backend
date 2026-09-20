@@ -3,12 +3,47 @@ import { PrismaService } from '@/core/database/prisma.service';
 import { EntityType, Prisma } from '@prisma/client';
 import { CreateAttachmentDto } from './dto/create-attachment.dto';
 
+const AUTHOR_SELECT = {
+  id: true,
+  email: true,
+  profile: {
+    select: {
+      name: true,
+      avatar: true,
+    },
+  },
+} as const;
+
+function mapAttachment<
+  T extends {
+    author?: {
+      id: string;
+      email: string | null;
+      profile?: { name: string; avatar: string | null } | null;
+    } | null;
+  },
+>(attachment: T) {
+  if (!attachment) return attachment;
+  const { author, ...rest } = attachment;
+  return {
+    ...rest,
+    author: author
+      ? {
+          id: author.id,
+          email: author.email,
+          name: author.profile?.name ?? 'User',
+          avatar: author.profile?.avatar ?? null,
+        }
+      : null,
+  };
+}
+
 @Injectable()
 export class AttachmentRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(data: CreateAttachmentDto, authorId?: string) {
-    return this.prisma.entityAttachment.create({
+    const res = await this.prisma.entityAttachment.create({
       data: {
         entityType: data.entityType,
         entityId: data.entityId,
@@ -23,31 +58,23 @@ export class AttachmentRepository {
       },
       include: {
         author: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            avatar: true,
-          },
+          select: AUTHOR_SELECT,
         },
       },
     });
+    return mapAttachment(res);
   }
 
   async findById(id: string) {
-    return this.prisma.entityAttachment.findUnique({
+    const res = await this.prisma.entityAttachment.findUnique({
       where: { id },
       include: {
         author: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            avatar: true,
-          },
+          select: AUTHOR_SELECT,
         },
       },
     });
+    return res ? mapAttachment(res) : null;
   }
 
   async findMany(
@@ -74,22 +101,17 @@ export class AttachmentRepository {
         orderBy: { createdAt: 'desc' },
         include: {
           author: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              avatar: true,
-            },
+            select: AUTHOR_SELECT,
           },
         },
       }),
     ]);
 
-    return { total, items };
+    return { total, items: items.map(mapAttachment) };
   }
 
   async findByEntity(entityType: EntityType, entityId: string) {
-    return this.prisma.entityAttachment.findMany({
+    const items = await this.prisma.entityAttachment.findMany({
       where: {
         entityType,
         entityId,
@@ -97,15 +119,11 @@ export class AttachmentRepository {
       orderBy: { createdAt: 'desc' },
       include: {
         author: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            avatar: true,
-          },
+          select: AUTHOR_SELECT,
         },
       },
     });
+    return items.map(mapAttachment);
   }
 
   async delete(id: string) {

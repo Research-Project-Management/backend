@@ -11,5 +11,4 @@ export const STICKY_REDIS_KEYS = {
    */
   personalStickies: (userId: string) => `flux:sticky:user:${userId}`,
   userStickies: (userId: string) => `flux:sticky:user:${userId}`,
-  projectStickies: (projectId: string) => `flux:sticky:project:${projectId}`,
 } as const;

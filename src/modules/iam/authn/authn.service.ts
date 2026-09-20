@@ -2,6 +2,7 @@ import {
   Injectable,
   UnauthorizedException,
   BadRequestException,
+  ForbiddenException,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
@@ -86,13 +87,23 @@ export class AuthnService {
   /**
    * Formats a Prisma User model into a sanitized UserSummaryResponseDto.
    */
-  formatUser(user: User): UserSummaryResponseDto;
-  formatUser(user: null | undefined): null;
-  formatUser(user: User | null | undefined): UserSummaryResponseDto | null;
-  formatUser(user: User | null | undefined): UserSummaryResponseDto | null {
+  formatUser(
+    user: User & { profile?: { name: string; avatar: string | null } | null },
+  ): UserSummaryResponseDto;
+  formatUser(
+    user: (User & { profile?: { name: string; avatar: string | null } | null }) | null | undefined,
+  ): UserSummaryResponseDto | null;
+  formatUser(
+    user: (User & { profile?: { name: string; avatar: string | null } | null }) | null | undefined,
+  ): UserSummaryResponseDto | null {
     if (!user) return null;
-    const { password, ...rest } = user;
-    return rest;
+    const { password, profile, ...rest } = user as any;
+    return {
+      ...rest,
+      name: profile?.name ?? (user as any).name ?? 'User',
+      avatar: profile?.avatar ?? (user as any).avatar ?? null,
+      isVerified: user.status === 'active',
+    };
   }
 
   private getRefreshTokenExpiresAt(): Date {
@@ -104,13 +115,18 @@ export class AuthnService {
   private async signTokenPair(user: {
     id: string;
     email: string | null;
-    name: string;
+    name?: string;
+    status?: string;
+    profile?: { name?: string; avatar?: string | null } | null;
   }): Promise<TokenPair> {
+    const isVerified = user.status === 'active';
     const payload = {
       sub: user.id,
       id: user.id,
       email: user.email,
-      name: user.name,
+      name: user.name ?? user.profile?.name ?? 'User',
+      status: user.status || 'active',
+      isVerified,
     };
 
     const accessTokenSecret = this.configService.get<string>('JWT_SECRET');
@@ -143,7 +159,13 @@ export class AuthnService {
    * Generates a signed Access Token & Refresh Token pair with token family lineage.
    */
   private async generateTokens(
-    user: { id: string; email: string | null; name: string },
+    user: {
+      id: string;
+      email: string | null;
+      name?: string;
+      status?: string;
+      profile?: { name?: string; avatar?: string | null } | null;
+    },
     options?: {
       familyId?: string;
       parentId?: string;
@@ -482,13 +504,24 @@ export class AuthnService {
       if (existingUser) {
         user = existingUser;
       } else {
-        // Create new user profile
+        if (!profile.email) {
+          throw new BadRequestException(
+            `A verified email address is required from ${profile.provider} to complete account registration.`,
+          );
+        }
+        // Create new user profile with atomic settings initialization
         user = await this.authnRepo.createUser({
-          email: profile.email?.toLowerCase() || null,
-          name: profile.name || 'User',
-          avatar: profile.avatar || null,
-          isVerified: true,
+          email: profile.email.toLowerCase(),
           status: 'active',
+          settings: {
+            create: {},
+          },
+          profile: {
+            create: {
+              name: profile.name || 'User',
+              avatar: profile.avatar || null,
+            },
+          },
         });
       }
 
@@ -508,6 +541,25 @@ export class AuthnService {
         targetId: user.id,
         metadata: { provider: profile.provider },
       });
+    }
+
+    if (user.status !== 'active') {
+      await this.logAudit({
+        actorId: user.id,
+        eventType: 'login_failed',
+        targetType: 'user',
+        targetId: user.id,
+        metadata: { method: `oauth_${profile.provider}`, status: user.status },
+      });
+      if (user.status === 'suspended') {
+        throw new ForbiddenException(
+          'Account has been suspended. Please contact support.',
+        );
+      }
+      if (user.status === 'deactivated') {
+        throw new ForbiddenException('Account has been deactivated.');
+      }
+      throw new UnauthorizedException(`Account is ${user.status}.`);
     }
 
     const tokens = await this.generateTokens(user);
@@ -537,27 +589,170 @@ export class AuthnService {
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
     const user = await this.authnRepo.createUser({
-      email: dto.email.toLowerCase(),
+      email: dto.email.toLowerCase().trim(),
       password: hashedPassword,
-      name: dto.name || 'User',
-      avatar: dto.avatar || null,
-      isVerified: true,
-      status: 'active',
+      status: 'pending_verification',
+      settings: {
+        create: {},
+      },
+      profile: {
+        create: {
+          name: dto.name || 'User',
+          avatar: dto.avatar || null,
+        },
+      },
     });
 
-    const tokens = await this.generateTokens(user);
+    // Generate cryptographic email verification token
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = this.hashToken(rawToken);
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
+    await this.prisma.verificationToken.create({
+      data: {
+        userId: user.id,
+        tokenHash,
+        type: 'email_verification',
+        expiresAt,
+      },
+    });
 
     await this.logAudit({
       actorId: user.id,
-      eventType: 'login_success',
+      eventType: 'email_verification_requested',
       targetType: 'user',
       targetId: user.id,
       metadata: { method: 'local_registration' },
     });
 
+    // Soft Onboarding: Mint session tokens on registration so user can explore app immediately
+    const tokens = await this.generateTokens(user);
+
     return {
       user: this.formatUser(user),
       ...tokens,
+    };
+  }
+
+  async verifyEmail(rawToken: string): Promise<AuthnResponseDto> {
+    if (!rawToken || typeof rawToken !== 'string') {
+      throw new BadRequestException('Verification token is required');
+    }
+
+    const tokenHash = this.hashToken(rawToken.trim());
+    const tokenRecord = await this.prisma.verificationToken.findUnique({
+      where: { tokenHash },
+      include: {
+        user: {
+          include: {
+            profile: {
+              select: {
+                name: true,
+                avatar: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!tokenRecord) {
+      throw new BadRequestException('Invalid or expired verification token');
+    }
+
+    if (tokenRecord.expiresAt < new Date()) {
+      await this.prisma.verificationToken.delete({
+        where: { id: tokenRecord.id },
+      });
+      throw new BadRequestException(
+        'Verification token has expired. Please request a new verification link.',
+      );
+    }
+
+    const user = tokenRecord.user;
+
+    // Transition user to active and remove all verification tokens in transaction
+    const activatedUser = await this.prisma.$transaction(async (tx) => {
+      await tx.verificationToken.deleteMany({
+        where: { userId: user.id, type: 'email_verification' },
+      });
+
+      return tx.user.update({
+        where: { id: user.id },
+        data: { status: 'active' },
+        include: {
+          profile: {
+            select: {
+              name: true,
+              avatar: true,
+            },
+          },
+        },
+      });
+    });
+
+    await this.logAudit({
+      actorId: user.id,
+      eventType: 'email_verified',
+      targetType: 'user',
+      targetId: user.id,
+      metadata: { method: 'token' },
+    });
+
+    // Mint session tokens upon successful email activation
+    const tokens = await this.generateTokens(activatedUser);
+
+    return {
+      user: this.formatUser(activatedUser),
+      ...tokens,
+    };
+  }
+
+  async resendVerification(email: string): Promise<{ message: string }> {
+    if (!email) {
+      throw new BadRequestException('Email is required');
+    }
+
+    const user = await this.authnRepo.findUserByEmail(
+      email.toLowerCase().trim(),
+    );
+    // Return generic message to prevent email enumeration
+    if (!user || user.status !== 'pending_verification') {
+      return {
+        message:
+          'If an account pending verification exists with this email, a verification link has been sent.',
+      };
+    }
+
+    // Invalidate previous verification tokens
+    await this.prisma.verificationToken.deleteMany({
+      where: { userId: user.id, type: 'email_verification' },
+    });
+
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = this.hashToken(rawToken);
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    await this.prisma.verificationToken.create({
+      data: {
+        userId: user.id,
+        tokenHash,
+        type: 'email_verification',
+        expiresAt,
+      },
+    });
+
+    await this.logAudit({
+      actorId: user.id,
+      eventType: 'email_verification_requested',
+      targetType: 'user',
+      targetId: user.id,
+      metadata: { method: 'resend' },
+    });
+
+    return {
+      message:
+        'If an account pending verification exists with this email, a verification link has been sent.',
     };
   }
 
@@ -586,9 +781,41 @@ export class AuthnService {
         targetId: user.id,
         metadata: { email: dto.email, reason: 'password_mismatch' },
       });
-      throw new UnauthorizedException('Invalid email or password');
     }
 
+    if (user.status === 'suspended') {
+      await this.logAudit({
+        actorId: user.id,
+        eventType: 'login_failed',
+        targetType: 'user',
+        targetId: user.id,
+        metadata: {
+          email: dto.email,
+          status: user.status,
+          reason: 'account_suspended',
+        },
+      });
+      throw new ForbiddenException(
+        'Your account has been suspended. Please contact support.',
+      );
+    }
+
+    if (user.status === 'deactivated') {
+      await this.logAudit({
+        actorId: user.id,
+        eventType: 'login_failed',
+        targetType: 'user',
+        targetId: user.id,
+        metadata: {
+          email: dto.email,
+          status: user.status,
+          reason: 'account_deactivated',
+        },
+      });
+      throw new ForbiddenException('This account has been deactivated.');
+    }
+
+    // Soft Onboarding: Allow pending_verification users to log in with progressive gating
     const tokens = await this.generateTokens(user);
 
     await this.logAudit({
@@ -596,7 +823,10 @@ export class AuthnService {
       eventType: 'login_success',
       targetType: 'user',
       targetId: user.id,
-      metadata: { method: 'password' },
+      metadata: {
+        method: 'password',
+        isVerified: user.status === 'active',
+      },
     });
 
     return {
@@ -613,11 +843,27 @@ export class AuthnService {
     }
 
     const tokenHash = this.hashToken(refreshToken);
+
+    // 1. Check Redis grace period cache (Optional performance accelerator)
+    try {
+      const cached = await this.redis.get<TokenRefreshResponseDto>(
+        IAM_REDIS_KEYS.graceToken(tokenHash),
+      );
+      if (cached) {
+        this.logger.debug(
+          `Serving cached token refresh from Redis grace window (hash: ${tokenHash.slice(0, 8)}...)`,
+        );
+        return cached;
+      }
+    } catch {
+      // Redis offline or failed - fallback silently to database
+    }
+
     const tokenRecord = await this.authnRepo.findRefreshToken(tokenHash);
 
-    // BREACH DETECTION: If token was already revoked, check grace period first before triggering full breach
+    // 2. BREACH DETECTION with Pure Database Grace Period (Self-contained in PostgreSQL)
     if (tokenRecord && (tokenRecord.isRevoked || tokenRecord.revokedAt)) {
-      const GRACE_PERIOD_MS = 15_000;
+      const GRACE_PERIOD_MS = 30_000; // 30-second leeway window (OAuth 2.0 Security BCP)
       const revokedTime = tokenRecord.revokedAt
         ? new Date(tokenRecord.revokedAt).getTime()
         : 0;
@@ -625,24 +871,87 @@ export class AuthnService {
         revokedTime > 0 && Date.now() - revokedTime < GRACE_PERIOD_MS;
 
       if (isWithinGrace) {
-        this.logger.warn(
-          `Token refresh race condition detected within grace window (familyId: ${tokenRecord.familyId}). Request safely rejected without revoking session family.`,
+        this.logger.log(
+          `Token refresh grace period active in database (familyId: ${tokenRecord.familyId}). Handling concurrent tab refresh safely.`,
         );
-        throw new UnauthorizedException(
-          'Session is currently refreshing. Please retry.',
-        );
+
+        if (tokenRecord.user.status !== 'active') {
+          throw new ForbiddenException(
+            `Account is ${tokenRecord.user.status}.`,
+          );
+        }
+
+        // Find the active child token generated during the rotation of this token
+        const childToken = await this.prisma.refreshToken.findFirst({
+          where: {
+            parentId: tokenRecord.id,
+            isRevoked: false,
+            expiresAt: { gt: new Date() },
+          },
+          include: {
+            user: {
+              include: {
+                profile: {
+                  select: {
+                    name: true,
+                    avatar: true,
+                  },
+                },
+              },
+            },
+          },
+        });
+
+        if (childToken) {
+          // Re-sign token pair for this concurrent tab within the same lineage
+          const freshTokens = await this.signTokenPair(childToken.user);
+          const freshHash = this.hashToken(freshTokens.refreshToken);
+
+          // Create a valid sibling session to keep both tabs alive independently
+          await this.authnRepo.createSession({
+            userId: childToken.userId,
+            tokenHash: freshHash,
+            familyId: childToken.familyId,
+            parentId: tokenRecord.id,
+            expiresAt: this.getRefreshTokenExpiresAt(),
+          });
+
+          const response: TokenRefreshResponseDto = {
+            accessToken: freshTokens.accessToken,
+            refreshToken: freshTokens.refreshToken,
+            user: this.formatUser(childToken.user),
+          };
+
+          // Cache in Redis for instant subsequent responses if available
+          try {
+            await this.redis.set(
+              IAM_REDIS_KEYS.graceToken(tokenHash),
+              response,
+              30,
+            );
+          } catch {
+            // Redis error safely ignored
+          }
+
+          return response;
+        }
       }
 
+      // OUTSIDE GRACE PERIOD (> 30s): Real Replay Attack! Terminate token family immediately.
       if (tokenRecord.familyId) {
         await this.authnRepo.revokeFamily(tokenRecord.familyId);
       } else {
         await this.authnRepo.revokeAllUserTokens(tokenRecord.userId);
       }
-      await this.redis.set(
-        IAM_REDIS_KEYS.revoked(tokenRecord.userId),
-        Date.now(),
-        7 * 86400,
-      );
+      try {
+        await this.redis.set(
+          IAM_REDIS_KEYS.revoked(tokenRecord.userId),
+          Date.now(),
+          7 * 86400,
+        );
+      } catch {
+        // Non-critical: Redis revocation write failure is tolerated
+      }
 
       await this.logAudit({
         actorId: tokenRecord.userId,
@@ -651,7 +960,7 @@ export class AuthnService {
         targetId: tokenRecord.id,
         metadata: {
           familyId: tokenRecord.familyId,
-          reason: 'revoked_token_replay',
+          reason: 'revoked_token_replay_outside_grace',
         },
       });
 
@@ -662,6 +971,22 @@ export class AuthnService {
 
     if (!tokenRecord || tokenRecord.expiresAt < new Date()) {
       throw new UnauthorizedException('Refresh token is invalid or expired');
+    }
+
+    if (tokenRecord.user.status !== 'active') {
+      await this.logAudit({
+        actorId: tokenRecord.userId,
+        eventType: 'token_revoked',
+        targetType: 'session',
+        targetId: tokenRecord.id,
+        metadata: {
+          status: tokenRecord.user.status,
+          reason: 'inactive_user_refresh_attempt',
+        },
+      });
+      throw new ForbiddenException(
+        `Account is ${tokenRecord.user.status}. Session has been terminated.`,
+      );
     }
 
     const familyId = tokenRecord.familyId || crypto.randomUUID();
@@ -680,6 +1005,19 @@ export class AuthnService {
       throw new UnauthorizedException('Refresh token is invalid or expired');
     }
 
+    const response: TokenRefreshResponseDto = {
+      accessToken: newTokens.accessToken,
+      refreshToken: newTokens.refreshToken,
+      user: this.formatUser(tokenRecord.user),
+    };
+
+    // Cache in Redis with 30s TTL to accelerate concurrent requests from other tabs
+    try {
+      await this.redis.set(IAM_REDIS_KEYS.graceToken(tokenHash), response, 30);
+    } catch {
+      // Redis optional cache write failure ignored safely
+    }
+
     await this.logAudit({
       actorId: tokenRecord.userId,
       eventType: 'token_refreshed',
@@ -688,11 +1026,7 @@ export class AuthnService {
       metadata: { familyId },
     });
 
-    return {
-      accessToken: newTokens.accessToken,
-      refreshToken: newTokens.refreshToken,
-      user: this.formatUser(tokenRecord.user),
-    };
+    return response;
   }
 
   async logout(refreshToken?: string): Promise<{ message: string }> {

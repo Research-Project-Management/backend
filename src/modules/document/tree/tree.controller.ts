@@ -28,10 +28,7 @@ import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
 export class TreeController {
   constructor(private readonly treeService: TreeService) {}
 
-  @Get([
-    'projects/:projectId/nodes/tree',
-    'projects/:projectId/tree',
-  ])
+  @Get(['projects/:projectId/nodes/tree', 'projects/:projectId/tree'])
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary:
@@ -130,6 +127,3 @@ export class TreeController {
     return this.treeService.createChildNode(nodeId, userId, dto, projectId);
   }
 }
-
-export const NodeController = TreeController;
-export type NodeController = TreeController;

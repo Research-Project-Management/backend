@@ -11,6 +11,3 @@ import { CoreModule as AppCoreModule } from '@/core/core.module';
   exports: [TreeService, TreeRepository],
 })
 export class TreeModule {}
-
-export const NodeModule = TreeModule;
-export type NodeModule = TreeModule;

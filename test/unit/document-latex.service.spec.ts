@@ -3,7 +3,7 @@ import {
   CompilerService,
   LatexService,
 } from '@/modules/document/compiler/compiler.service';
-import { PageService } from '@/modules/document/core/core.service';
+import { PageService } from '@/modules/document/page/page.service';
 import { ConfigService } from '@nestjs/config';
 import { LibraryFacade } from '@/modules/library/library.facade';
 import { PrismaService } from '@/core/database/prisma.service';
@@ -232,6 +232,79 @@ describe('Document LatexService (Server-Authoritative Multi-file Assembly & Comp
 
       expect(result).toEqual(cachedResult);
       expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('should save compiled result to cache with safe 300s TTL when within 2MB limit', async () => {
+      cache.get.mockResolvedValue(null);
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        headers: { get: () => 'application/json' },
+        json: () =>
+          Promise.resolve({
+            success: true,
+            pdf: 'JVBERi0xLjQKJcfs...',
+            synctex: 'sync',
+          }),
+      } as any);
+
+      await service.compile({
+        source: '\\documentclass{article}\\begin{document}Hello\\end{document}',
+        use_cache: true,
+      });
+
+      expect(cache.set).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ success: true, pdf: 'JVBERi0xLjQKJcfs...' }),
+        300, // 5 minutes TTL
+      );
+    });
+
+    it('should NOT cache PDF in Redis if base64 size exceeds 2MB limit to prevent RAM exhaustion', async () => {
+      cache.get.mockResolvedValue(null);
+      const massivePdf = 'A'.repeat(2.5 * 1024 * 1024); // 2.5 MB base64
+
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        headers: { get: () => 'application/json' },
+        json: () =>
+          Promise.resolve({
+            success: true,
+            pdf: massivePdf,
+          }),
+      } as any);
+
+      await service.compile({
+        source: '\\documentclass{article}\\begin{document}Massive PDF\\end{document}',
+        use_cache: true,
+      });
+
+      expect(cache.set).not.toHaveBeenCalled();
+    });
+
+    it('should parse raw logs and extract primary error when compiler returns unformatted logs', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        headers: { get: () => 'application/json' },
+        json: () =>
+          Promise.resolve({
+            success: false,
+            error: 'LaTeX compilation failed',
+            logs: 'This is pdfTeX\n! Undefined control sequence.\nl.42 \\invalidMacro\nTranscript written.',
+          }),
+      } as any);
+
+      const result = await service.compile({
+        source: '\\documentclass{article}\\begin{document}\\invalidMacro\\end{document}',
+        use_cache: false,
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error).toContain('! Undefined control sequence. on line 42');
+        expect(result.diagnostics).toBeDefined();
+        expect(result.diagnostics?.[0].line).toBe(42);
+        expect(result.diagnostics?.[0].suggestion).toContain('\\usepackage');
+      }
     });
   });
 

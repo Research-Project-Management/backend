@@ -86,27 +86,35 @@ model PageVersion {
 }
 
 model PageComment {
-  id            String        @id @default(uuid()) @db.Uuid
-  pageId        String        @map("page_id") @db.Uuid
-  page          Page          @relation(fields: [pageId], references: [id], onDelete: Cascade)
-  projectPageId String?       @map("project_page_id") @db.Uuid
-  authorId      String        @map("author_id") @db.Uuid
-  author        User          @relation("PageCommentAuthor", fields: [authorId], references: [id], onDelete: Cascade)
-  content       String
-  isEdited      Boolean       @default(false) @map("is_edited")
-  line          Int?
-  lineEnd       Int?          @map("line_end")
-  status        CommentStatus @default(open)
-  replies       Json?         @default("[]")
-  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
-  deletedAt     DateTime?     @map("deleted_at") @db.Timestamptz(6)
+  id             String        @id @default(uuid()) @db.Uuid
+  pageId         String        @map("page_id") @db.Uuid
+  page           Page          @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  projectPageId  String?       @map("project_page_id") @db.Uuid
+  authorId       String        @map("author_id") @db.Uuid
+  author         User          @relation("PageCommentAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  content        String
+  isEdited       Boolean       @default(false) @map("is_edited")
+  line           Int?
+  lineEnd        Int?          @map("line_end")
+  status         CommentStatus @default(open)
+  replies        Json?         @default("[]")
+  /// JSON-encoded Y.RelativePosition for start of highlighted range.
+  /// Stays accurate after concurrent edits without manual range tracking.
+  yjsAnchorStart String?       @map("yjs_anchor_start")
+  /// JSON-encoded Y.RelativePosition for end of highlighted range.
+  yjsAnchorEnd   String?       @map("yjs_anchor_end")
+  /// Snapshot of the highlighted text at comment creation time (for display context).
+  selectedText   String?       @map("selected_text")
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt      DateTime?     @map("deleted_at") @db.Timestamptz(6)
 
   @@index([pageId, status])
   @@index([projectPageId])
   @@index([authorId])
   @@map("page_comments")
 }
+
 
 model PageSuggestion {
   id            String           @id @default(uuid()) @db.Uuid

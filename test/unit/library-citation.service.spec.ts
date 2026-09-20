@@ -1,10 +1,10 @@
 import { BadRequestException } from '@nestjs/common';
-import { CitationService } from '@/modules/library/citation/citation.service';
+import { CitationService } from '@/modules/library/discovery/application/services/citation.service';
 import {
   CslStyleRegistry,
   SUPPORTED_CITATION_STYLES,
-} from '@/modules/library/citation/formatters/csl-style-registry';
-import { CitationItemInput } from '@/modules/library/citation/types/citation.types';
+} from '@/modules/library/discovery/application/formatters/csl-style-registry';
+import { CitationItemInput } from '@/modules/library/discovery/domain/types/citation.types';
 
 describe('Library Citation Service & CSL Style Registry', () => {
   let citationService: CitationService;

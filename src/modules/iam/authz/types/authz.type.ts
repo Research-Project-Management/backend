@@ -35,5 +35,5 @@ export interface AuthzProjectContext {
 export interface IAuthzRepository {
   findProjectContext(projectId: string): Promise<AuthzProjectContext | null>;
   findMemberRole(projectId: string, userId: string): Promise<Role | null>;
-  findMemberContext(projectId: string, userId: string): Promise<any | null>;
+  findMemberContext(projectId: string, userId: string): Promise<any>;
 }

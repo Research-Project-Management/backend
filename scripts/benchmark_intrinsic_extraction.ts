@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { PdfProvider, ExtractedPdfDocument } from '../src/modules/library/attachments/providers/pdf.provider';
+import { PdfProvider, ExtractedPdfDocument } from '../src/modules/library/content/infrastructure/providers/pdf.provider';
 
 interface GroundTruthPaper {
   id: string;

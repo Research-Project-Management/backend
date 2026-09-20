@@ -47,8 +47,8 @@ export class IamService {
       const session: IamUserSession = {
         userId: user.id,
         email: user.email || '',
-        name: user.name,
-        avatar: user.avatar,
+        name: user.profile?.name ?? 'User',
+        avatar: user.profile?.avatar ?? null,
         status: user.status,
       };
 
@@ -71,8 +71,8 @@ export class IamService {
     return {
       userId: user.id,
       email: user.email || '',
-      name: user.name,
-      avatar: user.avatar,
+      name: user.profile?.name ?? 'User',
+      avatar: user.profile?.avatar ?? null,
       status: user.status,
     };
   }

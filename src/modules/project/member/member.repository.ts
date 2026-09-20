@@ -7,10 +7,28 @@ import { isUuid } from '@/core/utils/uuid.util';
 
 const USER_SELECT = {
   id: true,
-  name: true,
   email: true,
-  avatar: true,
+  profile: {
+    select: {
+      name: true,
+      avatar: true,
+    },
+  },
 } as const;
+
+function mapMember<T extends { user: { id: string; email: string | null; profile?: { name: string; avatar: string | null } | null } }>(
+  member: T,
+): Omit<T, 'user'> & { user: MinimalUser } {
+  return {
+    ...member,
+    user: {
+      id: member.user.id,
+      email: member.user.email,
+      name: member.user.profile?.name ?? 'User',
+      avatar: member.user.profile?.avatar ?? null,
+    },
+  };
+}
 
 @Injectable()
 export class MemberRepository {
@@ -25,7 +43,7 @@ export class MemberRepository {
   ): Promise<ProjectMemberWithUser | null> {
     if (!isUuid(projectId) || !isUuid(userId)) return null;
 
-    return this.prisma.projectMember.findUnique({
+    const member = await this.prisma.projectMember.findUnique({
       where: {
         projectId_userId: {
           projectId,
@@ -36,6 +54,8 @@ export class MemberRepository {
         user: { select: USER_SELECT },
       },
     });
+
+    return member ? mapMember(member) : null;
   }
 
   /**
@@ -53,14 +73,18 @@ export class MemberRepository {
       ...(options?.search && {
         user: {
           OR: [
-            { name: { contains: options.search, mode: 'insensitive' } },
+            {
+              profile: {
+                name: { contains: options.search, mode: 'insensitive' },
+              },
+            },
             { email: { contains: options.search, mode: 'insensitive' } },
           ],
         },
       }),
     };
 
-    return this.prisma.projectMember.findMany({
+    const members = await this.prisma.projectMember.findMany({
       where,
       include: {
         user: { select: USER_SELECT },
@@ -69,6 +93,8 @@ export class MemberRepository {
       ...(options?.take ? { take: options.take } : {}),
       ...(options?.skip ? { skip: options.skip } : {}),
     });
+
+    return members.map(mapMember);
   }
 
   /**
@@ -89,7 +115,11 @@ export class MemberRepository {
       ...(options?.search && {
         user: {
           OR: [
-            { name: { contains: options.search, mode: 'insensitive' } },
+            {
+              profile: {
+                name: { contains: options.search, mode: 'insensitive' },
+              },
+            },
             { email: { contains: options.search, mode: 'insensitive' } },
           ],
         },
@@ -107,7 +137,7 @@ export class MemberRepository {
     userId: string,
     role: ProjectMemberRole,
   ): Promise<ProjectMemberWithUser> {
-    return this.prisma.projectMember.create({
+    const member = await this.prisma.projectMember.create({
       data: {
         projectId,
         userId,
@@ -117,6 +147,8 @@ export class MemberRepository {
         user: { select: USER_SELECT },
       },
     });
+
+    return mapMember(member);
   }
 
   /**
@@ -127,7 +159,7 @@ export class MemberRepository {
     userId: string,
     role: ProjectMemberRole,
   ): Promise<ProjectMemberWithUser> {
-    return this.prisma.projectMember.update({
+    const member = await this.prisma.projectMember.update({
       where: {
         projectId_userId: {
           projectId,
@@ -139,6 +171,8 @@ export class MemberRepository {
         user: { select: USER_SELECT },
       },
     });
+
+    return mapMember(member);
   }
 
   /**
@@ -177,10 +211,17 @@ export class MemberRepository {
   async findUser(userId: string): Promise<MinimalUser | null> {
     if (!isUuid(userId)) return null;
 
-    return this.prisma.user.findFirst({
+    const user = await this.prisma.user.findFirst({
       where: { id: userId, deletedAt: null },
       select: USER_SELECT,
     });
+    if (!user) return null;
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.profile?.name ?? 'User',
+      avatar: user.profile?.avatar ?? null,
+    };
   }
 
   /**
@@ -219,5 +260,56 @@ export class MemberRepository {
       },
     });
     return result.count;
+  }
+
+  /**
+   * Atomically transfer project ownership from current owner to another member.
+   * Demotes current owner to coordinator and elevates target member to owner.
+   */
+  async transferOwnership(
+    projectId: string,
+    currentOwnerId: string,
+    newOwnerId: string,
+  ): Promise<{
+    previousOwner: ProjectMemberWithUser;
+    newOwner: ProjectMemberWithUser;
+  }> {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.project.update({
+        where: { id: projectId },
+        data: { createdById: newOwnerId },
+      });
+
+      const previousOwner = await tx.projectMember.update({
+        where: {
+          projectId_userId: {
+            projectId,
+            userId: currentOwnerId,
+          },
+        },
+        data: { role: ProjectMemberRole.coordinator },
+        include: {
+          user: { select: USER_SELECT },
+        },
+      });
+
+      const newOwner = await tx.projectMember.update({
+        where: {
+          projectId_userId: {
+            projectId,
+            userId: newOwnerId,
+          },
+        },
+        data: { role: ProjectMemberRole.owner },
+        include: {
+          user: { select: USER_SELECT },
+        },
+      });
+
+      return {
+        previousOwner: mapMember(previousOwner),
+        newOwner: mapMember(newOwner),
+      };
+    });
   }
 }

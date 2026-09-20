@@ -558,6 +558,3 @@ export class PageService {
     return false;
   }
 }
-
-export const CoreService = PageService;
-export type CoreService = PageService;

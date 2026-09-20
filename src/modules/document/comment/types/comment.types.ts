@@ -1,4 +1,4 @@
-﻿export interface CommentAuthor {
+export interface CommentAuthor {
   id: string;
   name: string;
   email?: string | null;
@@ -13,8 +13,16 @@ export interface CommentReply {
 }
 
 export function parseCommentReplies(raw: unknown): CommentReply[] {
-  if (!raw || !Array.isArray(raw)) return [];
-  const list: unknown[] = raw;
+  let parsed = raw;
+  if (typeof raw === 'string') {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+  if (!parsed || !Array.isArray(parsed)) return [];
+  const list: unknown[] = parsed;
   return list.filter(
     (item: unknown): item is CommentReply =>
       typeof item === 'object' &&

@@ -9,7 +9,6 @@ import { CollaborationModule } from './collaboration/collaboration.module';
 import { ExportModule } from './export/export.module';
 import { OutlineModule } from './outline/outline.module';
 import { AssetModule } from './asset/asset.module';
-import { SynctexModule } from './synctex/synctex.module';
 import { SuggestionModule } from './suggestion/suggestion.module';
 import { DocumentFacade, DOCUMENT_FACADE } from './document.facade';
 
@@ -25,7 +24,6 @@ import { DocumentFacade, DOCUMENT_FACADE } from './document.facade';
     ExportModule,
     OutlineModule,
     AssetModule,
-    SynctexModule,
     SuggestionModule,
   ],
   providers: [
@@ -48,14 +46,7 @@ import { DocumentFacade, DOCUMENT_FACADE } from './document.facade';
     ExportModule,
     OutlineModule,
     AssetModule,
-    SynctexModule,
     SuggestionModule,
   ],
 })
 export class DocumentModule {}
-
-export const CoreModule = PageModule;
-export type CoreModule = PageModule;
-
-export const NodeModule = TreeModule;
-export type NodeModule = TreeModule;

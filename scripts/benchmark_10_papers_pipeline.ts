@@ -8,7 +8,7 @@ import { MetadataCache } from '../src/modules/library/ingestion/metadata/cache/m
 import { ReconciliationService } from '../src/modules/library/ingestion/metadata/services/reconciliation.service';
 import { ExecutorService } from '../src/modules/library/ingestion/metadata/services/executor.service';
 import { MetadataService } from '../src/modules/library/ingestion/metadata/metadata.service';
-import { ItemsMapper } from '../src/modules/library/items/mappers/items.mapper';
+import { ItemsMapper } from '../src/modules/library/catalog/infrastructure/mappers/items.mapper';
 
 const BENCHMARK_PAPERS = [
   { id: '1706.03762', expectedTitle: 'Attention Is All You Need', minCitations: 5000, minRefs: 20 },

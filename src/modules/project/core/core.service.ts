@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
   Optional,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -252,6 +253,21 @@ export class CoreService {
     userId: string,
     dto: CreateProjectDto,
   ): Promise<{ project: ProjectWithMembers }> {
+    // Progressive Gating: Unverified users can create at most 1 sandbox project
+    const userMeta =
+      await this.projectRepo.getUserStatusAndOwnedProjectCount(userId);
+    if (
+      userMeta &&
+      userMeta.status === 'pending_verification' &&
+      userMeta.ownedProjectCount >= 1
+    ) {
+      throw new ForbiddenException({
+        code: 'EMAIL_VERIFICATION_REQUIRED',
+        message:
+          'Please verify your email address to create additional projects. Unverified accounts are limited to 1 sandbox project.',
+      });
+    }
+
     const identifier = dto.identifier?.trim().toUpperCase();
     if (identifier) {
       const existing =

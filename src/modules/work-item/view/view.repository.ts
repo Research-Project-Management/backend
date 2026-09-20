@@ -1,8 +1,33 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { ViewAccess } from '@prisma/client';
-import { WorkItemViewItem } from './types/view.types';
+import { WorkItemViewItem, ViewCreatorUser } from './types/view.types';
 import { QueryViewDto } from './dto/view.dto';
+
+const CREATOR_SELECT = {
+  id: true,
+  email: true,
+  profile: {
+    select: {
+      name: true,
+      avatar: true,
+    },
+  },
+} as const;
+
+function mapCreator(user: {
+  id: string;
+  email: string | null;
+  profile?: { name: string; avatar: string | null } | null;
+} | null | undefined): ViewCreatorUser | undefined {
+  if (!user) return undefined;
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.profile?.name ?? 'User',
+    avatar: user.profile?.avatar ?? null,
+  };
+}
 
 @Injectable()
 export class ViewRepository {
@@ -51,12 +76,7 @@ export class ViewRepository {
       where: whereClause,
       include: {
         createdBy: {
-          select: {
-            id: true,
-            name: true,
-            avatar: true,
-            email: true,
-          },
+          select: CREATOR_SELECT,
         },
         favorites: {
           where: { userId },
@@ -84,7 +104,7 @@ export class ViewRepository {
       archivedAt: record.archivedAt,
       projectId: record.projectId,
       createdById: record.createdById,
-      createdBy: record.createdBy,
+      createdBy: mapCreator(record.createdBy),
       isFavorite:
         Array.isArray(record.favorites) && record.favorites.length > 0,
       createdAt: record.createdAt,
@@ -107,12 +127,7 @@ export class ViewRepository {
       where: { id: viewId },
       include: {
         createdBy: {
-          select: {
-            id: true,
-            name: true,
-            avatar: true,
-            email: true,
-          },
+          select: CREATOR_SELECT,
         },
         favorites: userId
           ? {
@@ -146,7 +161,7 @@ export class ViewRepository {
       archivedAt: record.archivedAt,
       projectId: record.projectId,
       createdById: record.createdById,
-      createdBy: record.createdBy,
+      createdBy: mapCreator(record.createdBy),
       isFavorite:
         Array.isArray(record.favorites) && record.favorites.length > 0,
       createdAt: record.createdAt,
@@ -185,12 +200,7 @@ export class ViewRepository {
       },
       include: {
         createdBy: {
-          select: {
-            id: true,
-            name: true,
-            avatar: true,
-            email: true,
-          },
+          select: CREATOR_SELECT,
         },
       },
     });
@@ -216,7 +226,7 @@ export class ViewRepository {
       archivedAt: record.archivedAt,
       projectId: record.projectId,
       createdById: record.createdById,
-      createdBy: record.createdBy,
+      createdBy: mapCreator(record.createdBy),
       isFavorite: false,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
@@ -269,12 +279,7 @@ export class ViewRepository {
       },
       include: {
         createdBy: {
-          select: {
-            id: true,
-            name: true,
-            avatar: true,
-            email: true,
-          },
+          select: CREATOR_SELECT,
         },
         favorites: userId
           ? {
@@ -306,7 +311,7 @@ export class ViewRepository {
       archivedAt: record.archivedAt,
       projectId: record.projectId,
       createdById: record.createdById,
-      createdBy: record.createdBy,
+      createdBy: mapCreator(record.createdBy),
       isFavorite:
         Array.isArray(record.favorites) && record.favorites.length > 0,
       createdAt: record.createdAt,
