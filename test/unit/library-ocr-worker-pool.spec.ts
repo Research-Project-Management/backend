@@ -1,4 +1,4 @@
-import { OcrWorkerPoolService } from '../../src/modules/library/content/infrastructure/ocr/ocr-worker-pool.service';
+import { OcrWorkerPoolService } from '../../src/modules/library/reader/infrastructure/ocr/ocr-worker-pool.service';
 
 describe('OcrWorkerPoolService', () => {
   let service: OcrWorkerPoolService;

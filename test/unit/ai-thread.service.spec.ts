@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ThreadService } from '@/modules/ai/thread/thread.service';
-import { ThreadRepository } from '@/modules/ai/thread/thread.repository';
+import { ChatService as ThreadService } from '@/modules/ai/chat/chat.service';
+import { ChatRepository as ThreadRepository } from '@/modules/ai/chat/chat.repository';
 import { PrismaService } from '@/core/database/prisma.service';
 import { RedisCacheService } from '@/core/cache/redis.service';
 import {

@@ -15,11 +15,14 @@ const USER_SELECT = {
 } as const;
 
 function mapUser<
-  T extends {
-    id: string;
-    email: string | null;
-    profile?: { name: string; avatar: string | null } | null;
-  } | null | undefined,
+  T extends
+    | {
+        id: string;
+        email: string | null;
+        profile?: { name: string; avatar: string | null } | null;
+      }
+    | null
+    | undefined,
 >(user: T) {
   if (!user) return null;
   return {

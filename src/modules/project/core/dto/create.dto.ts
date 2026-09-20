@@ -11,7 +11,7 @@ import {
   Matches,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ProjectPriority, ProjectState } from '@prisma/client';
+import { ProjectPriority } from '@prisma/client';
 
 /**
  * DTO for creating a new project.
@@ -44,14 +44,12 @@ export class CreateProjectDto {
   identifier?: string;
 
   @ApiPropertyOptional({
-    description: 'Project lifecycle stage',
-    enum: ProjectState,
-    default: ProjectState.planning,
-    example: ProjectState.planning,
+    description: 'Initial project state ID',
+    example: '01957c91-2345-7890-abcd-ef0123456789',
   })
-  @IsEnum(ProjectState)
+  @IsUUID('all')
   @IsOptional()
-  state?: ProjectState;
+  stateId?: string;
 
   @ApiPropertyOptional({
     description: 'Project strategic priority',
@@ -132,7 +130,7 @@ export class CreateProjectDto {
     description:
       'List of enabled feature modules in this project (work_items, cycles, views, pages)',
     example: ['work_items', 'cycles', 'views', 'pages'],
-    default: ['work_items', 'cycles', 'views', 'pages', 'stickies', 'storage'],
+    default: ['work_items', 'cycles', 'views', 'pages'],
   })
   @IsArray()
   @IsString({ each: true })

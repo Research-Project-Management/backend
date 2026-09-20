@@ -90,6 +90,7 @@
     "tesseract.js": "^7.0.0",
     "tsconfig-paths": "^4.2.0",
     "unpdf": "^1.8.1",
+    "uuid": "^14.0.2",
     "y-protocols": "^1.0.7",
     "yjs": "^13.6.32"
   },
@@ -110,6 +111,7 @@
     "@types/passport-jwt": "^4.0.1",
     "@types/pg": "^8.21.0",
     "@types/supertest": "^7.0.0",
+    "@types/uuid": "^11.0.0",
     "eslint": "^9.18.0",
     "eslint-config-prettier": "^10.0.1",
     "eslint-plugin-prettier": "^5.2.2",

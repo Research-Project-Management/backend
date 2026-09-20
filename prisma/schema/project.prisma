@@ -1,6 +1,6 @@
 // -- 2. Project Context (Collaborative Research Microservice) ----------------
 
-enum ProjectMemberRole {
+enum Role {
   owner       // Truong nhom / Chu nhiem de tai — toan quyen toi cao & doc quyen nhan su
   coordinator // Dieu phoi vien — quan ly cycles, work items (khong quan ly nhan su)
   contributor // Thanh vien nghien cuu — tao/sua work items, tai lieu, upload paper
@@ -15,14 +15,6 @@ enum InvitationStatus {
   expired
 }
 
-enum ProjectState {
-  draft       // Bản nháp / Ý tưởng sơ khởi
-  planning    // Lên kế hoạch, scoping tài nguyên
-  execution   // Đang triển khai thực hiện (In Progress)
-  monitoring  // Thử nghiệm, nghiệm thu, kiểm thử (Staging / Review)
-  completed   // Hoàn thành
-  cancelled   // Hủy bỏ / Tạm ngưng
-}
 
 enum ProjectPriority {
   urgent      // Khẩn cấp
@@ -39,18 +31,20 @@ enum ProjectUpdateStatus {
 }
 
 model Project {
-  id             String                @id @default(uuid()) @db.Uuid
-  name           String
-  identifier     String                @unique
-  description    String?               @default("")
+  id             String                @id @default(uuid(7)) @db.Uuid
+  name           String                @db.VarChar(100)
+  identifier     String                @unique(map: "uq_projects_identifier") @db.VarChar(20)
+  description    String?               @default("") @db.Text
   avatar         String?
   coverImage     String?               @map("cover_image")
 
-  // Vòng đời & Portfolio Tracking
-  state          ProjectState          @default(planning)
-  priority       ProjectPriority       @default(none)
-  startDate      DateTime?             @map("start_date") @db.Date
-  targetDate     DateTime?             @map("target_date") @db.Date
+  // Trạng thái dự án (Dữ liệu động, do user tự do tạo/sửa/xóa/kéo thả; null nếu chưa gán hoặc xóa hết)
+  stateId             String?                @map("state_id") @db.Uuid
+  state               ProjectState?          @relation("CurrentProjectState", fields: [stateId], references: [id], onDelete: SetNull)
+  projectStates       ProjectState[]         @relation("ProjectStates")
+  priority            ProjectPriority        @default(none)
+  startDate           DateTime?              @map("start_date") @db.Date
+  targetDate          DateTime?              @map("target_date") @db.Date
 
   // Trạng thái vận hành & Lưu trữ
   isActive       Boolean               @default(true) @map("is_active")
@@ -58,16 +52,16 @@ model Project {
   archivedAt     DateTime?             @map("archived_at") @db.Timestamptz(6)
 
   createdById    String                @map("created_by_id") @db.Uuid
-  createdBy      User                  @relation("ProjectCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  createdBy      User                  @relation("ProjectCreator", fields: [createdById], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_projects_created_by_id")
   modules        String[]              @default(["overview", "work_items", "cycles", "views", "pages"])
   settings       Json?                 @default("{}")
 
   // Template liên kết (nếu được tạo từ Project Template)
   templateId     String?               @map("template_id") @db.Uuid
-  template       ProjectTemplate?      @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  template       ProjectTemplate?      @relation(fields: [templateId], references: [id], onDelete: SetNull, onUpdate: Cascade, map: "fk_projects_template_id")
 
   // WorkItem & Board extensions
-  workItemSequence   Int                   @default(0) @map("work_item_sequence")
+  workItemSequence   Int               @default(0) @map("work_item_sequence")
 
   createdAt      DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -76,117 +70,118 @@ model Project {
   // Relations
   members        ProjectMember[]
   invitations    ProjectInvitation[]
-  labels         ProjectLabelAssignment[]
+  labels         ProjectLabel[]
   favorites      ProjectFavorite[]
   pages          Page[]
   states         WorkItemState[]
   cycles         Cycle[]
   workItems      WorkItem[]
-  projectLabels  Label[]
+  workItemLabels WorkItemLabel[]       @relation("ProjectWorkItemLabels")
   views          WorkItemView[]
   userProperties ProjectUserProperty[]
   drafts         WorkItemDraft[]
   templates      WorkItemTemplate[]
   activityEvents ActivityEvent[]
   aiChats        AiChat[]              @relation("ProjectAiChats")
-  links          ProjectLink[]
   updates        ProjectUpdate[]
 
-
-  @@index([createdById])
-  @@index([state, priority])
-  @@index([isActive, isArchived, deletedAt])
+  @@index([createdById], map: "idx_projects_created_by_id")
+  @@index([stateId], map: "idx_projects_state_id")
+  @@index([priority], map: "idx_projects_priority")
+  @@index([isActive, isArchived, deletedAt], map: "idx_projects_operational_status")
   @@map("projects")
 }
 
 model ProjectMember {
-  id        String            @id @default(uuid()) @db.Uuid
-  projectId String            @map("project_id") @db.Uuid
-  project   Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  userId    String            @map("user_id") @db.Uuid
-  user      User              @relation("UserProjectMemberships", fields: [userId], references: [id], onDelete: Cascade)
-  role      ProjectMemberRole @default(contributor)
-  joinedAt  DateTime          @default(now()) @map("joined_at") @db.Timestamptz(6)
-  createdAt DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  projectId String   @map("project_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  role      Role     @default(contributor)
+  joinedAt  DateTime @default(now()) @map("joined_at") @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@unique([projectId, userId])
-  @@index([userId])
-  @@index([projectId, role])
+  project             Project           @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_project_members_project_id")
+  user                User              @relation("UserProjectMemberships", fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_project_members_user_id")
+
+  @@id([projectId, userId], map: "pk_project_members")
+  @@index([userId, projectId], map: "idx_project_members_user_covering")
+  @@index([projectId, role], map: "idx_project_members_role")
   @@map("project_members")
 }
 
 model ProjectInvitation {
-  id          String            @id @default(uuid()) @db.Uuid
+  id          String            @id @default(uuid(7)) @db.Uuid
   projectId   String            @map("project_id") @db.Uuid
-  project     Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  email       String
-  role        ProjectMemberRole @default(contributor)
-  tokenHash   String            @unique @map("token_hash")
+  project     Project           @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_project_invitations_project_id")
+  email       String            @db.VarChar(255)
+  role        Role              @default(contributor)
+  tokenHash   String            @unique(map: "uq_project_invitations_token_hash") @map("token_hash") @db.VarChar(255)
   status      InvitationStatus  @default(pending)
   invitedById String            @map("invited_by_id") @db.Uuid
   expiresAt   DateTime          @map("expires_at") @db.Timestamptz(6)
   createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@index([projectId, status])
-  @@index([email])
+  @@index([projectId, status], map: "idx_project_invitations_status")
+  @@index([email], map: "idx_project_invitations_email")
   @@map("project_invitations")
 }
 
+model Label {
+  id          String         @id @default(uuid(7)) @db.Uuid
+  name        String         @db.VarChar(50)
+  color       String         @db.VarChar(10) // Hex color code e.g. #3B82F6
+  description String?        @db.VarChar(200)
+  userId      String         @map("user_id") @db.Uuid
+  user        User           @relation("UserLabels", fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_labels_user_id")
+  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  projects    ProjectLabel[]
+
+  @@unique([userId, name], map: "uq_labels_user_name")
+  @@index([userId], map: "idx_labels_user_id")
+  @@map("labels")
+}
+
 model ProjectLabel {
-  id          String                   @id @default(uuid()) @db.Uuid
-  name        String                   @db.VarChar(50)
-  color       String                   @db.VarChar(10) // Hex color code e.g. #3B82F6
-  description String?                  @db.VarChar(200)
-  userId      String                   @map("user_id") @db.Uuid
-  user        User                     @relation("UserProjectLabels", fields: [userId], references: [id], onDelete: Cascade)
-  createdAt   DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(6)
+  projectId    String    @map("project_id") @db.Uuid
+  labelId      String    @map("label_id") @db.Uuid
+  assignedAt   DateTime  @default(now()) @map("assigned_at") @db.Timestamptz(6)
+  assignedById String?   @map("assigned_by_id") @db.Uuid
 
-  assignments ProjectLabelAssignment[]
+  project      Project   @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_project_labels_project_id")
+  label        Label     @relation(fields: [labelId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_project_labels_label_id")
+  assignedBy   User?     @relation("ProjectLabelAssigner", fields: [assignedById], references: [id], onDelete: SetNull, onUpdate: Cascade, map: "fk_project_labels_assigned_by_id")
 
-  @@unique([userId, name])
-  @@index([userId])
+  @@id([projectId, labelId], map: "pk_project_labels")
+  @@index([labelId, projectId], map: "idx_project_labels_covering")
+  @@index([assignedById, assignedAt(sort: Desc)], map: "idx_project_labels_timeline")
   @@map("project_labels")
 }
 
-model ProjectLabelAssignment {
-  id         String       @id @default(uuid()) @db.Uuid
-  projectId  String       @map("project_id") @db.Uuid
-  project    Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  labelId    String       @map("label_id") @db.Uuid
-  label      ProjectLabel @relation(fields: [labelId], references: [id], onDelete: Cascade)
-  assignedAt DateTime     @default(now()) @map("assigned_at") @db.Timestamptz(6)
-
-  @@unique([projectId, labelId])
-  @@index([projectId])
-  @@index([labelId])
-  @@map("project_label_assignments")
-}
-
 model ProjectFavorite {
-  id        String   @id @default(uuid()) @db.Uuid
   projectId String   @map("project_id") @db.Uuid
-  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   userId    String   @map("user_id") @db.Uuid
-  user      User     @relation("UserProjectFavorites", fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  @@unique([projectId, userId])
-  @@index([userId])
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_project_favorites_project_id")
+  user      User     @relation("UserProjectFavorites", fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_project_favorites_user_id")
+
+  @@id([projectId, userId], map: "pk_project_favorites")
+  @@index([userId, projectId], map: "idx_project_favorites_user_covering")
   @@map("project_favorites")
 }
 
 model ProjectTemplate {
-  id               String    @id @default(uuid()) @db.Uuid
+  id               String    @id @default(uuid(7)) @db.Uuid
   name             String    @db.VarChar(100)
   description      String?   @db.VarChar(500)
   avatar           String?
   coverImage       String?   @map("cover_image")
   isPublic         Boolean   @default(false) @map("is_public")
   createdById      String    @map("created_by_id") @db.Uuid
-  createdBy        User      @relation("UserProjectTemplates", fields: [createdById], references: [id], onDelete: Cascade)
+  createdBy        User      @relation("UserProjectTemplates", fields: [createdById], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_project_templates_created_by_id")
 
   // Cấu hình dự án mẫu (Features / Modules)
   defaultModules   String[]  @default(["overview", "work_items", "cycles", "views", "pages"]) @map("default_modules")
@@ -202,36 +197,43 @@ model ProjectTemplate {
 
   projects         Project[]
 
-  @@index([createdById])
+  @@index([createdById], map: "idx_project_templates_created_by_id")
   @@map("project_templates")
 }
 
-model ProjectLink {
-  id          String   @id @default(uuid()) @db.Uuid
-  projectId   String   @map("project_id") @db.Uuid
-  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  title       String   @db.VarChar(255)
-  url         String   @db.Text
-  createdById String   @map("created_by_id") @db.Uuid
-  createdBy   User     @relation("UserProjectLinks", fields: [createdById], references: [id], onDelete: Cascade)
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  @@index([projectId, createdAt])
-  @@map("project_links")
-}
-
 model ProjectUpdate {
-  id          String              @id @default(uuid()) @db.Uuid
+  id          String              @id @default(uuid(7)) @db.Uuid
   projectId   String              @map("project_id") @db.Uuid
-  project     Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
   status      ProjectUpdateStatus @default(on_track)
   message     String              @db.Text
   createdById String              @map("created_by_id") @db.Uuid
-  createdBy   User                @relation("UserProjectUpdates", fields: [createdById], references: [id], onDelete: Cascade)
   createdAt   DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@index([projectId, createdAt(sort: Desc)])
+  project     Project             @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_project_updates_project_id")
+  createdBy   User                @relation("UserProjectUpdates", fields: [createdById], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_project_updates_created_by_id")
+
+  @@index([projectId, createdAt(sort: Desc)], map: "idx_project_updates_timeline")
   @@map("project_updates")
+}
+
+model ProjectState {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  projectId   String    @map("project_id") @db.Uuid
+  project     Project   @relation("ProjectStates", fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_project_states_project_id")
+  
+  name        String    @db.VarChar(100)
+  description String?   @default("") @db.Text
+  color       String    @default("#0284c7") @db.VarChar(30)
+  sequence    Int       @default(0)
+  isDefault   Boolean   @default(false) @map("is_default")
+  
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  currentProjects Project[] @relation("CurrentProjectState")
+
+  @@unique([projectId, name], map: "uq_project_states_project_name")
+  @@index([projectId, sequence], map: "idx_project_states_sequence")
+  @@map("project_states")
 }

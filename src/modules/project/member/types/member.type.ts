@@ -1,6 +1,6 @@
-import { ProjectMember, ProjectMemberRole } from '@prisma/client';
+﻿import { ProjectMember, Role } from '@prisma/client';
 
-export { ProjectMemberRole };
+export { Role };
 
 export type MinimalUser = {
   id: string;
@@ -27,7 +27,7 @@ export interface BulkAddProjectMembersResult {
 }
 
 export interface FindMembersOptions {
-  role?: ProjectMemberRole;
+  role?: Role;
   search?: string;
   take?: number;
   skip?: number;

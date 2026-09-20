@@ -1,7 +1,7 @@
 /**
  * Sticky Domain Repository Interface (Port)
  *
- * Standardized for Project & Personal Scopes (no workspace).
+ * Standardized for Personal Scope.
  */
 
 import { Sticky, Prisma } from '@prisma/client';

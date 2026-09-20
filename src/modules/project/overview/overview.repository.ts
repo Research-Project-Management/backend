@@ -16,6 +16,7 @@ export class OverviewRepository {
         description: true,
         avatar: true,
         coverImage: true,
+        stateId: true,
         state: true,
         priority: true,
         startDate: true,
@@ -33,7 +34,7 @@ export class OverviewRepository {
         },
         members: {
           select: {
-            id: true,
+            userId: true,
             role: true,
             user: {
               select: {
@@ -47,18 +48,6 @@ export class OverviewRepository {
               },
             },
           },
-        },
-        links: {
-          select: {
-            id: true,
-            projectId: true,
-            title: true,
-            url: true,
-            createdById: true,
-            createdAt: true,
-            updatedAt: true,
-          },
-          orderBy: { createdAt: 'desc' },
         },
         _count: {
           select: {

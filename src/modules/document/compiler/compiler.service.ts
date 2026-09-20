@@ -5,6 +5,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Optional,
+  Inject,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PageService } from '../page/page.service';
@@ -27,7 +28,7 @@ export { ForwardSyncDto, ReverseSyncDto, SyncPoint, ReverseSyncPoint };
 import { getErrorMessage, tryCatch } from '@/core/utils/error.util';
 import { RedisCacheService } from '@/core/cache/redis.service';
 import { DOCUMENT_REDIS_KEYS } from '../page/constants/page-redis-keys.constant';
-import { LibraryFacade } from '../../library/library.facade';
+
 import { AssetService } from '../asset/asset.service';
 import { PrismaService } from '@/core/database/prisma.service';
 import { VersionEventType } from '@prisma/client';
@@ -78,28 +79,6 @@ export type CompileResult =
       diagnostics?: CompilerDiagnostic[];
     };
 
-const LATEX_CITE_REGEX =
-  /\\(?:auto|paren|text|foot|no)?cite(?:p|t|alt|alp|author|year|date|num)?\*?(?:\[[^\]]*\])?(?:\[[^\]]*\])?\{([^}]+)\}/gi;
-
-function extractCitationKeys(text: string): string[] {
-  if (!text) return [];
-  const foundKeys = new Set<string>();
-  let match: RegExpExecArray | null;
-  LATEX_CITE_REGEX.lastIndex = 0;
-  while ((match = LATEX_CITE_REGEX.exec(text)) !== null) {
-    const rawKeys = match[1];
-    if (rawKeys) {
-      for (const rawKey of rawKeys.split(',')) {
-        const clean = rawKey.trim();
-        if (clean && /^[a-zA-Z0-9_:-]+$/.test(clean)) {
-          foundKeys.add(clean);
-        }
-      }
-    }
-  }
-  return Array.from(foundKeys);
-}
-
 @Injectable()
 export class CompilerService {
   private readonly latexUrl: string;
@@ -111,7 +90,6 @@ export class CompilerService {
     private readonly pageService: PageService,
     @Optional() private readonly historyService?: HistoryService,
     @Optional() private readonly cache?: RedisCacheService,
-    @Optional() private readonly libraryFacade?: LibraryFacade,
     @Optional() private readonly assetService?: AssetService,
     @Optional() private readonly prisma?: PrismaService,
     @Optional() private readonly yjsDocumentManager?: YjsDocumentManager,
@@ -467,48 +445,17 @@ export class CompilerService {
       if (cached) {
         return cached;
       }
-    }
-
-    // Extract citekeys from LaTeX source and child files to generate references.bib
-    let bibContent: string | null = null;
-    const combinedTexts = [source, ...Object.values(files)].join('\n');
-    const citeKeys = extractCitationKeys(combinedTexts);
-    if (citeKeys.length > 0 && this.libraryFacade) {
-      let userId: string | undefined;
-      if (pageId && this.prisma) {
-        const page = await this.prisma.page.findUnique({
-          where: { id: pageId },
-          select: { authorId: true },
-        });
-        userId = page?.authorId;
+    } else if (!dto.use_cache && this.cache) {
+      try {
+        await this.cache.del(cacheKey);
+        this.logger.debug(
+          `[Compiler] Cleared compile cache for key: ${cacheKey}`,
+        );
+      } catch (err) {
+        this.logger.warn(
+          `[Compiler] Failed to clear cache key: ${getErrorMessage(err)}`,
+        );
       }
-      if (!userId && projectId && this.prisma) {
-        const project = await this.prisma.project.findUnique({
-          where: { id: projectId },
-          select: { createdById: true },
-        });
-        userId = project?.createdById;
-      }
-
-      if (userId) {
-        try {
-          const exportRes = await this.libraryFacade.exportBibByCitationKeys(
-            userId,
-            citeKeys,
-          );
-          if (exportRes && exportRes.content) {
-            bibContent = exportRes.content;
-          }
-        } catch (err) {
-          this.logger.warn(
-            `Failed to auto-sync references.bib: ${getErrorMessage(err)}`,
-          );
-        }
-      }
-    }
-
-    if (bibContent) {
-      files['references.bib'] = bibContent;
     }
 
     // Auto-mount binary project assets (figures, images, styles) into compilation tree
@@ -533,9 +480,9 @@ export class CompilerService {
       engine: dto.engine || 'pdflatex',
       draft: dto.draft ?? false,
       use_cache: dto.use_cache ?? true,
+      stop_on_first_error: dto.stop_on_first_error ?? false,
       source,
       ...(Object.keys(files).length > 0 ? { files } : {}),
-      ...(bibContent ? { bib_content: bibContent } : {}),
     };
 
     const compilePriority = dto.draft ? 'low' : 'high';

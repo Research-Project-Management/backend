@@ -6,10 +6,9 @@ import {
   ApiQuery,
   ApiResponse,
 } from '@nestjs/swagger';
-import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
-import { ProjectRoleGuard } from '@/modules/iam/authz/guards/role.guard';
-import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
+import { JwtAuthGuard } from '@/modules/identity/auth';
 import { ProjectAnalyticsService } from './analytics.service';
+import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Project Analytics & Portfolio')
 @ApiBearerAuth('JWT-auth')

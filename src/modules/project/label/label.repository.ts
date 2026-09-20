@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
-import { ProjectLabel, ProjectLabelAssignment } from '@prisma/client';
+import { Label, ProjectLabel } from '@prisma/client';
 import {
   CreateProjectLabelDto,
   UpdateProjectLabelDto,
@@ -10,27 +10,21 @@ import {
 export class LabelRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findLabelsByUser(userId: string): Promise<ProjectLabel[]> {
-    return this.prisma.projectLabel.findMany({
+  async findLabelsByUser(userId: string): Promise<Label[]> {
+    return this.prisma.label.findMany({
       where: { userId },
       orderBy: { name: 'asc' },
     });
   }
 
-  async findLabelById(
-    id: string,
-    userId: string,
-  ): Promise<ProjectLabel | null> {
-    return this.prisma.projectLabel.findFirst({
+  async findLabelById(id: string, userId: string): Promise<Label | null> {
+    return this.prisma.label.findFirst({
       where: { id, userId },
     });
   }
 
-  async findLabelByName(
-    name: string,
-    userId: string,
-  ): Promise<ProjectLabel | null> {
-    return this.prisma.projectLabel.findUnique({
+  async findLabelByName(name: string, userId: string): Promise<Label | null> {
+    return this.prisma.label.findUnique({
       where: {
         userId_name: {
           userId,
@@ -43,8 +37,8 @@ export class LabelRepository {
   async createLabel(
     userId: string,
     dto: CreateProjectLabelDto,
-  ): Promise<ProjectLabel> {
-    return this.prisma.projectLabel.create({
+  ): Promise<Label> {
+    return this.prisma.label.create({
       data: {
         userId,
         name: dto.name.trim(),
@@ -54,11 +48,8 @@ export class LabelRepository {
     });
   }
 
-  async updateLabel(
-    id: string,
-    dto: UpdateProjectLabelDto,
-  ): Promise<ProjectLabel> {
-    return this.prisma.projectLabel.update({
+  async updateLabel(id: string, dto: UpdateProjectLabelDto): Promise<Label> {
+    return this.prisma.label.update({
       where: { id },
       data: {
         ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
@@ -70,16 +61,16 @@ export class LabelRepository {
     });
   }
 
-  async deleteLabel(id: string): Promise<ProjectLabel> {
-    return this.prisma.projectLabel.delete({
+  async deleteLabel(id: string): Promise<Label> {
+    return this.prisma.label.delete({
       where: { id },
     });
   }
 
   async findProjectLabels(
     projectId: string,
-  ): Promise<(ProjectLabelAssignment & { label: ProjectLabel })[]> {
-    return this.prisma.projectLabelAssignment.findMany({
+  ): Promise<(ProjectLabel & { label: Label })[]> {
+    return this.prisma.projectLabel.findMany({
       where: { projectId },
       include: { label: true },
       orderBy: { label: { name: 'asc' } },
@@ -89,12 +80,14 @@ export class LabelRepository {
   async assignLabelsToProject(
     projectId: string,
     labelIds: string[],
+    assignedById?: string,
   ): Promise<void> {
     // Upsert or createMany skipDuplicates
-    await this.prisma.projectLabelAssignment.createMany({
+    await this.prisma.projectLabel.createMany({
       data: labelIds.map((labelId) => ({
         projectId,
         labelId,
+        ...(assignedById ? { assignedById } : {}),
       })),
       skipDuplicates: true,
     });
@@ -104,7 +97,7 @@ export class LabelRepository {
     projectId: string,
     labelId: string,
   ): Promise<void> {
-    await this.prisma.projectLabelAssignment.deleteMany({
+    await this.prisma.projectLabel.deleteMany({
       where: {
         projectId,
         labelId,
@@ -115,16 +108,18 @@ export class LabelRepository {
   async replaceProjectLabels(
     projectId: string,
     labelIds: string[],
+    assignedById?: string,
   ): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
-      await tx.projectLabelAssignment.deleteMany({
+      await tx.projectLabel.deleteMany({
         where: { projectId },
       });
       if (labelIds.length > 0) {
-        await tx.projectLabelAssignment.createMany({
+        await tx.projectLabel.createMany({
           data: labelIds.map((labelId) => ({
             projectId,
             labelId,
+            ...(assignedById ? { assignedById } : {}),
           })),
           skipDuplicates: true,
         });

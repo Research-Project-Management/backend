@@ -1,7 +1,7 @@
 // -- 6. Sticky Note Context (Sticky Microservice) -----------------------------
 
 model Sticky {
-  id          String      @id @default(uuid()) @db.Uuid
+  id          String      @id @default(uuid(7)) @db.Uuid
   title       String?     @default("")
   content     String      @default("")
   color       String      @default("yellow-1")

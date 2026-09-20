@@ -1,10 +1,10 @@
-import { ProjectMemberRole, InvitationStatus } from '@prisma/client';
+﻿import { Role, InvitationStatus } from '@prisma/client';
 
 export interface ProjectInvitationWithDetails {
   id: string;
   projectId: string;
   email: string;
-  role: ProjectMemberRole;
+  role: Role;
   tokenHash: string;
   status: InvitationStatus;
   invitedById: string;

@@ -1,11 +1,11 @@
 ﻿import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { StateService } from '@/modules/library/catalog/application/services/state.service';
-import { StateRepository } from '@/modules/library/catalog/infrastructure/repositories/state.repository';
+import { StateService } from '@/modules/library/bibliography/application/services/state.service';
+import { StateRepository } from '@/modules/library/bibliography/infrastructure/repositories/state.repository';
 import {
   ReadingStatus,
   StateData,
-} from '@/modules/library/catalog/domain/types/state.types';
+} from '@/modules/library/bibliography/domain/types/state.types';
 import {
   formatStateDate,
   isValidRating,
@@ -13,12 +13,12 @@ import {
   isValidScrollPosition,
   shouldAutoAdvanceToReading,
   toStateResponse,
-} from '@/modules/library/catalog/application/utils/state.utils';
+} from '@/modules/library/bibliography/application/utils/state.utils';
 import {
   TransactionService,
   TransactionHelpers,
 } from '@/modules/library/shared-kernel/outbox/transaction.service';
-import { ITEM_EXISTENCE_PORT } from '@/modules/library/catalog/domain/ports/items.ports';
+import { ITEM_EXISTENCE_PORT } from '@/modules/library/bibliography/domain/ports/items.ports';
 import { PrismaService } from '@/core/database/prisma.service';
 
 describe('Library State Service — Reading Progress, Ratings & Viewer Position', () => {

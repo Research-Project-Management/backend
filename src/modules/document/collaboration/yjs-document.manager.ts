@@ -444,7 +444,9 @@ export class YjsDocumentManager implements OnModuleDestroy {
       // Compact Redis oplog — prune ops captured in this snapshot
       if (this.redis?.isReady()) {
         const oplogKey = COLLABORATION_REDIS_KEYS.oplog(pageId);
-        await this.redis.zremrangebyscore(oplogKey, '-inf', now).catch(() => {});
+        await this.redis
+          .zremrangebyscore(oplogKey, '-inf', now)
+          .catch(() => {});
       }
 
       this.logger.log(

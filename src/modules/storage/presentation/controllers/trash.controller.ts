@@ -12,8 +12,8 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
-import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
+import { JwtAuthGuard } from '@/modules/identity/auth';
+import { CurrentUser } from '@/modules/identity/auth';
 import { ListDriveUseCase } from '../../application/use-cases/drive/list-drive.use-case';
 import { SoftDeleteUseCase } from '../../application/use-cases/trash/soft-delete.use-case';
 import { RestoreNodeUseCase } from '../../application/use-cases/trash/restore-node.use-case';
@@ -132,7 +132,9 @@ export class TrashController {
       try {
         await this.restoreNodeUseCase.execute(id);
         count++;
-      } catch {}
+      } catch {
+        // Best-effort batch restore
+      }
     }
     return { success: true, count };
   }
@@ -147,7 +149,9 @@ export class TrashController {
       try {
         await this.permanentDeleteUseCase.execute(id);
         count++;
-      } catch {}
+      } catch {
+        // Best-effort batch permanent deletion
+      }
     }
     return { success: true, count };
   }

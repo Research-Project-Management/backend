@@ -1,22 +1,20 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
-import { ItemsController } from '../../src/modules/library/catalog/presentation/items.controller';
-import { ItemsService } from '../../src/modules/library/catalog/application/services/items.service';
-import { CreateItemUseCase } from '../../src/modules/library/catalog/application/commands/create-item/create-item.use-case';
-import { UpdateItemUseCase } from '../../src/modules/library/catalog/application/commands/update-item/update-item.use-case';
-import { DeleteItemUseCase } from '../../src/modules/library/catalog/application/commands/delete-item/delete-item.use-case';
-import { RestoreItemUseCase } from '../../src/modules/library/catalog/application/commands/restore-item/restore-item.use-case';
-import { GetItemUseCase } from '../../src/modules/library/catalog/application/queries/get-item/get-item.use-case';
-import { ListItemsUseCase } from '../../src/modules/library/catalog/application/queries/list-items/list-items.use-case';
+import { ItemsController } from '../../src/modules/library/bibliography/presentation/items.controller';
+import { CreateItemUseCase } from '../../src/modules/library/bibliography/application/commands/create-item/create-item.use-case';
+import { UpdateItemUseCase } from '../../src/modules/library/bibliography/application/commands/update-item/update-item.use-case';
+import { DeleteItemUseCase } from '../../src/modules/library/bibliography/application/commands/delete-item/delete-item.use-case';
+import { RestoreItemUseCase } from '../../src/modules/library/bibliography/application/commands/restore-item/restore-item.use-case';
+import { GetItemUseCase } from '../../src/modules/library/bibliography/application/queries/get-item/get-item.use-case';
+import { ListItemsUseCase } from '../../src/modules/library/bibliography/application/queries/list-items/list-items.use-case';
 import {
   ItemConcurrencyDomainException,
   ItemNotFoundDomainException,
-} from '../../src/modules/library/catalog/domain/exceptions/item-domain.exception';
+} from '../../src/modules/library/bibliography/domain/exceptions/item-domain.exception';
 import { VersionMismatchException } from '../../src/modules/library/shared-kernel/core/errors/version-mismatch.exception';
 
 describe('ItemsController (Hexagonal Driver Adapter)', () => {
   let controller: ItemsController;
-  let mockItemsService: any;
   let mockCreateUseCase: { execute: jest.Mock };
   let mockUpdateUseCase: { execute: jest.Mock };
   let mockDeleteUseCase: { execute: jest.Mock };
@@ -27,7 +25,6 @@ describe('ItemsController (Hexagonal Driver Adapter)', () => {
   const validUuid = '11111111-1111-4111-8111-111111111111';
 
   beforeEach(async () => {
-    mockItemsService = {};
     mockCreateUseCase = {
       execute: jest.fn().mockResolvedValue({
         id: validUuid,
@@ -98,14 +95,13 @@ describe('ItemsController (Hexagonal Driver Adapter)', () => {
     };
 
     controller = new ItemsController(
-      mockItemsService,
       mockCreateUseCase as any,
       mockUpdateUseCase as any,
       mockDeleteUseCase as any,
       mockRestoreUseCase as any,
       mockGetUseCase as any,
       mockListUseCase as any,
-      // A1 — New Use Cases (mocked as no-ops)
+      // Query & Command Use Cases
       {
         execute: jest.fn().mockResolvedValue({
           title: '',
@@ -118,7 +114,7 @@ describe('ItemsController (Hexagonal Driver Adapter)', () => {
       } as any,
       {
         execute: jest.fn().mockResolvedValue({ references: [], count: 0 }),
-      },
+      } as any,
       {
         execute: jest.fn().mockResolvedValue({
           success: true,
@@ -130,6 +126,23 @@ describe('ItemsController (Hexagonal Driver Adapter)', () => {
         execute: jest
           .fn()
           .mockResolvedValue({ success: true, item: {}, conversionReport: {} }),
+      } as any,
+      {
+        execute: jest.fn().mockResolvedValue({ success: true, importedCount: 0 }),
+      } as any,
+      {
+        execute: jest.fn().mockResolvedValue(true),
+      } as any,
+      {
+        execute: jest.fn().mockResolvedValue({ id: validUuid }),
+      } as any,
+      {
+        getRelatedItems: jest.fn().mockResolvedValue({ relatedItems: [], total: 0 }),
+        linkItems: jest.fn().mockResolvedValue({ success: true }),
+        unlinkItems: jest.fn().mockResolvedValue({ success: true }),
+      } as any,
+      {
+        execute: jest.fn().mockReturnValue({ targetType: 'book', fields: {} }),
       } as any,
     );
   });

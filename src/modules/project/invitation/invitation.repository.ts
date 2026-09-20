@@ -1,6 +1,6 @@
-import { Injectable } from '@nestjs/common';
+﻿import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
-import { ProjectMemberRole, InvitationStatus, Prisma } from '@prisma/client';
+import { Role, InvitationStatus, Prisma } from '@prisma/client';
 import { isUuid } from '@/core/utils/uuid.util';
 
 const USER_SELECT = {
@@ -128,7 +128,7 @@ export class InvitationRepository {
   async create(data: {
     projectId: string;
     email: string;
-    role: ProjectMemberRole;
+    role: Role;
     tokenHash: string;
     invitedById: string;
     expiresAt: Date;
@@ -260,11 +260,7 @@ export class InvitationRepository {
   /**
    * Add a member to a project.
    */
-  async addProjectMember(
-    projectId: string,
-    userId: string,
-    role: ProjectMemberRole,
-  ) {
+  async addProjectMember(projectId: string, userId: string, role: Role) {
     return this.prisma.projectMember.create({
       data: {
         projectId,

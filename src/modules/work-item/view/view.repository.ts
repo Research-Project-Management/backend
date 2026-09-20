@@ -15,11 +15,16 @@ const CREATOR_SELECT = {
   },
 } as const;
 
-function mapCreator(user: {
-  id: string;
-  email: string | null;
-  profile?: { name: string; avatar: string | null } | null;
-} | null | undefined): ViewCreatorUser | undefined {
+function mapCreator(
+  user:
+    | {
+        id: string;
+        email: string | null;
+        profile?: { name: string; avatar: string | null } | null;
+      }
+    | null
+    | undefined,
+): ViewCreatorUser | undefined {
   if (!user) return undefined;
   return {
     id: user.id,

@@ -71,10 +71,10 @@ async function runAudit() {
     { module: 'Health & Core', method: 'GET', path: '/api/health', auth: false, expected: [200] },
     { module: 'Health & Core', method: 'GET', path: '/api/ai/health', auth: false, expected: [200] },
 
-    // ── 2. Identity & Access Management (IAM) ────────────────────────────────
-    { module: 'Identity / IAM', method: 'GET', path: '/auth/me', auth: true, expected: [200] },
-    { module: 'Identity / IAM', method: 'GET', path: '/api/auth/sessions', auth: true, expected: [200] },
-    { module: 'Identity / IAM', method: 'GET', path: `/api/authz/projects/${projectId}/permissions`, auth: true, expected: [200] },
+    // ── 2. Identity Domain ──────────────────────────────────────────────────
+    { module: 'Identity', method: 'GET', path: '/auth/me', auth: true, expected: [200] },
+    { module: 'Identity', method: 'GET', path: '/api/auth/sessions', auth: true, expected: [200] },
+    { module: 'Identity', method: 'GET', path: `/api/authz/projects/${projectId}/permissions`, auth: true, expected: [200] },
 
     // ── 3. Project Management ────────────────────────────────────────────────
     { module: 'Project Management', method: 'GET', path: '/api/projects', auth: true, expected: [200] },
@@ -82,21 +82,19 @@ async function runAudit() {
     { module: 'Project Management', method: 'GET', path: `/api/projects/${projectId}/members`, auth: true, expected: [200] },
     { module: 'Project Management', method: 'GET', path: `/api/projects/${projectId}/overview`, auth: true, expected: [200] },
 
-    // ── 4. Sticky Notes (Server-Authoritative) ────────────────────────────────
-    { module: 'Sticky Notes', method: 'GET', path: '/api/stickies', auth: true, expected: [200] },
-    { module: 'Sticky Notes', method: 'GET', path: '/api/me/stickies', auth: true, expected: [200] },
-    { module: 'Sticky Notes', method: 'GET', path: `/api/projects/${projectId}/stickies`, auth: true, expected: [200] },
+    // ── 4. Sticky Notes (Server-Authoritative Personal Scope) ────────────────
+    { module: 'Sticky Notes', method: 'GET', path: '/api/v1/stickies', auth: true, expected: [200] },
     {
       module: 'Sticky Notes',
       method: 'POST',
-      path: '/api/stickies',
+      path: '/api/v1/stickies',
       auth: true,
-      body: { title: 'Audit Sticky Note', content: '<p>Server Authoritative Verified</p>', color: 'yellow-1', scope: 'personal' },
+      body: { title: 'Audit Sticky Note', content: '<p>Server Authoritative Verified</p>', color: 'yellow-1' },
       expected: [200, 201],
       cleanup: async (resData) => {
         const id = resData?.data?.id || resData?.id;
         if (id) {
-          await fetch(`${BASE_URL}/api/stickies/${id}`, { method: 'DELETE', headers });
+          await fetch(`${BASE_URL}/api/v1/stickies/${id}`, { method: 'DELETE', headers });
         }
       },
     },

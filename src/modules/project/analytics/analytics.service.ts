@@ -45,7 +45,10 @@ export class ProjectAnalyticsService {
       const target = new Date(project.targetDate);
       const diffMs = target.getTime() - now.getTime();
       daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-      isOverdue = daysRemaining < 0 && project.state !== 'completed';
+      const terminalStates = ['completed', 'cancelled', 'suspended', 'hoàn thành & lưu trữ', 'hủy bỏ', 'tạm dừng'];
+      isOverdue =
+        daysRemaining < 0 &&
+        Boolean(project.state && !terminalStates.includes(project.state.name?.toLowerCase()));
     }
 
     return {

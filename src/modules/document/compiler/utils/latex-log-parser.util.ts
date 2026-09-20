@@ -101,7 +101,9 @@ export function parseLatexLog(
     // File tracking: detect (path/to/file.tex and )
     // Simple heuristic for TeX file navigation in logs
     if (line.includes('(')) {
-      const fileMatch = line.match(/\((?:\.\/|\/|[a-zA-Z]:[\\/])([^\s()]+\.(?:tex|sty|cls|bbl|aux))/i);
+      const fileMatch = line.match(
+        /\((?:\.\/|\/|[a-zA-Z]:[\\/])([^\s()]+\.(?:tex|sty|cls|bbl|aux))/i,
+      );
       if (fileMatch) {
         const openedFile = fileMatch[1].replace(/\\/g, '/');
         const filename = openedFile.split('/').pop() || openedFile;
@@ -159,7 +161,10 @@ export function parseLatexLog(
     // Examples:
     // LaTeX Warning: Citation 'smith2020' on page 1 undefined on input line 42.
     // LaTeX Warning: Reference 'fig:arch' on page 2 undefined on input line 85.
-    if (line.includes('LaTeX Warning:') || line.includes('Package ') && line.includes('Warning:')) {
+    if (
+      line.includes('LaTeX Warning:') ||
+      (line.includes('Package ') && line.includes('Warning:'))
+    ) {
       let warningMessage = line.trim();
       let warnLine: number | null = null;
 
@@ -174,7 +179,9 @@ export function parseLatexLog(
         warningMessage += ' ' + lines[i + 1].trim();
       }
 
-      const inputLineMatch = warningMessage.match(/(?:input line|lines?)\s+(\d+)/i);
+      const inputLineMatch = warningMessage.match(
+        /(?:input line|lines?)\s+(\d+)/i,
+      );
       if (inputLineMatch) {
         warnLine = parseInt(inputLineMatch[1], 10);
       }
@@ -193,8 +200,13 @@ export function parseLatexLog(
 
     // 3. Detect Overfull/Underfull boxes
     // Example: Overfull \hbox (15.22pt too wide) in paragraph at lines 15--24
-    if (line.startsWith('Overfull \\hbox') || line.startsWith('Underfull \\hbox')) {
-      const boxMatch = line.match(/(Overfull|Underfull)\s+\\hbox\s*\(([^)]+)\)\s+in paragraph at lines?\s+(\d+)(?:--(\d+))?/i);
+    if (
+      line.startsWith('Overfull \\hbox') ||
+      line.startsWith('Underfull \\hbox')
+    ) {
+      const boxMatch = line.match(
+        /(Overfull|Underfull)\s+\\hbox\s*\(([^)]+)\)\s+in paragraph at lines?\s+(\d+)(?:--(\d+))?/i,
+      );
       let boxLine: number | null = null;
       let context = '';
 
@@ -221,7 +233,9 @@ export function parseLatexLog(
  * Extracts a concise, human-readable primary error summary from diagnostics.
  * Ideal for displaying in toasts or high-level error alerts.
  */
-export function extractPrimaryError(diagnostics: CompilerDiagnostic[]): string | null {
+export function extractPrimaryError(
+  diagnostics: CompilerDiagnostic[],
+): string | null {
   const firstError = diagnostics.find((d) => d.severity === 'error');
   if (!firstError) {
     return null;

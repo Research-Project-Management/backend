@@ -17,11 +17,13 @@ const AUTHOR_SELECT = {
   },
 } as const;
 
-function mapAuthor(user: {
-  id: string;
-  email: string | null;
-  profile?: { name: string; avatar: string | null } | null;
-} | null): StorageVersionAuthor | null {
+function mapAuthor(
+  user: {
+    id: string;
+    email: string | null;
+    profile?: { name: string; avatar: string | null } | null;
+  } | null,
+): StorageVersionAuthor | null {
   if (!user) return null;
   return {
     id: user.id,

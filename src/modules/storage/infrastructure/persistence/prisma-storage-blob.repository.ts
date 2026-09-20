@@ -66,6 +66,6 @@ export class PrismaStorageBlobRepository implements IStorageBlobRepository {
       },
       take: limit,
     });
-    return records.map(StorageBlobMapper.toDomain);
+    return records.map((r) => StorageBlobMapper.toDomain(r));
   }
 }

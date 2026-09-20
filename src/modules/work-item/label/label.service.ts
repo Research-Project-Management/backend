@@ -15,11 +15,15 @@ import {
   UpdateLabelDto,
   ImportLabelsDto,
 } from './dto/label.dto';
-import { LabelType, Label, Prisma } from '@prisma/client';
+import { WorkItemLabel as Label, Prisma } from '@prisma/client';
 import { PrismaService } from '@/core/database/prisma.service';
 import { RedisCacheService } from '@/core/cache/redis.service';
 import { WORK_ITEM_REDIS_KEYS } from '../core/constants/redis-keys.constant';
-import { LabelWithChildren, ImportLabelResult } from './types/label.types';
+import {
+  LabelWithChildren,
+  ImportLabelResult,
+  LabelType,
+} from './types/label.types';
 
 export const DEFAULT_LABEL_PALETTE = [
   '#ef4444', // Red
@@ -152,7 +156,7 @@ export class LabelService {
     // 3. Calculate sortOrder if omitted
     let sortOrder = dto.sortOrder;
     if (sortOrder === undefined) {
-      const lastLabel = await this.prisma.label.findFirst({
+      const lastLabel = await this.prisma.workItemLabel.findFirst({
         where: { projectId },
         orderBy: { sortOrder: 'desc' },
         select: { sortOrder: true },
@@ -169,7 +173,6 @@ export class LabelService {
       sortOrder,
       parentId: dto.parentId || null,
       projectId,
-      type: dto.type || LabelType.work_item,
       createdById: userId,
     });
 
@@ -340,9 +343,9 @@ export class LabelService {
     const seenInBatch = new Set<string>();
     let skipped = 0;
     let failed = 0;
-    const toCreate: Prisma.LabelUncheckedCreateInput[] = [];
+    const toCreate: Prisma.WorkItemLabelUncheckedCreateInput[] = [];
 
-    const lastLabel = await this.prisma.label.findFirst({
+    const lastLabel = await this.prisma.workItemLabel.findFirst({
       where: { projectId },
       orderBy: { sortOrder: 'desc' },
       select: { sortOrder: true },
@@ -373,7 +376,6 @@ export class LabelService {
         description: row.description?.trim() || null,
         projectId,
         createdById: userId,
-        type: LabelType.work_item,
         sortOrder: baseSortOrder,
       });
       baseSortOrder += 10000;
@@ -431,7 +433,7 @@ export class LabelService {
       });
     }
 
-    const existing = await this.prisma.label.findFirst({
+    const existing = await this.prisma.workItemLabel.findFirst({
       where: {
         createdById: userId,
         projectId: null,
@@ -448,7 +450,6 @@ export class LabelService {
     const label = await this.labelRepository.create({
       name: dto.name.trim(),
       color,
-      type: dto.type || LabelType.work_item,
       description: dto.description || null,
       parentId: dto.parentId || null,
       createdById: userId,
@@ -476,7 +477,7 @@ export class LabelService {
       dto.name &&
       dto.name.trim().toLowerCase() !== existing.name.toLowerCase()
     ) {
-      const duplicate = await this.prisma.label.findFirst({
+      const duplicate = await this.prisma.workItemLabel.findFirst({
         where: {
           createdById: userId,
           projectId: null,
@@ -543,7 +544,7 @@ export class LabelService {
     const seenInBatch = new Set<string>();
     let skipped = 0;
     let failed = 0;
-    const toCreate: Prisma.LabelUncheckedCreateInput[] = [];
+    const toCreate: Prisma.WorkItemLabelUncheckedCreateInput[] = [];
 
     for (const row of dto.labels) {
       if (!row.name || typeof row.name !== 'string' || !row.name.trim()) {
@@ -569,7 +570,6 @@ export class LabelService {
         description: row.description?.trim() || null,
         projectId: null,
         createdById: userId,
-        type: LabelType.work_item,
       });
     }
 

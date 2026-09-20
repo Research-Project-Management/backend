@@ -1,5 +1,5 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ProjectMemberRole } from '@prisma/client';
+﻿import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Role } from '@prisma/client';
 
 export class MinimalUserDto {
   @ApiProperty({ example: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11' })
@@ -26,10 +26,10 @@ export class ProjectMemberResponseDto {
   userId!: string;
 
   @ApiProperty({
-    enum: ProjectMemberRole,
-    example: ProjectMemberRole.contributor,
+    enum: Role,
+    example: Role.contributor,
   })
-  role!: ProjectMemberRole;
+  role!: Role;
 
   @ApiProperty({ example: '2026-09-12T00:00:00.000Z' })
   joinedAt!: Date | string;

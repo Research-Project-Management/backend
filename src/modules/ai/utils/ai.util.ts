@@ -12,6 +12,7 @@ export function sanitizeChatTitle(rawTitle?: string | null): string {
     .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
     .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
     .replace(/<[^>]*>/g, '')
+    // eslint-disable-next-line no-control-regex
     .replace(/[\x00-\x1F\x7F]/g, '')
     .trim();
   return sanitized.length > 0 ? sanitized.slice(0, 100) : 'New Chat';
@@ -23,11 +24,14 @@ export function sanitizeChatTitle(rawTitle?: string | null): string {
  */
 export function sanitizeChatMessageContent(rawContent?: string | null): string {
   if (!rawContent) return '';
-  return rawContent
-    .replace(/\0/g, '')
-    .replace(/[\x01-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
-    .trim()
-    .slice(0, 50000);
+  return (
+    rawContent
+      .replace(/\0/g, '')
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\x01-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+      .trim()
+      .slice(0, 50000)
+  );
 }
 
 /**

@@ -2,27 +2,26 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { fromPartial } from '@total-typescript/shoehorn';
 import { Prisma } from '@prisma/client';
-import { DuplicateService } from '@/modules/library/processing/application/services/duplicate.service';
+import { DuplicateService } from '@/modules/library/ingestion/application/services/duplicate.service';
 import { PrismaService } from '@/core/database/prisma.service';
 import {
   TransactionService,
   TransactionHelpers,
 } from '@/modules/library/shared-kernel/outbox/transaction.service';
-import { TagsService } from '@/modules/library/catalog/application/services/tags.service';
-import { CollectionsService } from '@/modules/library/catalog/application/services/collections.service';
-import { AttachmentsService } from '@/modules/library/content/application/services/attachments.service';
-import { NotesService } from '@/modules/library/content/application/services/notes.service';
-import { StateService } from '@/modules/library/catalog/application/services/state.service';
 import {
-  ITEM_READ_PORT,
-  IItemReadPort,
-  ItemDetail,
-} from '@/modules/library/catalog/domain/ports/items.ports';
+  BIBLIOGRAPHY_FACADE,
+  IBibliographyFacade,
+} from '@/modules/library/bibliography/bibliography.facade';
+import {
+  READER_FACADE,
+  IReaderFacade,
+} from '@/modules/library/reader/reader.facade';
+import { ItemDetail } from '@/modules/library/bibliography/domain/ports/items.ports';
 import {
   normalizeTitleForDedupe,
   extractFirstAuthorFamily,
   generateDedupeBucketKey,
-} from '@/modules/library/processing/application/utils/curation.utils';
+} from '@/modules/library/ingestion/application/utils/curation.utils';
 
 describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () => {
   const mockUserId = '11111111-1111-4111-8111-111111111111';
@@ -58,12 +57,8 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
     let service: DuplicateService;
     let mockPrisma: any;
     let mockLibraryTx: any;
-    let mockTagsService: jest.Mocked<TagsService>;
-    let mockCollectionsService: jest.Mocked<CollectionsService>;
-    let mockAttachmentsService: jest.Mocked<AttachmentsService>;
-    let mockNotesService: jest.Mocked<NotesService>;
-    let mockStateService: jest.Mocked<StateService>;
-    let mockItemReadPort: jest.Mocked<IItemReadPort>;
+    let mockBibliographyFacade: jest.Mocked<IBibliographyFacade>;
+    let mockReaderFacade: jest.Mocked<IReaderFacade>;
     let mockTx: any;
     let mockHelpers: jest.Mocked<TransactionHelpers>;
 
@@ -110,24 +105,13 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
           .mockImplementation((cb: any) => cb(mockTx, mockHelpers)),
       };
 
-      mockTagsService = fromPartial({
-        mergeTagsToItem: jest.fn().mockResolvedValue(undefined),
-      });
-      mockCollectionsService = fromPartial({
-        transferItemMemberships: jest.fn().mockResolvedValue(undefined),
-      });
-      mockAttachmentsService = fromPartial({
-        reassignToItem: jest.fn().mockResolvedValue(undefined),
-      });
-      mockNotesService = fromPartial({
-        reassignToItem: jest.fn().mockResolvedValue(undefined),
-      });
-      mockStateService = fromPartial({
-        transferUserItemStates: jest.fn().mockResolvedValue(undefined),
-      });
-      mockItemReadPort = fromPartial({
+      mockBibliographyFacade = fromPartial({
         findDuplicateCandidateItems: jest.fn(),
         findByIds: jest.fn(),
+        mergeItems: jest.fn().mockResolvedValue(undefined),
+      });
+      mockReaderFacade = fromPartial({
+        reassignContentToItem: jest.fn().mockResolvedValue(undefined),
       });
       mockPrisma = fromPartial({});
 
@@ -136,12 +120,8 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
           DuplicateService,
           { provide: PrismaService, useValue: mockPrisma },
           { provide: TransactionService, useValue: mockLibraryTx },
-          { provide: TagsService, useValue: mockTagsService },
-          { provide: CollectionsService, useValue: mockCollectionsService },
-          { provide: AttachmentsService, useValue: mockAttachmentsService },
-          { provide: NotesService, useValue: mockNotesService },
-          { provide: StateService, useValue: mockStateService },
-          { provide: ITEM_READ_PORT, useValue: mockItemReadPort },
+          { provide: BIBLIOGRAPHY_FACADE, useValue: mockBibliographyFacade },
+          { provide: READER_FACADE, useValue: mockReaderFacade },
         ],
       }).compile();
 
@@ -149,7 +129,7 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
     });
 
     it('should detect duplicate items via exact normalized DOI', async () => {
-      mockItemReadPort.findDuplicateCandidateItems.mockResolvedValueOnce([
+      mockBibliographyFacade.findDuplicateCandidateItems.mockResolvedValueOnce([
         fromPartial({
           id: 'item-1',
           title: 'Attention Is All You Need',
@@ -175,7 +155,7 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
     });
 
     it('should detect duplicate items via fuzzy Title + Year + Author matching', async () => {
-      mockItemReadPort.findDuplicateCandidateItems.mockResolvedValueOnce([
+      mockBibliographyFacade.findDuplicateCandidateItems.mockResolvedValueOnce([
         fromPartial({
           id: 'item-a',
           title: 'Deep Residual Learning for Image Recognition',
@@ -232,7 +212,7 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
         extra: null,
       });
 
-      mockItemReadPort.findByIds.mockResolvedValueOnce([
+      mockBibliographyFacade.findByIds.mockResolvedValueOnce([
         primaryItem,
         duplicateItem,
       ]);
@@ -249,26 +229,13 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
 
       // Verify advisory transaction lock was acquired
       expect(mockTx.$executeRaw).toHaveBeenCalled();
-      // Verify sub-services were orchestrated
-      expect(mockAttachmentsService.reassignToItem).toHaveBeenCalledWith(
+      // Verify facades were orchestrated
+      expect(mockReaderFacade.reassignContentToItem).toHaveBeenCalledWith(
         ['dup-2'],
         'primary-1',
         mockTx,
       );
-      expect(mockNotesService.reassignToItem).toHaveBeenCalledWith(
-        ['dup-2'],
-        'primary-1',
-        mockTx,
-      );
-      expect(mockTagsService.mergeTagsToItem).toHaveBeenCalledWith(
-        mockTx,
-        ['dup-2'],
-        'primary-1',
-      );
-      expect(
-        mockCollectionsService.transferItemMemberships,
-      ).toHaveBeenCalledWith(['dup-2'], 'primary-1', mockTx);
-      expect(mockStateService.transferUserItemStates).toHaveBeenCalledWith(
+      expect(mockBibliographyFacade.mergeItems).toHaveBeenCalledWith(
         mockTx,
         ['dup-2'],
         'primary-1',
@@ -291,7 +258,7 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
 
     it('should auto-resolve cluster using "most_complete" strategy and borrow missing fields', async () => {
       // 1. Setup candidate items in detectDuplicates
-      mockItemReadPort.findDuplicateCandidateItems.mockResolvedValue([
+      mockBibliographyFacade.findDuplicateCandidateItems.mockResolvedValue([
         fromPartial({
           id: 'item-incomplete',
           title: 'Quantum Computing',
@@ -306,7 +273,7 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
         }),
       ]);
 
-      // 2. Setup candidate items fetched by itemReadPort.findByIds for ranking & merge
+      // 2. Setup candidate items fetched by bibliographyFacade.findByIds for ranking & merge
       const itemIncomplete = fromPartial<ItemDetail>({
         id: 'item-incomplete',
         title: 'Quantum Computing',
@@ -341,7 +308,7 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
       });
 
       // First call for ranking in autoResolveCluster, second call inside mergeDuplicates
-      mockItemReadPort.findByIds
+      mockBibliographyFacade.findByIds
         .mockResolvedValueOnce([itemIncomplete, itemComplete])
         .mockResolvedValueOnce([itemComplete, itemIncomplete]);
 
@@ -363,7 +330,7 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
     });
 
     it('should throw NotFoundException if clusterId does not exist during autoResolveCluster', async () => {
-      mockItemReadPort.findDuplicateCandidateItems.mockResolvedValueOnce([]);
+      mockBibliographyFacade.findDuplicateCandidateItems.mockResolvedValueOnce([]);
 
       await expect(
         service.autoResolveCluster(mockUserId, 'non-existent-cluster'),
@@ -371,13 +338,13 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
     });
 
     it('should throw BadRequestException if cluster contains fewer than 2 items to merge', async () => {
-      mockItemReadPort.findDuplicateCandidateItems.mockResolvedValue([
+      mockBibliographyFacade.findDuplicateCandidateItems.mockResolvedValue([
         fromPartial({ id: 'item-1', doi: '10.1/1', title: 'Paper 1' }),
         fromPartial({ id: 'item-2', doi: '10.1/1', title: 'Paper 2' }),
       ]);
 
       // simulate only 1 item remaining in DB (one already deleted)
-      mockItemReadPort.findByIds.mockResolvedValueOnce([
+      mockBibliographyFacade.findByIds.mockResolvedValueOnce([
         fromPartial<ItemDetail>({
           id: 'item-1',
           doi: '10.1/1',

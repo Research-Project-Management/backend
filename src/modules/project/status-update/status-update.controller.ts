@@ -7,6 +7,8 @@ import {
   Param,
   Body,
   UseGuards,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -14,8 +16,9 @@ import {
   ApiOperation,
   ApiResponse,
 } from '@nestjs/swagger';
-import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
-import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
+import { JwtAuthGuard } from '@/modules/identity/auth';
+import { CurrentUser } from '@/modules/identity/auth';
+import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 import { StatusUpdateService } from './status-update.service';
 import { CreateProjectStatusUpdateDto } from './dto/create-status-update.dto';
 import { UpdateProjectStatusUpdateDto } from './dto/update-status-update.dto';
@@ -28,6 +31,8 @@ export class StatusUpdateController {
   constructor(private readonly service: StatusUpdateService) {}
 
   @Get(':projectId/updates')
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
     summary: 'List all status updates for a project (chronological)',
   })
@@ -37,6 +42,8 @@ export class StatusUpdateController {
   }
 
   @Get(':projectId/updates/latest')
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get the latest status update for a project' })
   @ApiResponse({ status: 200, description: 'Latest status update or null' })
   getLatestUpdate(@Param('projectId') projectId: string) {
@@ -44,6 +51,9 @@ export class StatusUpdateController {
   }
 
   @Post(':projectId/updates')
+  @HttpCode(HttpStatus.CREATED)
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Post a new status update for a project' })
   @ApiResponse({
     status: 201,
@@ -58,6 +68,8 @@ export class StatusUpdateController {
   }
 
   @Patch(':projectId/updates/:updateId')
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Edit an existing status update' })
   @ApiResponse({
     status: 200,
@@ -72,6 +84,8 @@ export class StatusUpdateController {
   }
 
   @Delete(':projectId/updates/:updateId')
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('owner', 'coordinator')
   @ApiOperation({ summary: 'Delete a status update' })
   @ApiResponse({
     status: 200,

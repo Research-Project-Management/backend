@@ -1,6 +1,6 @@
-import { WorkItem, ProjectMember, ProjectMemberRole } from '@prisma/client';
+﻿import { WorkItem, ProjectMember, Role } from '@prisma/client';
 
-export { ProjectMemberRole };
+export { Role };
 
 export interface AssignWorkItemResult {
   workItem: WorkItem;
@@ -19,10 +19,10 @@ export interface ProjectSettingsWithAssignee {
   [key: string]: unknown;
 }
 
-export const ELIGIBLE_ASSIGNEE_ROLES: readonly ProjectMemberRole[] = [
-  ProjectMemberRole.owner,
-  ProjectMemberRole.coordinator,
-  ProjectMemberRole.contributor,
+export const ELIGIBLE_ASSIGNEE_ROLES: readonly Role[] = [
+  Role.owner,
+  Role.coordinator,
+  Role.contributor,
 ] as const;
 
 export interface IAssignmentRepository {

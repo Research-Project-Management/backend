@@ -18,21 +18,15 @@ import {
 import { InvitationService } from './invitation.service';
 import { CreateProjectInvitationDto } from './dto/create-invitation.dto';
 import { JoinByCodeDto } from './dto/join-by-code.dto';
-import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
-import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
-import { ProjectRoleGuard } from '@/modules/iam/authz/guards/role.guard';
-import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
-import { VerifiedEmailGuard } from '@/modules/iam/authn/guards/verified-email.guard';
-import type { AuthenticatedUser } from '@/modules/iam/core/types/iam.type';
+import { JwtAuthGuard } from '@/modules/identity/auth';
+import { CurrentUser } from '@/modules/identity/auth';
+import { VerifiedEmailGuard } from '@/modules/identity/auth';
+import type { AuthenticatedUser } from '@/modules/identity/identity.facade';
+import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Project Invitations')
 @ApiBearerAuth('JWT-auth')
-@Controller([
-  'api/v1/projects',
-  'api/v1/project',
-  'api/projects',
-  'api/project',
-])
+@Controller(['api/v1/projects', 'api/projects'])
 @UseGuards(JwtAuthGuard)
 export class InvitationController {
   constructor(private readonly invitationService: InvitationService) {}
@@ -100,6 +94,7 @@ export class InvitationController {
   }
 
   @Post(':projectId/invitations')
+  @HttpCode(HttpStatus.CREATED)
   @UseGuards(ProjectRoleGuard, VerifiedEmailGuard)
   @ProjectRoles('owner')
   @ApiOperation({ summary: 'Invite a user to a project via email' })

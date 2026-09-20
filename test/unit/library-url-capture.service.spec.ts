@@ -1,7 +1,8 @@
-import { UrlCaptureService } from '../../src/modules/library/processing/application/services/url-capture.service';
+import { UrlCaptureService } from '../../src/modules/library/ingestion/application/services/url-capture.service';
+import { IngestionRepository } from '../../src/modules/library/ingestion/infrastructure/repositories/ingestion.repository';
 
 jest.mock(
-  '../../src/modules/library/content/application/services/web-snapshot.service',
+  '../../src/modules/library/reader/application/services/web-snapshot.service',
   () => ({ WebSnapshotService: class WebSnapshotService {} }),
 );
 
@@ -10,6 +11,7 @@ describe('UrlCaptureService', () => {
     const prisma = {
       capturePreview: { create: jest.fn().mockResolvedValue({}) },
     } as any;
+    const repo = new IngestionRepository(prisma);
     const provider = {
       captureFromUrl: jest.fn().mockResolvedValue({
         title: 'Captured article',
@@ -19,7 +21,7 @@ describe('UrlCaptureService', () => {
       }),
       calculateMetadataDigest: jest.fn().mockReturnValue('digest'),
     } as any;
-    const service = new UrlCaptureService(prisma, provider);
+    const service = new UrlCaptureService(repo, provider);
 
     await service.captureUrl('https://example.org/article', {
       userId: 'user-1',
@@ -59,7 +61,8 @@ describe('UrlCaptureService', () => {
         title: 'Captured article',
       }),
     } as any;
-    const service = new UrlCaptureService(prisma, provider, undefined, items);
+    const repo = new IngestionRepository(prisma);
+    const service = new UrlCaptureService(repo, provider, undefined, items);
 
     await service.confirmCapturedUrl('project-1', 'user-1', {
       previewToken: 'signed-token',

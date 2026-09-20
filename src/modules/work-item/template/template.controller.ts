@@ -18,15 +18,14 @@ import {
   ApiOperation,
   ApiParam,
 } from '@nestjs/swagger';
-import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
-import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
-import { ProjectRoleGuard } from '@/modules/iam/authz/guards/role.guard';
-import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
+import { JwtAuthGuard } from '@/modules/identity/auth';
+import { CurrentUser } from '@/modules/identity/auth';
 import { TemplateService } from './template.service';
 import { CreateTemplateDto } from './dto/create-template.dto';
 import { UpdateTemplateDto } from './dto/update-template.dto';
 import { QueryTemplateDto } from './dto/query-template.dto';
 import { InstantiateTemplateDto } from './dto/instantiate-template.dto';
+import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('work-items')
 @ApiBearerAuth('JWT-auth')

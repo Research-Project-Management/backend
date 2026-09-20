@@ -2,7 +2,6 @@ import 'dotenv/config';
 import {
   PrismaClient,
   Role,
-  ProjectMemberRole,
   AttachmentType,
   WorkItemPriority,
   CycleStatus,
@@ -38,8 +37,10 @@ async function main() {
   await prisma.label.deleteMany();
   await prisma.file.deleteMany();
   await prisma.projectMember.deleteMany();
+  await prisma.projectState.deleteMany();
   await prisma.project.deleteMany();
   await prisma.refreshToken.deleteMany();
+  await prisma.userProfile.deleteMany();
   await prisma.user.deleteMany();
 
   // 2. Create Users
@@ -48,9 +49,13 @@ async function main() {
     data: {
       email: 'admin@rpm.local',
       password: passwordHash,
-      name: 'Dr. Evelyn Vance',
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
       status: 'active',
+      profile: {
+        create: {
+          name: 'Dr. Evelyn Vance',
+          avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+        },
+      },
     },
   });
 
@@ -58,9 +63,13 @@ async function main() {
     data: {
       email: 'researcher@rpm.local',
       password: passwordHash,
-      name: 'Alex Chen',
-      avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
       status: 'active',
+      profile: {
+        create: {
+          name: 'Alex Chen',
+          avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
+        },
+      },
     },
   });
 
@@ -75,8 +84,8 @@ async function main() {
       createdById: adminUser.id,
       members: {
         create: [
-          { userId: adminUser.id, role: ProjectMemberRole.owner },
-          { userId: researcherUser.id, role: ProjectMemberRole.contributor },
+          { userId: adminUser.id, role: Role.owner },
+          { userId: researcherUser.id, role: Role.contributor },
         ],
       },
     },

@@ -15,12 +15,11 @@ import {
   ApiOperation,
   ApiResponse,
 } from '@nestjs/swagger';
-import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
-import { ProjectRoleGuard } from '@/modules/iam/authz/guards/role.guard';
-import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
-import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
+import { JwtAuthGuard } from '@/modules/identity/auth';
+import { CurrentUser } from '@/modules/identity/auth';
 import { RelationService } from './relation.service';
 import { AddRelationDto, RelationResponseDto } from './dto/relation.dto';
+import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Work Item Relations')
 @ApiBearerAuth('JWT-auth')

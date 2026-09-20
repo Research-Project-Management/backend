@@ -12,8 +12,8 @@ import {
   ApiOperation,
   ApiResponse,
 } from '@nestjs/swagger';
-import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
-import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
+import { JwtAuthGuard } from '@/modules/identity/auth';
+import { CurrentUser } from '@/modules/identity/auth';
 import { FavoriteService } from './favorite.service';
 
 @ApiTags('Project Favorites')

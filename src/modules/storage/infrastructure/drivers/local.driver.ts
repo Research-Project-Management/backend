@@ -23,7 +23,7 @@ export class LocalStorageDriver implements IStorageDriver {
   }
 
   private resolveFilePath(key: string): string {
-    const cleanKey = key.replace(/\0/g, '').replace(/(\.\.[\/\\])+/g, '');
+    const cleanKey = key.replace(/\0/g, '').replace(/(\.\.[/\\])+/g, '');
     const fullPath = path.join(this.rootPath, cleanKey);
     const dir = path.dirname(fullPath);
     if (!fs.existsSync(dir)) {
@@ -101,9 +101,9 @@ export class LocalStorageDriver implements IStorageDriver {
     }
   }
 
-  async exists(key: string): Promise<boolean> {
+  exists(key: string): Promise<boolean> {
     const fullPath = this.resolveFilePath(key);
-    return fs.existsSync(fullPath);
+    return Promise.resolve(fs.existsSync(fullPath));
   }
 
   async copy(sourceKey: string, destinationKey: string): Promise<void> {
@@ -112,45 +112,51 @@ export class LocalStorageDriver implements IStorageDriver {
     await fs.promises.copyFile(src, dst);
   }
 
-  async getPresignedUploadUrl(key: string): Promise<string> {
+  getPresignedUploadUrl(key: string): Promise<string> {
     // Local driver fallback URL
-    return `/api/files/local-upload?key=${encodeURIComponent(key)}`;
+    return Promise.resolve(
+      `/api/files/local-upload?key=${encodeURIComponent(key)}`,
+    );
   }
 
-  async getPresignedDownloadUrl(key: string): Promise<string> {
-    return `/api/files/local-download?key=${encodeURIComponent(key)}`;
+  getPresignedDownloadUrl(key: string): Promise<string> {
+    return Promise.resolve(
+      `/api/files/local-download?key=${encodeURIComponent(key)}`,
+    );
   }
 
-  async initiateMultipartUpload(key: string): Promise<{ uploadId: string }> {
-    return { uploadId: `local-mpu-${Date.now()}` };
+  initiateMultipartUpload(key: string): Promise<{ uploadId: string }> {
+    return Promise.resolve({ uploadId: `local-mpu-${Date.now()}` });
   }
 
-  async getPresignedPartUploadUrl(
+  getPresignedPartUploadUrl(
     key: string,
     uploadId: string,
     partNumber: number,
   ): Promise<string> {
-    return `/api/files/local-upload-part?key=${encodeURIComponent(key)}&uploadId=${uploadId}&part=${partNumber}`;
+    return Promise.resolve(
+      `/api/files/local-upload-part?key=${encodeURIComponent(key)}&uploadId=${uploadId}&part=${partNumber}`,
+    );
   }
 
-  async completeMultipartUpload(): Promise<{
+  completeMultipartUpload(): Promise<{
     location?: string;
     eTag?: string;
   }> {
-    return { eTag: 'local-completed-etag' };
+    return Promise.resolve({ eTag: 'local-completed-etag' });
   }
 
-  async abortMultipartUpload(): Promise<void> {}
+  abortMultipartUpload(): Promise<void> {
+    return Promise.resolve();
+  }
 
-  async listUploadedParts(): Promise<CompletedPart[]> {
-    return [];
+  listUploadedParts(): Promise<CompletedPart[]> {
+    return Promise.resolve([]);
   }
 
   private activeLifecycleConfig: StorageLifecycleConfiguration | null = null;
 
-  async applyLifecycleRules(
-    config?: StorageLifecycleConfiguration,
-  ): Promise<void> {
+  applyLifecycleRules(config?: StorageLifecycleConfiguration): Promise<void> {
     this.activeLifecycleConfig = config || {
       rules: [
         {
@@ -170,9 +176,10 @@ export class LocalStorageDriver implements IStorageDriver {
     this.logger.log(
       `LocalStorageDriver lifecycle rules configured: ${this.activeLifecycleConfig.rules.length} rules`,
     );
+    return Promise.resolve();
   }
 
-  async getLifecycleRules(): Promise<StorageLifecycleConfiguration | null> {
-    return this.activeLifecycleConfig;
+  getLifecycleRules(): Promise<StorageLifecycleConfiguration | null> {
+    return Promise.resolve(this.activeLifecycleConfig);
   }
 }

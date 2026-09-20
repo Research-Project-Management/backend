@@ -1,22 +1,22 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { UnprocessableEntityException } from '@nestjs/common';
 import { fromPartial } from '@total-typescript/shoehorn';
-import { ItemsService } from '@/modules/library/catalog/application/services/items.service';
-import { QueryRepository } from '@/modules/library/catalog/infrastructure/repositories/query.repository';
-import { CommandRepository } from '@/modules/library/catalog/infrastructure/repositories/command.repository';
+import { ItemsService } from '@/modules/library/bibliography/application/services/items.service';
+import { QueryRepository } from '@/modules/library/bibliography/infrastructure/repositories/query.repository';
+import { CommandRepository } from '@/modules/library/bibliography/infrastructure/repositories/command.repository';
 import { TransactionService } from '@/modules/library/shared-kernel/outbox/transaction.service';
 import { PrismaService } from '@/core/database/prisma.service';
-import { TagsService } from '@/modules/library/catalog/application/services/tags.service';
-import { TypesService } from '@/modules/library/catalog/application/services/types.service';
-import { RagProvider } from '@/modules/library/discovery/infrastructure/providers/rag.provider';
-import { ItemTransformer } from '@/modules/library/catalog/infrastructure/mappers/item.transformer';
-import { sanitizeItemTitle } from '@/modules/library/catalog/application/utils/items.utils';
+import { TagsService } from '@/modules/library/bibliography/application/services/tags.service';
+import { TypesService } from '@/modules/library/bibliography/application/services/types.service';
+import { RagProvider } from '@/modules/library/search/infrastructure/providers/rag.provider';
+import { ItemTransformer } from '@/modules/library/bibliography/infrastructure/mappers/item.transformer';
+import { sanitizeItemTitle } from '@/modules/library/shared-kernel/utils/bibliographic.utils';
 import { VersionMismatchException } from '@/modules/library/shared-kernel/core/errors/version-mismatch.exception';
-import { ItemsMapper } from '@/modules/library/catalog/infrastructure/mappers/items.mapper';
+import { ItemsMapper } from '@/modules/library/bibliography/infrastructure/mappers/items.mapper';
 import {
   resolveExtraPlainText,
   extractNonColumnExtraFields,
-} from '@/modules/library/catalog/infrastructure/repositories/command.repository';
+} from '@/modules/library/bibliography/infrastructure/repositories/command.repository';
 
 describe('Library Items — Authoritative Backend & Sanitization', () => {
   describe('sanitizeItemTitle (Domain Utility)', () => {

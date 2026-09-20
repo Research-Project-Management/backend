@@ -13,8 +13,8 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
-import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
+import { JwtAuthGuard } from '@/modules/identity/auth';
+import { CurrentUser } from '@/modules/identity/auth';
 import { UploadNewVersionUseCase } from '../../application/use-cases/version/upload-new-version.use-case';
 import { GetFileVersionsUseCase } from '../../application/use-cases/version/get-file-versions.use-case';
 import { DownloadFileVersionUseCase } from '../../application/use-cases/version/download-file-version.use-case';

@@ -3,13 +3,14 @@ jest.mock('unpdf', () => ({
 }));
 
 import { NotFoundException, BadRequestException } from '@nestjs/common';
-import { PdfAnnotationImporterService } from '@/modules/library/content/application/services/pdf-annotation-importer.service';
+import { PdfAnnotationImporterService } from '@/modules/library/reader/application/services/pdf-annotation-importer.service';
 import { AnnotationType } from '@prisma/client';
 import { getDocumentProxy } from 'unpdf';
 
 describe('PdfAnnotationImporterService (Zotero 7 Level 5 PDF /Annots Import)', () => {
   let service: PdfAnnotationImporterService;
-  let mockPrisma: any;
+  let mockAnnotationsRepo: any;
+  let mockAttachmentsRepo: any;
   let mockStoragePort: any;
   let mockAnnotationsService: any;
   const mockGetDocumentProxy = getDocumentProxy as jest.MockedFunction<
@@ -19,13 +20,13 @@ describe('PdfAnnotationImporterService (Zotero 7 Level 5 PDF /Annots Import)', (
   beforeEach(() => {
     jest.clearAllMocks();
 
-    mockPrisma = {
-      attachment: {
-        findUnique: jest.fn(),
-      },
-      annotation: {
-        findMany: jest.fn().mockResolvedValue([]),
-      },
+    mockAnnotationsRepo = {
+      findExistingForImport: jest.fn().mockResolvedValue([]),
+    };
+
+    mockAttachmentsRepo = {
+      findUnique: jest.fn(),
+      checkProjectMember: jest.fn().mockResolvedValue(true),
     };
 
     mockStoragePort = {
@@ -42,14 +43,15 @@ describe('PdfAnnotationImporterService (Zotero 7 Level 5 PDF /Annots Import)', (
     };
 
     service = new PdfAnnotationImporterService(
-      mockPrisma,
+      mockAnnotationsRepo,
+      mockAttachmentsRepo,
       mockStoragePort,
       mockAnnotationsService,
     );
   });
 
   it('should throw NotFoundException if attachment is not found', async () => {
-    mockPrisma.attachment.findUnique.mockResolvedValue(null);
+    mockAttachmentsRepo.findUnique.mockResolvedValue(null);
 
     await expect(
       service.importFromAttachment('user-1', 'missing-att'),
@@ -57,7 +59,7 @@ describe('PdfAnnotationImporterService (Zotero 7 Level 5 PDF /Annots Import)', (
   });
 
   it('should throw BadRequestException if attachment has no physical file in storage', async () => {
-    mockPrisma.attachment.findUnique.mockResolvedValue({
+    mockAttachmentsRepo.findUnique.mockResolvedValue({
       id: 'att-1',
       fileId: null,
       file: null,
@@ -69,7 +71,7 @@ describe('PdfAnnotationImporterService (Zotero 7 Level 5 PDF /Annots Import)', (
   });
 
   it('should return 0 imported when PDF contains no annotations', async () => {
-    mockPrisma.attachment.findUnique.mockResolvedValue({
+    mockAttachmentsRepo.findUnique.mockResolvedValue({
       id: 'att-1',
       fileId: 'file-100',
     });
@@ -98,7 +100,7 @@ describe('PdfAnnotationImporterService (Zotero 7 Level 5 PDF /Annots Import)', (
   });
 
   it('should convert standard PDF Annots (Highlight, Underline, StrikeOut, FreeText) and persist them', async () => {
-    mockPrisma.attachment.findUnique.mockResolvedValue({
+    mockAttachmentsRepo.findUnique.mockResolvedValue({
       id: 'att-1',
       fileId: 'file-100',
     });
@@ -184,7 +186,7 @@ describe('PdfAnnotationImporterService (Zotero 7 Level 5 PDF /Annots Import)', (
   });
 
   it('should skip annotations that already exist (deduplication)', async () => {
-    mockPrisma.attachment.findUnique.mockResolvedValue({
+    mockAttachmentsRepo.findUnique.mockResolvedValue({
       id: 'att-1',
       fileId: 'file-100',
     });
@@ -209,7 +211,7 @@ describe('PdfAnnotationImporterService (Zotero 7 Level 5 PDF /Annots Import)', (
     mockGetDocumentProxy.mockResolvedValue(mockPdfDoc as any);
 
     // Existing annotation in database on pageIndex 0 with identical position
-    mockPrisma.annotation.findMany.mockResolvedValue([
+    mockAnnotationsRepo.findExistingForImport.mockResolvedValue([
       {
         pageIndex: 0,
         type: AnnotationType.highlight,

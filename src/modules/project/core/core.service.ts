@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CoreRepository } from './core.repository';
-import { ProjectMemberRole, EntityType } from '@prisma/client';
+import { Role, EntityType } from '@prisma/client';
 import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
 import { RedisCacheService } from '@/core/cache/redis.service';
 import { CACHE_KEYS, CACHE_TTL_SECONDS } from './constants/cache.constant';
@@ -80,12 +80,12 @@ export class CoreService {
       members?: Array<{ userId: string; role?: string }>;
     } | null,
     userId?: string,
-  ): ProjectMemberRole {
-    if (!userId || !project) return ProjectMemberRole.reviewer;
-    if (project.createdById === userId) return ProjectMemberRole.owner;
+  ): Role {
+    if (!userId || !project) return Role.reviewer;
+    if (project.createdById === userId) return Role.owner;
 
     const member = project.members?.find((m) => m.userId === userId);
-    return (member?.role as ProjectMemberRole) || ProjectMemberRole.reviewer;
+    return (member?.role as Role) || Role.reviewer;
   }
 
   /**
@@ -138,10 +138,10 @@ export class CoreService {
     const enrichProject = (p: ProjectWithMembers): EnrichedProject => {
       const yourRole =
         p.createdById === userId
-          ? ProjectMemberRole.owner
+          ? Role.owner
           : membershipMap.get(p.id) ||
             p.members?.find((m) => m.userId === userId)?.role ||
-            ProjectMemberRole.reviewer;
+            Role.reviewer;
       const permissions = calculateProjectPermissions(yourRole, p.isActive);
 
       return {
@@ -175,7 +175,7 @@ export class CoreService {
     userId: string,
   ): Promise<{
     project: EnrichedProject;
-    yourRole: ProjectMemberRole;
+    yourRole: Role;
     permissions: ProjectPermissions;
   }> {
     const cacheKey = CACHE_KEYS.detail(projectId);
@@ -217,7 +217,7 @@ export class CoreService {
     userId: string,
   ): Promise<{
     overview: ProjectOverview;
-    yourRole: ProjectMemberRole;
+    yourRole: Role;
   }> {
     const cacheKey = CACHE_KEYS.overview(projectId);
 
@@ -285,7 +285,7 @@ export class CoreService {
       avatar: dto.avatar || '',
       coverImage: dto.coverImage || dto.cover || '',
       description: dto.description || '',
-      state: dto.state,
+      stateId: dto.stateId,
       priority: dto.priority,
       startDate: dto.startDate ? new Date(dto.startDate) : null,
       targetDate: dto.targetDate ? new Date(dto.targetDate) : null,
@@ -348,7 +348,6 @@ export class CoreService {
       ...(dto.avatar !== undefined && { avatar: dto.avatar }),
       ...(coverVal !== undefined && { coverImage: coverVal }),
       ...(dto.description !== undefined && { description: dto.description }),
-      ...(dto.state !== undefined && { state: dto.state }),
       ...(dto.priority !== undefined && { priority: dto.priority }),
       ...(dto.startDate !== undefined && {
         startDate: dto.startDate ? new Date(dto.startDate) : null,
@@ -550,10 +549,10 @@ export class CoreService {
     const enriched: EnrichedProject[] = projects.map((p) => {
       const yourRole =
         p.createdById === userId
-          ? ProjectMemberRole.owner
+          ? Role.owner
           : membershipMap.get(p.id) ||
             p.members?.find((m) => m.userId === userId)?.role ||
-            ProjectMemberRole.reviewer;
+            Role.reviewer;
       const permissions = calculateProjectPermissions(yourRole, p.isActive);
 
       return {

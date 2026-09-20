@@ -1,7 +1,10 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
-import { CONTENT_FACADE, IContentFacade } from '@/modules/library/content/content.facade';
+import {
+  CONTENT_FACADE,
+  IContentFacade,
+} from '@/modules/library/reader/reader.facade';
 import { EngineService } from '../../engine/engine.service';
 import { ScientificChunkingService } from './scientific-chunking.service';
 import { FileUploadedEvent } from '@/modules/storage/domain/events/file-uploaded.event';

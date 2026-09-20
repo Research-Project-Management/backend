@@ -8,9 +8,9 @@
     "src/core/**/*",
     "src/modules/library/**/*",
     "src/modules/storage/**/*",
-    "src/modules/iam/authn/**/*",
-    "src/modules/iam/authz/**/*",
-    "src/modules/iam/core/**/*"
+    "src/modules/identity/auth/**/*",
+    "src/modules/project/access/**/*",
+    "src/modules/identity/**/*"
   ],
   "exclude": [
     "node_modules",

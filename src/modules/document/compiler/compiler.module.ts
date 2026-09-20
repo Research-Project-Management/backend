@@ -3,7 +3,6 @@ import { CompilerController } from './compiler.controller';
 import { CompilerService } from './compiler.service';
 import { PageModule } from '../page/page.module';
 import { HistoryModule } from '../history/history.module';
-import { LibraryModule } from '../../library/library.module';
 import { AssetModule } from '../asset/asset.module';
 import { CoreModule as AppCoreModule } from '@/core/core.module';
 import { CollaborationModule } from '../collaboration/collaboration.module';
@@ -12,7 +11,6 @@ import { CollaborationModule } from '../collaboration/collaboration.module';
   imports: [
     PageModule,
     HistoryModule,
-    LibraryModule,
     AssetModule,
     AppCoreModule,
     CollaborationModule,

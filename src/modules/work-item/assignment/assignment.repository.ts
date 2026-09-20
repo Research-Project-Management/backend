@@ -1,11 +1,11 @@
-import { Injectable } from '@nestjs/common';
+﻿import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { WorkItem, ProjectMember } from '@prisma/client';
 import {
   IAssignmentRepository,
   ProjectSettingsWithAssignee,
   ELIGIBLE_ASSIGNEE_ROLES,
-  ProjectMemberRole,
+  Role,
 } from './types/assignment.types';
 import { isUuid } from '@/core/utils/uuid.util';
 

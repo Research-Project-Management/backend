@@ -8,6 +8,12 @@ export enum DocumentExportFormat {
   LATEX_BUNDLE = 'latex-bundle',
   LATEX_SOURCE_UNDERSCORE = 'latex_source',
   LATEX_BUNDLE_UNDERSCORE = 'latex_bundle',
+  ZIP = 'zip',
+  ARXIV_ZIP = 'arxiv-zip',
+  ARXIV_ZIP_UNDERSCORE = 'arxiv_zip',
+  LOG = 'log',
+  BBL = 'bbl',
+  AUX = 'aux',
 }
 
 export class ExportDocumentDto {

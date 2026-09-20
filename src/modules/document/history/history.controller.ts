@@ -26,10 +26,9 @@ import {
   UpdateVersionDto,
   VersionQueryDto,
 } from './dto/history.dto';
-import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
-import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
-import { ProjectRoleGuard } from '@/modules/iam/authz/guards/role.guard';
-import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
+import { JwtAuthGuard } from '@/modules/identity/auth';
+import { CurrentUser } from '@/modules/identity/auth';
+import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Document - History & Versions')
 @ApiBearerAuth('JWT-auth')

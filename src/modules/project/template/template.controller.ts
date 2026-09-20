@@ -16,8 +16,8 @@ import {
   ApiOperation,
   ApiResponse,
 } from '@nestjs/swagger';
-import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
-import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
+import { JwtAuthGuard } from '@/modules/identity/auth';
+import { CurrentUser } from '@/modules/identity/auth';
 import { TemplateService } from './template.service';
 import { CreateProjectTemplateDto } from './dto/create-template.dto';
 import { InstantiateProjectTemplateDto } from './dto/instantiate-template.dto';

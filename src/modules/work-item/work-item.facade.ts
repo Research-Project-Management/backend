@@ -105,3 +105,6 @@ export class WorkItemFacade implements IWorkItemFacade {
     return this.workItemRepository.countProjectWorkItems(projectId);
   }
 }
+
+export { DEFAULT_WORK_ITEM_STATES, WorkItemState } from './state/types/state.types';
+export { WORK_ITEM_REDIS_KEYS } from './core/constants/redis-keys.constant';

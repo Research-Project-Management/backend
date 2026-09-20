@@ -8,11 +8,11 @@ import {
 import { randomBytes, createHash } from 'crypto';
 import { InvitationRepository } from './invitation.repository';
 import { CreateProjectInvitationDto } from './dto/create-invitation.dto';
-import { ProjectMemberRole, InvitationStatus } from '@prisma/client';
-import type { AuthenticatedUser } from '@/modules/iam/core/types/iam.type';
+import { Role, InvitationStatus } from '@prisma/client';
+import type { AuthenticatedUser } from '@/modules/identity/identity.facade';
 import { RedisCacheService } from '@/core/cache/redis.service';
 import { CACHE_KEYS } from '../core/constants/cache.constant';
-import { IAM_REDIS_KEYS } from '@/modules/iam/core/constants/redis.constant';
+import { PROJECT_ACCESS_REDIS_KEYS } from '../access/constants/redis.constant';
 
 @Injectable()
 export class InvitationService {
@@ -31,8 +31,11 @@ export class InvitationService {
     if (!this.cache) return;
     try {
       await Promise.all([
-        this.cache.del(IAM_REDIS_KEYS.role(projectId, userId)),
-        this.cache.del(IAM_REDIS_KEYS.permissions(projectId, userId)),
+        this.cache.del(PROJECT_ACCESS_REDIS_KEYS.role(projectId, userId)),
+        this.cache.del(
+          PROJECT_ACCESS_REDIS_KEYS.permissions(projectId, userId),
+        ),
+        this.cache.del(PROJECT_ACCESS_REDIS_KEYS.context(projectId, userId)),
         this.cache.del(CACHE_KEYS.detail(projectId)),
         this.cache.del(CACHE_KEYS.overview(projectId)),
         this.cache.del(CACHE_KEYS.userProjects(userId)),
@@ -239,7 +242,7 @@ export class InvitationService {
     }
 
     // Zero-Trust: Prevent assigning owner role via invitation
-    if (dto.role === ProjectMemberRole.owner) {
+    if (dto.role === Role.owner) {
       throw new ForbiddenException(
         'Cannot invite a member with owner role. Use transfer ownership instead.',
       );
@@ -257,18 +260,21 @@ export class InvitationService {
       throw new BadRequestException('You cannot invite yourself');
     }
 
-    // Prevent inviting someone who is already a member of this project
+    // Enforce Internal System Scope: Invited user must already exist in the system (IAM / users table)
     const existingUser = await this.repository.findUserByEmail(email);
-    if (existingUser) {
-      const isMember = await this.repository.findMember(
-        project.id,
-        existingUser.id,
+    if (!existingUser) {
+      throw new NotFoundException(
+        'User with this email does not exist in the system',
       );
-      if (isMember) {
-        throw new BadRequestException(
-          'User is already a member of this project',
-        );
-      }
+    }
+
+    // Prevent inviting someone who is already a member of this project
+    const isMember = await this.repository.findMember(
+      project.id,
+      existingUser.id,
+    );
+    if (isMember) {
+      throw new BadRequestException('User is already a member of this project');
     }
 
     // Check if duplicate pending invite exists
@@ -291,7 +297,7 @@ export class InvitationService {
     const invitation = await this.repository.create({
       projectId,
       email,
-      role: dto.role || ProjectMemberRole.contributor,
+      role: dto.role || Role.contributor,
       tokenHash,
       invitedById: inviterId,
       expiresAt,

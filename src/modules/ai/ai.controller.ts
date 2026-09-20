@@ -17,10 +17,10 @@ import { FastifyRequest, FastifyReply } from 'fastify';
 import '@fastify/multipart';
 import { AiService } from './ai.service';
 import { AiQueryDto, GetDocumentsBulkDto } from './dto/ai.dto';
-import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
-import { VerifiedEmailGuard } from '@/modules/iam/authn/guards/verified-email.guard';
-import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
-import { Public } from '@/modules/iam/authn/decorators/public.decorator';
+import { JwtAuthGuard } from '@/modules/identity/auth';
+import { VerifiedEmailGuard } from '@/modules/identity/auth';
+import { CurrentUser } from '@/modules/identity/auth';
+import { Public } from '@/modules/identity/auth';
 import { BypassEnvelope } from '@/core/decorators/bypass.decorator';
 
 @ApiTags('AI - Unified Copilot')

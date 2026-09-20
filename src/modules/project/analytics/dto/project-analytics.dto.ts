@@ -24,8 +24,13 @@ export class ProjectPortfolioOverviewDto {
   @ApiProperty({ example: 'Deep Learning Genome Analysis' })
   name!: string;
 
-  @ApiProperty({ enum: ProjectState, example: ProjectState.execution })
-  state!: ProjectState;
+  @ApiPropertyOptional({ example: '01957c91-2345-7890-abcd-ef0123456789', nullable: true })
+  stateId?: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+  })
+  state?: ProjectState | null;
 
   @ApiProperty({ enum: ProjectPriority, example: ProjectPriority.high })
   priority!: ProjectPriority;

@@ -33,7 +33,7 @@ export interface WorkItemActivityEvent extends BaseActivityEvent {
     | 'title'
     | 'description'
     | 'state'
-    | string;
+    | (string & {});
   oldValue?: string;
   newValue?: string;
   oldIdentifier?: string;

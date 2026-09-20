@@ -64,9 +64,7 @@ export class AnalyticsRepository {
           trashedAt: null,
         },
       }),
-      this.prisma.sticky.count({
-        where: { projectId: canonicalProjectId, deletedAt: null },
-      }),
+      Promise.resolve(0),
       this.prisma.cycle.count({
         where: { projectId: canonicalProjectId, deletedAt: null },
       }),

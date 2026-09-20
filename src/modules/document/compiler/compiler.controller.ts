@@ -17,10 +17,9 @@ import {
   CompileDocumentDto,
 } from './dto/compiler.dto';
 import { ForwardSyncDto, ReverseSyncDto } from './dto/synctex.dto';
-import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
-import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
-import { ProjectRoleGuard } from '@/modules/iam/authz/guards/role.guard';
-import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
+import { JwtAuthGuard } from '@/modules/identity/auth';
+import { CurrentUser } from '@/modules/identity/auth';
+import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Document - Compiler')
 @ApiBearerAuth('JWT-auth')
@@ -148,6 +147,7 @@ export class CompilerController {
     'synctex/forward',
     'projects/:projectId/synctex/forward',
     'compiler/synctex/forward',
+    'compiler/projects/:projectId/synctex/forward',
   ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
@@ -164,6 +164,7 @@ export class CompilerController {
     'synctex/reverse',
     'projects/:projectId/synctex/reverse',
     'compiler/synctex/reverse',
+    'compiler/projects/:projectId/synctex/reverse',
   ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')

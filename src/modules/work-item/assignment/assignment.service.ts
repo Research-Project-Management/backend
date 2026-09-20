@@ -264,7 +264,7 @@ export class AssignmentService {
       await this.assignmentRepository.findEligibleAssignees(projectId);
     return {
       members: members.map((member) => ({
-        id: member.id,
+        id: member.userId,
         userId: member.userId,
         role: member.role,
         joinedAt: member.joinedAt,

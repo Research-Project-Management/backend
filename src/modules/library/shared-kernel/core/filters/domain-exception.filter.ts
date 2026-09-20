@@ -6,17 +6,17 @@ import {
   Logger,
 } from '@nestjs/common';
 import { FastifyReply } from 'fastify';
-import { CatalogDomainException } from '../../../catalog/domain/exceptions/item-domain.exception';
+import { BaseDomainException } from '../errors/domain.exception';
 
 /**
  * Clean Architecture Interface Adapter:
  * Maps pure domain exceptions to HTTP status codes at the presentation boundary.
  */
-@Catch(CatalogDomainException)
+@Catch(BaseDomainException)
 export class DomainExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(DomainExceptionFilter.name);
 
-  catch(exception: CatalogDomainException, host: ArgumentsHost) {
+  catch(exception: BaseDomainException, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<FastifyReply>();
 

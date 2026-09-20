@@ -101,8 +101,8 @@ export class YourWorkService {
         if (matched?.group && typeof matched.group === 'string') {
           return matched.group as StateGroup;
         }
-        if (matched?.name) {
-          colName = String(matched.name);
+        if (typeof matched?.name === 'string') {
+          colName = matched.name;
         }
       }
       return inferStateGroup(item.columnId, colName);

@@ -10,7 +10,7 @@ import {
 } from '@nestjs/common';
 import { FastifyReply } from 'fastify';
 import { EngineService } from './engine/engine.service';
-import { ThreadService } from './thread/thread.service';
+import { ChatService } from './chat/chat.service';
 import { AiQueryDto } from './dto/ai.dto';
 import {
   buildAiPayload,
@@ -26,7 +26,7 @@ export class AiService {
 
   constructor(
     private readonly engineService: EngineService,
-    private readonly threadService: ThreadService,
+    private readonly chatService: ChatService,
     private readonly prisma: PrismaService,
   ) {}
 
@@ -149,7 +149,7 @@ export class AiService {
     // Resolve or establish authoritative chat session
     let effectiveTitle = 'New Chat';
     if (targetPageId) {
-      const pageSession = await this.threadService.getOrCreatePageChat(
+      const pageSession = await this.chatService.getOrCreatePageChat(
         targetPageId,
         userId,
         targetProjectId,
@@ -158,7 +158,7 @@ export class AiService {
       effectiveTitle = pageSession.title;
     } else if (!targetChatId) {
       effectiveTitle = sanitizeChatTitle(lastUserMsg.content);
-      const newSession = await this.threadService.createChat(userId, {
+      const newSession = await this.chatService.createChat(userId, {
         projectId: targetProjectId,
         title: effectiveTitle,
         documentIds: payload.document_ids,
@@ -170,12 +170,14 @@ export class AiService {
 
     // Save user message to thread
     try {
-      await this.threadService.appendMessages(targetChatId, userId, {
+      await this.chatService.appendMessages(targetChatId, userId, {
         messages: [{ role: 'user', content: lastUserMsg.content }],
         documentIds: payload.document_ids,
       });
     } catch (err) {
-      this.logger.warn(`Could not persist user message to thread: ${err}`);
+      this.logger.warn(
+        `Could not persist user message to thread: ${String(err)}`,
+      );
     }
 
     const initialEvents = [
@@ -188,13 +190,13 @@ export class AiService {
     const onComplete = async (accumulatedText: string) => {
       if (targetChatId && accumulatedText && accumulatedText.trim()) {
         try {
-          await this.threadService.appendMessages(targetChatId, userId, {
+          await this.chatService.appendMessages(targetChatId, userId, {
             messages: [{ role: 'assistant', content: accumulatedText }],
             documentIds: payload.document_ids,
           });
         } catch (err) {
           this.logger.warn(
-            `Could not persist assistant stream response: ${err}`,
+            `Could not persist assistant stream response: ${String(err)}`,
           );
         }
       }
@@ -238,7 +240,7 @@ export class AiService {
     // Resolve or establish authoritative chat session
     let effectiveTitle = 'New Chat';
     if (targetPageId) {
-      const pageSession = await this.threadService.getOrCreatePageChat(
+      const pageSession = await this.chatService.getOrCreatePageChat(
         targetPageId,
         userId,
         targetProjectId,
@@ -247,7 +249,7 @@ export class AiService {
       effectiveTitle = pageSession.title;
     } else if (!targetChatId) {
       effectiveTitle = sanitizeChatTitle(lastUserMsg.content);
-      const newSession = await this.threadService.createChat(userId, {
+      const newSession = await this.chatService.createChat(userId, {
         projectId: targetProjectId,
         title: effectiveTitle,
         documentIds: payload.document_ids,
@@ -259,19 +261,21 @@ export class AiService {
 
     // Save user message to thread
     try {
-      await this.threadService.appendMessages(targetChatId, userId, {
+      await this.chatService.appendMessages(targetChatId, userId, {
         messages: [{ role: 'user', content: lastUserMsg.content }],
         documentIds: payload.document_ids,
       });
     } catch (err) {
-      this.logger.warn(`Could not persist user message to thread: ${err}`);
+      this.logger.warn(
+        `Could not persist user message to thread: ${String(err)}`,
+      );
     }
 
     const result = await this.engineService.syncChat(payload);
 
     if (targetChatId && result.content && result.content.trim()) {
       try {
-        await this.threadService.appendMessages(targetChatId, userId, {
+        await this.chatService.appendMessages(targetChatId, userId, {
           messages: [
             {
               role: 'assistant',
@@ -283,7 +287,9 @@ export class AiService {
           documentIds: payload.document_ids,
         });
       } catch (err) {
-        this.logger.warn(`Could not persist assistant sync response: ${err}`);
+        this.logger.warn(
+          `Could not persist assistant sync response: ${String(err)}`,
+        );
       }
     }
 

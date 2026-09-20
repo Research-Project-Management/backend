@@ -79,8 +79,7 @@ export const formatWorkItem = (
   const assignee = record.assignee
     ? {
         id: record.assignee.id,
-        name:
-          record.assignee.profile?.name ?? record.assignee.name ?? 'User',
+        name: record.assignee.profile?.name ?? record.assignee.name ?? 'User',
         email: record.assignee.email,
         avatar:
           record.assignee.profile?.avatar ?? record.assignee.avatar ?? null,

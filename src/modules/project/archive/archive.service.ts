@@ -1,4 +1,4 @@
-import {
+﻿import {
   Injectable,
   NotFoundException,
   BadRequestException,
@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ArchiveRepository } from './archive.repository';
-import { ProjectMemberRole, EntityType } from '@prisma/client';
+import { Role, EntityType } from '@prisma/client';
 import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
 import { RedisCacheService } from '@/core/cache/redis.service';
 import { CACHE_KEYS } from '../core/constants/cache.constant';
@@ -60,10 +60,10 @@ export class ArchiveService {
     const enriched: EnrichedProject[] = projects.map((p) => {
       const yourRole =
         p.createdById === userId
-          ? ProjectMemberRole.owner
+          ? Role.owner
           : membershipMap.get(p.id) ||
             p.members?.find((m) => m.userId === userId)?.role ||
-            ProjectMemberRole.reviewer;
+            Role.reviewer;
       const permissions = calculateProjectPermissions(yourRole, p.isActive);
 
       return {

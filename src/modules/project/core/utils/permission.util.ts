@@ -1,4 +1,4 @@
-import { ProjectMemberRole } from '@prisma/client';
+﻿import { Role } from '@prisma/client';
 import { ProjectPermissions } from '../types/project.type';
 
 /**
@@ -8,10 +8,10 @@ import { ProjectPermissions } from '../types/project.type';
  * Enforces Zero-Trust: Frontend must never calculate permissions; Backend is the SSOT.
  */
 export function calculateProjectPermissions(
-  role?: ProjectMemberRole | null,
+  role?: Role | null,
   isActive = true,
 ): ProjectPermissions {
-  const isOwner = role === ProjectMemberRole.owner;
+  const isOwner = role === Role.owner;
 
   if (!isActive) {
     // In archived/inactive state, project settings are read-only.

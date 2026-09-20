@@ -10,8 +10,8 @@ import { ProjectAnalyticsService } from '@/modules/project/analytics/analytics.s
 import { ProjectAnalyticsRepository } from '@/modules/project/analytics/analytics.repository';
 import { TemplateService } from '@/modules/project/template/template.service';
 import { TemplateRepository } from '@/modules/project/template/template.repository';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { ProjectState, ProjectPriority } from '@prisma/client';
+import { NotFoundException, BadRequestException } from '@nestjs/common';
+import { ProjectPriority } from '@prisma/client';
 
 describe('Project Sub-Modules Specification (Single Responsibility)', () => {
   // ─── 1. State Module ───────────────────────────────────────────────────────
@@ -22,56 +22,67 @@ describe('Project Sub-Modules Specification (Single Responsibility)', () => {
     beforeEach(() => {
       mockStateRepo = {
         findProjectState: jest.fn(),
-        updateProjectState: jest.fn(),
+        findProjectStateById: jest.fn(),
+        setCurrentProjectState: jest.fn(),
       };
       stateService = new StateService(mockStateRepo as StateRepository);
     });
 
-    it('should return catalog of all 6 project states with descriptions', () => {
-      const catalog = stateService.getProjectStatesCatalog();
-      expect(catalog).toHaveLength(6);
-      expect(catalog.map((c) => c.state)).toEqual([
-        'draft',
-        'planning',
-        'execution',
-        'monitoring',
-        'completed',
-        'cancelled',
+    it('should return default template of 8 research project states', () => {
+      const template = stateService.getDefaultStatesTemplate();
+      expect(template).toHaveLength(8);
+      expect(template.map((c) => c.name)).toEqual([
+        'Thuyết minh đề cương',
+        'Thẩm định & Phê duyệt',
+        'Triển khai & Thực nghiệm',
+        'Soạn thảo & Công bố',
+        'Nghiệm thu & Đánh giá',
+        'Hoàn thành & Lưu trữ',
+        'Tạm dừng',
+        'Hủy bỏ',
       ]);
     });
 
-    it('should allow valid lifecycle transition from planning to execution', async () => {
+    it('should transition project state to target stateId', async () => {
       mockStateRepo.findProjectState.mockResolvedValue({
         id: 'proj-1',
-        state: ProjectState.planning,
         name: 'Genome AI',
+        stateId: 'state-1',
+        state: { id: 'state-1', name: 'Proposal' },
       });
-      mockStateRepo.updateProjectState.mockResolvedValue({
+      mockStateRepo.findProjectStateById.mockResolvedValue({
+        id: 'state-2',
+        name: 'Under Review',
+      });
+      mockStateRepo.setCurrentProjectState.mockResolvedValue({
         id: 'proj-1',
-        state: ProjectState.execution,
+        stateId: 'state-2',
       });
 
-      const result = await stateService.updateProjectState(
+      const result = await stateService.transitionToState('proj-1', 'state-2');
+      expect(result.stateId).toBe('state-2');
+      expect(result.stateLabel).toBe('Under Review');
+      expect(mockStateRepo.setCurrentProjectState).toHaveBeenCalledWith(
         'proj-1',
-        ProjectState.execution,
-      );
-      expect(result.state).toBe(ProjectState.execution);
-      expect(mockStateRepo.updateProjectState).toHaveBeenCalledWith(
-        'proj-1',
-        ProjectState.execution,
+        'state-2',
       );
     });
 
-    it('should reject invalid transition (e.g. completed to draft directly)', async () => {
+    it('should allow unassigning state when targetStateId is null', async () => {
       mockStateRepo.findProjectState.mockResolvedValue({
         id: 'proj-1',
-        state: ProjectState.completed,
         name: 'Genome AI',
+        stateId: 'state-1',
+      });
+      mockStateRepo.setCurrentProjectState.mockResolvedValue({
+        id: 'proj-1',
+        stateId: null,
       });
 
-      await expect(
-        stateService.updateProjectState('proj-1', ProjectState.draft),
-      ).rejects.toThrow(BadRequestException);
+      const result = await stateService.transitionToState('proj-1', null);
+      expect(result.stateId).toBeNull();
+      expect(result.state).toBeNull();
+      expect(result.stateLabel).toBe('Chưa đặt trạng thái (Unassigned)');
     });
   });
 
@@ -251,7 +262,8 @@ describe('Project Sub-Modules Specification (Single Responsibility)', () => {
       mockRepo.getProjectWithMetadata.mockResolvedValue({
         id: 'proj-1',
         name: 'Research Engine',
-        state: ProjectState.execution,
+        stateId: 's1',
+        state: { id: 's1', name: 'Triển khai & Thực nghiệm' } as any,
         priority: ProjectPriority.urgent,
         startDate: new Date('2026-01-01'),
         targetDate: futureDate,
@@ -340,7 +352,7 @@ describe('Project Sub-Modules Specification (Single Responsibility)', () => {
                 .fn()
                 .mockResolvedValue({ id: 'state-1', group: 'unstarted' }),
             },
-            label: {
+            workItemLabel: {
               create: jest.fn().mockResolvedValue({ id: 'label-1' }),
             },
             workItem: {

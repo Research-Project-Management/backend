@@ -4,7 +4,9 @@
  * Implements Hexagonal / DDD-Lite Architecture decoupling Prisma models from services.
  */
 
-import { Label, LabelType, Prisma } from '@prisma/client';
+import { WorkItemLabel as Label, Prisma } from '@prisma/client';
+
+export type LabelType = string;
 
 export interface ILabelRepository {
   findUserLabels(
@@ -14,11 +16,15 @@ export interface ILabelRepository {
   ): Promise<Label[]>;
   findLabelById(labelId: string): Promise<Label | null>;
   createLabel(
-    data: Prisma.LabelCreateInput | Prisma.LabelUncheckedCreateInput,
+    data:
+      | Prisma.WorkItemLabelCreateInput
+      | Prisma.WorkItemLabelUncheckedCreateInput,
   ): Promise<Label>;
   updateLabel(
     labelId: string,
-    data: Prisma.LabelUpdateInput | Prisma.LabelUncheckedUpdateInput,
+    data:
+      | Prisma.WorkItemLabelUpdateInput
+      | Prisma.WorkItemLabelUncheckedUpdateInput,
   ): Promise<Label>;
   deleteLabel(labelId: string): Promise<Label>;
 }

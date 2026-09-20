@@ -8,12 +8,14 @@ import { ArchiveModule } from './archive/archive.module';
 import { ProjectAnalyticsModule } from './analytics/analytics.module';
 import { MemberModule } from './member/member.module';
 import { InvitationModule } from './invitation/invitation.module';
-import { LinkModule } from './link/link.module';
 import { OverviewModule } from './overview/overview.module';
 import { StatusUpdateModule } from './status-update/status-update.module';
 
+import { AccessModule } from './access/access.module';
+
 @Module({
   imports: [
+    AccessModule,
     CoreModule,
     StateModule,
     LabelModule,
@@ -23,11 +25,11 @@ import { StatusUpdateModule } from './status-update/status-update.module';
     ProjectAnalyticsModule,
     MemberModule,
     InvitationModule,
-    LinkModule,
     OverviewModule,
     StatusUpdateModule,
   ],
   exports: [
+    AccessModule,
     CoreModule,
     StateModule,
     LabelModule,
@@ -37,7 +39,6 @@ import { StatusUpdateModule } from './status-update/status-update.module';
     ProjectAnalyticsModule,
     MemberModule,
     InvitationModule,
-    LinkModule,
     OverviewModule,
     StatusUpdateModule,
   ],

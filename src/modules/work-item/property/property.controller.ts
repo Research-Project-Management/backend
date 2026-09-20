@@ -16,10 +16,9 @@ import {
 } from '@nestjs/swagger';
 import { PropertyService } from './property.service';
 import { UpdatePropertyDto } from './dto/property.dto';
-import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
-import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
-import { ProjectRoleGuard } from '@/modules/iam/authz/guards/role.guard';
-import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
+import { JwtAuthGuard } from '@/modules/identity/auth';
+import { CurrentUser } from '@/modules/identity/auth';
+import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Work Item User Properties (Plane.so Parity)')
 @ApiBearerAuth('JWT-auth')

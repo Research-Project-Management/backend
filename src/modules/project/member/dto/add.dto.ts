@@ -1,4 +1,4 @@
-import {
+﻿import {
   IsArray,
   IsEnum,
   IsNotEmpty,
@@ -8,7 +8,7 @@ import {
   ArrayMaxSize,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ProjectMemberRole } from '@prisma/client';
+import { Role } from '@prisma/client';
 
 export class AddProjectMemberDto {
   @ApiProperty({
@@ -22,13 +22,13 @@ export class AddProjectMemberDto {
   @ApiPropertyOptional({
     description:
       'Role to assign in the project. Defaults to contributor (assignable: coordinator, contributor, reviewer).',
-    enum: ProjectMemberRole,
-    default: ProjectMemberRole.contributor,
-    example: ProjectMemberRole.contributor,
+    enum: Role,
+    default: Role.contributor,
+    example: Role.contributor,
   })
-  @IsEnum(ProjectMemberRole, { message: 'Invalid project member role' })
+  @IsEnum(Role, { message: 'Invalid project member role' })
   @IsOptional()
-  role?: ProjectMemberRole;
+  role?: Role;
 }
 
 export class BulkAddProjectMembersDto {
@@ -47,11 +47,11 @@ export class BulkAddProjectMembersDto {
   @ApiPropertyOptional({
     description:
       'Common role to grant to all added users (defaults to contributor)',
-    enum: ProjectMemberRole,
-    default: ProjectMemberRole.contributor,
-    example: ProjectMemberRole.contributor,
+    enum: Role,
+    default: Role.contributor,
+    example: Role.contributor,
   })
-  @IsEnum(ProjectMemberRole, { message: 'Invalid project member role' })
+  @IsEnum(Role, { message: 'Invalid project member role' })
   @IsOptional()
-  role?: ProjectMemberRole;
+  role?: Role;
 }

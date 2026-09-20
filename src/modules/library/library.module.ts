@@ -4,25 +4,25 @@ import { CoreModule as AppCoreModule } from '../../core/core.module';
 
 // Bounded Context Modules
 import { SharedKernelModule } from './shared-kernel/shared-kernel.module';
-import { CatalogModule } from './catalog/catalog.module';
-import { ContentModule } from './content/content.module';
-import { ProcessingModule } from './processing/processing.module';
-import { DiscoveryModule } from './discovery/discovery.module';
+import { BibliographyModule } from './bibliography/bibliography.module';
+import { ReaderModule } from './reader/reader.module';
+import { IngestionModule } from './ingestion/ingestion.module';
+import { SearchModule } from './search/search.module';
+import { CitationModule } from './citation/citation.module';
 
 import { LibraryFacade, LIBRARY_FACADE } from './library.facade';
 
 /**
  * Macro Composition Root for the Library Module.
  *
- * Clean Architecture & DDD structure:
- * Consists of exactly 4 Bounded Contexts + 1 Shared Kernel:
- * 1. CatalogModule (Core Domain — Items, Collections, Tags, Types, State, Saved Searches)
- * 2. ContentModule (Supporting Domain — Attachments, Annotations, Notes)
- * 3. ProcessingModule (Supporting Domain — Ingestion Pipeline, Metadata Resolution, Curation, Retraction)
- * 4. DiscoveryModule (Generic Domain — Search, Citation CSL, Exports)
- * 5. SharedKernelModule (Shared Infrastructure, Outbox, Integration Event Bus)
- *
- * Zero submodule clutter. Each Bounded Context is a self-contained unit.
+ * Clean Architecture & Strategic DDD structure:
+ * Consists of exactly 5 Bounded Contexts + 1 Shared Kernel + 1 Unified Facade:
+ * 1. BibliographyModule (Core Domain — Items, Collections, Tags, Types, State, Saved Searches)
+ * 2. ReaderModule (Supporting Domain — Attachments, Annotations, Notes, OCR)
+ * 3. IngestionModule (Supporting Domain — Ingestion Pipeline, Metadata Resolution, Curation, Retraction)
+ * 4. SearchModule (Generic Domain — Postgres FTS, Local Semantic Vector Search, RAG Retrieval)
+ * 5. CitationModule (Supporting Domain — CSL Engine, Citation Formatting, DOI Negotiation, Exports, PDF Baker)
+ * 6. SharedKernelModule (Shared Infrastructure, Outbox, Integration Event Bus)
  */
 @Module({
   imports: [
@@ -31,10 +31,11 @@ import { LibraryFacade, LIBRARY_FACADE } from './library.facade';
 
     // Bounded Contexts
     SharedKernelModule,
-    CatalogModule,
-    ContentModule,
-    ProcessingModule,
-    DiscoveryModule,
+    BibliographyModule,
+    ReaderModule,
+    IngestionModule,
+    SearchModule,
+    CitationModule,
   ],
   providers: [
     LibraryFacade,
@@ -50,10 +51,11 @@ import { LibraryFacade, LIBRARY_FACADE } from './library.facade';
 
     // Bounded Context Modules
     SharedKernelModule,
-    CatalogModule,
-    ContentModule,
-    ProcessingModule,
-    DiscoveryModule,
+    BibliographyModule,
+    ReaderModule,
+    IngestionModule,
+    SearchModule,
+    CitationModule,
   ],
 })
 export class LibraryModule {}

@@ -24,12 +24,12 @@ jest.mock('@mozilla/readability', () => ({
 }));
 
 import { fromPartial, fromAny } from '@total-typescript/shoehorn';
-import { AttachmentsService } from '@/modules/library/content/application/services/attachments.service';
-import { AttachmentsController } from '@/modules/library/content/presentation/attachments.controller';
-import { WebSnapshotService } from '@/modules/library/content/application/services/web-snapshot.service';
-import { IdentifyStage } from '@/modules/library/processing/infrastructure/stages/identify.stage';
-import { ExtractionHandler } from '@/modules/library/content/application/handlers/extraction.handler';
-import { CommandRepository } from '@/modules/library/catalog/infrastructure/repositories/command.repository';
+import { AttachmentsService } from '@/modules/library/reader/application/services/attachments.service';
+import { AttachmentsController } from '@/modules/library/reader/presentation/attachments.controller';
+import { WebSnapshotService } from '@/modules/library/reader/application/services/web-snapshot.service';
+import { IdentifyStage } from '@/modules/library/ingestion/infrastructure/stages/identify.stage';
+import { ExtractionHandler } from '@/modules/library/reader/application/handlers/extraction.handler';
+import { CommandRepository } from '@/modules/library/bibliography/infrastructure/repositories/command.repository';
 import { IStoragePort } from '@/modules/storage/storage.port';
 
 describe('Library Attachments & Storage Integration Suite', () => {
@@ -136,10 +136,9 @@ describe('Library Attachments & Storage Integration Suite', () => {
 
     beforeEach(() => {
       service = new AttachmentsService(
-        mockPrisma,
         mockRepo,
         mockTx,
-        mockItemExistencePort,
+        { itemExists: jest.fn().mockResolvedValue(true) } as any,
         mockStoragePort,
       );
     });
@@ -229,10 +228,9 @@ describe('Library Attachments & Storage Integration Suite', () => {
       };
 
       const thumbnailService = new AttachmentsService(
-        mockPrisma,
         mockRepo,
         mockTx,
-        mockItemExistencePort,
+        { itemExists: jest.fn().mockResolvedValue(true) } as any,
         mockStoragePort,
         mockDriver,
         mockNodeRepo,
@@ -275,10 +273,9 @@ describe('Library Attachments & Storage Integration Suite', () => {
       };
 
       const thumbnailService = new AttachmentsService(
-        mockPrisma,
         mockRepo,
         mockTx,
-        mockItemExistencePort,
+        { itemExists: jest.fn().mockResolvedValue(true) } as any,
         mockStoragePort,
         mockDriver,
         mockNodeRepo,
@@ -534,10 +531,32 @@ describe('Library Attachments & Storage Integration Suite', () => {
 
   describe('ExtractionHandler (Background PDF Text Extraction)', () => {
     let handler: ExtractionHandler;
+    let mockExtractionRepo: any;
     let mockPdf: any;
     let mockSearch: any;
 
     beforeEach(() => {
+      mockExtractionRepo = {
+        claimPendingOrRetryable: jest.fn().mockResolvedValue({ count: 1 }),
+        claimStaleProcessing: jest.fn().mockResolvedValue({ count: 0 }),
+        findUniqueAttachment: jest.fn().mockResolvedValue({
+          id: 'att-1',
+          itemId: 'item-1',
+          fileId: null,
+          url: '/api/files/storage-file-123/content',
+          file: null,
+        }),
+        updateAttachmentFileId: jest.fn().mockResolvedValue({ id: 'att-1' }),
+        saveMetadataSourceRecord: jest.fn().mockResolvedValue({ id: 'rec-1' }),
+        updateAttachmentMetadata: jest.fn().mockResolvedValue({ id: 'att-1' }),
+        updateItem: jest.fn().mockResolvedValue({ id: 'item-1' }),
+        countContributors: jest.fn().mockResolvedValue(0),
+        createContributors: jest.fn().mockResolvedValue({ count: 0 }),
+        markReady: jest.fn().mockResolvedValue({ id: 'att-1' }),
+        markFailed: jest.fn().mockResolvedValue({ id: 'att-1' }),
+        findScopePapers: jest.fn().mockResolvedValue([]),
+        upsertItemCitationRelation: jest.fn().mockResolvedValue({}),
+      };
       mockPdf = {
         extractDocumentFromBuffer: jest.fn().mockResolvedValue({
           metadata: { title: 'Extracted PDF' },
@@ -551,7 +570,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
       };
 
       handler = new ExtractionHandler(
-        mockPrisma,
+        mockExtractionRepo,
         mockPdf,
         mockSearch,
         mockStoragePort,
@@ -559,15 +578,6 @@ describe('Library Attachments & Storage Integration Suite', () => {
     });
 
     it('should resolve fileId from URL regex if attachment.fileId is missing and backfill DB', async () => {
-      mockPrisma.attachment.updateMany.mockResolvedValue({ count: 1 });
-      mockPrisma.attachment.findUnique.mockResolvedValue({
-        id: 'att-1',
-        itemId: 'item-1',
-        fileId: null,
-        url: '/api/files/storage-file-123/content',
-        file: null,
-      });
-
       await handler.handle(
         fromPartial({
           id: 'event-1',
@@ -580,11 +590,9 @@ describe('Library Attachments & Storage Integration Suite', () => {
       expect(mockStoragePort.readOwnedFile).toHaveBeenCalledWith({
         fileId: 'storage-file-123',
       });
-      expect(mockPrisma.attachment.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: 'att-1' },
-          data: { fileId: 'storage-file-123' },
-        }),
+      expect(mockExtractionRepo.updateAttachmentFileId).toHaveBeenCalledWith(
+        'att-1',
+        'storage-file-123',
       );
     });
   });

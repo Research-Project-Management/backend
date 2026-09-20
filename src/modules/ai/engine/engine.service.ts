@@ -161,7 +161,7 @@ export class EngineService {
         try {
           await options.onComplete(fallbackMsg);
         } catch (err) {
-          this.logger.warn(`Failed in onComplete fallback: ${err}`);
+          this.logger.warn(`Failed in onComplete fallback: ${String(err)}`);
         }
       }
       rawRes.end();
@@ -175,7 +175,7 @@ export class EngineService {
         try {
           await options.onComplete('');
         } catch (err) {
-          this.logger.warn(`Failed in onComplete empty stream: ${err}`);
+          this.logger.warn(`Failed in onComplete empty stream: ${String(err)}`);
         }
       }
       rawRes.end();
@@ -208,15 +208,17 @@ export class EngineService {
       }
     });
 
-    nodeStream.on('end', async () => {
-      if (options?.onComplete) {
-        try {
-          await options.onComplete(accumulatedText);
-        } catch (err) {
-          this.logger.warn(`Failed in onComplete stream: ${err}`);
+    nodeStream.on('end', () => {
+      void (async () => {
+        if (options?.onComplete) {
+          try {
+            await options.onComplete(accumulatedText);
+          } catch (err) {
+            this.logger.warn(`Failed in onComplete stream: ${String(err)}`);
+          }
         }
-      }
-      rawRes.end();
+        rawRes.end();
+      })();
     });
 
     nodeStream.on('error', (err) => {

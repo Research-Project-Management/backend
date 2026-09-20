@@ -3,7 +3,7 @@ import { DocumentAiIngestionService } from '@/modules/ai/ingestion/services/docu
 import { ScientificChunkingService } from '@/modules/ai/ingestion/services/scientific-chunking.service';
 import { FileUploadedEvent } from '@/modules/storage/domain/events/file-uploaded.event';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
-import { IContentFacade } from '@/modules/library/content/content.facade';
+import { IContentFacade } from '@/modules/library/reader/reader.facade';
 import { EngineService } from '@/modules/ai/engine/engine.service';
 import { PrismaService } from '@/core/database/prisma.service';
 

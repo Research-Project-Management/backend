@@ -5,11 +5,10 @@ import {
   ApiOperation,
   ApiParam,
 } from '@nestjs/swagger';
-import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
-import { ProjectRoleGuard } from '@/modules/iam/authz/guards/role.guard';
-import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
+import { JwtAuthGuard } from '@/modules/identity/auth';
 import { HistoryService } from './history.service';
 import { FeedQueryDto } from './dto/feed-query.dto';
+import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Work Item History & Activity')
 @ApiBearerAuth('JWT-auth')

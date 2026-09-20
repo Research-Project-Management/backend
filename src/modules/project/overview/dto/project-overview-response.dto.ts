@@ -14,7 +14,8 @@ export interface ProjectOverviewProjectDto {
   description: string | null;
   avatar: string | null;
   coverImage: string | null;
-  state: ProjectState;
+  stateId?: string | null;
+  state: ProjectState | null;
   priority: ProjectPriority;
   startDate: Date | null;
   targetDate: Date | null;
@@ -25,16 +26,6 @@ export interface ProjectOverviewProjectDto {
     avatar: string | null;
   } | null;
   members?: ProjectOverviewMemberSummaryDto[];
-}
-
-export interface ProjectOverviewLinkDto {
-  id: string;
-  projectId: string;
-  title: string;
-  url: string;
-  createdById: string;
-  createdAt: Date;
-  updatedAt: Date;
 }
 
 export interface ProjectOverviewMetricsDto {
@@ -90,7 +81,6 @@ export interface ProjectOverviewStatusUpdateDto {
 
 export interface ProjectOverviewResponseDto {
   project: ProjectOverviewProjectDto;
-  links: ProjectOverviewLinkDto[];
   metrics: ProjectOverviewMetricsDto;
   activeCycle: ProjectOverviewActiveCycleDto | null;
   recentActivities: ProjectOverviewActivityDto[];

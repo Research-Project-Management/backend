@@ -1,5 +1,5 @@
 import { ScientificChunkingService } from '@/modules/ai/ingestion/services/scientific-chunking.service';
-import { ExtractedPdfDocument } from '@/modules/library/content/infrastructure/providers/pdf.provider';
+import { ExtractedPdfDocument } from '@/modules/library/reader/infrastructure/providers/pdf.provider';
 
 describe('ScientificChunkingService Unit Suite', () => {
   let service: ScientificChunkingService;

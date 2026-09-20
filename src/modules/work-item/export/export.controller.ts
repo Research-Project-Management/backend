@@ -9,9 +9,8 @@ import {
 import { FastifyReply } from 'fastify';
 import { ExportService } from './export.service';
 import { ExportWorkItemsQueryDto } from './dto/export-query.dto';
-import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
-import { ProjectRoleGuard } from '@/modules/iam/authz/guards/role.guard';
-import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
+import { JwtAuthGuard } from '@/modules/identity/auth';
+import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Work Item Export')
 @ApiBearerAuth('JWT-auth')

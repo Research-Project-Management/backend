@@ -3,7 +3,7 @@ import { PrismaService } from '@/core/database/prisma.service';
 import {
   Prisma,
   Project,
-  ProjectMemberRole,
+  Role,
   ProjectPriority,
   ProjectState,
 } from '@prisma/client';
@@ -14,7 +14,8 @@ import {
   MinimalUser,
 } from './types/project.type';
 import { isUuid } from '@/core/utils/uuid.util';
-import { DEFAULT_WORK_ITEM_STATES } from '@/modules/work-item/state/types/state.types';
+import { DEFAULT_WORK_ITEM_STATES } from '@/modules/work-item/work-item.facade';
+import { DEFAULT_PROJECT_STATES } from '../state/state.constants';
 import { deriveProjectPrefix } from './utils/identifier.util';
 import { ProjectQueryDto } from './dto/query.dto';
 
@@ -77,7 +78,7 @@ export function mapProjectWithMembers<
 export interface CreateProjectInput {
   name: string;
   identifier?: string | null;
-  state?: ProjectState;
+  stateId?: string | null;
   priority?: ProjectPriority;
   startDate?: Date | null;
   targetDate?: Date | null;
@@ -122,7 +123,7 @@ export class CoreRepository {
           : {
               OR: [{ createdById: userId }, { members: { some: { userId } } }],
             }),
-      ...(query?.state ? { state: query.state } : {}),
+      ...(query?.stateId ? { stateId: query.stateId } : {}),
       ...(query?.priority ? { priority: query.priority } : {}),
       ...(query?.labelId
         ? { labels: { some: { labelId: query.labelId } } }
@@ -132,6 +133,7 @@ export class CoreRepository {
     const projects = await this.prisma.project.findMany({
       where,
       include: {
+        state: true,
         members: {
           take: 20,
           include: {
@@ -158,7 +160,7 @@ export class CoreRepository {
   async findMembershipsForUser(
     projectIds: string[],
     userId: string,
-  ): Promise<Map<string, ProjectMemberRole>> {
+  ): Promise<Map<string, Role>> {
     if (!projectIds.length || !isUuid(userId)) return new Map();
 
     const validProjectIds = projectIds.filter(isUuid);
@@ -199,6 +201,7 @@ export class CoreRepository {
         _count: {
           select: { members: true },
         },
+        state: true,
       },
     });
     return project ? mapProjectWithMembers(project) : null;
@@ -216,6 +219,7 @@ export class CoreRepository {
         deletedAt: null,
       },
       include: {
+        state: true,
         members: {
           include: {
             user: { select: USER_SELECT },
@@ -249,7 +253,6 @@ export class CoreRepository {
         avatar: data.avatar || '',
         coverImage: data.coverImage || '',
         description: data.description || '',
-        state: data.state || ProjectState.planning,
         priority: data.priority || ProjectPriority.none,
         startDate: data.startDate || null,
         targetDate: data.targetDate || null,
@@ -259,15 +262,13 @@ export class CoreRepository {
           'cycles',
           'views',
           'pages',
-          'stickies',
-          'storage',
         ],
         settings: (data.settings || {}) as Prisma.InputJsonValue,
         createdById: userId,
         members: {
           create: {
             userId,
-            role: ProjectMemberRole.owner,
+            role: Role.owner,
           },
         },
         ...(data.labelIds && data.labelIds.length > 0
@@ -287,6 +288,15 @@ export class CoreRepository {
             description: s.description || '',
           })),
         },
+        projectStates: {
+          create: DEFAULT_PROJECT_STATES.map((s) => ({
+            name: s.name,
+            description: s.description,
+            color: s.color,
+            sequence: s.sequence,
+            isDefault: s.isDefault,
+          })),
+        },
       },
       include: {
         members: {
@@ -299,8 +309,29 @@ export class CoreRepository {
             label: true,
           },
         },
+        projectStates: true,
       },
     });
+
+    // Link initial stateId to the default project state
+    const defaultProjectState =
+      (data.stateId
+        ? project.projectStates?.find((s: ProjectState) => s.id === data.stateId)
+        : null) ||
+      project.projectStates?.find((s: ProjectState) => s.isDefault) ||
+      project.projectStates?.[0];
+
+    if (defaultProjectState) {
+      await this.prisma.project.update({
+        where: { id: project.id },
+        data: {
+          stateId: defaultProjectState.id,
+        },
+      });
+      project.stateId = defaultProjectState.id;
+      (project as any).state = defaultProjectState;
+    }
+
     return mapProjectWithMembers(project);
   }
 
@@ -569,7 +600,10 @@ export class CoreRepository {
       const target = new Date(project.targetDate);
       const diffMs = target.getTime() - now.getTime();
       daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-      isOverdue = daysRemaining < 0 && project.state !== 'completed';
+      const terminalStates = ['completed', 'cancelled', 'suspended', 'hoàn thành & lưu trữ', 'hủy bỏ', 'tạm dừng'];
+      isOverdue =
+        daysRemaining < 0 &&
+        Boolean(project.state && !terminalStates.includes(project.state.name?.toLowerCase()));
     }
 
     return {
@@ -692,10 +726,10 @@ export class CoreRepository {
         status: true,
         projectMembers: {
           where: {
-            role: ProjectMemberRole.owner,
+            role: Role.owner,
             project: { deletedAt: null },
           },
-          select: { id: true },
+          select: { projectId: true },
         },
       },
     });

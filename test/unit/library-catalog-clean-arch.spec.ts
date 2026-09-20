@@ -1,17 +1,17 @@
-import { DoiVo } from '../../src/modules/library/catalog/domain/value-objects/doi.vo';
-import { CitationKeyVo } from '../../src/modules/library/catalog/domain/value-objects/citation-key.vo';
-import { ItemAggregate } from '../../src/modules/library/catalog/domain/model/item.aggregate';
+import { DoiVo } from '../../src/modules/library/bibliography/domain/value-objects/doi.vo';
+import { CitationKeyVo } from '../../src/modules/library/bibliography/domain/value-objects/citation-key.vo';
+import { ItemAggregate } from '../../src/modules/library/bibliography/domain/model/item.aggregate';
 import {
   ItemConcurrencyDomainException,
   ItemValidationDomainException,
-} from '../../src/modules/library/catalog/domain/exceptions/item-domain.exception';
-import { CreateItemUseCase } from '../../src/modules/library/catalog/application/commands/create-item/create-item.use-case';
-import { UpdateItemUseCase } from '../../src/modules/library/catalog/application/commands/update-item/update-item.use-case';
-import { DeleteItemUseCase } from '../../src/modules/library/catalog/application/commands/delete-item/delete-item.use-case';
-import { RestoreItemUseCase } from '../../src/modules/library/catalog/application/commands/restore-item/restore-item.use-case';
-import { GetItemUseCase } from '../../src/modules/library/catalog/application/queries/get-item/get-item.use-case';
-import { ListItemsUseCase } from '../../src/modules/library/catalog/application/queries/list-items/list-items.use-case';
-import { IItemRepositoryPort } from '../../src/modules/library/catalog/domain/ports/item-repository.port';
+} from '../../src/modules/library/bibliography/domain/exceptions/item-domain.exception';
+import { CreateItemUseCase } from '../../src/modules/library/bibliography/application/commands/create-item/create-item.use-case';
+import { UpdateItemUseCase } from '../../src/modules/library/bibliography/application/commands/update-item/update-item.use-case';
+import { DeleteItemUseCase } from '../../src/modules/library/bibliography/application/commands/delete-item/delete-item.use-case';
+import { RestoreItemUseCase } from '../../src/modules/library/bibliography/application/commands/restore-item/restore-item.use-case';
+import { GetItemUseCase } from '../../src/modules/library/bibliography/application/queries/get-item/get-item.use-case';
+import { ListItemsUseCase } from '../../src/modules/library/bibliography/application/queries/list-items/list-items.use-case';
+import { IItemRepositoryPort } from '../../src/modules/library/bibliography/domain/ports/item-repository.port';
 
 describe('Catalog Bounded Context - Clean Architecture & DDD', () => {
   describe('Value Objects', () => {
@@ -168,6 +168,12 @@ describe('Catalog Bounded Context - Clean Architecture & DDD', () => {
           };
         }),
         delete: jest.fn().mockResolvedValue(undefined),
+        purge: jest.fn().mockResolvedValue(true),
+        updateRagStatus: jest.fn().mockResolvedValue(undefined),
+        setMyPublication: jest.fn().mockResolvedValue(null),
+        getRelations: jest.fn().mockResolvedValue([]),
+        putRelation: jest.fn().mockResolvedValue({ id: 'rel-1' }),
+        removeRelation: jest.fn().mockResolvedValue(true),
       };
     });
 

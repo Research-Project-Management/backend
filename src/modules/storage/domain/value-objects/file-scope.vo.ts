@@ -13,5 +13,9 @@ export function isDriveVisible(
   scope: FileScope | string | null | undefined,
 ): boolean {
   if (!scope) return true;
-  return scope !== FileScope.Library && scope !== FileScope.Paper;
+  const strScope = String(scope);
+  return (
+    strScope !== (FileScope.Library as string) &&
+    strScope !== (FileScope.Paper as string)
+  );
 }

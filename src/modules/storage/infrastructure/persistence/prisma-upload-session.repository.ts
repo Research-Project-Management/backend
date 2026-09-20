@@ -93,6 +93,6 @@ export class PrismaUploadSessionRepository implements IUploadSessionRepository {
       },
       take: limit,
     });
-    return records.map(UploadSessionMapper.toDomain);
+    return records.map((r) => UploadSessionMapper.toDomain(r));
   }
 }

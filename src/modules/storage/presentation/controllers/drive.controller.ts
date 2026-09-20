@@ -13,8 +13,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
-import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
+import { JwtAuthGuard } from '@/modules/identity/auth';
+import { CurrentUser } from '@/modules/identity/auth';
 import { ListDriveUseCase } from '../../application/use-cases/drive/list-drive.use-case';
 import { MoveNodeUseCase } from '../../application/use-cases/drive/move-node.use-case';
 import { SoftDeleteUseCase } from '../../application/use-cases/trash/soft-delete.use-case';
@@ -116,7 +116,7 @@ export class DriveController {
 
   @Get(['shared', 'me/shared'])
   @ApiOperation({ summary: 'Get shared files' })
-  async getSharedFiles(@CurrentUser('id') _userId: string) {
+  getSharedFiles(@CurrentUser('id') _userId: string) {
     return {
       items: [],
       files: [],
@@ -373,7 +373,9 @@ export class DriveController {
       try {
         await this.softDeleteUseCase.execute(id);
         count++;
-      } catch {}
+      } catch {
+        // Best-effort batch deletion
+      }
     }
     return { success: true, count };
   }
@@ -413,7 +415,9 @@ export class DriveController {
       try {
         await this.moveNodeUseCase.execute(id, targetFolderId);
         count++;
-      } catch {}
+      } catch {
+        // Best-effort batch move
+      }
     }
     return { success: true, count };
   }

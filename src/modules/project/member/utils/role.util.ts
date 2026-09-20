@@ -1,20 +1,20 @@
-import { ProjectMemberRole } from '@prisma/client';
+﻿import { Role } from '@prisma/client';
 
 /**
  * Checks if a project member role has ownership privileges.
  */
-export function isOwner(role: ProjectMemberRole): boolean {
-  return role === ProjectMemberRole.owner;
+export function isOwner(role: Role): boolean {
+  return role === Role.owner;
 }
 
 /**
  * Checks if a project member role is capable of execution / work-item assignment (owner or contributor).
  */
-export function isExecutionRole(role: ProjectMemberRole): boolean {
+export function isExecutionRole(role: Role): boolean {
   return (
-    role === ProjectMemberRole.owner ||
-    role === ProjectMemberRole.coordinator ||
-    role === ProjectMemberRole.contributor
+    role === Role.owner ||
+    role === Role.coordinator ||
+    role === Role.contributor
   );
 }
 

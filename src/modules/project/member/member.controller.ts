@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Put,
+  Patch,
   Delete,
   Body,
   Param,
@@ -22,19 +23,13 @@ import { AddProjectMemberDto, BulkAddProjectMembersDto } from './dto/add.dto';
 import { UpdateProjectMemberDto } from './dto/update.dto';
 import { QueryProjectMembersDto } from './dto/query.dto';
 import { TransferOwnershipDto } from './dto/transfer.dto';
-import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
-import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
-import { ProjectRoleGuard } from '@/modules/iam/authz/guards/role.guard';
-import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
+import { JwtAuthGuard } from '@/modules/identity/auth';
+import { CurrentUser } from '@/modules/identity/auth';
+import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Project Members')
 @ApiBearerAuth('JWT-auth')
-@Controller([
-  'api/v1/projects',
-  'api/v1/project',
-  'api/projects',
-  'api/project',
-])
+@Controller(['api/v1/projects', 'api/projects'])
 @UseGuards(JwtAuthGuard)
 export class MemberController {
   constructor(private readonly memberService: MemberService) {}

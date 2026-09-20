@@ -4,14 +4,14 @@ import {
   BadRequestException,
   NotFoundException,
 } from '@nestjs/common';
-import { CollectionsService } from '@/modules/library/catalog/application/services/collections.service';
-import { CollectionsRepository } from '@/modules/library/catalog/infrastructure/repositories/collections.repository';
-import { TreeEngine } from '@/modules/library/catalog/application/engines/tree.engine';
+import { CollectionsService } from '@/modules/library/bibliography/application/services/collections.service';
+import { CollectionsRepository } from '@/modules/library/bibliography/infrastructure/repositories/collections.repository';
+import { TreeEngine } from '@/modules/library/bibliography/application/engines/tree.engine';
 import { PrismaService } from '@/core/database/prisma.service';
 import {
   sanitizeCollectionName,
   sanitizeCollectionDescription,
-} from '@/modules/library/catalog/application/utils/collections.utils';
+} from '@/modules/library/bibliography/application/utils/collections.utils';
 
 describe('Library Collections — Tree Invariants & Sanitization', () => {
   describe('Collection Sanitization Utilities', () => {

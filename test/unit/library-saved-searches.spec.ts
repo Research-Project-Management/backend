@@ -1,9 +1,9 @@
 ﻿import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
-import { ConditionEvaluatorEngine } from '../../src/modules/library/catalog/application/engines/condition-evaluator.engine';
-import { SavedSearchesService } from '../../src/modules/library/catalog/application/services/saved-searches.service';
-import { SavedSearchesRepository } from '../../src/modules/library/catalog/infrastructure/repositories/saved-searches.repository';
-import { SavedSearchConditionGroup } from '../../src/modules/library/catalog/domain/types/saved-search.types';
+import { ConditionEvaluatorEngine } from '../../src/modules/library/bibliography/application/engines/condition-evaluator.engine';
+import { SavedSearchesService } from '../../src/modules/library/bibliography/application/services/saved-searches.service';
+import { SavedSearchesRepository } from '../../src/modules/library/bibliography/infrastructure/repositories/saved-searches.repository';
+import { SavedSearchConditionGroup } from '../../src/modules/library/bibliography/domain/types/saved-search.types';
 
 describe('Library Saved Searches & ConditionEvaluatorEngine', () => {
   let engine: ConditionEvaluatorEngine;

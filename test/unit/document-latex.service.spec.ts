@@ -5,7 +5,6 @@ import {
 } from '@/modules/document/compiler/compiler.service';
 import { PageService } from '@/modules/document/page/page.service';
 import { ConfigService } from '@nestjs/config';
-import { LibraryFacade } from '@/modules/library/library.facade';
 import { PrismaService } from '@/core/database/prisma.service';
 import { RedisCacheService } from '@/core/cache/redis.service';
 import { ForbiddenException } from '@nestjs/common';
@@ -13,7 +12,6 @@ import { ForbiddenException } from '@nestjs/common';
 describe('Document LatexService (Server-Authoritative Multi-file Assembly & Compilation)', () => {
   let service: LatexService;
   let pageService: jest.Mocked<PageService>;
-  let libraryFacade: jest.Mocked<LibraryFacade>;
   let prisma: any;
   let cache: jest.Mocked<RedisCacheService>;
 
@@ -45,13 +43,6 @@ describe('Document LatexService (Server-Authoritative Multi-file Assembly & Comp
       findPageById: jest.fn().mockResolvedValue(mockRootPage),
     };
 
-    const mockLibraryFacade = {
-      exportBibByCitationKeys: jest.fn().mockResolvedValue({
-        content:
-          '@article{nielsen2010, title={Quantum Computation}, author={Nielsen, M.}}\n',
-      }),
-    };
-
     const mockConfigService = {
       get: jest.fn().mockReturnValue('http://localhost:2918'),
     };
@@ -76,7 +67,6 @@ describe('Document LatexService (Server-Authoritative Multi-file Assembly & Comp
         LatexService,
         { provide: PageService, useValue: mockPageService },
         { provide: ConfigService, useValue: mockConfigService },
-        { provide: LibraryFacade, useValue: mockLibraryFacade },
         { provide: PrismaService, useValue: prisma },
         { provide: RedisCacheService, useValue: mockCache },
       ],
@@ -84,7 +74,6 @@ describe('Document LatexService (Server-Authoritative Multi-file Assembly & Comp
 
     service = module.get<LatexService>(LatexService);
     pageService = module.get(PageService);
-    libraryFacade = module.get(LibraryFacade);
     cache = module.get(RedisCacheService);
   });
 
@@ -128,17 +117,13 @@ describe('Document LatexService (Server-Authoritative Multi-file Assembly & Comp
       );
 
       expect(pageService.findPageById).toHaveBeenCalledWith(mockPageId);
-      expect(libraryFacade.exportBibByCitationKeys).toHaveBeenCalledWith(
-        mockUserId,
-        expect.arrayContaining(['nielsen2010']),
-      );
 
-      // Verify payload sent to compiler has assembled child files + references.bib
+      // Verify payload sent to compiler has assembled child files
       expect(global.fetch).toHaveBeenCalledWith(
         'http://localhost:2918/compile',
         expect.objectContaining({
           method: 'POST',
-          body: expect.stringContaining('references.bib'),
+          body: expect.stringContaining('methods.tex'),
         }),
       );
 

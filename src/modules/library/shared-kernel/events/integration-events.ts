@@ -19,7 +19,16 @@ export interface BaseIntegrationEvent<T = any> {
   readonly eventId: string;
   readonly topic: string;
   readonly occurredAt: string;
-  readonly sourceContext: 'catalog' | 'content' | 'processing' | 'discovery';
+  readonly sourceContext:
+    | 'catalog'
+    | 'content'
+    | 'processing'
+    | 'discovery'
+    | 'bibliography'
+    | 'reader'
+    | 'ingestion'
+    | 'search'
+    | 'citation';
   readonly payload: T;
   readonly scope: {
     userId: string;
@@ -65,7 +74,16 @@ export interface IngestionCompletedIntegrationPayload {
 
 export function createIntegrationEvent<T>(
   topic: string,
-  sourceContext: 'catalog' | 'content' | 'processing' | 'discovery',
+  sourceContext:
+    | 'catalog'
+    | 'content'
+    | 'processing'
+    | 'discovery'
+    | 'bibliography'
+    | 'reader'
+    | 'ingestion'
+    | 'search'
+    | 'citation',
   payload: T,
   scope: { userId: string; projectId?: string | null },
 ): BaseIntegrationEvent<T> {

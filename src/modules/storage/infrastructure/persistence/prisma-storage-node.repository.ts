@@ -105,7 +105,7 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
     ]);
 
     return {
-      nodes: records.map(StorageNodeMapper.toDomain),
+      nodes: records.map((r) => StorageNodeMapper.toDomain(r)),
       total,
     };
   }
@@ -114,7 +114,7 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
     const records = await this.prisma.file.findMany({
       where: { blobId },
     });
-    return records.map(StorageNodeMapper.toDomain);
+    return records.map((r) => StorageNodeMapper.toDomain(r));
   }
 
   async softDeleteSubtree(rootNodeId: string): Promise<number> {
@@ -154,7 +154,7 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
       )
       SELECT * FROM subtree;
     `;
-    return records.map(StorageNodeMapper.toDomain);
+    return records.map((r) => StorageNodeMapper.toDomain(r));
   }
 
   async findExpiredTrash(
@@ -168,6 +168,6 @@ export class PrismaStorageNodeRepository implements IStorageNodeRepository {
       },
       take: limit,
     });
-    return records.map(StorageNodeMapper.toDomain);
+    return records.map((r) => StorageNodeMapper.toDomain(r));
   }
 }

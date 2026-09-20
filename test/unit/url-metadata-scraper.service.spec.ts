@@ -1,7 +1,7 @@
-import { UrlMetadataScraperService } from '../../src/modules/library/processing/application/services/url-metadata-scraper.service';
+import { UrlMetadataScraperService } from '../../src/modules/library/ingestion/application/services/url-metadata-scraper.service';
 import { SsrfGuardService } from '../../src/modules/library/shared-kernel/core/services/ssrf-guard.service';
 import { IStoragePort } from '../../src/modules/storage/storage.port';
-import { IContentFacade } from '../../src/modules/library/content/content.facade';
+import { IContentFacade } from '../../src/modules/library/reader/reader.facade';
 
 describe('UrlMetadataScraperService', () => {
   let scraper: UrlMetadataScraperService;

@@ -1,17 +1,14 @@
-import { IsEnum, IsNotEmpty } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
-import { ProjectState } from '@prisma/client';
+import { IsOptional, IsUUID } from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateProjectStateDto {
-  @ApiProperty({
-    description: 'Target lifecycle state of the project',
-    enum: ProjectState,
-    example: ProjectState.execution,
+  @ApiPropertyOptional({
+    description: 'Target state ID of the project, or null to unassign',
+    example: '01957c91-2345-7890-abcd-ef0123456789',
+    nullable: true,
   })
-  @IsEnum(ProjectState, {
-    message:
-      'State must be one of: draft, planning, execution, monitoring, completed, cancelled',
-  })
-  @IsNotEmpty({ message: 'State is required' })
-  state!: ProjectState;
+  @IsUUID('all', { message: 'stateId must be a valid UUID' })
+  @IsOptional()
+  stateId?: string | null;
 }
+

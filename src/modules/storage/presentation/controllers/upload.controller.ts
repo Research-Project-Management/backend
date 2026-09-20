@@ -15,8 +15,8 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { FastifyRequest } from 'fastify';
-import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
-import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
+import { JwtAuthGuard } from '@/modules/identity/auth';
+import { CurrentUser } from '@/modules/identity/auth';
 import { UploadDirectUseCase } from '../../application/use-cases/upload/upload-direct.use-case';
 import { PresignUploadUseCase } from '../../application/use-cases/upload/presign-upload.use-case';
 import { CompletePresignUseCase } from '../../application/use-cases/upload/complete-presign.use-case';

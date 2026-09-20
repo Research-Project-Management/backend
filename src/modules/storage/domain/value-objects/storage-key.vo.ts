@@ -40,7 +40,7 @@ export class StorageKey {
 
   public static fromString(key: string): StorageKey {
     // Sanitize: strip null bytes and path traversal sequences
-    const sanitized = key.replace(/\0/g, '').replace(/(\.\.[\/\\])+/g, '');
+    const sanitized = key.replace(/\0/g, '').replace(/(\.\.[/\\])+/g, '');
     return new StorageKey(sanitized);
   }
 

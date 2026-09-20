@@ -7,6 +7,7 @@ import {
   StickyWithUser,
   USER_MINIMAL_SELECT,
 } from './types/sticky-repository.interface';
+import { uuidv7 } from './utils/sticky.utils';
 
 export type { StickyWithUser };
 
@@ -52,13 +53,6 @@ export class StickyRepository implements IStickyRepository {
     });
   }
 
-  async findPersonalStickies(
-    userId: string,
-    search?: string,
-  ): Promise<StickyWithUser[]> {
-    return this.findStickiesByUserId(userId, search);
-  }
-
   async countStickiesByUserId(userId: string): Promise<number> {
     if (!isUUID(userId)) return 0;
     return this.prisma.sticky.count({
@@ -69,15 +63,15 @@ export class StickyRepository implements IStickyRepository {
     });
   }
 
-  async countPersonalStickies(userId: string): Promise<number> {
-    return this.countStickiesByUserId(userId);
-  }
-
   async createSticky(
     data: Prisma.StickyCreateInput | Prisma.StickyUncheckedCreateInput,
   ): Promise<StickyWithUser> {
+    const payload = {
+      id: data.id ?? uuidv7(),
+      ...data,
+    };
     return this.prisma.sticky.create({
-      data: data as Prisma.StickyCreateInput,
+      data: payload as Prisma.StickyCreateInput,
       include: {
         user: { select: USER_MINIMAL_SELECT },
       },

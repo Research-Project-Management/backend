@@ -1,9 +1,10 @@
 import {
   LocalEmbeddingService,
   EMBEDDING_DIMENSIONS,
-} from '../../src/modules/library/discovery/application/services/local-embedding.service';
-import { VectorIndexService } from '../../src/modules/library/discovery/application/services/vector-index.service';
-import { SemanticSearchService } from '../../src/modules/library/discovery/application/services/semantic-search.service';
+} from '../../src/modules/library/search/application/services/local-embedding.service';
+import { VectorIndexService } from '../../src/modules/library/search/application/services/vector-index.service';
+import { SemanticSearchService } from '../../src/modules/library/search/application/services/semantic-search.service';
+import { SearchRepository } from '../../src/modules/library/search/infrastructure/repositories/search.repository';
 
 describe('In-Process Local Embeddings & Semantic Vector Search', () => {
   let embeddingService: LocalEmbeddingService;
@@ -110,9 +111,10 @@ describe('In-Process Local Embeddings & Semantic Vector Search', () => {
       },
     };
 
-    vectorIndex = new VectorIndexService(mockPrisma, embeddingService);
+    const searchRepo = new SearchRepository(mockPrisma);
+    vectorIndex = new VectorIndexService(searchRepo, embeddingService);
     semanticSearch = new SemanticSearchService(
-      mockPrisma,
+      searchRepo,
       embeddingService,
       vectorIndex,
     );

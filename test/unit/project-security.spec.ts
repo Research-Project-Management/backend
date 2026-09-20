@@ -3,7 +3,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { ProjectMemberRole, InvitationStatus } from '@prisma/client';
+import { Role, InvitationStatus } from '@prisma/client';
 import { InvitationService } from '@/modules/project/invitation/invitation.service';
 import { CoreRepository } from '@/modules/project/core/core.repository';
 import {
@@ -71,7 +71,7 @@ describe('Project Module Security & SSOT Suite', () => {
         id: 'invite-pending-uuid',
         projectId: 'proj-public-uuid',
         email: mockUser.email,
-        role: ProjectMemberRole.contributor,
+        role: Role.contributor,
         status: InvitationStatus.pending,
         expiresAt: new Date(Date.now() + 100000),
       };
@@ -96,7 +96,7 @@ describe('Project Module Security & SSOT Suite', () => {
       });
       mockRepo.findMember.mockResolvedValue({
         userId: mockUser.id,
-        role: ProjectMemberRole.contributor,
+        role: Role.contributor,
       });
 
       const result = await invitationService.joinByCode('LAB', mockUser as any);
@@ -110,7 +110,7 @@ describe('Project Module Security & SSOT Suite', () => {
         id: 'invite-123',
         projectId: 'proj-any-uuid',
         email: 'researcher@flux.ac.vn',
-        role: ProjectMemberRole.contributor,
+        role: Role.contributor,
         status: InvitationStatus.pending,
         expiresAt: new Date(Date.now() + 100000),
         project: { id: 'proj-any-uuid', name: 'Valid Project' },
@@ -147,7 +147,10 @@ describe('Project Module Security & SSOT Suite', () => {
           id: 'inviter-uuid',
           email: 'pi@flux.ac.vn',
         }),
-        findUserByEmail: jest.fn().mockResolvedValue(null),
+        findUserByEmail: jest.fn().mockResolvedValue({
+          id: 'target-user-uuid',
+          email: 'colleague@flux.ac.vn',
+        }),
         findMember: jest.fn().mockResolvedValue(null),
         findPendingByProjectAndEmail: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockResolvedValue({ id: 'new-invite-id' }),
@@ -156,11 +159,25 @@ describe('Project Module Security & SSOT Suite', () => {
       invitationService = new InvitationService(mockRepo);
     });
 
+    it('should throw NotFoundException when inviting an email that does not exist in the system', async () => {
+      mockRepo.findUserByEmail.mockResolvedValue(null);
+
+      await expect(
+        invitationService.createInvitation(
+          'proj-123',
+          { email: 'outsider@gmail.com', role: Role.contributor },
+          'inviter-uuid',
+        ),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(mockRepo.create).not.toHaveBeenCalled();
+    });
+
     it('should throw ForbiddenException when attempting to invite with owner role', async () => {
       await expect(
         invitationService.createInvitation(
           'proj-123',
-          { email: 'newmember@flux.ac.vn', role: ProjectMemberRole.owner },
+          { email: 'newmember@flux.ac.vn', role: Role.owner },
           'inviter-uuid',
         ),
       ).rejects.toThrow(ForbiddenException);
@@ -172,7 +189,7 @@ describe('Project Module Security & SSOT Suite', () => {
       await expect(
         invitationService.createInvitation(
           'proj-123',
-          { email: 'pi@flux.ac.vn', role: ProjectMemberRole.contributor },
+          { email: 'pi@flux.ac.vn', role: Role.contributor },
           'inviter-uuid',
         ),
       ).rejects.toThrow(BadRequestException);
@@ -191,7 +208,7 @@ describe('Project Module Security & SSOT Suite', () => {
           'proj-123',
           {
             email: 'colleague@flux.ac.vn',
-            role: ProjectMemberRole.contributor,
+            role: Role.contributor,
           },
           'inviter-uuid',
         ),
@@ -209,7 +226,7 @@ describe('Project Module Security & SSOT Suite', () => {
       await expect(
         invitationService.createInvitation(
           'proj-archived',
-          { email: 'new@flux.ac.vn', role: ProjectMemberRole.contributor },
+          { email: 'new@flux.ac.vn', role: Role.contributor },
           'inviter-uuid',
         ),
       ).rejects.toThrow(BadRequestException);
@@ -323,13 +340,13 @@ describe('Project Module Security & SSOT Suite', () => {
     it('should prevent demoting the only owner of a project', async () => {
       mockMemberRepo.findMember.mockResolvedValue({
         userId: 'owner-1',
-        role: ProjectMemberRole.owner,
+        role: Role.owner,
       });
       mockMemberRepo.countOwners.mockResolvedValue(1);
 
       await expect(
         memberService.updateMemberRole('proj-123', 'owner-1', {
-          role: ProjectMemberRole.contributor,
+          role: Role.contributor,
         }),
       ).rejects.toThrow(ForbiddenException);
 
@@ -339,7 +356,7 @@ describe('Project Module Security & SSOT Suite', () => {
     it('should prevent removing the only owner of a project', async () => {
       mockMemberRepo.findMember.mockResolvedValue({
         userId: 'owner-1',
-        role: ProjectMemberRole.owner,
+        role: Role.owner,
       });
       mockMemberRepo.countOwners.mockResolvedValue(1);
 
@@ -353,52 +370,52 @@ describe('Project Module Security & SSOT Suite', () => {
     it('should allow promoting a member to coordinator role', async () => {
       mockMemberRepo.findMember.mockResolvedValue({
         userId: 'member-2',
-        role: ProjectMemberRole.contributor,
+        role: Role.contributor,
       });
       mockMemberRepo.updateMemberRole.mockResolvedValue({
         userId: 'member-2',
-        role: ProjectMemberRole.coordinator,
+        role: Role.coordinator,
       });
 
       const result = await memberService.updateMemberRole(
         'proj-123',
         'member-2',
         {
-          role: ProjectMemberRole.coordinator,
+          role: Role.coordinator,
         },
       );
 
-      expect(result.member.role).toBe(ProjectMemberRole.coordinator);
+      expect(result.member.role).toBe(Role.coordinator);
       expect(mockMemberRepo.updateMemberRole).toHaveBeenCalledWith(
         'proj-123',
         'member-2',
-        ProjectMemberRole.coordinator,
+        Role.coordinator,
       );
     });
 
     it('should allow assigning a member to reviewer role', async () => {
       mockMemberRepo.findMember.mockResolvedValue({
         userId: 'member-3',
-        role: ProjectMemberRole.contributor,
+        role: Role.contributor,
       });
       mockMemberRepo.updateMemberRole.mockResolvedValue({
         userId: 'member-3',
-        role: ProjectMemberRole.reviewer,
+        role: Role.reviewer,
       });
 
       const result = await memberService.updateMemberRole(
         'proj-123',
         'member-3',
         {
-          role: ProjectMemberRole.reviewer,
+          role: Role.reviewer,
         },
       );
 
-      expect(result.member.role).toBe(ProjectMemberRole.reviewer);
+      expect(result.member.role).toBe(Role.reviewer);
       expect(mockMemberRepo.updateMemberRole).toHaveBeenCalledWith(
         'proj-123',
         'member-3',
-        ProjectMemberRole.reviewer,
+        Role.reviewer,
       );
     });
 
@@ -421,7 +438,7 @@ describe('Project Module Security & SSOT Suite', () => {
         mockMemberRepo.findProject.mockResolvedValue({ id: 'proj-123' });
         mockMemberRepo.findMember.mockResolvedValueOnce({
           userId: 'member-1',
-          role: ProjectMemberRole.coordinator,
+          role: Role.coordinator,
         });
 
         await expect(
@@ -434,7 +451,7 @@ describe('Project Module Security & SSOT Suite', () => {
         mockMemberRepo.findMember
           .mockResolvedValueOnce({
             userId: 'owner-1',
-            role: ProjectMemberRole.owner,
+            role: Role.owner,
           })
           .mockResolvedValueOnce(null);
 
@@ -448,21 +465,21 @@ describe('Project Module Security & SSOT Suite', () => {
         mockMemberRepo.findMember
           .mockResolvedValueOnce({
             userId: 'owner-1',
-            role: ProjectMemberRole.owner,
+            role: Role.owner,
           })
           .mockResolvedValueOnce({
             userId: 'member-2',
-            role: ProjectMemberRole.contributor,
+            role: Role.contributor,
           });
 
         mockMemberRepo.transferOwnership = jest.fn().mockResolvedValue({
           previousOwner: {
             userId: 'owner-1',
-            role: ProjectMemberRole.coordinator,
+            role: Role.coordinator,
           },
           newOwner: {
             userId: 'member-2',
-            role: ProjectMemberRole.owner,
+            role: Role.owner,
           },
         });
 
@@ -473,8 +490,8 @@ describe('Project Module Security & SSOT Suite', () => {
         );
 
         expect(result.message).toBe('Project ownership transferred successfully');
-        expect(result.previousOwner.role).toBe(ProjectMemberRole.coordinator);
-        expect(result.newOwner.role).toBe(ProjectMemberRole.owner);
+        expect(result.previousOwner.role).toBe(Role.coordinator);
+        expect(result.newOwner.role).toBe(Role.owner);
         expect(mockMemberRepo.transferOwnership).toHaveBeenCalledWith(
           'proj-123',
           'owner-1',

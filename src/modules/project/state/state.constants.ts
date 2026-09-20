@@ -1,63 +1,80 @@
-import { ProjectState } from '@prisma/client';
-
-export interface ProjectStateMetadata {
-  state: ProjectState;
-  label: string;
+export interface DefaultProjectStateTemplate {
+  name: string;
   description: string;
-  order: number;
+  color: string;
+  sequence: number;
+  isDefault: boolean;
 }
 
-export const PROJECT_STATES_CATALOG: ProjectStateMetadata[] = [
+/**
+ * 8 Default Research Project States to seed when a new project is created.
+ * Users can customize, reorder (drag & drop), add new, or delete any of these.
+ * States are purely dynamic data in the database (table project_states).
+ */
+export const DEFAULT_PROJECT_STATES: DefaultProjectStateTemplate[] = [
   {
-    state: 'draft',
-    label: 'Bản nháp (Draft)',
+    name: 'Thuyết minh đề cương',
     description:
-      'Dự án đang trong giai đoạn phác thảo ý tưởng, chưa chốt duyệt kế hoạch.',
-    order: 1,
+      'Phác thảo ý tưởng nghiên cứu, tổng quan tài liệu (Literature Review), thiết kế phương pháp và mục tiêu.',
+    color: '#0284c7',
+    sequence: 0,
+    isDefault: true,
   },
   {
-    state: 'planning',
-    label: 'Lên kế hoạch (Planning)',
-    description: 'Đang xác định scope, specs, kiến trúc và phân bổ tài nguyên.',
-    order: 2,
-  },
-  {
-    state: 'execution',
-    label: 'Đang triển khai (Execution / In Progress)',
+    name: 'Thẩm định & Phê duyệt',
     description:
-      'Đội ngũ đang tích cực thực thi, viết mã và hoàn thiện các work-items.',
-    order: 3,
+      'Đề cương đang được hội đồng khoa học, hội đồng đạo đức hoặc tổ chức tài trợ xem xét, thẩm định tính khả thi.',
+    color: '#8b5cf6',
+    sequence: 1,
+    isDefault: false,
   },
   {
-    state: 'monitoring',
-    label: 'Giám sát & Đánh giá (Monitoring / Review)',
+    name: 'Triển khai & Thực nghiệm',
     description:
-      'Kiểm thử, thử nghiệm beta, nghiệm thu chất lượng trước khi hoàn thành.',
-    order: 4,
+      'Đội ngũ đang tích cực thu thập dữ liệu, chạy mô phỏng, thí nghiệm và phân tích kết quả.',
+    color: '#f59e0b',
+    sequence: 2,
+    isDefault: false,
   },
   {
-    state: 'completed',
-    label: 'Hoàn thành (Completed)',
+    name: 'Soạn thảo & Công bố',
     description:
-      'Dự án đã nghiệm thu thành công và hoàn tất toàn bộ mục tiêu đề ra.',
-    order: 5,
+      'Đã có dữ liệu cốt lõi; đang tập trung soạn thảo bài báo khoa học (LaTeX), gửi bình duyệt hoặc viết báo cáo tổng kết.',
+    color: '#3b82f6',
+    sequence: 3,
+    isDefault: false,
   },
   {
-    state: 'cancelled',
-    label: 'Hủy bỏ / Tạm dừng (Cancelled)',
-    description: 'Dự án tạm hoãn hoặc bị hủy bỏ do thay đổi định hướng.',
-    order: 6,
+    name: 'Nghiệm thu & Đánh giá',
+    description:
+      'Phản biện độc lập, đánh giá kết quả và bảo vệ trước hội đồng nghiệm thu.',
+    color: '#a855f7',
+    sequence: 4,
+    isDefault: false,
+  },
+  {
+    name: 'Hoàn thành & Lưu trữ',
+    description:
+      'Đề tài đã nghiệm thu thành công, nộp lưu chiểu báo cáo, công bố dữ liệu và bài báo chính thức.',
+    color: '#10b981',
+    sequence: 5,
+    isDefault: false,
+  },
+  {
+    name: 'Tạm dừng',
+    description:
+      'Đề tài tạm hoãn do chờ kinh phí, thiếu mẫu vật, sự cố thiết bị hoặc thay đổi nhân sự.',
+    color: '#f97316',
+    sequence: 6,
+    isDefault: false,
+  },
+  {
+    name: 'Hủy bỏ',
+    description:
+      'Đề tài bị đình chỉ hoặc chấm dứt do không khả thi, vi phạm quy chế hoặc thay đổi định hướng.',
+    color: '#ef4444',
+    sequence: 7,
+    isDefault: false,
   },
 ];
 
-/**
- * Valid state transitions for project lifecycle
- */
-export const ALLOWED_STATE_TRANSITIONS: Record<ProjectState, ProjectState[]> = {
-  draft: ['planning', 'cancelled'],
-  planning: ['draft', 'execution', 'cancelled'],
-  execution: ['planning', 'monitoring', 'completed', 'cancelled'],
-  monitoring: ['execution', 'completed', 'cancelled'],
-  completed: ['monitoring', 'execution'], // Re-open if needed
-  cancelled: ['draft', 'planning'], // Revive project
-};

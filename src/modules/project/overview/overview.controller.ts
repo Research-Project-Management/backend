@@ -5,7 +5,7 @@ import {
   ApiOperation,
   ApiResponse,
 } from '@nestjs/swagger';
-import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
+import { JwtAuthGuard } from '@/modules/identity/auth';
 import { OverviewService } from './overview.service';
 
 @ApiTags('Project Overview')

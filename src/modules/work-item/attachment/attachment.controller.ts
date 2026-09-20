@@ -17,10 +17,8 @@ import {
   ApiOperation,
   ApiParam,
 } from '@nestjs/swagger';
-import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
-import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
-import { ProjectRoleGuard } from '@/modules/iam/authz/guards/role.guard';
-import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
+import { JwtAuthGuard } from '@/modules/identity/auth';
+import { CurrentUser } from '@/modules/identity/auth';
 import { AttachmentService } from './attachment.service';
 import {
   CreateAttachmentDto,
@@ -31,6 +29,7 @@ import {
 } from './dto/attachment.dto';
 import { PresignAttachmentDto } from './dto/presign-attachment.dto';
 import { EntityType } from '@prisma/client';
+import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Work Item Attachments')
 @ApiBearerAuth('JWT-auth')

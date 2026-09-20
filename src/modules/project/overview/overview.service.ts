@@ -78,6 +78,7 @@ export class OverviewService {
         description: projectMeta.description,
         avatar: projectMeta.avatar,
         coverImage: projectMeta.coverImage,
+        stateId: projectMeta.stateId,
         state: projectMeta.state,
         priority: projectMeta.priority,
         startDate: projectMeta.startDate,
@@ -104,15 +105,6 @@ export class OverviewService {
           role: m.role || 'contributor',
         })),
       },
-      links: (projectMeta.links || []).map((link: any) => ({
-        id: link.id,
-        projectId: link.projectId,
-        title: link.title,
-        url: link.url,
-        createdById: link.createdById,
-        createdAt: link.createdAt,
-        updatedAt: link.updatedAt,
-      })),
       metrics: {
         totalIssues,
         totalWorkItems,

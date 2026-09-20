@@ -8,7 +8,7 @@ import {
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { ProjectPriority, ProjectState } from '@prisma/client';
+import { ProjectPriority } from '@prisma/client';
 
 /**
  * Query DTO for filtering and searching projects.
@@ -32,12 +32,11 @@ export class ProjectQueryDto {
   search?: string;
 
   @ApiPropertyOptional({
-    description: 'Filter by project lifecycle state',
-    enum: ProjectState,
+    description: 'Filter by ProjectState UUID',
   })
-  @IsEnum(ProjectState)
+  @IsUUID('all')
   @IsOptional()
-  state?: ProjectState;
+  stateId?: string;
 
   @ApiPropertyOptional({
     description: 'Filter by project priority',

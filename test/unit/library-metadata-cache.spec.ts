@@ -1,6 +1,7 @@
-import { MetadataCache } from '../../src/modules/library/processing/infrastructure/cache/metadata.cache';
-import { MetadataService } from '../../src/modules/library/processing/application/services/metadata.service';
-import { ResolvedMetadata } from '../../src/modules/library/processing/domain/types/metadata.types';
+import { MetadataCache } from '../../src/modules/library/ingestion/infrastructure/cache/metadata.cache';
+import { MetadataService } from '../../src/modules/library/ingestion/application/services/metadata.service';
+import { IngestionRepository } from '../../src/modules/library/ingestion/infrastructure/repositories/ingestion.repository';
+import { ResolvedMetadata } from '../../src/modules/library/ingestion/domain/types/metadata.types';
 
 describe('Multi-Tier Metadata Cache & Local Database Resolution', () => {
   describe('MetadataCache (L1 Memory LRU + L2 Redis)', () => {
@@ -126,12 +127,14 @@ describe('Multi-Tier Metadata Cache & Local Database Resolution', () => {
         },
       };
 
+      const ingestionRepo = new IngestionRepository(mockPrisma);
+
       service = new MetadataService(
         [],
         mockCache,
         mockReconciler,
         mockExecutor,
-        mockPrisma,
+        ingestionRepo,
       );
     });
 

@@ -1,8 +1,12 @@
 import { Injectable, Optional } from '@nestjs/common';
-import { CatalogFacade } from './catalog/catalog.facade';
-import { DiscoveryFacade } from './discovery/discovery.facade';
-import { ContentFacade } from './content/content.facade';
-import { CslJsonMapper } from './discovery/application/mappers/csl-json.mapper';
+import {
+  BibliographyFacade,
+  CatalogFacade,
+} from './bibliography/bibliography.facade';
+import { SearchFacade } from './search/search.facade';
+import { CitationFacade } from './citation/citation.facade';
+import { ReaderFacade, ContentFacade } from './reader/reader.facade';
+import { CslJsonMapper } from './citation/application/mappers/csl-json.mapper';
 
 export interface LibraryItemSummary {
   id: string;
@@ -34,10 +38,7 @@ export interface ILibraryFacade {
   ): Promise<LibraryItemDetail | null>;
   countItems(scopeId: string): Promise<number>;
   searchItems(scopeId: string, query: string): Promise<LibraryItemSummary[]>;
-  extractDocumentFromBuffer(
-    buffer: Buffer,
-    options?: any,
-  ): Promise<any>;
+  extractDocumentFromBuffer(buffer: Buffer, options?: any): Promise<any>;
 }
 
 export const LIBRARY_FACADE = 'LIBRARY_FACADE';
@@ -50,21 +51,39 @@ export const LIBRARY_FACADE = 'LIBRARY_FACADE';
 export class LibraryFacade implements ILibraryFacade {
   constructor(
     @Optional()
-    private readonly catalogFacade?: CatalogFacade,
+    private readonly bibliographyFacade?: BibliographyFacade,
     @Optional()
-    private readonly discoveryFacade?: DiscoveryFacade,
+    private readonly readerFacade?: ReaderFacade,
     @Optional()
-    private readonly contentFacade?: ContentFacade,
+    private readonly searchFacade?: SearchFacade,
+    @Optional()
+    private readonly citationFacade?: CitationFacade,
   ) {}
+
+  get catalogFacade(): BibliographyFacade | undefined {
+    return this.bibliographyFacade;
+  }
+
+  get contentFacade(): ReaderFacade | undefined {
+    return this.readerFacade;
+  }
+
+  get search(): SearchFacade | undefined {
+    return this.searchFacade;
+  }
+
+  get citation(): CitationFacade | undefined {
+    return this.citationFacade;
+  }
 
   async exportBibByCitationKeys(
     userId: string,
     citeKeys: string[],
   ): Promise<{ content: string } | null> {
-    if (!this.discoveryFacade) {
-      return null;
+    if (this.citationFacade) {
+      return this.citationFacade.exportBibliography(userId, citeKeys);
     }
-    return this.discoveryFacade.exportBibliography(userId, citeKeys);
+    return null;
   }
 
   async getItem(
@@ -140,7 +159,7 @@ export class LibraryFacade implements ILibraryFacade {
       limit: 20,
     });
 
-    return items.map((it) => ({
+    return items.map((it: any) => ({
       id: it.id,
       title: it.title,
       doi: it.doi,
@@ -151,14 +170,10 @@ export class LibraryFacade implements ILibraryFacade {
     }));
   }
 
-  async extractDocumentFromBuffer(
-    buffer: Buffer,
-    options?: any,
-  ): Promise<any> {
+  async extractDocumentFromBuffer(buffer: Buffer, options?: any): Promise<any> {
     if (!this.contentFacade) {
       throw new Error('ContentFacade is not initialized in LibraryFacade');
     }
     return this.contentFacade.extractDocumentFromBuffer(buffer, options);
   }
 }
-

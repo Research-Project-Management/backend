@@ -39,8 +39,6 @@ export class TemplateRepository {
           'cycles',
           'views',
           'pages',
-          'stickies',
-          'storage',
         ],
         initialStates: (dto.initialStates ||
           []) as unknown as Prisma.InputJsonValue,

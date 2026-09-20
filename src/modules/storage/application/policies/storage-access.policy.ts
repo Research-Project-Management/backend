@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { StorageNode } from '../../domain/entities/storage-node.entity';
+import { FileScope } from '../../domain/value-objects/file-scope.vo';
 import { IStorageNodeRepository } from '../../domain/ports/storage-node.repository.port';
 import { Inject } from '@nestjs/common';
 import { STORAGE_NODE_REPOSITORY } from '../../storage.tokens';
@@ -57,7 +58,7 @@ export class StorageAccessPolicy {
     }
 
     // 3. Project Workbench RBAC check
-    if (node.scope === 'Project' && node.projectId) {
+    if (node.scope === FileScope.Project && node.projectId) {
       const membership = await this.prisma.projectMember.findUnique({
         where: {
           projectId_userId: { projectId: node.projectId, userId },

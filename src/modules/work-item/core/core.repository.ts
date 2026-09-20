@@ -679,7 +679,7 @@ export class CoreRepository implements IWorkItemRepository {
       if (
         Array.isArray(created.labels) &&
         created.labels.length > 0 &&
-        tx.label &&
+        tx.workItemLabel &&
         tx.workItemLabelAssignment
       ) {
         const rawLabels: unknown[] = Array.isArray(created.labels)
@@ -697,7 +697,7 @@ export class CoreRepository implements IWorkItemRepository {
         );
 
         if (uniqueLabelNames.length > 0) {
-          const existingLabels = await tx.label.findMany({
+          const existingLabels = await tx.workItemLabel.findMany({
             where: {
               projectId: created.projectId,
               name: { in: uniqueLabelNames, mode: 'insensitive' },
@@ -713,7 +713,7 @@ export class CoreRepository implements IWorkItemRepository {
           );
 
           if (missingNames.length > 0) {
-            await tx.label.createMany({
+            await tx.workItemLabel.createMany({
               data: missingNames.map((name: string) => ({
                 name,
                 projectId: created.projectId,
@@ -723,7 +723,7 @@ export class CoreRepository implements IWorkItemRepository {
             });
           }
 
-          const allLabels = await tx.label.findMany({
+          const allLabels = await tx.workItemLabel.findMany({
             where: {
               projectId: created.projectId,
               name: { in: uniqueLabelNames, mode: 'insensitive' },
@@ -816,7 +816,7 @@ export class CoreRepository implements IWorkItemRepository {
       if (
         updateData.labels !== undefined &&
         Array.isArray(updated.labels) &&
-        tx.label &&
+        tx.workItemLabel &&
         tx.workItemLabelAssignment
       ) {
         await tx.workItemLabelAssignment.deleteMany({
@@ -838,7 +838,7 @@ export class CoreRepository implements IWorkItemRepository {
         );
 
         if (uniqueLabelNames.length > 0) {
-          const existingLabels = await tx.label.findMany({
+          const existingLabels = await tx.workItemLabel.findMany({
             where: {
               projectId: updated.projectId,
               name: { in: uniqueLabelNames, mode: 'insensitive' },
@@ -854,7 +854,7 @@ export class CoreRepository implements IWorkItemRepository {
           );
 
           if (missingNames.length > 0) {
-            await tx.label.createMany({
+            await tx.workItemLabel.createMany({
               data: missingNames.map((name: string) => ({
                 name,
                 projectId: updated.projectId,
@@ -864,7 +864,7 @@ export class CoreRepository implements IWorkItemRepository {
             });
           }
 
-          const allLabels = await tx.label.findMany({
+          const allLabels = await tx.workItemLabel.findMany({
             where: {
               projectId: updated.projectId,
               name: { in: uniqueLabelNames, mode: 'insensitive' },
@@ -1252,7 +1252,7 @@ export class CoreRepository implements IWorkItemRepository {
     if (!labelIds.length) return [];
     const uniqueIds = Array.from(new Set(labelIds.filter(Boolean)));
     if (!uniqueIds.length) return [];
-    return this.prismaService.label.findMany({
+    return this.prismaService.workItemLabel.findMany({
       where: { id: { in: uniqueIds }, projectId },
       select: { id: true, name: true, color: true },
     });

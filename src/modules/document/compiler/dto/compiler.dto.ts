@@ -55,6 +55,10 @@ export class CompileLatexDto {
   @IsOptional()
   use_cache?: boolean;
 
+  @IsBoolean()
+  @IsOptional()
+  stop_on_first_error?: boolean;
+
   @IsOptional()
   files?: Record<string, string>;
 }

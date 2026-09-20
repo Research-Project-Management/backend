@@ -19,11 +19,13 @@ const USER_SELECT = {
   },
 } as const;
 
-function mapUserMinimal(user: {
-  id: string;
-  email: string | null;
-  profile?: { name: string; avatar: string | null } | null;
-} | null): UserMinimal | null {
+function mapUserMinimal(
+  user: {
+    id: string;
+    email: string | null;
+    profile?: { name: string; avatar: string | null } | null;
+  } | null,
+): UserMinimal | null {
   if (!user) return null;
   return {
     id: user.id,

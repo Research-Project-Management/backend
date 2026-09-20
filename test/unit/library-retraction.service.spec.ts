@@ -1,8 +1,8 @@
-import { RetractionDatabaseService } from '../../src/modules/library/processing/application/services/retraction-database.service';
-import { RetractionScannerProvider } from '../../src/modules/library/processing/infrastructure/providers/retraction-scanner.provider';
-import { RetractionService } from '../../src/modules/library/processing/application/services/retraction.service';
-import { RetractionRepository } from '../../src/modules/library/processing/infrastructure/repositories/retraction.repository';
-import { RetractionSyncService } from '../../src/modules/library/processing/application/services/retraction-sync.service';
+import { RetractionDatabaseService } from '../../src/modules/library/ingestion/application/services/retraction-database.service';
+import { RetractionScannerProvider } from '../../src/modules/library/ingestion/infrastructure/providers/retraction-scanner.provider';
+import { RetractionService } from '../../src/modules/library/ingestion/application/services/retraction.service';
+import { RetractionRepository } from '../../src/modules/library/ingestion/infrastructure/repositories/retraction.repository';
+import { RetractionSyncService } from '../../src/modules/library/ingestion/application/services/retraction-sync.service';
 
 describe('Retraction Watch & Offline Retraction Detection', () => {
   let mockPrisma: any;
@@ -107,12 +107,12 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
       },
     };
 
-    retractionDb = new RetractionDatabaseService(mockPrisma);
+    repo = new RetractionRepository(mockPrisma);
+    retractionDb = new RetractionDatabaseService(repo);
     // Pre-populate with seed records
     await retractionDb.importRecords(retractionWatchSeed as any);
 
     scanner = new RetractionScannerProvider(mockPrisma, retractionDb);
-    repo = new RetractionRepository(mockPrisma);
     syncService = new RetractionSyncService(repo, scanner, retractionDb);
     service = new RetractionService(repo, scanner, retractionDb, syncService);
   });

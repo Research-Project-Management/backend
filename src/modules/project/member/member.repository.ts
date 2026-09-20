@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
-import { ProjectMemberRole, Prisma } from '@prisma/client';
+import { Role, Prisma } from '@prisma/client';
 import { MinimalUser } from '../core/types/project.type';
 import { ProjectMemberWithUser, FindMembersOptions } from './types/member.type';
 import { isUuid } from '@/core/utils/uuid.util';
@@ -16,9 +16,15 @@ const USER_SELECT = {
   },
 } as const;
 
-function mapMember<T extends { user: { id: string; email: string | null; profile?: { name: string; avatar: string | null } | null } }>(
-  member: T,
-): Omit<T, 'user'> & { user: MinimalUser } {
+function mapMember<
+  T extends {
+    user: {
+      id: string;
+      email: string | null;
+      profile?: { name: string; avatar: string | null } | null;
+    };
+  },
+>(member: T): Omit<T, 'user'> & { user: MinimalUser } {
   return {
     ...member,
     user: {
@@ -103,7 +109,7 @@ export class MemberRepository {
   async countMembers(
     projectId: string,
     options?: {
-      role?: ProjectMemberRole;
+      role?: Role;
       search?: string;
     },
   ): Promise<number> {
@@ -135,7 +141,7 @@ export class MemberRepository {
   async createMember(
     projectId: string,
     userId: string,
-    role: ProjectMemberRole,
+    role: Role,
   ): Promise<ProjectMemberWithUser> {
     const member = await this.prisma.projectMember.create({
       data: {
@@ -157,7 +163,7 @@ export class MemberRepository {
   async updateMemberRole(
     projectId: string,
     userId: string,
-    role: ProjectMemberRole,
+    role: Role,
   ): Promise<ProjectMemberWithUser> {
     const member = await this.prisma.projectMember.update({
       where: {
@@ -200,7 +206,7 @@ export class MemberRepository {
     return this.prisma.projectMember.count({
       where: {
         projectId,
-        role: ProjectMemberRole.owner,
+        role: Role.owner,
       },
     });
   }
@@ -287,7 +293,7 @@ export class MemberRepository {
             userId: currentOwnerId,
           },
         },
-        data: { role: ProjectMemberRole.coordinator },
+        data: { role: Role.coordinator },
         include: {
           user: { select: USER_SELECT },
         },
@@ -300,7 +306,7 @@ export class MemberRepository {
             userId: newOwnerId,
           },
         },
-        data: { role: ProjectMemberRole.owner },
+        data: { role: Role.owner },
         include: {
           user: { select: USER_SELECT },
         },

@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AiService } from '@/modules/ai/ai.service';
 import { EngineService } from '@/modules/ai/engine/engine.service';
-import { ThreadService } from '@/modules/ai/thread/thread.service';
+import { ChatService, ThreadService } from '@/modules/ai/chat/chat.service';
 import { PrismaService } from '@/core/database/prisma.service';
 import {
   ForbiddenException,
@@ -13,7 +13,8 @@ import { FastifyReply } from 'fastify';
 describe('AiService (Server-Authoritative Chat & Streaming)', () => {
   let service: AiService;
   let engineService: jest.Mocked<EngineService>;
-  let threadService: jest.Mocked<ThreadService>;
+  let chatService: jest.Mocked<ChatService>;
+  let threadService: jest.Mocked<ChatService>;
   let prisma: any;
 
   const mockUserId = '11111111-1111-1111-1111-111111111111';
@@ -70,6 +71,7 @@ describe('AiService (Server-Authoritative Chat & Streaming)', () => {
       providers: [
         AiService,
         { provide: EngineService, useValue: mockEngine },
+        { provide: ChatService, useValue: mockThread },
         { provide: ThreadService, useValue: mockThread },
         { provide: PrismaService, useValue: mockPrisma },
       ],
@@ -77,7 +79,8 @@ describe('AiService (Server-Authoritative Chat & Streaming)', () => {
 
     service = module.get<AiService>(AiService);
     engineService = module.get(EngineService);
-    threadService = module.get(ThreadService);
+    chatService = module.get(ChatService);
+    threadService = chatService;
     prisma = module.get(PrismaService);
   });
 

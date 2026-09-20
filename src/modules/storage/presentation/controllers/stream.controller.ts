@@ -14,8 +14,8 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
-import { Public } from '@/modules/iam/authn/decorators/public.decorator';
+import { JwtAuthGuard } from '@/modules/identity/auth';
+import { Public } from '@/modules/identity/auth';
 import { StreamBinaryUseCase } from '../../application/use-cases/stream/stream-binary.use-case';
 import { R2Service } from '../../infrastructure/drivers/r2.service';
 import {

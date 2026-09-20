@@ -1,35 +1,26 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ProjectState } from '@prisma/client';
-
-export class ProjectStateMetadataDto {
-  @ApiProperty({ enum: ProjectState, example: ProjectState.planning })
-  state!: ProjectState;
-
-  @ApiProperty({ example: 'Lên kế hoạch (Planning)' })
-  label!: string;
-
-  @ApiProperty({
-    example: 'Đang xác định scope, specs, kiến trúc và phân bổ tài nguyên.',
-  })
-  description!: string;
-
-  @ApiProperty({ example: 2 })
-  order!: number;
-}
 
 export class ProjectCurrentStateResponseDto {
   @ApiProperty({ example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' })
   projectId!: string;
 
-  @ApiProperty({ enum: ProjectState, example: ProjectState.execution })
-  state!: ProjectState;
+  @ApiPropertyOptional({
+    example: '01957c91-2345-7890-abcd-ef0123456789',
+    nullable: true,
+  })
+  stateId!: string | null;
 
-  @ApiProperty({ example: 'Đang triển khai (Execution / In Progress)' })
-  stateLabel!: string;
+  @ApiPropertyOptional({
+    description: 'Current active project state details, or null if unassigned',
+    nullable: true,
+  })
+  state!: ProjectState | null;
 
   @ApiProperty({
-    example: ['planning', 'monitoring', 'completed', 'cancelled'],
-    description: 'List of valid states the project can transition to next',
+    example: 'Triển khai & Thực nghiệm',
   })
-  allowedTransitions!: ProjectState[];
+  stateLabel!: string;
 }
+
+

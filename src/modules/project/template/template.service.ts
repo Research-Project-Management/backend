@@ -14,7 +14,7 @@ import {
 } from './dto/create-template.dto';
 import { InstantiateProjectTemplateDto } from './dto/instantiate-template.dto';
 import { deriveProjectPrefix } from '../core/utils/identifier.util';
-import { DEFAULT_WORK_ITEM_STATES } from '@/modules/work-item/state/types/state.types';
+import { DEFAULT_WORK_ITEM_STATES } from '@/modules/work-item/work-item.facade';
 
 @Injectable()
 export class TemplateService {
@@ -99,8 +99,6 @@ export class TemplateService {
             'cycles',
             'views',
             'pages',
-            'stickies',
-            'storage',
           ],
           members: {
             create: {
@@ -140,7 +138,7 @@ export class TemplateService {
       const labelMap = new Map<string, string>();
 
       for (const lbl of rawLabels) {
-        const created = await tx.label.create({
+        const created = await tx.workItemLabel.create({
           data: {
             projectId: project.id,
             name: lbl.name,

@@ -16,6 +16,7 @@ import {
   isStickyContentEmpty,
   normalizeStickyColor,
   sanitizeStickyHtml,
+  uuidv7,
 } from './utils/sticky.utils';
 
 @Injectable()
@@ -28,40 +29,12 @@ export class StickyService {
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
-  private async invalidateStickyCache(
-    userId: string,
-    projectId?: string | null,
-  ) {
+  private async invalidateStickyCache(userId: string) {
     if (!this.cache) return;
     try {
-      const promises: Promise<any>[] = [
-        this.cache.del(STICKY_REDIS_KEYS.userStickies(userId)),
-      ];
-      if (projectId) {
-        promises.push(
-          this.cache.del(STICKY_REDIS_KEYS.projectStickies(projectId)),
-        );
-      }
-      await Promise.all(promises);
+      await this.cache.del(STICKY_REDIS_KEYS.userStickies(userId));
     } catch (err) {
-      this.logger.warn(`Failed to invalidate sticky cache: ${err}`);
-    }
-  }
-
-  private async validateProjectAccess(
-    userId: string,
-    projectId: string,
-  ): Promise<void> {
-    const project = await this.prisma.project.findFirst({
-      where: {
-        id: projectId,
-        deletedAt: null,
-        OR: [{ createdById: userId }, { members: { some: { userId } } }],
-      },
-      select: { id: true },
-    });
-    if (!project) {
-      throw new ForbiddenException('You do not have access to this project');
+      this.logger.warn(`Failed to invalidate sticky cache: ${String(err)}`);
     }
   }
 
@@ -75,24 +48,7 @@ export class StickyService {
     };
   }
 
-  async getStickies(userId: string, projectId?: string, search?: string) {
-    if (projectId) {
-      await this.validateProjectAccess(userId, projectId);
-      if (search && search.trim()) {
-        const stickies = await this.stickyRepo.findStickiesByProjectId(
-          projectId,
-          search,
-        );
-        return {
-          stickies: stickies.map((sticky) => this.formatSticky(sticky)),
-        };
-      }
-      const cacheKey = STICKY_REDIS_KEYS.projectStickies(projectId);
-      return this.getStickiesWithCache(cacheKey, async () => {
-        return this.stickyRepo.findStickiesByProjectId(projectId);
-      });
-    }
-
+  async getStickies(userId: string, search?: string) {
     if (search && search.trim()) {
       const stickies = await this.stickyRepo.findStickiesByUserId(
         userId,
@@ -107,10 +63,6 @@ export class StickyService {
     return this.getStickiesWithCache(cacheKey, async () => {
       return this.stickyRepo.findStickiesByUserId(userId);
     });
-  }
-
-  async getPersonalStickies(userId: string, search?: string) {
-    return this.getStickies(userId, undefined, search);
   }
 
   private async getStickiesWithCache(
@@ -134,24 +86,26 @@ export class StickyService {
     return result;
   }
 
-  async createSticky(userId: string, dto: CreateStickyDto) {
-    let order: number;
-    let scope: 'personal' | 'project' = 'personal';
-
-    if (dto.projectId) {
-      await this.validateProjectAccess(userId, dto.projectId);
-      scope = 'project';
-      order = await this.stickyRepo.countStickiesByProjectId(dto.projectId);
-    } else {
-      order = await this.stickyRepo.countStickiesByUserId(userId);
+  async getStickyById(stickyId: string, userId: string) {
+    const existingSticky = await this.stickyRepo.findStickyById(stickyId);
+    if (!existingSticky) {
+      throw new NotFoundException('Sticky not found');
     }
 
-    // 1. Authoritative Server Check: Find the latest note in this scope
+    if (existingSticky.userId !== userId) {
+      throw new ForbiddenException('You can only access your own sticky notes');
+    }
+
+    return { sticky: this.formatSticky(existingSticky) };
+  }
+
+  async createSticky(userId: string, dto: CreateStickyDto) {
+    const order = await this.stickyRepo.countStickiesByUserId(userId);
+
+    // 1. Authoritative Server Check: Find the latest note
     const latestSticky = await this.prisma.sticky.findFirst({
       where: {
-        ...(dto.projectId
-          ? { projectId: dto.projectId }
-          : { userId, projectId: null }),
+        userId,
         deletedAt: null,
       },
       orderBy: { createdAt: 'desc' },
@@ -177,24 +131,19 @@ export class StickyService {
     const sanitizedContent = sanitizeStickyHtml(dto.content || '<p></p>');
 
     const sticky = await this.stickyRepo.createSticky({
+      id: dto.id ?? uuidv7(),
       title: dto.title ? dto.title.trim() : '',
       content: sanitizedContent,
       color: resolvedColor,
-      scope,
       positionX: dto.position?.x ?? 0,
       positionY: dto.position?.y ?? 0,
       order,
       userId,
-      projectId: dto.projectId,
     });
 
-    await this.invalidateStickyCache(userId, dto.projectId);
+    await this.invalidateStickyCache(userId);
 
     return { sticky: this.formatSticky(sticky) };
-  }
-
-  async createPersonalSticky(userId: string, dto: CreateStickyDto) {
-    return this.createSticky(userId, dto);
   }
 
   async updateSticky(stickyId: string, userId: string, dto: UpdateStickyDto) {
@@ -203,9 +152,7 @@ export class StickyService {
       throw new NotFoundException('Sticky not found');
     }
 
-    if (existingSticky.projectId) {
-      await this.validateProjectAccess(userId, existingSticky.projectId);
-    } else if (existingSticky.userId !== userId) {
+    if (existingSticky.userId !== userId) {
       throw new ForbiddenException('You can only update your own sticky notes');
     }
 
@@ -224,10 +171,7 @@ export class StickyService {
 
     const updated = await this.stickyRepo.updateSticky(stickyId, updateData);
 
-    await this.invalidateStickyCache(
-      existingSticky.userId,
-      existingSticky.projectId,
-    );
+    await this.invalidateStickyCache(userId);
 
     return { sticky: this.formatSticky(updated) };
   }
@@ -238,43 +182,26 @@ export class StickyService {
       throw new NotFoundException('Sticky not found');
     }
 
-    if (existingSticky.projectId) {
-      await this.validateProjectAccess(userId, existingSticky.projectId);
-    } else if (existingSticky.userId !== userId) {
+    if (existingSticky.userId !== userId) {
       throw new ForbiddenException('You can only delete your own sticky notes');
     }
 
     await this.stickyRepo.deleteSticky(stickyId);
 
-    await this.invalidateStickyCache(
-      existingSticky.userId,
-      existingSticky.projectId,
-    );
+    await this.invalidateStickyCache(userId);
 
     return { success: true, message: 'Sticky deleted successfully' };
   }
 
-  async reorderStickies(
-    stickyIds: string[],
-    userId: string,
-    projectId?: string,
-  ) {
+  async reorderStickies(stickyIds: string[], userId: string) {
     if (!stickyIds || stickyIds.length === 0) {
       return { success: true, count: 0 };
-    }
-
-    if (projectId) {
-      await this.validateProjectAccess(userId, projectId);
     }
 
     const stickies = await this.stickyRepo.findStickiesByIds(stickyIds);
 
     for (const sticky of stickies) {
-      if (sticky.projectId) {
-        if (sticky.projectId !== projectId) {
-          await this.validateProjectAccess(userId, sticky.projectId);
-        }
-      } else if (sticky.userId !== userId) {
+      if (sticky.userId !== userId) {
         throw new ForbiddenException(
           'You can only reorder your own sticky notes',
         );
@@ -283,7 +210,7 @@ export class StickyService {
 
     const reordered = await this.stickyRepo.reorderStickies(stickyIds);
 
-    await this.invalidateStickyCache(userId, projectId);
+    await this.invalidateStickyCache(userId);
 
     return {
       success: true,

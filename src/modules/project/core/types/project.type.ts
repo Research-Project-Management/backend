@@ -1,9 +1,4 @@
-import {
-  Project,
-  ProjectMember,
-  ProjectMemberRole,
-  ProjectLabel,
-} from '@prisma/client';
+import { Project, ProjectMember, Role, ProjectLabel, ProjectState } from '@prisma/client';
 
 import {
   MinimalUser,
@@ -28,13 +23,14 @@ export interface ProjectPermissions {
 }
 
 export type ProjectWithMembers = Project & {
+  state?: ProjectState | null;
   createdBy?: MinimalUser | null;
   members?: ProjectMemberWithUser[];
   labels?: Array<{ label: ProjectLabel }>;
 };
 
 export type EnrichedProject = ProjectWithMembers & {
-  yourRole?: ProjectMemberRole;
+  yourRole?: Role;
   permissions?: ProjectPermissions;
   isFavorite?: boolean;
   projectLabelsList?: ProjectLabel[];

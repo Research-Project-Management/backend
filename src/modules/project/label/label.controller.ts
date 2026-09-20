@@ -16,16 +16,15 @@ import {
   ApiOperation,
   ApiResponse,
 } from '@nestjs/swagger';
-import { JwtAuthGuard } from '@/modules/iam/authn/guards/auth.guard';
-import { CurrentUser } from '@/modules/iam/authn/decorators/user.decorator';
-import { ProjectRoleGuard } from '@/modules/iam/authz/guards/role.guard';
-import { ProjectRoles } from '@/modules/iam/authz/decorators/role.decorator';
+import { JwtAuthGuard } from '@/modules/identity/auth';
+import { CurrentUser } from '@/modules/identity/auth';
 import { LabelService } from './label.service';
 import {
   CreateProjectLabelDto,
   UpdateProjectLabelDto,
 } from './dto/create-label.dto';
 import { AssignProjectLabelsDto } from './dto/assign-label.dto';
+import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 
 @ApiTags('Project Labels')
 @ApiBearerAuth('JWT-auth')
@@ -84,9 +83,14 @@ export class LabelController {
   @ApiOperation({ summary: 'Assign labels to a project' })
   assignLabels(
     @Param('projectId') projectId: string,
+    @CurrentUser('id') userId: string,
     @Body() dto: AssignProjectLabelsDto,
   ) {
-    return this.labelService.assignLabelsToProject(projectId, dto.labelIds);
+    return this.labelService.assignLabelsToProject(
+      projectId,
+      dto.labelIds,
+      userId,
+    );
   }
 
   @Delete('projects/:projectId/project-labels/:labelId')

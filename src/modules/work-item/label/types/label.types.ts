@@ -5,7 +5,9 @@
  * parent-child nesting hierarchy, and safe work item detachment.
  */
 
-import { Label, LabelType, Prisma } from '@prisma/client';
+import { WorkItemLabel as Label, Prisma } from '@prisma/client';
+
+export type LabelType = string;
 
 export interface LabelWithChildren extends Label {
   children?: Label[];
@@ -46,13 +48,13 @@ export interface ILabelRepository {
     name: string,
     excludeId?: string,
   ): Promise<Label | null>;
-  create(data: Prisma.LabelUncheckedCreateInput): Promise<Label>;
+  create(data: Prisma.WorkItemLabelUncheckedCreateInput): Promise<Label>;
   createMany?(
-    data: Prisma.LabelUncheckedCreateInput[],
+    data: Prisma.WorkItemLabelUncheckedCreateInput[],
   ): Promise<{ count: number }>;
   update(
     labelId: string,
-    data: Prisma.LabelUncheckedUpdateInput,
+    data: Prisma.WorkItemLabelUncheckedUpdateInput,
   ): Promise<Label>;
   delete(labelId: string): Promise<Label>;
   reorder(projectId: string, updates: ReorderLabelItem[]): Promise<void>;

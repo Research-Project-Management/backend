@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
-import { Prisma, LabelType, Label } from '@prisma/client';
+import { Prisma, WorkItemLabel as Label } from '@prisma/client';
 import {
   ILabelRepository,
   LabelWithChildren,
   ReorderLabelItem,
+  LabelType,
 } from './types/label.types';
 
 @Injectable()
@@ -15,10 +16,9 @@ export class LabelRepository implements ILabelRepository {
     projectId: string,
     type?: LabelType,
   ): Promise<LabelWithChildren[]> {
-    return this.prisma.label.findMany({
+    return this.prisma.workItemLabel.findMany({
       where: {
         projectId,
-        ...(type && { type }),
       },
       include: {
         children: {
@@ -34,11 +34,10 @@ export class LabelRepository implements ILabelRepository {
     type?: LabelType,
     projectId?: string | null,
   ): Promise<Label[]> {
-    return this.prisma.label.findMany({
+    return this.prisma.workItemLabel.findMany({
       where: {
         createdById: userId,
         ...(projectId !== undefined && { projectId }),
-        ...(type && { type }),
       },
       include: {
         children: {
@@ -50,7 +49,7 @@ export class LabelRepository implements ILabelRepository {
   }
 
   async findById(labelId: string): Promise<LabelWithChildren | null> {
-    return this.prisma.label.findUnique({
+    return this.prisma.workItemLabel.findUnique({
       where: { id: labelId },
       include: {
         children: {
@@ -66,7 +65,7 @@ export class LabelRepository implements ILabelRepository {
     name: string,
     excludeId?: string,
   ): Promise<Label | null> {
-    return this.prisma.label.findFirst({
+    return this.prisma.workItemLabel.findFirst({
       where: {
         projectId,
         name: { equals: name.trim(), mode: 'insensitive' },
@@ -75,24 +74,24 @@ export class LabelRepository implements ILabelRepository {
     });
   }
 
-  async create(data: Prisma.LabelUncheckedCreateInput): Promise<Label> {
-    return this.prisma.label.create({
+  async create(data: Prisma.WorkItemLabelUncheckedCreateInput): Promise<Label> {
+    return this.prisma.workItemLabel.create({
       data,
     });
   }
 
   async update(
     labelId: string,
-    data: Prisma.LabelUncheckedUpdateInput,
+    data: Prisma.WorkItemLabelUncheckedUpdateInput,
   ): Promise<Label> {
-    return this.prisma.label.update({
+    return this.prisma.workItemLabel.update({
       where: { id: labelId },
       data,
     });
   }
 
   async delete(labelId: string): Promise<Label> {
-    return this.prisma.label.delete({
+    return this.prisma.workItemLabel.delete({
       where: { id: labelId },
     });
   }
@@ -100,7 +99,7 @@ export class LabelRepository implements ILabelRepository {
   async reorder(projectId: string, updates: ReorderLabelItem[]): Promise<void> {
     await this.prisma.$transaction(
       updates.map((item) =>
-        this.prisma.label.updateMany({
+        this.prisma.workItemLabel.updateMany({
           where: { id: item.id, projectId },
           data: { sortOrder: item.sortOrder },
         }),
@@ -212,9 +211,9 @@ export class LabelRepository implements ILabelRepository {
   }
 
   async createMany(
-    data: Prisma.LabelUncheckedCreateInput[],
+    data: Prisma.WorkItemLabelUncheckedCreateInput[],
   ): Promise<{ count: number }> {
-    return this.prisma.label.createMany({
+    return this.prisma.workItemLabel.createMany({
       data,
       skipDuplicates: true,
     });
@@ -226,14 +225,18 @@ export class LabelRepository implements ILabelRepository {
   }
 
   async createLabel(
-    data: Prisma.LabelCreateInput | Prisma.LabelUncheckedCreateInput,
+    data:
+      | Prisma.WorkItemLabelCreateInput
+      | Prisma.WorkItemLabelUncheckedCreateInput,
   ): Promise<Label> {
-    return this.create(data as Prisma.LabelUncheckedCreateInput);
+    return this.create(data as Prisma.WorkItemLabelUncheckedCreateInput);
   }
 
   async updateLabel(
     labelId: string,
-    data: Prisma.LabelUpdateInput | Prisma.LabelUncheckedUpdateInput,
+    data:
+      | Prisma.WorkItemLabelUpdateInput
+      | Prisma.WorkItemLabelUncheckedUpdateInput,
   ): Promise<Label> {
     return this.update(labelId, data);
   }

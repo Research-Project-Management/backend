@@ -1,22 +1,19 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { fromPartial } from '@total-typescript/shoehorn';
 import { Prisma } from '@prisma/client';
-import { NotesService } from '@/modules/library/content/application/services/notes.service';
-import { NotesRepository } from '@/modules/library/content/infrastructure/repositories/notes.repository';
-import { AnnotationsService } from '@/modules/library/content/application/services/annotations.service';
-import { AnnotationsRepository } from '@/modules/library/content/infrastructure/repositories/annotations.repository';
-import { TagsService } from '@/modules/library/catalog/application/services/tags.service';
-import { TagsRepository } from '@/modules/library/catalog/infrastructure/repositories/tags.repository';
-import { AttachmentsService } from '@/modules/library/content/application/services/attachments.service';
+import { NotesService } from '@/modules/library/reader/application/services/notes.service';
+import { NotesRepository } from '@/modules/library/reader/infrastructure/repositories/notes.repository';
+import { AnnotationsService } from '@/modules/library/reader/application/services/annotations.service';
+import { AnnotationsRepository } from '@/modules/library/reader/infrastructure/repositories/annotations.repository';
+import { TagsService } from '@/modules/library/bibliography/application/services/tags.service';
+import { TagsRepository } from '@/modules/library/bibliography/infrastructure/repositories/tags.repository';
+import { AttachmentsService } from '@/modules/library/reader/application/services/attachments.service';
 import {
   TransactionService,
   TransactionHelpers,
 } from '@/modules/library/shared-kernel/outbox/transaction.service';
 import { PrismaService } from '@/core/database/prisma.service';
-import {
-  ITEM_READ_PORT,
-  ITEM_EXISTENCE_PORT,
-} from '@/modules/library/catalog/domain/ports/items.ports';
+import { BIBLIOGRAPHY_FACADE } from '@/modules/library/bibliography/bibliography.facade';
 
 describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
   const mockUserId = '11111111-1111-4111-8111-111111111111';
@@ -65,17 +62,14 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
           { provide: TransactionService, useValue: mockLibraryTx },
           { provide: PrismaService, useValue: {} },
           {
-            provide: ITEM_READ_PORT,
+            provide: BIBLIOGRAPHY_FACADE,
             useValue: {
-              findById: jest.fn().mockResolvedValue({
+              itemExists: jest.fn().mockResolvedValue(true),
+              getItem: jest.fn().mockResolvedValue({
                 id: mockItemId,
                 projectId: mockProjectId,
               }),
             },
-          },
-          {
-            provide: ITEM_EXISTENCE_PORT,
-            useValue: { assertExists: jest.fn().mockResolvedValue(undefined) },
           },
         ],
       }).compile();

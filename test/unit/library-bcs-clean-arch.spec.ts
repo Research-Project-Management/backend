@@ -1,16 +1,16 @@
-import { FileHashVo } from '../../src/modules/library/content/domain/value-objects/file-hash.vo';
-import { MimeTypeVo } from '../../src/modules/library/content/domain/value-objects/mime-type.vo';
-import { AttachmentAggregate } from '../../src/modules/library/content/domain/model/attachment.aggregate';
-import { IngestionStatusVo } from '../../src/modules/library/processing/domain/value-objects/ingestion-status.vo';
-import { IngestionRunAggregate } from '../../src/modules/library/processing/domain/model/ingestion-run.aggregate';
-import { SearchQueryVo } from '../../src/modules/library/discovery/domain/value-objects/search-query.vo';
-import { CitationStyleVo } from '../../src/modules/library/discovery/domain/value-objects/citation-style.vo';
-import { ExecuteSearchUseCase } from '../../src/modules/library/discovery/application/queries/execute-search.use-case';
-import { FormatCitationUseCase } from '../../src/modules/library/discovery/application/queries/format-citation.use-case';
-import { ISearchEnginePort } from '../../src/modules/library/discovery/domain/ports/search-engine.port';
-import { ICitationEnginePort } from '../../src/modules/library/discovery/domain/ports/citation-engine.port';
+import { FileHashVo } from '../../src/modules/library/reader/domain/value-objects/file-hash.vo';
+import { MimeTypeVo } from '../../src/modules/library/reader/domain/value-objects/mime-type.vo';
+import { AttachmentAggregate } from '../../src/modules/library/reader/domain/model/attachment.aggregate';
+import { IngestionStatusVo } from '../../src/modules/library/ingestion/domain/value-objects/ingestion-status.vo';
+import { IngestionRunAggregate } from '../../src/modules/library/ingestion/domain/model/ingestion-run.aggregate';
+import { SearchQueryVo } from '../../src/modules/library/search/domain/value-objects/search-query.vo';
+import { CitationStyleVo } from '../../src/modules/library/citation/domain/value-objects/citation-style.vo';
+import { ExecuteSearchUseCase } from '../../src/modules/library/search/application/queries/execute-search.use-case';
+import { FormatCitationUseCase } from '../../src/modules/library/citation/application/queries/format-citation.use-case';
+import { ISearchEnginePort } from '../../src/modules/library/search/domain/ports/search-engine.port';
+import { ICitationEnginePort } from '../../src/modules/library/citation/domain/ports/citation-engine.port';
 
-describe('Content, Processing & Discovery Bounded Contexts - Clean Architecture & DDD', () => {
+describe('Reader, Ingestion, Search & Citation Bounded Contexts - Clean Architecture & DDD', () => {
   describe('Content Bounded Context', () => {
     it('FileHashVo should validate MD5 and SHA-256 hex formats', () => {
       const validMd5 = 'd41d8cd98f00b204e9800998ecf8427e';
@@ -110,7 +110,7 @@ describe('Content, Processing & Discovery Bounded Contexts - Clean Architecture 
     });
   });
 
-  describe('Discovery Bounded Context', () => {
+  describe('Search Bounded Context', () => {
     it('SearchQueryVo should enforce limits and sanitize parameters', () => {
       const query = SearchQueryVo.create('  quantum computing  ', {
         limit: 500, // Should be clamped to 100
@@ -122,14 +122,6 @@ describe('Content, Processing & Discovery Bounded Contexts - Clean Architecture 
       expect(query.limit).toBe(100);
       expect(query.offset).toBe(0);
       expect(query.sortBy).toBe('date');
-    });
-
-    it('CitationStyleVo should validate academic styles', () => {
-      const apa = CitationStyleVo.create('APA');
-      expect(apa.value).toBe('apa');
-
-      const unsupported = CitationStyleVo.create('unsupported-style');
-      expect(unsupported.value).toBe('apa'); // Fallback
     });
 
     it('ExecuteSearchUseCase should delegate to search engine port', async () => {
@@ -150,6 +142,16 @@ describe('Content, Processing & Discovery Bounded Contexts - Clean Architecture 
       expect(mockSearchEngine.search).toHaveBeenCalledTimes(1);
       expect(result.hits).toHaveLength(1);
       expect(result.hits[0].title).toBe('Deep Learning');
+    });
+  });
+
+  describe('Citation Bounded Context', () => {
+    it('CitationStyleVo should validate academic styles', () => {
+      const apa = CitationStyleVo.create('APA');
+      expect(apa.value).toBe('apa');
+
+      const unsupported = CitationStyleVo.create('unsupported-style');
+      expect(unsupported.value).toBe('apa'); // Fallback
     });
 
     it('FormatCitationUseCase should delegate to citation engine port', async () => {

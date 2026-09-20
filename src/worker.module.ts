@@ -6,7 +6,7 @@ import { CoreModule } from './core/core.module';
 import { StorageModule } from './modules/storage/storage.module';
 import { LibraryModule } from './modules/library/library.module';
 import { DocumentModule } from './modules/document/document.module';
-import { IamModule } from './modules/iam/iam.module';
+import { IdentityModule } from './modules/identity/identity.module';
 import { ProjectModule } from './modules/project/project.module';
 
 /**
@@ -80,7 +80,7 @@ import { ProjectModule } from './modules/project/project.module';
       },
     }),
     CoreModule,
-    IamModule,
+    IdentityModule,
     ProjectModule,
     StorageModule,
     LibraryModule,

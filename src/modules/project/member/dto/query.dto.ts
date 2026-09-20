@@ -1,16 +1,16 @@
-import { IsEnum, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+﻿import { IsEnum, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { ProjectMemberRole } from '@prisma/client';
+import { Role } from '@prisma/client';
 
 export class QueryProjectMembersDto {
   @ApiPropertyOptional({
     description: 'Filter project members by role',
-    enum: ProjectMemberRole,
+    enum: Role,
   })
-  @IsEnum(ProjectMemberRole)
+  @IsEnum(Role)
   @IsOptional()
-  role?: ProjectMemberRole;
+  role?: Role;
 
   @ApiPropertyOptional({
     description: 'Search string to match user name or email',

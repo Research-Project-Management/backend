@@ -12,6 +12,8 @@ export function isSensitiveAuthRoute(rawUrl?: string): boolean {
     normalized.startsWith('/auth/forgot-password') ||
     normalized.startsWith('/auth/reset-password') ||
     normalized.startsWith('/auth/change-password') ||
+    normalized.startsWith('/auth/verify-email') ||
+    normalized.startsWith('/auth/resend-verification') ||
     normalized.startsWith('/auth/oauth/exchange')
   );
 }

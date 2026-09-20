@@ -40,7 +40,12 @@ const TRANSIENT_NETWORK_ERRORS = [
 
 function isTransientNetworkError(err: unknown): boolean {
   if (!err) return false;
-  const msg = err instanceof Error ? err.stack || err.message : String(err);
+  const msg =
+    err instanceof Error
+      ? err.stack || err.message
+      : typeof err === 'string'
+        ? err
+        : JSON.stringify(err);
   const code = (err as any)?.code;
   return (
     TRANSIENT_NETWORK_ERRORS.some((e) => code === e || msg?.includes(e)) ||

@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RedisCacheService } from '@/core/cache/redis.service';
-import { ProjectMemberRole, EntityType } from '@prisma/client';
+import { Role, EntityType } from '@prisma/client';
 import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
 import { MemberRepository } from './member.repository';
 import { AddProjectMemberDto, BulkAddProjectMembersDto } from './dto/add.dto';
@@ -20,7 +20,14 @@ import {
 } from './types/member.type';
 import { isOwner, canDemoteOrRemoveOwner } from './utils/role.util';
 import { CACHE_KEYS } from '../core/constants/cache.constant';
-import { IAM_REDIS_KEYS } from '@/modules/iam/core/constants/redis.constant';
+import { PROJECT_ACCESS_REDIS_KEYS } from '../access/constants/redis.constant';
+import {
+  IdentityFacade,
+  AUDIT_ACTIONS,
+  AuditOutcome,
+  AuditSeverity,
+} from '@/modules/identity/identity.facade';
+import { WORK_ITEM_REDIS_KEYS } from '@/modules/work-item/work-item.facade';
 
 @Injectable()
 export class MemberService {
@@ -28,6 +35,7 @@ export class MemberService {
     private readonly memberRepo: MemberRepository,
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly cache?: RedisCacheService,
+    @Optional() private readonly identityFacade?: IdentityFacade,
   ) {}
 
   /**
@@ -108,7 +116,7 @@ export class MemberService {
       throw new NotFoundException('User not found');
     }
 
-    const role = dto.role || ProjectMemberRole.contributor;
+    const role = dto.role || Role.contributor;
 
     // Prevent assigning owner role via invitation
     if (isOwner(role)) {
@@ -138,6 +146,17 @@ export class MemberService {
       }),
     );
 
+    await this.identityFacade?.recordAudit({
+      actorId,
+      action: AUDIT_ACTIONS.PROJECT_MEMBER_INVITED,
+      outcome: AuditOutcome.success,
+      severity: AuditSeverity.info,
+      projectId,
+      targetType: 'user',
+      targetId: dto.userId,
+      metadata: { role },
+    });
+
     return {
       message: 'Project member added successfully',
       member,
@@ -157,7 +176,7 @@ export class MemberService {
       throw new NotFoundException('Project not found');
     }
 
-    const targetRole = dto.role || ProjectMemberRole.contributor;
+    const targetRole = dto.role || Role.contributor;
 
     // Block bulk-assigning owner role
     if (isOwner(targetRole)) {
@@ -271,6 +290,17 @@ export class MemberService {
       }),
     );
 
+    await this.identityFacade?.recordAudit({
+      actorId,
+      action: AUDIT_ACTIONS.PROJECT_MEMBER_ROLE_UPDATED,
+      outcome: AuditOutcome.success,
+      severity: AuditSeverity.info,
+      projectId,
+      targetType: 'user',
+      targetId: targetUserId,
+      metadata: { oldRole: existing.role, newRole: dto.role },
+    });
+
     return {
       message: 'Project member role updated successfully',
       member,
@@ -328,6 +358,16 @@ export class MemberService {
         projectId,
       }),
     );
+
+    await this.identityFacade?.recordAudit({
+      actorId,
+      action: AUDIT_ACTIONS.PROJECT_MEMBER_REMOVED,
+      outcome: AuditOutcome.success,
+      severity: AuditSeverity.warning,
+      projectId,
+      targetType: 'user',
+      targetId: targetUserId,
+    });
 
     return { message: 'Project member removed successfully' };
   }
@@ -411,6 +451,20 @@ export class MemberService {
       }),
     );
 
+    await this.identityFacade?.recordAudit({
+      actorId,
+      action: AUDIT_ACTIONS.PROJECT_OWNERSHIP_TRANSFERRED,
+      outcome: AuditOutcome.success,
+      severity: AuditSeverity.warning,
+      projectId,
+      targetType: 'user',
+      targetId: newOwnerId,
+      metadata: {
+        previousOwnerId: actorId,
+        newOwnerId,
+      },
+    });
+
     return {
       message: 'Project ownership transferred successfully',
       previousOwner: result.previousOwner,
@@ -425,12 +479,15 @@ export class MemberService {
     if (!this.cache) return;
     try {
       await Promise.all([
-        this.cache.del(IAM_REDIS_KEYS.role(projectId, userId)),
-        this.cache.del(IAM_REDIS_KEYS.permissions(projectId, userId)),
+        this.cache.del(PROJECT_ACCESS_REDIS_KEYS.role(projectId, userId)),
+        this.cache.del(
+          PROJECT_ACCESS_REDIS_KEYS.permissions(projectId, userId),
+        ),
+        this.cache.del(PROJECT_ACCESS_REDIS_KEYS.context(projectId, userId)),
         this.cache.del(CACHE_KEYS.detail(projectId)),
         this.cache.del(CACHE_KEYS.overview(projectId)),
         this.cache.del(CACHE_KEYS.userProjects(userId)),
-        this.cache.del(`flux:wi:work-items:${projectId}`),
+        this.cache.del(WORK_ITEM_REDIS_KEYS.projectWorkItems(projectId)),
       ]);
     } catch {
       // Best effort cache invalidation

@@ -14,7 +14,8 @@ import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '@/core/database/prisma.service';
 import { RedisCacheService } from '@/core/cache/redis.service';
-import { IAM_REDIS_KEYS } from '@/modules/iam/core/constants/redis.constant';
+import { IDENTITY_REDIS_KEYS } from '@/modules/identity/identity.facade';
+import { PROJECT_ACCESS_REDIS_KEYS } from '@/modules/project/access';
 import { PageRepository } from '../page/page.repository';
 import { CollaborationService } from './collaboration.service';
 import { YjsDocumentManager } from './yjs-document.manager';
@@ -119,7 +120,7 @@ export class CollaborationGateway
       if (this.redis) {
         try {
           const revokedAt = await this.redis.get<number>(
-            IAM_REDIS_KEYS.revoked(userId),
+            IDENTITY_REDIS_KEYS.revoked(userId),
           );
           if (revokedAt) {
             const tokenIatMs = (payload.iat || 0) * 1000;
@@ -533,7 +534,7 @@ export class CollaborationGateway
     projectId: string,
     userId: string,
   ): Promise<string | null> {
-    const cacheKey = IAM_REDIS_KEYS.role(projectId, userId);
+    const cacheKey = PROJECT_ACCESS_REDIS_KEYS.role(projectId, userId);
     if (this.redis) {
       try {
         const cached = await this.redis.get<string>(cacheKey);
