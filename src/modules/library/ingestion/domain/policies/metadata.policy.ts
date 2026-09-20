@@ -1,5 +1,12 @@
-import { ConflictException } from '@nestjs/common';
+import { BaseDomainException } from '../../../shared-kernel/core/errors/domain.exception';
 import { ProviderName, QueryType } from '../types/metadata.types';
+
+export class SsrfBlockedDomainException extends BaseDomainException {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SsrfBlockedDomainException';
+  }
+}
 
 export const METADATA_POLICY_VERSION = 2;
 
@@ -96,7 +103,7 @@ export class MetadataRoutingPolicy {
     }
 
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      throw new ConflictException(
+      throw new SsrfBlockedDomainException(
         `SSRF Protection: Blocked unsupported protocol "${parsed.protocol}" in URL: ${rawUrl}`,
       );
     }
@@ -105,7 +112,7 @@ export class MetadataRoutingPolicy {
 
     for (const pattern of SSRF_BLOCKED_PATTERNS) {
       if (pattern.test(hostname)) {
-        throw new ConflictException(
+        throw new SsrfBlockedDomainException(
           `SSRF Protection: Blocked request to restricted host "${hostname}"`,
         );
       }

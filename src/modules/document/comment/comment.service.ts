@@ -25,6 +25,25 @@ import { sanitizeCommentContent } from '../page/utils/page.utils';
 import { CollaborationGateway } from '../collaboration/collaboration.gateway';
 import { YjsDocumentManager } from '../collaboration/yjs-document.manager';
 
+/**
+ * Parses @mention tokens from comment content.
+ * Supports:
+ *   - Rich-text: @[Display Name](userId)   → returns ['userId']
+ */
+function extractMentions(content: string): string[] {
+  if (!content) return [];
+  const rich = /@\[([^\]]+)\](?:\(([^)]+)\))?/g;
+  const mentions: string[] = [];
+  let match: RegExpExecArray | null;
+
+  while ((match = rich.exec(content)) !== null) {
+    const userId = match[2]?.trim();
+    if (userId) mentions.push(userId);
+  }
+
+  return [...new Set(mentions)];
+}
+
 @Injectable()
 export class CommentService {
   private readonly logger = new Logger(CommentService.name);
@@ -172,6 +191,17 @@ export class CommentService {
       comment,
     });
 
+    const mentions = extractMentions(cleanContent);
+    if (mentions.length > 0) {
+      this.collaborationGateway?.broadcastRoomEvent(pageId, 'comment:mention', {
+        pageId,
+        commentId: comment.id,
+        authorId: userId,
+        mentionedUserIds: mentions,
+        content: cleanContent,
+      });
+    }
+
     return { comment };
   }
 
@@ -282,6 +312,22 @@ export class CommentService {
         comment,
       },
     );
+
+    const replyMentions = extractMentions(cleanContent);
+    if (replyMentions.length > 0) {
+      this.collaborationGateway?.broadcastRoomEvent(
+        targetPageId,
+        'comment:mention',
+        {
+          pageId: targetPageId,
+          commentId,
+          replyId: newReply.id,
+          authorId: userId,
+          mentionedUserIds: replyMentions,
+          content: cleanContent,
+        },
+      );
+    }
 
     return { comment };
   }

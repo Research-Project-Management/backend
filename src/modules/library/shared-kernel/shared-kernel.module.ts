@@ -18,12 +18,12 @@ import { CorrelationIdMiddleware } from './core/middlewares/correlation-id.middl
 import { IdempotencyMiddleware } from './core/middlewares/idempotency.middleware';
 import { DomainExceptionFilter } from './core/filters/domain-exception.filter';
 
-// ── 4. Outbox Transactional Messaging ─────────────────────────────────────
 import { TransactionService } from './outbox/transaction.service';
 import { ChangeLogRepository } from './outbox/repositories/changelog.repository';
 import { OutboxWorker } from './outbox/outbox.worker';
 import { OutboxDispatcher, EventDispatcher } from './outbox/outbox.dispatcher';
 import { EVENT_PUBLISHER_PORT } from './outbox/ports/event-publisher.port';
+import { UNIT_OF_WORK_PORT } from './outbox/ports/unit-of-work.port';
 import { OutboxMetrics, SyncMetricsService } from './outbox/outbox.metrics';
 import { LIBRARY_EVENT_TYPES } from './outbox/outbox.events';
 
@@ -58,6 +58,10 @@ import { LIBRARY_EVENT_TYPES } from './outbox/outbox.events';
 
     // Outbox & Transaction
     TransactionService,
+    {
+      provide: UNIT_OF_WORK_PORT,
+      useExisting: TransactionService,
+    },
     ChangeLogRepository,
     OutboxWorker,
     OutboxDispatcher,
@@ -84,6 +88,7 @@ import { LIBRARY_EVENT_TYPES } from './outbox/outbox.events';
 
     // Outbox & Transaction
     TransactionService,
+    UNIT_OF_WORK_PORT,
     ChangeLogRepository,
     OutboxWorker,
     OutboxDispatcher,

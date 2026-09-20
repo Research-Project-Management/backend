@@ -409,6 +409,21 @@ export class PageService {
     return { files: files.map((f) => this.formatPage(f)) };
   }
 
+  async getDeletedFiles(pageId: string, projectId?: string) {
+    const page = await this.pageRepo.findPageById(pageId, true);
+    if (!page) {
+      throw new NotFoundException('Page not found');
+    }
+    if (projectId && page.projectId !== projectId) {
+      throw new NotFoundException('Page not found in this project');
+    }
+    const deletedFiles = await this.pageRepo.findDeletedPages(
+      pageId,
+      projectId || page.projectId,
+    );
+    return { files: deletedFiles.map((f) => this.formatPage(f)) };
+  }
+
   async createPageFile(
     pageId: string,
     userId: string,

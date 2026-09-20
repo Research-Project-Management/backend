@@ -1,4 +1,4 @@
-import { HttpException, HttpStatus } from '@nestjs/common';
+import { BaseDomainException } from '../../../shared-kernel/core/errors/domain.exception';
 
 export type AttachmentKind = 'stored_file' | 'linked_resource' | 'snapshot';
 
@@ -65,39 +65,41 @@ export interface ReplaceAttachmentFileInput {
   comment?: string;
 }
 
-export class AttachmentInvariantError extends Error {
+export class AttachmentInvariantError extends BaseDomainException {
   constructor(message: string) {
     super(message);
     this.name = 'AttachmentInvariantError';
   }
 }
 
-export class AttachmentTooLargeException extends HttpException {
+export class AttachmentTooLargeException extends BaseDomainException {
+  readonly size: number;
+  readonly limit: number;
+
   constructor(size: number, limit: number) {
-    super(
-      `File size (${size} bytes) exceeds maximum limit (${limit} bytes)`,
-      HttpStatus.PAYLOAD_TOO_LARGE,
-    );
+    super(`File size (${size} bytes) exceeds maximum limit (${limit} bytes)`);
+    this.size = size;
+    this.limit = limit;
   }
 }
 
-export class InvalidAttachmentTypeException extends HttpException {
+export class InvalidAttachmentTypeException extends BaseDomainException {
+  readonly mimeType: string;
+
   constructor(mimeType: string) {
-    super(
-      `MIME type "${mimeType}" is not an allowed attachment format`,
-      HttpStatus.UNSUPPORTED_MEDIA_TYPE,
-    );
+    super(`MIME type "${mimeType}" is not an allowed attachment format`);
+    this.mimeType = mimeType;
   }
 }
 
-export class MissingAttachmentFileException extends HttpException {
+export class MissingAttachmentFileException extends BaseDomainException {
   constructor() {
-    super('No file uploaded or provided', HttpStatus.BAD_REQUEST);
+    super('No file uploaded or provided');
   }
 }
 
-export class AttachmentStorageException extends HttpException {
+export class AttachmentStorageException extends BaseDomainException {
   constructor(message: string) {
-    super(message, HttpStatus.INTERNAL_SERVER_ERROR);
+    super(message);
   }
 }

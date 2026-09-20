@@ -77,6 +77,10 @@ export interface IPageRepository {
     slug: string,
   ): Promise<PageWithAuthor | null>;
   findChildPages(parentPageId: string): Promise<PageListItem[]>;
+  findDeletedPages(
+    parentPageId: string,
+    projectId?: string,
+  ): Promise<PageListItem[]>;
   findPageAncestorChain(
     startPageId: string,
   ): Promise<Array<{ id: string; parentPageId: string | null }>>;

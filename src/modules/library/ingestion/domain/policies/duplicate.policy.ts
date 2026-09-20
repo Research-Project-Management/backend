@@ -1,4 +1,3 @@
-import { Injectable } from '@nestjs/common';
 import { ItemMetadata } from '../types/metadata.types';
 import { DuplicateMatchResult } from '../types/metadata-candidate.types';
 import { normalizeDoi } from '../../../shared-kernel/utils/bibliographic.utils';
@@ -17,7 +16,6 @@ export interface ExistingItemSummary {
   citationKey?: string | null;
 }
 
-@Injectable()
 export class DuplicatePolicy {
   /**
    * Matches proposed metadata against existing workspace items.

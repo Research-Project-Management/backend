@@ -1,4 +1,3 @@
-import { Injectable } from '@nestjs/common';
 import {
   MetadataCandidate,
   FieldEvidence,
@@ -9,7 +8,6 @@ import { ItemMetadata } from '../types/metadata.types';
 import { normalizeAcademicTags } from '../../../shared-kernel/utils/tag.utils';
 import { BASE_FIELD_MAPPINGS } from '../../../shared-kernel/types/schema.constants';
 
-@Injectable()
 export class ReconciliationPolicy {
   /**
    * Global provider priority scores for ingestion-pipeline reconciliation.

@@ -1,4 +1,4 @@
-import { Injectable, Optional } from '@nestjs/common';
+import { Injectable, Optional, Inject } from '@nestjs/common';
 import { ItemsService } from './application/services/items.service';
 import { QueryRepository } from './infrastructure/repositories/query.repository';
 import { CollectionsService } from './application/services/collections.service';
@@ -6,10 +6,21 @@ import { TagsService } from './application/services/tags.service';
 import { TypesService } from './application/services/types.service';
 import { StateService } from './application/services/state.service';
 import {
+  ITEM_READ_PORT,
+  ITEM_EXISTENCE_PORT,
+  IItemReadPort,
+  IItemExistencePort,
   ItemDetail,
   ItemSummary,
   DuplicateCandidateItem,
 } from './domain/ports/items.ports';
+import {
+  ITEM_REPOSITORY_PORT,
+  IItemRepositoryPort,
+} from './domain/ports/item-repository.port';
+import { CreateItemUseCase } from './application/commands/create-item.use-case';
+import { UpdateItemUseCase } from './application/commands/update-item.use-case';
+import { sanitizeItemTitle } from '../shared-kernel/utils/bibliographic.utils';
 import { ItemFieldDefinition } from '../shared-kernel/types/schema.types';
 
 export const BIBLIOGRAPHY_FACADE = 'BIBLIOGRAPHY_FACADE';
@@ -88,6 +99,17 @@ export type ICatalogFacade = IBibliographyFacade;
 @Injectable()
 export class BibliographyFacade implements IBibliographyFacade {
   constructor(
+    @Inject(ITEM_READ_PORT)
+    @Optional()
+    private readonly itemReadPort?: IItemReadPort,
+    @Inject(ITEM_EXISTENCE_PORT)
+    @Optional()
+    private readonly itemExistencePort?: IItemExistencePort,
+    @Inject(ITEM_REPOSITORY_PORT)
+    @Optional()
+    private readonly itemRepo?: IItemRepositoryPort,
+    @Optional() private readonly createItemUseCase?: CreateItemUseCase,
+    @Optional() private readonly updateItemUseCase?: UpdateItemUseCase,
     @Optional() private readonly itemsService?: ItemsService,
     @Optional() private readonly queryRepo?: QueryRepository,
     @Optional() private readonly collectionsService?: CollectionsService,
@@ -101,8 +123,13 @@ export class BibliographyFacade implements IBibliographyFacade {
     itemId: string,
     projectId?: string,
   ): Promise<ItemDetail | null> {
-    if (!this.itemsService) return null;
-    return this.itemsService.findById(userId, itemId, projectId);
+    if (this.itemReadPort) {
+      return this.itemReadPort.findById(userId, itemId, projectId);
+    }
+    if (this.itemsService) {
+      return this.itemsService.findById(userId, itemId, projectId);
+    }
+    return null;
   }
 
   async getItemSummary(
@@ -110,8 +137,13 @@ export class BibliographyFacade implements IBibliographyFacade {
     itemId: string,
     projectId?: string,
   ): Promise<ItemSummary | null> {
-    if (!this.itemsService) return null;
-    return this.itemsService.findSummaryById(userId, itemId, projectId);
+    if (this.itemReadPort) {
+      return this.itemReadPort.findSummaryById(userId, itemId, projectId);
+    }
+    if (this.itemsService) {
+      return this.itemsService.findSummaryById(userId, itemId, projectId);
+    }
+    return null;
   }
 
   async itemExists(
@@ -119,8 +151,13 @@ export class BibliographyFacade implements IBibliographyFacade {
     itemId: string,
     projectId?: string,
   ): Promise<boolean> {
-    if (!this.itemsService) return false;
-    return this.itemsService.exists(userId, itemId, projectId);
+    if (this.itemExistencePort) {
+      return this.itemExistencePort.exists(userId, itemId, projectId);
+    }
+    if (this.itemsService) {
+      return this.itemsService.exists(userId, itemId, projectId);
+    }
+    return false;
   }
 
   async getTags(
@@ -146,10 +183,25 @@ export class BibliographyFacade implements IBibliographyFacade {
     options?: any,
     projectId?: string,
   ): Promise<any> {
-    if (!this.itemsService) {
-      throw new Error('ItemsService not initialized in CatalogFacade');
+    if (this.createItemUseCase) {
+      const cleanTitle = data.title ? sanitizeItemTitle(data.title) : '';
+      return this.createItemUseCase.execute({
+        userId,
+        projectId: projectId || data.projectId || undefined,
+        title: cleanTitle || data.title || 'Untitled',
+        itemType: data.itemType ?? 'journalArticle',
+        doi: data.doi,
+        citationKey: data.citationKey,
+        abstract: data.abstract,
+        year: data.year ? parseInt(data.year, 10) : undefined,
+        publicationTitle: data.publicationTitle,
+        fields: data.fields ?? data,
+      });
     }
-    return this.itemsService.createItem(userId, data, options, projectId);
+    if (this.itemsService) {
+      return this.itemsService.createItem(userId, data, options, projectId);
+    }
+    throw new Error('No provider available for createItem in BibliographyFacade');
   }
 
   async updateItem(
@@ -158,10 +210,28 @@ export class BibliographyFacade implements IBibliographyFacade {
     data: any,
     options?: any,
   ): Promise<any> {
-    if (!this.itemsService) {
-      throw new Error('ItemsService not initialized in CatalogFacade');
+    if (this.updateItemUseCase) {
+      return this.updateItemUseCase.execute({
+        userId,
+        itemId,
+        projectId: data.projectId,
+        expectedVersion: options?.expectedVersion,
+        changes: {
+          title: data.title,
+          itemType: data.itemType,
+          doi: data.doi,
+          citationKey: data.citationKey,
+          abstract: data.abstract,
+          year: data.year ? parseInt(data.year, 10) : undefined,
+          publicationTitle: data.publicationTitle,
+          fields: data.fields ?? data,
+        },
+      });
     }
-    return this.itemsService.updateItem(userId, itemId, data, options);
+    if (this.itemsService) {
+      return this.itemsService.updateItem(userId, itemId, data, options);
+    }
+    throw new Error('No provider available for updateItem in BibliographyFacade');
   }
 
   async findByIds(
@@ -169,6 +239,9 @@ export class BibliographyFacade implements IBibliographyFacade {
     itemIds: string[],
     projectId?: string,
   ): Promise<any[]> {
+    if (this.itemReadPort) {
+      return this.itemReadPort.findByIds(userId, itemIds, projectId);
+    }
     if (!this.itemsService) return [];
     return this.itemsService.findByIds(userId, itemIds, projectId);
   }
@@ -203,6 +276,9 @@ export class BibliographyFacade implements IBibliographyFacade {
     limit?: number,
     projectId?: string,
   ): Promise<any[]> {
+    if (this.itemReadPort) {
+      return this.itemReadPort.findQualityAuditItems(userId, limit, projectId);
+    }
     if (!this.itemsService) return [];
     return this.itemsService.findQualityAuditItems(userId, limit, projectId);
   }
@@ -212,6 +288,13 @@ export class BibliographyFacade implements IBibliographyFacade {
     limit?: number,
     projectId?: string,
   ): Promise<DuplicateCandidateItem[]> {
+    if (this.itemReadPort) {
+      return this.itemReadPort.findDuplicateCandidateItems(
+        userId,
+        limit,
+        projectId,
+      );
+    }
     if (!this.itemsService) return [];
     return this.itemsService.findDuplicateCandidateItems(
       userId,

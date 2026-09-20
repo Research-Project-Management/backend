@@ -1,11 +1,4 @@
-import {
-  HttpException,
-  HttpStatus,
-  BadRequestException,
-  NotFoundException,
-  ConflictException,
-  InternalServerErrorException,
-} from '@nestjs/common';
+import { BaseDomainException } from '../../../shared-kernel/core/errors/domain.exception';
 
 export type IngestionErrorCategory =
   | 'validation_failed'
@@ -20,116 +13,71 @@ export type IngestionErrorCategory =
   | 'unauthorized'
   | 'forbidden';
 
-export class IngestionException extends HttpException {
+export class IngestionException extends BaseDomainException {
   public readonly category: IngestionErrorCategory;
 
   constructor(
     message: string,
-    category: IngestionErrorCategory,
-    statusCode: HttpStatus = HttpStatus.BAD_REQUEST,
+    category: IngestionErrorCategory = 'validation_failed',
   ) {
-    super(
-      {
-        statusCode,
-        errorCategory: category,
-        message,
-      },
-      statusCode,
-    );
+    super(message);
     this.category = category;
+    this.name = this.constructor.name;
   }
 }
 
-export class IngestionValidationException extends BadRequestException {
-  public readonly category: IngestionErrorCategory = 'validation_failed';
-
+export class IngestionValidationException extends IngestionException {
   constructor(message: string) {
-    super({
-      statusCode: HttpStatus.BAD_REQUEST,
-      errorCategory: 'validation_failed',
-      message,
-    });
+    super(message, 'validation_failed');
+    this.name = 'IngestionValidationException';
   }
 }
 
-export class IngestionUnsupportedSourceException extends BadRequestException {
-  public readonly category: IngestionErrorCategory = 'unsupported_source';
-
+export class IngestionUnsupportedSourceException extends IngestionException {
   constructor(source: string) {
-    super({
-      statusCode: HttpStatus.BAD_REQUEST,
-      errorCategory: 'unsupported_source',
-      message: `Unsupported ingestion source: ${source}`,
-    });
+    super(`Unsupported ingestion source: ${source}`, 'unsupported_source');
+    this.name = 'IngestionUnsupportedSourceException';
   }
 }
 
-export class IngestionMetadataNotFoundException extends NotFoundException {
-  public readonly category: IngestionErrorCategory = 'metadata_not_found';
-
+export class IngestionMetadataNotFoundException extends IngestionException {
   constructor(query: string) {
-    super({
-      statusCode: HttpStatus.NOT_FOUND,
-      errorCategory: 'metadata_not_found',
-      message: `Metadata not found for query: ${query}`,
-    });
+    super(`Metadata not found for query: ${query}`, 'metadata_not_found');
+    this.name = 'IngestionMetadataNotFoundException';
   }
 }
 
-export class IngestionIdempotencyConflictException extends ConflictException {
-  public readonly category: IngestionErrorCategory = 'idempotency_conflict';
-
+export class IngestionIdempotencyConflictException extends IngestionException {
   constructor(
     message = 'Idempotency key reused with mismatched payload or request already in progress',
   ) {
-    super({
-      statusCode: HttpStatus.CONFLICT,
-      errorCategory: 'idempotency_conflict',
-      message,
-    });
+    super(message, 'idempotency_conflict');
+    this.name = 'IngestionIdempotencyConflictException';
   }
 }
 
-export class IngestionDuplicateConflictException extends ConflictException {
-  public readonly category: IngestionErrorCategory = 'duplicate_conflict';
-
+export class IngestionDuplicateConflictException extends IngestionException {
   constructor(message: string) {
-    super({
-      statusCode: HttpStatus.CONFLICT,
-      errorCategory: 'duplicate_conflict',
-      message,
-    });
+    super(message, 'duplicate_conflict');
+    this.name = 'IngestionDuplicateConflictException';
   }
 }
 
-export class IngestionStorageException extends InternalServerErrorException {
-  public readonly category: IngestionErrorCategory = 'storage_failed';
+export class IngestionStorageException extends IngestionException {
+  public readonly cause?: unknown;
 
   constructor(message: string, options?: { cause?: unknown }) {
-    super(
-      {
-        statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
-        errorCategory: 'storage_failed',
-        message,
-      },
-      options,
-    );
+    super(message, 'storage_failed');
+    this.cause = options?.cause;
+    this.name = 'IngestionStorageException';
   }
 }
 
-export class IngestionRateLimitException extends HttpException {
-  public readonly category: IngestionErrorCategory = 'provider_unavailable';
-
+export class IngestionRateLimitException extends IngestionException {
   constructor(
     message = 'Upstream provider rate limit exceeded, please retry later',
   ) {
-    super(
-      {
-        statusCode: HttpStatus.TOO_MANY_REQUESTS,
-        errorCategory: 'provider_unavailable',
-        message,
-      },
-      HttpStatus.TOO_MANY_REQUESTS,
-    );
+    super(message, 'provider_unavailable');
+    this.name = 'IngestionRateLimitException';
   }
 }

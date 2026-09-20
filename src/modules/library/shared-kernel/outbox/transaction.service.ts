@@ -12,6 +12,7 @@ import {
   AppendChangeEntry,
   RecordTombstoneEntry,
 } from './repositories/changelog.repository';
+import { IUnitOfWork } from './ports/unit-of-work.port';
 
 export interface TransactionHelpers {
   appendChange(
@@ -31,7 +32,7 @@ export interface TransactionHelpers {
 }
 
 @Injectable()
-export class TransactionService {
+export class TransactionService implements IUnitOfWork {
   private readonly logger = new Logger(TransactionService.name);
 
   constructor(

@@ -98,7 +98,7 @@ export class PageController {
   }
 
   @Post(['pages/:pageId/restore', 'projects/:projectId/pages/:pageId/restore'])
-  @ProjectRoles('owner')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
   @ApiOperation({ summary: 'Restore a soft-deleted page/document' })
   async restorePage(
     @Param('pageId') pageId: string,
@@ -130,6 +130,19 @@ export class PageController {
     @Param('projectId') projectId?: string,
   ) {
     return this.pageService.getPageFiles(pageId, projectId);
+  }
+
+  @Get([
+    'pages/:pageId/deleted-files',
+    'projects/:projectId/pages/:pageId/deleted-files',
+  ])
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  @ApiOperation({ summary: 'List soft-deleted files attached to a page/project' })
+  async getDeletedFiles(
+    @Param('pageId') pageId: string,
+    @Param('projectId') projectId?: string,
+  ) {
+    return this.pageService.getDeletedFiles(pageId, projectId);
   }
 
   @Post(['pages/:pageId/files', 'projects/:projectId/pages/:pageId/files'])

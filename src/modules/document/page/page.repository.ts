@@ -206,6 +206,33 @@ export class PageRepository implements IPageRepository {
     });
   }
 
+  async findDeletedPages(
+    parentPageId: string,
+    projectId?: string,
+  ): Promise<PageListItem[]> {
+    if (!isUuid(parentPageId)) return [];
+
+    const canonicalProjectId = projectId
+      ? await this.resolveProjectId(projectId)
+      : null;
+
+    const where: Prisma.PageWhereInput = {
+      deletedAt: { not: null },
+      OR: [
+        { parentPageId },
+        ...(canonicalProjectId
+          ? [{ projectId: canonicalProjectId, id: { not: parentPageId } }]
+          : []),
+      ],
+    };
+
+    return this.prisma.page.findMany({
+      where,
+      select: PAGE_LIST_SELECT,
+      orderBy: [{ deletedAt: 'desc' }, { updatedAt: 'desc' }],
+    });
+  }
+
   async createPage(
     data: Prisma.PageCreateInput | Prisma.PageUncheckedCreateInput,
   ): Promise<PageWithAuthor> {

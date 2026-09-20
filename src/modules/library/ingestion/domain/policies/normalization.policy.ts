@@ -1,4 +1,3 @@
-import { Injectable } from '@nestjs/common';
 import {
   ItemMetadata,
   CreatorInput,
@@ -20,7 +19,6 @@ import {
 } from '../../../shared-kernel/utils/bibliographic.utils';
 import { normalizeTags as canonicalNormalizeTags } from '../../../shared-kernel/utils/tag.utils';
 
-@Injectable()
 export class NormalizationPolicy {
   private static readonly BANNED_STRINGS = new Set([
     'undefined',
