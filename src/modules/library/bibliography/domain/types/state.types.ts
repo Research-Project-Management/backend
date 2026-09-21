@@ -30,7 +30,7 @@ export const StateStatus = ReadingStatus;
 
 // ─── StateEntity — Pure Domain Entity ────────────────────────────────────────
 export interface StateEntity {
-  id: string;
+  id?: string;
   userId: string;
   itemId: string;
   readStatus: ReadingStatus | string;

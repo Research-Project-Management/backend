@@ -4,9 +4,13 @@ import { isUUID } from 'class-validator';
 
 const USER_SELECT = {
   id: true,
-  name: true,
   email: true,
-  avatar: true,
+  profile: {
+    select: {
+      name: true,
+      avatar: true,
+    },
+  },
 } as const;
 
 @Injectable()
@@ -150,7 +154,7 @@ export class AnalyticsRepository {
       canonicalProjectId = proj.id;
     }
 
-    return this.prisma.workItem.findMany({
+    const items = await this.prisma.workItem.findMany({
       where: { projectId: canonicalProjectId, deletedAt: null },
       select: {
         id: true,
@@ -161,6 +165,19 @@ export class AnalyticsRepository {
         assignee: { select: USER_SELECT },
       },
     });
+
+    return items.map((item: any) => ({
+      ...item,
+      assignee: item.assignee
+        ? {
+            id: item.assignee.id,
+            email: item.assignee.email,
+            name: item.assignee.profile?.name ?? item.assignee.name ?? 'User',
+            avatar:
+              item.assignee.profile?.avatar ?? item.assignee.avatar ?? null,
+          }
+        : item.assignee,
+    }));
   }
 
   async findCycleWorkItems(cycleId: string) {

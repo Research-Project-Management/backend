@@ -4,7 +4,6 @@ import { Prisma, ReadStatus } from '@prisma/client';
 import { StateEntity, UpsertStateData } from '../../domain/types/state.types';
 
 const STATE_SELECT = {
-  id: true,
   userId: true,
   itemId: true,
   readStatus: true,

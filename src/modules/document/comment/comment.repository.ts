@@ -4,24 +4,51 @@ import { CommentStatus, Prisma } from '@prisma/client';
 
 const AUTHOR_SELECT = {
   id: true,
-  name: true,
-  avatar: true,
   email: true,
+  profile: {
+    select: {
+      name: true,
+      avatar: true,
+    },
+  },
 } as const;
+
+function mapCommentAuthor<T extends { author?: any }>(comment: T | null): any {
+  if (!comment) return null;
+  const author = comment.author
+    ? {
+        id: comment.author.id,
+        email: comment.author.email,
+        name: comment.author.profile?.name ?? comment.author.name ?? 'User',
+        avatar: comment.author.profile?.avatar ?? comment.author.avatar ?? null,
+      }
+    : comment.author;
+  return {
+    ...comment,
+    author,
+  };
+}
 
 @Injectable()
 export class CommentRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async findAuthorById(userId: string) {
-    return this.prisma.user.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: AUTHOR_SELECT,
     });
+    if (!user) return null;
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.profile?.name ?? 'User',
+      avatar: user.profile?.avatar ?? null,
+    };
   }
 
   async findComments(pageId: string) {
-    return this.prisma.pageComment.findMany({
+    const comments = await this.prisma.pageComment.findMany({
       where: {
         OR: [{ pageId }, { projectPageId: pageId }],
       },
@@ -30,16 +57,18 @@ export class CommentRepository {
         author: { select: AUTHOR_SELECT },
       },
     });
+    return comments.map((c) => mapCommentAuthor(c));
   }
 
   async findCommentById(commentId: string) {
-    return this.prisma.pageComment.findUnique({
+    const comment = await this.prisma.pageComment.findUnique({
       where: { id: commentId },
       include: {
         author: { select: AUTHOR_SELECT },
-        page: { select: { id: true, projectId: true } },
+        page: { select: { id: true, projectId: true, title: true } },
       },
     });
+    return mapCommentAuthor(comment);
   }
 
   async createComment(data: {
@@ -54,7 +83,7 @@ export class CommentRepository {
     yjsAnchorEnd?: string | null;
     selectedText?: string | null;
   }) {
-    return this.prisma.pageComment.create({
+    const comment = await this.prisma.pageComment.create({
       data: {
         pageId: data.pageId,
         projectPageId: data.projectPageId || null,
@@ -71,6 +100,7 @@ export class CommentRepository {
         author: { select: AUTHOR_SELECT },
       },
     });
+    return mapCommentAuthor(comment);
   }
 
   async updateComment(
@@ -82,13 +112,14 @@ export class CommentRepository {
       replies?: Prisma.InputJsonValue;
     },
   ) {
-    return this.prisma.pageComment.update({
+    const comment = await this.prisma.pageComment.update({
       where: { id: commentId },
       data,
       include: {
         author: { select: AUTHOR_SELECT },
       },
     });
+    return mapCommentAuthor(comment);
   }
 
   async deleteComment(commentId: string) {

@@ -1,5 +1,10 @@
 export type IngestionDomainStatus =
-  'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+  | 'PENDING'
+  | 'RUNNING'
+  | 'COMPENSATING'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'CANCELLED';
 
 /**
  * IngestionStatus Value Object enforcing valid pipeline lifecycle transitions.
@@ -10,6 +15,7 @@ export class IngestionStatusVo {
   private static readonly VALID_STATUSES: Set<IngestionDomainStatus> = new Set([
     'PENDING',
     'RUNNING',
+    'COMPENSATING',
     'COMPLETED',
     'FAILED',
     'CANCELLED',
@@ -32,6 +38,18 @@ export class IngestionStatusVo {
     return this._value;
   }
 
+  public get isCompensating(): boolean {
+    return this._value === 'COMPENSATING';
+  }
+
+  public get isTerminal(): boolean {
+    return (
+      this._value === 'COMPLETED' ||
+      this._value === 'FAILED' ||
+      this._value === 'CANCELLED'
+    );
+  }
+
   public canTransitionTo(next: IngestionStatusVo): boolean {
     if (
       this._value === 'COMPLETED' ||
@@ -47,8 +65,12 @@ export class IngestionStatusVo {
       return (
         next.value === 'COMPLETED' ||
         next.value === 'FAILED' ||
-        next.value === 'CANCELLED'
+        next.value === 'CANCELLED' ||
+        next.value === 'COMPENSATING'
       );
+    }
+    if (this._value === 'COMPENSATING') {
+      return next.value === 'FAILED' || next.value === 'CANCELLED';
     }
     return false;
   }

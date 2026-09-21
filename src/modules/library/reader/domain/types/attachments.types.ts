@@ -19,8 +19,9 @@ export interface AttachmentRevisionEntity {
   id: string;
   attachmentId: string;
   revisionNumber: number;
+  fileId?: string | null;
   fileHash: string;
-  sizeBytes: number;
+  sizeBytes: number | bigint;
   url: string;
   comment?: string | null;
   createdAt: Date;
@@ -33,7 +34,7 @@ export interface AttachmentEntity {
   filename: string;
   url: string;
   fileHash?: string | null;
-  size: number;
+  size: number | bigint;
   mimeType: string;
   attachmentType: AttachmentType;
   uploadedAt: Date;
@@ -52,16 +53,18 @@ export interface CreateAttachmentInput {
   filename: string;
   url: string;
   mimeType?: string;
-  size?: number;
+  size?: number | bigint;
   fileHash?: string;
   fileId?: string;
   attachmentType?: AttachmentType;
 }
 
 export interface ReplaceAttachmentFileInput {
-  url: string;
-  fileHash: string;
-  sizeBytes: number;
+  fileId?: string;
+  filename?: string;
+  url?: string;
+  fileHash?: string;
+  sizeBytes?: number | bigint;
   comment?: string;
 }
 

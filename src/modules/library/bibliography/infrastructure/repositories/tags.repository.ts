@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../../../core/database/prisma.service';
-import { Prisma } from '@prisma/client';
+import { Prisma, TagType } from '@prisma/client';
 
 @Injectable()
 export class TagsRepository {
@@ -78,7 +78,7 @@ export class TagsRepository {
     userId: string,
     name: string,
     color = '#3b82f6',
-    type = 'manual',
+    type: TagType | string = TagType.manual,
     projectIdOrTx?: string | null | Prisma.TransactionClient,
     tx?: Prisma.TransactionClient,
   ) {
@@ -93,6 +93,8 @@ export class TagsRepository {
       typeof projectIdOrTx === 'string' && projectIdOrTx !== 'user'
         ? projectIdOrTx
         : undefined;
+
+    const resolvedType = (type as TagType) || TagType.manual;
 
     if (effectiveProjectId) {
       const existingProjectTag = await client.tag.findFirst({
@@ -110,18 +112,47 @@ export class TagsRepository {
         }
         return existingProjectTag;
       }
+
+      return client.tag.create({
+        data: {
+          userId,
+          createdById: userId,
+          name,
+          color,
+          type: resolvedType,
+          projectId: effectiveProjectId,
+        },
+      });
     }
 
-    return client.tag.upsert({
-      where: { userId_name: { userId, name } },
-      create: {
+    // Personal scope
+    const existingPersonalTag = await client.tag.findFirst({
+      where: {
         userId,
+        projectId: null,
+        name,
+      },
+    });
+
+    if (existingPersonalTag) {
+      if (color && existingPersonalTag.color !== color) {
+        return client.tag.update({
+          where: { id: existingPersonalTag.id },
+          data: { color },
+        });
+      }
+      return existingPersonalTag;
+    }
+
+    return client.tag.create({
+      data: {
+        userId,
+        createdById: userId,
         name,
         color,
-        type,
-        ...(effectiveProjectId ? { projectId: effectiveProjectId } : {}),
+        type: resolvedType,
+        projectId: null,
       },
-      update: { color },
     });
   }
 
@@ -145,7 +176,7 @@ export class TagsRepository {
     const automaticTags = await client.tag.findMany({
       where: {
         userId,
-        type: { in: ['automatic', 'academic'] },
+        type: { in: [TagType.automatic, TagType.ai] },
       },
       select: { id: true },
     });

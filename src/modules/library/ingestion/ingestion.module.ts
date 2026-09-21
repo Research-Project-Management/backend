@@ -38,6 +38,7 @@ import { INGESTION_PORT } from './domain/types/ingestion.types';
 import { WatchdogService } from './application/services/watchdog.service';
 import { UrlCaptureService } from './application/services/url-capture.service';
 import { PipelineService } from './application/services/pipeline.service';
+import { IngestionSagaOrchestrator } from './application/services/ingestion-saga.orchestrator';
 import { QueueService } from './application/services/queue.service';
 import { IngestionQueueConsumer } from './application/services/ingestion-queue.consumer';
 import { UrlMetadataScraperService } from './application/services/url-metadata-scraper.service';
@@ -135,6 +136,7 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     UrlMetadataScraperService,
     UrlCaptureProvider,
     PipelineService,
+    IngestionSagaOrchestrator,
     QueueService,
     WatchdogService,
     ...ingestionWorkerProviders,
@@ -244,6 +246,7 @@ const ingestionWorkerProviders = shouldRunWorkerConsumers()
     CaptureUrlUseCase,
     ConfirmCapturedUrlUseCase,
     UnifiedIngestUseCase,
+    IngestionSagaOrchestrator,
   ],
 })
 export class IngestionModule {}

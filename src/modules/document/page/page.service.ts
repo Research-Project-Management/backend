@@ -589,7 +589,7 @@ export class PageService {
 
   async getPageLabels(pageId: string) {
     const assignments = await this.pageRepo.getPageLabels(pageId);
-    return { labels: assignments.map((a) => a.label) };
+    return { labels: assignments.map((a: any) => a.label) };
   }
 
   async assignLabels(pageId: string, labelIds: string[]) {

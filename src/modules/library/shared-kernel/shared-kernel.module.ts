@@ -1,6 +1,9 @@
 import { Module, OnModuleInit } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { BullModule } from '@nestjs/bullmq';
 import { CoreModule as AppCoreModule } from '../../../core/core.module';
+import { LIBRARY_OUTBOX_QUEUE } from './outbox/outbox.constants';
+import { OutboxQueueConsumer } from './outbox/outbox-queue.consumer';
 
 // ── 1. Events ─────────────────────────────────────────────────────────────
 import {
@@ -37,7 +40,13 @@ import { LIBRARY_EVENT_TYPES } from './outbox/outbox.events';
  * - Core Utilities (SSRF guard, correlation ID, idempotency, domain exception filters)
  */
 @Module({
-  imports: [ConfigModule, AppCoreModule],
+  imports: [
+    ConfigModule,
+    AppCoreModule,
+    BullModule.registerQueue({
+      name: LIBRARY_OUTBOX_QUEUE,
+    }),
+  ],
   providers: [
     // Integration Events
     IntegrationEventBusService,
@@ -70,6 +79,7 @@ import { LIBRARY_EVENT_TYPES } from './outbox/outbox.events';
       useExisting: OutboxDispatcher,
     },
     OutboxMetrics,
+    OutboxQueueConsumer,
   ],
   exports: [
     // Integration Events
@@ -96,6 +106,7 @@ import { LIBRARY_EVENT_TYPES } from './outbox/outbox.events';
     EVENT_PUBLISHER_PORT,
     OutboxMetrics,
     SyncMetricsService,
+    OutboxQueueConsumer,
   ],
 })
 export class SharedKernelModule implements OnModuleInit {

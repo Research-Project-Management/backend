@@ -85,14 +85,15 @@ export class WatchdogService
    * If retries are exhausted, transitions to terminal FAILED_FINAL.
    */
   async reconcileOrphanedRuns(
-    scopeId?: string,
+    scope?: { userId?: string; projectId?: string } | string,
     timeoutMs: number = WatchdogService.DEFAULT_TIMEOUT_MS,
   ): Promise<WatchdogReconciliationResult> {
     const olderThan = new Date(Date.now() - timeoutMs);
-    const orphanedRuns = await this.repo.findOrphanedRuns(olderThan, {
-      scopeId,
-      limit: 100,
-    });
+    const options =
+      typeof scope === 'object' && scope !== null
+        ? { userId: scope.userId, projectId: scope.projectId, limit: 100 }
+        : { scopeId: scope, limit: 100 };
+    const orphanedRuns = await this.repo.findOrphanedRuns(olderThan, options);
 
     if (orphanedRuns.length === 0) {
       return { reconciled: 0, retried: 0, deadLettered: 0 };

@@ -309,17 +309,17 @@ export class ActivityService {
         author: item.actor
           ? {
               id: item.actor.id,
-              name: item.actor.name,
-              email: item.actor.email,
-              avatar: item.actor.avatar,
+              name: item.actor.name ?? item.actor.profile?.name ?? 'User',
+              email: item.actor.email ?? '',
+              avatar: item.actor.avatar ?? item.actor.profile?.avatar ?? null,
             }
           : undefined,
         user: item.actor
           ? {
               id: item.actor.id,
-              name: item.actor.name,
-              email: item.actor.email,
-              avatar: item.actor.avatar,
+              name: item.actor.name ?? item.actor.profile?.name ?? 'User',
+              email: item.actor.email ?? '',
+              avatar: item.actor.avatar ?? item.actor.profile?.avatar ?? null,
             }
           : undefined,
         createdAt: item.createdAt,

@@ -5,10 +5,30 @@ import { isUuid } from '@/core/utils/uuid.util';
 
 const AUTHOR_SELECT = {
   id: true,
-  name: true,
-  avatar: true,
   email: true,
+  profile: {
+    select: {
+      name: true,
+      avatar: true,
+    },
+  },
 } as const;
+
+function mapCommentAuthor<T extends { author?: any }>(comment: T | null): any {
+  if (!comment) return null;
+  const author = comment.author
+    ? {
+        id: comment.author.id,
+        email: comment.author.email,
+        name: comment.author.profile?.name ?? comment.author.name ?? 'User',
+        avatar: comment.author.profile?.avatar ?? comment.author.avatar ?? null,
+      }
+    : comment.author;
+  return {
+    ...comment,
+    author,
+  };
+}
 
 @Injectable()
 export class CommentRepository {
@@ -31,31 +51,40 @@ export class CommentRepository {
   }
 
   async findAuthorById(userId: string) {
-    return this.prismaService.user.findUnique({
+    const user = await this.prismaService.user.findUnique({
       where: { id: userId },
       select: AUTHOR_SELECT,
     });
+    if (!user) return null;
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.profile?.name ?? 'User',
+      avatar: user.profile?.avatar ?? null,
+    };
   }
 
   async findWorkItemComments(workItemId: string) {
     const itemUuid = await this.resolveWorkItemUuid(workItemId);
     if (!itemUuid) return [];
-    return this.prismaService.workItemComment.findMany({
+    const comments = await this.prismaService.workItemComment.findMany({
       where: { workItemId: itemUuid },
       orderBy: { createdAt: 'asc' },
       include: {
         author: { select: AUTHOR_SELECT },
       },
     });
+    return comments.map((c) => mapCommentAuthor(c));
   }
 
   async findCommentById(commentId: string) {
-    return this.prismaService.workItemComment.findUnique({
+    const comment = await this.prismaService.workItemComment.findUnique({
       where: { id: commentId },
       include: {
         author: { select: AUTHOR_SELECT },
       },
     });
+    return mapCommentAuthor(comment);
   }
 
   async findCommentWithProject(commentId: string) {
@@ -82,7 +111,7 @@ export class CommentRepository {
     if (!itemUuid) {
       throw new Error(`Work item "${data.workItemId}" not found`);
     }
-    return this.prismaService.workItemComment.create({
+    const comment = await this.prismaService.workItemComment.create({
       data: {
         workItemId: itemUuid,
         authorId: data.authorId,
@@ -93,6 +122,7 @@ export class CommentRepository {
         author: { select: AUTHOR_SELECT },
       },
     });
+    return mapCommentAuthor(comment);
   }
 
   async updateComment(
@@ -105,13 +135,14 @@ export class CommentRepository {
       attachments?: Prisma.InputJsonValue;
     },
   ) {
-    return this.prismaService.workItemComment.update({
+    const comment = await this.prismaService.workItemComment.update({
       where: { id: commentId },
       data,
       include: {
         author: { select: AUTHOR_SELECT },
       },
     });
+    return mapCommentAuthor(comment);
   }
 
   async deleteComment(commentId: string) {

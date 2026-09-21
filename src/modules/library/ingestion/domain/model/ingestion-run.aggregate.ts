@@ -4,6 +4,12 @@ import {
   IngestionRunStartedDomainEvent,
   IngestionRunCompletedDomainEvent,
   IngestionRunFailedDomainEvent,
+  IngestionStageName,
+  IngestionStepStartedDomainEvent,
+  IngestionStepCompletedDomainEvent,
+  IngestionStepFailedDomainEvent,
+  IngestionCompensationStartedDomainEvent,
+  IngestionCompensationCompletedDomainEvent,
 } from '../events/ingestion-domain.event';
 
 export interface CreateIngestionRunProps {
@@ -26,14 +32,19 @@ export interface ReconstituteIngestionRunProps {
   errorReason?: string | null;
   startedAt: Date;
   completedAt?: Date | null;
+  completedSteps?: IngestionStageName[];
+  currentStep?: IngestionStageName | null;
+  compensatedSteps?: IngestionStageName[];
+  compensationReason?: string | null;
 }
 
 /**
  * IngestionRun Aggregate Root (Processing Bounded Context - Supporting Domain).
  *
  * Encapsulates:
- * - Pipeline execution lifecycle state machine (PENDING -> RUNNING -> COMPLETED / FAILED)
+ * - Pipeline execution lifecycle state machine (PENDING -> RUNNING -> COMPENSATING -> COMPLETED / FAILED)
  * - Progress metrics tracking
+ * - Step-by-step Saga execution tracking & compensation
  * - Processing domain events
  */
 export class IngestionRunAggregate {
@@ -48,6 +59,10 @@ export class IngestionRunAggregate {
   private _errorReason?: string | null;
   private readonly _startedAt: Date;
   private _completedAt?: Date | null;
+  private _currentStep?: IngestionStageName | null;
+  private _completedSteps: IngestionStageName[] = [];
+  private _compensatedSteps: IngestionStageName[] = [];
+  private _compensationReason?: string | null;
 
   private _domainEvents: IProcessingDomainEvent[] = [];
 
@@ -63,6 +78,10 @@ export class IngestionRunAggregate {
     errorReason?: string | null;
     startedAt: Date;
     completedAt?: Date | null;
+    completedSteps?: IngestionStageName[];
+    currentStep?: IngestionStageName | null;
+    compensatedSteps?: IngestionStageName[];
+    compensationReason?: string | null;
   }) {
     this._id = props.id;
     this._userId = props.userId;
@@ -75,6 +94,10 @@ export class IngestionRunAggregate {
     this._errorReason = props.errorReason;
     this._startedAt = props.startedAt;
     this._completedAt = props.completedAt;
+    this._completedSteps = props.completedSteps ? [...props.completedSteps] : [];
+    this._currentStep = props.currentStep ?? null;
+    this._compensatedSteps = props.compensatedSteps ? [...props.compensatedSteps] : [];
+    this._compensationReason = props.compensationReason ?? null;
   }
 
   public static create(props: CreateIngestionRunProps): IngestionRunAggregate {
@@ -123,6 +146,10 @@ export class IngestionRunAggregate {
       errorReason: props.errorReason,
       startedAt: props.startedAt,
       completedAt: props.completedAt,
+      completedSteps: props.completedSteps,
+      currentStep: props.currentStep,
+      compensatedSteps: props.compensatedSteps,
+      compensationReason: props.compensationReason,
     });
   }
 
@@ -131,6 +158,89 @@ export class IngestionRunAggregate {
   public recordProgress(processedCount: number, failedCount = 0): void {
     this._processedItems += processedCount;
     this._failedItems += failedCount;
+  }
+
+  // ── Saga Step Lifecycle Methods ─────────────────────────────────────────────
+
+  public startStep(stageName: IngestionStageName): void {
+    if (this._status.value !== 'RUNNING') {
+      throw new Error(
+        `Cannot start step "${stageName}" on run in status ${this._status.value}.`,
+      );
+    }
+    this._currentStep = stageName;
+    this.recordEvent(
+      new IngestionStepStartedDomainEvent(
+        this._id,
+        stageName,
+        this._userId,
+        this._projectId ?? undefined,
+      ),
+    );
+  }
+
+  public completeStep(stageName: IngestionStageName, durationMs: number): void {
+    if (!this._completedSteps.includes(stageName)) {
+      this._completedSteps.push(stageName);
+    }
+    this._currentStep = null;
+    this.recordEvent(
+      new IngestionStepCompletedDomainEvent(
+        this._id,
+        stageName,
+        durationMs,
+        this._userId,
+        this._projectId ?? undefined,
+      ),
+    );
+  }
+
+  public failStep(stageName: IngestionStageName, errorReason: string): void {
+    this._currentStep = null;
+    this.recordEvent(
+      new IngestionStepFailedDomainEvent(
+        this._id,
+        stageName,
+        errorReason,
+        this._userId,
+        this._projectId ?? undefined,
+      ),
+    );
+  }
+
+  public startCompensation(failedStage: IngestionStageName, reason: string): void {
+    const nextStatus = IngestionStatusVo.create('COMPENSATING');
+    if (this._status.canTransitionTo(nextStatus)) {
+      this._status = nextStatus;
+    }
+    this._compensationReason = reason;
+    this.recordEvent(
+      new IngestionCompensationStartedDomainEvent(
+        this._id,
+        failedStage,
+        reason,
+        this._userId,
+        this._projectId ?? undefined,
+      ),
+    );
+  }
+
+  public recordCompensatedStep(stageName: IngestionStageName): void {
+    if (!this._compensatedSteps.includes(stageName)) {
+      this._compensatedSteps.push(stageName);
+    }
+  }
+
+  public completeCompensation(): void {
+    this.recordEvent(
+      new IngestionCompensationCompletedDomainEvent(
+        this._id,
+        [...this._compensatedSteps],
+        this._userId,
+        this._projectId ?? undefined,
+      ),
+    );
+    this.fail(this._compensationReason || 'Saga compensation completed');
   }
 
   public complete(): void {
@@ -223,5 +333,17 @@ export class IngestionRunAggregate {
   }
   public get completedAt(): Date | null | undefined {
     return this._completedAt;
+  }
+  public get currentStep(): IngestionStageName | null | undefined {
+    return this._currentStep;
+  }
+  public get completedSteps(): IngestionStageName[] {
+    return [...this._completedSteps];
+  }
+  public get compensatedSteps(): IngestionStageName[] {
+    return [...this._compensatedSteps];
+  }
+  public get compensationReason(): string | null | undefined {
+    return this._compensationReason;
   }
 }

@@ -304,6 +304,7 @@ model WorkItemLabel {
   createdById         String                    @map("created_by_id") @db.Uuid
   createdBy           User                      @relation("UserCreatedWorkItemLabels", fields: [createdById], references: [id], onDelete: Cascade)
   workItemAssignments WorkItemLabelAssignment[] @relation("WorkItemLabelAssignments")
+  pageAssignments     PageLabelAssignment[]     @relation("PageLabelAssignments")
   createdAt           DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
 

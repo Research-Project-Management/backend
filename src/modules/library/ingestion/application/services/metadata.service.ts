@@ -414,30 +414,33 @@ export class MetadataService implements MetadataPort {
         lastName: c.lastName || '',
       }));
 
+      const meta = (item.metadata as any) ?? {};
+      const openAccessPdfUrl = meta.openAccessPdfUrl || undefined;
+
       const finalMetadata: ItemMetadata = {
         title: item.title,
         abstract: item.abstract || undefined,
         authors: authors.length > 0 ? authors : undefined,
         creators: creators.length > 0 ? creators : undefined,
         year: item.year || undefined,
-        publicationDate: item.publicationDate || undefined,
-        journal: item.publicationTitle || undefined,
-        publisher: item.publisher || undefined,
-        volume: item.volume || undefined,
-        issue: item.issue || undefined,
-        pages: item.pages || undefined,
+        publicationDate: meta.publicationDate || undefined,
+        journal: meta.publicationTitle || meta.journal || undefined,
+        publisher: meta.publisher || undefined,
+        volume: meta.volume || undefined,
+        issue: meta.issue || undefined,
+        pages: meta.pages || undefined,
         doi: item.doi || undefined,
-        arxivId: item.arxivId || undefined,
-        pmid: item.pmid || undefined,
-        isbn: item.isbn || undefined,
-        openAccessPdfUrl: item.openAccessPdfUrl || undefined,
+        arxivId: meta.arxivId || undefined,
+        pmid: meta.pmid || undefined,
+        isbn: meta.isbn || undefined,
+        openAccessPdfUrl,
         provenance: {
           originProvider: 'local_database',
           resolvedAt: new Date().toISOString(),
           canonicalId,
           confidenceScore: 0.95,
-          isOpenAccess: Boolean(item.openAccessPdfUrl),
-          openAccessPdfUrl: item.openAccessPdfUrl || undefined,
+          isOpenAccess: Boolean(openAccessPdfUrl),
+          openAccessPdfUrl,
         },
       };
 

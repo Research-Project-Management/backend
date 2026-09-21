@@ -80,75 +80,35 @@ enum OutboxStatus {
   FAILED
 }
 
+enum TagType {
+  manual
+  automatic
+  ai
+}
+
 model Item {
-  id                  String      @id @default(uuid()) @db.Uuid
+  id                  String      @id @default(uuid(7)) @db.Uuid
   title               String
+  type                String      @default("journalArticle")
   year                Int?
-  doi                 String?
-  abstract            String?
-  itemType            String?     @default("journalArticle") @map("item_type")
-  publicationTitle    String?     @map("publication_title")
-  publicationDate     String?     @map("publication_date")
-  publisher           String?
-  place               String?
-  volume              String?
-  issue               String?
-  section             String?
-  partNumber          String?     @map("part_number")
-  partTitle           String?     @map("part_title")
-  pages               String?
-  series              String?
-  seriesTitle         String?     @map("series_title")
-  seriesText          String?     @map("series_text")
-  issn                String?
-  isbn                String?
-  pmid                String?
-  pmcid               String?
-  url                 String?
-  language            String?
-  journalAbbr         String?     @map("journal_abbr")
-  shortTitle          String?     @map("short_title")
-  rights              String?
-  license             String?
   citationKey         String?     @map("citation_key")
-  libraryCatalog      String?     @map("library_catalog")
-  archive             String?
-  archiveLocation     String?     @map("archive_location")
-  callNumber          String?     @map("call_number")
-  accessedAt          DateTime?   @map("accessed_at") @db.Timestamptz(6)
-  extra               String?     @default("")
-  arxivId             String?     @map("arxiv_id")
-  citationCount       Int?        @map("citation_count")
-  referenceCount      Int?        @map("reference_count")
-  openAccessPdfUrl    String?     @map("open_access_pdf_url")
-  seriesNumber        String?     @map("series_number")
-  ragDocId            String?     @map("rag_doc_id")
-  ragIndexedAt        DateTime?   @map("rag_indexed_at") @db.Timestamptz(6)
-  ragLastAttemptAt    DateTime?   @map("rag_last_attempt_at") @db.Timestamptz(6)
-  ragAttempts         Int         @default(0) @map("rag_attempts")
-  ragError            String?     @map("rag_error")
-  ragStatus           RagStatus?  @map("rag_status")
-  isRetracted         Boolean     @default(false) @map("is_retracted")
-  retractionNature    String?     @map("retraction_nature")
-  retractionDetails   Json?       @map("retraction_details")
-  retractionCheckedAt DateTime?   @map("retraction_checked_at") @db.Timestamptz(6)
-  isMyPublication     Boolean     @default(false) @map("is_my_publication")
-  publicationConfirmedAt DateTime? @map("publication_confirmed_at") @db.Timestamptz(6)
+  doi                 String?
+  publicationTitle    String?     @map("publication_title")
+  abstract            String?
+  url                 String?
+  metadata            Json        @default("{}") @db.JsonB
   userId              String      @map("user_id") @db.Uuid
-  uploadedById        String?     @default("system") @map("uploaded_by_id")
   projectId           String?     @map("project_id") @db.Uuid
-  deletedAt           DateTime?   @map("deleted_at") @db.Timestamptz(6)
   version             Int         @default(1)
+  deletedAt           DateTime?   @map("deleted_at") @db.Timestamptz(6)
   createdAt           DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   // Canonical Relations
   attachments         Attachment[]
   contributors        Contributor[]
-  identifiers         Identifier[]
   collectionItems     CollectionItem[]
   itemTags            ItemTag[]
-  revisions           ItemRevision[]
   notesList           Note[]
   outgoingRel         ItemRelation[]         @relation("SourceItem")
   incomingRel         ItemRelation[]         @relation("TargetItem")
@@ -159,15 +119,15 @@ model Item {
   @@index([userId, deletedAt])
   @@index([projectId, deletedAt])
   @@index([userId, deletedAt, year(sort: Desc), createdAt(sort: Desc)])
-  @@index([userId, itemType])
+  @@index([userId, type])
   @@index([doi])
   @@index([citationKey])
-  @@index([arxivId])
-  @@map("papers")
+  @@index([publicationTitle])
+  @@map("items")
 }
 
 model Contributor {
-  id          String   @id @default(uuid()) @db.Uuid
+  id          String   @id @default(uuid(7)) @db.Uuid
   itemId      String   @map("item_id") @db.Uuid
   item        Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
   creatorType String   @default("author") @map("creator_type")
@@ -182,46 +142,31 @@ model Contributor {
   @@map("contributors")
 }
 
-model Identifier {
-  id           String   @id @default(uuid()) @db.Uuid
-  itemId       String   @map("item_id") @db.Uuid
-  item         Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  type         String
-  value        String
-  canonicalUri String?  @map("canonical_uri")
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  @@unique([itemId, type, value])
-  @@index([type, value])
-  @@map("identifiers")
-}
-
 model Collection {
-  id          String       @id @default(uuid()) @db.Uuid
+  id          String       @id @default(uuid(7)) @db.Uuid
   name        String
   description String?      @default("")
   color       String?
   icon        String?      @default("")
-  createdById String?      @map("created_by_id")
+  createdById String?      @map("created_by_id") @db.Uuid
   parentId    String?      @map("parent_id") @db.Uuid
   parent      Collection?  @relation("CollectionHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
   children    Collection[] @relation("CollectionHierarchy")
   userId      String       @map("user_id") @db.Uuid
   projectId   String?      @map("project_id") @db.Uuid
-  deletedAt DateTime?    @map("deleted_at") @db.Timestamptz(6)
-  version   Int          @default(1)
-  createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt   DateTime?    @map("deleted_at") @db.Timestamptz(6)
+  version     Int          @default(1)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   collectionItems CollectionItem[]
 
-  @@index([userId, parentId, createdAt])
-  @@index([projectId, parentId, createdAt])
+  @@index([userId, parentId, deletedAt])
+  @@index([projectId, parentId, deletedAt])
   @@map("collections")
 }
 
 model CollectionItem {
-  id           String     @id @default(uuid()) @db.Uuid
   collectionId String     @map("collection_id") @db.Uuid
   collection   Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
   itemId       String     @map("item_id") @db.Uuid
@@ -229,93 +174,93 @@ model CollectionItem {
   sortOrder    Int        @default(0) @map("sort_order")
   addedAt      DateTime   @default(now()) @map("added_at") @db.Timestamptz(6)
 
-  @@unique([collectionId, itemId])
+  @@id([collectionId, itemId])
   @@index([itemId])
   @@map("collection_items")
 }
 
 model Tag {
-  id        String    @id @default(uuid()) @db.Uuid
-  name      String
-  color     String?
-  type      String?   @default("manual")
-  userId    String    @map("user_id") @db.Uuid
-  projectId String?   @map("project_id") @db.Uuid
-  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id          String    @id @default(uuid(7)) @db.Uuid
+  name        String
+  color       String?   @default("#3b82f6")
+  type        TagType   @default(manual)
+  userId      String    @map("user_id") @db.Uuid
+  projectId   String?   @map("project_id") @db.Uuid
+  createdById String?   @map("created_by_id") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  itemTags  ItemTag[]
+  itemTags    ItemTag[]
 
-  @@unique([userId, name])
+  @@unique([userId, name, projectId])
   @@index([userId])
-  @@index([projectId])
+  @@index([projectId, name])
   @@map("tags")
 }
 
 model ItemTag {
-  id         String   @id @default(uuid()) @db.Uuid
   tagId      String   @map("tag_id") @db.Uuid
   tag        Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
   itemId     String   @map("item_id") @db.Uuid
   item       Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
   assignedAt DateTime @default(now()) @map("assigned_at") @db.Timestamptz(6)
 
-  @@unique([tagId, itemId])
+  @@id([tagId, itemId])
   @@index([itemId])
   @@map("item_tags")
 }
 
 model Attachment {
-  id                 String                     @id @default(uuid()) @db.Uuid
-  itemId             String                     @map("item_id") @db.Uuid
-  item               Item                       @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  type               AttachmentType             @default(primary_pdf)
-  attachmentType     AttachmentType             @default(primary_pdf) @map("attachment_type")
-  name               String                     @default("document.pdf")
-  filename           String                     @default("document.pdf")
-  url                String                     @default("")
-  fileHash           String?                    @default("") @map("file_hash")
-  fileId             String?                    @map("file_id") @db.Uuid
-  storageKey         String?                    @map("storage_key")
-  mimeType           String                     @default("application/pdf") @map("mime_type")
-  size               Int                        @default(0)
-  extractedText      String?                    @map("extracted_text")
-  extractionStatus   AttachmentExtractionStatus @default(PENDING) @map("extraction_status")
-  extractionAttempts Int                        @default(0) @map("extraction_attempts")
-  extractionStartedAt DateTime?                 @map("extraction_started_at") @db.Timestamptz(6)
-  extractionCompletedAt DateTime?               @map("extraction_completed_at") @db.Timestamptz(6)
-  extractionLastError String?                   @map("extraction_last_error")
-  metadata           Json?                      @default("{}")
-  createdAt          DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
-  deletedAt          DateTime?                  @map("deleted_at") @db.Timestamptz(6)
+  id                    String                     @id @default(uuid(7)) @db.Uuid
+  itemId                String                     @map("item_id") @db.Uuid
+  item                  Item                       @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  attachmentType        AttachmentType             @default(primary_pdf) @map("attachment_type")
+  filename              String                     @default("document.pdf")
+  url                   String                     @default("")
+  fileHash              String?                    @default("") @map("file_hash")
+  fileId                String?                    @map("file_id") @db.Uuid
+  storageKey            String?                    @map("storage_key")
+  mimeType              String                     @default("application/pdf") @map("mime_type")
+  size                  BigInt                     @default(0)
+  extractionStatus      AttachmentExtractionStatus @default(PENDING) @map("extraction_status")
+  extractionAttempts    Int                        @default(0) @map("extraction_attempts")
+  extractionStartedAt   DateTime?                  @map("extraction_started_at") @db.Timestamptz(6)
+  extractionCompletedAt DateTime?                  @map("extraction_completed_at") @db.Timestamptz(6)
+  extractionLastError   String?                    @map("extraction_last_error")
+  metadata              Json?                      @default("{}")
+  createdAt             DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt             DateTime?                  @map("deleted_at") @db.Timestamptz(6)
 
-  revisions          AttachmentRevision[]
-  annotations        Annotation[]
-  fullTextIndexes    FullTextIndex[]
+  revisions             AttachmentRevision[]
+  annotations           Annotation[]
+  fullTextIndexes       FullTextIndex[]
 
-  @@index([itemId, type])
+  @@index([itemId, attachmentType])
   @@index([fileId])
+  @@index([extractionStatus, extractionStartedAt])
   @@map("attachments")
 }
 
 model AttachmentRevision {
-  id             String     @id @default(uuid()) @db.Uuid
+  id             String     @id @default(uuid(7)) @db.Uuid
   attachmentId   String     @map("attachment_id") @db.Uuid
   attachment     Attachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
   revisionNumber Int        @default(1) @map("revision_number")
+  fileId         String?    @map("file_id") @db.Uuid
   fileHash       String?    @default("") @map("file_hash")
-  sizeBytes      Int        @default(0) @map("size_bytes")
+  sizeBytes      BigInt     @default(0) @map("size_bytes")
   url            String     @default("")
   comment        String?    @default("")
   createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@unique([attachmentId, revisionNumber])
+  @@index([fileId])
   @@map("attachment_revisions")
 }
 
 model Annotation {
-  id                  String         @id @default(uuid()) @db.Uuid
+  id                  String         @id @default(uuid(7)) @db.Uuid
   attachmentId        String         @map("attachment_id") @db.Uuid
   attachment          Attachment     @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
   type                AnnotationType @default(highlight)
@@ -332,13 +277,12 @@ model Annotation {
   updatedAt           DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt           DateTime?      @map("deleted_at") @db.Timestamptz(6)
 
-  @@index([attachmentId, pageIndex])
-  @@index([authorId])
+  @@index([attachmentId, deletedAt, pageIndex])
+  @@index([authorId, deletedAt])
   @@map("annotations")
 }
 
 model FullTextIndex {
-  id           String     @id @default(uuid()) @db.Uuid
   attachmentId String     @map("attachment_id") @db.Uuid
   attachment   Attachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
   pageIndex    Int        @map("page_index")
@@ -346,12 +290,12 @@ model FullTextIndex {
   charOffset   Int        @default(0) @map("char_offset")
   createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  @@index([attachmentId, pageIndex])
+  @@id([attachmentId, pageIndex])
   @@map("full_text_indexes")
 }
 
 model Note {
-  id          String    @id @default(uuid()) @db.Uuid
+  id          String    @id @default(uuid(7)) @db.Uuid
   itemId      String?   @map("item_id") @db.Uuid
   item        Item?     @relation(fields: [itemId], references: [id], onDelete: Cascade)
   title       String    @default("Untitled Note")
@@ -366,14 +310,14 @@ model Note {
   updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
 
-  @@index([itemId])
-  @@index([userId])
-  @@index([projectId])
+  @@index([itemId, deletedAt])
+  @@index([userId, deletedAt])
+  @@index([projectId, deletedAt])
   @@map("notes")
 }
 
 model ItemRelation {
-  id           String       @id @default(uuid()) @db.Uuid
+  id           String       @id @default(uuid(7)) @db.Uuid
   sourceItemId String       @map("source_item_id") @db.Uuid
   sourceItem   Item         @relation("SourceItem", fields: [sourceItemId], references: [id], onDelete: Cascade)
   targetItemId String       @map("target_item_id") @db.Uuid
@@ -388,7 +332,6 @@ model ItemRelation {
 }
 
 model State {
-  id             String     @id @default(uuid()) @db.Uuid
   userId         String     @map("user_id") @db.Uuid
   itemId         String     @map("item_id") @db.Uuid
   item           Item       @relation(fields: [itemId], references: [id], onDelete: Cascade)
@@ -400,18 +343,18 @@ model State {
   lastReadAt     DateTime?  @map("last_read_at") @db.Timestamptz(6)
   updatedAt      DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@unique([userId, itemId])
+  @@id([userId, itemId])
   @@index([userId, readStatus])
+  @@index([itemId])
   @@map("user_item_states")
 }
 
 model SavedSearch {
-  id              String    @id @default(uuid()) @db.Uuid
+  id              String    @id @default(uuid(7)) @db.Uuid
   name            String
   query           String?   @default("")
   description     String?   @default("")
-  filters         Json?     @default("{}")
-  conditions      Json?     @default("{}")
+  conditions      Json      @default("{}") @db.JsonB
   conjunction     String?   @default("AND")
   sortBy          String?   @default("dateAdded") @map("sort_by")
   sortOrder       String?   @default("desc") @map("sort_order")
@@ -427,13 +370,13 @@ model SavedSearch {
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@index([userId])
-  @@index([projectId])
+  @@index([userId, deletedAt])
+  @@index([projectId, deletedAt])
   @@map("saved_searches")
 }
 
 model RetractionRecord {
-  id               String    @id @default(uuid()) @db.Uuid
+  id               String    @id @default(uuid(7)) @db.Uuid
   doi              String    @unique
   pmid             String?
   isRetracted      Boolean   @default(true) @map("is_retracted")
@@ -442,64 +385,48 @@ model RetractionRecord {
   noticeUrl        String?   @map("notice_url")
   reason           String?
   source           String    @default("crossref")
-  rawMetadata      Json?     @map("raw_metadata")
+  rawMetadata      Json?     @map("raw_metadata") @db.JsonB
   checkedAt        DateTime  @default(now()) @map("checked_at") @db.Timestamptz(6)
 
-  @@index([doi])
   @@index([pmid])
   @@map("retraction_records")
 }
 
 model MetadataSourceRecord {
-  id             String   @id @default(uuid()) @db.Uuid
+  id             String   @id @default(uuid(7)) @db.Uuid
   itemId         String   @map("item_id") @db.Uuid
   item           Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
   source         String?  @default("")
   sourceProvider String   @default("arxiv") @map("source_provider")
-  rawJson        Json?    @map("raw_json")
-  rawPayload     Json?    @map("raw_payload")
+  rawPayload     Json     @map("raw_payload") @db.JsonB
   fetchedAt      DateTime @default(now()) @map("fetched_at") @db.Timestamptz(6)
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  @@index([itemId, sourceProvider])
+  @@index([itemId, sourceProvider, createdAt(sort: Desc)])
   @@map("metadata_source_records")
 }
 
-model ItemRevision {
-  id        String   @id @default(uuid()) @db.Uuid
-  itemId    String   @map("item_id") @db.Uuid
-  item      Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  version   Int
-  snapshot  Json
-  changeLog String?  @map("change_log")
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  @@unique([itemId, version])
-  @@map("item_revisions")
-}
-
 model IdempotencyRecord {
-  id             String    @id @default(uuid()) @db.Uuid
+  id             String    @id @default(uuid(7)) @db.Uuid
   userId         String    @map("user_id") @db.Uuid
   projectId      String?   @map("project_id") @db.Uuid
   idempotencyKey String    @map("idempotency_key")
   requestHash    String?   @map("request_hash")
   statusCode     Int?      @map("status_code")
-  responseBody   Json?     @map("response_body")
+  responseBody   Json?     @map("response_body") @db.JsonB
   status         String    @default("in_progress")
-  response       Json?
   expiresAt      DateTime  @map("expires_at") @db.Timestamptz(6)
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@index([userId, idempotencyKey])
+  @@unique([userId, idempotencyKey])
   @@index([projectId, idempotencyKey])
   @@index([expiresAt])
   @@map("idempotency_records")
 }
 
 model SyncSequence {
-  id              String   @id @default(uuid()) @db.Uuid
+  id              String   @id @default(uuid(7)) @db.Uuid
   userId          String?  @unique @map("user_id") @db.Uuid
   projectId       String?  @unique @map("project_id") @db.Uuid
   currentSequence BigInt   @default(0) @map("current_sequence")
@@ -508,7 +435,7 @@ model SyncSequence {
 }
 
 model LibraryChange {
-  id          String   @id @default(uuid()) @db.Uuid
+  id          String   @id @default(uuid(7)) @db.Uuid
   seq         BigInt
   userId      String?  @map("user_id") @db.Uuid
   projectId   String?  @map("project_id") @db.Uuid
@@ -525,7 +452,7 @@ model LibraryChange {
 }
 
 model Tombstone {
-  id          String    @id @default(uuid()) @db.Uuid
+  id          String    @id @default(uuid(7)) @db.Uuid
   userId      String?   @map("user_id") @db.Uuid
   projectId   String?   @map("project_id") @db.Uuid
   entityType  String    @map("entity_type")
@@ -534,13 +461,15 @@ model Tombstone {
   deletedById String?   @map("deleted_by_id") @db.Uuid
   deletedAt   DateTime  @default(now()) @map("deleted_at") @db.Timestamptz(6)
 
+  @@index([userId, seq])
+  @@index([projectId, seq])
   @@index([userId, entityType, entityId])
   @@index([projectId, entityType, entityId])
   @@map("tombstones")
 }
 
 model OutboxEvent {
-  id             String       @id @default(uuid()) @db.Uuid
+  id             String       @id @default(uuid(7)) @db.Uuid
   userId         String       @map("user_id") @db.Uuid
   projectId      String?      @map("project_id") @db.Uuid
   aggregateId    String       @map("aggregate_id")
@@ -559,110 +488,43 @@ model OutboxEvent {
   updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([status, createdAt])
+  @@index([status, scheduledAt, leaseExpiresAt])
   @@index([userId, createdAt])
   @@index([projectId, createdAt])
   @@map("outbox_events")
 }
 
 model IngestionRun {
-  id              String               @id @default(uuid()) @db.Uuid
-  userId          String               @map("user_id") @db.Uuid
-  projectId       String?              @map("project_id") @db.Uuid
-  requesterId     String?              @map("requester_id")
-  inputParams     Json                 @map("input_params")
-  inputHash       String               @map("input_hash")
-  idempotencyKey  String?              @map("idempotency_key")
-  contractVersion String               @default("1.0.0") @map("contract_version")
-  pipelineVersion String               @default("1.0.0") @map("pipeline_version")
-  status          IngestionStatus      @default(RECEIVED)
-  attempts        Int                  @default(0)
-  maxRetries      Int                  @default(3) @map("max_retries")
-  itemId          String?              @map("item_id") @db.Uuid
-  item            Item?                @relation(fields: [itemId], references: [id], onDelete: SetNull)
-  lastError       String?              @map("last_error")
-  executionLog    Json?                @map("execution_log")
-  startedAt       DateTime             @default(now()) @map("started_at") @db.Timestamptz(6)
-  completedAt     DateTime?            @map("completed_at") @db.Timestamptz(6)
-
-  stages          IngestionStage[]
-  candidates      IngestionCandidate[]
-  decisions       IngestionDecision[]
-  reviewCases     IngestionReviewCase[]
+  id              String          @id @default(uuid(7)) @db.Uuid
+  userId          String          @map("user_id") @db.Uuid
+  projectId       String?         @map("project_id") @db.Uuid
+  inputParams     Json            @map("input_params")
+  inputHash       String          @map("input_hash")
+  idempotencyKey  String?         @map("idempotency_key")
+  contractVersion String          @default("1.0.0") @map("contract_version")
+  pipelineVersion String          @default("1.0.0") @map("pipeline_version")
+  status          IngestionStatus @default(RECEIVED)
+  attempts        Int             @default(0)
+  maxRetries      Int             @default(3) @map("max_retries")
+  itemId          String?         @map("item_id") @db.Uuid
+  item            Item?           @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  lastError       String?         @map("last_error")
+  executionLog    Json?           @map("execution_log") @db.JsonB
+  reviewData      Json?           @map("review_data") @db.JsonB
+  startedAt       DateTime        @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt     DateTime?       @map("completed_at") @db.Timestamptz(6)
 
   @@index([userId, status])
   @@index([projectId, status])
+  @@index([idempotencyKey])
   @@map("ingestion_runs")
 }
 
-model IngestionStage {
-  id             String       @id @default(uuid()) @db.Uuid
-  ingestionRunId String       @map("ingestion_run_id") @db.Uuid
-  ingestionRun   IngestionRun @relation(fields: [ingestionRunId], references: [id], onDelete: Cascade)
-  stageName      String       @map("stage_name")
-  durationMs     Int          @default(0) @map("duration_ms")
-  success        Boolean      @default(true)
-  errorMessage   String?      @map("error_message")
-  outputSnapshot Json?        @map("output_snapshot")
-  leaseToken     String?      @map("lease_token")
-  leaseExpiresAt DateTime?    @map("lease_expires_at") @db.Timestamptz(6)
-  executedAt     DateTime     @default(now()) @map("executed_at") @db.Timestamptz(6)
-
-  @@map("ingestion_stages")
-}
-
-model IngestionCandidate {
-  id              String       @id @default(uuid()) @db.Uuid
-  ingestionRunId  String       @map("ingestion_run_id") @db.Uuid
-  ingestionRun    IngestionRun @relation(fields: [ingestionRunId], references: [id], onDelete: Cascade)
-  sourceProvider  String       @map("source_provider")
-  sourceRecordId  String?      @map("source_record_id")
-  confidenceScore Float        @default(1.0) @map("confidence_score")
-  metadataPayload Json         @map("metadata_payload")
-  rawEvidenceRef  String?      @map("raw_evidence_ref")
-  fetchedAt       DateTime     @default(now()) @map("fetched_at") @db.Timestamptz(6)
-
-  @@map("ingestion_candidates")
-}
-
-model IngestionDecision {
-  id             String       @id @default(uuid()) @db.Uuid
-  ingestionRunId String       @map("ingestion_run_id") @db.Uuid
-  ingestionRun   IngestionRun @relation(fields: [ingestionRunId], references: [id], onDelete: Cascade)
-  decisionType   String       @map("decision_type")
-  decisionReason String       @map("decision_reason")
-  proposedItem   Json         @map("proposed_item")
-  fieldDecisions Json?        @map("field_decisions")
-  duplicateMatch Json?        @map("duplicate_match")
-  decidedAt      DateTime     @default(now()) @map("decided_at") @db.Timestamptz(6)
-
-  @@map("ingestion_decisions")
-}
-
-model IngestionReviewCase {
-  id             String       @id @default(uuid()) @db.Uuid
-  userId         String?      @map("user_id") @db.Uuid
-  projectId      String?      @map("project_id") @db.Uuid
-  ingestionRunId String       @map("ingestion_run_id") @db.Uuid
-  ingestionRun   IngestionRun @relation(fields: [ingestionRunId], references: [id], onDelete: Cascade)
-  targetItemId   String?      @map("target_item_id") @db.Uuid
-  reason         String
-  evidence       Json?        @map("evidence")
-  options        Json?        @map("options")
-  assignedToId   String?      @map("assigned_to_id")
-  status         String       @default("PENDING")
-  resolution     String?
-  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  resolvedAt     DateTime?    @map("resolved_at") @db.Timestamptz(6)
-
-  @@map("ingestion_review_cases")
-}
-
-
 model CapturePreview {
-  id                String    @id @default(uuid()) @db.Uuid
+  id                String    @id @default(uuid(7)) @db.Uuid
   userId            String    @map("user_id") @db.Uuid
   sourceUrl         String    @map("source_url")
-  canonicalMetadata Json      @map("canonical_metadata")
+  canonicalMetadata Json      @map("canonical_metadata") @db.JsonB
   metadataDigest    String    @map("metadata_digest")
   tokenHash         String    @unique @map("token_hash")
   expiresAt         DateTime  @map("expires_at") @db.Timestamptz(6)
@@ -670,7 +532,7 @@ model CapturePreview {
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  @@index([expiresAt])
   @@index([userId, expiresAt])
-  @@index([tokenHash])
   @@map("capture_previews")
 }

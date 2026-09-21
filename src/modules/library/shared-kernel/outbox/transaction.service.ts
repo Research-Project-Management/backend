@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../../../../core/database/prisma.service';
 import {
   Prisma,
@@ -13,6 +13,7 @@ import {
   RecordTombstoneEntry,
 } from './repositories/changelog.repository';
 import { IUnitOfWork } from './ports/unit-of-work.port';
+import { OutboxWorker } from './outbox.worker';
 
 export interface TransactionHelpers {
   appendChange(
@@ -38,6 +39,7 @@ export class TransactionService implements IUnitOfWork {
   constructor(
     private readonly prisma: PrismaService,
     private readonly changeLogRepo: ChangeLogRepository,
+    @Optional() private readonly outboxWorker?: OutboxWorker,
   ) {}
 
   async executeInTransaction<T>(
@@ -47,7 +49,9 @@ export class TransactionService implements IUnitOfWork {
     ) => Promise<T>,
     options?: { maxWait?: number; timeout?: number },
   ): Promise<T> {
-    return this.prisma.$transaction(
+    const pendingOutboxEventIds: string[] = [];
+
+    const result = await this.prisma.$transaction(
       async (tx: Prisma.TransactionClient) => {
         const helpers: TransactionHelpers = {
           appendChange: async (
@@ -72,7 +76,7 @@ export class TransactionService implements IUnitOfWork {
             const projectId =
               typeof scope === 'object' ? scope.projectId : undefined;
 
-            return tx.outboxEvent.create({
+            const event = await tx.outboxEvent.create({
               data: {
                 userId,
                 projectId: projectId || null,
@@ -83,6 +87,8 @@ export class TransactionService implements IUnitOfWork {
                 retryCount: 0,
               },
             });
+            pendingOutboxEventIds.push(event.id);
+            return event;
           },
         };
 
@@ -93,6 +99,12 @@ export class TransactionService implements IUnitOfWork {
         timeout: options?.timeout ?? 30000,
       },
     );
+
+    if (pendingOutboxEventIds.length > 0 && this.outboxWorker) {
+      void this.outboxWorker.notifyEvents(pendingOutboxEventIds);
+    }
+
+    return result;
   }
 
   async getChangesSince(

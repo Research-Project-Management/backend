@@ -27,6 +27,7 @@ export class HistoryRepository implements IHistoryRepository {
         { page: { projectId: pageId } },
       ],
       ...(eventType ? { eventType } : {}),
+      ...(options?.labeledOnly ? { label: { not: null, notIn: [''] } } : {}),
     };
 
     const [total, rawVersions] = await Promise.all([

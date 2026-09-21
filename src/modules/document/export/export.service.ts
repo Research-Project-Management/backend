@@ -86,9 +86,6 @@ export class ExportService {
     this.registerStrategy(DocumentExportFormat.PDF, (page, userId, title) =>
       this.exportPdf(page, userId, title),
     );
-    this.registerStrategy(DocumentExportFormat.MARKDOWN, (page, _, title) =>
-      this.exportMarkdown(page, title),
-    );
     this.registerStrategy(DocumentExportFormat.LATEX_SOURCE, (page, _, title) =>
       this.exportLatexSource(page, title),
     );
@@ -185,27 +182,6 @@ export class ExportService {
     };
   }
 
-  private exportMarkdown(page: any, safeTitle: string): ExportFileResult {
-    let md = `# ${page.title}\n\n`;
-    md += toContentString(page.content);
-
-    if (page.childPages && page.childPages.length > 0) {
-      for (const child of page.childPages) {
-        md += `\n\n## ${child.title}\n\n`;
-        md += toContentString(child.content);
-      }
-    }
-
-    const buffer = Buffer.from(md, 'utf-8');
-
-    return {
-      filename: `${safeTitle}.md`,
-      mimeType: 'text/markdown',
-      content: md,
-      isBase64: false,
-      sizeBytes: buffer.length,
-    };
-  }
 
   private exportLatexSource(page: any, safeTitle: string): ExportFileResult {
     const source = toContentString(page.content);

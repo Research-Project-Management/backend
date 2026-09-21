@@ -28,6 +28,30 @@ export class ItemsMapper {
       it.userStates = it.states;
     }
 
+    // 0. Unpack metadata from PostgreSQL JsonB column if present
+    if (it.metadata) {
+      const metaObj =
+        typeof it.metadata === 'object' && !Array.isArray(it.metadata)
+          ? it.metadata
+          : typeof it.metadata === 'string' && it.metadata.trim().startsWith('{')
+            ? (() => {
+                try {
+                  return JSON.parse(it.metadata);
+                } catch {
+                  return null;
+                }
+              })()
+            : null;
+
+      if (metaObj && typeof metaObj === 'object') {
+        for (const [key, value] of Object.entries(metaObj)) {
+          if (value !== undefined && value !== null && it[key] === undefined) {
+            it[key] = value;
+          }
+        }
+      }
+    }
+
     if (Array.isArray(it.attachments)) {
       it.attachments = it.attachments.map((att: any) => {
         if (!att || typeof att !== 'object') return att;
@@ -110,6 +134,7 @@ export class ItemsMapper {
 
     // 2. Canonical ItemType projection
     it.itemType = it.itemType || it.type || 'journalArticle';
+    it.type = it.type || it.itemType || 'journalArticle';
 
     // 3. Unpack ExtraFields
     let extraFields: Record<string, any> = {};
@@ -887,14 +912,17 @@ export class ItemsMapper {
     if (!item) return null;
     const normalized = ItemsMapper.toDomain(item) as any;
     let userState: any = undefined;
-    if (
-      Array.isArray(normalized.userStates) &&
-      normalized.userStates.length > 0
-    ) {
+    const statesArr =
+      Array.isArray(normalized.userStates) && normalized.userStates.length > 0
+        ? normalized.userStates
+        : Array.isArray(normalized.states) && normalized.states.length > 0
+          ? normalized.states
+          : null;
+
+    if (statesArr) {
       userState = userId
-        ? normalized.userStates.find((u: any) => u.userId === userId) ||
-          normalized.userStates[0]
-        : normalized.userStates[0];
+        ? statesArr.find((u: any) => u.userId === userId) || statesArr[0]
+        : statesArr[0];
     }
     const { userStates: _userStates, states: _states, ...rest } = normalized;
     return {

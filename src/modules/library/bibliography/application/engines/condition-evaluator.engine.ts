@@ -170,23 +170,23 @@ export class ConditionEvaluatorEngine {
 
       case 'itemType':
         if (operator === 'isPresent') {
-          return { itemType: { not: null } };
+          return { type: { not: '' } };
         }
         if (operator === 'isAbsent') {
-          return { itemType: null };
+          return { type: '' };
         }
         if (operator === 'is') {
-          return { itemType: strVal };
+          return { type: strVal };
         }
         if (operator === 'isNot') {
-          return { NOT: { itemType: strVal } };
+          return { NOT: { type: strVal } };
         }
         if (operator === 'contains') {
-          return { itemType: { contains: strVal, mode: 'insensitive' } };
+          return { type: { contains: strVal, mode: 'insensitive' } };
         }
         if (operator === 'doesNotContain') {
           return {
-            NOT: { itemType: { contains: strVal, mode: 'insensitive' } },
+            NOT: { type: { contains: strVal, mode: 'insensitive' } },
           };
         }
         return null;
@@ -430,30 +430,30 @@ export class ConditionEvaluatorEngine {
     if (operator === 'isPresent') {
       return {
         AND: [{ [fieldName]: { not: null } }, { [fieldName]: { not: '' } }],
-      };
+      } as any;
     }
     if (operator === 'isAbsent') {
       return {
         OR: [{ [fieldName]: null }, { [fieldName]: '' }],
-      };
+      } as any;
     }
     if (operator === 'is') {
-      return { [fieldName]: { equals: val, mode: 'insensitive' } };
+      return { [fieldName]: { equals: val, mode: 'insensitive' } } as any;
     }
     if (operator === 'isNot') {
-      return { NOT: { [fieldName]: { equals: val, mode: 'insensitive' } } };
+      return { NOT: { [fieldName]: { equals: val, mode: 'insensitive' } } } as any;
     }
     if (operator === 'contains') {
-      return { [fieldName]: { contains: val, mode: 'insensitive' } };
+      return { [fieldName]: { contains: val, mode: 'insensitive' } } as any;
     }
     if (operator === 'doesNotContain') {
-      return { NOT: { [fieldName]: { contains: val, mode: 'insensitive' } } };
+      return { NOT: { [fieldName]: { contains: val, mode: 'insensitive' } } } as any;
     }
     if (operator === 'beginsWith') {
-      return { [fieldName]: { startsWith: val, mode: 'insensitive' } };
+      return { [fieldName]: { startsWith: val, mode: 'insensitive' } } as any;
     }
     if (operator === 'endsWith') {
-      return { [fieldName]: { endsWith: val, mode: 'insensitive' } };
+      return { [fieldName]: { endsWith: val, mode: 'insensitive' } } as any;
     }
     return null;
   }

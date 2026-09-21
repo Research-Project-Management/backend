@@ -26,13 +26,24 @@ export class CreateAttachmentDto {
 
 export class ReplaceAttachmentFileDto {
   @IsString()
-  url!: string;
+  @IsOptional()
+  fileId?: string;
 
   @IsString()
-  fileHash!: string;
+  @IsOptional()
+  filename?: string;
+
+  @IsString()
+  @IsOptional()
+  url?: string;
+
+  @IsString()
+  @IsOptional()
+  fileHash?: string;
 
   @IsNumber()
-  sizeBytes!: number;
+  @IsOptional()
+  sizeBytes?: number;
 
   @IsString()
   @IsOptional()

@@ -334,4 +334,39 @@ export class PageRepository implements IPageRepository {
       select: { role: true },
     });
   }
+
+  async getPageLabels(pageId: string): Promise<{ labelId: string; label: { id: string; name: string; color: string } }[]> {
+    return this.prisma.pageLabelAssignment.findMany({
+      where: { pageId },
+      select: {
+        labelId: true,
+        assignedAt: true,
+        label: { select: { id: true, name: true, color: true } },
+      },
+      orderBy: { assignedAt: 'asc' },
+    });
+  }
+
+  async assignLabelsToPage(pageId: string, labelIds: string[]): Promise<void> {
+    await this.prisma.pageLabelAssignment.createMany({
+      data: labelIds.map((labelId) => ({ pageId, labelId })),
+      skipDuplicates: true,
+    });
+  }
+
+  async removeLabelFromPage(pageId: string, labelId: string): Promise<void> {
+    await this.prisma.pageLabelAssignment.deleteMany({
+      where: { pageId, labelId },
+    });
+  }
+
+  async replacePageLabels(pageId: string, labelIds: string[]): Promise<void> {
+    await this.prisma.$transaction([
+      this.prisma.pageLabelAssignment.deleteMany({ where: { pageId } }),
+      this.prisma.pageLabelAssignment.createMany({
+        data: labelIds.map((labelId) => ({ pageId, labelId })),
+        skipDuplicates: true,
+      }),
+    ]);
+  }
 }

@@ -307,12 +307,8 @@ export class DuplicateService {
       }
 
       // ── 6. Provenance & Alias Citation Keys ──────────────────────────────────
-      let extraObj: Record<string, any> = {};
-      try {
-        extraObj = primary.extra ? JSON.parse(primary.extra) : {};
-      } catch {
-        extraObj = { rawExtra: primary.extra };
-      }
+      let extraObj: Record<string, any> =
+        (primary.metadata as any)?.extra ?? (primary.metadata as any) ?? {};
       const existingAliases: string[] = Array.isArray(
         extraObj.mergedCitationKeys,
       )
@@ -328,11 +324,14 @@ export class DuplicateService {
       );
 
       // ── 8. Update Primary Item ───────────────────────────────────────────────
+      const primaryMeta = (primary.metadata as any) ?? {};
+      primaryMeta.extra = extraObj;
+
       const updatedPrimary = await tx.item.update({
         where: { id: primary.id },
         data: {
           ...(dto.fieldSelections || {}),
-          extra: JSON.stringify(extraObj),
+          metadata: primaryMeta,
           version: { increment: 1 },
         },
       });
@@ -362,20 +361,15 @@ export class DuplicateService {
 
       // ── 9. Soft-Delete Duplicates with Merge Marker ──────────────────────────
       for (const dup of duplicates) {
-        let dupExtra: Record<string, any> = {};
-        try {
-          dupExtra = dup.extra ? JSON.parse(dup.extra) : {};
-        } catch {
-          dupExtra = { rawExtra: dup.extra };
-        }
-        dupExtra.mergedIntoId = primary.id;
-        dupExtra.mergedAt = now.toISOString();
+        const dupMeta = (dup.metadata as any) ?? {};
+        dupMeta.mergedIntoId = primary.id;
+        dupMeta.mergedAt = now.toISOString();
 
         const softDeleted = await tx.item.update({
           where: { id: dup.id },
           data: {
             deletedAt: now,
-            extra: JSON.stringify(dupExtra),
+            metadata: dupMeta,
             version: { increment: 1 },
           },
         });
@@ -411,7 +405,6 @@ export class DuplicateService {
         where: { id: primary.id },
         include: {
           contributors: { orderBy: { orderIndex: 'asc' } },
-          identifiers: true,
           collectionItems: { include: { collection: true } },
           itemTags: { include: { tag: true } },
           notesList: { where: { deletedAt: null } },

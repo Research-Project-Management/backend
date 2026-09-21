@@ -33,7 +33,6 @@ model Page {
   content        Json?         @default("{}")
   status         PageStatus    @default(draft)
   rank           Float         @default(0)
-  labels         String[]      @default([])
   isLocked       Boolean       @default(false) @map("is_locked")
   isPublished    Boolean       @default(false) @map("is_published")
   views          Int           @default(0)
@@ -54,10 +53,11 @@ model Page {
   updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   // Relations
-  versions       PageVersion[]
-  comments       PageComment[]
-  suggestions    PageSuggestion[]
-  aiChats        AiChat[]      @relation("PageAiChats")
+  versions         PageVersion[]
+  comments         PageComment[]
+  suggestions      PageSuggestion[]
+  aiChats          AiChat[]              @relation("PageAiChats")
+  labelAssignments PageLabelAssignment[]
 
   @@index([projectId, parentPageId, rank])
   @@index([projectId, status, deletedAt])
@@ -142,4 +142,19 @@ model PageSuggestion {
   @@index([projectPageId])
   @@index([authorId])
   @@map("page_suggestions")
+}
+
+// Assigns a WorkItemLabel (project-scoped, with color) to a Page
+// Shares the same label pool as Work Items within the same project
+model PageLabelAssignment {
+  pageId     String   @map("page_id") @db.Uuid
+  labelId    String   @map("label_id") @db.Uuid
+  assignedAt DateTime @default(now()) @map("assigned_at") @db.Timestamptz(6)
+
+  page  Page          @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  label WorkItemLabel @relation("PageLabelAssignments", fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@id([pageId, labelId], map: "pk_page_label_assignments")
+  @@index([labelId, pageId], map: "idx_page_label_assignments_covering")
+  @@map("page_label_assignments")
 }

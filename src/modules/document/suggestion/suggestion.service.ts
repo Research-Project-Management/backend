@@ -20,6 +20,7 @@ import { RedisCacheService } from '@/core/cache/redis.service';
 import { DOCUMENT_REDIS_KEYS } from '../page/constants/page-redis-keys.constant';
 import { YjsDocumentManager } from '../collaboration/yjs-document.manager';
 import { CollaborationGateway } from '../collaboration/collaboration.gateway';
+import { NotificationBundlerService } from '../notification/notification-bundler.service';
 import { getErrorMessage } from '@/core/utils/error.util';
 import { toContentString } from '../page/utils/page.utils';
 
@@ -116,6 +117,7 @@ export class SuggestionService {
     @Optional() private readonly cache?: RedisCacheService,
     @Optional() private readonly yjsManager?: YjsDocumentManager,
     @Optional() private readonly collaborationGateway?: CollaborationGateway,
+    @Optional() private readonly bundlerService?: NotificationBundlerService,
   ) {}
 
   private async invalidateCache(pageId: string, projectId?: string | null) {
@@ -185,6 +187,29 @@ export class SuggestionService {
       suggestion,
       timestamp: Date.now(),
     });
+
+    // Overleaf Parity: Enqueue review suggestion event for page author
+    if (this.bundlerService && page.authorId && page.authorId !== userId) {
+      this.bundlerService
+        .enqueueEvent(page.authorId, {
+          type: 'suggestion',
+          authorId: userId,
+          authorName: suggestion.author.name || 'A collaborator',
+          projectId: page.projectId || undefined,
+          pageId,
+          pageTitle: page.title || undefined,
+          targetId: suggestion.id,
+          contentSnippet: (
+            dto.suggestedText ||
+            dto.originalText ||
+            dto.description ||
+            ''
+          ).slice(0, 120),
+        })
+        .catch((err) =>
+          this.logger.debug(`Notification bundler error: ${err.message}`),
+        );
+    }
 
     return suggestion;
   }

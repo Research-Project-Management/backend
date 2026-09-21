@@ -189,4 +189,42 @@ export class PageController {
       projectId,
     );
   }
+
+  @Get(['pages/:pageId/labels', 'projects/:projectId/pages/:pageId/labels'])
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  @ApiOperation({ summary: 'Get labels assigned to a page' })
+  async getPageLabels(@Param('pageId') pageId: string) {
+    return this.pageService.getPageLabels(pageId);
+  }
+
+  @Post(['pages/:pageId/labels', 'projects/:projectId/pages/:pageId/labels'])
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Assign labels to a page (adds, does not replace)' })
+  async assignPageLabels(
+    @Param('pageId') pageId: string,
+    @Body() body: { labelIds: string[] },
+  ) {
+    return this.pageService.assignLabels(pageId, body.labelIds);
+  }
+
+  @Put(['pages/:pageId/labels', 'projects/:projectId/pages/:pageId/labels'])
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @ApiOperation({ summary: 'Replace all labels on a page' })
+  async replacePageLabels(
+    @Param('pageId') pageId: string,
+    @Body() body: { labelIds: string[] },
+  ) {
+    return this.pageService.replaceLabels(pageId, body.labelIds);
+  }
+
+  @Delete(['pages/:pageId/labels/:labelId', 'projects/:projectId/pages/:pageId/labels/:labelId'])
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @ApiOperation({ summary: 'Remove a label from a page' })
+  async removePageLabel(
+    @Param('pageId') pageId: string,
+    @Param('labelId') labelId: string,
+  ) {
+    return this.pageService.removeLabel(pageId, labelId);
+  }
 }

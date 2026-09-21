@@ -1,5 +1,7 @@
 import { AttachmentsController } from '../../src/modules/library/reader/presentation/attachments.controller';
 import { IngestionController } from '../../src/modules/library/ingestion/presentation/ingestion.controller';
+import { NotesController } from '../../src/modules/library/reader/presentation/notes.controller';
+import { AnnotationsController } from '../../src/modules/library/reader/presentation/annotations.controller';
 
 describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', () => {
   describe('AttachmentsController (Reader CQRS UseCases)', () => {
@@ -309,4 +311,250 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
       expect(res).toEqual({ success: true });
     });
   });
+
+  describe('NotesController (Reader CQRS UseCases)', () => {
+    let controller: NotesController;
+    let mockCreateNoteUseCase: { execute: jest.Mock };
+    let mockGetNoteUseCase: { execute: jest.Mock };
+    let mockListNotesUseCase: { execute: jest.Mock };
+    let mockUpdateNoteUseCase: { execute: jest.Mock };
+    let mockDeleteNoteUseCase: { execute: jest.Mock };
+    let mockExtractNotesUseCase: { execute: jest.Mock };
+
+    beforeEach(() => {
+      mockCreateNoteUseCase = {
+        execute: jest.fn().mockResolvedValue({ id: 'note-1', title: 'Note 1' }),
+      };
+      mockGetNoteUseCase = {
+        execute: jest.fn().mockResolvedValue({ id: 'note-1', title: 'Note 1' }),
+      };
+      mockListNotesUseCase = {
+        execute: jest.fn().mockResolvedValue([{ id: 'note-1', title: 'Note 1' }]),
+      };
+      mockUpdateNoteUseCase = {
+        execute: jest.fn().mockResolvedValue({ id: 'note-1', version: 2 }),
+      };
+      mockDeleteNoteUseCase = {
+        execute: jest.fn().mockResolvedValue(true),
+      };
+      mockExtractNotesUseCase = {
+        execute: jest.fn().mockResolvedValue({ success: true, totalExtracted: 2 }),
+      };
+
+      controller = new NotesController(
+        mockCreateNoteUseCase as any,
+        mockGetNoteUseCase as any,
+        mockListNotesUseCase as any,
+        mockUpdateNoteUseCase as any,
+        mockDeleteNoteUseCase as any,
+        mockExtractNotesUseCase as any,
+      );
+    });
+
+    it('should list notes by delegating to ListNotesUseCase', async () => {
+      const validProjId = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
+      const res = await controller.listNotes('user-1', 'item-1', undefined, validProjId);
+      expect(mockListNotesUseCase.execute).toHaveBeenCalledWith({
+        userId: 'user-1',
+        itemId: 'item-1',
+        projectId: validProjId,
+      });
+      expect(res).toEqual([{ id: 'note-1', title: 'Note 1' }]);
+    });
+
+    it('should get note by delegating to GetNoteUseCase', async () => {
+      const res = await controller.getNote('user-1', 'note-1', undefined, 'proj-1');
+      expect(mockGetNoteUseCase.execute).toHaveBeenCalledWith({
+        userId: 'user-1',
+        id: 'note-1',
+        projectId: 'proj-1',
+      });
+      expect(res).toEqual({ id: 'note-1', title: 'Note 1' });
+    });
+
+    it('should create note by delegating to CreateNoteUseCase', async () => {
+      const dto: any = { title: 'My Note', contentMd: 'Content' };
+      const res = await controller.createNote('user-1', dto, undefined, 'proj-1');
+      expect(mockCreateNoteUseCase.execute).toHaveBeenCalledWith({
+        userId: 'user-1',
+        data: expect.objectContaining({
+          title: 'My Note',
+          contentMd: 'Content',
+          projectId: 'proj-1',
+          createdById: 'user-1',
+        }),
+        projectId: 'proj-1',
+      });
+      expect(res).toEqual({ id: 'note-1', title: 'Note 1' });
+    });
+
+    it('should extract notes from annotations by delegating to ExtractNotesFromAnnotationsUseCase', async () => {
+      const res = await controller.extractNotesFromAnnotations('user-1', 'item-1');
+      expect(mockExtractNotesUseCase.execute).toHaveBeenCalledWith({
+        userId: 'user-1',
+        itemId: 'item-1',
+      });
+      expect(res).toEqual({ success: true, totalExtracted: 2 });
+    });
+
+    it('should update note by delegating to UpdateNoteUseCase', async () => {
+      const dto: any = { title: 'Updated', expectedVersion: 1 };
+      const res = await controller.updateNote('user-1', 'note-1', undefined, dto, undefined, 'proj-1');
+      expect(mockUpdateNoteUseCase.execute).toHaveBeenCalledWith({
+        userId: 'user-1',
+        id: 'note-1',
+        expectedVersion: 1,
+        data: { title: 'Updated' },
+        projectId: 'proj-1',
+      });
+      expect(res).toEqual({ id: 'note-1', version: 2 });
+    });
+
+    it('should delete note by delegating to DeleteNoteUseCase', async () => {
+      const res = await controller.deleteNote('user-1', 'note-1', '1', undefined, undefined, 'proj-1');
+      expect(mockDeleteNoteUseCase.execute).toHaveBeenCalledWith({
+        userId: 'user-1',
+        id: 'note-1',
+        expectedVersion: 1,
+        projectId: 'proj-1',
+      });
+      expect(res).toEqual({ deleted: true, id: 'note-1' });
+    });
+
+    it('should support legacy constructor with NotesService fallback', async () => {
+      const mockLegacyService = {
+        listNotes: jest.fn().mockResolvedValue([{ id: 'legacy-note' }]),
+        getNote: jest.fn().mockResolvedValue({ id: 'legacy-note' }),
+      };
+      const legacyController = new NotesController(mockLegacyService as any);
+      const res = await legacyController.listNotes('user-1');
+      expect(mockLegacyService.listNotes).toHaveBeenCalledWith('user-1', undefined, undefined);
+      expect(res).toEqual([{ id: 'legacy-note' }]);
+    });
+  });
+
+  describe('AnnotationsController (Reader CQRS UseCases)', () => {
+    let controller: AnnotationsController;
+    let mockCreateAnnotationUseCase: { execute: jest.Mock };
+    let mockListAnnotationsUseCase: { execute: jest.Mock };
+    let mockUpdateAnnotationUseCase: { execute: jest.Mock };
+    let mockDeleteAnnotationUseCase: { execute: jest.Mock };
+    let mockBatchUpsertAnnotationsUseCase: { execute: jest.Mock };
+    let mockPdfImporterService: { importFromAttachment: jest.Mock };
+
+    beforeEach(() => {
+      mockCreateAnnotationUseCase = {
+        execute: jest.fn().mockResolvedValue({ id: 'annot-1', color: '#ffeb3b' }),
+      };
+      mockListAnnotationsUseCase = {
+        execute: jest.fn().mockResolvedValue([{ id: 'annot-1' }]),
+      };
+      mockUpdateAnnotationUseCase = {
+        execute: jest.fn().mockResolvedValue({ id: 'annot-1', color: '#ff0000' }),
+      };
+      mockDeleteAnnotationUseCase = {
+        execute: jest.fn().mockResolvedValue(true),
+      };
+      mockBatchUpsertAnnotationsUseCase = {
+        execute: jest.fn().mockResolvedValue({ created: [], updated: [], deleted: [] }),
+      };
+      mockPdfImporterService = {
+        importFromAttachment: jest.fn().mockResolvedValue({ imported: 3 }),
+      };
+
+      controller = new AnnotationsController(
+        mockCreateAnnotationUseCase as any,
+        mockListAnnotationsUseCase as any,
+        mockUpdateAnnotationUseCase as any,
+        mockDeleteAnnotationUseCase as any,
+        mockBatchUpsertAnnotationsUseCase as any,
+        mockPdfImporterService as any,
+      );
+    });
+
+    it('should list annotations by delegating to ListAnnotationsUseCase', async () => {
+      const res = await controller.listAnnotations('user-1', 'att-1', '0', 'highlight' as any);
+      expect(mockListAnnotationsUseCase.execute).toHaveBeenCalledWith({
+        userId: 'user-1',
+        attachmentId: 'att-1',
+        pageIndex: 0,
+        type: 'highlight',
+      });
+      expect(res).toEqual([{ id: 'annot-1' }]);
+    });
+
+    it('should create annotation by delegating to CreateAnnotationUseCase', async () => {
+      const dto: any = { type: 'highlight', pageIndex: 1, color: '#ffeb3b' };
+      const res = await controller.createAnnotation('user-1', 'att-1', dto);
+      expect(mockCreateAnnotationUseCase.execute).toHaveBeenCalledWith({
+        userId: 'user-1',
+        data: expect.objectContaining({
+          attachmentId: 'att-1',
+          type: 'highlight',
+          pageIndex: 1,
+          color: '#ffeb3b',
+          authorId: 'user-1',
+        }),
+      });
+      expect(res).toEqual({ id: 'annot-1', color: '#ffeb3b' });
+    });
+
+    it('should update annotation by delegating to UpdateAnnotationUseCase', async () => {
+      const dto: any = { expectedVersion: 1, color: '#ff0000' };
+      const res = await controller.updateAnnotation('user-1', 'att-1', 'annot-1', undefined, dto);
+      expect(mockUpdateAnnotationUseCase.execute).toHaveBeenCalledWith({
+        userId: 'user-1',
+        id: 'annot-1',
+        expectedVersion: 1,
+        data: { color: '#ff0000' },
+      });
+      expect(res).toEqual({ id: 'annot-1', color: '#ff0000' });
+    });
+
+    it('should delete annotation by delegating to DeleteAnnotationUseCase', async () => {
+      const res = await controller.deleteAnnotation('user-1', 'att-1', 'annot-1', '1');
+      expect(mockDeleteAnnotationUseCase.execute).toHaveBeenCalledWith({
+        userId: 'user-1',
+        id: 'annot-1',
+        expectedVersion: 1,
+      });
+      expect(res).toEqual({ id: 'annot-1', deleted: true });
+    });
+
+    it('should batch upsert annotations by delegating to BatchUpsertAnnotationsUseCase', async () => {
+      const dto: any = { upserts: [{ pageIndex: 1 }], deletes: ['annot-old'] };
+      const res = await controller.batchUpsertAnnotations('user-1', 'att-1', dto);
+      expect(mockBatchUpsertAnnotationsUseCase.execute).toHaveBeenCalledWith({
+        userId: 'user-1',
+        attachmentId: 'att-1',
+        data: { upserts: dto.upserts, deletes: dto.deletes },
+      });
+      expect(res).toEqual({ created: [], updated: [], deleted: [] });
+    });
+
+    it('should import external annotations by delegating to PdfAnnotationImporterService', async () => {
+      const res = await controller.importExternalAnnotations('user-1', 'att-1');
+      expect(mockPdfImporterService.importFromAttachment).toHaveBeenCalledWith('user-1', 'att-1');
+      expect(res).toEqual({ imported: 3 });
+    });
+
+    it('should support legacy constructor with AnnotationsService fallback', async () => {
+      const mockLegacyService = {
+        getAnnotationsByAttachment: jest.fn().mockResolvedValue([{ id: 'legacy-annot' }]),
+      };
+      const legacyController = new AnnotationsController(
+        mockLegacyService as any,
+        mockPdfImporterService as any,
+      );
+      const res = await legacyController.listAnnotations('user-1', 'att-1');
+      expect(mockLegacyService.getAnnotationsByAttachment).toHaveBeenCalledWith(
+        'user-1',
+        'att-1',
+        undefined,
+        undefined,
+      );
+      expect(res).toEqual([{ id: 'legacy-annot' }]);
+    });
+  });
 });
+

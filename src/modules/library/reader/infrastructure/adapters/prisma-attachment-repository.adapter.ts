@@ -32,7 +32,7 @@ export class PrismaAttachmentRepositoryAdapter implements IAttachmentRepositoryP
       filename: raw.filename,
       url: raw.url,
       mimeType: raw.mimeType,
-      sizeBytes: raw.size,
+      sizeBytes: Number(raw.size),
       fileHash: raw.fileHash,
       revisionCount: raw.revisions?.length || 1,
       isExtracted:
@@ -59,7 +59,7 @@ export class PrismaAttachmentRepositoryAdapter implements IAttachmentRepositoryP
         filename: raw.filename,
         url: raw.url,
         mimeType: raw.mimeType,
-        sizeBytes: raw.size,
+        sizeBytes: Number(raw.size),
         fileHash: raw.fileHash,
         revisionCount: raw.revisions?.length || 1,
         isExtracted:

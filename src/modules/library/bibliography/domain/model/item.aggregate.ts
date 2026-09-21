@@ -264,8 +264,24 @@ export class ItemAggregate {
       modifiedFields.push('publicationTitle');
     }
 
-    if (changes.fields !== undefined) {
-      this._fields = { ...this._fields, ...changes.fields };
+    const {
+      title: _t,
+      itemType: _it,
+      doi: _d,
+      citationKey: _ck,
+      abstract: _a,
+      year: _y,
+      publicationTitle: _pt,
+      fields,
+      ...extraChanges
+    } = changes as any;
+
+    if (changes.fields !== undefined || Object.keys(extraChanges).length > 0) {
+      this._fields = {
+        ...this._fields,
+        ...(changes.fields ?? {}),
+        ...extraChanges,
+      };
       modifiedFields.push('fields');
     }
 
@@ -497,5 +513,60 @@ export class ItemAggregate {
   }
   public get isDeleted(): boolean {
     return this._deletedAt !== null && this._deletedAt !== undefined;
+  }
+  public get authors(): string[] {
+    return Array.isArray(this._fields.authors) ? this._fields.authors : [];
+  }
+  public get creators(): any[] {
+    return Array.isArray(this._fields.creators) ? this._fields.creators : [];
+  }
+  public get contributors(): any[] {
+    return Array.isArray(this._fields.contributors)
+      ? this._fields.contributors
+      : [];
+  }
+  public get tags(): string[] {
+    return Array.isArray(this._fields.tags) ? this._fields.tags : [];
+  }
+  public get attachments(): any[] {
+    return Array.isArray(this._fields.attachments)
+      ? this._fields.attachments
+      : [];
+  }
+  public get primaryFile(): any {
+    return this._fields.primaryFile ?? null;
+  }
+  public get fileUrl(): string {
+    return this._fields.fileUrl ?? '';
+  }
+  public get collections(): any[] {
+    return Array.isArray(this._fields.collections)
+      ? this._fields.collections
+      : [];
+  }
+  public get collectionIds(): string[] {
+    return Array.isArray(this._fields.collectionIds)
+      ? this._fields.collectionIds
+      : [];
+  }
+  public get collectionId(): string | null {
+    return this._fields.collectionId ?? null;
+  }
+  public get notes(): any[] {
+    return Array.isArray(this._fields.notes) ? this._fields.notes : [];
+  }
+  public get readStatus(): string {
+    return this._fields.readStatus ?? 'unread';
+  }
+  public get rating(): number {
+    return typeof this._fields.rating === 'number' ? this._fields.rating : 0;
+  }
+  public get lastReadAt(): string | null {
+    return this._fields.lastReadAt ?? null;
+  }
+  public get identifiers(): any[] {
+    return Array.isArray(this._fields.identifiers)
+      ? this._fields.identifiers
+      : [];
   }
 }

@@ -44,7 +44,6 @@ export class SearchRepository implements OnModuleInit {
         { abstract: { contains: trimmed, mode: 'insensitive' } },
         { doi: { contains: trimmed, mode: 'insensitive' } },
         { citationKey: { contains: trimmed, mode: 'insensitive' } },
-        { publicationTitle: { contains: trimmed, mode: 'insensitive' } },
         {
           contributors: {
             some: {
@@ -92,12 +91,18 @@ export class SearchRepository implements OnModuleInit {
     tx?: Prisma.TransactionClient,
   ) {
     // Build structured filters as SQL fragment
+    const hasProject = Boolean(
+      options.projectId &&
+        options.projectId !== 'user' &&
+        options.projectId !== 'me' &&
+        options.projectId !== 'personal',
+    );
     const baseFilters: string[] = [
-      `(user_id = $1::uuid OR project_id = $1::uuid)`,
+      hasProject ? `project_id = $1::uuid` : `user_id = $1::uuid`,
       `deleted_at IS NULL`,
       `search_vector @@ plainto_tsquery('english', $2)`,
     ];
-    const params: any[] = [userId, q];
+    const params: any[] = [hasProject ? options.projectId : userId, q];
     let paramIdx = 3;
 
     if (options.itemType) {
@@ -185,7 +190,6 @@ export class SearchRepository implements OnModuleInit {
       where: { id: { in: ids } },
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
-        identifiers: true,
         attachments: { take: 5 },
         itemTags: { include: { tag: true } },
         collectionItems: { include: { collection: true } },
@@ -229,7 +233,6 @@ export class SearchRepository implements OnModuleInit {
       ...(options.cursor ? { cursor: { id: options.cursor }, skip: 1 } : {}),
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
-        identifiers: true,
         attachments: { take: 5 },
         itemTags: { include: { tag: true } },
         collectionItems: { include: { collection: true } },
@@ -267,7 +270,7 @@ export class SearchRepository implements OnModuleInit {
       where,
       take: 2000,
       select: {
-        itemType: true,
+        type: true,
         year: true,
         itemTags: {
           take: 10,
@@ -283,8 +286,8 @@ export class SearchRepository implements OnModuleInit {
     const tags: Record<string, number> = {};
 
     for (const item of items) {
-      if (item.itemType) {
-        itemTypes[item.itemType] = (itemTypes[item.itemType] || 0) + 1;
+      if (item.type) {
+        itemTypes[item.type] = (itemTypes[item.type] || 0) + 1;
       }
       if (item.year) {
         years[item.year] = (years[item.year] || 0) + 1;
@@ -424,8 +427,8 @@ export class SearchRepository implements OnModuleInit {
         title: true,
         year: true,
         doi: true,
-        itemType: true,
-        publicationTitle: true,
+        type: true,
+        metadata: true,
         abstract: true,
         contributors: {
           select: { fullName: true },
@@ -458,8 +461,8 @@ export class SearchRepository implements OnModuleInit {
         title: true,
         year: true,
         doi: true,
-        itemType: true,
-        publicationTitle: true,
+        type: true,
+        metadata: true,
         abstract: true,
         contributors: {
           select: { fullName: true },

@@ -12,9 +12,13 @@ export { WorkItemPriority };
 
 export const USER_MINIMAL_SELECT = {
   id: true,
-  name: true,
   email: true,
-  avatar: true,
+  profile: {
+    select: {
+      name: true,
+      avatar: true,
+    },
+  },
 } as const;
 
 export const CYCLE_SELECT = {

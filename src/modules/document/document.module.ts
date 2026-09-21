@@ -7,9 +7,9 @@ import { CommentModule } from './comment/comment.module';
 import { TemplateModule } from './template/template.module';
 import { CollaborationModule } from './collaboration/collaboration.module';
 import { ExportModule } from './export/export.module';
-import { OutlineModule } from './outline/outline.module';
 import { AssetModule } from './asset/asset.module';
 import { SuggestionModule } from './suggestion/suggestion.module';
+import { NotificationBundlerModule } from './notification/notification-bundler.module';
 import { DocumentFacade, DOCUMENT_FACADE } from './document.facade';
 
 @Module({
@@ -22,9 +22,9 @@ import { DocumentFacade, DOCUMENT_FACADE } from './document.facade';
     TemplateModule,
     CollaborationModule,
     ExportModule,
-    OutlineModule,
     AssetModule,
     SuggestionModule,
+    NotificationBundlerModule,
   ],
   providers: [
     DocumentFacade,
@@ -44,9 +44,9 @@ import { DocumentFacade, DOCUMENT_FACADE } from './document.facade';
     TemplateModule,
     CollaborationModule,
     ExportModule,
-    OutlineModule,
     AssetModule,
     SuggestionModule,
+    NotificationBundlerModule,
   ],
 })
 export class DocumentModule {}

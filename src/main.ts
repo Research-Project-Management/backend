@@ -26,6 +26,14 @@ import { TransformInterceptor } from './core/interceptors/transform.interceptor'
 import { IdempotencyInterceptor } from './core/idempotency/idempotency.interceptor';
 import { IdempotencyService } from './core/idempotency/idempotency.service';
 
+// Enable native JSON serialization for PostgreSQL BigInt types across all HTTP endpoints
+if (typeof (BigInt.prototype as any).toJSON !== 'function') {
+  (BigInt.prototype as any).toJSON = function () {
+    const num = Number(this);
+    return Number.isSafeInteger(num) ? num : this.toString();
+  };
+}
+
 // Process-level safety nets to prevent unexpected crashes from background socket resets or async events
 const TRANSIENT_NETWORK_ERRORS = [
   'ECONNRESET',

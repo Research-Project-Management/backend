@@ -35,12 +35,13 @@ export function sanitizeFilename(filename?: string): string {
 export function validateAttachmentInvariants(input: {
   url?: string;
   filename?: string;
-  size?: number;
+  size?: number | bigint;
   mimeType?: string;
   fileHash?: string;
+  fileId?: string;
 }): void {
-  if (!input.url || input.url.trim() === '') {
-    throw new AttachmentInvariantError('Attachment URL cannot be empty.');
+  if ((!input.url || input.url.trim() === '') && !input.fileId) {
+    throw new AttachmentInvariantError('Attachment URL or fileId must be provided.');
   }
 
   if (input.size !== undefined && input.size < 0) {

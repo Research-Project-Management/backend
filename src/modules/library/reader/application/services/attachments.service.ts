@@ -132,6 +132,8 @@ export class AttachmentsService {
       )?.[1] ||
       null;
 
+    const sizeBigInt = input.size !== undefined ? BigInt(input.size) : 0n;
+
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
       const attachment = await tx.attachment.create({
         data: {
@@ -139,7 +141,7 @@ export class AttachmentsService {
           filename: input.filename,
           url: input.url,
           mimeType: input.mimeType ?? 'application/pdf',
-          size: input.size ?? 0,
+          size: sizeBigInt,
           fileHash: input.fileHash ?? '',
           fileId: resolvedFileId,
           revisions: {
@@ -147,7 +149,8 @@ export class AttachmentsService {
               revisionNumber: 1,
               url: input.url,
               fileHash: input.fileHash ?? '',
-              sizeBytes: input.size ?? 0,
+              fileId: resolvedFileId,
+              sizeBytes: sizeBigInt,
               comment: 'Initial file upload',
             },
           },
@@ -207,12 +210,6 @@ export class AttachmentsService {
     input: ReplaceAttachmentFileInput,
     projectId?: string,
   ) {
-    validateAttachmentInvariants({
-      url: input.url,
-      size: input.sizeBytes,
-      fileHash: input.fileHash,
-    });
-
     const attachment = await this.repo.findUnique(attachmentId, {
       item: true,
       revisions: { orderBy: { revisionNumber: 'desc' }, take: 1 },
@@ -228,16 +225,76 @@ export class AttachmentsService {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
+    // Resolve fileId, url, size, and hash
+    let resolvedFileId =
+      input.fileId ||
+      input.url?.match(
+        /\/api\/(?:v1\/(?:projects\/[^/]+\/)?library\/)?files\/([a-zA-Z0-9_-]+)/,
+      )?.[1] ||
+      null;
+
+    let resolvedUrl = input.url;
+    let resolvedSizeBytes = input.sizeBytes;
+    let resolvedHash = input.fileHash;
+
+    if (
+      resolvedFileId &&
+      (!resolvedUrl || resolvedSizeBytes === undefined || !resolvedHash)
+    ) {
+      if (this.storagePort?.readOwnedFile) {
+        try {
+          const fileRecord = await this.storagePort.readOwnedFile({
+            fileId: resolvedFileId,
+            userId,
+            projectId:
+              projectId && projectId !== 'user' ? projectId : undefined,
+          });
+          if (fileRecord) {
+            resolvedUrl =
+              resolvedUrl ||
+              fileRecord.contentUrl ||
+              `/api/files/${encodeURIComponent(resolvedFileId)}/content`;
+            resolvedSizeBytes =
+              resolvedSizeBytes !== undefined
+                ? resolvedSizeBytes
+                : fileRecord.size;
+            resolvedHash = resolvedHash || (fileRecord as any).hash || '';
+          }
+        } catch (err: any) {
+          this.logger.debug(
+            `Could not read storage file metadata for revision: ${err?.message}`,
+          );
+        }
+      }
+      resolvedUrl =
+        resolvedUrl ||
+        `/api/files/${encodeURIComponent(resolvedFileId)}/content`;
+    }
+
+    validateAttachmentInvariants({
+      url: resolvedUrl,
+      fileId: resolvedFileId ?? undefined,
+      size: resolvedSizeBytes,
+      fileHash: resolvedHash,
+    });
+
     const nextRevisionNumber =
       (attachment.revisions[0]?.revisionNumber ?? 0) + 1;
+
+    const nextSizeBigInt =
+      resolvedSizeBytes !== undefined
+        ? BigInt(resolvedSizeBytes)
+        : (attachment.size ?? 0n);
 
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
       const updatedAttachment = await tx.attachment.update({
         where: { id: attachmentId },
         data: {
-          size: input.sizeBytes,
-          fileHash: input.fileHash,
-          url: input.url,
+          fileId: resolvedFileId || attachment.fileId,
+          size: nextSizeBigInt,
+          fileHash: resolvedHash || attachment.fileHash,
+          url: resolvedUrl || attachment.url,
+          filename: input.filename || attachment.filename,
         },
       });
 
@@ -245,12 +302,21 @@ export class AttachmentsService {
         data: {
           attachmentId,
           revisionNumber: nextRevisionNumber,
-          fileHash: input.fileHash || '',
-          sizeBytes: input.sizeBytes,
-          url: input.url,
+          fileId: resolvedFileId || null,
+          fileHash: resolvedHash || '',
+          sizeBytes: nextSizeBigInt,
+          url: resolvedUrl || '',
           comment: input.comment || 'Revision upload',
         },
       });
+
+      if (resolvedFileId) {
+        await this.repo.updateLinkedFile(
+          resolvedFileId,
+          attachment.itemId,
+          tx,
+        );
+      }
 
       const effectiveProjectId =
         projectId || attachment.item?.projectId || undefined;
@@ -471,7 +537,7 @@ export class AttachmentsService {
           url: command.url,
           mimeType: command.mimeType,
           fileHash: command.fileHash,
-          size: command.size !== undefined ? command.size : undefined,
+          size: command.size !== undefined ? BigInt(command.size) : undefined,
         },
       });
 
@@ -480,7 +546,7 @@ export class AttachmentsService {
           attachmentId: updated.id,
           revisionNumber: nextRevisionNumber,
           fileHash: command.fileHash || '',
-          sizeBytes: command.size || 0,
+          sizeBytes: command.size !== undefined ? BigInt(command.size) : 0n,
           url: command.url,
           comment: 'Sync update',
         },
@@ -541,7 +607,7 @@ export class AttachmentsService {
           attachmentType: command.attachmentType
             ? (command.attachmentType as AttachmentType)
             : AttachmentType.primary_pdf,
-          size: command.size || 0,
+          size: command.size !== undefined ? BigInt(command.size) : 0n,
         },
       });
 
@@ -550,7 +616,7 @@ export class AttachmentsService {
           attachmentId: created.id,
           revisionNumber: 1,
           fileHash: command.fileHash || '',
-          sizeBytes: command.size || 0,
+          sizeBytes: command.size !== undefined ? BigInt(command.size) : 0n,
           url: command.url,
           comment: 'Initial sync',
         },
@@ -885,8 +951,7 @@ export class AttachmentsService {
     // Verify item ownership / project access
     await this.assertItemExists(userId, attachment.itemId, projectId);
 
-    const oldFilename =
-      attachment.filename || attachment.name || 'document.pdf';
+    const oldFilename = attachment.filename || 'document.pdf';
     let newFilename = '';
 
     if (dto.filename && dto.filename.trim()) {
@@ -969,7 +1034,7 @@ export class AttachmentsService {
       try {
         // Assert scope permission per item
         await this.assertItemExists(userId, att.itemId, projectId);
-        const oldFilename = (att as any).filename || att.name || 'document.pdf';
+        const oldFilename = att.filename || 'document.pdf';
         const newFilename = formatAttachmentFilename(
           pattern,
           (att as any).item,

@@ -217,4 +217,25 @@ export class ChangeLogRepository {
 
     return BigInt(0);
   }
+
+  /**
+   * Purges historical library_changes older than `olderThanMs` (default 90 days).
+   * Compacts the changelog to avoid unbounded growth while preserving tombstones.
+   */
+  async purgeOldChanges(
+    olderThanMs: number = 90 * 24 * 60 * 60 * 1000,
+  ): Promise<number> {
+    const cutoff = new Date(Date.now() - olderThanMs);
+    const result = await this.prisma.libraryChange.deleteMany({
+      where: {
+        createdAt: { lte: cutoff },
+      },
+    });
+    if (result.count > 0) {
+      this.logger.log(
+        `Purged ${result.count} historical library changes older than ${cutoff.toISOString()}`,
+      );
+    }
+    return result.count;
+  }
 }

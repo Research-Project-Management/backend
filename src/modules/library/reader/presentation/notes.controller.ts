@@ -11,6 +11,7 @@ import {
   UseGuards,
   NotFoundException,
   BadRequestException,
+  Optional,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { isUUID } from 'class-validator';
@@ -20,6 +21,14 @@ import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { CreateNoteDto, UpdateNoteDto } from '../application/dtos/notes.dto';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 
+// CQRS Use Cases
+import { CreateNoteUseCase } from '../application/commands/create-note.use-case';
+import { UpdateNoteUseCase } from '../application/commands/update-note.use-case';
+import { DeleteNoteUseCase } from '../application/commands/delete-note.use-case';
+import { ExtractNotesFromAnnotationsUseCase } from '../application/commands/extract-notes-from-annotations.use-case';
+import { GetNoteUseCase } from '../application/queries/get-note.use-case';
+import { ListNotesUseCase } from '../application/queries/list-notes.use-case';
+
 @ApiTags('Library Notes')
 @ApiBearerAuth('JWT-auth')
 @Controller([
@@ -28,7 +37,54 @@ import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 ])
 @UseGuards(JwtAuthGuard, ProjectRoleGuard)
 export class NotesController {
-  constructor(private readonly notesService: NotesService) {}
+  private notesServiceInstance?: NotesService;
+  private createNoteUseCaseInstance?: CreateNoteUseCase;
+  private getNoteUseCaseInstance?: GetNoteUseCase;
+  private listNotesUseCaseInstance?: ListNotesUseCase;
+  private updateNoteUseCaseInstance?: UpdateNoteUseCase;
+  private deleteNoteUseCaseInstance?: DeleteNoteUseCase;
+  private extractNotesUseCaseInstance?: ExtractNotesFromAnnotationsUseCase;
+
+  constructor(notesService: NotesService);
+  constructor(
+    createNoteUseCase: CreateNoteUseCase,
+    getNoteUseCase: GetNoteUseCase,
+    listNotesUseCase: ListNotesUseCase,
+    updateNoteUseCase: UpdateNoteUseCase,
+    deleteNoteUseCase: DeleteNoteUseCase,
+    extractNotesUseCase: ExtractNotesFromAnnotationsUseCase,
+    notesService?: NotesService,
+  );
+  constructor(
+    @Optional() private readonly createNoteUseCase?: any,
+    @Optional() private readonly getNoteUseCase?: any,
+    @Optional() private readonly listNotesUseCase?: any,
+    @Optional() private readonly updateNoteUseCase?: any,
+    @Optional() private readonly deleteNoteUseCase?: any,
+    @Optional() private readonly extractNotesUseCase?: any,
+    @Optional() private readonly notesService?: NotesService,
+  ) {
+    const isLegacyService =
+      createNoteUseCase &&
+      (typeof createNoteUseCase.listNotes === 'function' ||
+        typeof createNoteUseCase.getNote === 'function');
+
+    if (isLegacyService) {
+      this.notesServiceInstance = createNoteUseCase;
+    } else {
+      this.createNoteUseCaseInstance = createNoteUseCase;
+      this.getNoteUseCaseInstance = getNoteUseCase;
+      this.listNotesUseCaseInstance = listNotesUseCase;
+      this.updateNoteUseCaseInstance = updateNoteUseCase;
+      this.deleteNoteUseCaseInstance = deleteNoteUseCase;
+      this.extractNotesUseCaseInstance = extractNotesUseCase;
+      this.notesServiceInstance = notesService;
+    }
+  }
+
+  private get effectiveNotesService(): NotesService {
+    return (this.notesServiceInstance ?? this.notesService)!;
+  }
 
   @Get()
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
@@ -48,7 +104,16 @@ export class NotesController {
       isUUID(rawProjectId)
         ? rawProjectId
         : undefined;
-    return this.notesService.listNotes(
+
+    if (this.listNotesUseCaseInstance) {
+      return this.listNotesUseCaseInstance.execute({
+        userId: currentUserId,
+        itemId,
+        projectId: effectiveProjectId,
+      });
+    }
+
+    return this.effectiveNotesService.listNotes(
       currentUserId,
       itemId,
       effectiveProjectId,
@@ -65,11 +130,20 @@ export class NotesController {
     @Param('projectId') paramProjectId?: string,
   ) {
     const effectiveProjectId = paramProjectId || queryProjectId;
-    const note = await this.notesService.getNote(
-      currentUserId,
-      id,
-      effectiveProjectId,
-    );
+    let note;
+    if (this.getNoteUseCaseInstance) {
+      note = await this.getNoteUseCaseInstance.execute({
+        userId: currentUserId,
+        id,
+        projectId: effectiveProjectId,
+      });
+    } else {
+      note = await this.effectiveNotesService.getNote(
+        currentUserId,
+        id,
+        effectiveProjectId,
+      );
+    }
     if (!note) {
       throw new NotFoundException(`Note ${id} not found`);
     }
@@ -88,11 +162,21 @@ export class NotesController {
   ) {
     const effectiveProjectId =
       paramProjectId || queryProjectId || body.projectId;
-    return this.notesService.createNote(currentUserId, {
+    const createData = {
       ...body,
       projectId: effectiveProjectId || undefined,
       createdById: currentUserId || 'system',
-    });
+    };
+
+    if (this.createNoteUseCaseInstance) {
+      return this.createNoteUseCaseInstance.execute({
+        userId: currentUserId,
+        data: createData,
+        projectId: effectiveProjectId || undefined,
+      });
+    }
+
+    return this.effectiveNotesService.createNote(currentUserId, createData);
   }
 
   @Get('items/:itemId')
@@ -105,7 +189,15 @@ export class NotesController {
     @Param('projectId') paramProjectId?: string,
   ) {
     const effectiveProjectId = paramProjectId || queryProjectId;
-    return this.notesService.listNotes(
+    if (this.listNotesUseCaseInstance) {
+      return this.listNotesUseCaseInstance.execute({
+        userId: currentUserId,
+        itemId,
+        projectId: effectiveProjectId,
+      });
+    }
+
+    return this.effectiveNotesService.listNotes(
       currentUserId,
       itemId,
       effectiveProjectId,
@@ -119,7 +211,17 @@ export class NotesController {
     @CurrentUser('id') currentUserId: string,
     @Param('itemId') itemId: string,
   ) {
-    return this.notesService.extractNotesFromAnnotations(currentUserId, itemId);
+    if (this.extractNotesUseCaseInstance) {
+      return this.extractNotesUseCaseInstance.execute({
+        userId: currentUserId,
+        itemId,
+      });
+    }
+
+    return this.effectiveNotesService.extractNotesFromAnnotations(
+      currentUserId,
+      itemId,
+    );
   }
 
   @Patch(':id')
@@ -144,7 +246,18 @@ export class NotesController {
     }
 
     const { expectedVersion: _, ...updateData } = body;
-    return this.notesService.updateNote(
+
+    if (this.updateNoteUseCaseInstance) {
+      return this.updateNoteUseCaseInstance.execute({
+        userId: currentUserId,
+        id,
+        expectedVersion,
+        data: updateData,
+        projectId: effectiveProjectId,
+      });
+    }
+
+    return this.effectiveNotesService.updateNote(
       currentUserId,
       id,
       expectedVersion,
@@ -171,12 +284,24 @@ export class NotesController {
         : ifMatch
           ? parseInt(ifMatch.replace(/["']/g, ''), 10)
           : undefined;
-    const deleted = await this.notesService.deleteNote(
-      currentUserId,
-      id,
-      expectedVersion,
-      effectiveProjectId,
-    );
+
+    let deleted: boolean;
+    if (this.deleteNoteUseCaseInstance) {
+      deleted = await this.deleteNoteUseCaseInstance.execute({
+        userId: currentUserId,
+        id,
+        expectedVersion,
+        projectId: effectiveProjectId,
+      });
+    } else {
+      deleted = await this.effectiveNotesService.deleteNote(
+        currentUserId,
+        id,
+        expectedVersion,
+        effectiveProjectId,
+      );
+    }
+
     if (!deleted) {
       throw new NotFoundException(`Note ${id} not found`);
     }

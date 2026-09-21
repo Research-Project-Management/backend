@@ -48,14 +48,21 @@ export class MatchStage {
    *     This keeps fuzzy matching accurate without loading the entire workspace.
    */
   async execute(
-    scopeId: string,
+    scope: { userId?: string; projectId?: string | null } | string,
     proposed: ItemMetadata,
   ): Promise<DuplicateMatchResult> {
     const proposedDoi = proposed.doi?.toLowerCase().trim();
-    const validUuid = scopeId && isUUID(scopeId) ? scopeId : null;
-    const scopeFilter = validUuid
-      ? { OR: [{ projectId: validUuid }, { userId: validUuid }] }
-      : {};
+    let scopeFilter: Record<string, any> = {};
+
+    if (typeof scope === 'object' && scope !== null) {
+      if (scope.projectId && isUUID(scope.projectId)) {
+        scopeFilter = { projectId: scope.projectId };
+      } else if (scope.userId && isUUID(scope.userId)) {
+        scopeFilter = { userId: scope.userId };
+      }
+    } else if (typeof scope === 'string' && isUUID(scope)) {
+      scopeFilter = { OR: [{ projectId: scope }, { userId: scope }] };
+    }
 
     // ── Stage 1: Exact DOI lookup ─────────────────────────────────────────────
     if (proposedDoi) {

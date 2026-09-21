@@ -31,7 +31,6 @@ export class QueryRepository {
         contributors: {
           orderBy: { orderIndex: 'asc' },
         },
-        identifiers: true,
         collectionItems: {
           include: { collection: true },
         },
@@ -102,7 +101,6 @@ export class QueryRepository {
         contributors: {
           orderBy: { orderIndex: 'asc' },
         },
-        identifiers: true,
         collectionItems: {
           include: { collection: true },
         },
@@ -128,8 +126,11 @@ export class QueryRepository {
   ) {
     if (!isUuid(itemId) || !isUuid(userId)) return null;
     const client = this.getClient(tx);
-    const item = await client.item.findUnique({
-      where: { id: itemId },
+    const item = await client.item.findFirst({
+      where: {
+        id: itemId,
+        deletedAt: null,
+      },
       include: {
         itemTags: { include: { tag: true } },
       },
@@ -137,14 +138,14 @@ export class QueryRepository {
 
     if (
       !item ||
-      ((item as any).userId && (item as any).userId !== userId) ||
-      item.deletedAt
+      ((item as any).userId && (item as any).userId !== userId)
     ) {
       return null;
     }
 
     const relationTags = item.itemTags.map((it: any) => it.tag.name);
     const tags = normalizeTags(relationTags);
+    const meta: any = (item.metadata as any) ?? {};
 
     return {
       id: item.id,
@@ -154,12 +155,12 @@ export class QueryRepository {
       year: item.year,
       doi: item.doi,
       citationKey: item.citationKey,
-      publicationTitle: item.publicationTitle,
-      volume: item.volume,
-      issue: item.issue,
-      pages: item.pages,
-      issn: item.issn,
-      isbn: item.isbn,
+      publicationTitle: meta.publicationTitle ?? null,
+      volume: meta.volume ?? null,
+      issue: meta.issue ?? null,
+      pages: meta.pages ?? null,
+      issn: meta.issn ?? null,
+      isbn: meta.isbn ?? null,
       url: item.url,
       tags,
     };
@@ -184,7 +185,7 @@ export class QueryRepository {
       select: {
         id: true,
         title: true,
-        itemType: true,
+        type: true,
         version: true,
         updatedAt: true,
       },
@@ -211,7 +212,6 @@ export class QueryRepository {
         contributors: {
           orderBy: { orderIndex: 'asc' },
         },
-        identifiers: true,
         collectionItems: {
           include: { collection: true },
         },
@@ -271,7 +271,6 @@ export class QueryRepository {
       contributors: {
         orderBy: { orderIndex: 'asc' as const },
       },
-      identifiers: true,
       collectionItems: {
         include: { collection: true },
       },
@@ -281,14 +280,6 @@ export class QueryRepository {
       attachments: true,
       notesList: {
         where: { deletedAt: null },
-      },
-      user: {
-        select: {
-          id: true,
-          name: true,
-          avatar: true,
-          email: true,
-        },
       },
       states: options.userId
         ? {
@@ -412,7 +403,7 @@ export class QueryRepository {
       if (view === 'unfiled') {
         where.collectionItems = { none: {} };
       } else if (view === 'my-publications' || view === 'publications') {
-        where.isMyPublication = true;
+        where.metadata = { path: ['isMyPublication'], equals: true };
       }
     }
 
@@ -440,15 +431,10 @@ export class QueryRepository {
     const trimmed = search.trim();
     return [
       { title: { contains: trimmed, mode: 'insensitive' } },
+      { publicationTitle: { contains: trimmed, mode: 'insensitive' } },
       { abstract: { contains: trimmed, mode: 'insensitive' } },
       { doi: { contains: trimmed, mode: 'insensitive' } },
-      { publicationTitle: { contains: trimmed, mode: 'insensitive' } },
-      { publisher: { contains: trimmed, mode: 'insensitive' } },
       { citationKey: { contains: trimmed, mode: 'insensitive' } },
-      { arxivId: { contains: trimmed, mode: 'insensitive' } },
-      { isbn: { contains: trimmed, mode: 'insensitive' } },
-      { issn: { contains: trimmed, mode: 'insensitive' } },
-      { extra: { contains: trimmed, mode: 'insensitive' } },
       {
         contributors: {
           some: {
@@ -495,40 +481,7 @@ export class QueryRepository {
             deletedAt: null,
             ...(options.search
               ? {
-                  OR: [
-                    {
-                      title: { contains: options.search, mode: 'insensitive' },
-                    },
-                    {
-                      abstract: {
-                        contains: options.search,
-                        mode: 'insensitive',
-                      },
-                    },
-                    { doi: { contains: options.search, mode: 'insensitive' } },
-                    {
-                      publicationTitle: {
-                        contains: options.search,
-                        mode: 'insensitive',
-                      },
-                    },
-                    {
-                      citationKey: {
-                        contains: options.search,
-                        mode: 'insensitive',
-                      },
-                    },
-                    {
-                      contributors: {
-                        some: {
-                          fullName: {
-                            contains: options.search,
-                            mode: 'insensitive',
-                          },
-                        },
-                      },
-                    },
-                  ],
+                  OR: this.buildSearchCondition(options.search),
                 }
               : {}),
             ...(options.collectionId
@@ -661,7 +614,7 @@ export class QueryRepository {
         id: true,
         userId: true,
         title: true,
-        itemType: true,
+        type: true,
         year: true,
         doi: true,
         contributors: {
@@ -679,7 +632,7 @@ export class QueryRepository {
       id: item.id,
       userId: item.userId,
       title: item.title,
-      itemType: item.itemType || undefined,
+      itemType: item.type || undefined,
       year: item.year,
       doi: item.doi || null,
       primaryAuthors: item.contributors.map(
@@ -707,7 +660,7 @@ export class QueryRepository {
         id: true,
         userId: true,
         title: true,
-        itemType: true,
+        type: true,
         year: true,
         doi: true,
         contributors: {
@@ -811,7 +764,7 @@ export class QueryRepository {
           authors: authorNames,
           year: peerItem.year,
           doi: peerItem.doi,
-          itemType: peerItem.itemType,
+          itemType: (peerItem as any).type || (peerItem as any).itemType,
           citationKey: peerItem.citationKey,
           relationType: effectiveRelationType,
           direction: isOutgoing ? 'outgoing' : 'incoming',
@@ -828,12 +781,12 @@ export class QueryRepository {
 
     const item = await client.item.findUnique({
       where: { id: itemId },
-      select: { extra: true },
+      select: { metadata: true },
     });
-    if (!item || !item.extra) return [];
+    if (!item || !item.metadata) return [];
     try {
-      const parsed = JSON.parse(item.extra);
-      return Array.isArray(parsed.relations) ? parsed.relations : [];
+      const meta = (item.metadata as any) ?? {};
+      return Array.isArray(meta.relations) ? meta.relations : [];
     } catch {
       return [];
     }
@@ -860,7 +813,7 @@ export class QueryRepository {
           where: { creatorType: 'author' },
           select: { id: true },
         },
-        publicationTitle: true,
+        metadata: true,
       },
     });
   }
@@ -878,9 +831,7 @@ export class QueryRepository {
         id: true,
         title: true,
         doi: true,
-        isbn: true,
-        issn: true,
-        pmid: true,
+        metadata: true,
         citationKey: true,
         year: true,
         contributors: {

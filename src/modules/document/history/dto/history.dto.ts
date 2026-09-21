@@ -1,5 +1,5 @@
-import { IsEnum, IsOptional, IsString, IsInt, Min, Max } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsEnum, IsOptional, IsString, IsInt, Min, Max, IsBoolean } from 'class-validator';
+import { Type, Transform } from 'class-transformer';
 import { VersionEventType } from '@prisma/client';
 
 export class CreateVersionDto {
@@ -61,6 +61,11 @@ export class VersionQueryDto {
   @IsOptional()
   @IsEnum(VersionEventType)
   eventType?: VersionEventType;
+
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  labeledOnly?: boolean;
 }
 
 export interface DiffChunk {

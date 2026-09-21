@@ -63,13 +63,18 @@ export interface IBibliographyFacade {
     data: any,
     options?: any,
   ): Promise<any>;
+  deleteItem(
+    userId: string,
+    itemId: string,
+    projectId?: string,
+  ): Promise<void>;
   findByIds(
     userId: string,
     itemIds: string[],
     projectId?: string,
   ): Promise<any[]>;
-  countItems(scopeId: string, options?: any): Promise<number>;
-  findMany(scopeId: string, options?: any): Promise<any[]>;
+  countItems(userId: string, options?: any): Promise<number>;
+  findMany(userId: string, options?: any): Promise<any[]>;
   validateItemType(type: string): Promise<boolean>;
   getPrimaryCreatorType(itemType: string): string;
   getOrderedFields(itemType: string): ItemFieldDefinition[];
@@ -234,6 +239,16 @@ export class BibliographyFacade implements IBibliographyFacade {
     throw new Error('No provider available for updateItem in BibliographyFacade');
   }
 
+  async deleteItem(
+    userId: string,
+    itemId: string,
+    projectId?: string,
+  ): Promise<void> {
+    if (this.itemRepo) {
+      await this.itemRepo.delete(userId, itemId, projectId);
+    }
+  }
+
   async findByIds(
     userId: string,
     itemIds: string[],
@@ -246,14 +261,14 @@ export class BibliographyFacade implements IBibliographyFacade {
     return this.itemsService.findByIds(userId, itemIds, projectId);
   }
 
-  async countItems(scopeId: string, options?: any): Promise<number> {
+  async countItems(userId: string, options?: any): Promise<number> {
     if (!this.queryRepo) return 0;
-    return this.queryRepo.count(scopeId, options || { view: 'all' });
+    return this.queryRepo.count(userId, options || { view: 'all' });
   }
 
-  async findMany(scopeId: string, options?: any): Promise<any[]> {
+  async findMany(userId: string, options?: any): Promise<any[]> {
     if (!this.queryRepo) return [];
-    return this.queryRepo.findMany(scopeId, options);
+    return this.queryRepo.findMany(userId, options);
   }
 
   validateItemType(type: string): Promise<boolean> {
@@ -296,11 +311,11 @@ export class BibliographyFacade implements IBibliographyFacade {
       );
     }
     if (!this.itemsService) return [];
-    return this.itemsService.findDuplicateCandidateItems(
+    return (await this.itemsService.findDuplicateCandidateItems(
       userId,
       limit,
       projectId,
-    );
+    )) as unknown as DuplicateCandidateItem[];
   }
 
   async mergeItems(

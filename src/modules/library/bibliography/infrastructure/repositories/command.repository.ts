@@ -89,7 +89,6 @@ export class CommandRepository {
         contributors: {
           orderBy: { orderIndex: 'asc' },
         },
-        identifiers: true,
         attachments: true,
         notesList: {
           where: { deletedAt: null },
@@ -130,7 +129,6 @@ export class CommandRepository {
           : { userId }),
       } as any,
       include: {
-        identifiers: true,
         notesList: { where: { deletedAt: null } },
       },
     });
@@ -167,7 +165,6 @@ export class CommandRepository {
         contributors: {
           orderBy: { orderIndex: 'asc' },
         },
-        identifiers: true,
         attachments: {
           include: { revisions: true },
         },
@@ -177,24 +174,6 @@ export class CommandRepository {
       },
     });
 
-    const identifierChanges = calculateIdentifierChanges(cleanIds, existing);
-    for (const ident of identifierChanges) {
-      await client.identifier.deleteMany({
-        where: { itemId: updated.id, type: ident.type },
-      });
-      if (ident.value) {
-        await client.identifier.create({
-          data: {
-            itemId: updated.id,
-            type: ident.type,
-            value: ident.value,
-            canonicalUri: ident.canonicalUri || undefined,
-          },
-        });
-      }
-    }
-
-    const rawTags = data.tags || data.keywords || data.labels;
     if (rawTags && Array.isArray(rawTags)) {
       await syncTagsForCatalogItem(client, userId, updated.id, rawTags);
 
@@ -210,7 +189,6 @@ export class CommandRepository {
           contributors: {
             orderBy: { orderIndex: 'asc' },
           },
-          identifiers: true,
           attachments: {
             include: { revisions: true },
           },
@@ -287,16 +265,11 @@ export class CommandRepository {
     }
 
     // Protection against restoring merged items
-    let extraObj: any = {};
-    try {
-      extraObj = existing.extra ? JSON.parse(existing.extra) : {};
-    } catch {
-      extraObj = {};
-    }
+    const metadataObj: any = (existing.metadata as any) ?? {};
 
-    if (extraObj.mergedIntoId) {
+    if (metadataObj.mergedIntoId) {
       throw new BadRequestException(
-        `Cannot restore item ${id}: it was merged into primary item ${extraObj.mergedIntoId}`,
+        `Cannot restore item ${id}: it was merged into primary item ${metadataObj.mergedIntoId}`,
       );
     }
 
@@ -317,7 +290,6 @@ export class CommandRepository {
       },
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
-        identifiers: true,
         collectionItems: { include: { collection: true } },
         itemTags: { include: { tag: true } },
         notesList: { where: { deletedAt: null } },
@@ -456,23 +428,23 @@ export class CommandRepository {
 
     const item = await client.item.findUnique({
       where: { id: itemId },
-      select: { extra: true },
+      select: { metadata: true },
     });
-    if (item?.extra) {
+    if (item?.metadata) {
       try {
-        const extraObj = JSON.parse(item.extra);
-        if (Array.isArray(extraObj.relations)) {
-          extraObj.relations = extraObj.relations.filter(
+        const metadataObj: any = (item.metadata as any) ?? {};
+        if (Array.isArray(metadataObj.relations)) {
+          metadataObj.relations = metadataObj.relations.filter(
             (r: any) => (r.targetItemId || r.targetId) !== targetItemId,
           );
           await client.item.update({
             where: { id: itemId },
-            data: { extra: JSON.stringify(extraObj) },
+            data: { metadata: metadataObj },
           });
         }
       } catch (err: unknown) {
         this.logger.warn(
-          `Failed to parse or sanitize extra JSON for item ${itemId}: ${(err as Error)?.message}`,
+          `Failed to parse or sanitize relations JSON for item ${itemId}: ${(err as Error)?.message}`,
         );
       }
     }
@@ -496,11 +468,14 @@ export class CommandRepository {
       throw new NotFoundException(`CatalogItem ${id} not found`);
     }
 
+    const metadataObj: any = (existing.metadata as any) ?? {};
+    metadataObj.isMyPublication = isMyPublication;
+    if (isMyPublication) metadataObj.publicationConfirmedAt = new Date().toISOString();
+
     return client.item.update({
       where: { id },
       data: {
-        isMyPublication,
-        publicationConfirmedAt: isMyPublication ? new Date() : null,
+        metadata: metadataObj,
         version: { increment: 1 },
       },
       include: {
@@ -513,7 +488,6 @@ export class CommandRepository {
         contributors: {
           orderBy: { orderIndex: 'asc' },
         },
-        identifiers: true,
         attachments: true,
       },
     });
@@ -532,9 +506,15 @@ export class CommandRepository {
   ) {
     if (!isUuid(id)) return null as any;
     const client = this.getClient(tx);
+    const existing = await client.item.findUnique({
+      where: { id },
+      select: { metadata: true },
+    });
+    const metadataObj: any = (existing?.metadata as any) ?? {};
+    metadataObj.rag = { ...metadataObj.rag, ...data };
     return client.item.update({
       where: { id },
-      data,
+      data: { metadata: metadataObj },
     });
   }
 }

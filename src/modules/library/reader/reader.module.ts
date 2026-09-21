@@ -52,6 +52,12 @@ import { AnnotationNormalizer } from './application/normalizers/annotation.norma
 import { PdfAnnotationImporterService } from './application/services/pdf-annotation-importer.service';
 import { ANNOTATION_REPOSITORY_PORT } from './domain/ports/annotation-repository.port';
 import { PrismaAnnotationRepositoryAdapter } from './infrastructure/adapters/prisma-annotation-repository.adapter';
+import { CreateAnnotationUseCase } from './application/commands/create-annotation.use-case';
+import { UpdateAnnotationUseCase } from './application/commands/update-annotation.use-case';
+import { DeleteAnnotationUseCase } from './application/commands/delete-annotation.use-case';
+import { BatchUpsertAnnotationsUseCase } from './application/commands/batch-upsert-annotations.use-case';
+import { GetAnnotationUseCase } from './application/queries/get-annotation.use-case';
+import { ListAnnotationsUseCase } from './application/queries/list-annotations.use-case';
 
 // ── 3. Notes ──────────────────────────────────────────────────────────────
 import { NotesController } from './presentation/notes.controller';
@@ -59,14 +65,20 @@ import { NotesService } from './application/services/notes.service';
 import { NotesRepository } from './infrastructure/repositories/notes.repository';
 import { NOTE_REPOSITORY_PORT } from './domain/ports/note-repository.port';
 import { PrismaNoteRepositoryAdapter } from './infrastructure/adapters/prisma-note-repository.adapter';
+import { CreateNoteUseCase } from './application/commands/create-note.use-case';
+import { UpdateNoteUseCase } from './application/commands/update-note.use-case';
+import { DeleteNoteUseCase } from './application/commands/delete-note.use-case';
+import { ExtractNotesFromAnnotationsUseCase } from './application/commands/extract-notes-from-annotations.use-case';
+import { GetNoteUseCase } from './application/queries/get-note.use-case';
+import { ListNotesUseCase } from './application/queries/list-notes.use-case';
 
 /**
  * Reader Bounded Context Unified Module (Supporting Domain).
  *
  * Consolidates all reader features into a single Clean Architecture module:
  * - Attachments (Uploads, OCR, Snapshots, Storage, Extraction)
- * - Annotations (Highlights, Comments, PDF importer, Ports/Adapters)
- * - Notes (Markdown/Rich notes, Optimistic locking, Ports/Adapters)
+ * - Annotations (Highlights, Comments, PDF importer, Ports/Adapters, CQRS Use Cases)
+ * - Notes (Markdown/Rich notes, Optimistic locking, Ports/Adapters, CQRS Use Cases)
  */
 @Module({
   imports: [CoreModule, SharedKernelModule, StorageModule, BibliographyModule],
@@ -121,6 +133,12 @@ import { PrismaNoteRepositoryAdapter } from './infrastructure/adapters/prisma-no
       provide: ANNOTATION_REPOSITORY_PORT,
       useClass: PrismaAnnotationRepositoryAdapter,
     },
+    CreateAnnotationUseCase,
+    UpdateAnnotationUseCase,
+    DeleteAnnotationUseCase,
+    BatchUpsertAnnotationsUseCase,
+    GetAnnotationUseCase,
+    ListAnnotationsUseCase,
 
     // ── Notes Providers ────────────────────────────────────────────────
     NotesRepository,
@@ -130,6 +148,12 @@ import { PrismaNoteRepositoryAdapter } from './infrastructure/adapters/prisma-no
       provide: NOTE_REPOSITORY_PORT,
       useClass: PrismaNoteRepositoryAdapter,
     },
+    CreateNoteUseCase,
+    UpdateNoteUseCase,
+    DeleteNoteUseCase,
+    ExtractNotesFromAnnotationsUseCase,
+    GetNoteUseCase,
+    ListNotesUseCase,
   ],
   exports: [
     // Facade
@@ -143,7 +167,7 @@ import { PrismaNoteRepositoryAdapter } from './infrastructure/adapters/prisma-no
     ANNOTATION_REPOSITORY_PORT,
     NOTE_REPOSITORY_PORT,
 
-    // Use Cases
+    // Attachments Use Cases
     CreateAttachmentUseCase,
     DeleteAttachmentUseCase,
     AddAttachmentRevisionUseCase,
@@ -154,6 +178,22 @@ import { PrismaNoteRepositoryAdapter } from './infrastructure/adapters/prisma-no
     GetItemAttachmentsUseCase,
     GetAttachmentRevisionsUseCase,
     GetAttachmentThumbnailUseCase,
+
+    // Annotations Use Cases
+    CreateAnnotationUseCase,
+    UpdateAnnotationUseCase,
+    DeleteAnnotationUseCase,
+    BatchUpsertAnnotationsUseCase,
+    GetAnnotationUseCase,
+    ListAnnotationsUseCase,
+
+    // Notes Use Cases
+    CreateNoteUseCase,
+    UpdateNoteUseCase,
+    DeleteNoteUseCase,
+    ExtractNotesFromAnnotationsUseCase,
+    GetNoteUseCase,
+    ListNotesUseCase,
   ],
 })
 export class ReaderModule implements OnModuleInit {

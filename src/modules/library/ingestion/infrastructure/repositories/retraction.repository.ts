@@ -33,7 +33,6 @@ export class RetractionRepository {
       },
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
-        identifiers: true,
       },
     });
   }
@@ -44,7 +43,7 @@ export class RetractionRepository {
     projectId?: string,
   ) {
     const scopeWhere = this.getScopeWhere(userId, projectId);
-    return this.prisma.item.findMany({
+    const items = await this.prisma.item.findMany({
       where: {
         ...scopeWhere,
         ...(itemIds && itemIds.length > 0 ? { id: { in: itemIds } } : {}),
@@ -53,11 +52,23 @@ export class RetractionRepository {
         id: true,
         title: true,
         doi: true,
-        pmid: true,
-        isRetracted: true,
-        retractionNature: true,
-        retractionCheckedAt: true,
+        metadata: true,
       },
+    });
+
+    return items.map((item) => {
+      const meta = (item.metadata as any) ?? {};
+      return {
+        id: item.id,
+        title: item.title,
+        doi: item.doi,
+        pmid: meta.pmid ?? null,
+        isRetracted: Boolean(meta.isRetracted),
+        retractionNature: meta.retractionNature ?? null,
+        retractionCheckedAt: meta.retractionCheckedAt
+          ? new Date(meta.retractionCheckedAt)
+          : null,
+      };
     });
   }
 
@@ -68,28 +79,41 @@ export class RetractionRepository {
     limit = 100,
   ) {
     const scopeWhere = this.getScopeWhere(userId, projectId);
-    return this.prisma.item.findMany({
+    const items = await this.prisma.item.findMany({
       where: {
         ...scopeWhere,
-        OR: [
-          { retractionCheckedAt: null },
-          { retractionCheckedAt: { lt: staleBefore } },
-        ],
         NOT: {
-          AND: [{ doi: null }, { pmid: null }, { title: '' }],
+          AND: [{ doi: null }, { title: '' }],
         },
       },
       select: {
         id: true,
         title: true,
         doi: true,
-        pmid: true,
-        isRetracted: true,
-        retractionNature: true,
-        retractionCheckedAt: true,
+        metadata: true,
       },
-      take: limit,
+      take: limit * 2,
     });
+
+    return items
+      .map((item) => {
+        const meta = (item.metadata as any) ?? {};
+        return {
+          id: item.id,
+          title: item.title,
+          doi: item.doi,
+          pmid: meta.pmid ?? null,
+          isRetracted: Boolean(meta.isRetracted),
+          retractionNature: meta.retractionNature ?? null,
+          retractionCheckedAt: meta.retractionCheckedAt
+            ? new Date(meta.retractionCheckedAt)
+            : null,
+        };
+      })
+      .filter(
+        (i) => !i.retractionCheckedAt || i.retractionCheckedAt < staleBefore,
+      )
+      .slice(0, limit);
   }
 
   async updateItemRetraction(
@@ -100,72 +124,61 @@ export class RetractionRepository {
     checkedAt: Date = new Date(),
   ) {
     if (!isValidId(itemId)) return null as any;
+    const existing = await this.prisma.item.findUnique({
+      where: { id: itemId },
+      select: { metadata: true },
+    });
+    const metadataObj: any = (existing?.metadata as any) ?? {};
+    metadataObj.isRetracted = isRetracted;
+    metadataObj.retractionNature = nature || null;
+    metadataObj.retractionDetails = details || null;
+    metadataObj.retractionCheckedAt = checkedAt.toISOString();
+
     return this.prisma.item.update({
       where: { id: itemId },
-      data: {
-        isRetracted,
-        retractionNature: nature || null,
-        retractionDetails: (details as any) || null,
-        retractionCheckedAt: checkedAt,
-      },
+      data: { metadata: metadataObj },
     });
   }
 
   async findRetractedItems(userId: string, projectId?: string) {
     const scopeWhere = this.getScopeWhere(userId, projectId);
-    return this.prisma.item.findMany({
-      where: {
-        ...scopeWhere,
-        isRetracted: true,
-      },
+    const items = await this.prisma.item.findMany({
+      where: scopeWhere,
       orderBy: [{ updatedAt: 'desc' }],
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
-        identifiers: true,
         attachments: { take: 2 },
         itemTags: { include: { tag: true } },
       },
     });
+    return items.filter((item) => Boolean((item.metadata as any)?.isRetracted));
   }
 
   async getStats(userId: string, projectId?: string): Promise<RetractionStats> {
     const baseWhere = this.getScopeWhere(userId, projectId);
+    const items = await this.prisma.item.findMany({
+      where: baseWhere,
+      select: { metadata: true },
+    });
 
-    const [total, checked, retracted, expressionsOfConcern, manual] =
-      await Promise.all([
-        this.prisma.item.count({
-          where: baseWhere,
-        }),
-        this.prisma.item.count({
-          where: {
-            ...baseWhere,
-            retractionCheckedAt: { not: null },
-          },
-        }),
-        this.prisma.item.count({
-          where: {
-            ...baseWhere,
-            isRetracted: true,
-          },
-        }),
-        this.prisma.item.count({
-          where: {
-            ...baseWhere,
-            isRetracted: true,
-            retractionNature: 'expression_of_concern',
-          },
-        }),
-        this.prisma.item.count({
-          where: {
-            ...baseWhere,
-            isRetracted: true,
-            retractionNature: 'manual',
-          },
-        }),
-      ]);
+    let checked = 0;
+    let retracted = 0;
+    let expressionsOfConcern = 0;
+    let manual = 0;
+
+    for (const item of items) {
+      const meta = (item.metadata as any) ?? {};
+      if (meta.retractionCheckedAt) checked++;
+      if (meta.isRetracted) {
+        retracted++;
+        if (meta.retractionNature === 'expression_of_concern')
+          expressionsOfConcern++;
+        if (meta.retractionNature === 'manual') manual++;
+      }
+    }
 
     return {
-      totalItems: total,
+      totalItems: items.length,
       checkedItems: checked,
       retractedCount: retracted,
       expressionsOfConcernCount: expressionsOfConcern,

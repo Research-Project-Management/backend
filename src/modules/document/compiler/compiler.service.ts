@@ -954,6 +954,28 @@ export class CompilerService {
       error: 'SyncTeX data not available. Please compile document first.',
     };
   }
+
+  async listAuxFiles(projectId: string) {
+    try {
+      const response = await fetch(`${this.latexUrl}/projects/${projectId}/artifacts`);
+      return response.json();
+    } catch {
+      return { files: [] };
+    }
+  }
+
+  async downloadAuxFile(projectId: string, filename: string, res: any) {
+    try {
+      const response = await fetch(`${this.latexUrl}/projects/${projectId}/artifacts/${encodeURIComponent(filename)}`);
+      if (!response.ok) { res.status(404).send('File not found'); return; }
+      const buffer = Buffer.from(await response.arrayBuffer());
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Content-Type', 'text/plain');
+      res.send(buffer);
+    } catch {
+      res.status(500).send('Error fetching aux file');
+    }
+  }
 }
 
 export const LatexService = CompilerService;

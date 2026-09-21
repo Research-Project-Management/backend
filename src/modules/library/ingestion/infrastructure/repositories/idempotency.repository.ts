@@ -291,4 +291,21 @@ export class IdempotencyRepository {
     });
     return res.count > 0;
   }
+
+  /**
+   * Purges expired idempotency records to prevent table bloat.
+   * Scans and deletes records where expiresAt <= now.
+   */
+  async purgeExpiredRecords(): Promise<number> {
+    const now = new Date();
+    const result = await this.prisma.idempotencyRecord.deleteMany({
+      where: {
+        expiresAt: { lte: now },
+      },
+    });
+    if (result.count > 0) {
+      this.logger.log(`Purged ${result.count} expired idempotency records.`);
+    }
+    return result.count;
+  }
 }

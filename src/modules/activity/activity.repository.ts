@@ -9,6 +9,22 @@ import {
   ACTOR_MINIMAL_SELECT,
 } from './types/activity-repository.interface';
 
+function mapActivityEvent(event: any) {
+  if (!event) return event;
+  const actor = event.actor
+    ? {
+        id: event.actor.id,
+        email: event.actor.email,
+        name: event.actor.profile?.name ?? event.actor.name ?? 'User',
+        avatar: event.actor.profile?.avatar ?? event.actor.avatar ?? null,
+      }
+    : event.actor;
+  return {
+    ...event,
+    actor,
+  };
+}
+
 @Injectable()
 export class ActivityRepository implements IActivityRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -62,7 +78,7 @@ export class ActivityRepository implements IActivityRepository {
       this.prisma.activityEvent.count({ where }),
     ]);
 
-    return { items, total };
+    return { items: items.map(mapActivityEvent), total };
   }
 
   async findUserFeed(
@@ -103,7 +119,7 @@ export class ActivityRepository implements IActivityRepository {
       this.prisma.activityEvent.count({ where }),
     ]);
 
-    return { items, total };
+    return { items: items.map(mapActivityEvent), total };
   }
 
   async findEntityFeed(
@@ -112,7 +128,7 @@ export class ActivityRepository implements IActivityRepository {
     limit = 50,
   ): Promise<ActivityEventWithActor[]> {
     if (!isUUID(entityId)) return [];
-    return this.prisma.activityEvent.findMany({
+    const items = await this.prisma.activityEvent.findMany({
       where: {
         entityType,
         entityId,
@@ -124,6 +140,7 @@ export class ActivityRepository implements IActivityRepository {
         project: { select: { id: true, name: true } },
       },
     });
+    return items.map(mapActivityEvent);
   }
 
   async findUserRecentEvents(
@@ -205,7 +222,7 @@ export class ActivityRepository implements IActivityRepository {
       }),
       this.prisma.item.findMany({
         where: {
-          uploadedById: userId,
+          userId,
           deletedAt: null,
         },
         orderBy: { updatedAt: 'desc' },
@@ -248,20 +265,31 @@ export class ActivityRepository implements IActivityRepository {
   }
 
   async findWorkItemComments(workItemId: string, sort: 'asc' | 'desc' = 'asc') {
-    return this.prisma.workItemComment.findMany({
+    const comments = await this.prisma.workItemComment.findMany({
       where: { workItemId },
       orderBy: { createdAt: sort },
       include: {
         author: { select: ACTOR_MINIMAL_SELECT },
       },
     });
+    return comments.map((c: any) => ({
+      ...c,
+      author: c.author
+        ? {
+            id: c.author.id,
+            email: c.author.email,
+            name: c.author.profile?.name ?? c.author.name ?? 'User',
+            avatar: c.author.profile?.avatar ?? c.author.avatar ?? null,
+          }
+        : c.author,
+    }));
   }
 
   async findWorkItemActivityEvents(
     workItemId: string,
     sort: 'asc' | 'desc' = 'asc',
   ) {
-    return this.prisma.activityEvent.findMany({
+    const items = await this.prisma.activityEvent.findMany({
       where: {
         entityType: EntityType.work_item,
         entityId: workItemId,
@@ -272,5 +300,6 @@ export class ActivityRepository implements IActivityRepository {
         project: { select: { id: true, name: true } },
       },
     });
+    return items.map(mapActivityEvent);
   }
 }

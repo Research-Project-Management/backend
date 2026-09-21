@@ -136,6 +136,35 @@ export class CoreController {
   ) {
     return this.projectService.restore(projectId, actorId);
   }
+
+  @Post(':projectId/duplicate')
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Duplicate a project with all its pages and structure' })
+  async duplicateProject(
+    @Param('projectId') projectId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.projectService.duplicateProject(projectId, userId);
+  }
+
+  @Get('trash')
+  @ApiOperation({ summary: 'List soft-deleted (trashed) projects for current user' })
+  async getTrashedProjects(@CurrentUser('id') userId: string) {
+    return this.projectService.getTrashedProjects(userId);
+  }
+
+  @Delete(':projectId/permanent')
+  @UseGuards(ProjectRoleGuard)
+  @ProjectRoles('owner')
+  @ApiOperation({ summary: 'Permanently delete a soft-deleted project (irreversible)' })
+  async permanentDeleteProject(
+    @Param('projectId') projectId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.projectService.permanentDeleteProject(projectId, userId);
+  }
 }
 
 export { CoreController as ProjectController };

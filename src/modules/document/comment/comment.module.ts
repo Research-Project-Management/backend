@@ -3,9 +3,10 @@ import { CommentController } from './comment.controller';
 import { CommentService } from './comment.service';
 import { CommentRepository } from './comment.repository';
 import { CollaborationModule } from '../collaboration/collaboration.module';
+import { NotificationBundlerModule } from '../notification/notification-bundler.module';
 
 @Module({
-  imports: [CollaborationModule],
+  imports: [CollaborationModule, NotificationBundlerModule],
   controllers: [CommentController],
   providers: [CommentService, CommentRepository],
   exports: [CommentService],

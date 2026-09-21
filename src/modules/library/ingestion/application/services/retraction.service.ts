@@ -40,18 +40,25 @@ export class RetractionService {
       throw new NotFoundException(`Item ${itemId} not found`);
     }
 
+    const meta: any = (item.metadata as any) ?? {};
     // Do not overwrite manual retraction unless manually unflagged
-    if (item.isRetracted && item.retractionNature === 'manual') {
+    if (meta.isRetracted && meta.retractionNature === 'manual') {
       return {
         itemId,
         isRetracted: true,
         nature: 'manual',
-        details: (item.retractionDetails as any) || undefined,
-        checkedAt: item.retractionCheckedAt || new Date(),
+        details: meta.retractionDetails || undefined,
+        checkedAt: meta.retractionCheckedAt
+          ? new Date(meta.retractionCheckedAt)
+          : new Date(),
       };
     }
 
-    const scanResult = await this.scanner.scan(item.doi, item.pmid, item.title);
+    const scanResult = await this.scanner.scan(
+      item.doi,
+      meta.pmid ?? null,
+      item.title,
+    );
     const now = new Date();
 
     if (scanResult) {

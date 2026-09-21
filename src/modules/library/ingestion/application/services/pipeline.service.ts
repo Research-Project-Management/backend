@@ -28,14 +28,14 @@ import {
 import { LibraryItemSource } from '../../../shared-kernel/outbox/outbox.events';
 import { getFileContentPath } from '@/modules/storage/storage.port';
 import { IngestionStatus, Prisma } from '@prisma/client';
+import { isUUID } from 'class-validator';
+import { IngestionRunAggregate } from '../../domain/model/ingestion-run.aggregate';
+import { IngestionSagaOrchestrator } from './ingestion-saga.orchestrator';
 
 const SYSTEM_RESERVED_KEYS = new Set([
   'id',
   'userId',
   'projectId',
-  'scopeId',
-  'workspaceId',
-  'tenantId',
   'deletedAt',
   'createdAt',
   'updatedAt',
@@ -60,9 +60,26 @@ function sanitizeOverrides(
   return clean;
 }
 
+function resolveScope(
+  scopeId: string,
+  envelope: IngestionSubmissionEnvelope,
+): { userId: string; projectId?: string } {
+  const isProject =
+    Boolean(scopeId) &&
+    scopeId !== 'user' &&
+    scopeId !== 'me' &&
+    scopeId !== 'personal' &&
+    scopeId !== envelope.userId &&
+    isUUID(scopeId);
+  const userId = envelope.userId || (scopeId !== 'user' ? scopeId : 'system');
+  const projectId = envelope.projectId || (isProject ? scopeId : undefined);
+  return { userId, projectId };
+}
+
 @Injectable()
 export class PipelineService {
   private readonly logger = new Logger(PipelineService.name);
+  private readonly orchestrator: IngestionSagaOrchestrator;
 
   constructor(
     private readonly repo: IngestionRepository,
@@ -78,7 +95,13 @@ export class PipelineService {
     @Optional()
     @Inject(CONTENT_FACADE)
     private readonly contentFacade?: IContentFacade,
-  ) {}
+    @Optional()
+    sagaOrchestrator?: IngestionSagaOrchestrator,
+  ) {
+    this.orchestrator =
+      sagaOrchestrator ??
+      new IngestionSagaOrchestrator(repo, catalogFacade);
+  }
 
   /**
    * Executes the multi-stage ingestion pipeline.
@@ -88,72 +111,99 @@ export class PipelineService {
     scopeId: string,
     envelope: IngestionSubmissionEnvelope,
   ): Promise<void> {
+    const resolvedScope = resolveScope(scopeId, envelope);
+
+    const existingRun = await this.repo
+      .findRunById(scopeId, runId)
+      .catch(() => null);
+
+    const aggregate = existingRun
+      ? IngestionRunAggregate.reconstitute({
+          id: existingRun.id,
+          userId: existingRun.userId,
+          projectId: existingRun.projectId,
+          sourceType:
+            (existingRun.inputParams as any)?.sourceType ||
+            envelope.payload.kind,
+          status: 'RUNNING',
+          totalItems: (existingRun.inputParams as any)?.totalItems || 1,
+          processedItems: 0,
+          failedItems: 0,
+          startedAt: existingRun.startedAt,
+        })
+      : IngestionRunAggregate.create({
+          id: runId,
+          userId: resolvedScope.userId,
+          projectId: resolvedScope.projectId,
+          sourceType: envelope.payload.kind,
+          totalItems: 1,
+        });
+
+    const session = this.orchestrator.createSession(runId, scopeId, aggregate);
+
     // Stage 1: IDENTIFY & PARSE
-    const identifyStart = Date.now();
-    const identifiedCandidates = await this.identify.execute(
-      runId,
-      envelope.payload,
-      scopeId,
+    const { initialCandidates, sanitizedOverrides } = await session.executeStep(
+      'IDENTIFY',
+      async () => {
+        const identifiedCandidates = await this.identify.execute(
+          runId,
+          envelope.payload,
+          scopeId,
+        );
+        const overrides = sanitizeOverrides(envelope.overrides);
+        const candidates = identifiedCandidates.map((candidate) => ({
+          ...candidate,
+          normalizedMetadata: {
+            ...candidate.normalizedMetadata,
+            ...overrides,
+          },
+        }));
+
+        for (const cand of candidates) {
+          await this.repo.createCandidate(runId, {
+            sourceProvider: cand.sourceName,
+            sourceRecordId: cand.sourceRecordId,
+            confidenceScore: cand.confidenceScore,
+            metadataPayload: cand.normalizedMetadata as Prisma.InputJsonValue,
+          });
+        }
+
+        if (candidates.length === 0) {
+          throw new BadRequestException(
+            'No valid bibliographic metadata could be identified from input',
+          );
+        }
+
+        return { initialCandidates: candidates, sanitizedOverrides: overrides };
+      },
+      {
+        outputSnapshot: (res) => ({
+          candidateCount: res.initialCandidates.length,
+        }),
+      },
     );
-    const sanitizedOverrides = sanitizeOverrides(envelope.overrides);
-    const initialCandidates = identifiedCandidates.map((candidate) => ({
-      ...candidate,
-      normalizedMetadata: {
-        ...candidate.normalizedMetadata,
-        ...sanitizedOverrides,
-      },
-    }));
-    await this.repo.createStage(runId, {
-      stageName: 'IDENTIFY',
-      durationMs: Date.now() - identifyStart,
-      success: true,
-      outputSnapshot: {
-        candidateCount: initialCandidates.length,
-      },
-    });
-
-    for (const cand of initialCandidates) {
-      await this.repo.createCandidate(runId, {
-        sourceProvider: cand.sourceName,
-        sourceRecordId: cand.sourceRecordId,
-        confidenceScore: cand.confidenceScore,
-        metadataPayload: cand.normalizedMetadata as Prisma.InputJsonValue,
-      });
-    }
-
-    if (initialCandidates.length === 0) {
-      throw new BadRequestException(
-        'No valid bibliographic metadata could be identified from input',
-      );
-    }
 
     // Stage 2: NORMALIZE
-    const normalizeStart = Date.now();
-    const normalizedCandidates =
-      await this.normalize.execute(initialCandidates);
-    await this.repo.createStage(runId, {
-      stageName: 'NORMALIZE',
-      durationMs: Date.now() - normalizeStart,
-      success: true,
-      outputSnapshot: {
-        candidateCount: normalizedCandidates.length,
+    const normalizedCandidates = await session.executeStep(
+      'NORMALIZE',
+      async () => this.normalize.execute(initialCandidates),
+      {
+        outputSnapshot: (res) => ({
+          candidateCount: res.length,
+        }),
       },
-    });
+    );
 
     // Stage 3: ENRICH (Crossref, OpenAlex, PubMed, arXiv)
-    const enrichStart = Date.now();
-    const enrichedCandidates = await this.enrich.execute(
-      scopeId,
-      normalizedCandidates,
-    );
-    await this.repo.createStage(runId, {
-      stageName: 'ENRICH',
-      durationMs: Date.now() - enrichStart,
-      success: true,
-      outputSnapshot: {
-        candidateCount: enrichedCandidates.length,
+    const enrichedCandidates = await session.executeStep(
+      'ENRICH',
+      async () => this.enrich.execute(scopeId, normalizedCandidates),
+      {
+        outputSnapshot: (res) => ({
+          candidateCount: res.length,
+        }),
       },
-    });
+    );
 
     // ── Multi-Record Ingestion Handling (BibTeX / RIS batches) ────────────────
     if (envelope.payload.kind === 'RECORD' && normalizedCandidates.length > 1) {
@@ -194,7 +244,7 @@ export class PipelineService {
           const itemDecision =
             await this.reconcile.execute(candidatesForRecord);
           const matchRes = await this.match.execute(
-            scopeId,
+            resolvedScope,
             itemDecision.proposedItem,
           );
 
@@ -208,12 +258,12 @@ export class PipelineService {
             });
           } else {
             const created = await this.commit.execute(
-              scopeId,
+              resolvedScope.projectId || resolvedScope.userId,
               itemDecision.proposedItem,
               {
                 collectionIds: envelope.collectionIds,
                 tagIds: envelope.tagIds,
-                userId: envelope.userId,
+                userId: resolvedScope.userId,
                 source: this.mapPayloadToSource(envelope.payload.kind),
               },
             );
@@ -261,310 +311,312 @@ export class PipelineService {
         }
       }
 
-      await this.repo.createStage(runId, {
-        stageName: 'COMMIT',
-        durationMs: Date.now() - identifyStart,
-        success: true,
-        outputSnapshot: {
-          itemIds: createdItemIds,
-          totalProcessed: createdItemIds.length,
-          succeeded,
-          duplicates,
-          failed,
-        },
-      });
+      await session.executeStep(
+        'COMMIT',
+        async () => {
+          await this.repo.updateRunStatus(
+            scopeId,
+            runId,
+            IngestionStatus.READY,
+            {
+              itemId: createdItemIds[0],
+              completedAt: new Date(),
+              executionLog: {
+                total,
+                processed,
+                succeeded,
+                duplicates,
+                failed,
+                percentage: 100,
+                status: 'COMPLETED',
+                items: progressItems.slice(-50),
+              } as unknown as Prisma.InputJsonValue,
+            },
+          );
 
-      await this.repo.updateRunStatus(scopeId, runId, IngestionStatus.READY, {
-        itemId: createdItemIds[0],
-        completedAt: new Date(),
-        executionLog: {
-          total,
-          processed,
-          succeeded,
-          duplicates,
-          failed,
-          percentage: 100,
-          status: 'COMPLETED',
-          items: progressItems.slice(-50),
-        } as unknown as Prisma.InputJsonValue,
-      });
+          aggregate.recordProgress(succeeded, failed);
+          aggregate.complete();
+
+          return {
+            itemIds: createdItemIds,
+            totalProcessed: createdItemIds.length,
+            succeeded,
+            duplicates,
+            failed,
+          };
+        },
+        {
+          outputSnapshot: (res) => ({
+            itemIds: res.itemIds,
+            totalProcessed: res.totalProcessed,
+            succeeded: res.succeeded,
+            duplicates: res.duplicates,
+            failed: res.failed,
+          }),
+        },
+      );
       return;
     }
 
     // Stage 4: RECONCILE (Field Provenance & Conflict Detection)
-    const reconcileStart = Date.now();
-    const decision = await this.reconcile.execute(enrichedCandidates);
-    await this.repo.createStage(runId, {
-      stageName: 'RECONCILE',
-      durationMs: Date.now() - reconcileStart,
-      success: true,
-      outputSnapshot: {
-        conflictCount: decision.conflicts.length,
-        fieldCount: Object.keys(decision.selectedFields).length,
+    const decision = await session.executeStep(
+      'RECONCILE',
+      async () => this.reconcile.execute(enrichedCandidates),
+      {
+        outputSnapshot: (res) => ({
+          conflictCount: res.conflicts.length,
+          fieldCount: Object.keys(res.selectedFields).length,
+        }),
       },
-    });
+    );
 
     // Stage 5: MATCH (Duplicate Detection)
-    const matchStart = Date.now();
-    const matchResult = await this.match.execute(
-      scopeId,
-      decision.proposedItem,
+    const matchResult = await session.executeStep(
+      'MATCH',
+      async () => this.match.execute(resolvedScope, decision.proposedItem),
+      {
+        outputSnapshot: (res) => res as unknown as Prisma.InputJsonValue,
+      },
     );
-    await this.repo.createStage(runId, {
-      stageName: 'MATCH',
-      durationMs: Date.now() - matchStart,
-      success: true,
-      outputSnapshot: matchResult as unknown as Prisma.InputJsonValue,
-    });
 
     // ── Decision Branching ─────────────────────────────────────────────────────
 
     // EXACT DOI match → Additive metadata enrichment of the existing item.
-    // Only fields that are null/empty on the existing item are updated (safe merge).
-    // Fields provided by the user via overrides always win (they are in the reconciled proposal).
     if (matchResult.matchType === 'EXACT' && matchResult.targetItemId) {
-      const enrichExistingStart = Date.now();
-      let enrichedItem: any = null;
-      const enrichPatch: Record<string, any> = {};
+      const targetItemId = matchResult.targetItemId;
+      await session.executeStep(
+        'ENRICH_EXISTING',
+        async () => {
+          let enrichedItem: any = null;
+          const enrichPatch: Record<string, any> = {};
 
-      if (this.catalogFacade) {
-        // Resolve effective user vs project context
-        const isProject =
-          Boolean(scopeId) && scopeId !== 'user' && scopeId !== envelope.userId;
-        const effectiveUserId = envelope.userId || scopeId;
-        const effectiveProjectId = isProject ? scopeId : undefined;
-
-        // Fetch current state to build a null-safe patch
-        const existing = await this.catalogFacade.getItem(
-          effectiveUserId,
-          matchResult.targetItemId,
-          effectiveProjectId,
-        );
-
-        const p = decision.proposedItem;
-
-        // Build patch: only overwrite fields that are currently empty on the existing item
-        const maybeEnrich = (field: string, proposed: any) => {
-          if (proposed == null || proposed === '') return;
-          const current = (existing as any)?.[field];
-          if (
-            current == null ||
-            current === '' ||
-            (Array.isArray(current) && current.length === 0)
-          ) {
-            enrichPatch[field] = proposed;
-          }
-        };
-
-        maybeEnrich('abstract', p.abstract);
-
-        // Allow title update if existing title is a placeholder, filename, or raw DOI
-        if (p.title && p.title !== 'Untitled Document') {
-          const currentTitle = String((existing as any)?.title || '').trim();
-          if (
-            !currentTitle ||
-            currentTitle === 'Untitled Document' ||
-            currentTitle === 'Uploaded Document' ||
-            /\.pdf$/i.test(currentTitle) ||
-            /^10\.\d{4,9}\//.test(currentTitle)
-          ) {
-            enrichPatch['title'] = p.title;
-          }
-        }
-
-        maybeEnrich('journal', p.journal);
-        maybeEnrich('publicationTitle', p.publicationTitle);
-        maybeEnrich('publicationDate', p.publicationDate);
-        maybeEnrich('publisher', p.publisher);
-        maybeEnrich('place', p.place);
-        maybeEnrich('volume', p.volume);
-        maybeEnrich('issue', p.issue);
-        maybeEnrich('pages', p.pages);
-        maybeEnrich('section', p.section);
-        maybeEnrich('partNumber', p.partNumber);
-        maybeEnrich('partTitle', p.partTitle);
-        maybeEnrich('series', p.series);
-        maybeEnrich('seriesTitle', p.seriesTitle);
-        maybeEnrich('seriesText', p.seriesText);
-        maybeEnrich('year', p.year);
-        maybeEnrich('url', p.url);
-        maybeEnrich('arxivId', p.arxivId);
-        maybeEnrich('pmid', p.pmid);
-        maybeEnrich('pmcid', p.pmcid);
-        maybeEnrich('itemType', p.itemType);
-        maybeEnrich('type', p.type);
-        maybeEnrich('citationKey', p.citationKey);
-        maybeEnrich('issn', p.issn);
-        maybeEnrich('isbn', p.isbn);
-        maybeEnrich('language', p.language);
-        maybeEnrich('rights', p.rights);
-        maybeEnrich('license', p.license);
-        maybeEnrich('extra', p.extra);
-        maybeEnrich('libraryCatalog', p.libraryCatalog);
-        maybeEnrich('callNumber', p.callNumber);
-        maybeEnrich('archive', p.archive);
-        maybeEnrich('archiveLocation', p.archiveLocation);
-        maybeEnrich('extraFields', p.extraFields);
-        if (p.authors?.length && !existing?.authors?.length) {
-          enrichPatch['authors'] = p.authors;
-        }
-        if (p.editors?.length && !existing?.editors?.length) {
-          enrichPatch['editors'] = p.editors;
-        }
-        if (p.creators?.length && !existing?.creators?.length) {
-          enrichPatch['creators'] = p.creators;
-        }
-        if (p.keywords?.length && !existing?.keywords?.length) {
-          enrichPatch['keywords'] = p.keywords;
-          enrichPatch['labels'] = p.keywords;
-        }
-
-        if (Object.keys(enrichPatch).length > 0) {
-          enrichedItem = await this.catalogFacade.updateItem(
-            effectiveUserId,
-            matchResult.targetItemId,
-            enrichPatch,
-            { projectId: effectiveProjectId },
-          );
-          this.logger.log(
-            `[EXACT_MERGE] Enriched item ${matchResult.targetItemId} with ${Object.keys(enrichPatch).join(', ')}`,
-          );
-        } else {
-          enrichedItem = existing;
-          this.logger.log(
-            `[EXACT_MERGE] Item ${matchResult.targetItemId} already fully populated — no patch needed`,
-          );
-        }
-
-        // Attach uploaded file to existing item if a file was provided and not yet attached
-        const uploadedFileIdentifier =
-          envelope.payload.kind === 'FILE'
-            ? envelope.payload.fileId
-            : (decision.proposedItem as any)?.fileId;
-        const uploadedFilename =
-          envelope.payload.kind === 'FILE'
-            ? envelope.payload.filename || 'document.pdf'
-            : (decision.proposedItem as any)?.filename || 'document.pdf';
-
-        if (uploadedFileIdentifier && this.contentFacade) {
-          try {
-            await this.contentFacade.createAttachment(
-              {
-                itemId: matchResult.targetItemId,
-                fileId: uploadedFileIdentifier,
-                filename: uploadedFilename,
-                url: getFileContentPath(uploadedFileIdentifier),
-                mimeType: 'application/pdf',
-                size: 0,
-                userId: effectiveUserId,
-              },
-              scopeId,
+          if (this.catalogFacade) {
+            const existing = await this.catalogFacade.getItem(
+              resolvedScope.userId,
+              targetItemId,
+              resolvedScope.projectId,
             );
-            this.logger.log(
-              `[EXACT_MERGE] Attached file ${uploadedFileIdentifier} to item ${matchResult.targetItemId}`,
-            );
-          } catch (attachmentError: unknown) {
-            const errorMessage =
-              attachmentError instanceof Error
-                ? attachmentError.message
-                : String(attachmentError);
-            this.logger.warn(
-              `[EXACT_MERGE] Failed to attach file ${uploadedFileIdentifier} to item ${matchResult.targetItemId}: ${errorMessage}`,
-            );
+
+            const p = decision.proposedItem;
+
+            const maybeEnrich = (field: string, proposed: any) => {
+              if (proposed == null || proposed === '') return;
+              const current = (existing as any)?.[field];
+              if (
+                current == null ||
+                current === '' ||
+                (Array.isArray(current) && current.length === 0)
+              ) {
+                enrichPatch[field] = proposed;
+              }
+            };
+
+            maybeEnrich('abstract', p.abstract);
+
+            if (p.title && p.title !== 'Untitled Document') {
+              const currentTitle = String((existing as any)?.title || '').trim();
+              if (
+                !currentTitle ||
+                currentTitle === 'Untitled Document' ||
+                currentTitle === 'Uploaded Document' ||
+                /\.pdf$/i.test(currentTitle) ||
+                /^10\.\d{4,9}\//.test(currentTitle)
+              ) {
+                enrichPatch['title'] = p.title;
+              }
+            }
+
+            maybeEnrich('journal', p.journal);
+            maybeEnrich('publicationTitle', p.publicationTitle);
+            maybeEnrich('publicationDate', p.publicationDate);
+            maybeEnrich('publisher', p.publisher);
+            maybeEnrich('place', p.place);
+            maybeEnrich('volume', p.volume);
+            maybeEnrich('issue', p.issue);
+            maybeEnrich('pages', p.pages);
+            maybeEnrich('section', p.section);
+            maybeEnrich('partNumber', p.partNumber);
+            maybeEnrich('partTitle', p.partTitle);
+            maybeEnrich('series', p.series);
+            maybeEnrich('seriesTitle', p.seriesTitle);
+            maybeEnrich('seriesText', p.seriesText);
+            maybeEnrich('year', p.year);
+            maybeEnrich('url', p.url);
+            maybeEnrich('arxivId', p.arxivId);
+            maybeEnrich('pmid', p.pmid);
+            maybeEnrich('pmcid', p.pmcid);
+            maybeEnrich('itemType', p.itemType);
+            maybeEnrich('type', p.type);
+            maybeEnrich('citationKey', p.citationKey);
+            maybeEnrich('issn', p.issn);
+            maybeEnrich('isbn', p.isbn);
+            maybeEnrich('language', p.language);
+            maybeEnrich('rights', p.rights);
+            maybeEnrich('license', p.license);
+            maybeEnrich('extra', p.extra);
+            maybeEnrich('libraryCatalog', p.libraryCatalog);
+            maybeEnrich('callNumber', p.callNumber);
+            maybeEnrich('archive', p.archive);
+            maybeEnrich('archiveLocation', p.archiveLocation);
+            maybeEnrich('extraFields', p.extraFields);
+            if (p.authors?.length && !existing?.authors?.length) {
+              enrichPatch['authors'] = p.authors;
+            }
+            if (p.editors?.length && !existing?.editors?.length) {
+              enrichPatch['editors'] = p.editors;
+            }
+            if (p.creators?.length && !existing?.creators?.length) {
+              enrichPatch['creators'] = p.creators;
+            }
+            if (p.keywords?.length && !existing?.keywords?.length) {
+              enrichPatch['keywords'] = p.keywords;
+              enrichPatch['labels'] = p.keywords;
+            }
+
+            if (Object.keys(enrichPatch).length > 0) {
+              enrichedItem = await this.catalogFacade.updateItem(
+                resolvedScope.userId,
+                targetItemId,
+                enrichPatch,
+                { projectId: resolvedScope.projectId },
+              );
+              this.logger.log(
+                `[EXACT_MERGE] Enriched item ${targetItemId} with ${Object.keys(enrichPatch).join(', ')}`,
+              );
+            } else {
+              enrichedItem = existing;
+              this.logger.log(
+                `[EXACT_MERGE] Item ${targetItemId} already fully populated — no patch needed`,
+              );
+            }
+
+            const uploadedFileIdentifier =
+              envelope.payload.kind === 'FILE'
+                ? envelope.payload.fileId
+                : (decision.proposedItem as any)?.fileId;
+            const uploadedFilename =
+              envelope.payload.kind === 'FILE'
+                ? envelope.payload.filename || 'document.pdf'
+                : (decision.proposedItem as any)?.filename || 'document.pdf';
+
+            if (uploadedFileIdentifier && this.contentFacade) {
+              try {
+                await this.contentFacade.createAttachment(
+                  {
+                    itemId: matchResult.targetItemId,
+                    fileId: uploadedFileIdentifier,
+                    filename: uploadedFilename,
+                    url: getFileContentPath(uploadedFileIdentifier),
+                    mimeType: 'application/pdf',
+                    size: 0,
+                    userId: resolvedScope.userId,
+                  },
+                  resolvedScope.projectId || resolvedScope.userId,
+                );
+                this.logger.log(
+                  `[EXACT_MERGE] Attached file ${uploadedFileIdentifier} to item ${matchResult.targetItemId}`,
+                );
+              } catch (attachmentError: unknown) {
+                const errorMessage =
+                  attachmentError instanceof Error
+                    ? attachmentError.message
+                    : String(attachmentError);
+                this.logger.warn(
+                  `[EXACT_MERGE] Failed to attach file ${uploadedFileIdentifier} to item ${matchResult.targetItemId}: ${errorMessage}`,
+                );
+              }
+            }
+
+            if (
+              Array.isArray(p.notes) &&
+              p.notes.length > 0 &&
+              this.contentFacade
+            ) {
+              for (const noteItem of p.notes) {
+                const rawContent =
+                  typeof noteItem === 'object' && noteItem !== null
+                    ? (noteItem as Record<string, unknown>).content
+                    : undefined;
+                const noteContent =
+                  typeof noteItem === 'string'
+                    ? noteItem
+                    : typeof rawContent === 'string'
+                      ? rawContent
+                      : '';
+                if (!noteContent.trim()) continue;
+                await this.contentFacade.createNote(resolvedScope.userId, {
+                  itemId: matchResult.targetItemId,
+                  contentMd: noteContent.trim(),
+                  title: 'Literature Note',
+                  projectId: resolvedScope.projectId,
+                });
+                this.logger.log(
+                  `[EXACT_MERGE] Added literature note to item ${matchResult.targetItemId}`,
+                );
+              }
+            }
           }
-        }
 
-        // Add literature notes from proposed item if not already recorded
-        if (
-          Array.isArray(p.notes) &&
-          p.notes.length > 0 &&
-          this.contentFacade
-        ) {
-          for (const noteItem of p.notes) {
-            const rawContent =
-              typeof noteItem === 'object' && noteItem !== null
-                ? (noteItem as Record<string, unknown>).content
-                : undefined;
-            const noteContent =
-              typeof noteItem === 'string'
-                ? noteItem
-                : typeof rawContent === 'string'
-                  ? rawContent
-                  : '';
-            if (!noteContent.trim()) continue;
-            const noteSource =
-              typeof noteItem === 'object' && noteItem !== null
-                ? typeof (noteItem as Record<string, unknown>).source ===
-                  'string'
-                  ? String((noteItem as Record<string, unknown>).source)
-                  : undefined
-                : undefined;
-            await this.contentFacade.createNote(envelope.userId || 'system', {
-              itemId: matchResult.targetItemId,
-              contentMd: noteContent.trim(),
-              title: 'Literature Note',
-              projectId: effectiveProjectId,
-            });
-            this.logger.log(
-              `[EXACT_MERGE] Added literature note to item ${matchResult.targetItemId}`,
-            );
-          }
-        }
-      }
+          await this.repo.createDecision(runId, {
+            decisionType: 'UPDATE',
+            decisionReason:
+              'Exact DOI match — additive enrichment applied to existing item',
+            proposedItem: decision.proposedItem as unknown as Prisma.InputJsonValue,
+            duplicateMatch: matchResult as unknown as Prisma.InputJsonValue,
+          });
 
-      await this.repo.createDecision(runId, {
-        decisionType: 'UPDATE',
-        decisionReason:
-          'Exact DOI match — additive enrichment applied to existing item',
-        proposedItem: decision.proposedItem as unknown as Prisma.InputJsonValue,
-        duplicateMatch: matchResult as unknown as Prisma.InputJsonValue,
-      });
+          const exactSourceLabel =
+            (envelope.payload as any).filename ||
+            (envelope.payload as any).url ||
+            (envelope.payload as any).value ||
+            (decision.proposedItem as any)?.filename ||
+            decision.proposedItem?.title ||
+            'Document';
 
-      await this.repo.createStage(runId, {
-        stageName: 'ENRICH_EXISTING',
-        durationMs: Date.now() - enrichExistingStart,
-        success: true,
-        outputSnapshot: {
-          itemId: matchResult.targetItemId,
-          patchedFields: Object.keys(enrichPatch),
-          patchCount: Object.keys(enrichPatch).length,
+          await this.repo.updateRunStatus(scopeId, runId, IngestionStatus.READY, {
+            itemId: matchResult.targetItemId,
+            completedAt: new Date(),
+            executionLog: {
+              total: 1,
+              processed: 1,
+              succeeded: 0,
+              duplicates: 1,
+              failed: 0,
+              percentage: 100,
+              status: 'COMPLETED',
+              currentTitle: decision.proposedItem?.title || 'Document',
+              items: [
+                {
+                  title: exactSourceLabel,
+                  itemName: decision.proposedItem?.title || 'Document',
+                  status: 'DUPLICATE',
+                  itemId: matchResult.targetItemId,
+                },
+              ],
+            } as unknown as Prisma.InputJsonValue,
+          });
+
+          aggregate.recordProgress(1, 0);
+          aggregate.complete();
+
+          return {
+            itemId: matchResult.targetItemId,
+            patchedFields: Object.keys(enrichPatch),
+            patchCount: Object.keys(enrichPatch).length,
+          };
         },
-      });
-
-      const exactSourceLabel =
-        (envelope.payload as any).filename ||
-        (envelope.payload as any).url ||
-        (envelope.payload as any).value ||
-        (decision.proposedItem as any)?.filename ||
-        decision.proposedItem?.title ||
-        'Document';
-
-      await this.repo.updateRunStatus(scopeId, runId, IngestionStatus.READY, {
-        itemId: matchResult.targetItemId,
-        completedAt: new Date(),
-        executionLog: {
-          total: 1,
-          processed: 1,
-          succeeded: 0,
-          duplicates: 1,
-          failed: 0,
-          percentage: 100,
-          status: 'COMPLETED',
-          currentTitle: decision.proposedItem?.title || 'Document',
-          items: [
-            {
-              title: exactSourceLabel,
-              itemName: decision.proposedItem?.title || 'Document',
-              status: 'DUPLICATE',
-              itemId: matchResult.targetItemId,
-            },
-          ],
-        } as unknown as Prisma.InputJsonValue,
-      });
+        {
+          outputSnapshot: (res) => ({
+            itemId: res.itemId,
+            patchedFields: res.patchedFields,
+            patchCount: res.patchCount,
+          }),
+        },
+      );
       return;
     }
 
-    // PROBABLE fuzzy match → Queue for human review (unchanged)
+    // PROBABLE fuzzy match → Queue for human review
     if (matchResult.matchType === 'PROBABLE' && matchResult.targetItemId) {
       await this.repo.createDecision(runId, {
         decisionType: 'REVIEW',
@@ -592,67 +644,88 @@ export class PipelineService {
         IngestionStatus.NEEDS_REVIEW,
         { completedAt: new Date() },
       );
+      aggregate.complete();
       return;
     }
 
-    // Stage 6: COMMIT (create new Item via CommitStage)
-    const commitStart = Date.now();
-    const createdItem = await this.commit.execute(
-      scopeId,
-      decision.proposedItem,
+    // Stage 6: COMMIT (create new Item via CommitStage with Saga Compensation)
+    const createdItem = await session.executeStep(
+      'COMMIT',
+      async () => {
+        return this.commit.execute(
+          resolvedScope.projectId || resolvedScope.userId,
+          decision.proposedItem,
+          {
+            collectionIds: envelope.collectionIds,
+            tagIds: envelope.tagIds,
+            userId: resolvedScope.userId,
+            source: this.mapPayloadToSource(envelope.payload.kind),
+            fileId:
+              envelope.payload.kind === 'FILE'
+                ? envelope.payload.fileId
+                : (decision.proposedItem as any)?.fileId,
+            filename:
+              envelope.payload.kind === 'FILE'
+                ? envelope.payload.filename
+                : (decision.proposedItem as any)?.filename,
+          },
+        );
+      },
       {
-        collectionIds: envelope.collectionIds,
-        tagIds: envelope.tagIds,
-        userId: envelope.userId,
-        source: this.mapPayloadToSource(envelope.payload.kind),
-        fileId:
-          envelope.payload.kind === 'FILE'
-            ? envelope.payload.fileId
-            : (decision.proposedItem as any)?.fileId,
-        filename:
-          envelope.payload.kind === 'FILE'
-            ? envelope.payload.filename
-            : (decision.proposedItem as any)?.filename,
+        outputSnapshot: (res) => ({ itemId: res?.id }),
+        compensate: async (item) => {
+          if (item?.id && this.catalogFacade?.deleteItem) {
+            this.logger.warn(
+              `[SAGA_COMPENSATION] Rolling back committed item ${item.id} for run ${runId}`,
+            );
+            await this.catalogFacade.deleteItem(
+              resolvedScope.userId,
+              item.id,
+              resolvedScope.projectId,
+            );
+          }
+        },
       },
     );
 
-    await this.repo.createStage(runId, {
-      stageName: 'COMMIT',
-      durationMs: Date.now() - commitStart,
-      success: true,
-      outputSnapshot: { itemId: createdItem?.id },
-    });
+    try {
+      const commitSourceLabel =
+        (envelope.payload as any).filename ||
+        (envelope.payload as any).url ||
+        (envelope.payload as any).value ||
+        (decision.proposedItem as any)?.filename ||
+        createdItem?.title ||
+        'Document';
 
-    const commitSourceLabel =
-      (envelope.payload as any).filename ||
-      (envelope.payload as any).url ||
-      (envelope.payload as any).value ||
-      (decision.proposedItem as any)?.filename ||
-      createdItem?.title ||
-      'Document';
+      await this.repo.updateRunStatus(scopeId, runId, IngestionStatus.READY, {
+        itemId: createdItem?.id,
+        completedAt: new Date(),
+        executionLog: {
+          total: 1,
+          processed: 1,
+          succeeded: 1,
+          duplicates: 0,
+          failed: 0,
+          percentage: 100,
+          status: 'COMPLETED',
+          currentTitle: createdItem?.title || 'Document',
+          items: [
+            {
+              title: commitSourceLabel,
+              itemName: createdItem?.title || 'Document',
+              status: 'SUCCEEDED',
+              itemId: createdItem?.id,
+            },
+          ],
+        } as unknown as Prisma.InputJsonValue,
+      });
 
-    await this.repo.updateRunStatus(scopeId, runId, IngestionStatus.READY, {
-      itemId: createdItem?.id,
-      completedAt: new Date(),
-      executionLog: {
-        total: 1,
-        processed: 1,
-        succeeded: 1,
-        duplicates: 0,
-        failed: 0,
-        percentage: 100,
-        status: 'COMPLETED',
-        currentTitle: createdItem?.title || 'Document',
-        items: [
-          {
-            title: commitSourceLabel,
-            itemName: createdItem?.title || 'Document',
-            status: 'SUCCEEDED',
-            itemId: createdItem?.id,
-          },
-        ],
-      } as unknown as Prisma.InputJsonValue,
-    });
+      aggregate.recordProgress(1, 0);
+      aggregate.complete();
+    } catch (finalErr: any) {
+      await session.rollback('COMMIT', finalErr?.message || String(finalErr));
+      throw finalErr;
+    }
   }
 
   private mapPayloadToSource(kind: string): LibraryItemSource {

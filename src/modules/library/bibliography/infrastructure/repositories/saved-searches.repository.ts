@@ -134,7 +134,6 @@ export class SavedSearchesRepository {
       ...(options.cursor ? { cursor: { id: options.cursor }, skip: 1 } : {}),
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
-        identifiers: true,
         attachments: { take: 5 },
         itemTags: { include: { tag: true } },
         collectionItems: { include: { collection: true } },

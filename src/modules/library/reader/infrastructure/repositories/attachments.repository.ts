@@ -191,7 +191,6 @@ export class AttachmentsRepository {
       where: { id: attachmentId },
       data: {
         filename: newFilename,
-        name: newFilename,
       },
     });
     if (fileId) {
@@ -216,7 +215,6 @@ export class AttachmentsRepository {
           where: { id: item.id },
           data: {
             filename: item.filename,
-            name: item.filename,
           },
         });
         if (item.fileId) {

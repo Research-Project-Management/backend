@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../../../core/database/prisma.service';
+import { TagType } from '@prisma/client';
 import {
   ITagRepositoryPort,
   TagDto,
@@ -87,7 +88,7 @@ export class PrismaTagRepositoryAdapter implements ITagRepositoryPort {
     options?: CreateTagOptions,
   ): Promise<TagDto> {
     const color = options?.color ?? '#3b82f6';
-    const type = options?.type ?? 'manual';
+    const resolvedType = (options?.type as TagType) || TagType.manual;
     const effectiveProjectId =
       options?.projectId &&
       options.projectId !== 'user' &&
@@ -113,15 +114,45 @@ export class PrismaTagRepositoryAdapter implements ITagRepositoryPort {
         }
       } else {
         row = await this.prisma.tag.create({
-          data: { userId, name, color, type, projectId: effectiveProjectId },
+          data: {
+            userId,
+            createdById: userId,
+            name,
+            color,
+            type: resolvedType,
+            projectId: effectiveProjectId,
+          },
         });
       }
     } else {
-      row = await this.prisma.tag.upsert({
-        where: { userId_name: { userId, name } },
-        create: { userId, name, color, type },
-        update: { color },
+      const existing = await this.prisma.tag.findFirst({
+        where: {
+          userId,
+          name,
+          projectId: null,
+        },
       });
+      if (existing) {
+        if (color && existing.color !== color) {
+          row = await this.prisma.tag.update({
+            where: { id: existing.id },
+            data: { color },
+          });
+        } else {
+          row = existing;
+        }
+      } else {
+        row = await this.prisma.tag.create({
+          data: {
+            userId,
+            createdById: userId,
+            name,
+            color,
+            type: resolvedType,
+            projectId: null,
+          },
+        });
+      }
     }
 
     return {

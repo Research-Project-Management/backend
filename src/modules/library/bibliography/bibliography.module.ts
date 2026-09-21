@@ -13,6 +13,7 @@ import {
 // ── 1. Items ─────────────────────────────────────────────────────────────
 import { ItemsController } from './presentation/items.controller';
 import { ItemsService } from './application/services/items.service';
+import { ItemSyncDelegate } from './application/services/item-sync.delegate';
 import { QueryRepository } from './infrastructure/repositories/query.repository';
 import { CommandRepository } from './infrastructure/repositories/command.repository';
 import { ItemsMapper } from './infrastructure/mappers/items.mapper';
@@ -134,6 +135,7 @@ import { ConditionEvaluatorEngine } from './application/engines/condition-evalua
     QueryRepository,
     CommandRepository,
     ItemsService,
+    ItemSyncDelegate,
     ItemsMapper,
     ItemTransformer,
     {

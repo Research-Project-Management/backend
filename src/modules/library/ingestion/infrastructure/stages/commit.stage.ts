@@ -350,7 +350,7 @@ export class CommitStage {
    * Persists Item, child attachments, tags/keywords, and literature notes.
    */
   async execute(
-    scopeId: string,
+    scope: { userId?: string; projectId?: string | null } | string,
     metadata: ItemMetadata,
     options?: CommitStageOptions,
   ): Promise<any> {
@@ -360,10 +360,18 @@ export class CommitStage {
       ) || 'author';
     const createData = toItemData(metadata, options, primaryRole);
 
-    const isProject =
-      Boolean(scopeId) && scopeId !== 'user' && scopeId !== options?.userId;
-    const effectiveUserId = options?.userId || scopeId;
-    const effectiveProjectId = isProject ? scopeId : undefined;
+    let effectiveUserId: string;
+    let effectiveProjectId: string | undefined;
+
+    if (typeof scope === 'object' && scope !== null) {
+      effectiveUserId = scope.userId || options?.userId || 'system';
+      effectiveProjectId = scope.projectId || undefined;
+    } else {
+      const isProject =
+        Boolean(scope) && scope !== 'user' && scope !== options?.userId;
+      effectiveUserId = options?.userId || scope;
+      effectiveProjectId = isProject ? scope : undefined;
+    }
 
     if (effectiveProjectId) {
       createData.projectId = effectiveProjectId;

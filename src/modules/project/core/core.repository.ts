@@ -741,6 +741,51 @@ export class CoreRepository {
       ownedProjectCount: user.projectMembers.length,
     };
   }
+
+  async findProjectForDuplication(projectId: string) {
+    return this.prisma.project.findUnique({
+      where: { id: projectId },
+      include: {
+        members: { select: { userId: true, role: true } },
+        labels: { include: { label: true } },
+        projectStates: true,
+        pages: {
+          where: { deletedAt: null },
+          select: {
+            id: true, title: true, slug: true, icon: true, coverImage: true,
+            content: true, status: true, rank: true, isLocked: true, isPublished: true,
+            parentPageId: true, mainFileId: true, authorId: true,
+          },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
+  }
+
+  async findByIdentifier(identifier: string) {
+    return this.prisma.project.findUnique({ where: { identifier } });
+  }
+
+  async findTrashedProjectsByUser(userId: string) {
+    return this.prisma.project.findMany({
+      where: {
+        deletedAt: { not: null },
+        OR: [
+          { createdById: userId },
+          { members: { some: { userId } } },
+        ],
+      },
+      include: {
+        members: { select: { userId: true, role: true, user: { select: { id: true, email: true, profile: { select: { name: true, avatar: true } } } } } },
+        labels: { include: { label: true } },
+      },
+      orderBy: { deletedAt: 'desc' },
+    });
+  }
+
+  async permanentDeleteProject(projectId: string) {
+    return this.prisma.project.delete({ where: { id: projectId } });
+  }
 }
 
 export { CoreRepository as ProjectRepository };

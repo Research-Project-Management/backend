@@ -206,23 +206,49 @@ export class ItemsController {
       projectId || cleanBody.projectId,
     );
 
+    const {
+      title,
+      itemType,
+      type,
+      doi,
+      citationKey,
+      abstract,
+      abstractNote,
+      year,
+      publicationTitle,
+      extra,
+      ...otherFields
+    } = cleanBody as any;
+
+    const parsedExtra = extra
+      ? typeof extra === 'string' && extra.trim().startsWith('{')
+        ? (() => {
+            try {
+              return JSON.parse(extra);
+            } catch {
+              return { extra };
+            }
+          })()
+        : { extra }
+      : {};
+
+    const combinedFields = {
+      ...otherFields,
+      ...parsedExtra,
+    };
+
     try {
       return await this.createItemUseCase.execute({
         userId,
         projectId: effectiveProjectId,
-        title: cleanBody.title || 'Untitled',
-        itemType: cleanBody.itemType || 'journalArticle',
-        doi: cleanBody.doi,
-
-        citationKey: cleanBody.citationKey,
-        abstract: cleanBody.abstract,
-        year: cleanBody.year,
-        publicationTitle: cleanBody.publicationTitle,
-        fields: cleanBody.extra
-          ? typeof cleanBody.extra === 'string'
-            ? JSON.parse(cleanBody.extra)
-            : cleanBody.extra
-          : {},
+        title: title || 'Untitled',
+        itemType: itemType || type || 'journalArticle',
+        doi,
+        citationKey,
+        abstract: abstract || abstractNote,
+        year,
+        publicationTitle,
+        fields: combinedFields,
         idempotencyKey,
         correlationId,
       });

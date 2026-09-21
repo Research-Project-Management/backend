@@ -9,17 +9,37 @@ import { DomainActivityEvent } from '../events/activity.events';
 
 export const ACTOR_MINIMAL_SELECT = {
   id: true,
-  name: true,
   email: true,
-  avatar: true,
+  profile: {
+    select: {
+      name: true,
+      avatar: true,
+    },
+  },
 } as const;
 
-export type ActivityEventWithActor = Prisma.ActivityEventGetPayload<{
-  include: {
-    actor: { select: typeof ACTOR_MINIMAL_SELECT };
-    project: { select: { id: true; name: true } };
-  };
-}>;
+export type ActivityActor = {
+  id: string;
+  email: string | null;
+  name?: string;
+  avatar?: string | null;
+  profile?: {
+    name: string;
+    avatar: string | null;
+  } | null;
+};
+
+export type ActivityEventWithActor = Omit<
+  Prisma.ActivityEventGetPayload<{
+    include: {
+      actor: { select: typeof ACTOR_MINIMAL_SELECT };
+      project: { select: { id: true; name: true } };
+    };
+  }>,
+  'actor'
+> & {
+  actor: ActivityActor | null;
+};
 
 export interface IActivityRepository {
   create(event: DomainActivityEvent): Promise<ActivityEvent>;

@@ -24,6 +24,7 @@ import { PrismaService } from '@/core/database/prisma.service';
 import { sanitizeCommentContent } from '../page/utils/page.utils';
 import { CollaborationGateway } from '../collaboration/collaboration.gateway';
 import { YjsDocumentManager } from '../collaboration/yjs-document.manager';
+import { NotificationBundlerService } from '../notification/notification-bundler.service';
 
 /**
  * Parses @mention tokens from comment content.
@@ -53,6 +54,7 @@ export class CommentService {
     private readonly prisma: PrismaService,
     @Optional() private readonly collaborationGateway?: CollaborationGateway,
     @Optional() private readonly yjsManager?: YjsDocumentManager,
+    @Optional() private readonly bundlerService?: NotificationBundlerService,
   ) {}
 
   private async assertCanModifyComment(
@@ -150,7 +152,13 @@ export class CommentService {
 
     const page = await this.prisma.page.findFirst({
       where: { id: pageId, deletedAt: null },
-      select: { id: true, parentPageId: true, projectId: true, authorId: true },
+      select: {
+        id: true,
+        parentPageId: true,
+        projectId: true,
+        authorId: true,
+        title: true,
+      },
     });
 
     if (!page) {
@@ -191,6 +199,27 @@ export class CommentService {
       comment,
     });
 
+    const author = await this.commentRepo.findAuthorById(userId);
+    const authorName = author?.name || author?.email || 'A collaborator';
+
+    // Overleaf Parity: Enqueue review event for page author
+    if (this.bundlerService && page.authorId && page.authorId !== userId) {
+      this.bundlerService
+        .enqueueEvent(page.authorId, {
+          type: 'comment',
+          authorId: userId,
+          authorName,
+          projectId: page.projectId || undefined,
+          pageId,
+          pageTitle: page.title || undefined,
+          targetId: comment.id,
+          contentSnippet: cleanContent.slice(0, 120),
+        })
+        .catch((err) =>
+          this.logger.debug(`Notification bundler error: ${err.message}`),
+        );
+    }
+
     const mentions = extractMentions(cleanContent);
     if (mentions.length > 0) {
       this.collaborationGateway?.broadcastRoomEvent(pageId, 'comment:mention', {
@@ -200,6 +229,27 @@ export class CommentService {
         mentionedUserIds: mentions,
         content: cleanContent,
       });
+
+      if (this.bundlerService) {
+        for (const mUserId of mentions) {
+          if (mUserId !== userId) {
+            this.bundlerService
+              .enqueueEvent(mUserId, {
+                type: 'mention',
+                authorId: userId,
+                authorName,
+                projectId: page.projectId || undefined,
+                pageId,
+                pageTitle: page.title || undefined,
+                targetId: comment.id,
+                contentSnippet: cleanContent.slice(0, 120),
+              })
+              .catch((err) =>
+                this.logger.debug(`Notification bundler error: ${err.message}`),
+              );
+          }
+        }
+      }
     }
 
     return { comment };
@@ -313,6 +363,30 @@ export class CommentService {
       },
     );
 
+    const authorName = author?.name || author?.email || 'A collaborator';
+
+    // Overleaf Parity: Enqueue reply event for comment author if different
+    if (
+      this.bundlerService &&
+      existing.authorId &&
+      existing.authorId !== userId
+    ) {
+      this.bundlerService
+        .enqueueEvent(existing.authorId, {
+          type: 'reply',
+          authorId: userId,
+          authorName,
+          projectId: commentPage?.projectId || undefined,
+          pageId: targetPageId,
+          pageTitle: commentPage?.title || undefined,
+          targetId: commentId,
+          contentSnippet: cleanContent.slice(0, 120),
+        })
+        .catch((err) =>
+          this.logger.debug(`Notification bundler error: ${err.message}`),
+        );
+    }
+
     const replyMentions = extractMentions(cleanContent);
     if (replyMentions.length > 0) {
       this.collaborationGateway?.broadcastRoomEvent(
@@ -327,6 +401,27 @@ export class CommentService {
           content: cleanContent,
         },
       );
+
+      if (this.bundlerService) {
+        for (const mUserId of replyMentions) {
+          if (mUserId !== userId && mUserId !== existing.authorId) {
+            this.bundlerService
+              .enqueueEvent(mUserId, {
+                type: 'mention',
+                authorId: userId,
+                authorName,
+                projectId: commentPage?.projectId || undefined,
+                pageId: targetPageId,
+                pageTitle: commentPage?.title || undefined,
+                targetId: commentId,
+                contentSnippet: cleanContent.slice(0, 120),
+              })
+              .catch((err) =>
+                this.logger.debug(`Notification bundler error: ${err.message}`),
+              );
+          }
+        }
+      }
     }
 
     return { comment };

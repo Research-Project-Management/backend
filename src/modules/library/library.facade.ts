@@ -30,14 +30,22 @@ export interface ILibraryFacade {
     userId: string,
     citeKeys: string[],
   ): Promise<{ content: string } | null>;
-  getItem(scopeId: string, itemId: string): Promise<LibraryItemSummary | null>;
+  getItem(
+    userId: string,
+    itemId: string,
+    projectId?: string,
+  ): Promise<LibraryItemSummary | null>;
   getItemWithDetails(
-    scopeId: string,
+    userId: string,
     itemId: string,
     projectId?: string,
   ): Promise<LibraryItemDetail | null>;
-  countItems(scopeId: string): Promise<number>;
-  searchItems(scopeId: string, query: string): Promise<LibraryItemSummary[]>;
+  countItems(userId: string, options?: { projectId?: string }): Promise<number>;
+  searchItems(
+    userId: string,
+    query: string,
+    projectId?: string,
+  ): Promise<LibraryItemSummary[]>;
   extractDocumentFromBuffer(buffer: Buffer, options?: any): Promise<any>;
 }
 
@@ -87,11 +95,12 @@ export class LibraryFacade implements ILibraryFacade {
   }
 
   async getItem(
-    scopeId: string,
+    userId: string,
     itemId: string,
+    projectId?: string,
   ): Promise<LibraryItemSummary | null> {
     if (!this.catalogFacade) return null;
-    const item = await this.catalogFacade.getItem(scopeId, itemId);
+    const item = await this.catalogFacade.getItem(userId, itemId, projectId);
     if (!item) return null;
 
     return {
@@ -106,7 +115,7 @@ export class LibraryFacade implements ILibraryFacade {
   }
 
   async getItemWithDetails(
-    scopeId: string,
+    userId: string,
     itemId: string,
     projectId?: string,
   ): Promise<LibraryItemDetail | null> {
@@ -114,12 +123,12 @@ export class LibraryFacade implements ILibraryFacade {
 
     // Scatter-gather across Bounded Contexts (Microservices-Ready)
     const [catalogItem, attachmentsRes, notes] = await Promise.all([
-      this.catalogFacade.getItem(scopeId, itemId, projectId),
+      this.catalogFacade.getItem(userId, itemId, projectId),
       this.contentFacade
-        ? this.contentFacade.getItemAttachments(scopeId, itemId)
+        ? this.contentFacade.getItemAttachments(userId, itemId)
         : Promise.resolve({ attachments: [] }),
       this.contentFacade
-        ? this.contentFacade.listNotes(scopeId, itemId, projectId)
+        ? this.contentFacade.listNotes(userId, itemId, projectId)
         : Promise.resolve([]),
     ]);
 
@@ -144,19 +153,27 @@ export class LibraryFacade implements ILibraryFacade {
     };
   }
 
-  async countItems(scopeId: string): Promise<number> {
+  async countItems(
+    userId: string,
+    options?: { projectId?: string },
+  ): Promise<number> {
     if (!this.catalogFacade) return 0;
-    return this.catalogFacade.countItems(scopeId, { view: 'all' });
+    return this.catalogFacade.countItems(userId, {
+      view: 'all',
+      ...(options?.projectId ? { projectId: options.projectId } : {}),
+    });
   }
 
   async searchItems(
-    scopeId: string,
+    userId: string,
     query: string,
+    projectId?: string,
   ): Promise<LibraryItemSummary[]> {
     if (!this.catalogFacade) return [];
-    const items = await this.catalogFacade.findMany(scopeId, {
+    const items = await this.catalogFacade.findMany(userId, {
       search: query,
       limit: 20,
+      ...(projectId ? { projectId } : {}),
     });
 
     return items.map((it: any) => ({

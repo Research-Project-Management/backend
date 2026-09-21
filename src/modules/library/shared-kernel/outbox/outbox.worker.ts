@@ -1,14 +1,18 @@
 import {
   Injectable,
   Logger,
+  Optional,
   OnApplicationBootstrap,
   OnApplicationShutdown,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { PrismaService } from '../../../../core/database/prisma.service';
 import { OutboxMetrics as SyncMetricsService } from './outbox.metrics';
 import { OutboxStatus, OutboxEvent } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import { LIBRARY_OUTBOX_QUEUE, LIBRARY_OUTBOX_JOB } from './outbox.constants';
 
 export interface OutboxDispatchHandler {
   handle(event: OutboxEvent, signal?: AbortSignal): Promise<void>;
@@ -30,10 +34,18 @@ export class OutboxWorker
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly configService?: ConfigService,
-    private readonly metricsService?: SyncMetricsService,
+    @Optional() private readonly configService?: ConfigService,
+    @Optional() private readonly metricsService?: SyncMetricsService,
+    @Optional()
+    @InjectQueue(LIBRARY_OUTBOX_QUEUE)
+    private readonly bullQueue?: Queue,
   ) {
     this.workerId = `outbox-worker-${process.pid}-${randomUUID().slice(0, 8)}`;
+    if (this.bullQueue && typeof (this.bullQueue as any).on === 'function') {
+      (this.bullQueue as any).on('error', (err: any) => {
+        this.logger.warn(`Outbox BullMQ queue notice: ${err?.message || err}`);
+      });
+    }
   }
 
   getWorkerId(): string {
@@ -52,6 +64,135 @@ export class OutboxWorker
 
   hasHandler(eventType: string): boolean {
     return this.handlers.has(eventType);
+  }
+
+  /**
+   * Immediately dispatches or enqueues newly written outbox events.
+   * Triggered upon PostgreSQL transaction commit from TransactionService.
+   */
+  async notifyEvents(eventIds: string[]): Promise<void> {
+    if (!eventIds || eventIds.length === 0) return;
+
+    if (this.bullQueue && typeof this.bullQueue.add === 'function') {
+      for (const eventId of eventIds) {
+        await this.bullQueue
+          .add(
+            LIBRARY_OUTBOX_JOB,
+            { eventId },
+            {
+              attempts: this.maxRetries,
+              backoff: { type: 'exponential', delay: 1000 },
+              removeOnComplete: true,
+            },
+          )
+          .catch((err) => {
+            this.logger.warn(
+              `Failed to enqueue outbox event ${eventId} to BullMQ: ${err?.message}. Falling back to direct dispatch.`,
+            );
+            void this.processEventById(eventId);
+          });
+      }
+    } else {
+      // In-memory or test environment fallback
+      for (const eventId of eventIds) {
+        void this.processEventById(eventId);
+      }
+    }
+  }
+
+  /**
+   * Processes a single OutboxEvent by ID with atomic CAS claiming.
+   * Idempotent: safe to run from BullMQ or in-memory runner.
+   */
+  async processEventById(eventId: string): Promise<boolean> {
+    const event = await this.prisma.outboxEvent.findUnique({
+      where: { id: eventId },
+    });
+
+    if (!event || event.status === OutboxStatus.PUBLISHED) {
+      return true;
+    }
+
+    // Atomic CAS claim: only move if PENDING or FAILED
+    const claimResult = await this.prisma.outboxEvent.updateMany({
+      where: {
+        id: eventId,
+        status: { in: [OutboxStatus.PENDING, OutboxStatus.FAILED] },
+      },
+      data: {
+        status: OutboxStatus.PROCESSING,
+        claimedAt: new Date(),
+        claimedBy: this.workerId,
+      },
+    });
+
+    if (claimResult.count === 0) {
+      return true;
+    }
+
+    const handler = this.handlers.get(event.eventType) || this.defaultHandler;
+    if (!handler) {
+      const newRetryCount = event.retryCount + 1;
+      const isMax = newRetryCount >= this.maxRetries;
+      await this.prisma.outboxEvent.updateMany({
+        where: { id: eventId, status: OutboxStatus.PROCESSING },
+        data: {
+          status: isMax ? OutboxStatus.FAILED : OutboxStatus.PENDING,
+          retryCount: newRetryCount,
+          error: `No handler registered for event type "${event.eventType}"`,
+          claimedAt: null,
+          claimedBy: null,
+        },
+      });
+      return false;
+    }
+
+    const start = performance.now();
+    try {
+      await handler.handle(event);
+      const durationMs = Math.round(performance.now() - start);
+
+      await this.prisma.outboxEvent.updateMany({
+        where: { id: eventId, status: OutboxStatus.PROCESSING },
+        data: {
+          status: OutboxStatus.PUBLISHED,
+          processedAt: new Date(),
+          claimedAt: null,
+          claimedBy: null,
+          error: null,
+        },
+      });
+
+      this.metricsService?.recordOutboxDispatch(durationMs, true);
+      this.metricsService?.incrementCounter('outbox_dispatched_total');
+      return true;
+    } catch (err: any) {
+      const durationMs = Math.round(performance.now() - start);
+      const newRetryCount = event.retryCount + 1;
+      const isMax = newRetryCount >= this.maxRetries;
+
+      this.logger.error(
+        `[OutboxWorker] Event ${eventId} (${event.eventType}) failed (attempt ${newRetryCount}/${this.maxRetries}): ${err?.message}`,
+      );
+
+      await this.prisma.outboxEvent.updateMany({
+        where: { id: eventId, status: OutboxStatus.PROCESSING },
+        data: {
+          status: isMax ? OutboxStatus.FAILED : OutboxStatus.PENDING,
+          retryCount: newRetryCount,
+          error: err?.message || String(err),
+          claimedAt: null,
+          claimedBy: null,
+        },
+      });
+
+      this.metricsService?.recordOutboxDispatch(durationMs, false);
+      this.metricsService?.incrementCounter('outbox_retry_total');
+      if (isMax) {
+        this.metricsService?.incrementCounter('outbox_dlq_total');
+      }
+      throw err;
+    }
   }
 
   onApplicationBootstrap() {
@@ -74,7 +215,7 @@ export class OutboxWorker
         Number(
           this.configService?.get('OUTBOX_POLL_INTERVAL_MS') ||
             process.env.OUTBOX_POLL_INTERVAL_MS,
-        ) || 5000;
+        ) || (this.bullQueue ? 60000 : 10000);
 
       this.logger.log(
         `Starting runtime Outbox consumer [${this.workerId}] (interval=${intervalMs}ms)...`,
@@ -607,6 +748,28 @@ export class OutboxWorker
     }
 
     return { processed, failed, deadLettered, reclaimed };
+  }
+
+  /**
+   * Purges completed outbox events older than `olderThanMs` (default 7 days).
+   * Prevents table bloat and maintains high-throughput B-tree index performance.
+   */
+  async purgeCompletedEvents(
+    olderThanMs: number = 7 * 24 * 60 * 60 * 1000,
+  ): Promise<number> {
+    const cutoff = new Date(Date.now() - olderThanMs);
+    const result = await this.prisma.outboxEvent.deleteMany({
+      where: {
+        status: OutboxStatus.PUBLISHED,
+        processedAt: { lte: cutoff },
+      },
+    });
+    if (result.count > 0) {
+      this.logger.log(
+        `Purged ${result.count} completed outbox events older than ${cutoff.toISOString()}`,
+      );
+    }
+    return result.count;
   }
 
   onApplicationShutdown() {

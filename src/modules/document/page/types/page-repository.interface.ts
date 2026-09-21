@@ -115,6 +115,10 @@ export interface IPageRepository {
     projectId: string,
     userId: string,
   ): Promise<{ role: string } | null>;
+  getPageLabels(pageId: string): Promise<{ labelId: string; label: { id: string; name: string; color: string } }[]>;
+  assignLabelsToPage(pageId: string, labelIds: string[]): Promise<void>;
+  removeLabelFromPage(pageId: string, labelId: string): Promise<void>;
+  replacePageLabels(pageId: string, labelIds: string[]): Promise<void>;
 }
 
 /** Lean version summary — excludes heavy `content` field for history list UI */

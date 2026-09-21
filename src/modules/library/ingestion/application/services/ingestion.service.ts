@@ -87,13 +87,15 @@ export class IngestionService implements IngestionPort {
     }
 
     // 2. Create IngestionRun Record
-    const run = await this.repo.createRun(projectId, {
-      requesterId: envelope.userId,
-      inputParams: envelope as unknown as Prisma.InputJsonValue,
-      inputHash: requestHash,
-      idempotencyKey,
-      contractVersion: envelope.contractVersion || '1.0.0',
-    });
+    const run = await this.repo.createRun(
+      { userId: envelope.userId, projectId },
+      {
+        inputParams: envelope as unknown as Prisma.InputJsonValue,
+        inputHash: requestHash,
+        idempotencyKey,
+        contractVersion: envelope.contractVersion || '1.0.0',
+      },
+    );
 
     const runId = run?.id || randomUUID();
     const statusUrl = `/api/v1/library/ingestion/status/${runId}`;

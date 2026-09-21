@@ -3,7 +3,6 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export enum DocumentExportFormat {
   PDF = 'pdf',
-  MARKDOWN = 'markdown',
   LATEX_SOURCE = 'latex-source',
   LATEX_BUNDLE = 'latex-bundle',
   LATEX_SOURCE_UNDERSCORE = 'latex_source',

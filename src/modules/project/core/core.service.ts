@@ -25,6 +25,7 @@ import { calculateProjectPermissions } from './utils/permission.util';
 import { FavoriteRepository } from '../favorite/favorite.repository';
 import { LabelRepository } from '../label/label.repository';
 import { deriveProjectPrefix } from './utils/identifier.util';
+import { PrismaService } from '@/core/database/prisma.service';
 
 export const ALLOWED_PROJECT_MODULES = new Set([
   'overview',
@@ -53,6 +54,7 @@ export class CoreService {
     private readonly projectRepo: CoreRepository,
     private readonly favoriteRepo: FavoriteRepository,
     private readonly labelRepo: LabelRepository,
+    private readonly prisma: PrismaService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
@@ -616,6 +618,124 @@ export class CoreService {
   async getProjectPrefix(projectId: string): Promise<string> {
     const project = await this.assertProjectExists(projectId);
     return deriveProjectPrefix(project.identifier, project.name);
+  }
+
+  async duplicateProject(projectId: string, userId: string): Promise<{ project: EnrichedProject; yourRole: Role; permissions: ProjectPermissions }> {
+    const source = await this.projectRepo.findProjectForDuplication(projectId);
+    if (!source) throw new NotFoundException(`Project ${projectId} not found`);
+
+    // 1. Generate unique identifier
+    const baseIdentifier = deriveProjectPrefix(`${source.name} Copy`);
+    let identifier = baseIdentifier;
+    let suffix = 1;
+    while (await this.projectRepo.findByIdentifier(identifier)) {
+      identifier = `${baseIdentifier}${suffix++}`;
+    }
+
+    // 2. Create new project
+    const newProject = await this.prisma.project.create({
+      data: {
+        name: `${source.name} (Copy)`,
+        identifier,
+        description: source.description ?? '',
+        avatar: source.avatar ?? undefined,
+        coverImage: source.coverImage ?? undefined,
+        modules: source.modules ? (source.modules as any) : undefined,
+        createdById: userId,
+      }
+    });
+
+    // 3. Add creator as owner member
+    await this.prisma.projectMember.create({
+      data: { projectId: newProject.id, userId, role: 'owner' },
+    });
+
+    // 4. Clone ProjectStates
+    const stateIdMap = new Map<string, string>();
+    for (const state of source.projectStates) {
+      const newState = await this.prisma.projectState.create({
+        data: {
+          projectId: newProject.id,
+          name: state.name,
+          color: state.color,
+          description: state.description ?? '',
+          sequence: state.sequence,
+          isDefault: state.isDefault,
+        },
+      });
+      stateIdMap.set(state.id, newState.id);
+    }
+
+    // 5. Clone Pages — two passes for parent/mainFile hierarchy
+    const pageIdMap = new Map<string, string>();
+    // First pass: create all pages without parent/mainFile links
+    for (const page of source.pages) {
+      const newPage = await this.prisma.page.create({
+        data: {
+          title: page.title,
+          slug: page.slug ?? undefined,
+          icon: page.icon ?? undefined,
+          coverImage: page.coverImage ?? undefined,
+          content: (page.content ?? {}) as any,
+          status: page.status,
+          rank: page.rank,
+          isLocked: false,
+          isPublished: false,
+          projectId: newProject.id,
+          authorId: userId,
+        },
+      });
+      pageIdMap.set(page.id, newPage.id);
+    }
+    // Second pass: wire parentPageId and mainFileId using the map
+    for (const page of source.pages) {
+      const newPageId = pageIdMap.get(page.id);
+      if (!newPageId) continue;
+      const newParentId = page.parentPageId ? pageIdMap.get(page.parentPageId) : null;
+      const newMainFileId = page.mainFileId ? pageIdMap.get(page.mainFileId) : null;
+      if (newParentId !== undefined || newMainFileId !== undefined) {
+        await this.prisma.page.update({
+          where: { id: newPageId },
+          data: {
+            ...(newParentId ? { parentPageId: newParentId } : {}),
+            ...(newMainFileId ? { mainFileId: newMainFileId } : {}),
+          },
+        });
+      }
+    }
+
+    await this.invalidateProjectCache(newProject.id, [userId]);
+
+    // Return enriched project
+    const result = await this.findById(newProject.id, userId);
+    if (!result?.project) throw new NotFoundException('Duplicated project not found');
+    return result;
+  }
+
+  async getTrashedProjects(userId: string): Promise<{ projects: EnrichedProject[] }> {
+    const projects = await this.projectRepo.findTrashedProjectsByUser(userId);
+    const enriched: EnrichedProject[] = projects.map((p: any) => ({
+      ...p,
+      yourRole: p.createdById === userId ? Role.owner
+        : p.members?.find((m: any) => m.userId === userId)?.role ?? Role.reviewer,
+      permissions: calculateProjectPermissions(
+        p.createdById === userId ? Role.owner
+          : p.members?.find((m: any) => m.userId === userId)?.role ?? Role.reviewer,
+        p.isActive,
+      ),
+      projectLabelsList: p.labels?.map((l: any) => l.label) || [],
+    }));
+    return { projects: enriched };
+  }
+
+  async permanentDeleteProject(projectId: string, userId: string): Promise<{ message: string }> {
+    const project = await this.projectRepo.findProjectById(projectId);
+    if (!project) throw new NotFoundException(`Project ${projectId} not found`);
+    if (project.createdById !== userId) throw new ForbiddenException('Only project owner can permanently delete');
+    if (!project.deletedAt) throw new BadRequestException('Project must be soft-deleted before permanent deletion');
+    await this.projectRepo.permanentDeleteProject(projectId);
+    await this.invalidateProjectCache(projectId, [userId]);
+    return { message: 'Project permanently deleted' };
   }
 }
 

@@ -79,16 +79,46 @@ export class HistoryService {
     dto: UpdateVersionDto,
   ) {
     const existing = await this.historyRepo.findVersionById(versionId);
-    if (!existing || existing.pageId !== pageId) {
+    if (!existing) {
       throw new NotFoundException('Version not found');
     }
 
+    // Allow update if pageId matches version's pageId, projectPageId, or page's projectId
+    const existingPage = (existing as any).page;
+    if (
+      existing.pageId !== pageId &&
+      existing.projectPageId !== pageId &&
+      existingPage?.projectId !== pageId
+    ) {
+      const targetPage = await this.pageService.findPageById(pageId);
+      if (
+        !targetPage ||
+        (existingPage?.projectId &&
+          targetPage.projectId !== existingPage.projectId)
+      ) {
+        throw new NotFoundException('Version not found for this page context');
+      }
+    }
+
+    const cleanLabel =
+      dto.label !== undefined
+        ? dto.label.trim() === ''
+          ? null
+          : dto.label.trim()
+        : undefined;
+
     const updated = await this.historyRepo.updateVersion(versionId, {
-      ...(dto.label !== undefined ? { label: dto.label } : {}),
+      ...(cleanLabel !== undefined ? { label: cleanLabel } : {}),
       ...(dto.title !== undefined ? { title: dto.title } : {}),
     });
 
-    await this.invalidateVersionCache(pageId);
+    await this.invalidateVersionCache(existing.pageId);
+    if (existing.projectPageId) {
+      await this.invalidateVersionCache(existing.projectPageId);
+    }
+    if (pageId !== existing.pageId) {
+      await this.invalidateVersionCache(pageId);
+    }
 
     return { version: updated };
   }
@@ -124,7 +154,7 @@ export class HistoryService {
       projectPageId: effectiveProjectPageId,
       title: dto.title || page.title,
       content: contentToSave,
-      label: dto.label || '',
+      label: dto.label && dto.label.trim() ? dto.label.trim() : null,
       savedById: userId,
       eventType: dto.eventType || VersionEventType.manual_save,
       fileName: dto.fileName || page.title,

@@ -29,6 +29,7 @@ import {
 import { normalizeTags } from '../../../shared-kernel/utils/tag.utils';
 import { TagsService } from './tags.service';
 import { TypesService } from './types.service';
+import { ItemSyncDelegate } from './item-sync.delegate';
 import { ZoteroSchemaValidatorService } from './zotero-schema-validator.service';
 import { ItemsMapper } from '../../infrastructure/mappers/items.mapper';
 import {
@@ -45,6 +46,8 @@ import {
   IItemReadPort,
   IItemExistencePort,
   ItemDetail,
+  QualityAuditCandidateItem,
+  DuplicateCandidateItem,
 } from '../../domain/ports/items.ports';
 
 import type {
@@ -79,6 +82,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     @Optional() private readonly validator?: ZoteroSchemaValidatorService,
     @Optional() private readonly grobid?: GrobidClient,
     @Optional() private readonly semanticSearch?: any,
+    @Optional() private readonly syncDelegate?: ItemSyncDelegate,
   ) {}
 
   /**
@@ -796,16 +800,16 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     userId: string,
     limit?: number,
     projectId?: string,
-  ) {
-    return this.query.findQualityAuditItems(userId, limit);
+  ): Promise<QualityAuditCandidateItem[]> {
+    return this.query.findQualityAuditItems(userId, limit) as unknown as QualityAuditCandidateItem[];
   }
 
   async findDuplicateCandidateItems(
     userId: string,
     limit?: number,
     projectId?: string,
-  ) {
-    return this.query.findDuplicateCandidateItems(userId, limit);
+  ): Promise<DuplicateCandidateItem[]> {
+    return this.query.findDuplicateCandidateItems(userId, limit) as unknown as DuplicateCandidateItem[];
   }
 
   /**
@@ -816,105 +820,8 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     tx: Prisma.TransactionClient,
     helpers: TransactionHelpers,
   ): Promise<UpsertSyncEntityResult> {
-    const userId = command.userId;
-    if (command.existingId) {
-      const existing = await tx.item.findUnique({
-        where: { id: command.existingId },
-        include: { itemTags: { include: { tag: true } } },
-      });
-
-      if (!existing) {
-        throw new NotFoundException(`Item ${command.existingId} not found`);
-      }
-
-      if (existing.userId && existing.userId !== userId) {
-        throw new ForbiddenException(
-          `Item ${command.existingId} does not belong to user ${userId}`,
-        );
-      }
-
-      if (
-        !existing.userId &&
-        existing.projectId &&
-        existing.projectId !== (command as any).projectId
-      ) {
-        throw new ForbiddenException(
-          `Item ${command.existingId} does not belong to the specified project`,
-        );
-      }
-
-      const existingTagNames = (existing.itemTags || []).map(
-        (it) => it.tag.name,
-      );
-      const mergedTags = normalizeTags([
-        ...existingTagNames,
-        ...(command.tags || []),
-      ]);
-
-      const itemProjectId =
-        command.projectId || (command as any).projectId || undefined;
-      const syncScope = { userId, projectId: itemProjectId };
-
-      const updated = await this.command.update(
-        userId,
-        command.existingId,
-        undefined,
-        {
-          ...command,
-          tags: mergedTags,
-          userId: command.userId,
-        },
-        tx,
-        itemProjectId,
-      );
-
-      await helpers.appendChange(syncScope, {
-        entityType: 'Item',
-        entityId: updated.id,
-        action: 'update',
-        version: updated.version,
-        data: { title: command.title },
-      });
-
-      return { id: updated.id, isNew: false, version: updated.version };
-    } else {
-      const itemProjectId =
-        command.projectId || (command as any).projectId || undefined;
-      const syncScope = { userId, projectId: itemProjectId };
-
-      const created = await this.command.create(
-        userId,
-        {
-          ...command,
-          uploadedById: command.userId,
-        },
-        tx,
-        itemProjectId,
-      );
-
-      await helpers.appendChange(syncScope, {
-        entityType: 'Item',
-        entityId: created.id,
-        action: 'create',
-        version: 1,
-        data: { title: command.title },
-      });
-
-      await helpers.publishOutbox(
-        syncScope,
-        created.id,
-        LIBRARY_EVENT_TYPES.ITEM_CREATED,
-        buildItemCreatedOutboxPayload({
-          itemId: created.id,
-          userId,
-          projectId: itemProjectId,
-          title: created.title,
-          source: 'external_sync',
-        }),
-      );
-
-      return { id: created.id, isNew: true, version: 1 };
-    }
+    const delegate = this.syncDelegate ?? new ItemSyncDelegate(this.command);
+    return delegate.upsertFromSync(command, tx, helpers);
   }
 
   /**
@@ -925,50 +832,8 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     tx: Prisma.TransactionClient,
     helpers: TransactionHelpers,
   ): Promise<void> {
-    const targetUserId = command.userId || '';
-    const { entityId, reason, publishOutboxEventType, publishOutboxPayload } =
-      command;
-    const existing = await tx.item.findUnique({
-      where: { id: entityId },
-    });
-    if (!existing) return;
-
-    if (targetUserId && existing.userId && existing.userId !== targetUserId) {
-      throw new ForbiddenException(
-        `Item ${entityId} does not belong to user ${targetUserId}`,
-      );
-    }
-
-    const itemProjectId =
-      existing.projectId || (command as any).projectId || undefined;
-    const syncScope = { userId: targetUserId, projectId: itemProjectId };
-
-    await tx.item.update({
-      where: { id: entityId },
-      data: { deletedAt: new Date() },
-    });
-    await helpers.appendChange(syncScope, {
-      entityType: 'Item',
-      entityId,
-      action: 'delete',
-      version: existing.version + 1,
-      data: { reason },
-    });
-    await helpers.recordTombstone(syncScope, {
-      entityType: 'Item',
-      entityId,
-      deletedById: targetUserId || undefined,
-    });
-    await helpers.publishOutbox(
-      syncScope,
-      entityId,
-      publishOutboxEventType ?? 'library.item.deleted',
-      publishOutboxPayload ?? {
-        itemId: entityId,
-        reason,
-        projectId: itemProjectId,
-      },
-    );
+    const delegate = this.syncDelegate ?? new ItemSyncDelegate(this.command);
+    return delegate.deleteFromSync(command, tx, helpers);
   }
 
   /**
@@ -1007,52 +872,14 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       retainUnmappedInExtra: options.retainUnmappedInExtra ?? true,
     });
 
-    const projected = preview.projectedItem;
-
     const targetFields = this.typesService.getOrderedFields(targetType);
-    const dynamicExtraFields: Record<string, any> = {
-      ...(projected.extraFields || {}),
-    };
-
-    for (const field of targetFields) {
-      const val = this.transformer.getItemFieldValue(projected, field.key);
-      if (
-        val !== undefined &&
-        val !== null &&
-        val !== '' &&
-        !ITEM_COLUMN_METADATA_FIELDS.has(field.key) &&
-        !ITEM_COLUMN_METADATA_FIELDS.has(FIELD_ALIASES[field.key])
-      ) {
-        dynamicExtraFields[field.key] = val;
-      }
-    }
-
-    const updatePayload: Record<string, any> = {
-      itemType: targetType,
-      type: targetType,
-      creators: projected.creators ?? existing.creators,
-      extraFields: dynamicExtraFields,
-    };
-
-    const droppedSet = new Set(
-      preview.droppedFields.map((d) => d.field.toLowerCase()),
+    const updatePayload = buildTypeConversionUpdatePayload(
+      targetType,
+      existing,
+      preview,
+      targetFields,
+      this.transformer,
     );
-
-    for (const col of ITEM_COLUMN_METADATA_FIELDS) {
-      if (FIELD_ALIASES[col] && FIELD_ALIASES[col] !== col) continue;
-
-      const colLower = col.toLowerCase();
-      if (droppedSet.has(colLower)) {
-        updatePayload[col] = null;
-      } else {
-        const val =
-          this.transformer.getItemFieldValue(projected, col) ??
-          (existing as unknown as Record<string, unknown>)[col];
-        if (val !== undefined) {
-          updatePayload[col] = val;
-        }
-      }
-    }
 
     const updated = await this.command.update(
       userId,
@@ -1111,96 +938,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         continue;
       }
 
-      const primaryAttachment = source.attachments?.[0];
-      const resolvedFileId = primaryAttachment?.fileId
-        ? String(primaryAttachment.fileId)
-        : (source as any).fileId
-          ? String((source as any).fileId)
-          : undefined;
-      const resolvedFileUrl =
-        primaryAttachment?.url || (source as any).fileUrl || undefined;
-      const resolvedFilename =
-        primaryAttachment?.filename ||
-        primaryAttachment?.name ||
-        (source as any).filename ||
-        undefined;
-      const resolvedMimeType =
-        primaryAttachment?.mimeType || (source as any).mimeType || undefined;
-      const resolvedSize =
-        primaryAttachment?.size || (source as any).size || undefined;
-      const resolvedFileHash =
-        primaryAttachment?.fileHash || (source as any).fileHash || undefined;
-
-      const createData: CreateItemData = {
-        title: source.title,
-        uploadedById: userId,
-        year: source.year ?? undefined,
-        doi: source.doi ?? undefined,
-        abstract: source.abstract ?? undefined,
-        itemType: source.itemType || 'journalArticle',
-        publicationTitle: source.publicationTitle ?? undefined,
-        publicationDate: source.publicationDate ?? undefined,
-        publisher: source.publisher ?? undefined,
-        place: source.place ?? undefined,
-        volume: source.volume ?? undefined,
-        issue: source.issue ?? undefined,
-        section: source.section ?? undefined,
-        partNumber: source.partNumber ?? undefined,
-        partTitle: source.partTitle ?? undefined,
-        pages: source.pages ?? undefined,
-        series: source.series ?? undefined,
-        seriesTitle: source.seriesTitle ?? undefined,
-        seriesText: source.seriesText ?? undefined,
-        issn: source.issn ?? undefined,
-        isbn: source.isbn ?? undefined,
-        pmid: source.pmid ?? undefined,
-        pmcid: source.pmcid ?? undefined,
-        url: source.url ?? undefined,
-        language: source.language ?? undefined,
-        journalAbbr: source.journalAbbr ?? undefined,
-        shortTitle: source.shortTitle ?? undefined,
-        rights: source.rights ?? undefined,
-        license: source.license ?? undefined,
-        citationKey: source.citationKey ?? undefined,
-        libraryCatalog: source.libraryCatalog ?? undefined,
-        archive: source.archive ?? undefined,
-        archiveLocation: source.archiveLocation ?? undefined,
-        callNumber: source.callNumber ?? undefined,
-        extra: source.extra ?? undefined,
-        arxivId: source.arxivId ?? undefined,
-        citationCount: source.citationCount ?? undefined,
-        referenceCount: source.referenceCount ?? undefined,
-        openAccessPdfUrl: source.openAccessPdfUrl ?? undefined,
-        fileId: resolvedFileId,
-        fileUrl: resolvedFileUrl,
-        filename: resolvedFilename,
-        mimeType: resolvedMimeType,
-        size: resolvedSize,
-        fileHash: resolvedFileHash,
-        tags:
-          source.itemTags?.map((it: any) => it.tag?.name).filter(Boolean) || [],
-        notes:
-          source.notesList?.map((n: any) => ({
-            title: n.title,
-            contentMd: n.contentMd,
-            content: n.contentMd,
-            tags: n.tags || [],
-          })) || [],
-        creators: source.contributors?.map((c: any) => ({
-          creatorType: c.creatorType || 'author',
-          firstName: c.firstName || '',
-          lastName: c.lastName || '',
-          fullName: c.fullName || '',
-          name: c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
-          orderIndex: c.orderIndex ?? 0,
-        })),
-        identifiers: source.identifiers?.map((i: any) => ({
-          type: i.type,
-          value: i.value,
-          canonicalUri: i.canonicalUri,
-        })),
-      };
-
+      const createData = buildImportItemPayload(source, userId);
       await this.createItem(
         userId,
         createData,
@@ -1214,3 +952,154 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     return { success: true, importedCount };
   }
 }
+
+export function buildImportItemPayload(
+  source: any,
+  userId: string,
+): CreateItemData {
+  const primaryAttachment = source.attachments?.[0];
+  const resolvedFileId = primaryAttachment?.fileId
+    ? String(primaryAttachment.fileId)
+    : (source as any).fileId
+      ? String((source as any).fileId)
+      : undefined;
+  const resolvedFileUrl =
+    primaryAttachment?.url || (source as any).fileUrl || undefined;
+  const resolvedFilename =
+    primaryAttachment?.filename ||
+    primaryAttachment?.name ||
+    (source as any).filename ||
+    undefined;
+  const resolvedMimeType =
+    primaryAttachment?.mimeType || (source as any).mimeType || undefined;
+  const resolvedSize =
+    primaryAttachment?.size || (source as any).size || undefined;
+  const resolvedFileHash =
+    primaryAttachment?.fileHash || (source as any).fileHash || undefined;
+
+  return {
+    title: source.title,
+    uploadedById: userId,
+    year: source.year ?? undefined,
+    doi: source.doi ?? undefined,
+    abstract: source.abstract ?? undefined,
+    itemType: source.itemType || 'journalArticle',
+    publicationTitle: source.publicationTitle ?? undefined,
+    publicationDate: source.publicationDate ?? undefined,
+    publisher: source.publisher ?? undefined,
+    place: source.place ?? undefined,
+    volume: source.volume ?? undefined,
+    issue: source.issue ?? undefined,
+    section: source.section ?? undefined,
+    partNumber: source.partNumber ?? undefined,
+    partTitle: source.partTitle ?? undefined,
+    pages: source.pages ?? undefined,
+    series: source.series ?? undefined,
+    seriesTitle: source.seriesTitle ?? undefined,
+    seriesText: source.seriesText ?? undefined,
+    issn: source.issn ?? undefined,
+    isbn: source.isbn ?? undefined,
+    pmid: source.pmid ?? undefined,
+    pmcid: source.pmcid ?? undefined,
+    url: source.url ?? undefined,
+    language: source.language ?? undefined,
+    journalAbbr: source.journalAbbr ?? undefined,
+    shortTitle: source.shortTitle ?? undefined,
+    rights: source.rights ?? undefined,
+    license: source.license ?? undefined,
+    citationKey: source.citationKey ?? undefined,
+    libraryCatalog: source.libraryCatalog ?? undefined,
+    archive: source.archive ?? undefined,
+    archiveLocation: source.archiveLocation ?? undefined,
+    callNumber: source.callNumber ?? undefined,
+    extra: source.extra ?? undefined,
+    arxivId: source.arxivId ?? undefined,
+    citationCount: source.citationCount ?? undefined,
+    referenceCount: source.referenceCount ?? undefined,
+    openAccessPdfUrl: source.openAccessPdfUrl ?? undefined,
+    fileId: resolvedFileId,
+    fileUrl: resolvedFileUrl,
+    filename: resolvedFilename,
+    mimeType: resolvedMimeType,
+    size: resolvedSize,
+    fileHash: resolvedFileHash,
+    tags:
+      source.itemTags?.map((it: any) => it.tag?.name).filter(Boolean) || [],
+    notes:
+      source.notesList?.map((n: any) => ({
+        title: n.title,
+        contentMd: n.contentMd,
+        content: n.contentMd,
+        tags: n.tags || [],
+      })) || [],
+    creators: source.contributors?.map((c: any) => ({
+      creatorType: c.creatorType || 'author',
+      firstName: c.firstName || '',
+      lastName: c.lastName || '',
+      fullName: c.fullName || '',
+      name: c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+      orderIndex: c.orderIndex ?? 0,
+    })),
+    identifiers: source.identifiers?.map((i: any) => ({
+      type: i.type,
+      value: i.value,
+      canonicalUri: i.canonicalUri,
+    })),
+  };
+}
+
+export function buildTypeConversionUpdatePayload(
+  targetType: string,
+  existing: any,
+  preview: TypeConversionPreview,
+  targetFields: any[],
+  transformer: ItemTransformer,
+): Record<string, any> {
+  const projected = preview.projectedItem;
+  const dynamicExtraFields: Record<string, any> = {
+    ...(projected.extraFields || {}),
+  };
+
+  for (const field of targetFields) {
+    const val = transformer.getItemFieldValue(projected, field.key);
+    if (
+      val !== undefined &&
+      val !== null &&
+      val !== '' &&
+      !ITEM_COLUMN_METADATA_FIELDS.has(field.key) &&
+      !ITEM_COLUMN_METADATA_FIELDS.has(FIELD_ALIASES[field.key])
+    ) {
+      dynamicExtraFields[field.key] = val;
+    }
+  }
+
+  const updatePayload: Record<string, any> = {
+    itemType: targetType,
+    type: targetType,
+    creators: projected.creators ?? existing.creators,
+    extraFields: dynamicExtraFields,
+  };
+
+  const droppedSet = new Set(
+    preview.droppedFields.map((d) => d.field.toLowerCase()),
+  );
+
+  for (const col of ITEM_COLUMN_METADATA_FIELDS) {
+    if (FIELD_ALIASES[col] && FIELD_ALIASES[col] !== col) continue;
+
+    const colLower = col.toLowerCase();
+    if (droppedSet.has(colLower)) {
+      updatePayload[col] = null;
+    } else {
+      const val =
+        transformer.getItemFieldValue(projected, col) ??
+        (existing as unknown as Record<string, unknown>)[col];
+      if (val !== undefined) {
+        updatePayload[col] = val;
+      }
+    }
+  }
+
+  return updatePayload;
+}
+

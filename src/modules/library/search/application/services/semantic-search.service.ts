@@ -86,11 +86,11 @@ export class SemanticSearchService {
         title: item.title,
         year: item.year,
         doi: item.doi,
-        itemType: item.itemType,
-        publicationTitle: item.publicationTitle,
+        itemType: item.type,
+        publicationTitle: (item.metadata as any)?.publicationTitle ?? null,
         abstract: item.abstract,
         similarityScore: Number(match.similarityScore.toFixed(4)),
-        authors: item.contributors.map((c) => c.fullName),
+        authors: item.contributors.map((c: any) => c.fullName),
       });
     }
 
@@ -160,11 +160,11 @@ export class SemanticSearchService {
         title: item.title,
         year: item.year,
         doi: item.doi,
-        itemType: item.itemType,
-        publicationTitle: item.publicationTitle,
+        itemType: item.type,
+        publicationTitle: (item.metadata as any)?.publicationTitle ?? null,
         abstract: item.abstract,
         similarityScore: Number(match.similarityScore.toFixed(4)),
-        authors: item.contributors.map((c) => c.fullName),
+        authors: item.contributors.map((c: any) => c.fullName),
       });
     }
 
