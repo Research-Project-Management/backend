@@ -61,11 +61,27 @@ export class PageService {
       id: string;
       parentPageId?: string | null;
       mainFileId?: string | null;
+      author?: any;
     },
   >(pageRecord: T | null | undefined): FormattedPage<T> | null {
     if (!pageRecord) return null;
+    const author = pageRecord.author
+      ? {
+          id: pageRecord.author.id,
+          email: pageRecord.author.email,
+          name: pageRecord.author.profile?.name ?? pageRecord.author.name ?? 'User',
+          avatar: pageRecord.author.profile?.avatar ?? pageRecord.author.avatar ?? null,
+        }
+      : pageRecord.author;
+
+    const labels = (pageRecord as any).labelAssignments
+      ? (pageRecord as any).labelAssignments.map((la: any) => la.label)
+      : ((pageRecord as any).labels ?? []);
+
     return {
       ...pageRecord,
+      author,
+      labels,
       parentPage: pageRecord.parentPageId ?? null,
       mainFile: pageRecord.mainFileId ?? null,
     };
@@ -190,7 +206,6 @@ export class PageService {
       icon: dto.icon,
       coverImage: dto.coverImage,
       rank: dto.rank ?? 0,
-      labels: dto.labels ?? [],
       isLocked: dto.isLocked ?? false,
       isPublished: dto.isPublished ?? false,
       content: dto.content !== undefined ? dto.content : Prisma.JsonNull,
@@ -273,7 +288,6 @@ export class PageService {
     if (dto.icon !== undefined) updateData.icon = dto.icon;
     if (dto.coverImage !== undefined) updateData.coverImage = dto.coverImage;
     if (dto.rank !== undefined) updateData.rank = dto.rank;
-    if (dto.labels !== undefined) updateData.labels = dto.labels;
     if (dto.isLocked !== undefined) updateData.isLocked = dto.isLocked;
     if (dto.isPublished !== undefined) updateData.isPublished = dto.isPublished;
     if (dto.content !== undefined) updateData.content = dto.content;
@@ -571,5 +585,25 @@ export class PageService {
     if (projMember) return true;
 
     return false;
+  }
+
+  async getPageLabels(pageId: string) {
+    const assignments = await this.pageRepo.getPageLabels(pageId);
+    return { labels: assignments.map((a) => a.label) };
+  }
+
+  async assignLabels(pageId: string, labelIds: string[]) {
+    await this.pageRepo.assignLabelsToPage(pageId, labelIds);
+    return this.getPageLabels(pageId);
+  }
+
+  async removeLabel(pageId: string, labelId: string) {
+    await this.pageRepo.removeLabelFromPage(pageId, labelId);
+    return this.getPageLabels(pageId);
+  }
+
+  async replaceLabels(pageId: string, labelIds: string[]) {
+    await this.pageRepo.replacePageLabels(pageId, labelIds);
+    return this.getPageLabels(pageId);
   }
 }

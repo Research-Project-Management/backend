@@ -14,9 +14,13 @@ import {
 
 export const USER_MINIMAL_SELECT = {
   id: true,
-  name: true,
   email: true,
-  avatar: true,
+  profile: {
+    select: {
+      name: true,
+      avatar: true,
+    },
+  },
 } as const;
 
 export type PageWithAuthor = Prisma.PageGetPayload<{
@@ -35,7 +39,17 @@ export const PAGE_LIST_SELECT = {
   icon: true,
   status: true,
   rank: true,
-  labels: true,
+  labelAssignments: {
+    select: {
+      label: {
+        select: {
+          id: true,
+          name: true,
+          color: true,
+        },
+      },
+    },
+  },
   views: true,
   parentPageId: true,
   mainFileId: true,
@@ -124,6 +138,7 @@ export interface VersionQueryOptions {
   limit?: number;
   cursor?: string;
   eventType?: VersionEventType;
+  labeledOnly?: boolean;
 }
 
 export interface PaginatedPageVersions {
