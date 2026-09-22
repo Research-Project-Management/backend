@@ -116,8 +116,9 @@ export class StateService {
       targetStatus === ReadingStatus.COMPLETED;
 
     const upsertData: UpsertStateData = {
+      isStarred: dto.isStarred !== undefined ? dto.isStarred : existing?.isStarred,
       readStatus: targetStatus,
-      rating: dto.rating,
+      rating: dto.rating !== undefined ? dto.rating : (existing?.rating ?? undefined),
       currentPage: dto.currentPage,
       scrollPosition: dto.scrollPosition,
       lastOpenedAt: now,
@@ -157,6 +158,7 @@ export class StateService {
           itemId,
           userId,
           projectId: effectiveProjectId,
+          isStarred: updated.isStarred,
           readStatus: updated.readStatus,
           rating: updated.rating,
           currentPage: updated.currentPage,
@@ -326,6 +328,7 @@ export class StateService {
 
     for (const [userId, states] of userStateByUser.entries()) {
       const maxRating = Math.max(...states.map((s) => s.rating || 0));
+      const isStarred = states.some((s) => Boolean((s as any).isStarred));
       const isCompleted = states.some((s) => s.readStatus === 'completed');
       const isReading = states.some((s) => s.readStatus === 'reading');
       const readStatus = isCompleted
@@ -359,6 +362,7 @@ export class StateService {
         create: {
           userId,
           itemId: targetItemId,
+          isStarred,
           rating: maxRating,
           readStatus,
           currentPage: maxCurrentPage,
@@ -367,6 +371,7 @@ export class StateService {
           lastReadAt: latestReadAt || null,
         },
         update: {
+          isStarred,
           rating: maxRating,
           readStatus,
           currentPage: maxCurrentPage,

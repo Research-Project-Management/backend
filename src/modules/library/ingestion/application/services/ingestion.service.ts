@@ -19,7 +19,7 @@ import {
   IngestionRunSnapshot,
 } from '../../domain/types/ingestion.types';
 import { IngestionRepository } from '../../infrastructure/repositories/ingestion.repository';
-import { IngestionStatus, Prisma } from '@prisma/client';
+import { IngestionStatus, IngestionRun, Prisma } from '@prisma/client';
 import { PipelineService } from './pipeline.service';
 import { QueueService } from './queue.service';
 import { UrlCaptureService } from './url-capture.service';
@@ -86,16 +86,46 @@ export class IngestionService implements IngestionPort {
       }
     }
 
-    // 2. Create IngestionRun Record
-    const run = await this.repo.createRun(
-      { userId: envelope.userId, projectId },
-      {
-        inputParams: envelope as unknown as Prisma.InputJsonValue,
-        inputHash: requestHash,
-        idempotencyKey,
-        contractVersion: envelope.contractVersion || '1.0.0',
-      },
-    );
+    // 2. Create IngestionRun Record with Race Condition Protection (P2002)
+    let run: IngestionRun;
+    try {
+      run = await this.repo.createRun(
+        { userId: envelope.userId, projectId },
+        {
+          inputParams: envelope as unknown as Prisma.InputJsonValue,
+          inputHash: requestHash,
+          idempotencyKey,
+          contractVersion: envelope.contractVersion || '1.0.0',
+        },
+      );
+    } catch (err: any) {
+      // If a concurrent request inserted with the exact same (userId, idempotencyKey), Prisma throws P2002
+      if (idempotencyKey && (err?.code === 'P2002' || err?.message?.includes('Unique constraint'))) {
+        const raceRun = await this.repo.findRunByIdempotencyKey(
+          { userId: envelope.userId, projectId: envelope.projectId },
+          idempotencyKey,
+        );
+        if (raceRun) {
+          if (raceRun.inputHash !== requestHash) {
+            throw new ConflictException(
+              `Idempotency key "${idempotencyKey}" was already used with a different request payload`,
+            );
+          }
+          return {
+            runId: raceRun.id,
+            statusUrl: `/api/v1/library/ingestion/status/${raceRun.id}`,
+            acceptedAt: raceRun.startedAt
+              ? raceRun.startedAt.toISOString()
+              : new Date().toISOString(),
+            requestHash,
+            status: raceRun.status as any,
+            existingItemId: raceRun.itemId ?? undefined,
+            deduplicated: true,
+          };
+        }
+      }
+      throw err;
+    }
 
     const runId = run?.id || randomUUID();
     const statusUrl = `/api/v1/library/ingestion/status/${runId}`;
@@ -111,7 +141,7 @@ export class IngestionService implements IngestionPort {
         ? run.startedAt.toISOString()
         : new Date().toISOString(),
       requestHash,
-      status: (run?.status || IngestionStatus.RECEIVED) as any,
+      status: (run?.status || IngestionStatus.PENDING) as any,
       existingItemId: run?.itemId ?? undefined,
       deduplicated: false,
     };
@@ -174,6 +204,7 @@ export class IngestionService implements IngestionPort {
     runId: string;
     projectId: string;
     status: string;
+    currentStage?: string;
     total: number;
     processed: number;
     percentage: number;
@@ -197,12 +228,13 @@ export class IngestionService implements IngestionPort {
 
     const log = (run.executionLog as any) || {};
     const total = Number(log.total) || 1;
+    const isCompleted =
+      run.status === IngestionStatus.COMPLETED ||
+      (run.status as any) === 'READY';
     const processed =
-      Number(log.processed) ||
-      (run.status === IngestionStatus.READY ? total : 0);
+      Number(log.processed) || (isCompleted ? total : 0);
     const succeeded =
-      Number(log.succeeded) ||
-      (run.status === IngestionStatus.READY && !log.duplicates ? 1 : 0);
+      Number(log.succeeded) || (isCompleted && !log.duplicates ? 1 : 0);
     const duplicates = Number(log.duplicates) || 0;
     const failed =
       Number(log.failed) ||
@@ -213,7 +245,7 @@ export class IngestionService implements IngestionPort {
     const percentage =
       typeof log.percentage === 'number'
         ? log.percentage
-        : run.status === IngestionStatus.READY
+        : isCompleted
           ? 100
           : Math.min(Math.round((processed / total) * 100), 99);
 
@@ -231,8 +263,7 @@ export class IngestionService implements IngestionPort {
           ? [
               {
                 title,
-                status:
-                  run.status === IngestionStatus.READY ? 'SUCCEEDED' : 'FAILED',
+                status: isCompleted ? 'SUCCEEDED' : 'FAILED',
                 itemId: run.itemId || undefined,
               },
             ]
@@ -242,6 +273,7 @@ export class IngestionService implements IngestionPort {
       runId: run.id,
       projectId,
       status: String(run.status),
+      currentStage: (run as any).currentStage || undefined,
       total,
       processed,
       percentage,
@@ -261,7 +293,7 @@ export class IngestionService implements IngestionPort {
       throw new NotFoundException(`Ingestion run '${runId}' not found`);
     }
 
-    await this.repo.updateRunStatus(projectId, runId, IngestionStatus.RECEIVED);
+    await this.repo.updateRunStatus(projectId, runId, IngestionStatus.PENDING);
 
     const envelope = run.inputParams as unknown as IngestionSubmissionEnvelope;
     if (envelope && typeof envelope === 'object') {
@@ -280,7 +312,7 @@ export class IngestionService implements IngestionPort {
 
     return {
       runId,
-      status: IngestionStatus.RECEIVED,
+      status: IngestionStatus.PENDING,
       message: 'Ingestion run retry initiated and enqueued',
     };
   }

@@ -8,11 +8,6 @@ import {
   PageAnchorMatch,
   PageTextExtraction,
 } from '../../infrastructure/providers/full-text.provider';
-import {
-  RagProvider,
-  RagIndexPaperInput,
-  RagIndexResult,
-} from '../../infrastructure/providers/rag.provider';
 import { SearchItemsQueryDto } from '../dtos/search.dto';
 
 @Injectable()
@@ -22,7 +17,6 @@ export class SearchService {
   constructor(
     private readonly repo: SearchRepository,
     private readonly fullText: FullTextProvider,
-    private readonly rag: RagProvider,
   ) {}
 
   /**
@@ -113,12 +107,5 @@ export class SearchService {
       indexedItems: totalTypes,
       indexedAttachments: 0,
     };
-  }
-
-  /**
-   * Uploads and vectorizes an academic paper into Qdrant for RAG.
-   */
-  async indexPaperForRag(item: RagIndexPaperInput): Promise<RagIndexResult> {
-    return this.rag.indexPaper(item);
   }
 }

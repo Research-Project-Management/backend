@@ -1,0 +1,171 @@
+// ============================================================================
+// Library Shared Kernel: Catalog Sub-Domain
+// Self-managed domain schema: Item, Contributor, Relations, Metadata Sources
+// ============================================================================
+
+enum RelationType {
+  cites
+  cited_by
+  replicates
+  extends
+  is_preprint_of
+  is_published_version_of
+  is_translation_of
+  supplements
+  related
+  rebuts
+  uses_dataset
+  survey_of
+}
+
+model Item {
+  id                  String      @id @default(uuid(7)) @db.Uuid
+  title               String
+  itemType            String      @default("journalArticle") @map("type")
+  year                Int?
+  citationKey         String?     @map("citation_key")
+  doi                 String?
+  publicationTitle    String?     @map("publication_title")
+  abstract            String?
+  url                 String?
+  metadata            Json        @default("{}") @db.JsonB
+  userId              String      @map("user_id") @db.Uuid
+  projectId           String?     @map("project_id") @db.Uuid
+  version             Int         @default(1)
+  deletedAt           DateTime?   @map("deleted_at") @db.Timestamptz(6)
+  createdAt           DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Fast-Display Denormalized Fields & Counter Caches
+  hasFile             Boolean     @default(false) @map("has_file")
+  attachmentCount     Int         @default(0) @map("attachment_count")
+  noteCount           Int         @default(0) @map("note_count")
+  firstAuthor         String?     @map("first_author") @db.VarChar(255)
+
+  // Canonical Relations across Library Sub-Domains
+  attachments         Attachment[]
+  contributors        Contributor[]
+  collectionItems     CollectionItem[]
+  itemTags            ItemTag[]
+  notesList           Note[]
+  outgoingRel         ItemRelation[]         @relation("SourceItem")
+  incomingRel         ItemRelation[]         @relation("TargetItem")
+  states              State[]
+  ingestionRuns       IngestionRun[]
+  itemMetadata        ItemMetadata[]
+  publications        UserPublication[]
+
+  @@index([userId, deletedAt])
+  @@index([projectId, deletedAt])
+  @@index([userId, deletedAt, year(sort: Desc), createdAt(sort: Desc)])
+  @@index([userId, itemType])
+  @@index([userId, hasFile, deletedAt])
+  @@index([doi])
+  @@index([citationKey])
+  @@index([publicationTitle])
+  @@index([metadata], type: Gin)
+  @@map("items")
+}
+
+model Contributor {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  itemId      String   @map("item_id") @db.Uuid
+  item        Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  creatorType String   @default("author") @map("creator_type")
+  fieldMode   Int      @default(0) @map("field_mode") // 0 = personal (two-field), 1 = single-field institution
+  firstName   String?  @default("") @map("first_name")
+  lastName    String?  @default("") @map("last_name")
+  fullName    String   @map("full_name")
+  orcid       String?  @map("orcid") @db.VarChar(19) // e.g. "0000-0002-1825-0097"
+  orderIndex  Int      @default(0) @map("order_index")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([itemId, orderIndex])
+  @@index([fullName])
+  @@index([orcid])
+  @@map("contributors")
+}
+
+model ItemRelation {
+  id           String       @id @default(uuid(7)) @db.Uuid
+  sourceItemId String       @map("source_item_id") @db.Uuid
+  sourceItem   Item         @relation("SourceItem", fields: [sourceItemId], references: [id], onDelete: Cascade)
+  targetItemId String       @map("target_item_id") @db.Uuid
+  targetItem   Item         @relation("TargetItem", fields: [targetItemId], references: [id], onDelete: Cascade)
+  relationType RelationType @default(related) @map("relation_type")
+  description  String?      @default("")
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([sourceItemId, targetItemId, relationType])
+  @@index([targetItemId])
+  @@map("item_relations")
+}
+
+model ItemMetadata {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  itemId         String   @map("item_id") @db.Uuid
+  item           Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  sourceUri      String?  @default("") @map("source_uri")
+  sourceProvider String   @default("arxiv") @map("source_provider") @db.VarChar(64)
+  rawPayload     Json     @map("raw_payload") @db.JsonB
+  format         String?  @default("json") @map("format") @db.VarChar(32)
+  fetchedAt      DateTime @default(now()) @map("fetched_at") @db.Timestamptz(6)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([itemId, sourceProvider, createdAt(sort: Desc)])
+  @@index([sourceProvider])
+  @@map("item_metadata")
+}
+
+model Retraction {
+  id               String    @id @default(uuid(7)) @db.Uuid
+  doi              String    @unique @db.VarChar(255)
+  pmid             String?   @db.VarChar(32)
+  title            String?   @db.Text
+  isRetracted      Boolean   @default(true) @map("is_retracted")
+  nature           String    @default("retraction") @db.VarChar(32)
+  retractionDate   DateTime? @map("retraction_date") @db.Timestamptz(6)
+  noticeType       String?   @map("notice_type") @db.VarChar(64)
+  noticeUrl        String?   @map("notice_url") @db.Text
+  reason           String?   @db.Text
+  journal          String?   @db.VarChar(512)
+  source           String    @default("crossref") @db.VarChar(64)
+  rawMetadata      Json?     @map("raw_metadata") @db.JsonB
+  checkedAt        DateTime  @default(now()) @map("checked_at") @db.Timestamptz(6)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([pmid])
+  @@index([isRetracted, nature])
+  @@index([checkedAt(sort: Desc)])
+  @@map("retractions")
+}
+
+model UserPublication {
+  userId            String   @map("user_id") @db.Uuid
+  itemId            String   @map("item_id") @db.Uuid
+  item              Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  contributorId     String?  @map("contributor_id") @db.Uuid
+  isPublic          Boolean  @default(false) @map("is_public")
+  openAccessLicense String?  @map("open_access_license")
+  addedAt           DateTime @default(now()) @map("added_at") @db.Timestamptz(6)
+
+  @@id([userId, itemId])
+  @@index([userId, isPublic])
+  @@index([itemId])
+  @@map("user_publications")
+}
+
+model ItemFieldMapping {
+  itemType   String  @map("item_type") @db.VarChar(64)
+  baseField  String  @map("base_field") @db.VarChar(64)
+  fieldKey   String  @map("field_key") @db.VarChar(64)
+  fieldLabel String? @map("field_label") @db.VarChar(128)
+  orderIndex Int     @default(0) @map("order_index")
+
+  @@id([itemType, baseField])
+  @@index([baseField])
+  @@map("item_field_mappings")
+}
+

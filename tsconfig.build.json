@@ -17,9 +17,9 @@
     "prisma.config.ts"
   ],
   "watchOptions": {
-    "watchFile": "fixedPollingInterval",
-    "watchDirectory": "fixedPollingInterval",
-    "fallbackPolling": "fixedInterval",
+    "watchFile": "useFsEvents",
+    "watchDirectory": "useFsEvents",
+    "fallbackPolling": "dynamicpriority",
     "synchronousWatchDirectory": false,
     "excludeDirectories": ["**/node_modules", "dist"]
   }

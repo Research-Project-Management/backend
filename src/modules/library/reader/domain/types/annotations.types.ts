@@ -6,6 +6,7 @@ export const AnnotationType = {
   rect: 'rect',
   text: 'text',
   image: 'image',
+  ink: 'ink',
 } as const;
 
 export type AnnotationType =

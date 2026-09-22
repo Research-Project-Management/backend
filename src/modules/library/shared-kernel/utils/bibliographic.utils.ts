@@ -418,40 +418,169 @@ export function cleanCommentText(comment?: string | null): string | undefined {
   return cleaned;
 }
 
+const UNICODE_SUB_MAP: Record<string, string> = {
+  '0': '₀',
+  '1': '₁',
+  '2': '₂',
+  '3': '₃',
+  '4': '₄',
+  '5': '₅',
+  '6': '₆',
+  '7': '₇',
+  '8': '₈',
+  '9': '₉',
+  '+': '₊',
+  '-': '₋',
+  '=': '₌',
+  '(': '₍',
+  ')': '₎',
+  a: 'ₐ',
+  e: 'ₑ',
+  o: 'ₒ',
+  x: 'ₓ',
+  h: 'ₕ',
+  k: 'ₖ',
+  l: 'ₗ',
+  m: 'ₘ',
+  n: 'ₙ',
+  p: 'ₚ',
+  s: 'ₛ',
+  t: 'ₜ',
+  i: 'ᵢ',
+  j: 'ⱼ',
+  r: 'ᵣ',
+  u: 'ᵤ',
+  v: 'ᵥ',
+};
+
+const UNICODE_SUP_MAP: Record<string, string> = {
+  '0': '⁰',
+  '1': '¹',
+  '2': '²',
+  '3': '³',
+  '4': '⁴',
+  '5': '⁵',
+  '6': '⁶',
+  '7': '⁷',
+  '8': '⁸',
+  '9': '⁹',
+  '+': '⁺',
+  '-': '⁻',
+  '=': '⁼',
+  '(': '⁽',
+  ')': '⁾',
+  n: 'ⁿ',
+  i: 'ⁱ',
+  x: 'ˣ',
+  y: 'ʸ',
+  t: 'ᵗ',
+  a: 'ᵃ',
+  b: 'ᵇ',
+  c: 'ᶜ',
+  d: 'ᵈ',
+  e: 'ᵉ',
+};
+
+export function convertSubscriptsToUnicode(str: string): string {
+  return str
+    .split('')
+    .map((c) => UNICODE_SUB_MAP[c.toLowerCase()] || c)
+    .join('');
+}
+
+export function convertSuperscriptsToUnicode(str: string): string {
+  return str
+    .split('')
+    .map((c) => UNICODE_SUP_MAP[c.toLowerCase()] || c)
+    .join('');
+}
+
+const MATH_BLOCK_REGEX =
+  /(?:\$\$[\s\S]*?\$\$|\$(?!\s)(?:[^\$\r\n\\]|\\.)+?(?<!\s)\$|\\\([\s\S]*?\\\)|\\\[[\s\S]*?\\\]|\\begin\{([a-zA-Z*]+)\}[\s\S]*?\\end\{\1\})/g;
+
 /**
  * Sanitizes and normalizes an academic paper abstract.
+ * 0. Protects mathematical formulas ($...$, $$...$$, \(...\), \[...\], \begin{...}...\end{...}) and pre-extracts JATS <tex-math>.
  * 1. Pre-processes JATS XML (<jats:...>), PubMed (<AbstractText>), and HTML tags before stripping.
- * 2. Decodes HTML entities and strips remaining XML/HTML tags and LaTeX braces.
- * 3. Strips leading "Abstract", "ABSTRACT", "Summary", "Graphical Abstract" prefixes.
- * 4. Removes repeated year extraction artifacts (e.g. "(2012)(2013)(2014)(2015)(2016)(2017).").
- * 5. Removes trailing author contribution, publisher copyright banners (Elsevier, Springer, Wiley, MDPI, IEEE, ACM), and index terms noise.
- * 6. Unwraps single hard line-breaks within paragraphs while preserving double-newline paragraph separation.
- * 7. Normalizes punctuation spacing and fixes hyphenated words broken across line wraps ("stochas- tic" -> "stochastic").
+ * 2. Converts chemical and numerical <sub>/<sup> to native Unicode (H₂O, 10⁻⁵).
+ * 3. Normalizes structured section titles into formatted Markdown bold headings (**Background:**).
+ * 4. Decodes HTML entities and strips remaining XML/HTML tags and non-math formatting braces.
+ * 5. Strips leading "Abstract", "ABSTRACT", "Summary", "Graphical Abstract" prefixes.
+ * 6. Removes repeated year extraction artifacts (e.g. "(2012)(2013)(2014)(2015)(2016)(2017).").
+ * 7. Removes trailing author contribution, publisher copyright banners (Elsevier, Springer, Wiley, MDPI, IEEE, ACM), and index terms noise.
+ * 8. Unwraps single hard line-breaks within paragraphs while preserving double-newline paragraph separation.
+ * 9. Restores preserved mathematical formulas completely intact.
  */
 export function cleanAbstractText(text?: string | null): string | undefined {
   if (!text || typeof text !== 'string') return undefined;
 
-  // 0. Fix hyphenated words broken across line wraps before tag/whitespace stripping
-  let cleaned = text.replace(
+  let cleaned = text;
+
+  // 0a. Pre-extract JATS XML tex-math tags into standard LaTeX math before masking
+  cleaned = cleaned.replace(
+    /<(?:jats:)?disp-formula[^>]*>[\s\S]*?<(?:jats:)?tex-math[^>]*>([\s\S]*?)<\/(?:jats:)?tex-math>[\s\S]*?<\/(?:jats:)?disp-formula>/gi,
+    (_, math) => {
+      const trimmed = math.trim().replace(/^<!\[CDATA\[([\s\S]*?)\]\]>$/, '$1').trim();
+      const content = trimmed.replace(/^\$\$?([\s\S]*?)\$\$?$/, '$1').trim();
+      return `\n\n$$${content}$$\n\n`;
+    },
+  );
+  cleaned = cleaned.replace(
+    /<(?:jats:)?(?:inline-formula[^>]*>[\s\S]*?)?<(?:jats:)?tex-math[^>]*>([\s\S]*?)<\/(?:jats:)?tex-math>(?:[\s\S]*?<\/(?:jats:)?inline-formula>)?/gi,
+    (_, math) => {
+      const trimmed = math.trim().replace(/^<!\[CDATA\[([\s\S]*?)\]\]>$/, '$1').trim();
+      const content = trimmed.replace(/^\$([\s\S]*?)\$$/, '$1').trim();
+      return `$${content}$`;
+    },
+  );
+
+  // 0b. Protect mathematical formulas from accidental tag-stripping or LaTeX brace removal
+  const mathPlaceholders: string[] = [];
+  cleaned = cleaned.replace(MATH_BLOCK_REGEX, (match) => {
+    const placeholder = `@@MATH_BLOCK_${mathPlaceholders.length}@@`;
+    mathPlaceholders.push(match);
+    return placeholder;
+  });
+
+  // 1. Fix hyphenated words broken across line wraps before tag/whitespace stripping
+  cleaned = cleaned.replace(
     /([a-zA-Z]{2,})-\s*\r?\n\s*([a-zA-Z]{2,})/g,
     '$1$2',
   );
 
-  // 1. Structured JATS / PubMed / HTML Pre-Processing
-  // Remove abstract headings inside JATS/HTML tags
+  // 2. Structured JATS / PubMed / HTML Pre-Processing
+  // Convert <sub> and <sup> tags to scientific Unicode characters before stripping
+  cleaned = cleaned.replace(
+    /<(?:jats:)?sub[^>]*>([\s\S]*?)<\/(?:jats:)?sub>/gi,
+    (_, content) => convertSubscriptsToUnicode(content.trim()),
+  );
+  cleaned = cleaned.replace(
+    /<(?:jats:)?sup[^>]*>([\s\S]*?)<\/(?:jats:)?sup>/gi,
+    (_, content) => convertSuperscriptsToUnicode(content.trim()),
+  );
+
+  // Remove generic abstract headings inside JATS/HTML tags
   cleaned = cleaned.replace(
     /<(?:jats:)?title[^>]*>\s*(?:Abstract|Summary|Résumé|Overview)\s*<\/(?:jats:)?title>/gi,
     '',
   );
-  // Convert structured section titles into formatted headings (e.g. "Background:", "Methods:")
+  // Convert structured section titles into formatted Markdown bold headings (e.g. "**Background:** ", "**Methods:** ")
   cleaned = cleaned.replace(
-    /<(?:jats:)?title[^>]*>(.*?)<\/(?:jats:)?title>/gi,
-    '\n\n$1: ',
+    /<(?:jats:)?title[^>]*>([\s\S]*?)<\/(?:jats:)?title>/gi,
+    (_, title) => {
+      const cleanTitle = title.trim().replace(/[:.\s]+$/, '');
+      return cleanTitle ? `\n\n**${cleanTitle}:** ` : '';
+    },
   );
   // PubMed structured abstract tags: <AbstractText Label="BACKGROUND">...</AbstractText>
   cleaned = cleaned.replace(
-    /<AbstractText\s+[^>]*Label=["']([^"']+)["'][^>]*>([\s\S]*?)<\/AbstractText>/gi,
-    '\n\n$1: $2',
+    /<AbstractText\s+[^>]*Label=["']\s*([^"']+?)\s*["'][^>]*>([\s\S]*?)<\/AbstractText>/gi,
+    (_, label, content) => `\n\n**${label.trim().toUpperCase()}:** ${content.trim()}`,
+  );
+  // Unlabeled AbstractText tags become paragraph breaks
+  cleaned = cleaned.replace(
+    /<AbstractText[^>]*>([\s\S]*?)<\/AbstractText>/gi,
+    '\n\n$1',
   );
   // Convert paragraph break tags to newlines
   cleaned = cleaned.replace(/<\/(?:jats:)?p>/gi, '\n\n');
@@ -459,8 +588,10 @@ export function cleanAbstractText(text?: string | null): string | undefined {
   cleaned = cleaned.replace(/<br\s*\/?>/gi, '\n');
   cleaned = cleaned.replace(/<\/(?:jats:)?sec>/gi, '\n\n');
 
-  // Strip remaining XML/HTML tags, decode entities, and strip LaTeX braces
-  cleaned = stripXmlAndHtmlTags(cleaned);
+  // Strip remaining XML/HTML tags without flattening paragraph newlines
+  cleaned = cleaned
+    .replace(/<\/?[a-zA-Z0-9_:-]+(?:\s+[^>]*?)?\/?>/g, ' ')
+    .replace(/[ \t]+([.,;:!?])/g, '$1');
   cleaned = decodeHtmlEntities(cleaned);
   cleaned = stripLatexBraces(cleaned);
 
@@ -479,9 +610,9 @@ export function cleanAbstractText(text?: string | null): string | undefined {
   );
 
   // 3. Remove repeated parenthesized / bracketed year-chain extraction artifacts
-  cleaned = cleaned.replace(/(?:\((?:19|20)\d{2}\)\s*){2,}\.?/g, '');
-  cleaned = cleaned.replace(/(?:\[(?:19|20)\d{2}\]\s*){2,}\.?/g, '');
-  cleaned = cleaned.replace(/\((?:(?:19|20)\d{2}[,\s;]*){3,}\)\.?/g, '');
+  cleaned = cleaned.replace(/(?:\((?:19|20)\d{2}\)\s*){2,}(\.)?/g, (_, dot) => (dot ? '.' : ''));
+  cleaned = cleaned.replace(/(?:\[(?:19|20)\d{2}\]\s*){2,}(\.)?/g, (_, dot) => (dot ? '.' : ''));
+  cleaned = cleaned.replace(/\((?:(?:19|20)\d{2}[,\s;]*){3,}\)(\.)?/g, (_, dot) => (dot ? '.' : ''));
 
   // 4. Remove trailing author contribution / footnote / correspondence noise
   cleaned = cleaned.replace(
@@ -548,6 +679,14 @@ export function cleanAbstractText(text?: string | null): string | undefined {
     .filter((p) => p.length > 0);
 
   cleaned = normalizedParagraphs.join('\n\n').trim();
+
+  // 8. Restore preserved mathematical formulas completely intact
+  if (mathPlaceholders.length > 0) {
+    cleaned = cleaned.replace(/@@MATH_BLOCK_(\d+)@@/g, (_, index) => {
+      const idx = parseInt(index, 10);
+      return mathPlaceholders[idx] !== undefined ? mathPlaceholders[idx] : _;
+    });
+  }
 
   if (
     !cleaned ||

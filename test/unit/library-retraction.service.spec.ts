@@ -42,65 +42,69 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
     const recordsMap = new Map<string, any>();
 
     // Mock Prisma Service
+    const mockRetractionOps = {
+      count: jest.fn(async (args?: any) => {
+        if (!args?.where) return recordsMap.size;
+        if (args.where.isRetracted === true) {
+          let c = 0;
+          for (const v of recordsMap.values()) if (v.isRetracted) c++;
+          return c;
+        }
+        if (args.where.isRetracted === false) {
+          let c = 0;
+          for (const v of recordsMap.values()) if (!v.isRetracted) c++;
+          return c;
+        }
+        return recordsMap.size;
+      }),
+      findFirst: jest.fn(async (args?: any) => {
+        const where = args?.where;
+        if (!where) {
+          return recordsMap.values().next().value || null;
+        }
+        for (const orCond of where.OR || []) {
+          if (orCond.doi && recordsMap.has(orCond.doi.toLowerCase())) {
+            return recordsMap.get(orCond.doi.toLowerCase());
+          }
+          if (orCond.pmid) {
+            for (const r of recordsMap.values()) {
+              if (r.pmid === orCond.pmid) return r;
+            }
+          }
+        }
+        return null;
+      }),
+      findMany: jest.fn(async ({ where }: any) => {
+        const list: any[] = [];
+        for (const v of recordsMap.values()) {
+          if (
+            where?.isRetracted !== undefined &&
+            v.isRetracted !== where.isRetracted
+          ) {
+            continue;
+          }
+          list.push(v);
+        }
+        return list;
+      }),
+      upsert: jest.fn(async ({ where, create, update }: any) => {
+        const key = where.doi.toLowerCase();
+        const existing = recordsMap.get(key);
+        const merged = { ...(existing || create), ...update, doi: key };
+        recordsMap.set(key, merged);
+        return merged;
+      }),
+      groupBy: jest.fn(async () => [
+        { source: 'retraction_watch', _count: 2 },
+      ]),
+    };
+
     mockPrisma = {
-      retractionRecord: {
-        count: jest.fn(async (args?: any) => {
-          if (!args?.where) return recordsMap.size;
-          if (args.where.isRetracted === true) {
-            let c = 0;
-            for (const v of recordsMap.values()) if (v.isRetracted) c++;
-            return c;
-          }
-          if (args.where.isRetracted === false) {
-            let c = 0;
-            for (const v of recordsMap.values()) if (!v.isRetracted) c++;
-            return c;
-          }
-          return recordsMap.size;
-        }),
-        findFirst: jest.fn(async (args?: any) => {
-          const where = args?.where;
-          if (!where) {
-            return recordsMap.values().next().value || null;
-          }
-          for (const orCond of where.OR || []) {
-            if (orCond.doi && recordsMap.has(orCond.doi.toLowerCase())) {
-              return recordsMap.get(orCond.doi.toLowerCase());
-            }
-            if (orCond.pmid) {
-              for (const r of recordsMap.values()) {
-                if (r.pmid === orCond.pmid) return r;
-              }
-            }
-          }
-          return null;
-        }),
-        findMany: jest.fn(async ({ where }: any) => {
-          const list: any[] = [];
-          for (const v of recordsMap.values()) {
-            if (
-              where?.isRetracted !== undefined &&
-              v.isRetracted !== where.isRetracted
-            ) {
-              continue;
-            }
-            list.push(v);
-          }
-          return list;
-        }),
-        upsert: jest.fn(async ({ where, create, update }: any) => {
-          const key = where.doi.toLowerCase();
-          const existing = recordsMap.get(key);
-          const merged = { ...(existing || create), ...update, doi: key };
-          recordsMap.set(key, merged);
-          return merged;
-        }),
-        groupBy: jest.fn(async () => [
-          { source: 'retraction_watch', _count: 2 },
-        ]),
-      },
+      retraction: mockRetractionOps,
+      retractionRecord: mockRetractionOps,
       item: {
         findFirst: jest.fn(),
+        findUnique: jest.fn().mockResolvedValue({ metadata: {} }),
         findMany: jest.fn(),
         update: jest.fn(),
         count: jest.fn().mockResolvedValue(10),
@@ -222,8 +226,10 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
         expect.objectContaining({
           where: { id: 'item-123' },
           data: expect.objectContaining({
-            isRetracted: true,
-            retractionNature: 'retraction',
+            metadata: expect.objectContaining({
+              isRetracted: true,
+              retractionNature: 'retraction',
+            }),
           }),
         }),
       );
@@ -272,6 +278,11 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
           title: 'Wakefield MMR Paper',
           doi: '10.1016/s0140-6736(97)11096-0',
           pmid: null,
+          metadata: {
+            isRetracted: false,
+            retractionNature: null,
+            retractionCheckedAt: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString(),
+          },
           isRetracted: false,
           retractionNature: null,
           retractionCheckedAt: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000),
@@ -281,6 +292,10 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
           title: 'Manual flagged item',
           doi: '10.1016/s0140-6736(97)11096-0',
           pmid: null,
+          metadata: {
+            isRetracted: true,
+            retractionNature: 'manual',
+          },
           isRetracted: true,
           retractionNature: 'manual',
           retractionCheckedAt: null,

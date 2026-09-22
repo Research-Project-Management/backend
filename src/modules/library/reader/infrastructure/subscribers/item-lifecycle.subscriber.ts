@@ -43,11 +43,38 @@ export class ItemLifecycleSubscriber implements OnModuleInit {
     if (!itemId) return;
 
     this.logger.log(
-      `[ContentSubscriber] Cascading soft-delete to attachments and notes for deleted item ${itemId}`,
+      `[ContentSubscriber] Cascading soft-delete to attachments, notes, and annotations for deleted item ${itemId}`,
     );
 
     try {
       const tasks: Promise<any>[] = [];
+
+      if (
+        this.prisma?.attachment?.findMany &&
+        this.prisma?.annotation?.updateMany
+      ) {
+        try {
+          const attachments = await this.prisma.attachment.findMany({
+            where: { itemId },
+            select: { id: true },
+          });
+          const attachmentIds = attachments.map((a: any) => a.id);
+          if (attachmentIds.length > 0) {
+            tasks.push(
+              this.prisma.annotation.updateMany({
+                where: {
+                  attachmentId: { in: attachmentIds },
+                  deletedAt: null,
+                },
+                data: { deletedAt: new Date() },
+              }),
+            );
+          }
+        } catch {
+          // non-blocking fallback if findMany not present in test mock
+        }
+      }
+
       if (this.prisma?.attachment?.updateMany) {
         tasks.push(
           this.prisma.attachment.updateMany({

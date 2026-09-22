@@ -16,6 +16,7 @@ import {
   READER_FACADE,
   IReaderFacade,
 } from '@/modules/library/reader/reader.facade';
+import { IngestionRepository } from '@/modules/library/ingestion/infrastructure/repositories/ingestion.repository';
 import { ItemDetail } from '@/modules/library/bibliography/domain/ports/items.ports';
 import {
   normalizeTitleForDedupe,
@@ -61,6 +62,7 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
     let mockReaderFacade: jest.Mocked<IReaderFacade>;
     let mockTx: any;
     let mockHelpers: jest.Mocked<TransactionHelpers>;
+    let mockIngestionRepo: any;
 
     beforeEach(async () => {
       mockHelpers = {
@@ -97,6 +99,21 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
           delete: jest.fn().mockResolvedValue({}),
           update: jest.fn().mockResolvedValue({}),
         }),
+        contributor: fromPartial({
+          deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+          createMany: jest.fn().mockResolvedValue({ count: 0 }),
+          count: jest.fn().mockResolvedValue(0),
+        }),
+        userPublication: fromPartial({
+          findMany: jest.fn().mockResolvedValue([]),
+          findUnique: jest.fn().mockResolvedValue(null),
+          create: jest.fn().mockResolvedValue({}),
+          update: jest.fn().mockResolvedValue({}),
+          delete: jest.fn().mockResolvedValue({}),
+        }),
+        itemMetadata: fromPartial({
+          updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        }),
       });
 
       mockLibraryTx = {
@@ -113,6 +130,10 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
       mockReaderFacade = fromPartial({
         reassignContentToItem: jest.fn().mockResolvedValue(undefined),
       });
+      mockIngestionRepo = fromPartial({
+        findIngestionDuplicateSuspects: jest.fn().mockResolvedValue([]),
+        resolveReviewCasesForItems: jest.fn().mockResolvedValue(undefined),
+      });
       mockPrisma = fromPartial({});
 
       const module: TestingModule = await Test.createTestingModule({
@@ -122,6 +143,7 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
           { provide: TransactionService, useValue: mockLibraryTx },
           { provide: BIBLIOGRAPHY_FACADE, useValue: mockBibliographyFacade },
           { provide: READER_FACADE, useValue: mockReaderFacade },
+          { provide: IngestionRepository, useValue: mockIngestionRepo },
         ],
       }).compile();
 
@@ -196,6 +218,149 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
       expect(clusters[0].items).toHaveLength(2);
     });
 
+    it('should detect duplicate items via exact arXiv ID', async () => {
+      mockBibliographyFacade.findDuplicateCandidateItems.mockResolvedValueOnce([
+        fromPartial({
+          id: 'item-arxiv-1',
+          title: 'LoRA: Low-Rank Adaptation of Large Language Models',
+          metadata: { arxivId: '2106.09685' },
+          year: 2021,
+        }),
+        fromPartial({
+          id: 'item-arxiv-2',
+          title: 'LoRA preprint',
+          metadata: { arxivId: '2106.09685v2' },
+          year: 2021,
+        }),
+      ]);
+
+      const clusters = await service.detectDuplicates(
+        mockUserId,
+        mockProjectId,
+      );
+      expect(clusters).toHaveLength(1);
+      expect(clusters[0].matchReason).toBe('EXACT_ARXIV');
+      expect(clusters[0].confidence).toBe(1.0);
+      expect(clusters[0].items).toHaveLength(2);
+    });
+
+    it('should detect duplicate items via exact PMID and ISBN', async () => {
+      mockBibliographyFacade.findDuplicateCandidateItems.mockResolvedValueOnce([
+        fromPartial({
+          id: 'item-pmid-1',
+          title: 'CRISPR-Cas9 structures',
+          metadata: { pmid: '24507850' },
+          year: 2014,
+        }),
+        fromPartial({
+          id: 'item-pmid-2',
+          title: 'CRISPR Cas9 structural biology',
+          metadata: { pmid: ' 24507850 ' },
+          year: 2014,
+        }),
+        fromPartial({
+          id: 'item-isbn-1',
+          title: 'Clean Code',
+          metadata: { isbn: '978-0-13-235088-4' },
+          year: 2008,
+        }),
+        fromPartial({
+          id: 'item-isbn-2',
+          title: 'Clean Code: A Handbook',
+          metadata: { isbn: '9780132350884' },
+          year: 2008,
+        }),
+      ]);
+
+      const clusters = await service.detectDuplicates(
+        mockUserId,
+        mockProjectId,
+      );
+      expect(clusters).toHaveLength(2);
+      expect(clusters.some((c) => c.matchReason === 'EXACT_PMID')).toBe(true);
+      expect(clusters.some((c) => c.matchReason === 'EXACT_ISBN')).toBe(true);
+    });
+
+    it('should detect ingestion suspect pairs flagged during pipeline execution', async () => {
+      mockIngestionRepo.findIngestionDuplicateSuspects.mockResolvedValueOnce([
+        {
+          runId: 'run-12345678',
+          createdItemId: 'item-new',
+          targetItemId: 'item-existing',
+          confidence: 0.88,
+          matchReason: 'PROBABLE_MATCH',
+        },
+      ]);
+
+      mockBibliographyFacade.findDuplicateCandidateItems.mockResolvedValueOnce([
+        fromPartial({
+          id: 'item-new',
+          title: 'Graph Neural Networks in Action',
+          year: 2023,
+        }),
+        fromPartial({
+          id: 'item-existing',
+          title: 'Graph Neural Networks in Action (Early Access)',
+          year: 2023,
+        }),
+      ]);
+
+      const clusters = await service.detectDuplicates(
+        mockUserId,
+        mockProjectId,
+      );
+      expect(clusters).toHaveLength(1);
+      expect(clusters[0].matchReason).toBe('INGESTION_SUSPECT');
+      expect(clusters[0].confidence).toBe(0.88);
+      expect(clusters[0].items).toHaveLength(2);
+    });
+
+    it('should borrow contributors from donor during merge when primary is missing authors', async () => {
+      const primaryItem = fromPartial<ItemDetail>({
+        id: 'primary-no-authors',
+        title: 'Deep Learning without authors',
+        version: 1,
+        contributors: [],
+      });
+      const duplicateItem = fromPartial<ItemDetail>({
+        id: 'dup-with-authors',
+        title: 'Deep Learning',
+        version: 1,
+        contributors: [
+          {
+            fullName: 'Yann LeCun',
+            creatorType: 'author',
+            orderIndex: 0,
+          },
+        ],
+      });
+
+      mockBibliographyFacade.findByIds.mockResolvedValueOnce([
+        primaryItem,
+        duplicateItem,
+      ]);
+
+      await service.mergeDuplicates(
+        mockUserId,
+        {
+          primaryItemId: 'primary-no-authors',
+          duplicateItemIds: ['dup-with-authors'],
+          projectId: mockProjectId,
+        },
+        mockProjectId,
+      );
+
+      // Verify contributors were copied to primary item
+      expect(mockTx.contributor.createMany).toHaveBeenCalledWith({
+        data: expect.arrayContaining([
+          expect.objectContaining({
+            itemId: 'primary-no-authors',
+            fullName: 'Yann LeCun',
+          }),
+        ]),
+      });
+    });
+
     it('should acquire pg_advisory_xact_lock and execute merge atomically', async () => {
       const primaryItem = fromPartial<ItemDetail>({
         id: 'primary-1',
@@ -247,7 +412,9 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
           where: { id: 'dup-2' },
           data: expect.objectContaining({
             deletedAt: expect.any(Date),
-            extra: expect.stringContaining('"mergedIntoId":"primary-1"'),
+            metadata: expect.objectContaining({
+              mergedIntoId: 'primary-1',
+            }),
           }),
         }),
       );
@@ -356,6 +523,101 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
       await expect(
         service.autoResolveCluster(mockUserId, clusters[0].clusterId),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should transfer user_publications to primary item and delete duplicate publications', async () => {
+      const primaryItem = fromPartial<ItemDetail>({
+        id: 'primary-pub-item',
+        title: 'Primary Publication',
+        version: 1,
+      });
+      const duplicateItem = fromPartial<ItemDetail>({
+        id: 'dup-pub-item',
+        title: 'Duplicate Publication',
+        version: 1,
+      });
+
+      mockBibliographyFacade.findByIds.mockResolvedValueOnce([
+        primaryItem,
+        duplicateItem,
+      ]);
+
+      mockTx.userPublication.findMany.mockResolvedValueOnce([
+        {
+          userId: mockUserId,
+          itemId: 'dup-pub-item',
+          contributorId: 'contrib-123',
+          isPublic: true,
+          openAccessLicense: 'CC-BY-4.0',
+          addedAt: new Date('2026-01-01'),
+        },
+      ]);
+      mockTx.userPublication.findUnique.mockResolvedValueOnce(null);
+
+      await service.mergeDuplicates(
+        mockUserId,
+        {
+          primaryItemId: 'primary-pub-item',
+          duplicateItemIds: ['dup-pub-item'],
+          projectId: mockProjectId,
+        },
+        mockProjectId,
+      );
+
+      // Verify userPublication was created for primary item
+      expect(mockTx.userPublication.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          userId: mockUserId,
+          itemId: 'primary-pub-item',
+          isPublic: true,
+          openAccessLicense: 'CC-BY-4.0',
+          contributorId: 'contrib-123',
+        }),
+      });
+
+      // Verify duplicate record was deleted
+      expect(mockTx.userPublication.delete).toHaveBeenCalledWith({
+        where: {
+          userId_itemId: {
+            userId: mockUserId,
+            itemId: 'dup-pub-item',
+          },
+        },
+      });
+    });
+
+    it('should re-parent upstream item_metadata snapshots to primary item', async () => {
+      const primaryItem = fromPartial<ItemDetail>({
+        id: 'primary-meta-item',
+        title: 'Primary Meta Item',
+        version: 1,
+      });
+      const duplicateItem = fromPartial<ItemDetail>({
+        id: 'dup-meta-item',
+        title: 'Duplicate Meta Item',
+        version: 1,
+      });
+
+      mockBibliographyFacade.findByIds.mockResolvedValueOnce([
+        primaryItem,
+        duplicateItem,
+      ]);
+
+      await service.mergeDuplicates(
+        mockUserId,
+        {
+          primaryItemId: 'primary-meta-item',
+          duplicateItemIds: ['dup-meta-item'],
+          projectId: mockProjectId,
+        },
+        mockProjectId,
+      );
+
+      // Verify itemMetadata snapshots re-parented to primary item
+      expect(mockTx.itemMetadata.updateMany).toHaveBeenCalledWith({
+        where: { itemId: { in: ['dup-meta-item'] } },
+        data: { itemId: 'primary-meta-item' },
+      });
     });
   });
 });

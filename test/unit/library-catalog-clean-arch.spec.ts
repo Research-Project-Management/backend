@@ -169,7 +169,6 @@ describe('Catalog Bounded Context - Clean Architecture & DDD', () => {
         }),
         delete: jest.fn().mockResolvedValue(undefined),
         purge: jest.fn().mockResolvedValue(true),
-        updateRagStatus: jest.fn().mockResolvedValue(undefined),
         setMyPublication: jest.fn().mockResolvedValue(null),
         getRelations: jest.fn().mockResolvedValue([]),
         putRelation: jest.fn().mockResolvedValue({ id: 'rel-1' }),

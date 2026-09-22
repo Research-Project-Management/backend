@@ -182,7 +182,7 @@ Devlin, J., Chang, M. W., Lee, K., & Toutanova, K. (2019). BERT: Pre-training of
         processedPaperIds.push(item.id);
 
         // Store authoritative grobid_fulltext record
-        await prisma.metadataSourceRecord.create({
+        await prisma.itemMetadata.create({
           data: {
             itemId: item.id,
             sourceProvider: 'grobid_fulltext',

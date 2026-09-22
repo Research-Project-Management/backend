@@ -75,20 +75,29 @@ export class ExtractionRepository {
     });
   }
 
-  async saveMetadataSourceRecord(
+  async saveItemMetadata(
     itemId: string,
     sourceProvider: string,
     rawPayload: any,
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    return client.metadataSourceRecord.create({
+    return client.itemMetadata.create({
       data: {
         itemId,
         sourceProvider,
         rawPayload,
       },
     });
+  }
+
+  async saveMetadataSourceRecord(
+    itemId: string,
+    sourceProvider: string,
+    rawPayload: any,
+    tx?: Prisma.TransactionClient,
+  ) {
+    return this.saveItemMetadata(itemId, sourceProvider, rawPayload, tx);
   }
 
   async updateAttachmentMetadata(

@@ -1,0 +1,68 @@
+// ============================================================================
+// Library Shared Kernel: Pipeline Sub-Domain
+// Self-managed domain schema: IngestionRun, IngestionStatus, IngestionStage
+// ============================================================================
+
+enum IngestionStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED_RETRYABLE
+  FAILED_FINAL
+  CANCELLED
+  STALLED
+}
+
+enum IngestionStage {
+  IDENTIFY
+  EXTRACT
+  NORMALIZE
+  ENRICH
+  RECONCILE
+  MATCH
+  COMMIT
+}
+
+model IngestionRun {
+  id              String          @id @default(uuid(7)) @db.Uuid
+  userId          String          @map("user_id") @db.Uuid
+  projectId       String?         @map("project_id") @db.Uuid
+  traceId         String?         @map("trace_id") @db.VarChar(64)
+  inputParams     Json            @map("input_params") @db.JsonB
+  inputHash       String          @map("input_hash") @db.VarChar(64)
+  idempotencyKey  String?         @map("idempotency_key") @db.VarChar(128)
+  contractVersion String          @default("1.0.0") @map("contract_version") @db.VarChar(16)
+  pipelineVersion String          @default("1.0.0") @map("pipeline_version") @db.VarChar(16)
+  status          IngestionStatus @default(PENDING)
+  currentStage    IngestionStage? @map("current_stage")
+  attempts        Int             @default(0)
+  maxRetries      Int             @default(3) @map("max_retries")
+  nextRetryAt     DateTime?       @map("next_retry_at") @db.Timestamptz(6)
+  itemId          String?         @map("item_id") @db.Uuid
+  item            Item?           @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  lastError       String?         @map("last_error")
+  executionLog    Json?           @map("execution_log") @db.JsonB
+  reviewData      Json?           @map("review_data") @db.JsonB
+  startedAt       DateTime        @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt     DateTime?       @map("completed_at") @db.Timestamptz(6)
+  updatedAt       DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // 1. Atomic Idempotency Constraint at Database Engine Level
+  @@unique([userId, idempotencyKey])
+
+  // 2. Query Optimization for User History
+  @@index([userId, startedAt(sort: Desc)])
+  @@index([projectId, startedAt(sort: Desc)])
+
+  // 3. Foreign Key Check Optimization on Item Deletion
+  @@index([itemId])
+
+  // 4. Background Worker Polling & Orphan Recovery
+  @@index([status, nextRetryAt])
+  @@index([status, updatedAt])
+
+  // 5. Content-based Deduplication Index
+  @@index([userId, inputHash])
+
+  @@map("ingestion_runs")
+}

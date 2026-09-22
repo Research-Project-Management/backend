@@ -185,7 +185,7 @@ export class QueryRepository {
       select: {
         id: true,
         title: true,
-        type: true,
+        itemType: true,
         version: true,
         updatedAt: true,
       },
@@ -224,22 +224,30 @@ export class QueryRepository {
   }
 
   /**
-   * Retrieves the latest metadataSourceRecord for an item and provider (e.g. grobid, grobid_fulltext).
+   * Retrieves the latest itemMetadata for an item and provider (e.g. grobid, grobid_fulltext).
    */
-  async findMetadataSourceRecord(
+  async findItemMetadata(
     itemId: string,
     sourceProvider: string,
     tx?: Prisma.TransactionClient,
   ) {
     if (!isUuid(itemId)) return null;
     const client = this.getClient(tx);
-    return client.metadataSourceRecord.findFirst({
+    return client.itemMetadata.findFirst({
       where: {
         itemId,
         sourceProvider,
       },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  async findMetadataSourceRecord(
+    itemId: string,
+    sourceProvider: string,
+    tx?: Prisma.TransactionClient,
+  ) {
+    return this.findItemMetadata(itemId, sourceProvider, tx);
   }
 
   async findMany(
@@ -251,11 +259,13 @@ export class QueryRepository {
         | 'unfiled'
         | 'trash'
         | 'my-publications'
-        | 'publications';
+        | 'publications'
+        | 'starred';
       userId?: string;
       collectionId?: string;
       tagId?: string;
       search?: string;
+      hasFile?: boolean;
       limit?: number;
       cursor?: string;
       projectId?: string;
@@ -377,10 +387,12 @@ export class QueryRepository {
         | 'unfiled'
         | 'trash'
         | 'my-publications'
-        | 'publications';
+        | 'publications'
+        | 'starred';
       collectionId?: string;
       tagId?: string;
       search?: string;
+      hasFile?: boolean;
       projectId?: string;
     },
   ): Prisma.ItemWhereInput {
@@ -404,7 +416,13 @@ export class QueryRepository {
         where.collectionItems = { none: {} };
       } else if (view === 'my-publications' || view === 'publications') {
         where.metadata = { path: ['isMyPublication'], equals: true };
+      } else if (view === 'starred') {
+        where.states = { some: { userId, isStarred: true } };
       }
+    }
+
+    if (options.hasFile !== undefined) {
+      where.hasFile = options.hasFile;
     }
 
     if (options.collectionId) {
@@ -614,7 +632,7 @@ export class QueryRepository {
         id: true,
         userId: true,
         title: true,
-        type: true,
+        itemType: true,
         year: true,
         doi: true,
         contributors: {
@@ -632,7 +650,7 @@ export class QueryRepository {
       id: item.id,
       userId: item.userId,
       title: item.title,
-      itemType: item.type || undefined,
+      itemType: item.itemType || undefined,
       year: item.year,
       doi: item.doi || null,
       primaryAuthors: item.contributors.map(
@@ -660,7 +678,7 @@ export class QueryRepository {
         id: true,
         userId: true,
         title: true,
-        type: true,
+        itemType: true,
         year: true,
         doi: true,
         contributors: {
@@ -863,7 +881,7 @@ export class QueryRepository {
     });
     if (!item) return null;
 
-    const sourceRecord = await client.metadataSourceRecord.findFirst({
+    const sourceRecord = await client.itemMetadata.findFirst({
       where: {
         itemId: itemId,
         sourceProvider: 'grobid_fulltext',

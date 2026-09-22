@@ -118,11 +118,20 @@ export class HistoryRepository implements IHistoryRepository {
   async findVersionById(versionId: string): Promise<
     | (PageVersion & {
         savedBy?: { id: string; name: string; avatar?: string | null };
+        page?: { id: string; projectId: string | null } | null;
       })
     | null
   > {
     const version = await this.prisma.pageVersion.findUnique({
       where: { id: versionId },
+      include: {
+        page: {
+          select: {
+            id: true,
+            projectId: true,
+          },
+        },
+      },
     });
     if (!version) return null;
 

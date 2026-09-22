@@ -7,7 +7,7 @@ import {
   UnprocessableEntityException,
   Optional,
 } from '@nestjs/common';
-import { Prisma, RagStatus } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { QueryRepository } from '../../infrastructure/repositories/query.repository';
 import { CommandRepository } from '../../infrastructure/repositories/command.repository';
 import { CreateItemData, UpdateItemData } from '../../domain/types/items.types';
@@ -78,10 +78,8 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     private readonly tagsService: TagsService,
     private readonly typesService: TypesService,
     private readonly transformer: ItemTransformer,
-    @Optional() private readonly rag?: any,
     @Optional() private readonly validator?: ZoteroSchemaValidatorService,
     @Optional() private readonly grobid?: GrobidClient,
-    @Optional() private readonly semanticSearch?: any,
     @Optional() private readonly syncDelegate?: ItemSyncDelegate,
   ) {}
 
@@ -122,7 +120,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       throw new NotFoundException(`Item ${id} not found or access denied`);
     }
 
-    // 1. Look for authoritative grobid_fulltext record in metadataSourceRecord via QueryRepository
+    // 1. Look for authoritative grobid_fulltext record in itemMetadata via QueryRepository
     const fulltextRecord = await this.query.findMetadataSourceRecord(
       id,
       'grobid_fulltext',
@@ -426,56 +424,6 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     });
   }
 
-  private async executePaperRagIndexing(item: any): Promise<void> {
-    await this.command.updateRagStatus(item.id, {
-      ragStatus: RagStatus.pending,
-      ragLastAttemptAt: new Date(),
-    });
-
-    let localIndexed = false;
-    // 1. In-process Local Semantic Vector Indexing (100% offline, Zero-API)
-    try {
-      if (this.semanticSearch) {
-        await this.semanticSearch.indexItem(item);
-        localIndexed = true;
-      }
-    } catch (err: any) {
-      this.logger.debug(`Local semantic indexing skipped: ${err?.message}`);
-    }
-
-    // 2. External Qdrant indexing if FLUX_AI_URL is available
-    try {
-      const result = await this.rag.indexPaper(item);
-      await this.command.updateRagStatus(item.id, {
-        ragDocId: result.docId,
-        ragStatus: 'indexed',
-        ragIndexedAt: new Date(),
-      });
-      this.logger.log(
-        `Paper ${item.id} successfully indexed into Qdrant (docId: ${result.docId})`,
-      );
-    } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : 'External RAG unavailable';
-      if (localIndexed) {
-        // Local in-process vector search is ready, so mark as indexed!
-        await this.command.updateRagStatus(item.id, {
-          ragStatus: 'indexed',
-          ragIndexedAt: new Date(),
-        });
-        this.logger.log(
-          `Paper ${item.id} indexed into local vector store (external Qdrant offline).`,
-        );
-      } else {
-        await this.command.updateRagStatus(item.id, {
-          ragStatus: 'failed',
-          ragError: message,
-        });
-        this.logger.error(`Failed to index paper ${item.id}: ${message}`);
-      }
-    }
-  }
-
   async reindexItem(userId: string, id: string, projectId?: string) {
     const item = await this.query.findById(userId, id, projectId);
     if (!item) {
@@ -494,13 +442,9 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       });
     });
 
-    this.executePaperRagIndexing(item).catch((err) => {
-      this.logger.error(`Failed to index paper ${id}: ${err.message}`);
-    });
-
     return {
       success: true,
-      message: 'Item re-indexing started',
+      message: 'Item re-indexing requested',
       itemId: id,
     };
   }

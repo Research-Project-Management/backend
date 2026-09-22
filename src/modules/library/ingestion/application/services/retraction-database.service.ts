@@ -101,8 +101,10 @@ export class RetractionDatabaseService implements OnModuleInit {
           create: {
             doi: cleanDoi,
             pmid: cleanPmid,
+            title: item.title || null,
             isRetracted: true,
             nature: item.nature,
+            noticeType: item.nature,
             reason: item.reason || '',
             noticeUrl: item.noticeUrl || null,
             retractionDate: item.retractionDate
@@ -113,8 +115,10 @@ export class RetractionDatabaseService implements OnModuleInit {
           },
           update: {
             pmid: cleanPmid,
+            title: item.title || null,
             isRetracted: true,
             nature: item.nature,
+            noticeType: item.nature,
             reason: item.reason || '',
             noticeUrl: item.noticeUrl || null,
             retractionDate: item.retractionDate
@@ -148,7 +152,10 @@ export class RetractionDatabaseService implements OnModuleInit {
 
       for (const r of records) {
         const details: RetractionDetails = {
-          nature: (r.nature as RetractionNature) || 'retraction',
+          nature:
+            ((r as any).nature as RetractionNature) ||
+            (r.noticeType as RetractionNature) ||
+            'retraction',
           reason: r.reason || '',
           noticeUrl: r.noticeUrl || undefined,
           date: r.retractionDate ? r.retractionDate.toISOString() : undefined,
@@ -219,7 +226,7 @@ export class RetractionDatabaseService implements OnModuleInit {
         }
 
         const details: RetractionDetails = {
-          nature: (record.nature as RetractionNature) || 'retraction',
+          nature: (record.noticeType as RetractionNature) || 'retraction',
           reason: record.reason || '',
           noticeUrl: record.noticeUrl || undefined,
           date: record.retractionDate
@@ -257,6 +264,7 @@ export class RetractionDatabaseService implements OnModuleInit {
         pmid: cleanPmid,
         isRetracted: true,
         nature: details.nature,
+        noticeType: details.nature,
         reason: details.reason || '',
         noticeUrl: details.noticeUrl || null,
         retractionDate: details.date ? new Date(details.date) : null,
@@ -265,6 +273,7 @@ export class RetractionDatabaseService implements OnModuleInit {
       },
       update: {
         nature: details.nature,
+        noticeType: details.nature,
         reason: details.reason || '',
         noticeUrl: details.noticeUrl || null,
         retractionDate: details.date ? new Date(details.date) : null,
@@ -331,8 +340,10 @@ export class RetractionDatabaseService implements OnModuleInit {
             create: {
               doi: cleanDoi,
               pmid: cleanPmid,
+              title: r.title || null,
               isRetracted: true,
               nature: r.nature,
+              noticeType: r.nature,
               reason: r.reason || '',
               noticeUrl: r.noticeUrl || null,
               retractionDate: r.retractionDate
@@ -342,8 +353,10 @@ export class RetractionDatabaseService implements OnModuleInit {
               rawMetadata: r as any,
             },
             update: {
+              title: r.title || null,
               isRetracted: true,
               nature: r.nature,
+              noticeType: r.nature,
               reason: r.reason || '',
               noticeUrl: r.noticeUrl || null,
               retractionDate: r.retractionDate

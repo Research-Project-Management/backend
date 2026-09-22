@@ -317,7 +317,7 @@ export class PipelineService {
           await this.repo.updateRunStatus(
             scopeId,
             runId,
-            IngestionStatus.READY,
+            IngestionStatus.COMPLETED,
             {
               itemId: createdItemIds[0],
               completedAt: new Date(),
@@ -573,7 +573,7 @@ export class PipelineService {
             decision.proposedItem?.title ||
             'Document';
 
-          await this.repo.updateRunStatus(scopeId, runId, IngestionStatus.READY, {
+          await this.repo.updateRunStatus(scopeId, runId, IngestionStatus.COMPLETED, {
             itemId: matchResult.targetItemId,
             completedAt: new Date(),
             executionLog: {
@@ -616,11 +616,11 @@ export class PipelineService {
       return;
     }
 
-    // PROBABLE fuzzy match → Queue for human review
+    // PROBABLE fuzzy match → Record duplicate suspect for library Duplicate Items view (Zotero model: non-blocking, commit continues)
     if (matchResult.matchType === 'PROBABLE' && matchResult.targetItemId) {
       await this.repo.createDecision(runId, {
-        decisionType: 'REVIEW',
-        decisionReason: 'Probable duplicate matched via fuzzy title similarity',
+        decisionType: 'DUPLICATE_SUSPECT',
+        decisionReason: 'Probable duplicate matched via fuzzy title similarity (recorded for Duplicate Items review)',
         proposedItem: decision.proposedItem as unknown as Prisma.InputJsonValue,
         duplicateMatch: matchResult as unknown as Prisma.InputJsonValue,
       });
@@ -637,15 +637,7 @@ export class PipelineService {
           proposedMetadata: decision.proposedItem,
         } as unknown as Prisma.InputJsonValue,
       });
-
-      await this.repo.updateRunStatus(
-        scopeId,
-        runId,
-        IngestionStatus.NEEDS_REVIEW,
-        { completedAt: new Date() },
-      );
-      aggregate.complete();
-      return;
+      // Zotero design: Ingest does not pause or block. Continue to commit so document is immediately in library.
     }
 
     // Stage 6: COMMIT (create new Item via CommitStage with Saga Compensation)
@@ -697,7 +689,7 @@ export class PipelineService {
         createdItem?.title ||
         'Document';
 
-      await this.repo.updateRunStatus(scopeId, runId, IngestionStatus.READY, {
+      await this.repo.updateRunStatus(scopeId, runId, IngestionStatus.COMPLETED, {
         itemId: createdItem?.id,
         completedAt: new Date(),
         executionLog: {

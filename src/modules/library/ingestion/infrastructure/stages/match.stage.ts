@@ -64,7 +64,7 @@ export class MatchStage {
       scopeFilter = { OR: [{ projectId: scope }, { userId: scope }] };
     }
 
-    // ── Stage 1: Exact DOI lookup ─────────────────────────────────────────────
+    // ── Stage 1: Exact Identifier lookups (DOI, arXiv, PMID, ISBN) ───────────
     if (proposedDoi) {
       const doiMatch = await this.prisma.item.findFirst({
         where: {
@@ -83,6 +83,82 @@ export class MatchStage {
           targetItemTitle: doiMatch.title,
           matchReason: 'DOI_EXACT',
           evidence: { doi: proposedDoi },
+        };
+      }
+    }
+
+    const rawArxiv = proposed.arxivId || (proposed as any).metadata?.arxivId;
+    if (rawArxiv) {
+      const cleanArxiv = String(rawArxiv).trim();
+      const baseArxiv = cleanArxiv.replace(/v\d+$/i, '');
+      const arxivMatch = await this.prisma.item.findFirst({
+        where: {
+          ...scopeFilter,
+          deletedAt: null,
+          OR: [
+            { metadata: { path: ['arxivId'], equals: cleanArxiv } },
+            { metadata: { path: ['arxivId'], equals: baseArxiv } },
+          ],
+        },
+        select: { id: true, title: true },
+      });
+
+      if (arxivMatch) {
+        return {
+          matchType: 'EXACT',
+          confidence: 1.0,
+          targetItemId: arxivMatch.id,
+          targetItemTitle: arxivMatch.title,
+          matchReason: 'ARXIV_EXACT',
+          evidence: { arxivId: cleanArxiv },
+        };
+      }
+    }
+
+    const rawPmid = proposed.pmid || (proposed as any).metadata?.pmid;
+    if (rawPmid) {
+      const cleanPmid = String(rawPmid).trim();
+      const pmidMatch = await this.prisma.item.findFirst({
+        where: {
+          ...scopeFilter,
+          deletedAt: null,
+          metadata: { path: ['pmid'], equals: cleanPmid },
+        },
+        select: { id: true, title: true },
+      });
+
+      if (pmidMatch) {
+        return {
+          matchType: 'EXACT',
+          confidence: 1.0,
+          targetItemId: pmidMatch.id,
+          targetItemTitle: pmidMatch.title,
+          matchReason: 'PMID_EXACT',
+          evidence: { pmid: cleanPmid },
+        };
+      }
+    }
+
+    const rawIsbn = proposed.isbn || (proposed as any).metadata?.isbn;
+    if (rawIsbn) {
+      const cleanIsbn = String(rawIsbn).replace(/[-\s]/g, '').trim();
+      const isbnMatch = await this.prisma.item.findFirst({
+        where: {
+          ...scopeFilter,
+          deletedAt: null,
+          metadata: { path: ['isbn'], equals: cleanIsbn },
+        },
+        select: { id: true, title: true },
+      });
+
+      if (isbnMatch) {
+        return {
+          matchType: 'EXACT',
+          confidence: 1.0,
+          targetItemId: isbnMatch.id,
+          targetItemTitle: isbnMatch.title,
+          matchReason: 'ISBN_EXACT',
+          evidence: { isbn: cleanIsbn },
         };
       }
     }

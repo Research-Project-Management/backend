@@ -85,7 +85,7 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
       expect(run.compensatedSteps).toContain('IDENTIFY');
 
       run.completeCompensation();
-      expect(run.status).toBe('FAILED');
+      expect(run.status).toBe('FAILED_FINAL');
       expect(run.errorReason).toBe('Malformed metadata encoding');
 
       const compEvents = run.pullDomainEvents();
@@ -117,6 +117,7 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
       mockRepo = {
         createStage: jest.fn().mockResolvedValue({ id: 'stage-1' } as any),
         updateRunStatus: jest.fn().mockResolvedValue({ id: 'run-1' } as any),
+        updateRunStage: jest.fn().mockResolvedValue({ id: 'run-1' } as any),
       };
       mockCatalogFacade = {
         deleteItem: jest.fn().mockResolvedValue(undefined),
@@ -194,7 +195,7 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
 
       // Verifications
       expect(session.isCompensating).toBe(true);
-      expect(aggregate.status).toBe('FAILED');
+      expect(aggregate.status).toBe('FAILED_FINAL');
       expect(mockRepo.createStage).toHaveBeenCalledWith(
         'run-1',
         expect.objectContaining({
@@ -248,6 +249,7 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
         createCandidate: jest.fn().mockResolvedValue({ id: 'cand-1' }),
         createDecision: jest.fn().mockResolvedValue({ id: 'dec-1' }),
         updateRunStatus: jest.fn().mockResolvedValue({ id: 'run-1' }),
+        updateRunStage: jest.fn().mockResolvedValue({ id: 'run-1' }),
       };
       mockIdentify = {
         execute: jest.fn().mockResolvedValue([
@@ -328,7 +330,7 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
       expect(mockRepo.updateRunStatus).toHaveBeenCalledWith(
         'user-42',
         'run-100',
-        IngestionStatus.READY,
+        IngestionStatus.COMPLETED,
         expect.objectContaining({
           itemId: 'item-saga-100',
         }),

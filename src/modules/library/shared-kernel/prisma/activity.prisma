@@ -1,0 +1,56 @@
+// ============================================================================
+// Library Shared Kernel: Activity & Notes Sub-Domain
+// Self-managed domain schema: UserItemState (State), Notes
+// ============================================================================
+
+enum ReadStatus {
+  unread
+  reading
+  completed
+}
+
+model State {
+  userId         String     @map("user_id") @db.Uuid
+  itemId         String     @map("item_id") @db.Uuid
+  item           Item       @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  readStatus     ReadStatus @default(unread) @map("read_status")
+  isStarred      Boolean    @default(false) @map("is_starred")
+  rating         Int?
+  currentPage    Int?       @map("current_page")
+  scrollPosition Json?      @map("scroll_position")
+  lastOpenedAt   DateTime?  @map("last_opened_at") @db.Timestamptz(6)
+  lastReadAt     DateTime?  @map("last_read_at") @db.Timestamptz(6)
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@id([userId, itemId])
+  @@index([userId, isStarred])
+  @@index([userId, readStatus])
+  @@index([userId, lastOpenedAt(sort: Desc)])
+  @@index([itemId])
+  @@map("user_item_states")
+}
+
+model Note {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  itemId      String?   @map("item_id") @db.Uuid
+  item        Item?     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  title       String    @default("Untitled Note")
+  contentMd   String    @default("") @map("content_md")
+  contentJson Json?     @map("content_json") @db.JsonB
+  tags        String[]  @default([])
+  userId      String    @map("user_id") @db.Uuid
+  createdById String?   @map("created_by_id") @db.Uuid
+  projectId   String?   @map("project_id") @db.Uuid
+  version     Int       @default(1)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  @@index([itemId, deletedAt])
+  @@index([userId, deletedAt])
+  @@index([userId, deletedAt, updatedAt(sort: Desc)])
+  @@index([projectId, deletedAt])
+  @@index([tags], type: Gin)
+  @@map("notes")
+}

@@ -98,6 +98,9 @@ describe('Library Attachments & Storage Integration Suite', () => {
       file: {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
+      itemMetadata: {
+        create: jest.fn().mockResolvedValue({ id: 'source-1' }),
+      },
       metadataSourceRecord: {
         create: jest.fn().mockResolvedValue({ id: 'source-1' }),
       },

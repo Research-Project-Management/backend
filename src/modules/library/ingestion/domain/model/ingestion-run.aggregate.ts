@@ -265,17 +265,19 @@ export class IngestionRunAggregate {
     );
   }
 
-  public fail(reason: string): void {
-    const nextStatus = IngestionStatusVo.create('FAILED');
+  public fail(reason: string, isRetryable = false): void {
+    const nextStatus = IngestionStatusVo.create(
+      isRetryable ? 'FAILED_RETRYABLE' : 'FAILED_FINAL',
+    );
     if (!this._status.canTransitionTo(nextStatus)) {
       throw new Error(
-        `Cannot transition from ${this._status.value} to FAILED.`,
+        `Cannot transition from ${this._status.value} to ${nextStatus.value}.`,
       );
     }
 
     this._status = nextStatus;
     this._errorReason = reason;
-    this._completedAt = new Date();
+    this._completedAt = isRetryable ? null : new Date();
 
     this.recordEvent(
       new IngestionRunFailedDomainEvent(

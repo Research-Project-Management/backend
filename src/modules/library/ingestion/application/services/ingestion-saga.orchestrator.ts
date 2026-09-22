@@ -49,6 +49,11 @@ export class IngestionSagaSession {
     this.aggregate.startStep(stageName);
 
     try {
+      const dbStage = (stageName === 'ENRICH_EXISTING' ? 'ENRICH' : stageName) as any;
+      await this.repo.updateRunStage(this.scopeId, this.runId, dbStage).catch(() => {});
+    } catch {}
+
+    try {
       const result = await action();
       const durationMs = Date.now() - startMs;
       this.aggregate.completeStep(stageName, durationMs);

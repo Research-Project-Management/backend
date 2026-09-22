@@ -6,6 +6,7 @@ import { StateEntity, UpsertStateData } from '../../domain/types/state.types';
 const STATE_SELECT = {
   userId: true,
   itemId: true,
+  isStarred: true,
   readStatus: true,
   rating: true,
   currentPage: true,
@@ -83,6 +84,7 @@ export class StateRepository {
       create: {
         userId,
         itemId,
+        isStarred: data.isStarred ?? false,
         readStatus: dbReadStatus,
         rating: data.rating,
         currentPage: data.currentPage ?? 1,
@@ -91,6 +93,7 @@ export class StateRepository {
         lastReadAt: data.lastReadAt,
       },
       update: {
+        isStarred: data.isStarred,
         readStatus: dbReadStatus,
         rating: data.rating,
         currentPage: data.currentPage,

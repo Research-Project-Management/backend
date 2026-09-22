@@ -98,8 +98,8 @@ async function main() {
         },
       });
 
-      // 2. Upsert grobid_fulltext record in metadataSourceRecord
-      await prisma.metadataSourceRecord.create({
+      // 2. Upsert grobid_fulltext record in itemMetadata
+      await prisma.itemMetadata.create({
         data: {
           itemId: item.id,
           sourceProvider: 'grobid_fulltext',

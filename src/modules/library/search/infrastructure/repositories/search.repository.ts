@@ -54,6 +54,33 @@ export class SearchRepository implements OnModuleInit {
             },
           },
         },
+        {
+          notesList: {
+            some: {
+              deletedAt: null,
+              OR: [
+                { title: { contains: trimmed, mode: 'insensitive' } },
+                { contentMd: { contains: trimmed, mode: 'insensitive' } },
+              ],
+            },
+          },
+        },
+        {
+          attachments: {
+            some: {
+              deletedAt: null,
+              annotations: {
+                some: {
+                  deletedAt: null,
+                  OR: [
+                    { quoteText: { contains: trimmed, mode: 'insensitive' } },
+                    { comment: { contains: trimmed, mode: 'insensitive' } },
+                  ],
+                },
+              },
+            },
+          },
+        },
       ],
     };
   }
@@ -270,7 +297,7 @@ export class SearchRepository implements OnModuleInit {
       where,
       take: 2000,
       select: {
-        type: true,
+        itemType: true,
         year: true,
         itemTags: {
           take: 10,
@@ -286,8 +313,8 @@ export class SearchRepository implements OnModuleInit {
     const tags: Record<string, number> = {};
 
     for (const item of items) {
-      if (item.type) {
-        itemTypes[item.type] = (itemTypes[item.type] || 0) + 1;
+      if (item.itemType) {
+        itemTypes[item.itemType] = (itemTypes[item.itemType] || 0) + 1;
       }
       if (item.year) {
         years[item.year] = (years[item.year] || 0) + 1;
@@ -347,69 +374,7 @@ export class SearchRepository implements OnModuleInit {
     }
   }
 
-  // ── Vector Index Operations ──────────────────────────────────────────────
-  async getVectorRecord(itemId: string) {
-    return this.prisma.metadataSourceRecord.findFirst({
-      where: {
-        itemId,
-        sourceProvider: 'local_embedding',
-      },
-      select: { rawPayload: true },
-    });
-  }
-
-  async upsertVectorRecord(
-    itemId: string,
-    vectorArray: number[],
-    modelName: string,
-  ): Promise<void> {
-    const existing = await this.prisma.metadataSourceRecord.findFirst({
-      where: {
-        itemId,
-        sourceProvider: 'local_embedding',
-      },
-      select: { id: true },
-    });
-
-    const payload = {
-      dimensions: vectorArray.length,
-      vector: vectorArray,
-      model: modelName,
-      updatedAt: new Date().toISOString(),
-    };
-
-    if (existing) {
-      await this.prisma.metadataSourceRecord.update({
-        where: { id: existing.id },
-        data: {
-          rawPayload: payload as any,
-          fetchedAt: new Date(),
-        },
-      });
-    } else {
-      await this.prisma.metadataSourceRecord.create({
-        data: {
-          itemId,
-          source: 'vector',
-          sourceProvider: 'local_embedding',
-          rawPayload: payload as any,
-          fetchedAt: new Date(),
-        },
-      });
-    }
-  }
-
-  async findVectorRecords(itemIds: string[]) {
-    return this.prisma.metadataSourceRecord.findMany({
-      where: {
-        itemId: { in: itemIds },
-        sourceProvider: 'local_embedding',
-      },
-      select: { itemId: true, rawPayload: true },
-    });
-  }
-
-  // ── Semantic Search Operations ───────────────────────────────────────────
+  // ── Project Scope Operations ─────────────────────────────────────────────
   async checkProjectMember(projectId: string, userId: string) {
     return this.prisma.projectMember.findUnique({
       where: {
@@ -419,67 +384,6 @@ export class SearchRepository implements OnModuleInit {
     });
   }
 
-  async findItemsForSemanticSearch(scopeWhere: any) {
-    return this.prisma.item.findMany({
-      where: scopeWhere,
-      select: {
-        id: true,
-        title: true,
-        year: true,
-        doi: true,
-        type: true,
-        metadata: true,
-        abstract: true,
-        contributors: {
-          select: { fullName: true },
-          orderBy: { orderIndex: 'asc' },
-        },
-      },
-    });
-  }
-
-  async findItemWithContributors(itemId: string, scopeWhere: any) {
-    return this.prisma.item.findFirst({
-      where: { id: itemId, ...scopeWhere },
-      include: {
-        contributors: {
-          select: { fullName: true },
-          orderBy: { orderIndex: 'asc' },
-        },
-      },
-    });
-  }
-
-  async findCandidateItemsForSemantic(itemId: string, scopeWhere: any) {
-    return this.prisma.item.findMany({
-      where: {
-        ...scopeWhere,
-        id: { not: itemId },
-      },
-      select: {
-        id: true,
-        title: true,
-        year: true,
-        doi: true,
-        type: true,
-        metadata: true,
-        abstract: true,
-        contributors: {
-          select: { fullName: true },
-          orderBy: { orderIndex: 'asc' },
-        },
-      },
-    });
-  }
-
-  async findItemsForIndexLibrary(scopeWhere: any) {
-    return this.prisma.item.findMany({
-      where: scopeWhere,
-      include: {
-        contributors: { select: { fullName: true } },
-      },
-    });
-  }
 
   // ── Search Attachment Anchor Operations ──────────────────────────────────
   async findAttachmentWithItem(attachmentId: string) {

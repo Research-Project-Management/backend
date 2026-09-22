@@ -1,17 +1,12 @@
 import {
   Controller,
   Get,
-  Post,
   Param,
   Query,
-  Body,
   UseGuards,
-  ForbiddenException,
 } from '@nestjs/common';
 import { SearchService } from '../application/services/search.service';
-import { SemanticSearchService } from '../application/services/semantic-search.service';
 import { SearchItemsQueryDto } from '../application/dtos/search.dto';
-import { SemanticSearchDto } from '../application/dtos/semantic-search.dto';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 
@@ -23,7 +18,6 @@ import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 export class SearchController {
   constructor(
     private readonly searchService: SearchService,
-    private readonly semanticSearch: SemanticSearchService,
   ) {}
 
   @Get()
@@ -37,50 +31,6 @@ export class SearchController {
       dto.projectId = routeProjectId;
     }
     return this.searchService.search(userId, dto);
-  }
-
-  @Post('semantic')
-  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
-  async searchSemantic(
-    @CurrentUser('id') userId: string,
-    @Body() dto: SemanticSearchDto,
-    @Param('projectId') routeProjectId?: string,
-  ) {
-    if (routeProjectId && !dto.projectId) {
-      dto.projectId = routeProjectId;
-    }
-    return this.semanticSearch.searchSemantic(userId, dto);
-  }
-
-  @Get('items/:id/related')
-  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
-  async getRelatedItems(
-    @CurrentUser('id') userId: string,
-    @Param('id') itemId: string,
-    @Query('limit') limit?: string,
-    @Query('projectId') projectId?: string,
-    @Param('projectId') routeProjectId?: string,
-  ) {
-    const parsedLimit = limit ? parseInt(limit, 10) : 5;
-    const effectiveProjectId = routeProjectId || projectId;
-    return this.semanticSearch.findRelatedItems(
-      userId,
-      itemId,
-      parsedLimit,
-      effectiveProjectId,
-    );
-  }
-
-  @Post('index-all')
-  async indexAll(
-    @CurrentUser('id') userId: string,
-    @CurrentUser() user: any,
-    @Query('projectId') projectId?: string,
-  ) {
-    if (!user?.isAdmin && !user?.role?.includes('admin')) {
-      throw new ForbiddenException('Admin access required');
-    }
-    return this.semanticSearch.indexLibrary(userId, projectId);
   }
 
   @Get('attachments/:attachmentId/anchors')

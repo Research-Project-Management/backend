@@ -1,4 +1,4 @@
-﻿import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { Job } from 'bullmq';
 import {
@@ -52,10 +52,10 @@ export class IngestionQueueConsumer
 
     try {
       await this.repo
-        .updateRunStatus(projectId, runId, IngestionStatus.DETECTED)
+        .updateRunStatus(projectId, runId, IngestionStatus.RUNNING)
         .catch((statusErr: any) => {
           this.logger.warn(
-            `Failed to set DETECTED status for run ${runId}: ${statusErr?.message}`,
+            `Failed to set RUNNING status for run ${runId}: ${statusErr?.message}`,
           );
         });
 

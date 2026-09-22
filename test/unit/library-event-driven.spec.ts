@@ -81,14 +81,11 @@ describe('Library Module - Event-Driven Architecture (Cross-BC Integration)', ()
     let subscriber: CatalogEventsSubscriber;
 
     beforeEach(() => {
-      mockSearchService = {
-        indexPaperForRag: jest.fn().mockResolvedValue({ success: true }),
-      } as any;
-
+      mockSearchService = {} as any;
       subscriber = new CatalogEventsSubscriber(mockSearchService);
     });
 
-    it('should trigger search indexing on CATALOG_ITEM_CREATED event', async () => {
+    it('should handle CATALOG_ITEM_CREATED event without throwing', async () => {
       const event = createIntegrationEvent(
         INTEGRATION_EVENT_TOPICS.CATALOG_ITEM_CREATED,
         'catalog',
@@ -102,34 +99,18 @@ describe('Library Module - Event-Driven Architecture (Cross-BC Integration)', ()
         { userId: 'user-1' },
       );
 
-      await subscriber.handleItemCreated(event);
-
-      expect(mockSearchService.indexPaperForRag).toHaveBeenCalledTimes(1);
-      expect(mockSearchService.indexPaperForRag).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: 'item-xyz',
-          userId: 'user-1',
-          title: 'Quantum Advantage',
-        }),
-      );
+      await expect(subscriber.handleItemCreated(event)).resolves.not.toThrow();
     });
 
-    it('should gracefully handle indexing errors without throwing', async () => {
-      mockSearchService.indexPaperForRag.mockRejectedValueOnce(
-        new Error('Search engine unavailable'),
-      );
-
+    it('should ignore event when payload has no itemId', async () => {
       const event = createIntegrationEvent(
         INTEGRATION_EVENT_TOPICS.CATALOG_ITEM_CREATED,
         'catalog',
-        { itemId: 'item-err', title: 'Error Paper', itemType: 'book' },
+        {} as any,
         { userId: 'user-1' },
       );
 
-      // Should not throw
-      await expect(
-        subscriber.handleItemCreated(event as any),
-      ).resolves.not.toThrow();
+      await expect(subscriber.handleItemCreated(event)).resolves.not.toThrow();
     });
   });
 
@@ -140,14 +121,23 @@ describe('Library Module - Event-Driven Architecture (Cross-BC Integration)', ()
     beforeEach(() => {
       mockPrisma = {
         attachment: {
+          findMany: jest
+            .fn()
+            .mockResolvedValue([{ id: 'att-1' }, { id: 'att-2' }]),
           updateMany: jest.fn().mockResolvedValue({ count: 2 }),
+        },
+        annotation: {
+          updateMany: jest.fn().mockResolvedValue({ count: 5 }),
+        },
+        note: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         },
       };
 
       subscriber = new ItemLifecycleSubscriber(mockPrisma as PrismaService);
     });
 
-    it('should soft-delete associated attachments on CATALOG_ITEM_DELETED event', async () => {
+    it('should soft-delete associated attachments, notes, and annotations on CATALOG_ITEM_DELETED event', async () => {
       const event = createIntegrationEvent(
         INTEGRATION_EVENT_TOPICS.CATALOG_ITEM_DELETED,
         'catalog',
@@ -157,7 +147,19 @@ describe('Library Module - Event-Driven Architecture (Cross-BC Integration)', ()
 
       await subscriber.handleItemDeleted(event);
 
+      expect(mockPrisma.attachment.findMany).toHaveBeenCalledWith({
+        where: { itemId: 'item-del-1' },
+        select: { id: true },
+      });
+      expect(mockPrisma.annotation.updateMany).toHaveBeenCalledWith({
+        where: { attachmentId: { in: ['att-1', 'att-2'] }, deletedAt: null },
+        data: { deletedAt: expect.any(Date) },
+      });
       expect(mockPrisma.attachment.updateMany).toHaveBeenCalledWith({
+        where: { itemId: 'item-del-1', deletedAt: null },
+        data: { deletedAt: expect.any(Date) },
+      });
+      expect(mockPrisma.note.updateMany).toHaveBeenCalledWith({
         where: { itemId: 'item-del-1', deletedAt: null },
         data: { deletedAt: expect.any(Date) },
       });

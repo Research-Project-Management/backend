@@ -52,15 +52,17 @@ export interface IngestionReviewCase {
 }
 
 export type IngestionStatus =
+  | 'PENDING'
+  | 'RUNNING'
+  | 'COMPLETED'
+  | 'FAILED_RETRYABLE'
+  | 'FAILED_FINAL'
+  | 'CANCELLED'
+  | 'STALLED'
   | 'pending'
   | 'processing'
-  | 'extracting'
-  | 'normalizing'
-  | 'reconciling'
-  | 'indexing'
   | 'completed'
-  | 'failed'
-  | 'review_required';
+  | 'failed';
 
 export type IngestionSourceType = 'doi' | 'url' | 'bibtex' | 'pdf';
 
@@ -134,6 +136,7 @@ export interface IngestionRunSnapshot {
   scopeId?: string;
   sourceType: string;
   status: IngestionStatus;
+  currentStage?: string | null;
   totalItems: number;
   processedItems: number;
   failedItems: number;

@@ -309,6 +309,18 @@ export class ItemsMapper {
         it.abstract || extraFields.abstract || extraFields.abstractNote;
       it.abstract = cleanAbstractText(rawAbstract) ?? (it.abstract || null);
     }
+    it.abstractNote = it.abstractNote || it.abstract || null;
+    it.date =
+      it.date || it.publicationDate || (it.year ? String(it.year) : null);
+    if (it.volume !== undefined && it.volume !== null) {
+      it.volume = String(it.volume);
+    }
+    if (it.issue !== undefined && it.issue !== null) {
+      it.issue = String(it.issue);
+    }
+    if (it.pages !== undefined && it.pages !== null) {
+      it.pages = String(it.pages);
+    }
 
     // Legacy cleanup: If callNumber has arXiv:xxx, clean it and ensure it.arxivId is populated
     if (
@@ -367,18 +379,26 @@ export class ItemsMapper {
       }
     }
 
-    // Project lastReadAt from userStates if present and not already top-level
-    if (
-      !it.lastReadAt &&
-      Array.isArray(it.userStates) &&
-      it.userStates.length > 0
-    ) {
-      const activeState = it.userStates.find((u: any) => u?.lastReadAt);
-      if (activeState?.lastReadAt) {
-        it.lastReadAt =
-          activeState.lastReadAt instanceof Date
-            ? activeState.lastReadAt.toISOString()
-            : activeState.lastReadAt;
+    // Project user reading state (isStarred, readStatus, rating, lastReadAt) from userStates if present
+    if (Array.isArray(it.userStates) && it.userStates.length > 0) {
+      const activeState = it.userStates[0];
+      if (it.isStarred === undefined && activeState?.isStarred !== undefined) {
+        it.isStarred = Boolean(activeState.isStarred);
+      }
+      if (it.readStatus === undefined && activeState?.readStatus) {
+        it.readStatus = activeState.readStatus;
+      }
+      if (it.rating === undefined && activeState?.rating !== undefined) {
+        it.rating = activeState.rating;
+      }
+      if (!it.lastReadAt) {
+        const stateWithReadAt = it.userStates.find((u: any) => u?.lastReadAt);
+        if (stateWithReadAt?.lastReadAt) {
+          it.lastReadAt =
+            stateWithReadAt.lastReadAt instanceof Date
+              ? stateWithReadAt.lastReadAt.toISOString()
+              : stateWithReadAt.lastReadAt;
+        }
       }
     }
 

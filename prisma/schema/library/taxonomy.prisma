@@ -1,0 +1,109 @@
+// ============================================================================
+// Library Shared Kernel: Taxonomy Sub-Domain
+// Self-managed domain schema: Collections, Tags, Saved Searches
+// ============================================================================
+
+enum TagType {
+  manual
+  automatic
+  ai
+}
+
+model Collection {
+  id          String       @id @default(uuid(7)) @db.Uuid
+  name        String
+  description String?      @default("")
+  color       String?
+  icon        String?      @default("")
+  sortOrder   Int          @default(0) @map("sort_order")
+  createdById String?      @map("created_by_id") @db.Uuid
+  parentId    String?      @map("parent_id") @db.Uuid
+  parent      Collection?  @relation("CollectionHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children    Collection[] @relation("CollectionHierarchy")
+  userId      String       @map("user_id") @db.Uuid
+  projectId   String?      @map("project_id") @db.Uuid
+  deletedAt   DateTime?    @map("deleted_at") @db.Timestamptz(6)
+  version     Int          @default(1)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  collectionItems CollectionItem[]
+
+  @@index([userId, parentId, deletedAt])
+  @@index([userId, parentId, sortOrder, deletedAt])
+  @@index([projectId, parentId, deletedAt])
+  @@map("collections")
+}
+
+model CollectionItem {
+  collectionId String     @map("collection_id") @db.Uuid
+  collection   Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  itemId       String     @map("item_id") @db.Uuid
+  item         Item       @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  sortOrder    Int        @default(0) @map("sort_order")
+  addedAt      DateTime   @default(now()) @map("added_at") @db.Timestamptz(6)
+
+  @@id([collectionId, itemId])
+  @@index([itemId])
+  @@index([collectionId, sortOrder])
+  @@map("collection_items")
+}
+
+model Tag {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  name        String
+  color       String?   @default("#3b82f6")
+  shortcut    Int?      @map("shortcut")
+  type        TagType   @default(manual)
+  userId      String    @map("user_id") @db.Uuid
+  projectId   String?   @map("project_id") @db.Uuid
+  createdById String?   @map("created_by_id") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  itemTags    ItemTag[]
+
+  @@unique([userId, name, projectId])
+  @@index([userId])
+  @@index([projectId, name])
+  @@map("tags")
+}
+
+model ItemTag {
+  tagId      String   @map("tag_id") @db.Uuid
+  tag        Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  itemId     String   @map("item_id") @db.Uuid
+  item       Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  type       TagType  @default(manual)
+  assignedAt DateTime @default(now()) @map("assigned_at") @db.Timestamptz(6)
+
+  @@id([tagId, itemId])
+  @@index([itemId])
+  @@map("item_tags")
+}
+
+model SavedSearch {
+  id              String    @id @default(uuid(7)) @db.Uuid
+  name            String
+  query           String?   @default("")
+  description     String?   @default("")
+  conditions      Json      @default("{}") @db.JsonB
+  conjunction     String?   @default("AND")
+  sortBy          String?   @default("dateAdded") @map("sort_by")
+  sortOrder       String?   @default("desc") @map("sort_order")
+  isPinned        Boolean   @default(false) @map("is_pinned")
+  icon            String?   @default("")
+  color           String?
+  cachedCount     Int       @default(0) @map("cached_count")
+  lastEvaluatedAt DateTime? @map("last_evaluated_at") @db.Timestamptz(6)
+  version         Int       @default(1)
+  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz(6)
+  userId          String    @map("user_id") @db.Uuid
+  projectId       String?   @map("project_id") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([userId, deletedAt])
+  @@index([projectId, deletedAt])
+  @@map("saved_searches")
+}

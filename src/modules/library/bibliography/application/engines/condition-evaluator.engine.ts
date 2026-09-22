@@ -170,23 +170,23 @@ export class ConditionEvaluatorEngine {
 
       case 'itemType':
         if (operator === 'isPresent') {
-          return { type: { not: '' } };
+          return { itemType: { not: '' } };
         }
         if (operator === 'isAbsent') {
-          return { type: '' };
+          return { itemType: '' };
         }
         if (operator === 'is') {
-          return { type: strVal };
+          return { itemType: strVal };
         }
         if (operator === 'isNot') {
-          return { NOT: { type: strVal } };
+          return { NOT: { itemType: strVal } };
         }
         if (operator === 'contains') {
-          return { type: { contains: strVal, mode: 'insensitive' } };
+          return { itemType: { contains: strVal, mode: 'insensitive' } };
         }
         if (operator === 'doesNotContain') {
           return {
-            NOT: { type: { contains: strVal, mode: 'insensitive' } },
+            NOT: { itemType: { contains: strVal, mode: 'insensitive' } },
           };
         }
         return null;
@@ -416,6 +416,130 @@ export class ConditionEvaluatorEngine {
         }
         return null;
       }
+
+      case 'dateModified': {
+        if (operator === 'isPresent') {
+          return { updatedAt: { not: undefined } };
+        }
+        if (operator === 'isAbsent') {
+          return null;
+        }
+        if (operator === 'isBetween' && Array.isArray(value)) {
+          const [d1, d2] = value.map((v) => new Date(String(v)));
+          if (!isNaN(d1.getTime()) && !isNaN(d2.getTime())) {
+            return { updatedAt: { gte: d1, lte: d2 } };
+          }
+          return null;
+        }
+        const parsedDate = new Date(strVal);
+        if (isNaN(parsedDate.getTime())) {
+          return null;
+        }
+        if (operator === 'isGreaterThan') {
+          return { updatedAt: { gt: parsedDate } };
+        }
+        if (operator === 'isLessThan') {
+          return { updatedAt: { lt: parsedDate } };
+        }
+        return null;
+      }
+
+      case 'url':
+        return this.evalStringField('url', operator, strVal);
+
+      case 'attachmentContent':
+        if (operator === 'contains' || operator === 'is') {
+          return {
+            attachments: {
+              some: {
+                fullTextIndexes: {
+                  some: {
+                    textContent: { contains: strVal, mode: 'insensitive' },
+                  },
+                },
+              },
+            },
+          };
+        }
+        if (operator === 'doesNotContain' || operator === 'isNot') {
+          return {
+            NOT: {
+              attachments: {
+                some: {
+                  fullTextIndexes: {
+                    some: {
+                      textContent: { contains: strVal, mode: 'insensitive' },
+                    },
+                  },
+                },
+              },
+            },
+          };
+        }
+        if (operator === 'isPresent') {
+          return {
+            attachments: {
+              some: {
+                fullTextIndexes: { some: {} },
+              },
+            },
+          };
+        }
+        if (operator === 'isAbsent') {
+          return {
+            attachments: {
+              none: {
+                fullTextIndexes: { some: {} },
+              },
+            },
+          };
+        }
+        return null;
+
+      case 'noteContent':
+        if (operator === 'contains' || operator === 'is') {
+          return {
+            notesList: {
+              some: {
+                deletedAt: null,
+                OR: [
+                  { title: { contains: strVal, mode: 'insensitive' } },
+                  { contentMd: { contains: strVal, mode: 'insensitive' } },
+                ],
+              },
+            },
+          };
+        }
+        if (operator === 'doesNotContain' || operator === 'isNot') {
+          return {
+            NOT: {
+              notesList: {
+                some: {
+                  deletedAt: null,
+                  OR: [
+                    { title: { contains: strVal, mode: 'insensitive' } },
+                    { contentMd: { contains: strVal, mode: 'insensitive' } },
+                  ],
+                },
+              },
+            },
+          };
+        }
+        if (operator === 'isPresent') {
+          return {
+            notesList: {
+              some: { deletedAt: null },
+            },
+          };
+        }
+        if (operator === 'isAbsent') {
+          return {
+            notesList: {
+              none: { deletedAt: null },
+            },
+          };
+        }
+        return null;
 
       default:
         return null;

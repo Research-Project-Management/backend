@@ -85,6 +85,7 @@ export function isValidScrollPosition(scrollPosition: unknown): boolean {
  */
 export function toStateResponse(
   state?: {
+    isStarred?: boolean;
     readStatus?: string;
     rating?: number | null;
     currentPage?: number | null;
@@ -94,6 +95,7 @@ export function toStateResponse(
   } | null,
 ): StateData {
   return {
+    isStarred: Boolean(state?.isStarred),
     readStatus: (state?.readStatus as ReadingStatus) ?? ReadingStatus.UNREAD,
     rating: state?.rating ?? 0,
     currentPage: state?.currentPage ?? 1,

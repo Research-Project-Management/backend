@@ -200,12 +200,9 @@ export class UrlCaptureService {
     if (this.txService?.executeInTransaction) {
       createdItem = await this.txService.executeInTransaction(
         async (tx: Prisma.TransactionClient, helpers: any) => {
-          const updateRes = await tx.capturePreview.updateMany({
-            where: { id: preview.id, consumedAt: null },
-            data: { consumedAt: new Date() },
-          });
+          const claimedCount = await this.repo.claimCapturePreview(tokenHash, tx);
 
-          if (!updateRes || updateRes.count === 0) {
+          if (!claimedCount || claimedCount === 0) {
             throw new ConflictException(
               'Capture preview has already been confirmed or claimed',
             );

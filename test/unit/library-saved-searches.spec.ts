@@ -1,4 +1,4 @@
-﻿import { Test, TestingModule } from '@nestjs/testing';
+import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import { ConditionEvaluatorEngine } from '../../src/modules/library/bibliography/application/engines/condition-evaluator.engine';
 import { SavedSearchesService } from '../../src/modules/library/bibliography/application/services/saved-searches.service';
@@ -387,6 +387,80 @@ describe('Library Saved Searches & ConditionEvaluatorEngine', () => {
         createdAt: { gte: new Date('2024-01-01'), lte: new Date('2024-06-01') },
       });
       expect(clauses.length).toBe(3);
+    });
+
+    it('should evaluate attachmentContent full-text operators', () => {
+      const group: SavedSearchConditionGroup = {
+        conjunction: 'AND',
+        conditions: [
+          { field: 'attachmentContent', operator: 'contains', value: 'transformer' },
+          { field: 'attachmentContent', operator: 'doesNotContain', value: 'recurrent' },
+          { field: 'attachmentContent', operator: 'isPresent' },
+          { field: 'attachmentContent', operator: 'isAbsent' },
+        ],
+      };
+
+      const result = engine.compile(mockUserId, group);
+      const clauses = (result as any).AND[1].AND;
+
+      expect(clauses[0]).toEqual({
+        attachments: {
+          some: {
+            fullTextIndexes: {
+              some: { textContent: { contains: 'transformer', mode: 'insensitive' } },
+            },
+          },
+        },
+      });
+      expect(clauses[1]).toEqual({
+        NOT: {
+          attachments: {
+            some: {
+              fullTextIndexes: {
+                some: { textContent: { contains: 'recurrent', mode: 'insensitive' } },
+              },
+            },
+          },
+        },
+      });
+      expect(clauses[2]).toEqual({
+        attachments: { some: { fullTextIndexes: { some: {} } } },
+      });
+      expect(clauses[3]).toEqual({
+        attachments: { none: { fullTextIndexes: { some: {} } } },
+      });
+    });
+
+    it('should evaluate noteContent and url operators', () => {
+      const group: SavedSearchConditionGroup = {
+        conjunction: 'AND',
+        conditions: [
+          { field: 'noteContent', operator: 'contains', value: 'hypothesis' },
+          { field: 'noteContent', operator: 'isPresent' },
+          { field: 'url', operator: 'contains', value: 'arxiv.org' },
+        ],
+      };
+
+      const result = engine.compile(mockUserId, group);
+      const clauses = (result as any).AND[1].AND;
+
+      expect(clauses[0]).toEqual({
+        notesList: {
+          some: {
+            deletedAt: null,
+            OR: [
+              { title: { contains: 'hypothesis', mode: 'insensitive' } },
+              { contentMd: { contains: 'hypothesis', mode: 'insensitive' } },
+            ],
+          },
+        },
+      });
+      expect(clauses[1]).toEqual({
+        notesList: { some: { deletedAt: null } },
+      });
+      expect(clauses[2]).toEqual({
+        url: { contains: 'arxiv.org', mode: 'insensitive' },
+      });
     });
   });
 

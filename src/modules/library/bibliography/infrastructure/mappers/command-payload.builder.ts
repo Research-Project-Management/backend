@@ -490,6 +490,32 @@ export async function syncTagsForCatalogItem(
   }
 }
 
+export function deriveFirstAuthor(data: {
+  contributors?: any[];
+  creators?: any[];
+  authors?: any[];
+}): string | null {
+  if (data.contributors && data.contributors.length > 0) {
+    const c0 = data.contributors[0];
+    const authorName = c0.lastName || c0.fullName || c0.name || '';
+    if (!authorName) return null;
+    return data.contributors.length > 1 ? `${authorName} et al.` : authorName;
+  }
+  if (data.creators && data.creators.length > 0) {
+    const c0 = data.creators[0];
+    const authorName = c0.lastName || c0.fullName || c0.name || '';
+    if (!authorName) return null;
+    return data.creators.length > 1 ? `${authorName} et al.` : authorName;
+  }
+  if (data.authors && data.authors.length > 0) {
+    const parsed0 = parseCreatorString(data.authors[0], 0);
+    const authorName = parsed0.lastName || parsed0.fullName;
+    if (!authorName) return null;
+    return data.authors.length > 1 ? `${authorName} et al.` : authorName;
+  }
+  return null;
+}
+
 export async function buildCommandCreateInput(
   userId: string,
   data: CreateItemData,
@@ -507,6 +533,11 @@ export async function buildCommandCreateInput(
     userId,
     data.uploadedById || 'system',
   );
+
+  const firstAuthor = deriveFirstAuthor(data);
+  const hasFile = Boolean(data.fileUrl || resolvedFileId);
+  const attachmentCount = hasFile ? 1 : 0;
+  const noteCount = notes.length;
 
   const ids = normalizeItemIdentifiers(data);
   const cleanDoi = ids.doi ?? '';
@@ -555,43 +586,64 @@ export async function buildCommandCreateInput(
 
   const effectiveExtraFields = extractNonColumnExtraFields(data as any, null);
 
+  const rawDate =
+    data.publicationDate ??
+    data.date ??
+    (data.year ? String(data.year) : '');
+
   const metadataPayload = {
     publicationTitle: resolvedPubTitle,
-    publicationDate:
-      data.publicationDate ??
-      data.date ??
-      (data.year ? String(data.year) : ''),
+    publicationDate: rawDate,
+    date: rawDate,
     publisher: resolvedPublisher,
     place: data.place ?? '',
-    volume: data.volume ?? '',
-    issue: data.issue ?? '',
+    volume:
+      data.volume !== undefined && data.volume !== null
+        ? String(data.volume).trim()
+        : '',
+    issue:
+      data.issue !== undefined && data.issue !== null
+        ? String(data.issue).trim()
+        : '',
     section: data.section ?? '',
     partNumber: data.partNumber ?? '',
     partTitle: data.partTitle ?? '',
-    pages: data.pages ?? '',
+    pages:
+      data.pages !== undefined && data.pages !== null
+        ? String(data.pages).trim()
+        : '',
     series: data.series ?? '',
     seriesTitle: data.seriesTitle ?? '',
     seriesText: data.seriesText ?? '',
+    seriesNumber:
+      data.seriesNumber !== undefined && data.seriesNumber !== null
+        ? String(data.seriesNumber).trim()
+        : '',
+    edition:
+      (data as any).edition !== undefined && (data as any).edition !== null
+        ? String((data as any).edition).trim()
+        : '',
+    abstractNote: data.abstract ?? data.abstractNote ?? '',
     issn: cleanIssn,
     isbn: cleanIsbn,
     pmid: cleanPmid,
     pmcid: cleanPmcid,
     language: data.language ?? '',
-    journalAbbr: data.journalAbbr ?? data.journalAbbreviation ?? '',
+    journalAbbr: data.journalAbbr ?? '',
     shortTitle: data.shortTitle ?? '',
-    rights: data.rights ?? data.license ?? '',
-    license: data.license ?? data.rights ?? '',
+    rights: data.rights ?? '',
+    license: data.license ?? '',
     libraryCatalog: data.libraryCatalog ?? '',
     archive: data.archive ?? '',
     archiveLocation: data.archiveLocation ?? '',
     callNumber: data.callNumber ?? '',
-    accessedAt: data.accessedAt ?? parseAccessDate(data.accessDate) ?? null,
-    arxivId: cleanArxivId || undefined,
-    citationCount: data.citationCount ?? null,
-    referenceCount: data.referenceCount ?? null,
-    openAccessPdfUrl: data.openAccessPdfUrl ?? null,
-    seriesNumber: data.seriesNumber ?? null,
-    isMyPublication: (data as any).isMyPublication ?? false,
+    accessedAt:
+      data.accessedAt ??
+      (data.accessDate ? parseAccessDate(data.accessDate) : null),
+    arxivId: cleanArxivId,
+    citationCount: data.citationCount ?? 0,
+    referenceCount: data.referenceCount ?? 0,
+    openAccessPdfUrl: data.openAccessPdfUrl ?? '',
     extra:
       resolveExtraPlainText(data.extra, null, effectiveExtraFields) ?? '',
     uploadedById: data.uploadedById || 'system',
@@ -613,6 +665,10 @@ export async function buildCommandCreateInput(
     url: data.url ?? '',
     citationKey: data.citationKey ?? data.citeKey ?? '',
     metadata: metadataPayload,
+    hasFile,
+    attachmentCount,
+    noteCount,
+    firstAuthor,
     projectId:
       (projectId && projectId !== 'user' && isUuid(projectId)
         ? projectId
@@ -891,20 +947,44 @@ export function buildCommandUpdateInput(
   const updatedMetadata: any = {
     ...existingMeta,
     ...(rawPubTitle !== undefined ? { publicationTitle: rawPubTitle } : {}),
-    ...(rawPubDate !== undefined ? { publicationDate: rawPubDate } : {}),
+    ...(rawPubDate !== undefined
+      ? { publicationDate: rawPubDate, date: rawPubDate }
+      : {}),
     ...(rawPublisher !== undefined ? { publisher: rawPublisher } : {}),
     ...(data.place !== undefined ? { place: data.place } : {}),
-    ...(data.volume !== undefined ? { volume: data.volume } : {}),
-    ...(data.issue !== undefined ? { issue: data.issue } : {}),
+    ...(data.volume !== undefined
+      ? {
+          volume:
+            data.volume !== null ? String(data.volume).trim() : null,
+        }
+      : {}),
+    ...(data.issue !== undefined
+      ? {
+          issue: data.issue !== null ? String(data.issue).trim() : null,
+        }
+      : {}),
     ...(data.section !== undefined ? { section: data.section } : {}),
     ...(data.partNumber !== undefined ? { partNumber: data.partNumber } : {}),
     ...(data.partTitle !== undefined ? { partTitle: data.partTitle } : {}),
-    ...(data.pages !== undefined ? { pages: data.pages } : {}),
+    ...(data.pages !== undefined
+      ? {
+          pages: data.pages !== null ? String(data.pages).trim() : null,
+        }
+      : {}),
     ...(data.series !== undefined ? { series: data.series } : {}),
     ...(data.seriesTitle !== undefined
       ? { seriesTitle: data.seriesTitle }
       : {}),
     ...(data.seriesText !== undefined ? { seriesText: data.seriesText } : {}),
+    ...(data.seriesNumber !== undefined
+      ? {
+          seriesNumber:
+            data.seriesNumber !== null
+              ? String(data.seriesNumber).trim()
+              : null,
+        }
+      : {}),
+    ...(rawAbstract !== undefined ? { abstractNote: rawAbstract } : {}),
     ...(cleanIssn !== undefined ? { issn: cleanIssn } : {}),
     ...(cleanIsbn !== undefined ? { isbn: cleanIsbn } : {}),
     ...(cleanPmid !== undefined ? { pmid: cleanPmid } : {}),
@@ -981,6 +1061,11 @@ export function buildCommandUpdateInput(
     citationKey:
       rawCitationKey !== undefined ? rawCitationKey : existing.citationKey,
     metadata: updatedMetadata,
+    ...((data.contributors !== undefined ||
+      data.creators !== undefined ||
+      data.authors !== undefined)
+      ? { firstAuthor: deriveFirstAuthor(data) }
+      : {}),
     ...(data.collectionIds !== undefined
       ? {
           collectionItems: (() => {

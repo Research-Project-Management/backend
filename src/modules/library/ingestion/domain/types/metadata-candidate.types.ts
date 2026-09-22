@@ -51,6 +51,7 @@ export interface DuplicateMatchResult {
   targetItemTitle?: string;
   matchReason?:
     | 'DOI_EXACT'
+    | 'ARXIV_EXACT'
     | 'ISBN_EXACT'
     | 'PMID_EXACT'
     | 'TITLE_FUZZY'

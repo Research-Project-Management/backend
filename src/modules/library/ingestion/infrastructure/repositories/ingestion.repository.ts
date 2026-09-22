@@ -4,6 +4,7 @@ import {
   Prisma,
   IngestionRun,
   IngestionStatus,
+  IngestionStage as DbIngestionStage,
   Item,
 } from '@prisma/client';
 import {
@@ -19,12 +20,14 @@ export interface CreateIngestionRunData {
   id?: string;
   userId?: string;
   projectId?: string | null;
+  traceId?: string | null;
   inputParams: Prisma.InputJsonValue;
   inputHash: string;
-  idempotencyKey?: string;
+  idempotencyKey?: string | null;
   contractVersion?: string;
   pipelineVersion?: string;
   status?: IngestionStatus;
+  nextRetryAt?: Date | null;
 }
 
 export interface CreateIngestionStageData {
@@ -120,13 +123,28 @@ export class IngestionRepository {
         id: data.id || randomUUID(),
         userId,
         projectId,
+        traceId: data.traceId ?? null,
         inputParams: data.inputParams,
         inputHash: data.inputHash,
-        idempotencyKey: data.idempotencyKey,
+        idempotencyKey: data.idempotencyKey ?? null,
         contractVersion: data.contractVersion || '1.0.0',
         pipelineVersion: data.pipelineVersion || '1.0.0',
-        status: IngestionStatus.RECEIVED,
+        status: data.status || IngestionStatus.PENDING,
+        nextRetryAt: data.nextRetryAt ?? null,
       },
+    });
+  }
+
+  async updateRunStage(
+    _scope: IngestionScope,
+    runId: string,
+    stage: DbIngestionStage,
+    tx?: Prisma.TransactionClient,
+  ): Promise<IngestionRun> {
+    const client = this.getClient(tx);
+    return client.ingestionRun.update({
+      where: { id: runId },
+      data: { currentStage: stage },
     });
   }
 
@@ -184,11 +202,11 @@ export class IngestionRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<IngestionRun | null> {
     const client = this.getClient(tx);
-    const { userId, projectId } = parseRunScope(scope);
+    const { userId } = parseRunScope(scope);
     return client.ingestionRun.findFirst({
       where: {
+        userId,
         idempotencyKey,
-        ...(projectId ? { projectId } : userId && userId !== 'system' ? { userId } : {}),
       },
     });
   }
@@ -208,10 +226,10 @@ export class IngestionRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<IngestionRun> {
     const client = this.getClient(tx);
-    // Only increment attempts when retrying: transitioning from FAILED_RETRYABLE back to RECEIVED
+    // Only increment attempts when retrying: transitioning from FAILED_RETRYABLE back to PENDING
     const isRetry =
       details?.previousStatus === IngestionStatus.FAILED_RETRYABLE &&
-      status === IngestionStatus.RECEIVED;
+      (status === IngestionStatus.PENDING || (status as any) === 'RECEIVED');
     return client.ingestionRun.update({
       where: {
         id: runId,
@@ -262,13 +280,8 @@ export class IngestionRepository {
   ): Promise<IngestionRun[]> {
     const client = this.getClient(tx);
     const nonTerminalStatuses: IngestionStatus[] = [
-      IngestionStatus.RECEIVED,
-      IngestionStatus.DETECTED,
-      IngestionStatus.EXTRACTED,
-      IngestionStatus.RESOLVED,
-      IngestionStatus.NORMALIZED,
-      IngestionStatus.MERGED,
-      IngestionStatus.ENRICHING,
+      IngestionStatus.PENDING,
+      IngestionStatus.RUNNING,
     ];
 
     let projectId = options?.projectId;
@@ -283,12 +296,52 @@ export class IngestionRepository {
       where: {
         ...(projectId ? { projectId } : userId ? { userId } : {}),
         status: { in: nonTerminalStatuses },
-        startedAt: { lt: olderThan },
+        updatedAt: { lt: olderThan },
         completedAt: null,
       },
-      orderBy: { startedAt: 'asc' },
+      orderBy: { updatedAt: 'asc' },
       take: options?.limit ?? 100,
     });
+  }
+
+  async findLatestRunByInputHash(
+    userId: string,
+    inputHash: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<IngestionRun | null> {
+    const client = this.getClient(tx);
+    return client.ingestionRun.findFirst({
+      where: {
+        userId,
+        inputHash,
+      },
+      orderBy: { startedAt: 'desc' },
+    });
+  }
+
+  /**
+   * Purge completed, failed, or cancelled runs older than a retention threshold.
+   * Prevents long-term table and TOAST bloat.
+   */
+  async purgeOldRuns(
+    olderThan: Date,
+    tx?: Prisma.TransactionClient,
+  ): Promise<number> {
+    const client = this.getClient(tx);
+    const terminalStatuses: IngestionStatus[] = [
+      IngestionStatus.COMPLETED,
+      IngestionStatus.FAILED_FINAL,
+      IngestionStatus.CANCELLED,
+    ];
+
+    const result = await client.ingestionRun.deleteMany({
+      where: {
+        status: { in: terminalStatuses },
+        completedAt: { lt: olderThan },
+      },
+    });
+
+    return result.count;
   }
 
   async findRecoverableRuns(
@@ -300,7 +353,7 @@ export class IngestionRepository {
     return client.ingestionRun.findMany({
       where: {
         status: {
-          in: [IngestionStatus.RECEIVED, IngestionStatus.FAILED_RETRYABLE],
+          in: [IngestionStatus.PENDING, IngestionStatus.FAILED_RETRYABLE],
         },
         startedAt: { gte: since },
         completedAt: null,
@@ -474,7 +527,6 @@ export class IngestionRepository {
     await client.ingestionRun.update({
       where: { id: ingestionRunId },
       data: {
-        status: IngestionStatus.NEEDS_REVIEW,
         reviewData: reviewCase as any,
       },
     });
@@ -492,7 +544,6 @@ export class IngestionRepository {
     const runs = await client.ingestionRun.findMany({
       where: {
         ...(projectId ? { projectId } : userId && userId !== 'system' ? { userId } : {}),
-        status: IngestionStatus.NEEDS_REVIEW,
         reviewData: { not: Prisma.JsonNull },
       },
       take: options?.limit ?? 50,
@@ -538,18 +589,117 @@ export class IngestionRepository {
       where: { id },
       data: {
         reviewData: updatedReview as any,
-        status: status === 'APPROVED' ? IngestionStatus.COMMITTED : IngestionStatus.FAILED_FINAL,
+        status: status === 'APPROVED' ? IngestionStatus.COMPLETED : IngestionStatus.FAILED_FINAL,
       },
     });
     return updatedReview;
   }
 
-  // ── Capture Preview Operations ───────────────────────────────────────────
+  async findIngestionDuplicateSuspects(
+    scope: IngestionScope,
+    limit: number = 50,
+    tx?: Prisma.TransactionClient,
+  ): Promise<
+    Array<{
+      runId: string;
+      createdItemId: string;
+      targetItemId: string;
+      confidence: number;
+      matchReason: string;
+    }>
+  > {
+    const client = this.getClient(tx);
+    const { userId, projectId } = parseRunScope(scope);
+    const runs = await client.ingestionRun.findMany({
+      where: {
+        ...(projectId
+          ? { projectId }
+          : userId && userId !== 'system'
+            ? { userId }
+            : {}),
+        itemId: { not: null },
+        reviewData: { not: Prisma.JsonNull },
+      },
+      take: limit,
+      orderBy: { startedAt: 'desc' },
+      select: { id: true, itemId: true, reviewData: true },
+    });
+
+    const suspects: Array<{
+      runId: string;
+      createdItemId: string;
+      targetItemId: string;
+      confidence: number;
+      matchReason: string;
+    }> = [];
+
+    for (const run of runs) {
+      const rd = run.reviewData as any;
+      if (
+        rd &&
+        rd.targetItemId &&
+        run.itemId &&
+        rd.status !== 'RESOLVED' &&
+        rd.status !== 'DISMISSED'
+      ) {
+        suspects.push({
+          runId: run.id,
+          createdItemId: run.itemId,
+          targetItemId: rd.targetItemId,
+          confidence: rd.evidence?.confidence ?? 0.85,
+          matchReason: rd.evidence?.matchReason ?? 'PROBABLE_MATCH',
+        });
+      }
+    }
+    return suspects;
+  }
+
+  async resolveReviewCasesForItems(
+    itemIds: string[],
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    if (!itemIds || itemIds.length === 0) return;
+    const client = this.getClient(tx);
+    const runs = await client.ingestionRun.findMany({
+      where: {
+        itemId: { in: itemIds },
+        reviewData: { not: Prisma.JsonNull },
+      },
+      select: { id: true, reviewData: true },
+    });
+
+    for (const run of runs) {
+      const rd = (run.reviewData as any) || {};
+      await client.ingestionRun.update({
+        where: { id: run.id },
+        data: {
+          reviewData: {
+            ...rd,
+            status: 'RESOLVED',
+            resolvedAt: new Date(),
+          },
+        },
+      });
+    }
+  }
+
+  // ── Capture Preview Operations (In-Memory Ephemeral Store) ─────────────────
+  private readonly inMemoryPreviews = new Map<string, any>();
+
   async createCapturePreview(data: any, tx?: Prisma.TransactionClient) {
     const client = this.getClient(tx);
-    return await (client as any).capturePreview.create({
-      data,
-    });
+    if ((client as any).capturePreview) {
+      return await (client as any).capturePreview.create({ data });
+    }
+    const record = {
+      id: data.id || randomUUID(),
+      ...data,
+      consumedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    this.inMemoryPreviews.set(data.tokenHash, record);
+    return record;
   }
 
   async findCapturePreviewByTokenHash(
@@ -557,9 +707,18 @@ export class IngestionRepository {
     tx?: Prisma.TransactionClient,
   ) {
     const client = this.getClient(tx);
-    return await (client as any).capturePreview.findUnique({
-      where: { tokenHash },
-    });
+    if ((client as any).capturePreview) {
+      return await (client as any).capturePreview.findUnique({
+        where: { tokenHash },
+      });
+    }
+    const item = this.inMemoryPreviews.get(tokenHash);
+    if (!item) return null;
+    if (item.expiresAt && new Date(item.expiresAt).getTime() < Date.now()) {
+      this.inMemoryPreviews.delete(tokenHash);
+      return null;
+    }
+    return item;
   }
 
   async claimCapturePreview(
@@ -567,16 +726,22 @@ export class IngestionRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<number> {
     const client = this.getClient(tx);
-    const updateRes = await (client as any).capturePreview.updateMany({
-      where: {
-        tokenHash,
-        claimedAt: null,
-      },
-      data: {
-        claimedAt: new Date(),
-      },
-    });
-    return updateRes.count;
+    if ((client as any).capturePreview) {
+      const updateRes = await (client as any).capturePreview.updateMany({
+        where: {
+          tokenHash,
+          claimedAt: null,
+        },
+        data: {
+          claimedAt: new Date(),
+        },
+      });
+      return updateRes.count;
+    }
+    const item = this.inMemoryPreviews.get(tokenHash);
+    if (!item || item.consumedAt) return 0;
+    item.consumedAt = new Date();
+    return 1;
   }
 
   async deleteExpiredCapturePreviews(
@@ -584,12 +749,22 @@ export class IngestionRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<number> {
     const client = this.getClient(tx);
-    const res = await (client as any).capturePreview.deleteMany({
-      where: {
-        expiresAt: { lt: olderThan },
-      },
-    });
-    return res.count;
+    if ((client as any).capturePreview) {
+      const res = await (client as any).capturePreview.deleteMany({
+        where: {
+          expiresAt: { lt: olderThan },
+        },
+      });
+      return res.count;
+    }
+    let count = 0;
+    for (const [key, val] of this.inMemoryPreviews.entries()) {
+      if (val.expiresAt && new Date(val.expiresAt).getTime() < olderThan.getTime()) {
+        this.inMemoryPreviews.delete(key);
+        count++;
+      }
+    }
+    return count;
   }
 
   // ── Local Metadata Identifier Lookup ────────────────────────────────────

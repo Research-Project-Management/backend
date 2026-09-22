@@ -9,10 +9,6 @@ import { SearchController } from './presentation/search.controller';
 import { SearchService } from './application/services/search.service';
 import { SearchRepository } from './infrastructure/repositories/search.repository';
 import { FullTextProvider } from './infrastructure/providers/full-text.provider';
-import { RagProvider } from './infrastructure/providers/rag.provider';
-import { LocalEmbeddingService } from './application/services/local-embedding.service';
-import { VectorIndexService } from './application/services/vector-index.service';
-import { SemanticSearchService } from './application/services/semantic-search.service';
 import { EventHandler } from './application/handlers/event.handler';
 import { ExecuteSearchUseCase } from './application/queries/execute-search.use-case';
 import { SearchEngineAdapter } from './infrastructure/adapters/search-engine.adapter';
@@ -22,10 +18,9 @@ import { CatalogEventsSubscriber } from './infrastructure/subscribers/catalog-ev
 /**
  * Search Bounded Context Unified Module (Generic Domain).
  *
- * Dedicated strictly to Information Retrieval & Semantic Discovery:
+ * Dedicated strictly to Information Retrieval:
  * - Full-text FTS (Postgres tsvector with language weights)
- * - Local Vector Semantic Search & Embeddings
- * - RAG Retrieval Provider
+ * - Faceted search & anchor matching
  * - Event-driven search index updates
  */
 @Module({
@@ -40,10 +35,6 @@ import { CatalogEventsSubscriber } from './infrastructure/subscribers/catalog-ev
     SearchRepository,
     SearchService,
     FullTextProvider,
-    RagProvider,
-    LocalEmbeddingService,
-    VectorIndexService,
-    SemanticSearchService,
     EventHandler,
     SearchEngineAdapter,
     {
@@ -57,8 +48,6 @@ import { CatalogEventsSubscriber } from './infrastructure/subscribers/catalog-ev
     SearchFacade,
     SEARCH_FACADE,
     SearchService,
-    SemanticSearchService,
-    RagProvider,
     SEARCH_ENGINE_PORT,
   ],
 })

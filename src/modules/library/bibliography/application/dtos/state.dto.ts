@@ -1,5 +1,6 @@
-﻿import {
+import {
   IsArray,
+  IsBoolean,
   IsEnum,
   IsInt,
   IsOptional,
@@ -10,6 +11,9 @@
 import { ReadingStatus } from '../../domain/types/state.types';
 
 export class UpdateStateDto {
+  @IsOptional()
+  @IsBoolean()
+  isStarred?: boolean;
   @IsOptional()
   @IsEnum(ReadingStatus, {
     message: 'readStatus must be one of: unread, reading, completed',

@@ -68,11 +68,13 @@ export interface DuplicateCandidateItem {
   id: string;
   title: string;
   doi: string | null;
+  arxivId?: string | null;
   isbn: string | null;
   issn: string | null;
   pmid: string | null;
   citationKey: string | null;
   year: number | null;
+  metadata?: Record<string, any> | null;
   contributors: Array<{
     fullName: string;
     firstName: string | null;

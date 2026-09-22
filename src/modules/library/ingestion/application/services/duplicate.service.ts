@@ -12,6 +12,7 @@ import {
   IBibliographyFacade,
 } from '../../../bibliography/bibliography.facade';
 import { READER_FACADE, IReaderFacade } from '../../../reader/reader.facade';
+import { IngestionRepository } from '../../infrastructure/repositories/ingestion.repository';
 import { MergeDuplicatesDto } from '../dtos/curation.dto';
 import {
   DuplicateClusterResult,
@@ -27,6 +28,12 @@ import {
   extractContributorAuthors,
   generateDedupeBucketKey,
 } from '../utils/curation.utils';
+import {
+  normalizeDoi,
+  normalizeArxivId,
+  normalizePmid,
+  normalizeIsbn,
+} from '../utils/metadata.utils';
 import { LIBRARY_EVENT_TYPES } from '../../../shared-kernel/outbox/outbox.events';
 
 @Injectable()
@@ -41,11 +48,14 @@ export class DuplicateService {
     @Optional()
     @Inject(READER_FACADE)
     private readonly readerFacade?: IReaderFacade,
+    @Optional()
+    private readonly ingestionRepo?: IngestionRepository,
   ) {}
 
   /**
    * Scans active items and clusters duplicate candidates.
-   * Tier 1: Exact normalized DOI.
+   * Tier 0: Ingestion Pipeline suspects (real-time flagged from reviewData).
+   * Tier 1: Exact normalized Academic Identifiers (DOI, arXiv ID, PMID, ISBN).
    * Tier 2: Normalized title + publication year (+/- 1) + first author family name.
    */
   async detectDuplicates(
@@ -66,34 +76,121 @@ export class DuplicateService {
     const clusters: DuplicateClusterResult[] = [];
     const groupedItemIds = new Set<string>();
 
-    // ── Tier 1: Exact normalized DOI ─────────────────────────────────────────────
-    const doiMap = new Map<string, any[]>();
-    for (const item of items) {
-      if (!item.doi) continue;
-      const cleanDoi = item.doi.toLowerCase().trim();
-      const existing = doiMap.get(cleanDoi) || [];
-      existing.push(item);
-      doiMap.set(cleanDoi, existing);
+    // ── Tier 0: Ingestion-Suspect Pairs (High Priority from Pipeline) ────────
+    if (this.ingestionRepo) {
+      try {
+        const suspects = await this.ingestionRepo.findIngestionDuplicateSuspects({
+          userId: String(userId),
+          projectId: projectId ? String(projectId) : undefined,
+        });
+
+        const itemsMap = new Map<string, any>(
+          items.map((it: any) => [it.id, it]),
+        );
+
+        for (const suspect of suspects) {
+          const itemA = itemsMap.get(suspect.createdItemId);
+          const itemB = itemsMap.get(suspect.targetItemId);
+
+          if (
+            itemA &&
+            itemB &&
+            !groupedItemIds.has(itemA.id) &&
+            !groupedItemIds.has(itemB.id)
+          ) {
+            groupedItemIds.add(itemA.id);
+            groupedItemIds.add(itemB.id);
+
+            clusters.push({
+              clusterId: `ingest-${suspect.runId.substring(0, 8)}-${itemA.id.substring(0, 8)}`,
+              matchReason: 'INGESTION_SUSPECT',
+              confidence: suspect.confidence,
+              items: [itemA, itemB].map((m: any) => ({
+                id: m.id,
+                title: m.title,
+                doi: m.doi ?? undefined,
+                year: m.year ?? undefined,
+                authors: getItemAuthors(m),
+                citationKey: m.citationKey ?? undefined,
+              })),
+            });
+          }
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Could not load ingestion duplicate suspects: ${(err as Error).message}`,
+        );
+      }
     }
 
-    doiMap.forEach((matchedItems, doi) => {
-      if (matchedItems.length > 1) {
-        matchedItems.forEach((m: any) => groupedItemIds.add(m.id));
-        clusters.push({
-          clusterId: `doi-${doi.replace(/[^a-z0-9]/g, '-')}`,
-          matchReason: 'EXACT_DOI',
-          confidence: 1.0,
-          items: matchedItems.map((m: any) => ({
-            id: m.id,
-            title: m.title,
-            doi: m.doi ?? undefined,
-            year: m.year ?? undefined,
-            authors: getItemAuthors(m),
-            citationKey: m.citationKey ?? undefined,
-          })),
-        });
+    // ── Tier 1: Exact Academic Identifiers (DOI, arXiv, PMID, ISBN) ─────────
+    const clusterByIdentifier = (
+      idType: string,
+      getIdFn: (it: any) => string | null | undefined,
+      matchReason: 'EXACT_DOI' | 'EXACT_ARXIV' | 'EXACT_PMID' | 'EXACT_ISBN',
+    ) => {
+      const map = new Map<string, any[]>();
+      for (const item of items) {
+        if (groupedItemIds.has(item.id)) continue;
+        const rawId = getIdFn(item);
+        if (!rawId) continue;
+        const clean = String(rawId).toLowerCase().trim();
+        if (!clean) continue;
+        const existing = map.get(clean) || [];
+        existing.push(item);
+        map.set(clean, existing);
       }
-    });
+
+      map.forEach((matchedItems, idVal) => {
+        if (matchedItems.length > 1) {
+          matchedItems.forEach((m: any) => groupedItemIds.add(m.id));
+          clusters.push({
+            clusterId: `${idType}-${idVal.replace(/[^a-z0-9]/g, '-').substring(0, 32)}`,
+            matchReason,
+            confidence: 1.0,
+            items: matchedItems.map((m: any) => ({
+              id: m.id,
+              title: m.title,
+              doi: m.doi ?? undefined,
+              year: m.year ?? undefined,
+              authors: getItemAuthors(m),
+              citationKey: m.citationKey ?? undefined,
+            })),
+          });
+        }
+      });
+    };
+
+    // 1. DOI
+    clusterByIdentifier(
+      'doi',
+      (it) => normalizeDoi(it.doi) || it.doi,
+      'EXACT_DOI',
+    );
+
+    // 2. arXiv ID
+    clusterByIdentifier(
+      'arxiv',
+      (it) =>
+        normalizeArxivId(it.arxivId || it.metadata?.arxivId, {
+          stripVersion: true,
+        }),
+      'EXACT_ARXIV',
+    );
+
+    // 3. PMID
+    clusterByIdentifier(
+      'pmid',
+      (it) => normalizePmid(it.pmid || it.metadata?.pmid),
+      'EXACT_PMID',
+    );
+
+    // 4. ISBN
+    clusterByIdentifier(
+      'isbn',
+      (it) => normalizeIsbn(it.isbn || it.metadata?.isbn),
+      'EXACT_ISBN',
+    );
 
     // ── Tier 2: Fuzzy Title + Year (+/-1) + First Author ─────────────────────────
     const remainingItems = items.filter(
@@ -306,6 +403,73 @@ export class DuplicateService {
         }
       }
 
+      // ── 5.1 Consolidate User Publications ("My Publications") ────────────────
+      if (typeof (tx as any).userPublication?.findMany === 'function') {
+        const dupPublications = await (tx as any).userPublication.findMany({
+          where: { itemId: { in: uniqueDupIds } },
+        });
+
+        for (const pub of dupPublications) {
+          const existingPrimaryPub =
+            await (tx as any).userPublication.findUnique({
+              where: {
+                userId_itemId: {
+                  userId: pub.userId,
+                  itemId: primary.id,
+                },
+              },
+            });
+
+          if (!existingPrimaryPub) {
+            await (tx as any).userPublication.create({
+              data: {
+                userId: pub.userId,
+                itemId: primary.id,
+                contributorId: pub.contributorId,
+                isPublic: pub.isPublic,
+                openAccessLicense: pub.openAccessLicense,
+                addedAt: pub.addedAt,
+              },
+            });
+          } else {
+            await (tx as any).userPublication.update({
+              where: {
+                userId_itemId: {
+                  userId: pub.userId,
+                  itemId: primary.id,
+                },
+              },
+              data: {
+                isPublic: existingPrimaryPub.isPublic || pub.isPublic,
+                openAccessLicense:
+                  existingPrimaryPub.openAccessLicense || pub.openAccessLicense,
+                contributorId:
+                  existingPrimaryPub.contributorId || pub.contributorId,
+              },
+            });
+          }
+
+          await (tx as any).userPublication.delete({
+            where: {
+              userId_itemId: {
+                userId: pub.userId,
+                itemId: pub.itemId,
+              },
+            },
+          });
+        }
+      }
+
+      // ── 5.2 Re-parent Upstream Raw Metadata Snapshots (ItemMetadata) ──────────
+      const metadataModel =
+        (tx as any).itemMetadata || (tx as any).metadataSourceRecord;
+      if (typeof metadataModel?.updateMany === 'function') {
+        await metadataModel.updateMany({
+          where: { itemId: { in: uniqueDupIds } },
+          data: { itemId: primary.id },
+        });
+      }
+
       // ── 6. Provenance & Alias Citation Keys ──────────────────────────────────
       let extraObj: Record<string, any> =
         (primary.metadata as any)?.extra ?? (primary.metadata as any) ?? {};
@@ -323,6 +487,73 @@ export class DuplicateService {
         new Set([...existingAliases, ...dupCitationKeys]),
       );
 
+      // ── 7. Contributors (Authors) Synchronization ────────────────────────────
+      const rawSelections = (dto.fieldSelections || {}) as Record<string, any>;
+      const {
+        authors: selectedAuthors,
+        creators: selectedCreators,
+        contributors: selectedContributors,
+        ...scalarSelections
+      } = rawSelections;
+
+      const chosenContributors =
+        selectedContributors || selectedAuthors || selectedCreators;
+
+      if (Array.isArray(chosenContributors) && chosenContributors.length > 0) {
+        // Explicit contributor selection from DTO
+        if (typeof (tx as any).contributor?.deleteMany === 'function') {
+          await (tx as any).contributor.deleteMany({
+            where: { itemId: primary.id },
+          });
+          await (tx as any).contributor.createMany({
+            data: chosenContributors.map((c: any, idx: number) => ({
+              itemId: primary.id,
+              creatorType: c.creatorType || 'author',
+              firstName: c.firstName || '',
+              lastName: c.lastName || '',
+              fullName:
+                c.fullName ||
+                c.name ||
+                [c.firstName, c.lastName].filter(Boolean).join(' ') ||
+                (typeof c === 'string' ? c : ''),
+              orderIndex: c.orderIndex ?? idx,
+            })),
+          });
+        }
+      } else {
+        // If primary has no contributors, borrow from the richest duplicate
+        if (typeof (tx as any).contributor?.count === 'function') {
+          const primaryContribCount = await (tx as any).contributor.count({
+            where: { itemId: primary.id },
+          });
+
+          if (primaryContribCount === 0) {
+            const donorWithContribs = duplicates.find(
+              (d: any) =>
+                Array.isArray(d.contributors) && d.contributors.length > 0,
+            );
+            if (donorWithContribs) {
+              await (tx as any).contributor.createMany({
+                data: donorWithContribs.contributors.map(
+                  (c: any, idx: number) => ({
+                    itemId: primary.id,
+                    creatorType: c.creatorType || 'author',
+                    firstName: c.firstName || '',
+                    lastName: c.lastName || '',
+                    fullName:
+                      c.fullName ||
+                      c.name ||
+                      [c.firstName, c.lastName].filter(Boolean).join(' ') ||
+                      '',
+                    orderIndex: c.orderIndex ?? idx,
+                  }),
+                ),
+              });
+            }
+          }
+        }
+      }
+
       // ── 8. Update Primary Item ───────────────────────────────────────────────
       const primaryMeta = (primary.metadata as any) ?? {};
       primaryMeta.extra = extraObj;
@@ -330,7 +561,7 @@ export class DuplicateService {
       const updatedPrimary = await tx.item.update({
         where: { id: primary.id },
         data: {
-          ...(dto.fieldSelections || {}),
+          ...scalarSelections,
           metadata: primaryMeta,
           version: { increment: 1 },
         },
@@ -398,6 +629,20 @@ export class DuplicateService {
             projectId: effectiveProjectId,
           },
         );
+      }
+
+      // ── 10. Resolve Ingestion Review Cases ──────────────────────────────────
+      if (this.ingestionRepo) {
+        try {
+          await this.ingestionRepo.resolveReviewCasesForItems(
+            allItemIds,
+            tx,
+          );
+        } catch (err) {
+          this.logger.warn(
+            `Could not resolve ingestion review cases: ${(err as Error).message}`,
+          );
+        }
       }
 
       // Reload primary item with full relations so response is complete & normalized
@@ -504,6 +749,13 @@ export class DuplicateService {
     // Build fieldSelections for missing fields in primary
     const fieldSelections: Record<string, unknown> = {};
     for (const field of ALLOWED_MERGE_METADATA_FIELDS) {
+      if (
+        field === 'authors' ||
+        field === 'creators' ||
+        field === 'contributors'
+      ) {
+        continue;
+      }
       const primaryVal = primary[field];
       if (
         primaryVal === undefined ||
@@ -517,6 +769,18 @@ export class DuplicateService {
         if (donor) {
           fieldSelections[field] = donor[field];
         }
+      }
+    }
+
+    // Check if primary is missing contributors and borrow from richest duplicate
+    const primaryHasContributors =
+      Array.isArray(primary.contributors) && primary.contributors.length > 0;
+    if (!primaryHasContributors) {
+      const donorWithContribs = duplicates.find(
+        (d: any) => Array.isArray(d.contributors) && d.contributors.length > 0,
+      );
+      if (donorWithContribs) {
+        fieldSelections.contributors = donorWithContribs.contributors;
       }
     }
 

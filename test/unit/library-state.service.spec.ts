@@ -1,4 +1,4 @@
-﻿import { Test, TestingModule } from '@nestjs/testing';
+import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { StateService } from '@/modules/library/bibliography/application/services/state.service';
 import { StateRepository } from '@/modules/library/bibliography/infrastructure/repositories/state.repository';
@@ -326,6 +326,7 @@ describe('Library State Service — Reading Progress, Ratings & Viewer Position'
             {
               userId: mockUserId,
               itemId: 'item-dup-1',
+              isStarred: true,
               rating: 4,
               readStatus: 'reading',
               currentPage: 10,
@@ -336,6 +337,7 @@ describe('Library State Service — Reading Progress, Ratings & Viewer Position'
             {
               userId: mockUserId,
               itemId: 'item-dup-2',
+              isStarred: false,
               rating: 5,
               readStatus: 'completed',
               currentPage: 25,
@@ -356,7 +358,7 @@ describe('Library State Service — Reading Progress, Ratings & Viewer Position'
         'item-target',
       );
 
-      // Verify upsert picked the highest rating (5), completed status, and max page (25)
+      // Verify upsert picked the highest rating (5), completed status, max page (25), and preserved isStarred (true)
       expect(mockTx.state.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
@@ -366,6 +368,7 @@ describe('Library State Service — Reading Progress, Ratings & Viewer Position'
             },
           },
           create: expect.objectContaining({
+            isStarred: true,
             rating: 5,
             readStatus: 'completed',
             currentPage: 25,

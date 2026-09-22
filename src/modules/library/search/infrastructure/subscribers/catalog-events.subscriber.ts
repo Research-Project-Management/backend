@@ -59,15 +59,10 @@ export class CatalogEventsSubscriber implements OnModuleInit {
     );
 
     try {
-      // Background indexing trigger
-      await this.searchService.indexPaperForRag({
-        id: event.payload.itemId,
-        userId: event.scope.userId,
-        projectId: event.scope.projectId ?? undefined,
-        title: event.payload.title,
-        abstract: event.payload.abstract ?? undefined,
-        doi: event.payload.doi ?? undefined,
-      });
+      // Local library search index is automatically updated via database write and FTS tsvector
+      this.logger.debug(
+        `[DiscoverySubscriber] Local search index ready for item ${event.payload.itemId}`,
+      );
     } catch (err: any) {
       this.logger.warn(
         `[DiscoverySubscriber] Search indexing deferred/skipped for item ${event.payload.itemId}: ${err?.message || err}`,

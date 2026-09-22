@@ -1,0 +1,125 @@
+// ============================================================================
+// Library Shared Kernel: Attachments Sub-Domain
+// Self-managed domain schema: Attachments, Revisions, Annotations, FullTextIndex
+// ============================================================================
+
+enum AttachmentType {
+  primary_pdf
+  supplementary
+  dataset
+  slides
+  code
+  figure
+  other
+  preview
+}
+
+enum AttachmentExtractionStatus {
+  PENDING
+  PROCESSING
+  READY
+  COMPLETED
+  FAILED
+  FAILED_RETRYABLE
+  FAILED_FINAL
+}
+
+enum AnnotationType {
+  highlight
+  underline
+  strike
+  note
+  rect
+  text
+  image
+  ink
+}
+
+model Attachment {
+  id                    String                     @id @default(uuid(7)) @db.Uuid
+  itemId                String                     @map("item_id") @db.Uuid
+  item                  Item                       @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  attachmentType        AttachmentType             @default(primary_pdf) @map("attachment_type")
+  filename              String                     @default("document.pdf")
+  url                   String                     @default("")
+  fileHash              String?                    @default("") @map("file_hash")
+  fileId                String?                    @map("file_id") @db.Uuid
+  storageKey            String?                    @map("storage_key")
+  mimeType              String                     @default("application/pdf") @map("mime_type")
+  size                  BigInt                     @default(0)
+  pageCount             Int?                       @map("page_count")
+  extractionStatus      AttachmentExtractionStatus @default(PENDING) @map("extraction_status")
+  extractionAttempts    Int                        @default(0) @map("extraction_attempts")
+  extractionStartedAt   DateTime?                  @map("extraction_started_at") @db.Timestamptz(6)
+  extractionCompletedAt DateTime?                  @map("extraction_completed_at") @db.Timestamptz(6)
+  extractionLastError   String?                    @map("extraction_last_error")
+  metadata              Json?                      @default("{}")
+  createdAt             DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt             DateTime?                  @map("deleted_at") @db.Timestamptz(6)
+
+  revisions             AttachmentRevision[]
+  annotations           Annotation[]
+  fullTextIndexes       FullTextIndex[]
+
+  @@index([itemId, attachmentType])
+  @@index([itemId, deletedAt])
+  @@index([fileId])
+  @@index([extractionStatus, extractionStartedAt])
+  @@map("attachments")
+}
+
+model AttachmentRevision {
+  id             String     @id @default(uuid(7)) @db.Uuid
+  attachmentId   String     @map("attachment_id") @db.Uuid
+  attachment     Attachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+  revisionNumber Int        @default(1) @map("revision_number")
+  fileId         String?    @map("file_id") @db.Uuid
+  fileHash       String?    @default("") @map("file_hash")
+  sizeBytes      BigInt     @default(0) @map("size_bytes")
+  url            String     @default("")
+  comment        String?    @default("")
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([attachmentId, revisionNumber])
+  @@index([fileId])
+  @@map("attachment_revisions")
+}
+
+model Annotation {
+  id                  String         @id @default(uuid(7)) @db.Uuid
+  attachmentId        String         @map("attachment_id") @db.Uuid
+  attachment          Attachment     @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+  type                AnnotationType @default(highlight)
+  color               String         @default("#ffeb3b")
+  pageIndex           Int            @default(0) @map("page_index")
+  pageLabel           String?        @default("") @map("page_label")
+  annotationSortIndex String         @default("") @map("annotation_sort_index")
+  rectCoords          Json?          @map("rect_coords") @db.JsonB
+  quoteText           String?        @map("quote_text")
+  comment             String?        @default("")
+  tags                String[]       @default([])
+  authorId            String         @map("author_id") @db.Uuid
+  version             Int            @default(1)
+  createdAt           DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt           DateTime?      @map("deleted_at") @db.Timestamptz(6)
+
+  @@index([attachmentId, deletedAt, annotationSortIndex])
+  @@index([attachmentId, deletedAt, pageIndex])
+  @@index([authorId, deletedAt])
+  @@index([tags], type: Gin)
+  @@map("annotations")
+}
+
+model FullTextIndex {
+  attachmentId String     @map("attachment_id") @db.Uuid
+  attachment   Attachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+  pageIndex    Int        @map("page_index")
+  textContent  String     @map("text_content")
+  charOffset   Int        @default(0) @map("char_offset")
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([attachmentId, pageIndex])
+  @@map("full_text_indexes")
+}

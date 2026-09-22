@@ -233,10 +233,10 @@ export class QueueService implements OnModuleInit {
         `[QUEUE_START] Executing run ${runId} (active: ${this.activeCount}/${this.maxConcurrency}, remaining queued: ${this.queue.length})`,
       );
       await this.repo
-        .updateRunStatus(projectId, runId, IngestionStatus.DETECTED)
+        .updateRunStatus(projectId, runId, IngestionStatus.RUNNING)
         .catch((statusErr: any) => {
           this.logger.warn(
-            `Failed to set DETECTED status for run ${runId}: ${statusErr?.message}`,
+            `Failed to set RUNNING status for run ${runId}: ${statusErr?.message}`,
           );
         });
       await this.pipeline.executePipeline(runId, projectId, envelope);

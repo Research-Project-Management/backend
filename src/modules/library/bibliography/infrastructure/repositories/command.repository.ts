@@ -6,7 +6,7 @@ import {
   Inject,
   Optional,
 } from '@nestjs/common';
-import { Prisma, RagStatus } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../../core/database/prisma.service';
 import { VersionMismatchException } from '../../../shared-kernel/core/errors/version-mismatch.exception';
 import {
@@ -282,6 +282,28 @@ export class CommandRepository {
       });
     }
 
+    // Cascade restore associated notes, attachments, and annotations
+    await client.note.updateMany({
+      where: { itemId: id, deletedAt: { not: null } },
+      data: { deletedAt: null },
+    });
+
+    const attachments = await client.attachment.findMany({
+      where: { itemId: id },
+      select: { id: true },
+    });
+    if (attachments.length > 0) {
+      const attIds = attachments.map((a) => a.id);
+      await client.attachment.updateMany({
+        where: { id: { in: attIds }, deletedAt: { not: null } },
+        data: { deletedAt: null },
+      });
+      await client.annotation.updateMany({
+        where: { attachmentId: { in: attIds }, deletedAt: { not: null } },
+        data: { deletedAt: null },
+      });
+    }
+
     return client.item.update({
       where: { id },
       data: {
@@ -360,7 +382,14 @@ export class CommandRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
     const targetItemId = relation.targetItemId || relation.targetId;
-    if (!targetItemId || !isUuid(itemId) || !isUuid(targetItemId)) return;
+    if (
+      !targetItemId ||
+      !isUuid(itemId) ||
+      !isUuid(targetItemId) ||
+      itemId === targetItemId
+    ) {
+      return;
+    }
     const client = this.getClient(tx);
 
     const source = await client.item.findUnique({
@@ -492,31 +521,7 @@ export class CommandRepository {
       },
     });
   }
-
-  async updateRagStatus(
-    id: string,
-    data: {
-      ragStatus?: RagStatus;
-      ragDocId?: string;
-      ragIndexedAt?: Date;
-      ragLastAttemptAt?: Date;
-      ragError?: string | null;
-    },
-    tx?: Prisma.TransactionClient,
-  ) {
-    if (!isUuid(id)) return null as any;
-    const client = this.getClient(tx);
-    const existing = await client.item.findUnique({
-      where: { id },
-      select: { metadata: true },
-    });
-    const metadataObj: any = (existing?.metadata as any) ?? {};
-    metadataObj.rag = { ...metadataObj.rag, ...data };
-    return client.item.update({
-      where: { id },
-      data: { metadata: metadataObj },
-    });
-  }
 }
 
 export { CommandRepository as ItemCommandRepository };
+

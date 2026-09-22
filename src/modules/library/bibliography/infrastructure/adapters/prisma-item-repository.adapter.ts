@@ -176,7 +176,7 @@ export class PrismaItemRepositoryAdapter implements IItemRepositoryPort {
             userId: aggregate.userId,
             projectId: aggregate.projectId ?? null,
             title: aggregate.title,
-            type: aggregate.itemType,
+            itemType: aggregate.itemType,
             doi: aggregate.doi,
             citationKey: aggregate.citationKey,
             abstract: aggregate.abstract,
@@ -210,7 +210,7 @@ export class PrismaItemRepositoryAdapter implements IItemRepositoryPort {
           where: { id: aggregate.id },
           data: {
             title: aggregate.title,
-            type: aggregate.itemType,
+            itemType: aggregate.itemType,
             doi: aggregate.doi,
             citationKey: aggregate.citationKey,
             abstract: aggregate.abstract,
@@ -390,19 +390,6 @@ export class PrismaItemRepositoryAdapter implements IItemRepositoryPort {
       });
       return purged;
     });
-  }
-
-  async updateRagStatus(
-    itemId: string,
-    status: {
-      ragStatus: string;
-      ragDocId?: string;
-      ragError?: string;
-      ragLastAttemptAt?: Date;
-      ragIndexedAt?: Date;
-    },
-  ): Promise<void> {
-    await this.commandRepo.updateRagStatus(itemId, status as any);
   }
 
   async setMyPublication(

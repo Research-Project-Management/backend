@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { IIngestionRunRepositoryPort } from '../../domain/ports/ingestion-run-repository.port';
 import { IngestionRunAggregate } from '../../domain/model/ingestion-run.aggregate';
 import { PrismaService } from '../../../../../core/database/prisma.service';
@@ -29,7 +30,7 @@ export class PrismaIngestionRunRepositoryAdapter implements IIngestionRunReposit
       sourceType: (raw.inputParams as any)?.sourceType || 'manual',
       status: this.mapPrismaStatusToDomain(raw.status),
       totalItems: (raw.inputParams as any)?.totalItems || 1,
-      processedItems: raw.status === IngestionStatus.READY ? 1 : 0,
+      processedItems: raw.status === IngestionStatus.COMPLETED ? 1 : 0,
       failedItems: raw.status === IngestionStatus.FAILED_FINAL ? 1 : 0,
       errorReason: raw.lastError,
       startedAt: raw.startedAt,
@@ -55,7 +56,7 @@ export class PrismaIngestionRunRepositoryAdapter implements IIngestionRunReposit
         sourceType: (raw.inputParams as any)?.sourceType || 'manual',
         status: this.mapPrismaStatusToDomain(raw.status),
         totalItems: (raw.inputParams as any)?.totalItems || 1,
-        processedItems: raw.status === IngestionStatus.READY ? 1 : 0,
+        processedItems: raw.status === IngestionStatus.COMPLETED ? 1 : 0,
         failedItems: raw.status === IngestionStatus.FAILED_FINAL ? 1 : 0,
         errorReason: raw.lastError,
         startedAt: raw.startedAt,
@@ -74,7 +75,7 @@ export class PrismaIngestionRunRepositoryAdapter implements IIngestionRunReposit
         userId: aggregate.userId,
         projectId: aggregate.projectId ?? null,
         status: prismaStatus,
-        inputHash: crypto.randomUUID(),
+        inputHash: randomUUID(),
         inputParams: {
           sourceType: aggregate.sourceType,
           totalItems: aggregate.totalItems,
@@ -92,28 +93,18 @@ export class PrismaIngestionRunRepositoryAdapter implements IIngestionRunReposit
   }
 
   private mapPrismaStatusToDomain(status: IngestionStatus): string {
-    switch (status) {
-      case IngestionStatus.READY:
-      case IngestionStatus.COMMITTED:
-        return 'COMPLETED';
-      case IngestionStatus.FAILED_FINAL:
-      case IngestionStatus.FAILED_RETRYABLE:
-        return 'FAILED';
-      default:
-        return 'RUNNING';
-    }
+    return status as string;
   }
 
   private mapDomainStatusToPrisma(status: string): IngestionStatus {
-    switch (status) {
-      case 'COMPLETED':
-        return IngestionStatus.READY;
-      case 'FAILED':
-        return IngestionStatus.FAILED_FINAL;
-      case 'RUNNING':
-        return IngestionStatus.DETECTED;
-      default:
-        return IngestionStatus.RECEIVED;
-    }
+    const upper = status.toUpperCase();
+    if (upper === 'COMPLETED' || upper === 'READY') return IngestionStatus.COMPLETED;
+    if (upper === 'FAILED' || upper === 'FAILED_FINAL') return IngestionStatus.FAILED_FINAL;
+    if (upper === 'FAILED_RETRYABLE') return IngestionStatus.FAILED_RETRYABLE;
+    if (upper === 'NEEDS_REVIEW') return IngestionStatus.COMPLETED;
+    if (upper === 'RUNNING') return IngestionStatus.RUNNING;
+    if (upper === 'CANCELLED') return IngestionStatus.CANCELLED;
+    if (upper === 'STALLED') return IngestionStatus.STALLED;
+    return IngestionStatus.PENDING;
   }
 }

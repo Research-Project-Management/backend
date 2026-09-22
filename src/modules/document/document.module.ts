@@ -10,6 +10,8 @@ import { ExportModule } from './export/export.module';
 import { AssetModule } from './asset/asset.module';
 import { SuggestionModule } from './suggestion/suggestion.module';
 import { NotificationBundlerModule } from './notification/notification-bundler.module';
+import { OutlineModule } from './outline/outline.module';
+import { SearchModule } from './search/search.module';
 import { DocumentFacade, DOCUMENT_FACADE } from './document.facade';
 
 @Module({
@@ -25,6 +27,8 @@ import { DocumentFacade, DOCUMENT_FACADE } from './document.facade';
     AssetModule,
     SuggestionModule,
     NotificationBundlerModule,
+    OutlineModule,
+    SearchModule,
   ],
   providers: [
     DocumentFacade,
@@ -47,6 +51,8 @@ import { DocumentFacade, DOCUMENT_FACADE } from './document.facade';
     AssetModule,
     SuggestionModule,
     NotificationBundlerModule,
+    OutlineModule,
+    SearchModule,
   ],
 })
 export class DocumentModule {}

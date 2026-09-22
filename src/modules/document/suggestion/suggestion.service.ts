@@ -534,7 +534,7 @@ export class SuggestionService {
       }
     }
 
-    await this.prisma.$transaction([
+    const [updatedPage] = await this.prisma.$transaction([
       this.prisma.page.update({
         where: { id: pageId },
         data: {
@@ -576,6 +576,7 @@ export class SuggestionService {
         count: appliedIds.length,
         acceptedIds: appliedIds,
         resolvedBy: userId,
+        page: updatedPage,
       },
     );
 
@@ -583,10 +584,11 @@ export class SuggestionService {
       pageId,
       type: 'suggestions-accepted-all',
       count: appliedIds.length,
+      page: updatedPage,
       timestamp: Date.now(),
     });
 
-    return { ok: true, acceptedCount: appliedIds.length };
+    return { ok: true, acceptedCount: appliedIds.length, page: updatedPage };
   }
 
   async rejectAllSuggestions(pageId: string, userId: string) {

@@ -188,22 +188,33 @@ export class RetractionRepository {
 
   // ── Retraction Database Seed / Cache Operations ──────────────────────────
   async countRetractionRecords(): Promise<number> {
-    return this.prisma.retractionRecord.count();
+    return this.prisma.retraction.count();
+  }
+
+  async countRetractions(): Promise<number> {
+    return this.prisma.retraction.count();
   }
 
   async upsertRetractionRecord(args: any) {
-    return this.prisma.retractionRecord.upsert(args);
+    return this.prisma.retraction.upsert(args);
+  }
+
+  async upsertRetraction(args: any) {
+    return this.prisma.retraction.upsert(args);
   }
 
   async findRetractionRecordsForMemoryIndex() {
-    return this.prisma.retractionRecord.findMany({
+    return this.prisma.retraction.findMany({
       where: { isRetracted: true },
       select: {
         doi: true,
         pmid: true,
+        title: true,
         nature: true,
+        noticeType: true,
         reason: true,
         noticeUrl: true,
+        journal: true,
         retractionDate: true,
         source: true,
       },
@@ -211,7 +222,13 @@ export class RetractionRepository {
   }
 
   async findRetractionRecord(where: any) {
-    return this.prisma.retractionRecord.findFirst({
+    return this.prisma.retraction.findFirst({
+      where,
+    });
+  }
+
+  async findRetraction(where: any) {
+    return this.prisma.retraction.findFirst({
       where,
     });
   }
@@ -225,10 +242,10 @@ export class RetractionRepository {
   }> {
     const [totalRecords, retractedCount, cleanCount, sources] =
       await Promise.all([
-        this.prisma.retractionRecord.count(),
-        this.prisma.retractionRecord.count({ where: { isRetracted: true } }),
-        this.prisma.retractionRecord.count({ where: { isRetracted: false } }),
-        this.prisma.retractionRecord.groupBy({
+        this.prisma.retraction.count(),
+        this.prisma.retraction.count({ where: { isRetracted: true } }),
+        this.prisma.retraction.count({ where: { isRetracted: false } }),
+        this.prisma.retraction.groupBy({
           by: ['source'],
           _count: true,
         }),
@@ -239,7 +256,7 @@ export class RetractionRepository {
       sourceBreakdown[s.source] = s._count;
     }
 
-    const latest = await this.prisma.retractionRecord.findFirst({
+    const latest = await this.prisma.retraction.findFirst({
       orderBy: { checkedAt: 'desc' },
       select: { checkedAt: true },
     });

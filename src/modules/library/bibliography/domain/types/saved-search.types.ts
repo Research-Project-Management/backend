@@ -53,7 +53,11 @@ export type SavedSearchField =
   | 'isbn'
   | 'hasAttachment'
   | 'dateAdded'
-  | 'publicationTitle';
+  | 'dateModified'
+  | 'publicationTitle'
+  | 'attachmentContent'
+  | 'noteContent'
+  | 'url';
 
 export type SavedSearchOperator =
   | 'is'

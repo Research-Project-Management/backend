@@ -9,6 +9,13 @@ import { PageService } from './page/page.service';
 import { CompilerService } from './compiler/compiler.service';
 import { ExportService, ExportFileResult } from './export/export.service';
 import { HistoryService } from './history/history.service';
+import { SearchService } from './search/search.service';
+import {
+  SearchDocumentQueryDto,
+  BatchReplaceDocumentDto,
+  SearchResultResponse,
+  BatchReplaceResultResponse,
+} from './search/dto/search-document.dto';
 import { CreatePageDto } from './page/dto/page.dto';
 import { CompileDocumentDto } from './compiler/dto/compiler.dto';
 import { ExportDocumentDto } from './export/dto/export.dto';
@@ -68,6 +75,15 @@ export interface IDocumentFacade {
   ): Promise<ExportFileResult>;
   getRecentVersions(pageId: string, limit?: number): Promise<any>;
   getReviewStats(pageId: string): Promise<DocumentReviewStats>;
+  searchDocuments(
+    projectId: string,
+    dto: SearchDocumentQueryDto,
+  ): Promise<SearchResultResponse>;
+  batchReplaceDocuments(
+    projectId: string,
+    userId: string,
+    dto: BatchReplaceDocumentDto,
+  ): Promise<BatchReplaceResultResponse>;
 }
 
 export const DOCUMENT_FACADE = 'DOCUMENT_FACADE';
@@ -81,6 +97,7 @@ export class DocumentFacade implements IDocumentFacade {
     @Optional() private readonly compilerService?: CompilerService,
     @Optional() private readonly exportService?: ExportService,
     @Optional() private readonly historyService?: HistoryService,
+    @Optional() private readonly searchService?: SearchService,
   ) {}
 
   async getPageById(
@@ -250,5 +267,34 @@ export class DocumentFacade implements IDocumentFacade {
         pendingSuggestions +
         acceptedSuggestions,
     };
+  }
+
+  async searchDocuments(
+    projectId: string,
+    dto: SearchDocumentQueryDto,
+  ): Promise<SearchResultResponse> {
+    if (!this.searchService) {
+      throw new BadRequestException(
+        'SearchService is not available in DocumentFacade',
+      );
+    }
+    return this.searchService.searchProjectDocuments(projectId, dto);
+  }
+
+  async batchReplaceDocuments(
+    projectId: string,
+    userId: string,
+    dto: BatchReplaceDocumentDto,
+  ): Promise<BatchReplaceResultResponse> {
+    if (!this.searchService) {
+      throw new BadRequestException(
+        'SearchService is not available in DocumentFacade',
+      );
+    }
+    return this.searchService.batchReplaceProjectDocuments(
+      projectId,
+      userId,
+      dto,
+    );
   }
 }

@@ -11,6 +11,7 @@ import {
   HttpCode,
   HttpStatus,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/identity/auth';
@@ -23,10 +24,14 @@ import { STORAGE_NODE_REPOSITORY } from '../../storage.tokens';
 import { Inject } from '@nestjs/common';
 import { StorageNode } from '../../domain/entities/storage-node.entity';
 import { FileScope } from '../../domain/value-objects/file-scope.vo';
+import { PrismaService } from '@/core/database/prisma.service';
+import { FilePermission } from '@prisma/client';
+import { StorageNodeMapper } from '../../infrastructure/persistence/mappers/storage-node.mapper';
 import {
   CreateFolderDto,
   MoveFileDto,
   RenameFileDto,
+  ShareFileDto,
   BatchFileIdsDto,
   BatchStarDto,
 } from '../dto/file.dto';
@@ -43,6 +48,8 @@ export class DriveController {
     private readonly softDeleteUseCase: SoftDeleteUseCase,
     @Inject(STORAGE_NODE_REPOSITORY)
     private readonly nodeRepo: IStorageNodeRepository,
+    @Optional()
+    private readonly prisma?: PrismaService,
   ) {}
 
   private mapNodeToDto(node: StorageNode) {
@@ -116,15 +123,80 @@ export class DriveController {
 
   @Get(['shared', 'me/shared'])
   @ApiOperation({ summary: 'Get shared files' })
-  getSharedFiles(@CurrentUser('id') _userId: string) {
+  async getSharedFiles(
+    @CurrentUser('id') userId: string,
+    @Query('limit') limit?: number,
+    @Query('offset') offset?: number,
+    @Query('page') page?: number,
+  ) {
+    const take = limit ? Number(limit) : 100;
+    const skip =
+      offset !== undefined
+        ? Number(offset)
+        : page
+          ? (Number(page) - 1) * take
+          : 0;
+    const currentPage = page ? Number(page) : Math.floor(skip / take) + 1;
+
+    if (!this.prisma) {
+      return {
+        items: [],
+        files: [],
+        total: 0,
+        page: currentPage,
+        limit: take,
+        totalPages: 0,
+        hasMore: false,
+      };
+    }
+
+    const [shares, total] = await Promise.all([
+      this.prisma.fileShare.findMany({
+        where: {
+          userId,
+          file: {
+            trashedAt: null,
+          },
+        },
+        include: {
+          file: true,
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+        take,
+        skip,
+      }),
+      this.prisma.fileShare.count({
+        where: {
+          userId,
+          file: {
+            trashedAt: null,
+          },
+        },
+      }),
+    ]);
+
+    const files = shares
+      .filter((s) => s.file)
+      .map((s) => {
+        const node = StorageNodeMapper.toDomain(s.file);
+        const dto = this.mapNodeToDto(node);
+        return {
+          ...dto,
+          permission: s.permission,
+          sharedAt: s.createdAt.toISOString(),
+        };
+      });
+
     return {
-      items: [],
-      files: [],
-      total: 0,
-      page: 1,
-      limit: 100,
-      totalPages: 0,
-      hasMore: false,
+      items: files,
+      files,
+      total,
+      page: currentPage,
+      limit: take,
+      totalPages: Math.ceil(total / take) || 0,
+      hasMore: skip + files.length < total,
     };
   }
 
@@ -240,6 +312,56 @@ export class DriveController {
     node.toggleStar();
     await this.nodeRepo.update(node);
     return { success: true, starred: node.starred };
+  }
+
+  @Put([':id/share', 'files/:id/share'])
+  @Post([':id/share', 'files/:id/share'])
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Share a file with another user' })
+  async shareFile(
+    @Param('id') id: string,
+    @CurrentUser('id') _currentUserId: string,
+    @Body() dto: ShareFileDto,
+  ) {
+    const node = await this.nodeRepo.findById(id);
+    if (!node || node.isTrashed()) {
+      throw new NotFoundException('File not found');
+    }
+
+    if (!this.prisma) {
+      throw new NotFoundException('Storage sharing database service unavailable');
+    }
+
+    const permission =
+      dto.permission === 'edit' ? FilePermission.edit : FilePermission.view;
+
+    const share = await this.prisma.fileShare.upsert({
+      where: {
+        fileId_userId: {
+          fileId: id,
+          userId: dto.userId,
+        },
+      },
+      update: {
+        permission,
+      },
+      create: {
+        fileId: id,
+        userId: dto.userId,
+        permission,
+      },
+    });
+
+    return {
+      success: true,
+      share: {
+        id: share.id,
+        fileId: share.fileId,
+        userId: share.userId,
+        permission: share.permission,
+        createdAt: share.createdAt.toISOString(),
+      },
+    };
   }
 
   @Post('folder')

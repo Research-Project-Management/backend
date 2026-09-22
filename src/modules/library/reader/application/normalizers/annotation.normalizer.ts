@@ -99,6 +99,9 @@ export class AnnotationNormalizer {
     if (normalized === 'text' || normalized === 'freetext') {
       return AnnotationType.text;
     }
+    if (normalized === 'ink' || normalized === 'drawing' || normalized === 'pen') {
+      return AnnotationType.ink;
+    }
     const validTypes = Object.values(AnnotationType) as string[];
     if (validTypes.includes(normalized)) {
       return normalized as AnnotationType;

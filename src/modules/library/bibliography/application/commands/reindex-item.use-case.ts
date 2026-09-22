@@ -25,10 +25,11 @@ export interface ReindexItemResult {
 }
 
 /**
- * Command Use Case — Reindex Item for RAG / Semantic Search
+ * Command Use Case — Reindex Item
  *
- * Clean Architecture & DDD: Depends strictly on Domain Ports (IItemRepositoryPort)
- * without concrete repository or Prisma coupling.
+ * Clean Architecture & DDD:
+ * 1. Refreshes local library search indexing (FTS / facets).
+ * 2. Emits outbox event `library.item.reindexed` for asynchronous AI / vector processing.
  */
 @Injectable()
 export class ReindexItemUseCase {
@@ -41,8 +42,6 @@ export class ReindexItemUseCase {
     @Optional()
     @Inject(SEARCH_FACADE)
     private readonly searchFacade?: ISearchFacade,
-    @Optional() private readonly rag?: any,
-    @Optional() private readonly semanticSearch?: any,
   ) {}
 
   async execute(command: ReindexItemCommand): Promise<ReindexItemResult> {
@@ -64,6 +63,7 @@ export class ReindexItemUseCase {
       projectId: effectiveProjectId,
     };
 
+    // 1. Transactionally publish domain event for external listeners (e.g. AI / Vector module)
     await this.libraryTx.executeInTransaction(async (_tx, helpers) => {
       await helpers.publishOutbox(
         eventScope,
@@ -77,107 +77,21 @@ export class ReindexItemUseCase {
       );
     });
 
-    // Fire-and-forget — do not await
-    this.runRagIndexing(item).catch((err) => {
-      this.logger.error(
-        `Failed to index paper ${command.itemId}: ${err.message}`,
-      );
-    });
+    // 2. Refresh local search facade index if present
+    if (this.searchFacade) {
+      try {
+        await this.searchFacade.reindexItem(item);
+      } catch (err: any) {
+        this.logger.warn(
+          `Local search facade reindex warning for item ${command.itemId}: ${err?.message}`,
+        );
+      }
+    }
 
     return {
       success: true,
-      message: 'Item re-indexing started',
+      message: 'Item re-indexing requested',
       itemId: command.itemId,
     };
-  }
-
-  private async runRagIndexing(item: any): Promise<void> {
-    await this.itemRepo.updateRagStatus(item.id, {
-      ragStatus: 'pending',
-      ragLastAttemptAt: new Date(),
-    });
-
-    if (this.searchFacade) {
-      try {
-        const res = await this.searchFacade.reindexItem(item);
-        if (res.docId) {
-          await this.itemRepo.updateRagStatus(item.id, {
-            ragDocId: res.docId,
-            ragStatus: 'indexed',
-            ragIndexedAt: new Date(),
-          });
-          this.logger.log(
-            `Paper ${item.id} successfully indexed into Qdrant (docId: ${res.docId})`,
-          );
-        } else if (res.localIndexed) {
-          await this.itemRepo.updateRagStatus(item.id, {
-            ragStatus: 'indexed',
-            ragIndexedAt: new Date(),
-          });
-          this.logger.log(
-            `Paper ${item.id} indexed into local vector store (external Qdrant offline).`,
-          );
-        } else {
-          const errorMsg = res.error || 'External RAG unavailable';
-          await this.itemRepo.updateRagStatus(item.id, {
-            ragStatus: 'failed',
-            ragError: errorMsg,
-          });
-          this.logger.error(`Failed to index paper ${item.id}: ${errorMsg}`);
-        }
-      } catch (err: any) {
-        const errorMsg = err?.message || 'External RAG unavailable';
-        await this.itemRepo.updateRagStatus(item.id, {
-          ragStatus: 'failed',
-          ragError: errorMsg,
-        });
-        this.logger.error(`Failed to index paper ${item.id}: ${errorMsg}`);
-      }
-      return;
-    }
-
-    let localIndexed = false;
-
-    // 1. In-process local semantic vector indexing (offline, zero API)
-    try {
-      if (this.semanticSearch) {
-        await this.semanticSearch.indexItem(item);
-        localIndexed = true;
-      }
-    } catch (err: any) {
-      this.logger.debug(`Local semantic indexing skipped: ${err?.message}`);
-    }
-
-    // 2. External Qdrant indexing if FLUX_AI_URL is available
-    try {
-      if (!this.rag) throw new Error('RagProvider not configured');
-      const result = await this.rag.indexPaper(item);
-      await this.itemRepo.updateRagStatus(item.id, {
-        ragDocId: result.docId,
-        ragStatus: 'indexed',
-        ragIndexedAt: new Date(),
-      });
-      this.logger.log(
-        `Paper ${item.id} successfully indexed into Qdrant (docId: ${result.docId})`,
-      );
-    } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : 'External RAG unavailable';
-      if (localIndexed) {
-        await this.itemRepo.updateRagStatus(item.id, {
-          ragStatus: 'indexed',
-          ragIndexedAt: new Date(),
-        });
-        this.logger.log(
-          `Paper ${item.id} indexed into local vector store (external Qdrant offline).`,
-        );
-      } else {
-        await this.itemRepo.updateRagStatus(item.id, {
-          ragStatus: 'failed',
-          ragError: message,
-        });
-        this.logger.error(`Failed to index paper ${item.id}: ${message}`);
-      }
-    }
   }
 }

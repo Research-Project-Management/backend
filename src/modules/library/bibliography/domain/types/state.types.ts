@@ -33,6 +33,7 @@ export interface StateEntity {
   id?: string;
   userId: string;
   itemId: string;
+  isStarred?: boolean;
   readStatus: ReadingStatus | string;
   rating: number | null;
   currentPage: number | null;
@@ -44,6 +45,7 @@ export interface StateEntity {
 
 // ─── State Data & Response Shapes ─────────────────────────────────────────────
 export interface StateData {
+  isStarred?: boolean;
   readStatus: ReadingStatus;
   rating: number;
   currentPage: number;
@@ -57,6 +59,7 @@ export type ReadingState = StateData;
 
 // ─── Repository Upsert Input ──────────────────────────────────────────────────
 export interface UpsertStateData {
+  isStarred?: boolean;
   readStatus?: ReadingStatus;
   rating?: number;
   currentPage?: number;

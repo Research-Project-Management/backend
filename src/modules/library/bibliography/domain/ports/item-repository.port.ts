@@ -53,20 +53,6 @@ export interface IItemRepositoryPort {
   purge(userId: string, itemId: string, projectId?: string): Promise<boolean>;
 
   /**
-   * Update RAG vector indexing status of an item.
-   */
-  updateRagStatus(
-    itemId: string,
-    status: {
-      ragStatus: string;
-      ragDocId?: string;
-      ragError?: string;
-      ragLastAttemptAt?: Date;
-      ragIndexedAt?: Date;
-    },
-  ): Promise<void>;
-
-  /**
    * Mark or unmark an item as user's own publication.
    */
   setMyPublication(
