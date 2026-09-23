@@ -648,6 +648,23 @@ export class AttachmentsController {
     );
   }
 
+  @Post('attachments/:attachmentId/re-extract')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @HttpCode(HttpStatus.ACCEPTED)
+  async reExtractAttachment(
+    @CurrentUser('id') userId: string,
+    @Param('attachmentId') attachmentId: string,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
+  ) {
+    const effectiveProjectId = paramProjectId || queryProjectId;
+    return this.effectiveAttachmentsService!.reExtractAttachment(
+      userId,
+      attachmentId,
+      effectiveProjectId,
+    );
+  }
+
   @Delete('attachments/:attachmentId')
   @ProjectRoles('owner', 'coordinator', 'contributor')
   async deleteAttachment(

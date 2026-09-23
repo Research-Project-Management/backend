@@ -143,7 +143,13 @@ export class RetractionRepository {
   async findRetractedItems(userId: string, projectId?: string) {
     const scopeWhere = this.getScopeWhere(userId, projectId);
     const items = await this.prisma.item.findMany({
-      where: scopeWhere,
+      where: {
+        ...scopeWhere,
+        metadata: {
+          path: ['isRetracted'],
+          equals: true,
+        },
+      },
       orderBy: [{ updatedAt: 'desc' }],
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },
@@ -151,24 +157,35 @@ export class RetractionRepository {
         itemTags: { include: { tag: true } },
       },
     });
-    return items.filter((item) => Boolean((item.metadata as any)?.isRetracted));
+    return items.filter((item) => {
+      const meta = (item.metadata as any) ?? {};
+      return meta.isRetracted === true || (item as any).isRetracted === true;
+    });
   }
 
   async getStats(userId: string, projectId?: string): Promise<RetractionStats> {
     const baseWhere = this.getScopeWhere(userId, projectId);
-    const items = await this.prisma.item.findMany({
-      where: baseWhere,
-      select: { metadata: true },
-    });
+    const [totalItems, retractedItems] = await Promise.all([
+      this.prisma.item.count({ where: baseWhere }).catch(() => 0),
+      this.prisma.item.findMany({
+        where: {
+          ...baseWhere,
+          metadata: {
+            path: ['isRetracted'],
+            equals: true,
+          },
+        },
+        select: { metadata: true },
+      }),
+    ]);
 
     let checked = 0;
     let retracted = 0;
     let expressionsOfConcern = 0;
     let manual = 0;
 
-    for (const item of items) {
+    for (const item of retractedItems) {
       const meta = (item.metadata as any) ?? {};
-      if (meta.retractionCheckedAt) checked++;
       if (meta.isRetracted) {
         retracted++;
         if (meta.retractionNature === 'expression_of_concern')
@@ -178,12 +195,54 @@ export class RetractionRepository {
     }
 
     return {
-      totalItems: items.length,
-      checkedItems: checked,
+      totalItems: typeof totalItems === 'number' ? totalItems : retractedItems.length,
+      checkedItems: totalItems,
       retractedCount: retracted,
       expressionsOfConcernCount: expressionsOfConcern,
       manualCount: manual,
     };
+  }
+
+  async findGlobalStaleItemsForSync(staleBefore: Date, limit = 100) {
+    const items = await this.prisma.item.findMany({
+      where: {
+        deletedAt: null,
+        NOT: {
+          AND: [{ doi: null }, { title: '' }],
+        },
+      },
+      select: {
+        id: true,
+        userId: true,
+        projectId: true,
+        title: true,
+        doi: true,
+        metadata: true,
+      },
+      take: limit * 2,
+    });
+
+    return items
+      .map((item) => {
+        const meta = (item.metadata as any) ?? {};
+        return {
+          id: item.id,
+          userId: item.userId,
+          projectId: item.projectId,
+          title: item.title,
+          doi: item.doi,
+          pmid: meta.pmid ?? null,
+          isRetracted: Boolean(meta.isRetracted),
+          retractionNature: meta.retractionNature ?? null,
+          retractionCheckedAt: meta.retractionCheckedAt
+            ? new Date(meta.retractionCheckedAt)
+            : null,
+        };
+      })
+      .filter(
+        (i) => !i.retractionCheckedAt || i.retractionCheckedAt < staleBefore,
+      )
+      .slice(0, limit);
   }
 
   // ── Retraction Database Seed / Cache Operations ──────────────────────────

@@ -55,7 +55,6 @@ model Item {
   itemMetadata        ItemMetadata[]
   publications        UserPublication[]
 
-  @@index([userId, deletedAt])
   @@index([projectId, deletedAt])
   @@index([userId, deletedAt, year(sort: Desc), createdAt(sort: Desc)])
   @@index([userId, itemType])
@@ -76,13 +75,12 @@ model Contributor {
   firstName   String?  @default("") @map("first_name")
   lastName    String?  @default("") @map("last_name")
   fullName    String   @map("full_name")
-  orcid       String?  @map("orcid") @db.VarChar(19) // e.g. "0000-0002-1825-0097"
+  shortName   String?  @default("") @map("short_name") @db.VarChar(255)
   orderIndex  Int      @default(0) @map("order_index")
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@index([itemId, orderIndex])
   @@index([fullName])
-  @@index([orcid])
   @@map("contributors")
 }
 
@@ -114,6 +112,7 @@ model ItemMetadata {
   updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([itemId, sourceProvider, createdAt(sort: Desc)])
+  @@index([itemId, createdAt(sort: Desc)])
   @@index([sourceProvider])
   @@map("item_metadata")
 }

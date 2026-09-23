@@ -95,7 +95,9 @@ export class CompilerService {
     @Optional() private readonly yjsDocumentManager?: YjsDocumentManager,
   ) {
     this.latexUrl =
-      this.configService.get<string>('LATEX_URL') || 'http://localhost:2918';
+      this.configService.get<string>('CLSI_URL') ||
+      this.configService.get<string>('LATEX_URL') ||
+      'http://localhost:2918';
   }
 
   private hashSource(source: string): string {

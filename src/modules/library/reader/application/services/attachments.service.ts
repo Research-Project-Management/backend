@@ -15,7 +15,10 @@ import {
   CreateAttachmentInput,
   ReplaceAttachmentFileInput,
 } from '../../domain/types/attachments.types';
-import { validateAttachmentInvariants } from '../utils/attachments.utils';
+import {
+  validateAttachmentInvariants,
+  inferAttachmentTypeFromFilename,
+} from '../utils/attachments.utils';
 
 import { AttachmentsRepository } from '../../infrastructure/repositories/attachments.repository';
 
@@ -134,13 +137,37 @@ export class AttachmentsService {
 
     const sizeBigInt = input.size !== undefined ? BigInt(input.size) : 0n;
 
+    let resolvedLinkMode = input.linkMode;
+    if (!resolvedLinkMode) {
+      if (
+        input.mimeType === 'text/html' ||
+        input.attachmentType === ('snapshot' as any)
+      ) {
+        resolvedLinkMode = 'imported_url';
+      } else if (!resolvedFileId && input.url && /^https?:\/\//i.test(input.url)) {
+        resolvedLinkMode = 'linked_url';
+      } else {
+        resolvedLinkMode = 'imported_file';
+      }
+    }
+
+    const resolvedAttachmentType: AttachmentType =
+      input.attachmentType ??
+      (resolvedLinkMode === 'imported_url'
+        ? ('snapshot' as AttachmentType)
+        : input.filename
+        ? inferAttachmentTypeFromFilename(input.filename)
+        : AttachmentType.primary_pdf);
+
     return this.libraryTx.executeInTransaction(async (tx, helpers) => {
       const attachment = await tx.attachment.create({
         data: {
           itemId: targetItemId,
+          linkMode: resolvedLinkMode as any,
+          attachmentType: resolvedAttachmentType as any,
           filename: input.filename,
           url: input.url,
-          mimeType: input.mimeType ?? 'application/pdf',
+          mimeType: input.mimeType ?? (resolvedLinkMode === 'linked_url' ? 'text/uri-list' : 'application/pdf'),
           size: sizeBigInt,
           fileHash: input.fileHash ?? '',
           fileId: resolvedFileId,
@@ -151,7 +178,7 @@ export class AttachmentsService {
               fileHash: input.fileHash ?? '',
               fileId: resolvedFileId,
               sizeBytes: sizeBigInt,
-              comment: 'Initial file upload',
+              comment: resolvedLinkMode === 'linked_url' ? 'Linked URI' : 'Initial file upload',
             },
           },
         },
@@ -597,11 +624,27 @@ export class AttachmentsService {
         );
       }
 
+      let resolvedLinkMode = command.linkMode as any;
+      if (!resolvedLinkMode) {
+        if (
+          command.mimeType === 'text/html' ||
+          command.attachmentType === ('snapshot' as any)
+        ) {
+          resolvedLinkMode = 'imported_url';
+        } else if (!command.fileId && command.url && /^https?:\/\//i.test(command.url)) {
+          resolvedLinkMode = 'linked_url';
+        } else {
+          resolvedLinkMode = 'imported_file';
+        }
+      }
+
       const created = await tx.attachment.create({
         data: {
           itemId: parentItemId,
+          linkMode: resolvedLinkMode,
           filename: command.filename,
           url: command.url,
+          fileId: command.fileId,
           mimeType: command.mimeType,
           fileHash: command.fileHash,
           attachmentType: command.attachmentType
@@ -1103,5 +1146,72 @@ export class AttachmentsService {
       );
     }
     return itemUrl;
+  }
+
+  /**
+   * Triggers an on-demand re-extraction and OCR job for an attachment.
+   * Resets extraction status to PENDING and publishes extraction_requested to outbox.
+   */
+  async reExtractAttachment(
+    userId: string,
+    attachmentId: string,
+    projectId?: string,
+  ): Promise<{ status: string; attachmentId: string; message: string }> {
+    const attachment = await this.repo.findUnique(attachmentId, {
+      item: true,
+    });
+
+    const isAuthorized =
+      attachment &&
+      (projectId && projectId !== 'user'
+        ? attachment.item.projectId === projectId
+        : attachment.item.userId === userId);
+
+    if (!isAuthorized) {
+      throw new NotFoundException(`Attachment ${attachmentId} not found`);
+    }
+
+    if (
+      attachment.mimeType !== 'application/pdf' &&
+      !attachment.filename?.toLowerCase().endsWith('.pdf')
+    ) {
+      throw new BadRequestException(
+        `Attachment ${attachmentId} is not a PDF file`,
+      );
+    }
+
+    const eventScope =
+      projectId && projectId !== 'user'
+        ? { projectId, userId }
+        : { userId };
+
+    return this.libraryTx.executeInTransaction(async (tx, helpers) => {
+      await tx.attachment.update({
+        where: { id: attachmentId },
+        data: {
+          extractionStatus: 'PENDING',
+          extractionAttempts: 0,
+          extractionLastError: null,
+        },
+      });
+
+      await helpers.publishOutbox(
+        eventScope,
+        attachment.id,
+        'library.attachment.extraction_requested',
+        {
+          attachmentId: attachment.id,
+          itemId: attachment.itemId,
+          userId,
+          projectId: projectId && projectId !== 'user' ? projectId : undefined,
+        },
+      );
+
+      return {
+        status: 'PENDING',
+        attachmentId: attachment.id,
+        message: 'Re-extraction and OCR job queued successfully',
+      };
+    });
   }
 }

@@ -42,9 +42,11 @@ export interface CreatorCredit {
   id?: string | null;
   orderIndex: number;
   creatorType: CreatorType;
+  fieldMode?: number;
   firstName?: string | null;
   lastName?: string | null;
   fullName: string;
+  shortName?: string | null;
 }
 
 export interface CreatorCreditInput {
@@ -53,6 +55,8 @@ export interface CreatorCreditInput {
   firstName?: string | null;
   lastName?: string | null;
   creatorType?: CreatorType;
+  fieldMode?: number;
+  shortName?: string | null;
   orderIndex?: number;
 }
 
@@ -61,9 +65,11 @@ export type CreatorInput = CreatorCreditInput;
 export interface ParsedCreator {
   orderIndex: number;
   creatorType: CreatorType;
+  fieldMode?: number;
   firstName: string;
   lastName: string;
   fullName: string;
+  shortName?: string;
 }
 
 // ── Persistent Identifiers ───────────────────────────────────────────────────

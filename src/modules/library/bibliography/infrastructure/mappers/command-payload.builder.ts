@@ -653,6 +653,15 @@ export async function buildCommandCreateInput(
     ...((data as any).metadata && typeof (data as any).metadata === 'object'
       ? (data as any).metadata
       : {}),
+    ...((data as any).isRetracted !== undefined
+      ? {
+          isRetracted: Boolean((data as any).isRetracted),
+          retractionNature: (data as any).retractionNature ?? null,
+          retractionDetails: (data as any).retractionDetails ?? null,
+          retractionCheckedAt:
+            (data as any).retractionCheckedAt ?? new Date().toISOString(),
+        }
+      : {}),
   };
 
   const createData: any = {
@@ -713,9 +722,11 @@ export async function buildCommandCreateInput(
               }
               return {
                 creatorType: c.creatorType || 'author',
+                fieldMode: c.fieldMode !== undefined ? Number(c.fieldMode) : 0,
                 firstName: first,
                 lastName: last,
                 fullName,
+                shortName: c.shortName || '',
                 orderIndex: c.orderIndex !== undefined ? c.orderIndex : index,
               };
             }),
@@ -739,9 +750,11 @@ export async function buildCommandCreateInput(
                 }
                 return {
                   creatorType: c.creatorType || 'author',
+                  fieldMode: c.fieldMode !== undefined ? Number(c.fieldMode) : 0,
                   firstName: first,
                   lastName: last,
                   fullName,
+                  shortName: c.shortName || '',
                   orderIndex:
                     c.orderIndex !== undefined ? c.orderIndex : index,
                 };
@@ -787,6 +800,7 @@ export async function buildCommandCreateInput(
                 fileId: resolvedFileId,
                 size: data.size || 0,
                 mimeType: data.mimeType || 'application/pdf',
+                linkMode: 'imported_file',
                 attachmentType: 'primary_pdf',
                 revisions: {
                   create: [
@@ -1041,6 +1055,15 @@ export function buildCommandUpdateInput(
     ...((data as any).metadata && typeof (data as any).metadata === 'object'
       ? (data as any).metadata
       : {}),
+    ...((data as any).isRetracted !== undefined
+      ? {
+          isRetracted: Boolean((data as any).isRetracted),
+          retractionNature: (data as any).retractionNature ?? null,
+          retractionDetails: (data as any).retractionDetails ?? null,
+          retractionCheckedAt:
+            (data as any).retractionCheckedAt ?? new Date().toISOString(),
+        }
+      : {}),
   };
 
   const updateData: any = {
@@ -1133,9 +1156,11 @@ export function buildCommandUpdateInput(
                 }
                 return {
                   creatorType: c.creatorType || 'author',
+                  fieldMode: c.fieldMode !== undefined ? Number(c.fieldMode) : 0,
                   firstName: first,
                   lastName: last,
                   fullName,
+                  shortName: c.shortName || '',
                   orderIndex:
                     c.orderIndex !== undefined ? c.orderIndex : index,
                 };

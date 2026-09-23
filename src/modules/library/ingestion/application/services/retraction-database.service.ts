@@ -75,12 +75,26 @@ export class RetractionDatabaseService implements OnModuleInit {
         return existingCount;
       }
 
-      const seedPath = path.resolve(
-        __dirname,
-        '../data/retraction-watch-seed.json',
-      );
-      if (!fs.existsSync(seedPath)) {
-        this.logger.warn(`Retraction seed file not found at ${seedPath}`);
+      const candidatePaths = [
+        path.resolve(
+          __dirname,
+          '../../infrastructure/data/retraction-watch-seed.json',
+        ),
+        path.resolve(__dirname, '../data/retraction-watch-seed.json'),
+        path.resolve(
+          process.cwd(),
+          'src/modules/library/ingestion/infrastructure/data/retraction-watch-seed.json',
+        ),
+        path.resolve(
+          process.cwd(),
+          'dist/modules/library/ingestion/infrastructure/data/retraction-watch-seed.json',
+        ),
+      ];
+      const seedPath = candidatePaths.find((p) => fs.existsSync(p));
+      if (!seedPath) {
+        this.logger.warn(
+          `Retraction seed file not found in candidates: ${candidatePaths.join(', ')}`,
+        );
         return existingCount;
       }
 

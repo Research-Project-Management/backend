@@ -29,7 +29,7 @@ model Collection {
 
   collectionItems CollectionItem[]
 
-  @@index([userId, parentId, deletedAt])
+  @@index([parentId])
   @@index([userId, parentId, sortOrder, deletedAt])
   @@index([projectId, parentId, deletedAt])
   @@map("collections")

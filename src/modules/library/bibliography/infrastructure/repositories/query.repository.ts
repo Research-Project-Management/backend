@@ -250,6 +250,18 @@ export class QueryRepository {
     return this.findItemMetadata(itemId, sourceProvider, tx);
   }
 
+  /**
+   * Retrieves all itemMetadata records associated with an item across all providers.
+   */
+  async findMetadataSources(itemId: string, tx?: Prisma.TransactionClient) {
+    if (!isUuid(itemId)) return [];
+    const client = this.getClient(tx);
+    return client.itemMetadata.findMany({
+      where: { itemId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   async findMany(
     userId: string,
     options: {
@@ -269,6 +281,13 @@ export class QueryRepository {
       limit?: number;
       cursor?: string;
       projectId?: string;
+      orderBy?: string;
+      orderDirection?: 'asc' | 'desc';
+      itemType?: string;
+      type?: string;
+      fromYear?: number;
+      toYear?: number;
+      readStatus?: string;
     },
     tx?: Prisma.TransactionClient,
   ): Promise<any[]> {
@@ -276,6 +295,8 @@ export class QueryRepository {
     const client = this.getClient(tx);
     const view = options.view ?? 'all';
     const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
+
+    const effectiveUserId = options.userId || userId;
 
     const itemInclude = {
       contributors: {
@@ -291,9 +312,9 @@ export class QueryRepository {
       notesList: {
         where: { deletedAt: null },
       },
-      states: options.userId
+      states: effectiveUserId
         ? {
-            where: { userId: options.userId },
+            where: { userId: effectiveUserId },
           }
         : false,
     };
@@ -365,11 +386,20 @@ export class QueryRepository {
         }));
     }
 
+    const sortField = options.orderBy || 'createdAt';
+    const sortDir = options.orderDirection === 'asc' ? 'asc' : 'desc';
+    const allowedSortFields = ['title', 'year', 'createdAt', 'updatedAt', 'citationKey'];
+    const safeSortField = allowedSortFields.includes(sortField) ? sortField : 'createdAt';
+    const orderByClause: any[] = [
+      { [safeSortField]: sortDir },
+      { id: sortDir },
+    ];
+
     return client.item.findMany({
       where: this.buildWhereClause(userId, options),
       take: limit + 1,
       ...(options.cursor ? { cursor: { id: options.cursor }, skip: 1 } : {}),
-      orderBy: { createdAt: 'desc' },
+      orderBy: orderByClause,
       include: itemInclude,
     });
   }
@@ -394,6 +424,11 @@ export class QueryRepository {
       search?: string;
       hasFile?: boolean;
       projectId?: string;
+      itemType?: string;
+      type?: string;
+      fromYear?: number;
+      toYear?: number;
+      readStatus?: string;
     },
   ): Prisma.ItemWhereInput {
     const view = options.view ?? 'all';
@@ -415,7 +450,10 @@ export class QueryRepository {
       if (view === 'unfiled') {
         where.collectionItems = { none: {} };
       } else if (view === 'my-publications' || view === 'publications') {
-        where.metadata = { path: ['isMyPublication'], equals: true };
+        where.OR = [
+          { metadata: { path: ['isMyPublication'], equals: true } },
+          { publications: { some: { userId } } },
+        ];
       } else if (view === 'starred') {
         where.states = { some: { userId, isStarred: true } };
       }
@@ -431,6 +469,32 @@ export class QueryRepository {
 
     if (options.tagId) {
       where.itemTags = { some: { tagId: options.tagId } };
+    }
+
+    const itemType = options.itemType || options.type;
+    if (itemType) {
+      if (itemType.includes(',')) {
+        const types = itemType.split(',').map((t: string) => t.trim()).filter(Boolean);
+        where.itemType = { in: types };
+      } else {
+        where.itemType = itemType;
+      }
+    }
+
+    if (options.fromYear !== undefined || options.toYear !== undefined) {
+      where.year = {
+        ...(options.fromYear !== undefined ? { gte: Number(options.fromYear) } : {}),
+        ...(options.toYear !== undefined ? { lte: Number(options.toYear) } : {}),
+      };
+    }
+
+    if (options.readStatus && options.readStatus !== 'all') {
+      where.states = {
+        some: {
+          userId,
+          readStatus: options.readStatus,
+        },
+      };
     }
 
     if (options.search) {
@@ -489,10 +553,11 @@ export class QueryRepository {
     const client = this.getClient(tx);
     const view = options.view ?? 'all';
 
-    if (view === 'recent' && options.userId) {
+    const effectiveUserId = options.userId || userId;
+    if (view === 'recent' && effectiveUserId) {
       return client.state.count({
         where: {
-          userId: options.userId,
+          userId: effectiveUserId,
           lastReadAt: { not: null },
           item: {
             userId,

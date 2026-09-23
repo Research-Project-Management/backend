@@ -408,8 +408,10 @@ export class ItemsMapper {
         id: c.id,
         orderIndex: c.orderIndex ?? idx,
         creatorType: c.creatorType || 'author',
+        fieldMode: c.fieldMode ?? 0,
         firstName: c.firstName || undefined,
         lastName: c.lastName || undefined,
+        shortName: c.shortName || undefined,
         fullName:
           c.fullName ||
           [c.firstName, c.lastName].filter(Boolean).join(' ') ||
@@ -426,8 +428,10 @@ export class ItemsMapper {
         id: c.id,
         orderIndex: c.orderIndex ?? idx,
         creatorType: c.creatorType || 'author',
+        fieldMode: c.fieldMode ?? 0,
         firstName: c.firstName || undefined,
         lastName: c.lastName || undefined,
+        shortName: c.shortName || undefined,
         fullName:
           c.fullName ||
           [c.firstName, c.lastName].filter(Boolean).join(' ') ||
@@ -947,6 +951,10 @@ export class ItemsMapper {
     const { userStates: _userStates, states: _states, ...rest } = normalized;
     return {
       ...rest,
+      isStarred:
+        userState?.isStarred !== undefined
+          ? Boolean(userState.isStarred)
+          : Boolean(normalized.isStarred),
       readStatus: userState?.readStatus ?? 'unread',
       rating: userState?.rating ?? 0,
       lastReadAt: userState?.lastReadAt

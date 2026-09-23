@@ -499,7 +499,18 @@ export class CommandRepository {
 
     const metadataObj: any = (existing.metadata as any) ?? {};
     metadataObj.isMyPublication = isMyPublication;
-    if (isMyPublication) metadataObj.publicationConfirmedAt = new Date().toISOString();
+    if (isMyPublication) {
+      metadataObj.publicationConfirmedAt = new Date().toISOString();
+      await client.userPublication.upsert({
+        where: { userId_itemId: { userId, itemId: id } },
+        create: { userId, itemId: id },
+        update: {},
+      });
+    } else {
+      await client.userPublication.deleteMany({
+        where: { userId, itemId: id },
+      });
+    }
 
     return client.item.update({
       where: { id },

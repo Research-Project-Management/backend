@@ -120,16 +120,17 @@ describe('Library Attachments & Storage Integration Suite', () => {
       delete: jest.fn().mockResolvedValue({ id: 'att-1' }),
     };
 
+    const helpersMock = {
+      appendChange: jest.fn().mockResolvedValue(undefined),
+      publishOutbox: jest.fn().mockResolvedValue(undefined),
+    };
     mockTx = {
+      helpers: helpersMock,
       executeInTransaction: jest.fn().mockImplementation((cb) => {
         const txMock = {
           attachment: mockPrisma.attachment,
           attachmentRevision: mockPrisma.attachmentRevision,
           item: mockPrisma.item,
-        };
-        const helpersMock = {
-          appendChange: jest.fn().mockResolvedValue(undefined),
-          publishOutbox: jest.fn().mockResolvedValue(undefined),
         };
         return cb(txMock, helpersMock);
       }),
@@ -173,6 +174,14 @@ describe('Library Attachments & Storage Integration Suite', () => {
       });
 
       expect(result.id).toBe('att-1');
+      expect(mockPrisma.attachment.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            linkMode: 'imported_file',
+            attachmentType: 'primary_pdf',
+          }),
+        }),
+      );
       expect(mockRepo.updateLinkedFile).toHaveBeenCalledWith(
         'storage-file-123',
         'item-1',
@@ -183,6 +192,38 @@ describe('Library Attachments & Storage Integration Suite', () => {
         linkedToType: 'Paper',
         linkedToId: 'item-1',
       });
+    });
+
+    it('should create a linked_url attachment with dual-axis Zotero specifications', async () => {
+      mockPrisma.attachment.create.mockResolvedValue({
+        id: 'att-2',
+        itemId: 'item-1',
+        filename: 'Project Repository',
+        url: 'https://github.com/project/flux',
+        linkMode: 'linked_url',
+        attachmentType: 'other',
+        revisions: [{ revisionNumber: 1 }],
+      });
+
+      const result = await service.createAttachment({
+        userId: 'user-1',
+        itemId: 'item-1',
+        filename: 'Project Repository',
+        url: 'https://github.com/project/flux',
+        linkMode: 'linked_url',
+        attachmentType: 'other',
+      });
+
+      expect(result.id).toBe('att-2');
+      expect(mockPrisma.attachment.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            linkMode: 'linked_url',
+            attachmentType: 'other',
+            mimeType: 'text/uri-list',
+          }),
+        }),
+      );
     });
 
     it('should delete attachment from database AND trigger storagePort.deleteFile for quota reclamation', async () => {
@@ -275,6 +316,42 @@ describe('Library Attachments & Storage Integration Suite', () => {
         'new-file-456',
         'item-1',
         expect.anything(),
+      );
+    });
+
+    it('should queue re-extraction job and publish extraction_requested event for PDF attachment', async () => {
+      mockRepo.findUnique.mockResolvedValue({
+        id: 'att-1',
+        itemId: 'item-1',
+        filename: 'paper.pdf',
+        mimeType: 'application/pdf',
+        item: { id: 'item-1', userId: 'user-1' },
+      });
+
+      const result = await service.reExtractAttachment('user-1', 'att-1');
+
+      expect(result).toEqual({
+        status: 'PENDING',
+        attachmentId: 'att-1',
+        message: 'Re-extraction and OCR job queued successfully',
+      });
+      expect(mockPrisma.attachment.update).toHaveBeenCalledWith({
+        where: { id: 'att-1' },
+        data: {
+          extractionStatus: 'PENDING',
+          extractionAttempts: 0,
+          extractionLastError: null,
+        },
+      });
+      expect(mockTx.helpers.publishOutbox).toHaveBeenCalledWith(
+        { userId: 'user-1' },
+        'att-1',
+        'library.attachment.extraction_requested',
+        expect.objectContaining({
+          attachmentId: 'att-1',
+          itemId: 'item-1',
+          userId: 'user-1',
+        }),
       );
     });
 
@@ -483,6 +560,28 @@ describe('Library Attachments & Storage Integration Suite', () => {
         Buffer.from('WEBP_STREAM_DATA'),
       );
     });
+
+    it('should delegate reExtractAttachment to effective attachments service', async () => {
+      mockAttachmentsService.reExtractAttachment = jest.fn().mockResolvedValue({
+        status: 'PENDING',
+        attachmentId: 'att-1',
+        message: 'Re-extraction and OCR job queued successfully',
+      });
+
+      const res = await controller.reExtractAttachment(
+        'user-1',
+        'att-1',
+        'proj-456',
+        undefined,
+      );
+
+      expect(res.status).toBe('PENDING');
+      expect(mockAttachmentsService.reExtractAttachment).toHaveBeenCalledWith(
+        'user-1',
+        'att-1',
+        'proj-456',
+      );
+    });
   });
 
   describe('WebSnapshotService', () => {
@@ -623,6 +722,7 @@ describe('Library Attachments & Storage Integration Suite', () => {
         markFailed: jest.fn().mockResolvedValue({ id: 'att-1' }),
         findScopePapers: jest.fn().mockResolvedValue([]),
         upsertItemCitationRelation: jest.fn().mockResolvedValue({}),
+        recordSearchablePdfRevision: jest.fn().mockResolvedValue({ id: 'rev-2' }),
       };
       mockPdf = {
         extractDocumentFromBuffer: jest.fn().mockResolvedValue({
@@ -660,6 +760,51 @@ describe('Library Attachments & Storage Integration Suite', () => {
       expect(mockExtractionRepo.updateAttachmentFileId).toHaveBeenCalledWith(
         'att-1',
         'storage-file-123',
+      );
+    });
+
+    it('should upload searchablePdfBuffer to storage and record attachment revision when OCR produces a sandwich PDF', async () => {
+      mockPdf.extractDocumentFromBuffer.mockResolvedValue({
+        metadata: { title: 'Scanned Document' },
+        pages: [{ pageNumber: 1, text: 'Recognized Text' }],
+        references: [],
+        sections: [],
+        ocrProvenance: {
+          totalOcrPages: 1,
+          avgConfidence: 95,
+          executionTimeMs: 250,
+          pages: [],
+        },
+        searchablePdfBuffer: Buffer.from(
+          '%PDF-1.4 Searchable Sandwich PDF content',
+        ),
+      });
+
+      await handler.handle(
+        fromPartial({
+          id: 'event-ocr-1',
+          aggregateId: 'att-1',
+          eventType: 'library.attachment.extraction_requested',
+          payload: { attachmentId: 'att-1' },
+        }),
+      );
+
+      expect(mockStoragePort.uploadFile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          buffer: expect.any(Buffer),
+          mimeType: 'application/pdf',
+          source: 'reader.ocr_sandwich',
+        }),
+      );
+      expect(
+        mockExtractionRepo.recordSearchablePdfRevision,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          attachmentId: 'att-1',
+          fileId: 'storage-file-123',
+          url: '/api/files/storage-file-123/content',
+          comment: expect.stringContaining('OCR Sandwich PDF'),
+        }),
       );
     });
   });

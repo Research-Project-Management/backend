@@ -12,6 +12,8 @@ import {
   UseGuards,
   NotFoundException,
   BadRequestException,
+  Optional,
+  Header,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
@@ -46,6 +48,7 @@ import { PurgeItemUseCase } from '../application/commands/purge-item.use-case';
 import { SetMyPublicationUseCase } from '../application/commands/set-my-publication.use-case';
 import { ManageRelationsUseCase } from '../application/commands/manage-relations.use-case';
 import { PreviewTypeConversionUseCase } from '../application/queries/preview-type-conversion.use-case';
+import { ItemsService } from '../application/services/items.service';
 
 const toValidProjectId = (val?: string): string | undefined =>
   val && val !== 'me' && val !== 'user' && val !== 'personal' && isUUID(val)
@@ -77,6 +80,7 @@ export class ItemsController {
     private readonly setMyPublicationUseCase: SetMyPublicationUseCase,
     private readonly manageRelationsUseCase: ManageRelationsUseCase,
     private readonly previewTypeConversionUseCase: PreviewTypeConversionUseCase,
+    @Optional() private readonly itemsService?: ItemsService,
   ) {}
 
   @Get()
@@ -110,6 +114,13 @@ export class ItemsController {
       search: query?.search,
       cursor: query?.cursor,
       limit: query?.limit,
+      orderBy: query?.orderBy,
+      orderDirection: query?.orderDirection,
+      itemType: query?.itemType || query?.type,
+      fromYear: query?.fromYear,
+      toYear: query?.toYear,
+      readStatus: query?.readStatus,
+      hasFile: query?.hasFile,
       projectId: effectiveProjectId,
     });
     return { items: result.items, pagination: result.pagination };
@@ -176,6 +187,7 @@ export class ItemsController {
   }
 
   @Get(':id/fulltext')
+  @Header('Cache-Control', 'private, max-age=300, stale-while-revalidate=3600')
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Get fulltext of an item' })
   async getFulltext(
@@ -189,6 +201,32 @@ export class ItemsController {
       projectId: toValidProjectId(projectId),
     });
     return { success: true, data: fulltext, ...fulltext };
+  }
+
+  @Get(':id/metadata-sources')
+  @Header('Cache-Control', 'private, max-age=300, stale-while-revalidate=3600')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  @ApiOperation({
+    summary: 'Get raw provenance metadata sources for an item',
+    description:
+      'Fetches all raw academic metadata payloads (arXiv, GROBID, CrossRef) previously resolved and saved for this item.',
+  })
+  async getMetadataSources(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+    @Param('projectId') projectId?: string,
+  ) {
+    if (!isUUID(id)) {
+      throw new NotFoundException(`Item ${id} not found in library`);
+    }
+    if (this.itemsService) {
+      return this.itemsService.getMetadataSources(
+        userId,
+        id,
+        toValidProjectId(projectId),
+      );
+    }
+    return { itemId: id, count: 0, sources: [] };
   }
 
   @Post()

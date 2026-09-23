@@ -7,6 +7,7 @@ import {
   Query,
   UseGuards,
   NotFoundException,
+  Header,
 } from '@nestjs/common';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { CitationService } from '../application/services/citation.service';
@@ -30,6 +31,7 @@ export class CitationController {
   constructor(private readonly citationService: CitationService) {}
 
   @Get('styles')
+  @Header('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800')
   getStyles() {
     return this.citationService.getAvailableStyles();
   }
@@ -86,6 +88,7 @@ export class CitationController {
    * GET /citation/doi/:doi — for encoded DOIs (use encodeURIComponent on client).
    */
   @Get('doi/:doi')
+  @Header('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800')
   async getDoiReference(
     @CurrentUser('id') userId: string,
     @Param('doi') doi: string,
@@ -123,6 +126,7 @@ export class CitationController {
    * Route: GET /citation/items/:itemId/citation
    */
   @Get('items/:itemId/citation')
+  @Header('Cache-Control', 'private, max-age=3600, stale-while-revalidate=86400')
   async getItemCitation(
     @CurrentUser('id') userId: string,
     @Param('itemId') itemId: string,

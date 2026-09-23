@@ -7,6 +7,7 @@ export interface CslName {
   family?: string;
   given?: string;
   literal?: string;
+  short?: string;
   'dropping-particle'?: string;
   'non-dropping-particle'?: string;
   suffix?: string;

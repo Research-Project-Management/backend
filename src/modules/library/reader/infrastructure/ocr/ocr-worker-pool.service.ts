@@ -164,7 +164,18 @@ export class OcrWorkerPoolService implements OnModuleDestroy {
       jobPromise.finally(() => clearTimeout(timer));
     });
 
-    const result = (await Promise.race([jobPromise, timeoutPromise])) as any;
+    let result: any;
+    try {
+      result = await Promise.race([jobPromise, timeoutPromise]);
+    } catch (err: any) {
+      if (err?.message?.includes('timed out')) {
+        this.logger.warn(
+          `OCR recognition timed out after ${timeoutMs}ms. Recycling worker pool to prevent scheduler starvation.`,
+        );
+        this.recyclePool().catch(() => {});
+      }
+      throw err;
+    }
 
     const data = result?.data || {};
     const text = (data.text || '').trim();
@@ -240,6 +251,29 @@ export class OcrWorkerPoolService implements OnModuleDestroy {
       words,
       blocks,
     };
+  }
+
+  /**
+   * Recycles the worker pool when a job hangs or worker becomes unresponsive.
+   * Gracefully terminates the existing scheduler in background and resets state
+   * so subsequent recognition calls re-provision fresh workers.
+   */
+  async recyclePool(): Promise<void> {
+    this.logger.warn(
+      'Recycling Tesseract Worker Pool due to worker timeout or unrecoverable error...',
+    );
+    const deadScheduler = this.scheduler;
+    this.scheduler = undefined;
+    this.workers = [];
+    this.initPromise = undefined;
+
+    if (deadScheduler) {
+      deadScheduler.terminate().catch((err) => {
+        this.logger.debug(
+          `Old Tesseract scheduler termination completed: ${err?.message || err}`,
+        );
+      });
+    }
   }
 
   /**

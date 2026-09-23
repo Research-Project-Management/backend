@@ -42,6 +42,8 @@ export interface OcrPageResult {
   blocks: OcrBlock[];
   words: OcrWord[];
   wasOcr: boolean;
+  imageWidth?: number;
+  imageHeight?: number;
 }
 
 export interface OcrDocumentResult {

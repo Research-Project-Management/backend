@@ -336,6 +336,10 @@ export function toItemData(
     collectionId: options?.collectionIds?.[0] || null,
     collectionIds: options?.collectionIds,
     uploadedById: options?.userId || 'system',
+    isRetracted: (metadata as any).isRetracted,
+    retractionNature: (metadata as any).retractionNature,
+    retractionDetails: (metadata as any).retractionDetails,
+    retractionCheckedAt: (metadata as any).retractionCheckedAt,
   };
 }
 

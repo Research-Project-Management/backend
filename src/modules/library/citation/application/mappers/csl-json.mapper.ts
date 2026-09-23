@@ -292,19 +292,46 @@ export class CslJsonMapper {
    * Formats a single contributor record into a CSL Name object.
    */
   private static formatCslName(contrib: any): CslName {
+    // 1. Single-field institutional creator (fieldMode === 1)
+    if (contrib.fieldMode === 1 || contrib.fieldMode === '1') {
+      const name =
+        contrib.fullName?.trim() ||
+        contrib.name?.trim() ||
+        contrib.lastName?.trim() ||
+        'Anonymous';
+      const cslName: CslName = { literal: name };
+      if (contrib.shortName && contrib.shortName.trim()) {
+        cslName.short = contrib.shortName.trim();
+      }
+      return cslName;
+    }
+
+    // 2. Two-field creator with lastName / firstName
     if (contrib.lastName && contrib.lastName.trim()) {
-      return {
+      const cslName: CslName = {
         family: contrib.lastName.trim(),
         given: contrib.firstName ? contrib.firstName.trim() : undefined,
       };
+      if (contrib.shortName && contrib.shortName.trim()) {
+        cslName.short = contrib.shortName.trim();
+      }
+      return cslName;
     }
 
     if (contrib.fullName && contrib.fullName.trim()) {
-      return this.parseStringName(contrib.fullName);
+      const parsed = this.parseStringName(contrib.fullName);
+      if (contrib.shortName && contrib.shortName.trim()) {
+        parsed.short = contrib.shortName.trim();
+      }
+      return parsed;
     }
 
     if (contrib.name && contrib.name.trim()) {
-      return this.parseStringName(contrib.name);
+      const parsed = this.parseStringName(contrib.name);
+      if (contrib.shortName && contrib.shortName.trim()) {
+        parsed.short = contrib.shortName.trim();
+      }
+      return parsed;
     }
 
     if (contrib.firstName && contrib.firstName.trim()) {

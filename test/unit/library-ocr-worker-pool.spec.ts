@@ -37,5 +37,10 @@ describe('OcrWorkerPoolService', () => {
     await expect(
       service.recognize(Buffer.from('fake-image'), 50),
     ).rejects.toThrow(/timed out after/);
+
+    // Verify that recyclePool was triggered to terminate the hung scheduler and reset worker state
+    expect(mockScheduler.terminate).toHaveBeenCalled();
+    expect((service as any).scheduler).toBeUndefined();
+    expect((service as any).workers).toEqual([]);
   });
 });

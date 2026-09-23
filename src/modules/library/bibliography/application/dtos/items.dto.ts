@@ -448,6 +448,41 @@ export class CursorPaginationQueryDto {
   @Type(() => Number)
   @IsNumber()
   limit?: number = 50;
+
+  @IsOptional()
+  @IsString()
+  orderBy?: 'title' | 'year' | 'createdAt' | 'updatedAt' | 'citationKey' | string;
+
+  @IsOptional()
+  @IsString()
+  orderDirection?: 'asc' | 'desc';
+
+  @IsOptional()
+  @IsString()
+  itemType?: string;
+
+  @IsOptional()
+  @IsString()
+  type?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  fromYear?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  toYear?: number;
+
+  @IsOptional()
+  @IsString()
+  readStatus?: string;
+
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  hasFile?: boolean;
 }
 
 export interface CursorPaginatedResult<T> {

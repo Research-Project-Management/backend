@@ -70,6 +70,8 @@ export interface UpsertSyncAttachmentCommand {
   itemId?: string;
   filename: string;
   url: string;
+  fileId?: string;
+  linkMode?: string;
   mimeType: string;
   fileHash?: string;
   attachmentType?: string;

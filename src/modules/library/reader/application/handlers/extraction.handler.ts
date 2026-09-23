@@ -1,4 +1,5 @@
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
+import crypto from 'crypto';
 import { ExtractionRepository } from '../../infrastructure/repositories/extraction.repository';
 import { PdfProvider } from '../../infrastructure/providers/pdf.provider';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
@@ -196,6 +197,54 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         } catch (ocrErr: any) {
           this.logger.warn(
             `Failed to save OCR provenance: ${ocrErr?.message || ocrErr}`,
+          );
+        }
+      }
+
+      // 4.2. Persist Searchable Sandwich PDF and create revision if OCR produced one
+      if (
+        doc.searchablePdfBuffer &&
+        doc.ocrProvenance &&
+        doc.ocrProvenance.totalOcrPages > 0 &&
+        typeof this.storagePort?.uploadFile === 'function'
+      ) {
+        try {
+          const ownerUserId = attachment.item?.userId || 'system';
+          const ownerProjectId = attachment.item?.projectId || undefined;
+          const originalFilename = attachment.filename || 'document.pdf';
+          const uploadResult = await this.storagePort.uploadFile({
+            userId: ownerUserId,
+            projectId: ownerProjectId,
+            filename: originalFilename.toLowerCase().endsWith('.pdf')
+              ? originalFilename
+              : `${originalFilename}.pdf`,
+            buffer: doc.searchablePdfBuffer,
+            mimeType: 'application/pdf',
+            source: 'reader.ocr_sandwich',
+          });
+
+          if (uploadResult?.fileId) {
+            const hash = crypto
+              .createHash('sha256')
+              .update(doc.searchablePdfBuffer)
+              .digest('hex');
+
+            await this.extractionRepo.recordSearchablePdfRevision({
+              attachmentId: attachment.id,
+              fileId: uploadResult.fileId,
+              url: uploadResult.url,
+              sizeBytes: BigInt(doc.searchablePdfBuffer.length),
+              fileHash: hash,
+              comment: `OCR Sandwich PDF (${doc.ocrProvenance.totalOcrPages} pages recognized, avg confidence ${doc.ocrProvenance.avgConfidence}%)`,
+            });
+
+            this.logger.log(
+              `[AttachmentExtraction] Successfully saved searchable OCR Sandwich PDF for attachment ${attachment.id} (new fileId: ${uploadResult.fileId})`,
+            );
+          }
+        } catch (sandwichErr: any) {
+          this.logger.warn(
+            `Failed to persist searchable sandwich PDF for attachment ${attachment.id}: ${sandwichErr?.message || sandwichErr}`,
           );
         }
       }

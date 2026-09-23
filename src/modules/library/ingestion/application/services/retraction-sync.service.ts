@@ -1,4 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleInit,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { RetractionRepository } from '../../infrastructure/repositories/retraction.repository';
 import { RetractionScannerProvider } from '../../infrastructure/providers/retraction-scanner.provider';
 import { RetractionDatabaseService } from './retraction-database.service';
@@ -20,14 +25,125 @@ export interface RetractionSyncResult {
 }
 
 @Injectable()
-export class RetractionSyncService {
+export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RetractionSyncService.name);
+  private syncTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly repo: RetractionRepository,
     private readonly scanner: RetractionScannerProvider,
     private readonly retractionDb: RetractionDatabaseService,
   ) {}
+
+  onModuleInit(): void {
+    if (process.env.NODE_ENV === 'test') return;
+    const intervalHours = Number(
+      process.env.RETRACTION_SYNC_INTERVAL_HOURS || 12,
+    );
+    const intervalMs = Math.max(1, intervalHours) * 60 * 60 * 1000;
+    this.logger.log(
+      `Initializing background Retraction Sync worker (interval: ${intervalHours}h)`,
+    );
+
+    // Initial delay of 2 minutes after boot before first background scan
+    setTimeout(() => {
+      this.syncAllStaleItems().catch((err) => {
+        this.logger.warn(`Initial background retraction sync error: ${err?.message}`);
+      });
+    }, 120000);
+
+    this.syncTimer = setInterval(() => {
+      this.syncAllStaleItems().catch((err) => {
+        this.logger.warn(`Periodic background retraction sync error: ${err?.message}`);
+      });
+    }, intervalMs);
+  }
+
+  onModuleDestroy(): void {
+    if (this.syncTimer) {
+      clearInterval(this.syncTimer);
+      this.syncTimer = null;
+    }
+  }
+
+  /**
+   * Periodically scans stale items across all active users and projects.
+   */
+  async syncAllStaleItems(
+    options?: RetractionSyncOptions,
+  ): Promise<RetractionSyncResult> {
+    const startTime = Date.now();
+    const maxDays = options?.maxDays ?? 14;
+    const limit = options?.limit ?? 200;
+    const concurrency = Math.max(1, Math.min(options?.concurrency ?? 3, 5));
+
+    const staleBefore = new Date(Date.now() - maxDays * 24 * 60 * 60 * 1000);
+    const items = await this.repo.findGlobalStaleItemsForSync(
+      staleBefore,
+      limit,
+    );
+
+    let scanned = 0;
+    let newlyRetracted = 0;
+    let stillClean = 0;
+    let skippedManual = 0;
+    let failed = 0;
+
+    for (let i = 0; i < items.length; i += concurrency) {
+      const chunk = items.slice(i, i + concurrency);
+      await Promise.all(
+        chunk.map(async (item) => {
+          if (item.isRetracted && item.retractionNature === 'manual') {
+            skippedManual++;
+            return;
+          }
+
+          try {
+            const scanResult = await this.scanner.scan(
+              item.doi,
+              item.pmid,
+              item.title,
+            );
+            const now = new Date();
+
+            if (scanResult) {
+              if (!item.isRetracted) newlyRetracted++;
+              await this.repo.updateItemRetraction(
+                item.id,
+                true,
+                scanResult.nature,
+                scanResult,
+                now,
+              );
+            } else {
+              stillClean++;
+              await this.repo.updateItemRetraction(
+                item.id,
+                false,
+                null,
+                null,
+                now,
+              );
+            }
+            scanned++;
+          } catch (err: any) {
+            failed++;
+          }
+        }),
+      );
+    }
+
+    const durationMs = Date.now() - startTime;
+    return {
+      totalEligible: items.length,
+      scanned,
+      newlyRetracted,
+      stillClean,
+      skippedManual,
+      failed,
+      durationMs,
+    };
+  }
 
   /**
    * Scans stale library items whose retraction status has not been checked

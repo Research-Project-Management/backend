@@ -569,4 +569,23 @@ export class ItemAggregate {
       ? this._fields.identifiers
       : [];
   }
+  public get isStarred(): boolean {
+    return Boolean(this._fields.isStarred);
+  }
+  public get hasFile(): boolean {
+    return Boolean(this._fields.hasFile);
+  }
+  public get attachmentCount(): number {
+    return typeof this._fields.attachmentCount === 'number'
+      ? this._fields.attachmentCount
+      : 0;
+  }
+  public get noteCount(): number {
+    return typeof this._fields.noteCount === 'number'
+      ? this._fields.noteCount
+      : 0;
+  }
+  public get firstAuthor(): string | null {
+    return this._fields.firstAuthor ?? null;
+  }
 }

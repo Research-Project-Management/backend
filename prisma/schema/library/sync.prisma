@@ -48,7 +48,7 @@ model LibraryChange {
   entityId    String   @map("entity_id")
   action      String
   version     Int
-  data        Json?
+  data        Json?    @db.JsonB
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@index([userId, seq])
@@ -80,7 +80,7 @@ model OutboxEvent {
   projectId      String?      @map("project_id") @db.Uuid
   aggregateId    String       @map("aggregate_id")
   eventType      String       @map("event_type")
-  payload        Json
+  payload        Json         @db.JsonB
   status         OutboxStatus @default(PENDING)
   retryCount     Int          @default(0) @map("retry_count")
   error          String?

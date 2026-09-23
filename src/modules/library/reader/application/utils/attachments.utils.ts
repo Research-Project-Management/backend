@@ -63,6 +63,7 @@ export function inferAttachmentTypeFromFilename(
 ): AttachmentType {
   const lower = (filename || '').toLowerCase();
   if (lower.endsWith('.pdf')) return 'primary_pdf';
+  if (lower.endsWith('.html') || lower.endsWith('.htm')) return 'snapshot';
   if (
     lower.endsWith('.pptx') ||
     lower.endsWith('.ppt') ||

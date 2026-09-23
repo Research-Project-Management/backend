@@ -895,6 +895,34 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
 
     return { success: true, importedCount };
   }
+
+  /**
+   * Retrieves raw provenance metadata records for an item across all providers (arXiv, Grobid, CrossRef).
+   */
+  async getMetadataSources(
+    userId: string,
+    itemId: string,
+    projectId?: string,
+  ) {
+    const item = await this.query.findById(itemId, userId, projectId);
+    if (!item) {
+      throw new NotFoundException(`Item ${itemId} not found in library`);
+    }
+    const sources = await this.query.findMetadataSources(itemId);
+    return {
+      itemId,
+      count: sources.length,
+      sources: sources.map((s) => ({
+        id: s.id,
+        sourceProvider: s.sourceProvider,
+        sourceUri: s.sourceUri,
+        format: s.format,
+        fetchedAt: s.fetchedAt,
+        createdAt: s.createdAt,
+        rawPayload: s.rawPayload,
+      })),
+    };
+  }
 }
 
 export function buildImportItemPayload(

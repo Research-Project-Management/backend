@@ -2,6 +2,12 @@ import { BaseDomainException } from '../../../shared-kernel/core/errors/domain.e
 
 export type AttachmentKind = 'stored_file' | 'linked_resource' | 'snapshot';
 
+export type LinkMode =
+  | 'imported_file'
+  | 'imported_url'
+  | 'linked_url'
+  | 'linked_file';
+
 export type AttachmentType =
   | 'primary_pdf'
   | 'supplementary'
@@ -9,6 +15,7 @@ export type AttachmentType =
   | 'slides'
   | 'code'
   | 'figure'
+  | 'snapshot'
   | 'other'
   | 'preview';
 
@@ -36,6 +43,7 @@ export interface AttachmentEntity {
   fileHash?: string | null;
   size: number | bigint;
   mimeType: string;
+  linkMode?: LinkMode;
   attachmentType: AttachmentType;
   uploadedAt: Date;
   extractionStatus: AttachmentExtractionStatus;
@@ -56,6 +64,7 @@ export interface CreateAttachmentInput {
   size?: number | bigint;
   fileHash?: string;
   fileId?: string;
+  linkMode?: LinkMode;
   attachmentType?: AttachmentType;
 }
 

@@ -41,10 +41,13 @@ export class OcrSandwichPdfService {
         const pdfWidth = pdfPage.getWidth();
         const pdfHeight = pdfPage.getHeight();
 
-        const imgDim = imageDimensionsMap?.get(pageResult.pageIndex) || {
-          width: pdfWidth * 2,
-          height: pdfHeight * 2,
-        };
+        const imgDim =
+          pageResult.imageWidth && pageResult.imageHeight
+            ? { width: pageResult.imageWidth, height: pageResult.imageHeight }
+            : imageDimensionsMap?.get(pageResult.pageIndex) || {
+                width: pdfWidth * 2,
+                height: pdfHeight * 2,
+              };
 
         const scaleX = pdfWidth / Math.max(1, imgDim.width);
         const scaleY = pdfHeight / Math.max(1, imgDim.height);

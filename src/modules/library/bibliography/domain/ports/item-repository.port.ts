@@ -10,6 +10,13 @@ export interface FindManyItemsOptions {
   limit?: number;
   cursor?: string;
   projectId?: string;
+  orderBy?: string;
+  orderDirection?: 'asc' | 'desc';
+  itemType?: string;
+  fromYear?: number;
+  toYear?: number;
+  readStatus?: string;
+  hasFile?: boolean;
 }
 
 export interface PaginatedItemsResult {

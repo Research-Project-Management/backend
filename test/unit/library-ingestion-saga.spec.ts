@@ -237,11 +237,14 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
     let mockContentFacade: any;
     let orchestrator: IngestionSagaOrchestrator;
     let pipelineService: any;
+    let PipelineServiceClass: any;
 
     beforeEach(async () => {
-      const { PipelineService } = await import(
+      const imported = await import(
         '../../src/modules/library/ingestion/application/services/pipeline.service'
       );
+      PipelineServiceClass = imported.PipelineService;
+      const PipelineService = PipelineServiceClass;
 
       mockRepo = {
         findRunById: jest.fn().mockResolvedValue(null),
@@ -356,6 +359,52 @@ describe('Library Ingestion Bounded Context - Saga Orchestration & DDD Lifecycle
         'user-42',
         'item-saga-100',
         undefined,
+      );
+    });
+
+    it('should auto-scan and flag retracted paper during ingestion before commit', async () => {
+      const mockScanner: any = {
+        scan: jest.fn().mockResolvedValue({
+          doi: '10.1016/s0140-6736(97)11096-0',
+          nature: 'retraction',
+          reason: 'Data falsification (Wakefield MMR)',
+          noticeUrl: 'https://doi.org/10.1016/S0140-6736(10)60175-4',
+          source: 'retraction_watch',
+        }),
+      };
+
+      const svcWithScanner = new PipelineServiceClass(
+        mockRepo,
+        mockIdentify,
+        mockNormalize,
+        mockEnrich,
+        mockReconcile,
+        mockMatch,
+        mockCommit,
+        mockCatalogFacade,
+        mockContentFacade,
+        orchestrator,
+        mockScanner,
+      );
+
+      const envelope = {
+        userId: 'user-42',
+        payload: {
+          kind: 'IDENTIFIER',
+          value: '10.1016/s0140-6736(97)11096-0',
+        } as any,
+      };
+
+      await svcWithScanner.executePipeline('run-retract-1', 'user-42', envelope);
+
+      expect(mockScanner.scan).toHaveBeenCalled();
+      expect(mockCommit.execute).toHaveBeenCalledWith(
+        'user-42',
+        expect.objectContaining({
+          isRetracted: true,
+          retractionNature: 'retraction',
+        }),
+        expect.any(Object),
       );
     });
   });

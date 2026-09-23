@@ -215,4 +215,78 @@ export class ExtractionRepository {
       },
     });
   }
+
+  async recordSearchablePdfRevision(
+    params: {
+      attachmentId: string;
+      fileId: string;
+      url: string;
+      sizeBytes: bigint;
+      fileHash: string;
+      comment?: string;
+    },
+    tx?: Prisma.TransactionClient,
+  ) {
+    const client = this.getClient(tx);
+    const attachment = await client.attachment.findUnique({
+      where: { id: params.attachmentId },
+      include: {
+        revisions: {
+          orderBy: { revisionNumber: 'desc' },
+          take: 1,
+        },
+      },
+    });
+
+    if (!attachment) {
+      throw new Error(`Attachment ${params.attachmentId} not found`);
+    }
+
+    // Ensure Revision 1 exists for the original document if no revisions exist yet
+    let latestRevisionNumber = attachment.revisions?.[0]?.revisionNumber ?? 0;
+    if (latestRevisionNumber === 0) {
+      await client.attachmentRevision.create({
+        data: {
+          attachmentId: attachment.id,
+          revisionNumber: 1,
+          fileId: attachment.fileId || null,
+          fileHash: attachment.fileHash || '',
+          sizeBytes: attachment.size ?? 0n,
+          url: attachment.url || '',
+          comment: 'Original scanned document',
+        },
+      });
+      latestRevisionNumber = 1;
+    }
+
+    const nextRevisionNumber = latestRevisionNumber + 1;
+
+    // Create the new revision with the searchable Sandwich PDF
+    const revision = await client.attachmentRevision.create({
+      data: {
+        attachmentId: attachment.id,
+        revisionNumber: nextRevisionNumber,
+        fileId: params.fileId,
+        fileHash: params.fileHash,
+        sizeBytes: params.sizeBytes,
+        url: params.url,
+        comment:
+          params.comment ||
+          `OCR Sandwich PDF (Revision ${nextRevisionNumber})`,
+      },
+    });
+
+    // Update attachment pointer to the searchable PDF
+    await client.attachment.update({
+      where: { id: attachment.id },
+      data: {
+        fileId: params.fileId,
+        url: params.url,
+        size: params.sizeBytes,
+        fileHash: params.fileHash,
+      },
+    });
+
+    return revision;
+  }
 }

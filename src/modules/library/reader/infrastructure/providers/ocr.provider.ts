@@ -38,6 +38,15 @@ export class OcrProvider {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 200;
   }
 
+  get renderScale(): number {
+    const envScale = Number.parseFloat(
+      process.env.PDF_OCR_RENDER_SCALE || '3',
+    );
+    return Number.isFinite(envScale) && envScale >= 1 && envScale <= 4
+      ? envScale
+      : 3;
+  }
+
   /**
    * Evaluates whether a PDF page is image-only, hybrid, or born-digital.
    */
@@ -121,12 +130,19 @@ export class OcrProvider {
     const startTime = Date.now();
 
     try {
-      // 1. Render high-DPI page canvas (scale: 2 for sharp character recognition)
-      const viewport = page.getViewport({ scale: 2 });
-      const canvas = createCanvas(
-        Math.max(1, Math.ceil(viewport.width)),
-        Math.max(1, Math.ceil(viewport.height)),
-      );
+      // 1. Render high-DPI page canvas (scale: 3 ~ 216 DPI for optimal Tesseract 5 academic tokenization)
+      let scale = this.renderScale;
+      let viewport = page.getViewport({ scale });
+      // Clamp maximum canvas dimension to 4096px to prevent memory exhaustion on oversized scans
+      const maxDim = Math.max(viewport.width, viewport.height);
+      if (maxDim > 4096) {
+        scale = scale * (4096 / maxDim);
+        viewport = page.getViewport({ scale });
+      }
+
+      const canvasWidth = Math.max(1, Math.ceil(viewport.width));
+      const canvasHeight = Math.max(1, Math.ceil(viewport.height));
+      const canvas = createCanvas(canvasWidth, canvasHeight);
       const canvasContext = canvas.getContext('2d');
       await page.render({
         canvas: canvas as any,
@@ -178,6 +194,8 @@ export class OcrProvider {
         blocks,
         words,
         wasOcr: true,
+        imageWidth: canvasWidth,
+        imageHeight: canvasHeight,
       };
     } catch (error: any) {
       this.logger.warn(

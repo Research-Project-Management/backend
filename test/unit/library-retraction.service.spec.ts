@@ -336,5 +336,29 @@ describe('Retraction Watch & Offline Retraction Detection', () => {
       expect(result.stillClean).toBe(1);
       expect(result.newlyRetracted).toBe(0);
     });
+
+    it('should sync all stale items globally across users', async () => {
+      const globalStale = [
+        {
+          id: 'global-stale-1',
+          userId: 'user-2',
+          projectId: null,
+          title: 'Normal physics paper',
+          doi: '10.1103/physrevlett.120.010001',
+          pmid: null,
+          isRetracted: false,
+          retractionNature: null,
+          retractionCheckedAt: null,
+        },
+      ];
+      mockPrisma.item.findMany.mockResolvedValue(globalStale);
+      mockPrisma.item.update.mockResolvedValue({});
+      await retractionDb.saveClean('10.1103/physrevlett.120.010001');
+
+      const result = await syncService.syncAllStaleItems();
+      expect(result.scanned).toBe(1);
+      expect(result.stillClean).toBe(1);
+      expect(result.newlyRetracted).toBe(0);
+    });
   });
 });

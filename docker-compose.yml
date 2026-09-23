@@ -169,8 +169,8 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql://${DB_USER:-postgres}:${DB_PASSWORD}@db:5432/${DB_NAME:-flux-db}?schema=public}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       GROBID_URL: http://grobid:8070
-      ZOTERO_TRANSLATOR_URL: http://translator:1969
-      LATEX_URL: ${LATEX_URL:-http://flux_latex_compiler:2918}
+      CLSI_URL: ${CLSI_URL:-http://flux_clsi:2918}
+      LATEX_URL: ${LATEX_URL:-http://flux_clsi:2918}
       CLIENT_URL: ${CLIENT_URL}
       ORIGINS: ${ORIGINS}
     depends_on:

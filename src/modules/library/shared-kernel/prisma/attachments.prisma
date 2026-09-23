@@ -3,6 +3,13 @@
 // Self-managed domain schema: Attachments, Revisions, Annotations, FullTextIndex
 // ============================================================================
 
+enum LinkMode {
+  imported_file
+  imported_url
+  linked_url
+  linked_file
+}
+
 enum AttachmentType {
   primary_pdf
   supplementary
@@ -10,6 +17,7 @@ enum AttachmentType {
   slides
   code
   figure
+  snapshot
   other
   preview
 }
@@ -39,6 +47,7 @@ model Attachment {
   id                    String                     @id @default(uuid(7)) @db.Uuid
   itemId                String                     @map("item_id") @db.Uuid
   item                  Item                       @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  linkMode              LinkMode                   @default(imported_file) @map("link_mode")
   attachmentType        AttachmentType             @default(primary_pdf) @map("attachment_type")
   filename              String                     @default("document.pdf")
   url                   String                     @default("")
@@ -53,7 +62,7 @@ model Attachment {
   extractionStartedAt   DateTime?                  @map("extraction_started_at") @db.Timestamptz(6)
   extractionCompletedAt DateTime?                  @map("extraction_completed_at") @db.Timestamptz(6)
   extractionLastError   String?                    @map("extraction_last_error")
-  metadata              Json?                      @default("{}")
+  metadata              Json?                      @default("{}") @db.JsonB
   createdAt             DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt             DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt             DateTime?                  @map("deleted_at") @db.Timestamptz(6)
@@ -62,6 +71,7 @@ model Attachment {
   annotations           Annotation[]
   fullTextIndexes       FullTextIndex[]
 
+  @@index([itemId, linkMode])
   @@index([itemId, attachmentType])
   @@index([itemId, deletedAt])
   @@index([fileId])

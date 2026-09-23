@@ -86,19 +86,20 @@ export class OcrPreprocessorService {
       pipeline = pipeline.trim({ threshold: 25 });
     }
 
-    const processedBuffer = await pipeline.png().toBuffer();
-    const processedMeta = await sharp(processedBuffer).metadata();
+    const { data: processedBuffer, info: processedInfo } = await pipeline
+      .png()
+      .toBuffer({ resolveWithObject: true });
 
     this.logger.debug(
-      `Image preprocessed in ${Date.now() - startTime}ms (${processedMeta.width}x${processedMeta.height})`,
+      `Image preprocessed in ${Date.now() - startTime}ms (${processedInfo.width}x${processedInfo.height})`,
     );
 
     return {
       buffer: processedBuffer,
       orientationAngle,
       skewAngle,
-      width: processedMeta.width || currentWidth,
-      height: processedMeta.height || currentHeight,
+      width: processedInfo.width || currentWidth,
+      height: processedInfo.height || currentHeight,
     };
   }
 

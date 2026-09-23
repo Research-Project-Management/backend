@@ -139,6 +139,7 @@ export function parseCreatorString(
     return {
       orderIndex,
       creatorType,
+      fieldMode: 0,
       firstName: '',
       lastName: '',
       fullName: '',
@@ -154,6 +155,7 @@ export function parseCreatorString(
     return {
       orderIndex,
       creatorType,
+      fieldMode: 1,
       firstName: '',
       lastName: trimmed,
       fullName: trimmed,
@@ -169,6 +171,7 @@ export function parseCreatorString(
     return {
       orderIndex,
       creatorType,
+      fieldMode: 0,
       firstName,
       lastName,
       fullName,
@@ -182,6 +185,7 @@ export function parseCreatorString(
     return {
       orderIndex,
       creatorType,
+      fieldMode: 0,
       firstName: '',
       lastName: tokens[0],
       fullName: tokens[0],
@@ -209,6 +213,7 @@ export function parseCreatorString(
   return {
     orderIndex,
     creatorType,
+    fieldMode: 0,
     firstName,
     lastName,
     fullName: trimmed,

@@ -30,6 +30,11 @@ export interface ItemResultDto {
   collectionIds?: string[];
   collectionId?: string | null;
   notes?: any[];
+  isStarred?: boolean;
+  hasFile?: boolean;
+  attachmentCount?: number;
+  noteCount?: number;
+  firstAuthor?: string | null;
   readStatus?: string;
   rating?: number;
   lastReadAt?: string | null;
@@ -99,6 +104,11 @@ export function toItemResultDto(aggregate: ItemAggregate): ItemResultDto {
       aggregate.notes.length > 0
         ? aggregate.notes
         : fields.notes ?? [],
+    isStarred: aggregate.isStarred || Boolean(fields.isStarred),
+    hasFile: aggregate.hasFile || Boolean(fields.hasFile),
+    attachmentCount: aggregate.attachmentCount ?? fields.attachmentCount ?? 0,
+    noteCount: aggregate.noteCount ?? fields.noteCount ?? 0,
+    firstAuthor: aggregate.firstAuthor ?? fields.firstAuthor ?? null,
     readStatus:
       aggregate.readStatus !== 'unread'
         ? aggregate.readStatus

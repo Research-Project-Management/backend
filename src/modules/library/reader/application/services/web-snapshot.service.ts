@@ -141,54 +141,71 @@ export class WebSnapshotService {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const createDOMPurify = require('dompurify');
 
+    let title = 'Web Snapshot';
+    let byline: string | undefined;
+    let excerpt: string | undefined;
+    let siteName = new URL(canonicalUrl).hostname;
+    let textContent = '';
+    let sanitizedBody = '<p>No content captured</p>';
+
     const dom = new JSDOM(rawHtml, { url: canonicalUrl });
-    const DOMPurify = createDOMPurify(dom.window);
-    const reader = new Readability(dom.window.document, {
-      charThreshold: 20,
-    });
+    try {
+      const DOMPurify = createDOMPurify(dom.window);
+      const reader = new Readability(dom.window.document, {
+        charThreshold: 20,
+      });
 
-    const parsedArticle = reader.parse();
+      const parsedArticle = reader.parse();
 
-    const title =
-      parsedArticle?.title?.trim() ||
-      options?.title?.trim() ||
-      dom.window.document.title?.trim() ||
-      'Web Snapshot';
-    const byline = parsedArticle?.byline?.trim() || undefined;
-    const excerpt = parsedArticle?.excerpt?.trim() || undefined;
-    const siteName =
-      parsedArticle?.siteName?.trim() || new URL(canonicalUrl).hostname;
-    const textContent =
-      parsedArticle?.textContent?.trim() ||
-      dom.window.document.body?.textContent?.trim() ||
-      '';
+      title =
+        parsedArticle?.title?.trim() ||
+        options?.title?.trim() ||
+        dom.window.document.title?.trim() ||
+        'Web Snapshot';
+      byline = parsedArticle?.byline?.trim() || undefined;
+      excerpt = parsedArticle?.excerpt?.trim() || undefined;
+      siteName =
+        parsedArticle?.siteName?.trim() || new URL(canonicalUrl).hostname;
+      textContent =
+        parsedArticle?.textContent?.trim() ||
+        dom.window.document.body?.textContent?.trim() ||
+        '';
 
-    // 4. Sanitize article body with DOMPurify
-    const rawContent =
-      parsedArticle?.content ||
-      dom.window.document.body?.innerHTML ||
-      '<p>No content captured</p>';
-    const sanitizedBody = DOMPurify.sanitize(rawContent, {
-      FORBID_TAGS: [
-        'script',
-        'iframe',
-        'object',
-        'embed',
-        'form',
-        'input',
-        'button',
-        'dialog',
-      ],
-      FORBID_ATTR: [
-        'onerror',
-        'onload',
-        'onclick',
-        'onmouseover',
-        'onfocus',
-        'onblur',
-      ],
-      ADD_TAGS: ['math', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac'],
-    });
+      // 4. Sanitize article body with DOMPurify
+      const rawContent =
+        parsedArticle?.content ||
+        dom.window.document.body?.innerHTML ||
+        '<p>No content captured</p>';
+      sanitizedBody = DOMPurify.sanitize(rawContent, {
+        FORBID_TAGS: [
+          'script',
+          'iframe',
+          'object',
+          'embed',
+          'form',
+          'input',
+          'button',
+          'dialog',
+        ],
+        FORBID_ATTR: [
+          'onerror',
+          'onload',
+          'onclick',
+          'onmouseover',
+          'onfocus',
+          'onblur',
+        ],
+        ADD_TAGS: ['math', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac'],
+      });
+    } finally {
+      try {
+        if (typeof dom.window.close === 'function') {
+          dom.window.close();
+        }
+      } catch {
+        // Ignore close error in test environments
+      }
+    }
 
     // 5. Build self-contained Reader-mode HTML document styled with Flux Flat UI theme
     const capturedAtIso = new Date().toISOString();
@@ -468,6 +485,8 @@ export class WebSnapshotService {
       mimeType: 'text/html',
       size: snapshot.sizeBytes,
       fileHash: snapshot.checksum,
+      linkMode: 'imported_url',
+      attachmentType: 'snapshot',
     });
 
     this.logger.log(

@@ -9,7 +9,6 @@ import { CollaborationModule } from './collaboration/collaboration.module';
 import { ExportModule } from './export/export.module';
 import { AssetModule } from './asset/asset.module';
 import { SuggestionModule } from './suggestion/suggestion.module';
-import { NotificationBundlerModule } from './notification/notification-bundler.module';
 import { OutlineModule } from './outline/outline.module';
 import { SearchModule } from './search/search.module';
 import { DocumentFacade, DOCUMENT_FACADE } from './document.facade';
@@ -26,7 +25,6 @@ import { DocumentFacade, DOCUMENT_FACADE } from './document.facade';
     ExportModule,
     AssetModule,
     SuggestionModule,
-    NotificationBundlerModule,
     OutlineModule,
     SearchModule,
   ],
@@ -50,7 +48,6 @@ import { DocumentFacade, DOCUMENT_FACADE } from './document.facade';
     ExportModule,
     AssetModule,
     SuggestionModule,
-    NotificationBundlerModule,
     OutlineModule,
     SearchModule,
   ],

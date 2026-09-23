@@ -17,7 +17,7 @@ model State {
   isStarred      Boolean    @default(false) @map("is_starred")
   rating         Int?
   currentPage    Int?       @map("current_page")
-  scrollPosition Json?      @map("scroll_position")
+  scrollPosition Json?      @map("scroll_position") @db.JsonB
   lastOpenedAt   DateTime?  @map("last_opened_at") @db.Timestamptz(6)
   lastReadAt     DateTime?  @map("last_read_at") @db.Timestamptz(6)
   createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -48,7 +48,6 @@ model Note {
   deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
 
   @@index([itemId, deletedAt])
-  @@index([userId, deletedAt])
   @@index([userId, deletedAt, updatedAt(sort: Desc)])
   @@index([projectId, deletedAt])
   @@index([tags], type: Gin)

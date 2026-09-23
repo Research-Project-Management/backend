@@ -8,13 +8,20 @@ import { ItemResultDto, toItemResultDto } from '../dtos/item-result.dto';
 export interface ListItemsQuery {
   userId: string;
   view?:
-    'all' | 'recent' | 'unfiled' | 'trash' | 'my-publications' | 'publications';
+    | 'all' | 'recent' | 'unfiled' | 'trash' | 'my-publications' | 'publications';
   collectionId?: string;
   tagId?: string;
   search?: string;
   limit?: number;
   cursor?: string;
   projectId?: string;
+  orderBy?: string;
+  orderDirection?: 'asc' | 'desc';
+  itemType?: string;
+  fromYear?: number;
+  toYear?: number;
+  readStatus?: string;
+  hasFile?: boolean;
 }
 
 export interface PaginatedItemsDto {
@@ -48,6 +55,13 @@ export class ListItemsUseCase {
       limit: query.limit,
       cursor: query.cursor,
       projectId: query.projectId,
+      orderBy: query.orderBy,
+      orderDirection: query.orderDirection,
+      itemType: query.itemType,
+      fromYear: query.fromYear,
+      toYear: query.toYear,
+      readStatus: query.readStatus,
+      hasFile: query.hasFile,
     });
 
     return {

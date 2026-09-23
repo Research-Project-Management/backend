@@ -13,6 +13,7 @@ import { EnrichStage } from '../../infrastructure/stages/enrich.stage';
 import { ReconcileStage } from '../../infrastructure/stages/reconcile.stage';
 import { MatchStage } from '../../infrastructure/stages/match.stage';
 import { CommitStage } from '../../infrastructure/stages/commit.stage';
+import { RetractionScannerProvider } from '../../infrastructure/providers/retraction-scanner.provider';
 import {
   BIBLIOGRAPHY_FACADE,
   IBibliographyFacade,
@@ -97,6 +98,8 @@ export class PipelineService {
     private readonly contentFacade?: IContentFacade,
     @Optional()
     sagaOrchestrator?: IngestionSagaOrchestrator,
+    @Optional()
+    private readonly retractionScanner?: RetractionScannerProvider,
   ) {
     this.orchestrator =
       sagaOrchestrator ??
@@ -257,6 +260,24 @@ export class PipelineService {
               itemId: matchRes.targetItemId,
             });
           } else {
+            if (this.retractionScanner) {
+              try {
+                const scanRes = await this.retractionScanner.scan(
+                  itemDecision.proposedItem?.doi,
+                  itemDecision.proposedItem?.pmid,
+                  itemDecision.proposedItem?.title,
+                );
+                if (scanRes) {
+                  (itemDecision.proposedItem as any).isRetracted = true;
+                  (itemDecision.proposedItem as any).retractionNature = scanRes.nature;
+                  (itemDecision.proposedItem as any).retractionDetails = scanRes;
+                  (itemDecision.proposedItem as any).retractionCheckedAt = new Date().toISOString();
+                }
+              } catch {
+                // Non-blocking scan error
+              }
+            }
+
             const created = await this.commit.execute(
               resolvedScope.projectId || resolvedScope.userId,
               itemDecision.proposedItem,
@@ -638,6 +659,30 @@ export class PipelineService {
         } as unknown as Prisma.InputJsonValue,
       });
       // Zotero design: Ingest does not pause or block. Continue to commit so document is immediately in library.
+    }
+
+    // Retraction Check: Auto-scan against Retraction Watch & Crossref before commit
+    if (this.retractionScanner) {
+      try {
+        const scanRes = await this.retractionScanner.scan(
+          decision.proposedItem?.doi,
+          decision.proposedItem?.pmid,
+          decision.proposedItem?.title,
+        );
+        if (scanRes) {
+          (decision.proposedItem as any).isRetracted = true;
+          (decision.proposedItem as any).retractionNature = scanRes.nature;
+          (decision.proposedItem as any).retractionDetails = scanRes;
+          (decision.proposedItem as any).retractionCheckedAt = new Date().toISOString();
+          this.logger.warn(
+            `[RETRACTION_INGESTION_GUARD] Flagged imported item "${decision.proposedItem?.title}" as ${scanRes.nature}`,
+          );
+        }
+      } catch (scanErr: any) {
+        this.logger.warn(
+          `Retraction check during ingestion skipped: ${scanErr?.message}`,
+        );
+      }
     }
 
     // Stage 6: COMMIT (create new Item via CommitStage with Saga Compensation)

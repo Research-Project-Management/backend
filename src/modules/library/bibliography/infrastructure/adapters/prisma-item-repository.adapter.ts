@@ -128,6 +128,7 @@ export class PrismaItemRepositoryAdapter implements IItemRepositoryPort {
             ? {
                 create: contribList.map((c: any, idx: number) => ({
                   creatorType: c.creatorType || 'author',
+                  fieldMode: c.fieldMode !== undefined ? Number(c.fieldMode) : 0,
                   firstName: c.firstName || '',
                   lastName: c.lastName || '',
                   fullName:
@@ -135,6 +136,7 @@ export class PrismaItemRepositoryAdapter implements IItemRepositoryPort {
                     c.name ||
                     [c.firstName, c.lastName].filter(Boolean).join(' ') ||
                     '',
+                  shortName: c.shortName || '',
                   orderIndex: c.orderIndex ?? idx,
                 })),
               }
@@ -263,6 +265,7 @@ export class PrismaItemRepositoryAdapter implements IItemRepositoryPort {
               data: contribList.map((c: any, idx: number) => ({
                 itemId: aggregate.id,
                 creatorType: c.creatorType || 'author',
+                fieldMode: c.fieldMode !== undefined ? Number(c.fieldMode) : 0,
                 firstName: c.firstName || '',
                 lastName: c.lastName || '',
                 fullName:
@@ -270,6 +273,7 @@ export class PrismaItemRepositoryAdapter implements IItemRepositoryPort {
                   c.name ||
                   [c.firstName, c.lastName].filter(Boolean).join(' ') ||
                   '',
+                shortName: c.shortName || '',
                 orderIndex: c.orderIndex ?? idx,
               })),
             });

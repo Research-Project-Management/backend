@@ -156,6 +156,30 @@ describe('ItemsController (Hexagonal Driver Adapter)', () => {
     expect(result.pagination.totalCount).toBe(1);
   });
 
+  it('should list items by delegating to ListItemsUseCase with sorting and filters', async () => {
+    await controller.listItems('user-1', {
+      view: 'all',
+      orderBy: 'year',
+      orderDirection: 'asc',
+      fromYear: 2020,
+      toYear: 2024,
+      itemType: 'journalArticle',
+      readStatus: 'unread',
+    });
+    expect(mockListUseCase.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-1',
+        view: 'all',
+        orderBy: 'year',
+        orderDirection: 'asc',
+        fromYear: 2020,
+        toYear: 2024,
+        itemType: 'journalArticle',
+        readStatus: 'unread',
+      }),
+    );
+  });
+
   it('should get item by delegating to GetItemUseCase', async () => {
     const result = await controller.getItem(validUuid, 'user-1');
     expect(mockGetUseCase.execute).toHaveBeenCalledWith({
@@ -229,5 +253,53 @@ describe('ItemsController (Hexagonal Driver Adapter)', () => {
     });
     expect(result.success).toBe(true);
     expect(result.item.id).toBe(validUuid);
+  });
+
+  it('should return metadata sources by delegating to ItemsService', async () => {
+    const mockItemsService = {
+      getMetadataSources: jest.fn().mockResolvedValue({
+        itemId: validUuid,
+        count: 1,
+        sources: [
+          {
+            id: 'source-1',
+            sourceProvider: 'arxiv',
+            sourceUri: 'https://arxiv.org/abs/2301.00001',
+            format: 'json',
+            fetchedAt: new Date(),
+            createdAt: new Date(),
+            rawPayload: { title: 'Sample' },
+          },
+        ],
+      }),
+    };
+
+    const ctrl = new ItemsController(
+      mockCreateUseCase as any,
+      mockUpdateUseCase as any,
+      mockDeleteUseCase as any,
+      mockRestoreUseCase as any,
+      mockGetUseCase as any,
+      mockListUseCase as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      mockItemsService as any,
+    );
+
+    const result = await ctrl.getMetadataSources(validUuid, 'user-1');
+    expect(mockItemsService.getMetadataSources).toHaveBeenCalledWith(
+      'user-1',
+      validUuid,
+      undefined,
+    );
+    expect(result.count).toBe(1);
+    expect(result.sources[0].sourceProvider).toBe('arxiv');
   });
 });

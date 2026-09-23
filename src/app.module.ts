@@ -12,6 +12,7 @@ import { StickyModule } from './modules/sticky/sticky.module';
 import { StorageModule } from './modules/storage/storage.module';
 import { LibraryModule } from './modules/library/library.module';
 import { DocumentModule } from './modules/document/document.module';
+import { ManuscriptsModule } from './modules/manuscripts/manuscripts.module';
 import { WorkItemModule } from './modules/work-item/work-item.module';
 import { AiModule } from './modules/ai/ai.module';
 import { AppController } from './app.controller';
@@ -91,6 +92,7 @@ import { AppService } from './app.service';
     StickyModule,
     WorkItemModule,
     DocumentModule,
+    ManuscriptsModule,
     LibraryModule,
     StorageModule,
     AiModule,

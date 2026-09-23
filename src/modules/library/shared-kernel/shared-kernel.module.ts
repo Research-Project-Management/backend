@@ -29,6 +29,7 @@ import { EVENT_PUBLISHER_PORT } from './outbox/ports/event-publisher.port';
 import { UNIT_OF_WORK_PORT } from './outbox/ports/unit-of-work.port';
 import { OutboxMetrics, SyncMetricsService } from './outbox/outbox.metrics';
 import { LIBRARY_EVENT_TYPES } from './outbox/outbox.events';
+import { SyncController } from './presentation/sync.controller';
 
 /**
  * Unified Shared Kernel Module.
@@ -47,6 +48,7 @@ import { LIBRARY_EVENT_TYPES } from './outbox/outbox.events';
       name: LIBRARY_OUTBOX_QUEUE,
     }),
   ],
+  controllers: [SyncController],
   providers: [
     // Integration Events
     IntegrationEventBusService,

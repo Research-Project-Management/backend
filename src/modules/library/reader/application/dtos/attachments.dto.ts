@@ -1,4 +1,5 @@
 import { IsString, IsOptional, IsNumber, IsArray } from 'class-validator';
+import type { LinkMode, AttachmentType } from '../../domain/types/attachments.types';
 
 export class CreateAttachmentDto {
   @IsString()
@@ -22,6 +23,14 @@ export class CreateAttachmentDto {
   @IsString()
   @IsOptional()
   fileId?: string;
+
+  @IsString()
+  @IsOptional()
+  linkMode?: LinkMode;
+
+  @IsString()
+  @IsOptional()
+  attachmentType?: AttachmentType;
 }
 
 export class ReplaceAttachmentFileDto {
