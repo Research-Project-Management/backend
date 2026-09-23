@@ -268,11 +268,13 @@ export class OcrWorkerPoolService implements OnModuleDestroy {
     this.initPromise = undefined;
 
     if (deadScheduler) {
-      deadScheduler.terminate().catch((err) => {
+      try {
+        await deadScheduler.terminate();
+      } catch (err: any) {
         this.logger.debug(
           `Old Tesseract scheduler termination completed: ${err?.message || err}`,
         );
-      });
+      }
     }
   }
 

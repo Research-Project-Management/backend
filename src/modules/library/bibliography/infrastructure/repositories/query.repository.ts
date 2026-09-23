@@ -1,16 +1,23 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Inject, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import zlib from 'zlib';
 import { PrismaService } from '../../../../../core/database/prisma.service';
 import { isUUID } from 'class-validator';
 import { normalizeTags } from '../../../shared-kernel/utils/tag.utils';
 import { ItemSummary } from '../../domain/types/items.types';
+import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 
 const isUuid = (val: unknown): val is string =>
   typeof val === 'string' && isUUID(val);
 
 @Injectable()
 export class QueryRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional()
+    @Inject(STORAGE_PORT)
+    private readonly storagePort?: IStoragePort,
+  ) {}
 
   private getClient(tx?: Prisma.TransactionClient) {
     return tx ?? this.prisma;
@@ -233,13 +240,40 @@ export class QueryRepository {
   ) {
     if (!isUuid(itemId)) return null;
     const client = this.getClient(tx);
-    return client.itemMetadata.findFirst({
+    const record = await client.itemMetadata.findFirst({
       where: {
         itemId,
         sourceProvider,
       },
       orderBy: { createdAt: 'desc' },
     });
+
+    if (!record) return null;
+
+    // Claim Check Pattern: Transparently hydrate offloaded payload from Object Storage
+    const raw = record.rawPayload as Record<string, any> | null;
+    if (raw?.isOffloaded && raw?.fileId && this.storagePort?.readOwnedFile) {
+      try {
+        const storageFile = await this.storagePort.readOwnedFile({
+          fileId: raw.fileId,
+        });
+        if (storageFile?.buffer) {
+          const decompressed = zlib.gunzipSync(storageFile.buffer);
+          const fullData = JSON.parse(decompressed.toString('utf-8'));
+          return {
+            ...record,
+            rawPayload: {
+              ...raw,
+              ...fullData,
+            },
+          };
+        }
+      } catch (err: any) {
+        // Fallback gracefully to summary record if storage cannot be reached
+      }
+    }
+
+    return record;
   }
 
   async findMetadataSourceRecord(
@@ -829,6 +863,20 @@ export class QueryRepository {
             effectiveRelationType = 'is_published_version_of';
           } else if (r.relationType === 'is_published_version_of') {
             effectiveRelationType = 'is_preprint_of';
+          } else if (r.relationType === 'rebuts') {
+            effectiveRelationType = 'rebutted_by';
+          } else if (r.relationType === 'extends') {
+            effectiveRelationType = 'extended_by';
+          } else if (r.relationType === 'replicates') {
+            effectiveRelationType = 'replicated_by';
+          } else if (r.relationType === 'uses_dataset') {
+            effectiveRelationType = 'dataset_used_by';
+          } else if (r.relationType === 'survey_of') {
+            effectiveRelationType = 'reviewed_in';
+          } else if (r.relationType === 'supplements') {
+            effectiveRelationType = 'supplemented_by';
+          } else if (r.relationType === 'is_translation_of') {
+            effectiveRelationType = 'translated_as';
           }
         }
 

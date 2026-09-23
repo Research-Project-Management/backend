@@ -1,0 +1,68 @@
+// -- 14. Manuscript Review: Track Changes & Comments Context ------------------
+
+enum ManuscriptChangeType {
+  insert
+  delete
+}
+
+enum ManuscriptChangeStatus {
+  pending
+  accepted
+  rejected
+}
+
+model ManuscriptTrackChange {
+  id           String                 @id @default(uuid(7)) @db.Uuid
+  projectId    String                 @map("project_id") @db.Uuid
+  docId        String                 @map("doc_id") @db.Uuid
+  type         ManuscriptChangeType
+  status       ManuscriptChangeStatus @default(pending)
+  text         String                 @db.Text
+  startLine    Int                    @map("start_line")
+  startCol     Int                    @map("start_col")
+  endLine      Int                    @map("end_line")
+  endCol       Int                    @map("end_col")
+  createdById  String?                @map("created_by_id") @db.Uuid
+  resolvedById String?                @map("resolved_by_id") @db.Uuid
+  resolvedAt   DateTime?              @map("resolved_at") @db.Timestamptz(6)
+  createdAt    DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([projectId, docId, status], map: "idx_manuscript_changes_lookup")
+  @@map("manuscript_track_changes")
+}
+
+model ManuscriptCommentThread {
+  id           String                   @id @default(uuid(7)) @db.Uuid
+  projectId    String                   @map("project_id") @db.Uuid
+  docId        String                   @map("doc_id") @db.Uuid
+  quote        String?                  @db.Text
+  startLine    Int                      @map("start_line")
+  startCol     Int                      @map("start_col")
+  endLine      Int                      @map("end_line")
+  endCol       Int                      @map("end_col")
+  isResolved   Boolean                  @default(false) @map("is_resolved")
+  createdById  String?                  @map("created_by_id") @db.Uuid
+  resolvedById String?                  @map("resolved_by_id") @db.Uuid
+  resolvedAt   DateTime?                @map("resolved_at") @db.Timestamptz(6)
+  createdAt    DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  replies      ManuscriptCommentReply[]
+
+  @@index([projectId, docId, isResolved], map: "idx_manuscript_comments_lookup")
+  @@map("manuscript_comment_threads")
+}
+
+model ManuscriptCommentReply {
+  id          String                  @id @default(uuid(7)) @db.Uuid
+  threadId    String                  @map("thread_id") @db.Uuid
+  thread      ManuscriptCommentThread @relation(fields: [threadId], references: [id], onDelete: Cascade, map: "fk_comment_replies_thread_id")
+  content     String                  @db.Text
+  createdById String?                 @map("created_by_id") @db.Uuid
+  createdAt   DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([threadId, createdAt], map: "idx_comment_replies_thread")
+  @@map("manuscript_comment_replies")
+}

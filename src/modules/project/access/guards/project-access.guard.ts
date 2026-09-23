@@ -30,17 +30,7 @@ export class ProjectAccessGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    // 1. Standalone library mode guard (prohibited in production)
-    if (process.env.STANDALONE_LIBRARY === 'true') {
-      if (process.env.NODE_ENV === 'production') {
-        throw new ForbiddenException(
-          'STANDALONE_LIBRARY mode is strictly forbidden in production',
-        );
-      }
-      return true;
-    }
-
-    // 2. Extract metadata from route handler and class
+    // 1. Extract metadata from route handler and class
     const requiredRoles = this.reflector.getAllAndOverride<RoleInput[]>(
       ROLES_KEY,
       [context.getHandler(), context.getClass()],
@@ -75,7 +65,9 @@ export class ProjectAccessGuard implements CanActivate {
     // 4. Resolve Project ID
     const projectId = await this.resolveProjectId(request);
     if (!projectId) {
-      return true;
+      throw new ForbiddenException(
+        'Project context is required to enforce project permissions',
+      );
     }
 
     // 5. Fetch Member Access Context (Role + Overrides + Effective Permissions)

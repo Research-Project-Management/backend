@@ -27,6 +27,8 @@ import {
   DocumentFulltextResponse,
 } from '../dtos/items.dto';
 import { normalizeTags } from '../../../shared-kernel/utils/tag.utils';
+import { RedisCacheService } from '../../../../../core/cache/redis.service';
+import { LIBRARY_REDIS_KEYS } from '../../../shared-kernel/core/constants/redis-keys.constant';
 import { TagsService } from './tags.service';
 import { TypesService } from './types.service';
 import { ItemSyncDelegate } from './item-sync.delegate';
@@ -81,7 +83,43 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     @Optional() private readonly validator?: ZoteroSchemaValidatorService,
     @Optional() private readonly grobid?: GrobidClient,
     @Optional() private readonly syncDelegate?: ItemSyncDelegate,
+    @Optional() private readonly cache?: RedisCacheService,
   ) {}
+
+  /**
+   * Invalidates Redis cache entries for an item and affected library lists.
+   */
+  async invalidateItemCache(
+    id: string,
+    userId?: string,
+    projectId?: string,
+  ): Promise<void> {
+    if (!this.cache) return;
+    try {
+      const tasks: Promise<any>[] = [
+        this.cache.del(LIBRARY_REDIS_KEYS.item(id)),
+        this.cache.del(LIBRARY_REDIS_KEYS.itemDetails(id)),
+        this.cache.del(LIBRARY_REDIS_KEYS.itemFulltext(id)),
+      ];
+      if (userId) {
+        tasks.push(
+          this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(userId)),
+        );
+      }
+      if (projectId && projectId !== 'user') {
+        tasks.push(
+          this.cache.delPattern(
+            LIBRARY_REDIS_KEYS.itemsPattern(`proj:${projectId}`),
+          ),
+        );
+      }
+      await Promise.all(tasks);
+    } catch (err: any) {
+      this.logger.warn(
+        `Failed to invalidate item cache for ${id}: ${err?.message || err}`,
+      );
+    }
+  }
 
   /**
    * Parses raw unformatted citation strings or multi-line bibliographies via GROBID CRF.
@@ -101,9 +139,39 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
   }
 
   async getItem(userId: string, id: string, projectId?: string) {
+    const cacheKey = LIBRARY_REDIS_KEYS.item(id);
+    if (this.cache) {
+      try {
+        const cached = await this.cache.get<Record<string, any>>(cacheKey);
+        if (cached) {
+          const isOwner = cached.userId === userId;
+          const isProjectMatch = projectId && cached.projectId === projectId;
+          if (isOwner || isProjectMatch) {
+            return cached;
+          }
+        }
+      } catch (err: any) {
+        this.logger.debug(
+          `Cache lookup error for ${cacheKey}: ${err?.message || err}`,
+        );
+      }
+    }
+
     const item = await this.query.findById(userId, id, projectId);
     if (!item) return null;
-    return this.mapFlattenedState(item, userId);
+    const mapped = this.mapFlattenedState(item, userId);
+
+    if (mapped && this.cache) {
+      try {
+        await this.cache.set(cacheKey, mapped, 300); // 5 min TTL
+      } catch (err: any) {
+        this.logger.debug(
+          `Cache set error for ${cacheKey}: ${err?.message || err}`,
+        );
+      }
+    }
+
+    return mapped;
   }
 
   /**
@@ -115,6 +183,34 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     id: string,
     projectId?: string,
   ): Promise<DocumentFulltextResponse> {
+    const cacheKey = LIBRARY_REDIS_KEYS.itemFulltext(id);
+    if (this.cache) {
+      try {
+        const cached = await this.cache.get<any>(cacheKey);
+        if (cached) {
+          if (cached.userId) {
+            const isOwner = cached.userId === userId;
+            const isProjectMatch = Boolean(
+              projectId && cached.projectId === projectId,
+            );
+            if (isOwner || isProjectMatch) {
+              return cached;
+            }
+            this.logger.warn(
+              `Unauthorized fulltext cache access attempt for item ${id} by user ${userId}`,
+            );
+          } else {
+            // Backward compatibility for mocks/legacy entries without userId
+            return cached;
+          }
+        }
+      } catch (err: any) {
+        this.logger.debug(
+          `Cache lookup error for ${cacheKey}: ${err?.message || err}`,
+        );
+      }
+    }
+
     const item = await this.query.findById(userId, id, projectId);
     if (!item) {
       throw new NotFoundException(`Item ${id} not found or access denied`);
@@ -126,12 +222,13 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       'grobid_fulltext',
     );
 
+    let result: DocumentFulltextResponse;
     if (
       fulltextRecord?.rawPayload &&
       typeof fulltextRecord.rawPayload === 'object'
     ) {
       const payload = fulltextRecord.rawPayload as Record<string, any>;
-      return {
+      result = {
         title: payload.title || item.title,
         abstract: payload.abstract || item.abstract || undefined,
         sections: Array.isArray(payload.sections) ? payload.sections : [],
@@ -140,40 +237,57 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         formulas: Array.isArray(payload.formulas) ? payload.formulas : [],
         references: Array.isArray(payload.references) ? payload.references : [],
       };
+    } else {
+      // 2. Fallback to grobid header record if available via QueryRepository
+      const headerRecord = await this.query.findMetadataSourceRecord(
+        id,
+        'grobid',
+      );
+
+      if (
+        headerRecord?.rawPayload &&
+        typeof headerRecord.rawPayload === 'object'
+      ) {
+        const payload = headerRecord.rawPayload as Record<string, any>;
+        result = {
+          title: payload.title || item.title,
+          abstract: payload.abstract || item.abstract || undefined,
+          sections: [],
+          figures: [],
+          tables: [],
+          formulas: [],
+          references: Array.isArray(payload.references) ? payload.references : [],
+        };
+      } else {
+        // 3. Return clean empty structure instead of 404 so Reader renders gracefully
+        result = {
+          title: item.title,
+          abstract: item.abstract || undefined,
+          sections: [],
+          figures: [],
+          tables: [],
+          formulas: [],
+          references: [],
+        };
+      }
     }
 
-    // 2. Fallback to grobid header record if available via QueryRepository
-    const headerRecord = await this.query.findMetadataSourceRecord(
-      id,
-      'grobid',
-    );
-
-    if (
-      headerRecord?.rawPayload &&
-      typeof headerRecord.rawPayload === 'object'
-    ) {
-      const payload = headerRecord.rawPayload as Record<string, any>;
-      return {
-        title: payload.title || item.title,
-        abstract: payload.abstract || item.abstract || undefined,
-        sections: [],
-        figures: [],
-        tables: [],
-        formulas: [],
-        references: Array.isArray(payload.references) ? payload.references : [],
-      };
+    if (this.cache) {
+      try {
+        const cachedPayload = {
+          ...result,
+          userId: item.userId,
+          projectId: item.projectId ?? null,
+        };
+        await this.cache.set(cacheKey, cachedPayload, 600); // 10 min TTL
+      } catch (err: any) {
+        this.logger.debug(
+          `Cache set error for ${cacheKey}: ${err?.message || err}`,
+        );
+      }
     }
 
-    // 3. Return clean empty structure instead of 404 so Reader renders gracefully
-    return {
-      title: item.title,
-      abstract: item.abstract || undefined,
-      sections: [],
-      figures: [],
-      tables: [],
-      formulas: [],
-      references: [],
-    };
+    return result;
   }
 
   async listItems(
@@ -195,9 +309,38 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     },
   ): Promise<CursorPaginatedResult<any>> {
     const limit = Math.min(options.limit ?? 50, 100);
+    const scopeKey =
+      options.projectId && options.projectId !== 'user'
+        ? `proj:${options.projectId}`
+        : userId;
+    const canCache = !options.search && !options.cursor;
+    const cacheKey = canCache
+      ? LIBRARY_REDIS_KEYS.itemsList(
+          scopeKey,
+          `${options.view || 'all'}:${options.collectionId || ''}:${options.tagId || ''}:${limit}`,
+        )
+      : null;
+
+    if (canCache && cacheKey && this.cache) {
+      try {
+        const cached =
+          await this.cache.get<CursorPaginatedResult<any>>(cacheKey);
+        if (cached) {
+          return cached;
+        }
+      } catch (err: any) {
+        this.logger.debug(
+          `Cache lookup error for ${cacheKey}: ${err?.message || err}`,
+        );
+      }
+    }
+
     const queryOptions = { ...options, userId };
+    const isInitialPage = !options.cursor;
     const [totalCount, rawItems] = await Promise.all([
-      this.query.count(userId, queryOptions),
+      isInitialPage
+        ? this.query.count(userId, queryOptions)
+        : Promise.resolve(undefined),
       this.query.findMany(userId, {
         ...queryOptions,
         limit: limit + 1,
@@ -217,7 +360,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       .slice(0, limit)
       .map((it) => this.mapFlattenedState(it, userId));
 
-    return {
+    const result: CursorPaginatedResult<any> = {
       items,
       meta: {
         cursor: nextCursor,
@@ -225,6 +368,18 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         totalCount,
       },
     };
+
+    if (canCache && cacheKey && this.cache) {
+      try {
+        await this.cache.set(cacheKey, result, 60); // 60s TTL
+      } catch (err: any) {
+        this.logger.debug(
+          `Cache set error for ${cacheKey}: ${err?.message || err}`,
+        );
+      }
+    }
+
+    return result;
   }
 
   async createItem(
@@ -308,6 +463,13 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     }
 
     await this.tagsService.invalidateTagsCache(userId, effectiveProjectId);
+    if (this.cache) {
+      const scopeKey =
+        effectiveProjectId && effectiveProjectId !== 'user'
+          ? `proj:${effectiveProjectId}`
+          : userId;
+      await this.cache.delPattern(LIBRARY_REDIS_KEYS.itemsPattern(scopeKey));
+    }
     return result;
   }
 
@@ -371,22 +533,28 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         updated,
       );
 
+      await this.invalidateItemCache(id, userId, effectiveProjectId);
+
       return ItemsMapper.toDomain(updated);
     }
 
-    return this.libraryTx.executeInTransaction(async (tx, helpers) => {
-      return this.updateItem(
-        userId,
-        id,
-        expectedVersion,
-        data,
-        {
-          tx,
-          helpers,
-        },
-        projectId,
-      );
-    });
+    const result = await this.libraryTx.executeInTransaction(
+      async (tx, helpers) => {
+        return this.updateItem(
+          userId,
+          id,
+          expectedVersion,
+          data,
+          {
+            tx,
+            helpers,
+          },
+          projectId,
+        );
+      },
+    );
+    await this.invalidateItemCache(id, userId, projectId);
+    return result;
   }
 
   async setMyPublication(
@@ -419,6 +587,8 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
         LIBRARY_EVENT_TYPES.ITEM_UPDATED,
         updated,
       );
+
+      await this.invalidateItemCache(id, userId, effectiveProjectId);
 
       return ItemsMapper.toDomain(updated);
     });
@@ -483,6 +653,8 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
             projectId,
           },
         );
+
+        await this.invalidateItemCache(id, userId, projectId);
       }
 
       return deleted;
@@ -503,6 +675,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
       },
     );
     await this.tagsService.invalidateTagsCache(userId, projectId);
+    await this.invalidateItemCache(id, userId, projectId);
     return result;
   }
 
@@ -545,6 +718,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     );
 
     await this.tagsService.invalidateTagsCache(userId, projectId);
+    await this.invalidateItemCache(id, userId, projectId);
     return result;
   }
 
@@ -573,6 +747,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     );
 
     await this.tagsService.invalidateTagsCache(userId, projectId);
+    await this.invalidateItemCache(id, userId, projectId);
     return result;
   }
 
@@ -745,7 +920,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     limit?: number,
     projectId?: string,
   ): Promise<QualityAuditCandidateItem[]> {
-    return this.query.findQualityAuditItems(userId, limit) as unknown as QualityAuditCandidateItem[];
+    return (await this.query.findQualityAuditItems(userId, limit)) as unknown as QualityAuditCandidateItem[];
   }
 
   async findDuplicateCandidateItems(
@@ -753,7 +928,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     limit?: number,
     projectId?: string,
   ): Promise<DuplicateCandidateItem[]> {
-    return this.query.findDuplicateCandidateItems(userId, limit) as unknown as DuplicateCandidateItem[];
+    return (await this.query.findDuplicateCandidateItems(userId, limit)) as unknown as DuplicateCandidateItem[];
   }
 
   /**
@@ -932,22 +1107,22 @@ export function buildImportItemPayload(
   const primaryAttachment = source.attachments?.[0];
   const resolvedFileId = primaryAttachment?.fileId
     ? String(primaryAttachment.fileId)
-    : (source as any).fileId
-      ? String((source as any).fileId)
+    : source.fileId
+      ? String(source.fileId)
       : undefined;
   const resolvedFileUrl =
-    primaryAttachment?.url || (source as any).fileUrl || undefined;
+    primaryAttachment?.url || source.fileUrl || undefined;
   const resolvedFilename =
     primaryAttachment?.filename ||
     primaryAttachment?.name ||
-    (source as any).filename ||
+    source.filename ||
     undefined;
   const resolvedMimeType =
-    primaryAttachment?.mimeType || (source as any).mimeType || undefined;
+    primaryAttachment?.mimeType || source.mimeType || undefined;
   const resolvedSize =
-    primaryAttachment?.size || (source as any).size || undefined;
+    primaryAttachment?.size || source.size || undefined;
   const resolvedFileHash =
-    primaryAttachment?.fileHash || (source as any).fileHash || undefined;
+    primaryAttachment?.fileHash || source.fileHash || undefined;
 
   return {
     title: source.title,

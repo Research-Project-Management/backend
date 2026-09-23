@@ -78,12 +78,10 @@ export class TagsRepository {
     userId: string,
     name: string,
     color = '#3b82f6',
-    type: TagType | string = TagType.manual,
+    type: TagType = TagType.manual,
     projectIdOrTx?: string | null | Prisma.TransactionClient,
     tx?: Prisma.TransactionClient,
   ) {
-    const projectId =
-      typeof projectIdOrTx === 'string' ? projectIdOrTx : undefined;
     const client = this.getClient(
       typeof projectIdOrTx === 'object' && projectIdOrTx !== null
         ? projectIdOrTx
@@ -94,7 +92,7 @@ export class TagsRepository {
         ? projectIdOrTx
         : undefined;
 
-    const resolvedType = (type as TagType) || TagType.manual;
+    const resolvedType = type || TagType.manual;
 
     if (effectiveProjectId) {
       const existingProjectTag = await client.tag.findFirst({

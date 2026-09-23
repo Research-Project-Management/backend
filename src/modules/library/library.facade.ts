@@ -65,6 +65,7 @@ export interface ILibraryFacade {
   exportBibByCitationKeys(
     userId: string,
     citeKeys: string[],
+    projectId?: string,
   ): Promise<{ content: string } | null>;
   getItem(
     userId: string,
@@ -141,9 +142,14 @@ export class LibraryFacade implements ILibraryFacade {
   async exportBibByCitationKeys(
     userId: string,
     citeKeys: string[],
+    projectId?: string,
   ): Promise<{ content: string } | null> {
     if (this.citationFacade) {
-      return this.citationFacade.exportBibliography(userId, citeKeys);
+      return this.citationFacade.exportBibliography(
+        userId,
+        citeKeys,
+        projectId,
+      );
     }
     return null;
   }

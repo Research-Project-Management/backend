@@ -17,4 +17,13 @@ export const LIBRARY_REDIS_KEYS = {
   // Item Types (Static system registry)
   itemTypes: (includeSpecial: boolean) =>
     `library:system:item-types:${includeSpecial ? 'all' : 'bibliographic'}`,
+
+  // Items Cache (Cache-Aside Pattern)
+  item: (itemId: string) => `library:item:${itemId}`,
+  itemDetails: (itemId: string) => `library:item:${itemId}:details`,
+  itemFulltext: (itemId: string) => `library:item:${itemId}:fulltext`,
+  itemsList: (scopeKey: string, optionsHash: string) =>
+    `library:${scopeKey}:items:list:${optionsHash}`,
+  itemsPattern: (scopeKey: string) => `library:${scopeKey}:items*`,
+  itemPattern: (itemId: string) => `library:item:${itemId}*`,
 };

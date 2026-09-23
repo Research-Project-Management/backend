@@ -18,6 +18,7 @@ interface LocalCacheEntry {
   statusCode: number;
   expiresAt: number;
   inProgress?: boolean;
+  requestHash?: string;
 }
 
 @Injectable()
@@ -125,13 +126,18 @@ export class IdempotencyInterceptor implements NestInterceptor {
     }
 
     // In-memory fallback (e.g. standalone test context without DB)
-    const existing = IdempotencyInterceptor.memoryCache.get(cleanKey);
+    const scopedKey = `${projectId || NIL_UUID}:${userId}:${cleanKey}`;
+    const existing = IdempotencyInterceptor.memoryCache.get(scopedKey);
     if (existing) {
       if (existing.expiresAt < Date.now()) {
-        IdempotencyInterceptor.memoryCache.delete(cleanKey);
+        IdempotencyInterceptor.memoryCache.delete(scopedKey);
       } else if (existing.inProgress) {
         throw new ConflictException(
           'A mutation request with this Idempotency-Key is currently in progress. Please retry shortly.',
+        );
+      } else if (existing.requestHash && existing.requestHash !== requestHash) {
+        throw new ConflictException(
+          'Idempotency key was previously used with a different request payload',
         );
       } else {
         if (typeof reply.header === 'function') {
@@ -145,25 +151,27 @@ export class IdempotencyInterceptor implements NestInterceptor {
       }
     }
 
-    IdempotencyInterceptor.memoryCache.set(cleanKey, {
+    IdempotencyInterceptor.memoryCache.set(scopedKey, {
       body: null,
       statusCode: 200,
       expiresAt: Date.now() + 86400 * 1000,
       inProgress: true,
+      requestHash,
     });
 
     return next.handle().pipe(
       tap({
         next: (body) => {
-          IdempotencyInterceptor.memoryCache.set(cleanKey, {
+          IdempotencyInterceptor.memoryCache.set(scopedKey, {
             body,
             statusCode: reply.statusCode || 200,
             expiresAt: Date.now() + 86400 * 1000,
             inProgress: false,
+            requestHash,
           });
         },
         error: () => {
-          IdempotencyInterceptor.memoryCache.delete(cleanKey);
+          IdempotencyInterceptor.memoryCache.delete(scopedKey);
         },
       }),
     );

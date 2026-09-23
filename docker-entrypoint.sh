@@ -42,7 +42,12 @@ if [ -n "$DATABASE_URL" ] && [ "$SKIP_MIGRATIONS" != "true" ]; then
   while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     echo "🔄 [Database] Attempting migration deployment (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)..."
     
-    $PRISMA_CLI migrate deploy
+    if [ -d "./prisma/migrations" ] && [ "$(ls -A ./prisma/migrations 2>/dev/null)" ]; then
+      $PRISMA_CLI migrate deploy
+    else
+      echo "ℹ️ [Database] No migrations directory found. Running prisma db push..."
+      $PRISMA_CLI db push --accept-data-loss
+    fi
     EXIT_CODE=$?
 
     if [ $EXIT_CODE -eq 0 ]; then

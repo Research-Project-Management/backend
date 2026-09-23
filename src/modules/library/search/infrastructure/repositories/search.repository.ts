@@ -1,9 +1,13 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { PrismaService } from '../../../../../core/database/prisma.service';
+import { RedisCacheService } from '../../../../../core/cache/redis.service';
 import { Prisma } from '@prisma/client';
 
 import { SearchOptions, FacetResult } from '../../domain/types/search.types';
 import { buildBaseSearchWhere } from '../../application/utils/search.utils';
+import { SearchSpecificationBuilder } from '../../domain/specifications/search-specification.builder';
+import { TextSearchSpecification } from '../../domain/specifications/item-specifications';
 
 export { SearchOptions, FacetResult };
 
@@ -11,7 +15,10 @@ export { SearchOptions, FacetResult };
 export class SearchRepository implements OnModuleInit {
   private readonly logger = new Logger(SearchRepository.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly cache?: RedisCacheService,
+  ) {}
 
   async onModuleInit(): Promise<void> {
     await this.checkFtsColumnExists();
@@ -22,67 +29,25 @@ export class SearchRepository implements OnModuleInit {
   }
 
   /**
-   * Builds the base Prisma WHERE clause for non-text filters.
+   * Builds the base Prisma WHERE clause for non-text filters using Specification Pattern.
    * Text search is handled separately via raw FTS or ILIKE fallback.
    */
   private buildBaseWhere(
     userId: string,
     options: SearchOptions,
   ): Prisma.ItemWhereInput {
-    return buildBaseSearchWhere(userId, options);
+    return SearchSpecificationBuilder.baseFromOptions(
+      userId,
+      options,
+    ).toPrismaWhere();
   }
 
   /**
-   * Builds a Prisma text-search OR clause using ILIKE.
+   * Builds a Prisma text-search OR clause using Specification Pattern.
    * Used as fallback when tsvector is not available.
    */
   private buildTextWhereIlike(q: string): Prisma.ItemWhereInput {
-    const trimmed = q.trim();
-    return {
-      OR: [
-        { title: { contains: trimmed, mode: 'insensitive' } },
-        { abstract: { contains: trimmed, mode: 'insensitive' } },
-        { doi: { contains: trimmed, mode: 'insensitive' } },
-        { citationKey: { contains: trimmed, mode: 'insensitive' } },
-        {
-          contributors: {
-            some: {
-              OR: [
-                { fullName: { contains: trimmed, mode: 'insensitive' } },
-                { lastName: { contains: trimmed, mode: 'insensitive' } },
-              ],
-            },
-          },
-        },
-        {
-          notesList: {
-            some: {
-              deletedAt: null,
-              OR: [
-                { title: { contains: trimmed, mode: 'insensitive' } },
-                { contentMd: { contains: trimmed, mode: 'insensitive' } },
-              ],
-            },
-          },
-        },
-        {
-          attachments: {
-            some: {
-              deletedAt: null,
-              annotations: {
-                some: {
-                  deletedAt: null,
-                  OR: [
-                    { quoteText: { contains: trimmed, mode: 'insensitive' } },
-                    { comment: { contains: trimmed, mode: 'insensitive' } },
-                  ],
-                },
-              },
-            },
-          },
-        },
-      ],
-    };
+    return new TextSearchSpecification(q).toPrismaWhere();
   }
 
   async searchItems(
@@ -283,16 +248,105 @@ export class SearchRepository implements OnModuleInit {
     options: SearchOptions,
     tx?: Prisma.TransactionClient,
   ): Promise<FacetResult> {
+    // 1. Check Facet Cache (Cache-Aside)
+    const scopeKey = options.projectId
+      ? `proj:${options.projectId}`
+      : `user:${userId}`;
+    const filterHash = createHash('md5')
+      .update(JSON.stringify(options))
+      .digest('hex');
+    const cacheKey = `library:search:facets:${scopeKey}:${filterHash}`;
+
+    if (this.cache) {
+      try {
+        const cached = await this.cache.get<FacetResult>(cacheKey);
+        if (cached) {
+          return cached;
+        }
+      } catch (err: any) {
+        this.logger.debug(`Facet cache lookup error: ${err?.message}`);
+      }
+    }
+
     const client = this.getClient(tx);
+    const spec = SearchSpecificationBuilder.fromOptions(userId, options);
+    const where = spec.toPrismaWhere();
 
-    // Use the same text where logic as ILIKE for facets (FTS facets are computed same way)
-    const q = options.q?.trim();
-    const where: Prisma.ItemWhereInput = {
-      ...this.buildBaseWhere(userId, options),
-      ...(q ? this.buildTextWhereIlike(q) : {}),
-    };
+    // 2. High-Performance Database Pushdown Aggregation (PostgreSQL engine groupBy)
+    let facetResult: FacetResult;
+    if (typeof (client.item as any)?.groupBy === 'function') {
+      try {
+        const [typeGroups, yearGroups, tagItems] = await Promise.all([
+          (client.item as any).groupBy({
+            by: ['itemType'],
+            where,
+            _count: { _all: true },
+          }),
+          (client.item as any).groupBy({
+            by: ['year'],
+            where,
+            _count: { _all: true },
+          }),
+          typeof (client as any).itemTag?.findMany === 'function'
+            ? (client as any).itemTag.findMany({
+                where: { item: where },
+                take: 1000,
+                select: { tag: { select: { name: true } } },
+              })
+            : Promise.resolve([]),
+        ]);
 
-    // Limit facet sampling to top 2,000 matches to prevent OOM on massive libraries
+        const itemTypes: Record<string, number> = {};
+        for (const g of typeGroups || []) {
+          if (g.itemType) {
+            itemTypes[g.itemType] =
+              g._count?._all ?? g._count?.id ?? Number(g._count) ?? 1;
+          }
+        }
+
+        const years: Record<number, number> = {};
+        for (const g of yearGroups || []) {
+          if (g.year != null) {
+            years[Number(g.year)] =
+              g._count?._all ?? g._count?.id ?? Number(g._count) ?? 1;
+          }
+        }
+
+        const tags: Record<string, number> = {};
+        for (const t of tagItems || []) {
+          const tagName = t?.tag?.name;
+          if (tagName) {
+            tags[tagName] = (tags[tagName] || 0) + 1;
+          }
+        }
+
+        facetResult = { itemTypes, years, tags };
+      } catch (pushdownErr: any) {
+        this.logger.debug(
+          `GroupBy pushdown aggregation fallback to scan: ${pushdownErr?.message}`,
+        );
+        facetResult = await this.computeFacetsFallback(client, where);
+      }
+    } else {
+      facetResult = await this.computeFacetsFallback(client, where);
+    }
+
+    // 3. Cache computed facet result (TTL: 120 seconds)
+    if (this.cache) {
+      try {
+        await this.cache.set(cacheKey, facetResult, 120);
+      } catch (err: any) {
+        this.logger.debug(`Facet cache set error: ${err?.message}`);
+      }
+    }
+
+    return facetResult;
+  }
+
+  private async computeFacetsFallback(
+    client: any,
+    where: Prisma.ItemWhereInput,
+  ): Promise<FacetResult> {
     const items = await client.item.findMany({
       where,
       take: 2000,
@@ -319,7 +373,7 @@ export class SearchRepository implements OnModuleInit {
       if (item.year) {
         years[item.year] = (years[item.year] || 0) + 1;
       }
-      for (const t of item.itemTags) {
+      for (const t of item.itemTags ?? []) {
         if (t.tag?.name) {
           tags[t.tag.name] = (tags[t.tag.name] || 0) + 1;
         }
@@ -327,6 +381,12 @@ export class SearchRepository implements OnModuleInit {
     }
 
     return { itemTypes, years, tags };
+  }
+
+  async invalidateFacets(scopeId: string): Promise<void> {
+    if (this.cache) {
+      await this.cache.delPattern(`library:search:facets:*${scopeId}*`);
+    }
   }
 
   /**

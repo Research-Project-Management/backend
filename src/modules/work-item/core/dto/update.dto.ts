@@ -126,6 +126,13 @@ export class UpdateWorkItemDto {
   @ApiPropertyOptional({ description: 'Subscriber user IDs JSON array' })
   @IsOptional()
   subscriberIds?: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'Expected last modified timestamp for optimistic concurrency control',
+  })
+  @IsOptional()
+  expectedUpdatedAt?: string | Date;
 }
 
 export const UpdateDto = UpdateWorkItemDto;

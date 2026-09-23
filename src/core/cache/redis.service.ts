@@ -13,11 +13,40 @@ import { getErrorMessage } from '../utils/error.util';
 export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
   private redisClient: Redis | null = null;
   private isConnected = false;
+  private static readonly MAX_MEMORY_CACHE_SIZE = 5000;
   private memoryCache = new Map<
     string,
     { value: string; expiresAt?: number }
   >();
   private readonly logger = new Logger(RedisCacheService.name);
+
+  private setMemoryCache(
+    key: string,
+    value: string,
+    ttlSeconds?: number,
+  ): void {
+    if (this.memoryCache.size >= RedisCacheService.MAX_MEMORY_CACHE_SIZE) {
+      const now = Date.now();
+      for (const [k, v] of this.memoryCache.entries()) {
+        if (v.expiresAt && v.expiresAt < now) {
+          this.memoryCache.delete(k);
+        }
+      }
+      while (
+        this.memoryCache.size >= RedisCacheService.MAX_MEMORY_CACHE_SIZE
+      ) {
+        const oldestKey = this.memoryCache.keys().next().value;
+        if (!oldestKey) break;
+        this.memoryCache.delete(oldestKey);
+      }
+    }
+
+    const defaultTtl = ttlSeconds && ttlSeconds > 0 ? ttlSeconds : 300;
+    this.memoryCache.set(key, {
+      value,
+      expiresAt: Date.now() + defaultTtl * 1000,
+    });
+  }
 
   constructor(private readonly configService: ConfigService) {}
 
@@ -139,8 +168,8 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
       try {
         const data = await this.redisClient.get(key);
         if (data) {
-          // Cache in memory for subsequent sub-millisecond reads
-          this.memoryCache.set(key, { value: data });
+          // Cache in memory for subsequent sub-millisecond reads with bounded TTL (60s)
+          this.setMemoryCache(key, data, 60);
           return JSON.parse(data) as T;
         }
       } catch (err: unknown) {
@@ -157,10 +186,7 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
     const serialized = JSON.stringify(value);
 
     // Always maintain in-memory fallback
-    this.memoryCache.set(key, {
-      value: serialized,
-      expiresAt: ttlSeconds > 0 ? Date.now() + ttlSeconds * 1000 : undefined,
-    });
+    this.setMemoryCache(key, serialized, ttlSeconds);
 
     if (!this.isReady() || !this.redisClient) return;
     try {

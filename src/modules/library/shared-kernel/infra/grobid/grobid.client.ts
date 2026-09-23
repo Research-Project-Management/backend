@@ -1,4 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { ResilienceRegistryService } from '../../resilience/resilience-registry.service';
 
 export interface GrobidCreator {
   fullName: string;
@@ -127,6 +128,11 @@ export interface GrobidFulltextResult {
 export class GrobidClient {
   private readonly logger = new Logger(GrobidClient.name);
 
+  constructor(
+    @Optional()
+    private readonly resilienceRegistry?: ResilienceRegistryService,
+  ) {}
+
   private get baseUrl(): string {
     return (
       process.env.GROBID_URL?.replace(/\/$/, '') ?? 'http://localhost:8070'
@@ -157,49 +163,73 @@ export class GrobidClient {
   ): Promise<GrobidHeaderResult | null> {
     if (!this.enabled) return null;
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    const executeCall = async (): Promise<GrobidHeaderResult | null> => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
-    try {
-      const formData = new FormData();
-      formData.append(
-        'input',
-        new Blob([new Uint8Array(buffer)], { type: 'application/pdf' }),
-        'document.pdf',
-      );
-      formData.append('consolidateHeader', '0'); // No CrossRef consolidation (we have our own)
+      try {
+        const formData = new FormData();
+        formData.append(
+          'input',
+          new Blob([new Uint8Array(buffer)], { type: 'application/pdf' }),
+          'document.pdf',
+        );
+        formData.append('consolidateHeader', '0'); // No CrossRef consolidation (we have our own)
 
-      const response = await fetch(
-        `${this.baseUrl}/api/processHeaderDocument`,
-        {
-          method: 'POST',
-          body: formData,
-          signal: controller.signal,
-        },
-      );
+        const response = await fetch(
+          `${this.baseUrl}/api/processHeaderDocument`,
+          {
+            method: 'POST',
+            body: formData,
+            signal: controller.signal,
+          },
+        );
 
-      if (!response.ok) {
+        if (!response.ok) {
+          if (response.status >= 500 || response.status === 429) {
+            throw new Error(
+              `GROBID processHeaderDocument HTTP ${response.status}`,
+            );
+          }
+          this.logger.warn(
+            `GROBID processHeaderDocument returned HTTP ${response.status} — skipping enrichment`,
+          );
+          return null;
+        }
+
+        const teiXml = await response.text();
+        return this.parseTeiHeader(teiXml);
+      } catch (err: any) {
+        if (err?.name === 'AbortError') {
+          this.logger.warn(
+            'GROBID processHeaderDocument timed out — skipping enrichment',
+          );
+        } else {
+          this.logger.warn(
+            `GROBID unavailable: ${err?.message} — using unpdf fallback`,
+          );
+        }
+        throw err;
+      } finally {
+        clearTimeout(timeout);
+      }
+    };
+
+    if (this.resilienceRegistry) {
+      const breaker = this.resilienceRegistry.getCircuitBreaker('grobid');
+      if (!breaker.canExecute()) {
         this.logger.warn(
-          `GROBID processHeaderDocument returned HTTP ${response.status} — skipping enrichment`,
+          `[GrobidClient] GROBID circuit breaker is OPEN. Fast-failing processHeaderDocument.`,
         );
         return null;
       }
+      return breaker.execute(executeCall, async () => null);
+    }
 
-      const teiXml = await response.text();
-      return this.parseTeiHeader(teiXml);
-    } catch (err: any) {
-      if (err?.name === 'AbortError') {
-        this.logger.warn(
-          'GROBID processHeaderDocument timed out — skipping enrichment',
-        );
-      } else {
-        this.logger.warn(
-          `GROBID unavailable: ${err?.message} — using unpdf fallback`,
-        );
-      }
+    try {
+      return await executeCall();
+    } catch {
       return null;
-    } finally {
-      clearTimeout(timeout);
     }
   }
 
@@ -211,44 +241,66 @@ export class GrobidClient {
   async processReferences(buffer: Buffer): Promise<GrobidReference[]> {
     if (!this.enabled) return [];
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    const executeCall = async (): Promise<GrobidReference[]> => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
-    try {
-      const formData = new FormData();
-      formData.append(
-        'input',
-        new Blob([new Uint8Array(buffer)], { type: 'application/pdf' }),
-        'document.pdf',
-      );
-      formData.append('consolidateCitations', '0');
+      try {
+        const formData = new FormData();
+        formData.append(
+          'input',
+          new Blob([new Uint8Array(buffer)], { type: 'application/pdf' }),
+          'document.pdf',
+        );
+        formData.append('consolidateCitations', '0');
 
-      const response = await fetch(`${this.baseUrl}/api/processReferences`, {
-        method: 'POST',
-        body: formData,
-        signal: controller.signal,
-      });
+        const response = await fetch(`${this.baseUrl}/api/processReferences`, {
+          method: 'POST',
+          body: formData,
+          signal: controller.signal,
+        });
 
-      if (!response.ok) {
+        if (!response.ok) {
+          if (response.status >= 500 || response.status === 429) {
+            throw new Error(`GROBID processReferences HTTP ${response.status}`);
+          }
+          this.logger.warn(
+            `GROBID processReferences returned HTTP ${response.status} — skipping references`,
+          );
+          return [];
+        }
+
+        const teiXml = await response.text();
+        return this.parseTeiReferences(teiXml);
+      } catch (err: any) {
+        if (err?.name === 'AbortError') {
+          this.logger.warn(
+            'GROBID processReferences timed out — skipping references',
+          );
+        } else {
+          this.logger.warn(`GROBID references unavailable: ${err?.message}`);
+        }
+        throw err;
+      } finally {
+        clearTimeout(timeout);
+      }
+    };
+
+    if (this.resilienceRegistry) {
+      const breaker = this.resilienceRegistry.getCircuitBreaker('grobid');
+      if (!breaker.canExecute()) {
         this.logger.warn(
-          `GROBID processReferences returned HTTP ${response.status} — skipping references`,
+          `[GrobidClient] GROBID circuit breaker is OPEN. Fast-failing processReferences.`,
         );
         return [];
       }
+      return breaker.execute(executeCall, async () => []);
+    }
 
-      const teiXml = await response.text();
-      return this.parseTeiReferences(teiXml);
-    } catch (err: any) {
-      if (err?.name === 'AbortError') {
-        this.logger.warn(
-          'GROBID processReferences timed out — skipping references',
-        );
-      } else {
-        this.logger.warn(`GROBID references unavailable: ${err?.message}`);
-      }
+    try {
+      return await executeCall();
+    } catch {
       return [];
-    } finally {
-      clearTimeout(timeout);
     }
   }
 
@@ -308,57 +360,81 @@ export class GrobidClient {
   ): Promise<GrobidFulltextResult | null> {
     if (!this.enabled) return null;
 
-    const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      this.fulltextTimeoutMs,
-    );
-
-    try {
-      const formData = new FormData();
-      formData.append(
-        'input',
-        new Blob([new Uint8Array(buffer)], { type: 'application/pdf' }),
-        'document.pdf',
-      );
-      formData.append('consolidateHeader', '0');
-      formData.append('consolidateCitations', '0');
-      formData.append('includeRawAffiliations', '1');
-      formData.append('teiCoordinates', 'head');
-      formData.append('teiCoordinates', 'figure');
-      formData.append('teiCoordinates', 'table');
-      formData.append('teiCoordinates', 'formula');
-      formData.append('teiCoordinates', 'biblStruct');
-
-      const response = await fetch(
-        `${this.baseUrl}/api/processFulltextDocument`,
-        {
-          method: 'POST',
-          body: formData,
-          signal: controller.signal,
-        },
+    const executeCall = async (): Promise<GrobidFulltextResult | null> => {
+      const controller = new AbortController();
+      const timeout = setTimeout(
+        () => controller.abort(),
+        this.fulltextTimeoutMs,
       );
 
-      if (!response.ok) {
+      try {
+        const formData = new FormData();
+        formData.append(
+          'input',
+          new Blob([new Uint8Array(buffer)], { type: 'application/pdf' }),
+          'document.pdf',
+        );
+        formData.append('consolidateHeader', '0');
+        formData.append('consolidateCitations', '0');
+        formData.append('includeRawAffiliations', '1');
+        formData.append('teiCoordinates', 'head');
+        formData.append('teiCoordinates', 'figure');
+        formData.append('teiCoordinates', 'table');
+        formData.append('teiCoordinates', 'formula');
+        formData.append('teiCoordinates', 'biblStruct');
+
+        const response = await fetch(
+          `${this.baseUrl}/api/processFulltextDocument`,
+          {
+            method: 'POST',
+            body: formData,
+            signal: controller.signal,
+          },
+        );
+
+        if (!response.ok) {
+          if (response.status >= 500 || response.status === 429) {
+            throw new Error(
+              `GROBID processFulltextDocument HTTP ${response.status}`,
+            );
+          }
+          this.logger.warn(
+            `GROBID processFulltextDocument returned HTTP ${response.status} — skipping fulltext`,
+          );
+          return null;
+        }
+
+        const teiXml = await response.text();
+        return this.parseTeiFulltext(teiXml);
+      } catch (err: any) {
+        if (err?.name === 'AbortError') {
+          this.logger.warn('GROBID processFulltextDocument timed out');
+        } else {
+          this.logger.warn(
+            `GROBID processFulltextDocument error: ${err?.message}`,
+          );
+        }
+        throw err;
+      } finally {
+        clearTimeout(timeout);
+      }
+    };
+
+    if (this.resilienceRegistry) {
+      const breaker = this.resilienceRegistry.getCircuitBreaker('grobid');
+      if (!breaker.canExecute()) {
         this.logger.warn(
-          `GROBID processFulltextDocument returned HTTP ${response.status} — skipping fulltext`,
+          `[GrobidClient] GROBID circuit breaker is OPEN. Fast-failing processFulltextDocument.`,
         );
         return null;
       }
+      return breaker.execute(executeCall, async () => null);
+    }
 
-      const teiXml = await response.text();
-      return this.parseTeiFulltext(teiXml);
-    } catch (err: any) {
-      if (err?.name === 'AbortError') {
-        this.logger.warn('GROBID processFulltextDocument timed out');
-      } else {
-        this.logger.warn(
-          `GROBID processFulltextDocument error: ${err?.message}`,
-        );
-      }
+    try {
+      return await executeCall();
+    } catch {
       return null;
-    } finally {
-      clearTimeout(timeout);
     }
   }
 

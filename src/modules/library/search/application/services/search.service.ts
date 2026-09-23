@@ -108,4 +108,8 @@ export class SearchService {
       indexedAttachments: 0,
     };
   }
+
+  async invalidateFacetsCache(scopeId: string): Promise<void> {
+    await this.repo.invalidateFacets(scopeId);
+  }
 }

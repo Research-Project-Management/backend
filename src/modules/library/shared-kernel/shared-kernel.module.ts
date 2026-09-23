@@ -30,6 +30,8 @@ import { UNIT_OF_WORK_PORT } from './outbox/ports/unit-of-work.port';
 import { OutboxMetrics, SyncMetricsService } from './outbox/outbox.metrics';
 import { LIBRARY_EVENT_TYPES } from './outbox/outbox.events';
 import { SyncController } from './presentation/sync.controller';
+import { IdempotentConsumerService } from './outbox/services/idempotent-consumer.service';
+import { ResilienceRegistryService } from './resilience/resilience-registry.service';
 
 /**
  * Unified Shared Kernel Module.
@@ -82,6 +84,8 @@ import { SyncController } from './presentation/sync.controller';
     },
     OutboxMetrics,
     OutboxQueueConsumer,
+    IdempotentConsumerService,
+    ResilienceRegistryService,
   ],
   exports: [
     // Integration Events
@@ -109,6 +113,8 @@ import { SyncController } from './presentation/sync.controller';
     OutboxMetrics,
     SyncMetricsService,
     OutboxQueueConsumer,
+    IdempotentConsumerService,
+    ResilienceRegistryService,
   ],
 })
 export class SharedKernelModule implements OnModuleInit {

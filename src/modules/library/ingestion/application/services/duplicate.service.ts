@@ -471,8 +471,8 @@ export class DuplicateService {
       }
 
       // ── 6. Provenance & Alias Citation Keys ──────────────────────────────────
-      let extraObj: Record<string, any> =
-        (primary.metadata as any)?.extra ?? (primary.metadata as any) ?? {};
+      const extraObj: Record<string, any> =
+        primary.metadata?.extra ?? primary.metadata ?? {};
       const existingAliases: string[] = Array.isArray(
         extraObj.mergedCitationKeys,
       )
@@ -555,7 +555,7 @@ export class DuplicateService {
       }
 
       // ── 8. Update Primary Item ───────────────────────────────────────────────
-      const primaryMeta = (primary.metadata as any) ?? {};
+      const primaryMeta = primary.metadata ?? {};
       primaryMeta.extra = extraObj;
 
       const updatedPrimary = await tx.item.update({
@@ -592,7 +592,7 @@ export class DuplicateService {
 
       // ── 9. Soft-Delete Duplicates with Merge Marker ──────────────────────────
       for (const dup of duplicates) {
-        const dupMeta = (dup.metadata as any) ?? {};
+        const dupMeta = dup.metadata ?? {};
         dupMeta.mergedIntoId = primary.id;
         dupMeta.mergedAt = now.toISOString();
 

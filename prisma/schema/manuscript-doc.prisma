@@ -1,0 +1,26 @@
+// -- 11. Manuscript & LaTeX Documents Context (Manuscripts Subsystem) ----------------
+
+model ManuscriptDoc {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  projectId   String    @map("project_id") @db.Uuid
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_docs_project_id")
+  path        String    @db.VarChar(500)
+  lines       Json      @default("[]")
+  rev         Int       @default(0)
+  version     Int       @default(0)
+  ranges      Json?     @default("{}")
+  hash        String?   @db.VarChar(64)
+  sizeBytes   Int       @default(0) @map("size_bytes")
+  inStorage   Boolean   @default(false) @map("in_storage")
+  storageKey  String?   @map("storage_key") @db.VarChar(500)
+  deleted     Boolean   @default(false)
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  node        ManuscriptNode?
+
+  @@index([projectId, deleted], map: "idx_manuscript_docs_project_deleted")
+  @@index([projectId, inStorage], map: "idx_manuscript_docs_project_storage")
+  @@index([projectId, path], map: "idx_manuscript_docs_project_path")
+  @@map("manuscript_docs")
+}

@@ -118,7 +118,10 @@ describe('Manuscripts - ClsiService', () => {
           await new Promise((r) => setTimeout(r, delayMs));
         });
 
-      await Promise.all([runAction(1, 50), runAction(2, 10)]);
+      const p1 = runAction(1, 50);
+      await new Promise((r) => setTimeout(r, 10));
+      const p2 = runAction(2, 10);
+      await Promise.all([p1, p2]);
 
       expect(order).toEqual([1, 2]);
     });
@@ -350,6 +353,7 @@ describe('Manuscripts - ClsiService', () => {
 
       const past = new Date(Date.now() - 50000);
       await fs.utimes(pOld, past, past);
+      await fs.utimes(path.join(pOld, 'file.bin'), past, past);
 
       // Max 1500 bytes, target 1000 bytes -> should evict pOld
       const stats = await cleaner.enforceDiskQuota({ maxBytes: 1500, targetBytes: 1000 });

@@ -501,7 +501,7 @@ export function convertSuperscriptsToUnicode(str: string): string {
 }
 
 const MATH_BLOCK_REGEX =
-  /(?:\$\$[\s\S]*?\$\$|\$(?!\s)(?:[^\$\r\n\\]|\\.)+?(?<!\s)\$|\\\([\s\S]*?\\\)|\\\[[\s\S]*?\\\]|\\begin\{([a-zA-Z*]+)\}[\s\S]*?\\end\{\1\})/g;
+  /(?:\$\$[\s\S]*?\$\$|\$(?!\s)(?:[^$\r\n\\]|\\.)+?(?<!\s)\$|\\\([\s\S]*?\\\)|\\\[[\s\S]*?\\\]|\\begin\{([a-zA-Z*]+)\}[\s\S]*?\\end\{\1\})/g;
 
 /**
  * Sanitizes and normalizes an academic paper abstract.

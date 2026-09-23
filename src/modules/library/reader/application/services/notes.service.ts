@@ -15,6 +15,7 @@ import {
 } from '../../domain/types/notes.types';
 import {
   formatLiteratureNoteMarkdown,
+  FormatNoteOptions,
   buildTipTapDocFromText,
   sanitizeNoteTitle,
   sanitizeNoteContent,
@@ -339,7 +340,11 @@ export class NotesService {
     return this.repo.createLiteratureNote(userId, itemId, content, source, tx);
   }
 
-  async extractNotesFromAnnotations(userId: string, itemId: string) {
+  async extractNotesFromAnnotations(
+    userId: string,
+    itemId: string,
+    options?: FormatNoteOptions,
+  ) {
     const item = this.bibliographyFacade
       ? await this.bibliographyFacade.getItem(userId, itemId)
       : null;
@@ -357,7 +362,7 @@ export class NotesService {
       };
     }
 
-    const markdown = formatLiteratureNoteMarkdown(item, annotations);
+    const markdown = formatLiteratureNoteMarkdown(item, annotations, options);
 
     const note = await this.createNote(userId, {
       itemId,

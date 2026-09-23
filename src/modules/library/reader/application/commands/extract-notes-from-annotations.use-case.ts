@@ -1,9 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { NotesService } from '../services/notes.service';
 
+import { FormatNoteOptions } from '../utils/notes.utils';
+
 export interface ExtractNotesFromAnnotationsCommand {
   userId: string;
   itemId: string;
+  options?: FormatNoteOptions;
 }
 
 @Injectable()
@@ -19,6 +22,7 @@ export class ExtractNotesFromAnnotationsUseCase {
     return this.notesService.extractNotesFromAnnotations(
       command.userId,
       command.itemId,
+      command.options,
     );
   }
 }

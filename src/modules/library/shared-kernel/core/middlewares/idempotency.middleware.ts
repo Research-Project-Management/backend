@@ -6,7 +6,7 @@ const idempotencyStore = new Map<
 >();
 
 // Clean up keys older than 10 minutes periodically
-setInterval(() => {
+const cleanupTimer = setInterval(() => {
   const now = Date.now();
   for (const [key, val] of idempotencyStore.entries()) {
     if (now - val.timestamp > 600000) {
@@ -14,6 +14,7 @@ setInterval(() => {
     }
   }
 }, 300000);
+cleanupTimer.unref?.();
 
 /**
  * Idempotency Middleware for Distributed Systems.
@@ -30,7 +31,8 @@ export class IdempotencyMiddleware implements NestMiddleware {
       return next();
     }
 
-    const key = `${req.method}:${req.path}:${idempotencyKey}`;
+    const userId = req.user?.id || req.headers?.['x-user-id'] || 'anon';
+    const key = `${userId}:${req.method}:${req.path}:${idempotencyKey}`;
     const existing = idempotencyStore.get(key);
 
     if (existing) {

@@ -210,17 +210,24 @@ export class NotesController {
   async extractNotesFromAnnotations(
     @CurrentUser('id') currentUserId: string,
     @Param('itemId') itemId: string,
+    @Query('protocol') queryProtocol?: 'flux' | 'web' | 'zotero',
+    @Body() body?: { protocol?: 'flux' | 'web' | 'zotero'; webBaseUrl?: string },
   ) {
+    const protocol = body?.protocol || queryProtocol;
+    const options = protocol ? { protocol, webBaseUrl: body?.webBaseUrl } : undefined;
+
     if (this.extractNotesUseCaseInstance) {
       return this.extractNotesUseCaseInstance.execute({
         userId: currentUserId,
         itemId,
+        options,
       });
     }
 
     return this.effectiveNotesService.extractNotesFromAnnotations(
       currentUserId,
       itemId,
+      options,
     );
   }
 

@@ -1,6 +1,7 @@
 import { SearchRepository } from '../../src/modules/library/search/infrastructure/repositories/search.repository';
 import { CommandRepository } from '../../src/modules/library/bibliography/infrastructure/repositories/command.repository';
 import { PrismaService } from '../../src/core/database/prisma.service';
+import { formatLiteratureNoteMarkdown } from '../../src/modules/library/reader/application/utils/notes.utils';
 
 describe('Library Notes, Annotations & Deep Search Parity', () => {
   describe('1. SearchRepository - Zotero Parity Deep Full-Text Query Builder', () => {
@@ -137,6 +138,54 @@ describe('Library Notes, Annotations & Deep Search Parity', () => {
           where: { id: itemId },
           data: { deletedAt: null, version: { increment: 1 } },
         }),
+      );
+    });
+  });
+
+  describe('3. Literature Notes Multi-Protocol Backlink Formatter', () => {
+    const mockItem = {
+      id: 'paper-123',
+      title: 'Attention Is All You Need',
+      year: 2017,
+      citekey: 'vaswani2017',
+      creators: [{ lastName: 'Vaswani', fullName: 'Ashish Vaswani' }],
+    };
+
+    const mockAnnotations = [
+      {
+        id: 'ann-999',
+        attachmentId: 'att-456',
+        pageIndex: 0,
+        color: '#ff6666',
+        quoteText: 'The Transformer is the first transduction model.',
+        comment: 'Groundbreaking finding',
+      },
+    ];
+
+    it('should format backlinks with default flux:// protocol', () => {
+      const md = formatLiteratureNoteMarkdown(mockItem, mockAnnotations);
+      expect(md).toContain('🔴 Critical');
+      expect(md).toContain(
+        'flux://open-pdf/library/items/att-456?page=1&annotation=ann-999',
+      );
+    });
+
+    it('should format backlinks with zotero:// protocol when specified', () => {
+      const md = formatLiteratureNoteMarkdown(mockItem, mockAnnotations, {
+        protocol: 'zotero',
+      });
+      expect(md).toContain(
+        'zotero://open-pdf/0_att-456/1?annotation=ann-999',
+      );
+    });
+
+    it('should format backlinks with web https:// protocol when specified', () => {
+      const md = formatLiteratureNoteMarkdown(mockItem, mockAnnotations, {
+        protocol: 'web',
+        webBaseUrl: 'https://research.flux.ac',
+      });
+      expect(md).toContain(
+        'https://research.flux.ac/library/papers/paper-123?page=1&annotation=ann-999',
       );
     });
   });

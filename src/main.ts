@@ -319,28 +319,40 @@ async function bootstrap() {
     },
   });
 
-  app.enableShutdownHooks();
-
   const port = Number(process.env.PORT) || 3000;
   const host = process.env.HOST || '0.0.0.0';
 
-  try {
-    await app.listen(port, host);
-    logger.log(`🚀 NestJS + Fastify running on http://localhost:${port}`);
-    logger.log(
-      `📚 Swagger Documentation ready at http://localhost:${port}/docs`,
-    );
-  } catch (err: any) {
-    if (err?.code === 'EADDRINUSE') {
-      logger.error(
-        `❌ Port ${port} is already in use by another process. Please terminate the lingering process or run: Get-NetTCPConnection -LocalPort ${port}`,
+  const maxRetries = 4;
+  let retryDelay = 1000;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await app.listen(port, host);
+      logger.log(`🚀 NestJS + Fastify running on http://localhost:${port}`);
+      logger.log(
+        `📚 Swagger Documentation ready at http://localhost:${port}/docs`,
       );
-    } else {
-      logger.error(
-        `❌ Server failed to start on port ${port}: ${err?.message || err}`,
-      );
+      break;
+    } catch (err: any) {
+      if (err?.code === 'EADDRINUSE') {
+        if (attempt < maxRetries) {
+          logger.warn(
+            `⚠️ Port ${port} is busy (attempt ${attempt}/${maxRetries}). Retrying in ${retryDelay}ms after lingering socket release...`,
+          );
+          await new Promise((res) => setTimeout(res, retryDelay));
+          retryDelay *= 1.5;
+          continue;
+        }
+        logger.error(
+          `❌ Port ${port} is already in use by another process after ${maxRetries} attempts. Please terminate the lingering process or run: Get-NetTCPConnection -LocalPort ${port}`,
+        );
+      } else {
+        logger.error(
+          `❌ Server failed to start on port ${port}: ${err?.message || err}`,
+        );
+      }
+      process.exit(1);
     }
-    process.exit(1);
   }
 }
 

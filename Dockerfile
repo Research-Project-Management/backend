@@ -46,7 +46,7 @@ COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
 RUN pnpm exec prisma generate
 RUN pnpm run build
-RUN pnpm prune --prod
+RUN pnpm prune --prod || pnpm install --prod --ignore-scripts
 
 # ------------------------------------------------------------------------------
 # 5. Production Runner Stage: Minimal runtime image, non-root, auto-migration
@@ -65,17 +65,15 @@ ENV HOST=0.0.0.0
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 -G nodejs -h /home/nestjs -D nestjs
 
-# Copy runtime assets and Prisma multi-schema configuration
-COPY package.json ./
-COPY prisma.config.ts ./
-COPY prisma ./prisma
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
-COPY docker-entrypoint.sh ./
+# Copy runtime assets and Prisma multi-schema configuration with non-root ownership
+COPY --chown=nestjs:nodejs package.json prisma.config.ts ./
+COPY --chown=nestjs:nodejs prisma ./prisma
+COPY --chown=nestjs:nodejs --from=builder /app/node_modules ./node_modules
+COPY --chown=nestjs:nodejs --from=builder /app/dist ./dist
+COPY --chown=nestjs:nodejs docker-entrypoint.sh ./
 
-# Secure file permissions
-RUN chmod +x docker-entrypoint.sh && \
-    chown -R nestjs:nodejs /app /home/nestjs
+# Secure file permissions & normalize CRLF line endings for Linux
+RUN sed -i 's/\r$//' docker-entrypoint.sh && chmod +x docker-entrypoint.sh
 
 USER nestjs
 

@@ -13,6 +13,7 @@ export interface ICitationFacade {
   exportBibliography(
     userId: string,
     citeKeys: string[],
+    projectId?: string,
   ): Promise<{ content: string } | null>;
   exportLibrary(userId: string, options?: any): Promise<any>;
 }
@@ -36,12 +37,13 @@ export class CitationFacade implements ICitationFacade {
   async exportBibliography(
     userId: string,
     citeKeys: string[],
+    projectId?: string,
   ): Promise<{ content: string } | null> {
     if (!this.exportsService) return null;
     const res = await this.exportsService.exportByCitationKeys(
       userId,
       citeKeys,
-      'bibtex',
+      projectId,
     );
     if (!res || !res.content) return null;
     return { content: res.content };

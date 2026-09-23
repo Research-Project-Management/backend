@@ -228,5 +228,25 @@ describe('Identity Security Suite (BOLA Prevention & Real-time Revocation)', () 
       const result = await roleGuard.canActivate(mockContext);
       expect(result).toBe(true);
     });
+
+    it('should throw ForbiddenException when projectId cannot be resolved from request', async () => {
+      const mockContext = {
+        getHandler: () => ({}),
+        getClass: () => ({}),
+        switchToHttp: () => ({
+          getRequest: () => ({
+            user: { sub: 'some-user-id' },
+            params: {},
+            headers: {},
+            query: {},
+            body: {},
+          }),
+        }),
+      } as unknown as ExecutionContext;
+
+      await expect(roleGuard.canActivate(mockContext)).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
   });
 });

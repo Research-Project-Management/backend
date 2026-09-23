@@ -79,7 +79,7 @@ export class IngestionService implements IngestionPort {
             ? existingRun.startedAt.toISOString()
             : new Date().toISOString(),
           requestHash,
-          status: existingRun.status as any,
+          status: existingRun.status,
           existingItemId: existingRun.itemId ?? undefined,
           deduplicated: true,
         };
@@ -118,7 +118,7 @@ export class IngestionService implements IngestionPort {
               ? raceRun.startedAt.toISOString()
               : new Date().toISOString(),
             requestHash,
-            status: raceRun.status as any,
+            status: raceRun.status,
             existingItemId: raceRun.itemId ?? undefined,
             deduplicated: true,
           };
@@ -141,7 +141,7 @@ export class IngestionService implements IngestionPort {
         ? run.startedAt.toISOString()
         : new Date().toISOString(),
       requestHash,
-      status: (run?.status || IngestionStatus.PENDING) as any,
+      status: run?.status || IngestionStatus.PENDING,
       existingItemId: run?.itemId ?? undefined,
       deduplicated: false,
     };

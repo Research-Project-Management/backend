@@ -65,7 +65,13 @@ export interface IngestionAcceptedResult {
   statusUrl: string;
   acceptedAt: string;
   requestHash: string;
-  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED_FINAL' | 'FAILED_RETRYABLE' | string;
+  status:
+    | 'PENDING'
+    | 'RUNNING'
+    | 'COMPLETED'
+    | 'FAILED_FINAL'
+    | 'FAILED_RETRYABLE'
+    | (string & {});
   existingItemId?: string;
   deduplicated?: boolean;
 }

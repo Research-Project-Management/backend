@@ -23,14 +23,15 @@ export class SearchFacade implements ISearchFacade {
     return this.searchService.search(userId, queryDto);
   }
 
-  async indexItem(_item: any): Promise<void> {
+  indexItem(_item: any): Promise<void> {
     // In Library Bounded Context, indexing is handled via FTS in SearchService
+    return Promise.resolve();
   }
 
-  async reindexItem(_item: any): Promise<{
+  reindexItem(_item: any): Promise<{
     localIndexed: boolean;
     error?: string;
   }> {
-    return { localIndexed: true };
+    return Promise.resolve({ localIndexed: true });
   }
 }

@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { fromPartial } from '@total-typescript/shoehorn';
-import { Prisma } from '@prisma/client';
+import { Prisma, TagType } from '@prisma/client';
 import { NotesService } from '@/modules/library/reader/application/services/notes.service';
 import { NotesRepository } from '@/modules/library/reader/infrastructure/repositories/notes.repository';
 import { AnnotationsService } from '@/modules/library/reader/application/services/annotations.service';
@@ -435,7 +435,7 @@ describe('Library Sync & Multi-Tenant Changelog Scope Hardening', () => {
         mockUserId,
         'physics',
         '#00ff00',
-        'custom',
+        TagType.manual,
         mockProjectId,
       );
 

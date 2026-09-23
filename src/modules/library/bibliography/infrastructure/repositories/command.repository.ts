@@ -137,13 +137,43 @@ export class CommandRepository {
       throw new NotFoundException(`CatalogItem ${id} not found`);
     }
 
-    if (expectedVersion !== undefined && existing.version !== expectedVersion) {
-      throw new VersionMismatchException({
-        aggregateType: 'CatalogItem',
-        entityId: id,
-        currentVersion: existing.version,
-        providedVersion: expectedVersion,
+    if (expectedVersion !== undefined) {
+      if (existing.version !== expectedVersion) {
+        throw new VersionMismatchException({
+          aggregateType: 'CatalogItem',
+          entityId: id,
+          currentVersion: existing.version,
+          providedVersion: expectedVersion,
+        });
+      }
+
+      // Atomic OCC reservation: ensure no concurrent write modified the version between findFirst and now
+      const affected = await client.item.updateMany({
+        where: {
+          id,
+          version: expectedVersion,
+          deletedAt: null,
+          ...(projectId && projectId !== 'user' && isUUID(projectId)
+            ? { projectId }
+            : { userId }),
+        },
+        data: {
+          version: { increment: 1 },
+        },
       });
+
+      if (affected.count === 0) {
+        const fresh = await client.item.findUnique({
+          where: { id },
+          select: { version: true },
+        });
+        throw new VersionMismatchException({
+          aggregateType: 'CatalogItem',
+          entityId: id,
+          currentVersion: fresh?.version ?? existing.version,
+          providedVersion: expectedVersion,
+        });
+      }
     }
 
     const { updateData, cleanIds, rawTags } = buildCommandUpdateInput(
@@ -151,6 +181,11 @@ export class CommandRepository {
       existing,
       data,
     );
+
+    // If expectedVersion was specified, version was already incremented atomically via updateMany
+    if (expectedVersion !== undefined) {
+      delete (updateData as any).version;
+    }
 
     const updated = await client.item.update({
       where: { id },
@@ -214,28 +249,48 @@ export class CommandRepository {
       return false;
     }
     const client = this.getClient(tx);
-    const whereCondition: any = {
+    const scopeWhere: any = {
       id,
       deletedAt: null,
       ...(projectId && projectId !== 'user' ? { projectId } : { userId }),
     };
+
     if (expectedVersion !== undefined) {
-      const existing = await client.item.findFirst({
-        where: whereCondition,
+      const result = await client.item.updateMany({
+        where: {
+          ...scopeWhere,
+          version: expectedVersion,
+        },
+        data: {
+          deletedAt: new Date(),
+          version: { increment: 1 },
+        },
       });
-      if (existing && existing.version !== expectedVersion) {
-        throw new VersionMismatchException({
-          aggregateType: 'CatalogItem',
-          entityId: id,
-          currentVersion: existing.version,
-          providedVersion: expectedVersion,
+
+      if (result.count === 0) {
+        const existing = await client.item.findFirst({
+          where: scopeWhere,
+          select: { version: true },
         });
+        if (existing && existing.version !== expectedVersion) {
+          throw new VersionMismatchException({
+            aggregateType: 'CatalogItem',
+            entityId: id,
+            currentVersion: existing.version,
+            providedVersion: expectedVersion,
+          });
+        }
+        return false;
       }
+      return true;
     }
 
     const result = await client.item.updateMany({
-      where: whereCondition,
-      data: { deletedAt: new Date() },
+      where: scopeWhere,
+      data: {
+        deletedAt: new Date(),
+        version: { increment: 1 },
+      },
     });
 
     return result.count > 0;
@@ -273,13 +328,40 @@ export class CommandRepository {
       );
     }
 
-    if (expectedVersion !== undefined && existing.version !== expectedVersion) {
-      throw new VersionMismatchException({
-        aggregateType: 'CatalogItem',
-        entityId: id,
-        currentVersion: existing.version,
-        providedVersion: expectedVersion,
+    if (expectedVersion !== undefined) {
+      if (existing.version !== expectedVersion) {
+        throw new VersionMismatchException({
+          aggregateType: 'CatalogItem',
+          entityId: id,
+          currentVersion: existing.version,
+          providedVersion: expectedVersion,
+        });
+      }
+
+      const affected = await client.item.updateMany({
+        where: {
+          id,
+          deletedAt: { not: null },
+          version: expectedVersion,
+          ...(projectId && projectId !== 'user' ? { projectId } : { userId }),
+        },
+        data: {
+          version: { increment: 1 },
+        },
       });
+
+      if (affected.count === 0) {
+        const fresh = await client.item.findUnique({
+          where: { id },
+          select: { version: true },
+        });
+        throw new VersionMismatchException({
+          aggregateType: 'CatalogItem',
+          entityId: id,
+          currentVersion: fresh?.version ?? existing.version,
+          providedVersion: expectedVersion,
+        });
+      }
     }
 
     // Cascade restore associated notes, attachments, and annotations
@@ -308,7 +390,7 @@ export class CommandRepository {
       where: { id },
       data: {
         deletedAt: null,
-        version: { increment: 1 },
+        ...(expectedVersion !== undefined ? {} : { version: { increment: 1 } }),
       },
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },

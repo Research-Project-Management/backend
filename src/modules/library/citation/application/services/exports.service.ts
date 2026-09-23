@@ -418,6 +418,18 @@ export class ExportsService {
       .map((k) => k.trim().toLowerCase())
       .filter(Boolean);
 
+    if (projectId && userId) {
+      const member = await this.exportsRepo.findProjectMember(
+        projectId,
+        userId,
+      );
+      if (!member) {
+        throw new NotFoundException(
+          `Project ${projectId} not found or access denied`,
+        );
+      }
+    }
+
     const scopeWhere: any = projectId
       ? { projectId, deletedAt: null }
       : {
@@ -439,18 +451,29 @@ export class ExportsService {
     const keySet = new Set(normalizedKeys);
     const matchedItems = items.filter((it: any) => {
       const citeKey = (it.citationKey || '').toLowerCase();
-      return keySet.has(citeKey);
+      const itemId = (it.id || '').toLowerCase();
+      return (citeKey && keySet.has(citeKey)) || (itemId && keySet.has(itemId));
     });
 
-    const foundKeys = matchedItems.map((it: any) => it.citationKey || it.id);
+    const foundKeys: string[] = [];
+    for (const it of matchedItems) {
+      const citeKey = it.citationKey;
+      const itemId = it.id;
+      if (citeKey && keySet.has(citeKey.toLowerCase())) {
+        foundKeys.push(citeKey);
+      } else if (itemId && keySet.has(itemId.toLowerCase())) {
+        foundKeys.push(itemId);
+      }
+    }
     const foundKeySet = new Set(foundKeys.map((k: string) => k.toLowerCase()));
-    const missingKeys = keys.filter((k) => !foundKeySet.has(k.toLowerCase()));
+    const missingKeys = keys.filter((k) => !foundKeySet.has(k.trim().toLowerCase()));
 
     const entries = matchedItems.map((it: any) => {
       const authors = CslJsonMapper.getAuthorNames(it);
+      const citeKey = it.citationKey || it.id;
       const res = this.citationService.formatItem(
         {
-          id: it.id,
+          id: citeKey,
           itemType: it.itemType ?? 'journalArticle',
           title: it.title,
           authors,
@@ -462,7 +485,7 @@ export class ExportsService {
           pages: it.pages ?? undefined,
           doi: it.doi ?? undefined,
           url: it.url ?? undefined,
-          citationKey: it.citationKey ?? undefined,
+          citationKey: citeKey,
           creators: it.contributors,
           abstract: it.abstract ?? undefined,
         },

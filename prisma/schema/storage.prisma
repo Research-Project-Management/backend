@@ -64,7 +64,7 @@ model File {
 
   // Ownership & Sharing
   authorId     String         @map("author_id") @db.Uuid
-  author       User           @relation("UserFiles", fields: [authorId], references: [id], onDelete: Cascade)
+  author       User           @relation("UserFiles", fields: [authorId], references: [id], onDelete: Restrict)
   sharedWith   FileShare[]
   versions     FileVersion[]
 
@@ -76,6 +76,7 @@ model File {
   @@index([parentId])
   @@index([url])
   @@index([linkedToType, linkedToId])
+  @@index([linkedToType, linkedToId, trashedAt])
   @@index([trashedAt])
   @@index([blobId])
   @@map("files")

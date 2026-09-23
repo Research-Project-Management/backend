@@ -448,12 +448,12 @@ export class IngestionRepository {
 
   // ── Candidate Operations ──────────────────────────────────────────────────
 
-  async createCandidate(
+  createCandidate(
     ingestionRunId: string,
     data: CreateIngestionCandidateData,
     _tx?: Prisma.TransactionClient,
   ): Promise<IngestionCandidate> {
-    return {
+    return Promise.resolve({
       id: randomUUID(),
       ingestionRunId,
       sourceProvider: data.sourceProvider,
@@ -462,24 +462,24 @@ export class IngestionRepository {
       metadataPayload: data.metadataPayload,
       rawEvidenceRef: data.rawEvidenceRef ?? null,
       fetchedAt: new Date(),
-    };
+    });
   }
 
-  async findCandidates(
+  findCandidates(
     _ingestionRunId: string,
     _tx?: Prisma.TransactionClient,
   ): Promise<IngestionCandidate[]> {
-    return [];
+    return Promise.resolve([]);
   }
 
   // ── Decision Operations ───────────────────────────────────────────────────
 
-  async createDecision(
+  createDecision(
     ingestionRunId: string,
     data: CreateIngestionDecisionData,
     _tx?: Prisma.TransactionClient,
   ): Promise<IngestionDecision> {
-    return {
+    return Promise.resolve({
       id: randomUUID(),
       ingestionRunId,
       decisionType: data.decisionType,
@@ -488,14 +488,14 @@ export class IngestionRepository {
       fieldDecisions: data.fieldDecisions,
       duplicateMatch: data.duplicateMatch,
       decidedAt: new Date(),
-    };
+    });
   }
 
-  async findDecisions(
+  findDecisions(
     _ingestionRunId: string,
     _tx?: Prisma.TransactionClient,
   ): Promise<IngestionDecision[]> {
-    return [];
+    return Promise.resolve([]);
   }
 
   // ── Review Case Operations ────────────────────────────────────────────────

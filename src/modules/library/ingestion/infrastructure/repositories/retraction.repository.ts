@@ -179,7 +179,6 @@ export class RetractionRepository {
       }),
     ]);
 
-    let checked = 0;
     let retracted = 0;
     let expressionsOfConcern = 0;
     let manual = 0;

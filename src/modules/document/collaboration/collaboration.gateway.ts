@@ -72,18 +72,6 @@ export class CollaborationGateway
    * checks real-time Redis token revocation, and rejects unauthenticated sockets.
    */
   async handleConnection(client: Socket) {
-    if (process.env.STANDALONE_LIBRARY === 'true') {
-      const defaultUserId = '3f3fb23b-2193-4763-84e5-c934a10b3cd9';
-      client.data.user = {
-        id: defaultUserId,
-        sub: defaultUserId,
-        name: 'Sandbox Tester',
-        email: 'tester@flux.local',
-      };
-      this.logger.debug(`[WebSocket] Standalone connection: ${client.id}`);
-      return;
-    }
-
     const token = this.extractToken(client);
     if (!token) {
       this.logger.warn(
@@ -229,24 +217,16 @@ export class CollaborationGateway
     const projectId = page.projectId;
 
     // 2. Resolve user's project role & permission
-    let role = 'REVIEWER';
-    let canWrite = false;
-
-    if (process.env.STANDALONE_LIBRARY === 'true') {
-      role = 'OWNER';
-      canWrite = true;
-    } else {
-      const projectRole = await this.resolveProjectRole(projectId, authUser.id);
-      if (!projectRole) {
-        return {
-          status: 'forbidden',
-          message: 'Access denied: You are not a member of this project',
-        };
-      }
-      role = projectRole;
-      const upperRole = role.toUpperCase();
-      canWrite = ['OWNER', 'COORDINATOR', 'CONTRIBUTOR'].includes(upperRole);
+    const projectRole = await this.resolveProjectRole(projectId, authUser.id);
+    if (!projectRole) {
+      return {
+        status: 'forbidden',
+        message: 'Access denied: You are not a member of this project',
+      };
     }
+    const role = projectRole;
+    const upperRole = role.toUpperCase();
+    const canWrite = ['OWNER', 'COORDINATOR', 'CONTRIBUTOR'].includes(upperRole);
 
     // Clean up previous room if this socket was attached to another document
     const previousMeta = this.socketToUser.get(client.id);

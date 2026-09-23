@@ -1,0 +1,35 @@
+// -- 13. Manuscript Project History & Snapshots Context ----------------------
+
+model ManuscriptSnapshot {
+  id           String              @id @default(uuid(7)) @db.Uuid
+  projectId    String              @map("project_id") @db.Uuid
+  project      Project             @relation(fields: [projectId], references: [id], onDelete: Cascade, map: "fk_manuscript_snapshots_project_id")
+  version      Int                 @default(1)
+  summary      String?             @db.VarChar(500)
+  createdById  String?             @map("created_by_id") @db.Uuid
+  isAutomatic  Boolean             @default(false) @map("is_automatic")
+  files        Json                @default("{}")
+  createdAt    DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  labels       ManuscriptLabel[]
+
+  @@unique([projectId, version], map: "uq_manuscript_snapshots_project_version")
+  @@index([projectId, createdAt], map: "idx_manuscript_snapshots_project_created")
+  @@map("manuscript_snapshots")
+}
+
+model ManuscriptLabel {
+  id           String              @id @default(uuid(7)) @db.Uuid
+  projectId    String              @map("project_id") @db.Uuid
+  snapshotId   String              @map("snapshot_id") @db.Uuid
+  snapshot     ManuscriptSnapshot  @relation(fields: [snapshotId], references: [id], onDelete: Cascade, map: "fk_manuscript_labels_snapshot_id")
+  version      Int
+  label        String              @db.VarChar(255)
+  createdById  String?             @map("created_by_id") @db.Uuid
+  createdAt    DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([projectId, label], map: "uq_manuscript_labels_project_label")
+  @@index([projectId, version], map: "idx_manuscript_labels_project_version")
+  @@map("manuscript_labels")
+}

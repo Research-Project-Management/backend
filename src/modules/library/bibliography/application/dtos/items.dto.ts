@@ -451,7 +451,13 @@ export class CursorPaginationQueryDto {
 
   @IsOptional()
   @IsString()
-  orderBy?: 'title' | 'year' | 'createdAt' | 'updatedAt' | 'citationKey' | string;
+  orderBy?:
+    | 'title'
+    | 'year'
+    | 'createdAt'
+    | 'updatedAt'
+    | 'citationKey'
+    | (string & {});
 
   @IsOptional()
   @IsString()

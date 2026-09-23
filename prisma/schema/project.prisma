@@ -52,7 +52,7 @@ model Project {
   archivedAt     DateTime?             @map("archived_at") @db.Timestamptz(6)
 
   createdById    String                @map("created_by_id") @db.Uuid
-  createdBy      User                  @relation("ProjectCreator", fields: [createdById], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_projects_created_by_id")
+  createdBy      User                  @relation("ProjectCreator", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_projects_created_by_id")
   modules        String[]              @default(["overview", "work_items", "cycles", "views", "pages"])
   settings       Json?                 @default("{}")
 
@@ -84,6 +84,10 @@ model Project {
   activityEvents ActivityEvent[]
   aiChats        AiChat[]              @relation("ProjectAiChats")
   updates        ProjectUpdate[]
+  manuscriptDocs ManuscriptDoc[]
+  manuscriptNodes ManuscriptNode[]
+  manuscriptFiles ManuscriptFile[]
+  manuscriptSnapshots ManuscriptSnapshot[]
 
   @@index([createdById], map: "idx_projects_created_by_id")
   @@index([stateId], map: "idx_projects_state_id")

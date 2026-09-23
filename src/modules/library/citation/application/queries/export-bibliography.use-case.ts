@@ -21,7 +21,12 @@ export class ExportBibliographyUseCase {
 
   async execute(
     query: ExportBibliographyQuery,
-  ): Promise<{ content: string } | null> {
+  ): Promise<{
+    content: string;
+    count: number;
+    foundKeys: string[];
+    missingKeys: string[];
+  } | null> {
     this.logger.debug(
       `Executing ExportBibliographyUseCase for user ${query.userId} (${query.citeKeys.length} keys)`,
     );

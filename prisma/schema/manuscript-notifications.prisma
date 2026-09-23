@@ -1,0 +1,30 @@
+// -- 16. Manuscript Notifications & Mentions Context -----------------------
+
+enum ManuscriptNotificationType {
+  mention
+  comment_reply
+  thread_resolved
+  project_invite
+  review_request
+  system
+}
+
+model ManuscriptNotification {
+  id           String                     @id @default(uuid(7)) @db.Uuid
+  userId       String                     @map("user_id") @db.Uuid
+  key          String?                    @db.VarChar(255)
+  templateKey  String                     @map("template_key") @db.VarChar(100)
+  type         ManuscriptNotificationType @default(mention)
+  projectId    String?                    @map("project_id") @db.Uuid
+  docId        String?                    @map("doc_id") @db.Uuid
+  actorId      String?                    @map("actor_id") @db.Uuid
+  messageOpts  Json                       @default("{}") @map("message_opts")
+  isRead       Boolean                    @default(false) @map("is_read")
+  expiresAt    DateTime?                  @map("expires_at") @db.Timestamptz(6)
+  createdAt    DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  readAt       DateTime?                  @map("read_at") @db.Timestamptz(6)
+
+  @@index([userId, isRead, createdAt(sort: Desc)], map: "idx_manuscript_notifications_user")
+  @@index([key], map: "idx_manuscript_notifications_key")
+  @@map("manuscript_notifications")
+}

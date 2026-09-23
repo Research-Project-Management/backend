@@ -12,6 +12,7 @@ import {
   PreviewSavedSearchDto,
   ExecuteSavedSearchQueryDto,
 } from '../dtos/saved-search.dto';
+import { ItemsMapper } from '../../infrastructure/mappers/items.mapper';
 
 @Injectable()
 export class SavedSearchesService {
@@ -112,7 +113,7 @@ export class SavedSearchesService {
 
     return {
       count,
-      sampleItems: sampleResult.items,
+      sampleItems: ItemsMapper.toDomainList(sampleResult.items),
     };
   }
 
@@ -150,7 +151,7 @@ export class SavedSearchesService {
 
     return {
       savedSearch,
-      items: results.items,
+      items: ItemsMapper.toDomainList(results.items),
       meta: {
         totalCount: count,
         cursor: results.nextCursor,

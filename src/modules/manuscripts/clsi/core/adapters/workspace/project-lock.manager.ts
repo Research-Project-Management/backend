@@ -68,7 +68,7 @@ export class ProjectLockManager {
           }
         };
       } catch (err: any) {
-        if (err.code === 'EEXIST') {
+        if (err.code === 'EEXIST' || err.code === 'EPERM' || err.code === 'EBUSY') {
           // Check if existing lockfile is stale (> staleMs)
           try {
             const stat = await fs.stat(lockPath);

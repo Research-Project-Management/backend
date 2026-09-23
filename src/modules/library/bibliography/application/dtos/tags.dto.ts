@@ -1,4 +1,5 @@
-import { IsString, IsNotEmpty, IsOptional, MaxLength } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, MaxLength, IsEnum } from 'class-validator';
+import { TagType } from '@prisma/client';
 
 export class CreateTagDto {
   @IsString()
@@ -11,10 +12,9 @@ export class CreateTagDto {
   @MaxLength(50)
   color?: string;
 
-  @IsString()
+  @IsEnum(TagType)
   @IsOptional()
-  @MaxLength(50)
-  type?: string;
+  type?: TagType;
 
   @IsString()
   @IsOptional()

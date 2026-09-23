@@ -166,7 +166,36 @@ export class ClsiService {
       }
     }
 
-    // 2. Execute compilation through Hexagonal Pipeline
+    // 2. Dispatch to Standalone CLSI Microservice if configured
+    if (this.remoteClsiUrl) {
+      try {
+        const baseUrl = this.remoteClsiUrl.replace(/\/+$/, '');
+        const response = await fetch(`${baseUrl}/api/clsi/compile`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(dto),
+          signal: AbortSignal.timeout(dto.timeout_ms ?? dto.timeoutMs ?? 60000),
+        });
+
+        if (response.ok) {
+          const result = (await response.json()) as ClsiCompileResult;
+          if (
+            result.success &&
+            this.cache &&
+            result.pdf &&
+            result.pdf.length <= 2 * 1024 * 1024
+          ) {
+            await this.cache.set(cacheKey, result, 300);
+          }
+          return result;
+        }
+        this.logger.warn(`Remote CLSI responded with HTTP ${response.status}. Falling back to local pipeline.`);
+      } catch (err: any) {
+        this.logger.warn(`Remote CLSI compile failed: ${err.message}. Falling back to local pipeline.`);
+      }
+    }
+
+    // 3. Execute compilation through Hexagonal Pipeline (Local)
     const effectiveTimeoutMs = dto.timeout_ms ?? dto.timeoutMs ?? 30000;
     const pipelineResult: CompilePipelineResult = await this.pipeline.execute({
       projectId,
@@ -191,7 +220,7 @@ export class ClsiService {
         : 0,
     });
 
-    // 3. Cache successful results (5 mins TTL, max 2MB base64)
+    // 4. Cache successful results (5 mins TTL, max 2MB base64)
     if (
       pipelineResult.success &&
       this.cache &&
@@ -209,6 +238,23 @@ export class ClsiService {
     result?: SyncPoint;
     error?: string;
   }> {
+    if (this.remoteClsiUrl) {
+      try {
+        const baseUrl = this.remoteClsiUrl.replace(/\/+$/, '');
+        const response = await fetch(`${baseUrl}/api/clsi/synctex/forward`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(dto),
+          signal: AbortSignal.timeout(10000),
+        });
+        if (response.ok) {
+          return await response.json();
+        }
+      } catch (err: any) {
+        this.logger.warn(`Remote CLSI forwardSync failed: ${err.message}. Falling back to local.`);
+      }
+    }
+
     return this.synctexUseCase.forwardSync({
       projectId: dto.projectId || dto.pageId || 'default',
       file: dto.file,
@@ -223,6 +269,23 @@ export class ClsiService {
     result?: ReverseSyncPoint;
     error?: string;
   }> {
+    if (this.remoteClsiUrl) {
+      try {
+        const baseUrl = this.remoteClsiUrl.replace(/\/+$/, '');
+        const response = await fetch(`${baseUrl}/api/clsi/synctex/reverse`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(dto),
+          signal: AbortSignal.timeout(10000),
+        });
+        if (response.ok) {
+          return await response.json();
+        }
+      } catch (err: any) {
+        this.logger.warn(`Remote CLSI reverseSync failed: ${err.message}. Falling back to local.`);
+      }
+    }
+
     return this.synctexUseCase.reverseSync({
       projectId: dto.projectId || dto.pageId || 'default',
       page: dto.page,
@@ -257,6 +320,13 @@ export class ClsiService {
     );
     res.setHeader('Content-Type', 'text/plain');
     res.send(buffer);
+  }
+
+  public async readAuxFileBuffer(
+    projectId: string,
+    filename: string
+  ): Promise<Buffer | null> {
+    return await this.workspace.readAuxFile(projectId, filename);
   }
 
   public async getHealthReport() {

@@ -14,6 +14,7 @@ export interface NoteAnnotationSource {
 }
 
 export interface NoteItemSource {
+  id?: string | null;
   title?: string | null;
   citekey?: string | null;
   creators?: Array<{
@@ -29,6 +30,11 @@ export interface NoteItemSource {
   year?: number | null;
   doi?: string | null;
   identifiers?: Array<{ type: string; value: string }>;
+}
+
+export interface FormatNoteOptions {
+  protocol?: 'flux' | 'web' | 'zotero';
+  webBaseUrl?: string;
 }
 
 /**
@@ -149,6 +155,7 @@ export function sanitizeNoteContent(content?: string | null): string {
 export function formatLiteratureNoteMarkdown(
   item: NoteItemSource,
   annotations: NoteAnnotationSource[],
+  options?: FormatNoteOptions,
 ): string {
   const authorList =
     Array.isArray(item.creators) && item.creators.length > 0
@@ -242,9 +249,22 @@ export function formatLiteratureNoteMarkdown(
     }
 
     const citationLabel = `(${authorCitationBase}, p. ${pageNum})`;
-    const backlinkUrl = ann.attachmentId
-      ? `flux://open-pdf/library/items/${ann.attachmentId}?page=${pageNum}&annotation=${ann.id || ''}`
-      : `flux://open-pdf/library/items?page=${pageNum}&annotation=${ann.id || ''}`;
+    const protocol = options?.protocol || 'flux';
+    let backlinkUrl = '';
+    if (protocol === 'zotero') {
+      const attId = ann.attachmentId || '0';
+      backlinkUrl = `zotero://open-pdf/0_${attId}/${pageNum}?annotation=${ann.id || ''}`;
+    } else if (protocol === 'web') {
+      const base =
+        (options?.webBaseUrl || '').replace(/\/$/, '') ||
+        'https://app.flux.domain';
+      const targetId = item.id || ann.attachmentId || '';
+      backlinkUrl = `${base}/library/papers/${targetId}?page=${pageNum}&annotation=${ann.id || ''}`;
+    } else {
+      backlinkUrl = ann.attachmentId
+        ? `flux://open-pdf/library/items/${ann.attachmentId}?page=${pageNum}&annotation=${ann.id || ''}`
+        : `flux://open-pdf/library/items?page=${pageNum}&annotation=${ann.id || ''}`;
+    }
     const citationLink = `[${citationLabel}](${backlinkUrl})`;
 
     if (ann.quoteText) {

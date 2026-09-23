@@ -1,5 +1,6 @@
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import crypto from 'crypto';
+import zlib from 'zlib';
 import { ExtractionRepository } from '../../infrastructure/repositories/extraction.repository';
 import { PdfProvider } from '../../infrastructure/providers/pdf.provider';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
@@ -7,6 +8,7 @@ import { OutboxEvent, Prisma } from '@prisma/client';
 import { OutboxDispatchHandler } from '../../../shared-kernel/outbox/types/outbox.types';
 import { AttachmentStorageException } from '../../domain/errors/attachments.errors';
 import { parseCreatorString } from '../../../shared-kernel/utils/bibliographic.utils';
+import { IdempotentConsumerService } from '../../../shared-kernel/outbox/services/idempotent-consumer.service';
 
 export const EXTRACTION_EVENT_TYPES = {
   EXTRACTION_REQUESTED: 'library.attachment.extraction_requested',
@@ -22,6 +24,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
   private readonly staleThresholdMs: number;
   private readonly storagePort: IStoragePort;
   private readonly searchService?: any;
+  private readonly idempotentConsumer?: IdempotentConsumerService;
 
   constructor(
     private readonly extractionRepo: ExtractionRepository,
@@ -30,7 +33,9 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     @Optional() storagePortCandidate?: any,
     @Optional()
     @Inject(ATTACHMENT_EXTRACTION_STALE_THRESHOLD)
-    staleThresholdMs?: number,
+    staleThresholdMs?: number | IdempotentConsumerService,
+    @Optional()
+    idempotentConsumer?: IdempotentConsumerService,
   ) {
     if (
       storagePortOrSearch &&
@@ -48,7 +53,20 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       this.storagePort = storagePortOrSearch;
       this.searchService = storagePortCandidate;
     }
-    this.staleThresholdMs = staleThresholdMs ?? 5 * 60 * 1000;
+
+    if (typeof staleThresholdMs === 'number') {
+      this.staleThresholdMs = staleThresholdMs;
+      this.idempotentConsumer = idempotentConsumer;
+    } else if (
+      staleThresholdMs &&
+      typeof (staleThresholdMs as any).executeIdempotent === 'function'
+    ) {
+      this.staleThresholdMs = 5 * 60 * 1000;
+      this.idempotentConsumer = staleThresholdMs as IdempotentConsumerService;
+    } else {
+      this.staleThresholdMs = 5 * 60 * 1000;
+      this.idempotentConsumer = idempotentConsumer;
+    }
   }
 
   async handle(event: OutboxEvent, signal?: AbortSignal): Promise<void> {
@@ -64,6 +82,36 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         `[AttachmentExtraction] Outbox event ${event.id} missing attachmentId`,
       );
       return;
+    }
+
+    if (this.idempotentConsumer) {
+      const execResult = await this.idempotentConsumer.executeIdempotent({
+        consumer: 'ExtractionHandler',
+        eventId: event.id,
+        handler: async () => {
+          await this.processExtraction(event, attachmentId, payload, signal);
+        },
+      });
+
+      if (execResult.skipped) {
+        this.logger.debug(
+          `[AttachmentExtraction] Skipping duplicate or active extraction for event ${event.id} (${execResult.reason})`,
+        );
+      }
+      return;
+    }
+
+    await this.processExtraction(event, attachmentId, payload, signal);
+  }
+
+  private async processExtraction(
+    event: OutboxEvent,
+    attachmentId: string,
+    payload: Record<string, any>,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (signal?.aborted) {
+      throw new Error(`Extraction aborted for outbox event ${event.id}`);
     }
 
     // 1. Atomically claim PENDING / FAILED_RETRYABLE -> PROCESSING
@@ -256,29 +304,80 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         (doc.sections && doc.sections.length > 0)
       ) {
         try {
-          // Store full-text structured tree (sections, figures, tables, formulas)
+          const fulltextTree = {
+            title: doc.metadata?.title,
+            abstract: doc.metadata?.abstract,
+            creators: doc.metadata?.creators,
+            doi: doc.metadata?.doi,
+            arxivId: doc.metadata?.arxivId,
+            year: doc.metadata?.year,
+            keywords: doc.metadata?.keywords,
+            sections: doc.sections ?? [],
+            figures: doc.figures ?? [],
+            tables: doc.tables ?? [],
+            formulas: doc.formulas ?? [],
+            references: doc.references ?? [],
+            ...(doc.metadata?.rawTei ? { rawTei: doc.metadata.rawTei } : {}),
+          };
+
+          let payloadToSave: any = {
+            ...fulltextTree,
+            sectionCount: doc.sections?.length ?? 0,
+            figureCount: doc.figures?.length ?? 0,
+            tableCount: doc.tables?.length ?? 0,
+            formulaCount: doc.formulas?.length ?? 0,
+            referenceCount: doc.references?.length ?? 0,
+          };
+
+          // Claim Check Pattern: Offload heavy full-text tree to Object Storage
+          if (typeof this.storagePort?.uploadFile === 'function') {
+            try {
+              const jsonBuffer = Buffer.from(
+                JSON.stringify(fulltextTree),
+                'utf-8',
+              );
+              const compressed = zlib.gzipSync(jsonBuffer);
+              const ownerUserId = attachment.item?.userId || 'system';
+              const ownerProjectId = attachment.item?.projectId || undefined;
+
+              const uploadResult = await this.storagePort.uploadFile({
+                userId: ownerUserId,
+                projectId: ownerProjectId,
+                filename: `grobid_fulltext_${attachment.itemId}.json.gz`,
+                buffer: compressed,
+                mimeType: 'application/gzip',
+                source: 'reader.grobid_fulltext',
+              });
+
+              if (uploadResult?.fileId) {
+                payloadToSave = {
+                  isOffloaded: true,
+                  fileId: uploadResult.fileId,
+                  url: uploadResult.url,
+                  storageKey: uploadResult.path,
+                  byteSize: compressed.length,
+                  uncompressedSize: jsonBuffer.length,
+                  title: doc.metadata?.title,
+                  abstract: doc.metadata?.abstract,
+                  sectionCount: doc.sections?.length ?? 0,
+                  figureCount: doc.figures?.length ?? 0,
+                  tableCount: doc.tables?.length ?? 0,
+                  formulaCount: doc.formulas?.length ?? 0,
+                  referenceCount: doc.references?.length ?? 0,
+                };
+              }
+            } catch (offloadErr: any) {
+              this.logger.warn(
+                `Failed to offload GROBID fulltext to storage, falling back to inline: ${offloadErr?.message || offloadErr}`,
+              );
+            }
+          }
+
+          // Store full-text structured tree (Claim Check reference or inline)
           await this.extractionRepo.saveMetadataSourceRecord(
             attachment.itemId,
             'grobid_fulltext',
-            {
-              title: doc.metadata.title,
-              abstract: doc.metadata.abstract,
-              creators: doc.metadata.creators,
-              doi: doc.metadata.doi,
-              arxivId: doc.metadata.arxivId,
-              year: doc.metadata.year,
-              keywords: doc.metadata.keywords,
-              sections: doc.sections ?? [],
-              figures: doc.figures ?? [],
-              tables: doc.tables ?? [],
-              formulas: doc.formulas ?? [],
-              references: doc.references ?? [],
-              sectionCount: doc.sections?.length ?? 0,
-              figureCount: doc.figures?.length ?? 0,
-              tableCount: doc.tables?.length ?? 0,
-              formulaCount: doc.formulas?.length ?? 0,
-              referenceCount: doc.references?.length ?? 0,
-            } as any,
+            payloadToSave as any,
           );
 
           // Also keep grobid metadata provenance record for backward compatibility

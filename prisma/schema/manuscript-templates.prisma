@@ -1,0 +1,33 @@
+// -- 17. Manuscript Templates & Project Starters Context -------------------
+
+enum ManuscriptTemplateCategory {
+  journal
+  conference
+  thesis
+  cv
+  presentation
+  report
+  other
+}
+
+model ManuscriptTemplate {
+  id            String                     @id @default(uuid(7)) @db.Uuid
+  versionId     String                     @unique @map("version_id") @db.VarChar(64)
+  name          String                     @db.VarChar(255)
+  category      ManuscriptTemplateCategory @default(other)
+  description   String?                    @db.Text
+  compiler      String                     @default("pdflatex") @db.VarChar(32)
+  imageName     String?                    @map("image_name") @db.VarChar(128)
+  mainFile      String                     @default("main.tex") @map("main_file") @db.VarChar(255)
+  thumbnailUrl  String?                    @map("thumbnail_url") @db.Text
+  author        String                     @default("Flux Community") @db.VarChar(255)
+  tags          String[]                   @default([])
+  isOfficial    Boolean                    @default(false) @map("is_official")
+  downloadCount Int                        @default(0) @map("download_count")
+  files         Json                       @default("{}")
+  createdAt     DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([category, isOfficial], map: "idx_manuscript_templates_cat")
+  @@map("manuscript_templates")
+}

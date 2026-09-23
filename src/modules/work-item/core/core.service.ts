@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  ConflictException,
   Optional,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -60,7 +61,7 @@ export class CoreService {
   }
 
   private async buildLabelLookup(
-    projectId: string,
+    projectId: string | string[],
     labelIds: string[],
   ): Promise<Map<string, { name: string; color: string }>> {
     const lookup = new Map<string, { name: string; color: string }>();
@@ -146,9 +147,14 @@ export class CoreService {
       offset,
     );
     const allLabelIds = records.flatMap((r) => r.labels || []);
-    const projectId = query?.projectId || records[0]?.projectId;
-    const labelLookup = projectId
-      ? await this.buildLabelLookup(projectId, allLabelIds)
+    const projectIds = query?.projectId
+      ? query.projectId
+      : Array.from(new Set(records.map((r) => r.projectId).filter(Boolean)));
+    const hasProjectContext = Array.isArray(projectIds)
+      ? projectIds.length > 0
+      : Boolean(projectIds);
+    const labelLookup = hasProjectContext
+      ? await this.buildLabelLookup(projectIds, allLabelIds)
       : new Map<string, { id: string; name: string; color: string }>();
     const workItems = records
       .map((r) => formatWorkItem(r, labelLookup))
@@ -385,6 +391,22 @@ export class CoreService {
   ) {
     const existing = await this.workItemRepository.findWorkItemById(workItemId);
     if (!existing) throw new NotFoundException('WorkItem not found');
+
+    if (updateWorkItemDto.expectedUpdatedAt) {
+      const expectedTime = new Date(
+        updateWorkItemDto.expectedUpdatedAt,
+      ).getTime();
+      const actualTime = new Date(existing.updatedAt).getTime();
+      if (
+        !isNaN(expectedTime) &&
+        !isNaN(actualTime) &&
+        Math.abs(actualTime - expectedTime) > 1000
+      ) {
+        throw new ConflictException(
+          'WorkItem has been modified by another user. Please refresh and try again.',
+        );
+      }
+    }
 
     const parentId =
       updateWorkItemDto.parentWorkItemId !== undefined

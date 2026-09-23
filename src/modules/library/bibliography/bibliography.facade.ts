@@ -311,11 +311,11 @@ export class BibliographyFacade implements IBibliographyFacade {
       );
     }
     if (!this.itemsService) return [];
-    return (await this.itemsService.findDuplicateCandidateItems(
+    return this.itemsService.findDuplicateCandidateItems(
       userId,
       limit,
       projectId,
-    )) as unknown as DuplicateCandidateItem[];
+    );
   }
 
   async mergeItems(

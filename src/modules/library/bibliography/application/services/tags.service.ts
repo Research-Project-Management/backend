@@ -1,5 +1,5 @@
 import { Injectable, Optional, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, TagType } from '@prisma/client';
 import { TagsRepository } from '../../infrastructure/repositories/tags.repository';
 import { TransactionService } from '../../../shared-kernel/outbox/transaction.service';
 import {
@@ -62,7 +62,7 @@ export class TagsService {
     userId: UserId | string,
     name: string,
     color?: string,
-    type?: string,
+    type?: TagType,
     projectId?: ProjectId | string | null,
   ) {
     const cleanName = cleanSingleTag(name) || name.trim();

@@ -154,7 +154,7 @@ export class AttachmentsService {
     const resolvedAttachmentType: AttachmentType =
       input.attachmentType ??
       (resolvedLinkMode === 'imported_url'
-        ? ('snapshot' as AttachmentType)
+        ? AttachmentType.snapshot
         : input.filename
         ? inferAttachmentTypeFromFilename(input.filename)
         : AttachmentType.primary_pdf);
@@ -242,18 +242,29 @@ export class AttachmentsService {
       revisions: { orderBy: { revisionNumber: 'desc' }, take: 1 },
     });
 
-    const isAuthorized =
-      attachment &&
-      (projectId && projectId !== 'user'
-        ? attachment.item.projectId === projectId
-        : attachment.item.userId === userId);
+    let isAuthorized = false;
+    if (attachment) {
+      if (attachment.item.projectId) {
+        if (attachment.item.userId === userId) {
+          isAuthorized = true;
+        } else {
+          const isMember = await this.repo.checkProjectMember(
+            attachment.item.projectId,
+            userId,
+          );
+          isAuthorized = Boolean(isMember);
+        }
+      } else {
+        isAuthorized = attachment.item.userId === userId;
+      }
+    }
 
     if (!isAuthorized) {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
     // Resolve fileId, url, size, and hash
-    let resolvedFileId =
+    const resolvedFileId =
       input.fileId ||
       input.url?.match(
         /\/api\/(?:v1\/(?:projects\/[^/]+\/)?library\/)?files\/([a-zA-Z0-9_-]+)/,

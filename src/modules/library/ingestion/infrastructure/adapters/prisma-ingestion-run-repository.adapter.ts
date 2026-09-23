@@ -93,7 +93,7 @@ export class PrismaIngestionRunRepositoryAdapter implements IIngestionRunReposit
   }
 
   private mapPrismaStatusToDomain(status: IngestionStatus): string {
-    return status as string;
+    return status;
   }
 
   private mapDomainStatusToPrisma(status: string): IngestionStatus {

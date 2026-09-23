@@ -51,7 +51,9 @@ export class IngestionSagaSession {
     try {
       const dbStage = (stageName === 'ENRICH_EXISTING' ? 'ENRICH' : stageName) as any;
       await this.repo.updateRunStage(this.scopeId, this.runId, dbStage).catch(() => {});
-    } catch {}
+    } catch {
+      // Ignored: Best effort status update
+    }
 
     try {
       const result = await action();

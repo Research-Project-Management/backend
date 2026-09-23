@@ -7,6 +7,7 @@ import { TransactionService } from '../../../shared-kernel/outbox/transaction.se
 import { PrismaService } from '../../../../../core/database/prisma.service';
 import { ItemsMapper } from '../mappers/items.mapper';
 import { syncTagsForCatalogItem } from '../mappers/command-payload.builder';
+import { ItemConcurrencyDomainException } from '../../domain/exceptions/item-domain.exception';
 
 /**
  * Infrastructure Adapter implementing IItemRepositoryPort using Prisma & Outbox.
@@ -207,9 +208,13 @@ export class PrismaItemRepositoryAdapter implements IItemRepositoryPort {
           );
         }
       } else {
-        // Update existing item with version increment
-        await tx.item.update({
-          where: { id: aggregate.id },
+        // Update existing item with atomic Optimistic Concurrency Control (OCC) guard
+        const expectedPreviousVersion = aggregate.version - 1;
+        const updateResult = await tx.item.updateMany({
+          where: {
+            id: aggregate.id,
+            version: expectedPreviousVersion,
+          },
           data: {
             title: aggregate.title,
             itemType: aggregate.itemType,
@@ -224,6 +229,18 @@ export class PrismaItemRepositoryAdapter implements IItemRepositoryPort {
           },
         });
 
+        if (updateResult.count === 0) {
+          const fresh = await tx.item.findUnique({
+            where: { id: aggregate.id },
+            select: { version: true },
+          });
+          throw new ItemConcurrencyDomainException(
+            aggregate.id,
+            fresh?.version ?? 0,
+            expectedPreviousVersion,
+          );
+        }
+
         if (Array.isArray(rawTags)) {
           await syncTagsForCatalogItem(
             tx,
@@ -233,10 +250,19 @@ export class PrismaItemRepositoryAdapter implements IItemRepositoryPort {
           );
         }
 
-        if (Array.isArray(rawCollectionIds)) {
+        const incomingCollectionIds =
+          Array.isArray(rawCollectionIds)
+            ? rawCollectionIds
+            : _collectionId !== undefined
+              ? _collectionId
+                ? [_collectionId]
+                : []
+              : null;
+
+        if (incomingCollectionIds !== null) {
           const uniqueIds = Array.from(
             new Set(
-              rawCollectionIds.filter(
+              incomingCollectionIds.filter(
                 (id): id is string =>
                   typeof id === 'string' && id.trim().length > 0,
               ),
@@ -326,7 +352,7 @@ export class PrismaItemRepositoryAdapter implements IItemRepositoryPort {
     }
 
     const items = rawItems.slice(0, limit).map((raw: any) => {
-      const flattened = ItemsMapper.mapFlattenedState(raw, userId) as any;
+      const flattened = ItemsMapper.mapFlattenedState(raw, userId);
       return ItemAggregate.reconstitute({
         id: flattened.id,
         userId: flattened.userId,

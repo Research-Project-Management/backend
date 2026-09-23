@@ -1,0 +1,21 @@
+// -- 16. Manuscript Spelling: Custom Project & User Dictionaries ------------------
+
+enum ManuscriptDictionaryScope {
+  project
+  user
+}
+
+model ManuscriptCustomWord {
+  id        String                    @id @default(uuid(7)) @db.Uuid
+  scope     ManuscriptDictionaryScope
+  projectId String?                   @map("project_id") @db.Uuid
+  userId    String?                   @map("user_id") @db.Uuid
+  word      String                    @db.VarChar(128)
+  createdAt DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([projectId, word], map: "uq_custom_word_project")
+  @@unique([userId, word], map: "uq_custom_word_user")
+  @@index([projectId], map: "idx_custom_words_project")
+  @@index([userId], map: "idx_custom_words_user")
+  @@map("manuscript_custom_words")
+}

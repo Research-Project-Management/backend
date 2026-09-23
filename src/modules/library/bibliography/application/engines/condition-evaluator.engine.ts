@@ -554,30 +554,30 @@ export class ConditionEvaluatorEngine {
     if (operator === 'isPresent') {
       return {
         AND: [{ [fieldName]: { not: null } }, { [fieldName]: { not: '' } }],
-      } as any;
+      };
     }
     if (operator === 'isAbsent') {
       return {
         OR: [{ [fieldName]: null }, { [fieldName]: '' }],
-      } as any;
+      };
     }
     if (operator === 'is') {
-      return { [fieldName]: { equals: val, mode: 'insensitive' } } as any;
+      return { [fieldName]: { equals: val, mode: 'insensitive' } };
     }
     if (operator === 'isNot') {
-      return { NOT: { [fieldName]: { equals: val, mode: 'insensitive' } } } as any;
+      return { NOT: { [fieldName]: { equals: val, mode: 'insensitive' } } };
     }
     if (operator === 'contains') {
-      return { [fieldName]: { contains: val, mode: 'insensitive' } } as any;
+      return { [fieldName]: { contains: val, mode: 'insensitive' } };
     }
     if (operator === 'doesNotContain') {
-      return { NOT: { [fieldName]: { contains: val, mode: 'insensitive' } } } as any;
+      return { NOT: { [fieldName]: { contains: val, mode: 'insensitive' } } };
     }
     if (operator === 'beginsWith') {
-      return { [fieldName]: { startsWith: val, mode: 'insensitive' } } as any;
+      return { [fieldName]: { startsWith: val, mode: 'insensitive' } };
     }
     if (operator === 'endsWith') {
-      return { [fieldName]: { endsWith: val, mode: 'insensitive' } } as any;
+      return { [fieldName]: { endsWith: val, mode: 'insensitive' } };
     }
     return null;
   }

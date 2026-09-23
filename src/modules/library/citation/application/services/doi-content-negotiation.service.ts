@@ -1,10 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import type { ReferenceData } from '../../domain/types/citation.types';
 import {
   normalizeDoi,
   cleanBibliographicText,
 } from '../../../shared-kernel/utils/bibliographic.utils';
 import { getAcademicUserAgent } from '../../../shared-kernel/core/constants/academic-client.constants';
+import { ResilienceRegistryService } from '../../../shared-kernel/resilience/resilience-registry.service';
 
 export interface DoiCitationResult {
   styleId: string;
@@ -17,6 +18,11 @@ export interface DoiCitationResult {
 @Injectable()
 export class DoiContentNegotiationService {
   private readonly logger = new Logger(DoiContentNegotiationService.name);
+
+  constructor(
+    @Optional()
+    private readonly resilienceRegistry?: ResilienceRegistryService,
+  ) {}
 
   // In-memory cache with TTL (24 hours)
   private readonly cache = new Map<
@@ -95,56 +101,84 @@ export class DoiContentNegotiationService {
       return cached.result;
     }
 
-    try {
+    const executeFetch = async (): Promise<DoiCitationResult | null> => {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-      const response = await fetch(
-        `https://doi.org/${encodeURIComponent(doi)}`,
-        {
-          headers: {
-            Accept: acceptHeader,
-            'User-Agent': getAcademicUserAgent('Research'),
+      try {
+        const response = await fetch(
+          `https://doi.org/${encodeURIComponent(doi)}`,
+          {
+            headers: {
+              Accept: acceptHeader,
+              'User-Agent': getAcademicUserAgent('Research'),
+            },
+            signal: controller.signal,
           },
-          signal: controller.signal,
-        },
-      );
+        );
 
-      clearTimeout(timer);
+        clearTimeout(timer);
 
-      if (!response.ok) {
-        return null;
+        if (response.status === 404) {
+          return null;
+        }
+
+        if (response.status === 429 || response.status >= 500) {
+          throw new Error(`doi.org returned HTTP ${response.status}`);
+        }
+
+        if (!response.ok) {
+          return null;
+        }
+
+        const rawText = await response.text();
+        const cleanedText = rawText.trim();
+        if (!cleanedText || cleanedText.startsWith('<!DOCTYPE html>')) {
+          return null; // Received HTML error page rather than bibliography
+        }
+
+        // Generate HTML with linkified DOI if present
+        const bibliographyHtml = this.formatBibliographyHtml(cleanedText, doi);
+
+        const result: DoiCitationResult = {
+          styleId: normalizedStyle,
+          bibliography: cleanedText,
+          bibliographyHtml,
+          source: 'publisher',
+        };
+
+        // Cache for 24h
+        this.cache.set(cacheKey, {
+          result,
+          expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+        });
+
+        // Cleanup cache if too large
+        if (this.cache.size > 2000) {
+          const oldestKey = this.cache.keys().next().value;
+          if (oldestKey) this.cache.delete(oldestKey);
+        }
+
+        return result;
+      } catch (err: any) {
+        clearTimeout(timer);
+        throw err;
+      }
+    };
+
+    try {
+      if (this.resilienceRegistry) {
+        return await this.resilienceRegistry.execute('doi-org', executeFetch, {
+          fallback: async (err) => {
+            this.logger.debug(
+              `DOI Content Negotiation fallback for ${doi} (${normalizedStyle}): ${err?.message || err}`,
+            );
+            return null;
+          },
+        });
       }
 
-      const rawText = await response.text();
-      const cleanedText = rawText.trim();
-      if (!cleanedText || cleanedText.startsWith('<!DOCTYPE html>')) {
-        return null; // Received HTML error page rather than bibliography
-      }
-
-      // Generate HTML with linkified DOI if present
-      const bibliographyHtml = this.formatBibliographyHtml(cleanedText, doi);
-
-      const result: DoiCitationResult = {
-        styleId: normalizedStyle,
-        bibliography: cleanedText,
-        bibliographyHtml,
-        source: 'publisher',
-      };
-
-      // Cache for 24h
-      this.cache.set(cacheKey, {
-        result,
-        expiresAt: Date.now() + 24 * 60 * 60 * 1000,
-      });
-
-      // Cleanup cache if too large
-      if (this.cache.size > 2000) {
-        const oldestKey = this.cache.keys().next().value;
-        if (oldestKey) this.cache.delete(oldestKey);
-      }
-
-      return result;
+      return await executeFetch();
     } catch (err: any) {
       this.logger.debug(
         `DOI Content Negotiation bypassed for ${doi} (${normalizedStyle}): ${err?.message || err}`,
@@ -193,47 +227,73 @@ export class DoiContentNegotiationService {
       return cached.result;
     }
 
-    try {
+    const executeFetch = async (): Promise<ReferenceData | null> => {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-      const response = await fetch(
-        `https://doi.org/${encodeURIComponent(doi)}`,
-        {
-          headers: {
-            Accept:
-              'application/vnd.citationstyles.csl+json, application/citeproc+json, application/json',
-            'User-Agent': getAcademicUserAgent('Research'),
+      try {
+        const response = await fetch(
+          `https://doi.org/${encodeURIComponent(doi)}`,
+          {
+            headers: {
+              Accept:
+                'application/vnd.citationstyles.csl+json, application/citeproc+json, application/json',
+              'User-Agent': getAcademicUserAgent('Research'),
+            },
+            signal: controller.signal,
           },
-          signal: controller.signal,
-        },
-      );
+        );
 
-      clearTimeout(timer);
+        clearTimeout(timer);
 
-      if (!response.ok) return null;
+        if (response.status === 404) return null;
 
-      const contentType = response.headers.get('content-type') || '';
-      if (contentType.includes('text/html')) return null;
+        if (response.status === 429 || response.status >= 500) {
+          throw new Error(`doi.org metadata HTTP ${response.status}`);
+        }
 
-      const json = await response.json();
-      if (!json || typeof json !== 'object') return null;
+        if (!response.ok) return null;
 
-      const result = this.mapCslJsonToReferenceData(json, doi);
-      if (!result || !result.title || result.title === 'Untitled') return null;
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('text/html')) return null;
 
-      // Cache metadata
-      this.metaCache.set(doi, {
-        result,
-        expiresAt: Date.now() + 24 * 60 * 60 * 1000,
-      });
+        const json = await response.json();
+        if (!json || typeof json !== 'object') return null;
 
-      if (this.metaCache.size > 2000) {
-        const oldestKey = this.metaCache.keys().next().value;
-        if (oldestKey) this.metaCache.delete(oldestKey);
+        const result = this.mapCslJsonToReferenceData(json, doi);
+        if (!result || !result.title || result.title === 'Untitled') return null;
+
+        // Cache metadata
+        this.metaCache.set(doi, {
+          result,
+          expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+        });
+
+        if (this.metaCache.size > 2000) {
+          const oldestKey = this.metaCache.keys().next().value;
+          if (oldestKey) this.metaCache.delete(oldestKey);
+        }
+
+        return result;
+      } catch (err: any) {
+        clearTimeout(timer);
+        throw err;
+      }
+    };
+
+    try {
+      if (this.resilienceRegistry) {
+        return await this.resilienceRegistry.execute('doi-org', executeFetch, {
+          fallback: async (err) => {
+            this.logger.debug(
+              `DOI Content Negotiation metadata fallback for ${doi}: ${err?.message || err}`,
+            );
+            return null;
+          },
+        });
       }
 
-      return result;
+      return await executeFetch();
     } catch (err: any) {
       this.logger.debug(
         `DOI Content Negotiation metadata resolution bypassed for ${doi}: ${err?.message || err}`,

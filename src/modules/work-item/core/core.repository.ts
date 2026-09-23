@@ -1246,14 +1246,17 @@ export class CoreRepository implements IWorkItemRepository {
   }
 
   async findLabelsByIds(
-    projectId: string,
+    projectId: string | string[],
     labelIds: string[],
   ): Promise<Array<{ id: string; name: string; color: string }>> {
     if (!labelIds.length) return [];
     const uniqueIds = Array.from(new Set(labelIds.filter(Boolean)));
     if (!uniqueIds.length) return [];
+    const projectFilter = Array.isArray(projectId)
+      ? { in: projectId }
+      : projectId;
     return this.prismaService.workItemLabel.findMany({
-      where: { id: { in: uniqueIds }, projectId },
+      where: { id: { in: uniqueIds }, projectId: projectFilter },
       select: { id: true, name: true, color: true },
     });
   }

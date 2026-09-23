@@ -1,0 +1,28 @@
+// -- 13. Manuscript Binary Assets Context (Manuscripts Filestore Subsystem) ---------
+
+model ManuscriptFile {
+  id              String             @id @default(uuid(7)) @db.Uuid
+  projectId       String             @map("project_id") @db.Uuid
+  project         Project            @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_manuscript_files_project_id")
+
+  name            String             @db.VarChar(255)
+  mimeType        String             @default("application/octet-stream") @map("mime_type") @db.VarChar(128)
+  sizeBytes       Int                @default(0) @map("size_bytes")
+  hash            String             @db.VarChar(64)
+  storageKey      String             @map("storage_key") @db.VarChar(512)
+  bucketName      String             @default("manuscript-files") @map("bucket_name") @db.VarChar(128)
+  rev             Int                @default(0)
+
+  deleted         Boolean            @default(false)
+  deletedAt       DateTime?          @map("deleted_at") @db.Timestamptz(6)
+  createdAt       DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  node            ManuscriptNode?
+
+  @@index([projectId, deleted], map: "idx_manuscript_files_project_deleted")
+  @@index([projectId, hash], map: "idx_manuscript_files_project_hash")
+  @@index([hash], map: "idx_manuscript_files_hash")
+  @@index([storageKey], map: "idx_manuscript_files_storage_key")
+  @@map("manuscript_files")
+}

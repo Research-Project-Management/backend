@@ -24,10 +24,11 @@ export class PrismaService
       process.env.DATABASE_URL ||
       'postgresql://localhost:5432/rpm';
 
+    const isProd = process.env.NODE_ENV === 'production';
     const pool = new Pool({
       connectionString,
-      max: 20,
-      idleTimeoutMillis: 30000,
+      max: isProd ? 20 : 5,
+      idleTimeoutMillis: isProd ? 30000 : 10000,
       connectionTimeoutMillis: 10000,
     });
     pool.on('error', (err) => {

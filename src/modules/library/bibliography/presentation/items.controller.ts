@@ -313,15 +313,17 @@ export class ItemsController {
       ? parseInt(ifMatch.replace(/["']/g, ''), 10)
       : undefined;
     const expectedVersion =
-      body.expectedVersion ??
-      (!isNaN(parsedHeaderVersion as number) ? parsedHeaderVersion : undefined);
+      body.expectedVersion !== undefined
+        ? Number(body.expectedVersion)
+        : parsedHeaderVersion !== undefined && !isNaN(parsedHeaderVersion)
+          ? parsedHeaderVersion
+          : undefined;
     if (
-      expectedVersion === undefined ||
-      isNaN(expectedVersion) ||
-      expectedVersion < 0
+      expectedVersion !== undefined &&
+      (isNaN(expectedVersion) || expectedVersion < 0)
     ) {
       throw new BadRequestException(
-        'Optimistic locking requirement: expectedVersion or If-Match header is required',
+        'Invalid expectedVersion specified',
       );
     }
     const { expectedVersion: _, crossrefEnriched: _cr, ...updateData } = body;
