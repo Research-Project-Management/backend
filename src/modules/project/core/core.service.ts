@@ -666,39 +666,19 @@ export class CoreService {
       stateIdMap.set(state.id, newState.id);
     }
 
-    // 5. Clone Pages — two passes for parent/mainFile hierarchy
-    const pageIdMap = new Map<string, string>();
-    // First pass: create all pages without parent/mainFile links
-    for (const page of source.pages) {
-      const newPage = await this.prisma.page.create({
-        data: {
-          title: page.title,
-          slug: page.slug ?? undefined,
-          icon: page.icon ?? undefined,
-          coverImage: page.coverImage ?? undefined,
-          content: (page.content ?? {}) as any,
-          status: page.status,
-          rank: page.rank,
-          isLocked: false,
-          isPublished: false,
-          projectId: newProject.id,
-          authorId: userId,
-        },
-      });
-      pageIdMap.set(page.id, newPage.id);
-    }
-    // Second pass: wire parentPageId and mainFileId using the map
-    for (const page of source.pages) {
-      const newPageId = pageIdMap.get(page.id);
-      if (!newPageId) continue;
-      const newParentId = page.parentPageId ? pageIdMap.get(page.parentPageId) : null;
-      const newMainFileId = page.mainFileId ? pageIdMap.get(page.mainFileId) : null;
-      if (newParentId !== undefined || newMainFileId !== undefined) {
-        await this.prisma.page.update({
-          where: { id: newPageId },
+    // 5. Clone Manuscript Documents
+    if (source.manuscriptDocs && source.manuscriptDocs.length > 0) {
+      for (const doc of source.manuscriptDocs) {
+        await this.prisma.manuscriptDoc.create({
           data: {
-            ...(newParentId ? { parentPageId: newParentId } : {}),
-            ...(newMainFileId ? { mainFileId: newMainFileId } : {}),
+            projectId: newProject.id,
+            path: doc.path,
+            lines: (doc.lines ?? []) as any,
+            rev: 0,
+            version: 1,
+            ranges: (doc.ranges ?? {}) as any,
+            hash: doc.hash,
+            sizeBytes: doc.sizeBytes,
           },
         });
       }

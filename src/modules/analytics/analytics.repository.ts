@@ -58,8 +58,8 @@ export class AnalyticsRepository {
       this.prisma.workItem.count({
         where: { projectId: canonicalProjectId, deletedAt: null },
       }),
-      this.prisma.page.count({
-        where: { projectId: canonicalProjectId, deletedAt: null },
+      this.prisma.manuscriptDoc.count({
+        where: { projectId: canonicalProjectId, deleted: false },
       }),
       this.prisma.file.count({
         where: {
@@ -100,26 +100,33 @@ export class AnalyticsRepository {
       };
     }
 
+    const userProjects = await this.prisma.projectMember.findMany({
+      where: { userId },
+      select: { projectId: true },
+    });
+    const projectIds = userProjects.map((p) => p.projectId);
+
     const [
-      projectsCount,
       assignedWorkItemsCount,
       createdWorkItemsCount,
       pagesCount,
       stickiesCount,
       papersCount,
     ] = await Promise.all([
-      this.prisma.projectMember.count({
-        where: { userId },
-      }),
       this.prisma.workItem.count({
         where: { assigneeId: userId, deletedAt: null },
       }),
       this.prisma.workItem.count({
         where: { authorId: userId, deletedAt: null },
       }),
-      this.prisma.page.count({
-        where: { authorId: userId, deletedAt: null },
-      }),
+      projectIds.length
+        ? this.prisma.manuscriptDoc.count({
+            where: {
+              projectId: { in: projectIds },
+              deleted: false,
+            },
+          })
+        : 0,
       this.prisma.sticky.count({
         where: { userId, deletedAt: null },
       }),
@@ -129,7 +136,7 @@ export class AnalyticsRepository {
     ]);
 
     return {
-      projects: projectsCount,
+      projects: userProjects.length,
       assignedWorkItems: assignedWorkItemsCount,
       createdWorkItems: createdWorkItemsCount,
       pages: pagesCount,

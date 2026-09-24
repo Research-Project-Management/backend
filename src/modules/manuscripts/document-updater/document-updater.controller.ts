@@ -24,7 +24,11 @@ import { DocUpdaterConflictException } from './core/domain/exceptions/doc-update
 import { InFlightNotFoundException } from './core/domain/exceptions/in-flight-not-found.exception';
 import { DocumentLockedException } from './core/domain/exceptions/document-locked.exception';
 
-@Controller('project/:projectId')
+@Controller([
+  'api/v1/manuscripts/projects/:projectId/updater',
+  'manuscripts/projects/:projectId/updater',
+  'project/:projectId',
+])
 export class DocumentUpdaterController {
   constructor(private readonly service: DocumentUpdaterService) {}
 

@@ -479,21 +479,41 @@ export class UserRepository implements IUserRepository {
     }>
   > {
     try {
-      return await this.prisma.page.findMany({
+      const userProjects = await this.prisma.projectMember.findMany({
+        where: { userId },
+        select: { projectId: true, project: { select: { name: true } } },
+      });
+      if (!userProjects.length) return [];
+
+      const projectMap = new Map<string, string>();
+      userProjects.forEach((up) => {
+        if (up.project?.name) projectMap.set(up.projectId, up.project.name);
+      });
+      const projectIds = userProjects.map((up) => up.projectId);
+
+      const docs = await this.prisma.manuscriptDoc.findMany({
         where: {
-          deletedAt: null,
-          project: { members: { some: { userId } }, deletedAt: null },
-          title: { contains: query, mode: 'insensitive' },
+          deleted: false,
+          projectId: { in: projectIds },
+          path: { contains: query, mode: 'insensitive' },
         },
         select: {
           id: true,
-          title: true,
+          path: true,
           projectId: true,
-          project: { select: { name: true } },
           updatedAt: true,
         },
         take: 10,
       });
+      return docs.map((doc) => ({
+        id: doc.id,
+        title: doc.path,
+        projectId: doc.projectId,
+        project: projectMap.has(doc.projectId)
+          ? { name: projectMap.get(doc.projectId)! }
+          : undefined,
+        updatedAt: doc.updatedAt,
+      }));
     } catch {
       return [];
     }

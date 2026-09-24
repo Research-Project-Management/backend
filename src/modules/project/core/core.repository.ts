@@ -743,23 +743,35 @@ export class CoreRepository {
   }
 
   async findProjectForDuplication(projectId: string) {
-    return this.prisma.project.findUnique({
-      where: { id: projectId },
-      include: {
-        members: { select: { userId: true, role: true } },
-        labels: { include: { label: true } },
-        projectStates: true,
-        pages: {
-          where: { deletedAt: null },
-          select: {
-            id: true, title: true, slug: true, icon: true, coverImage: true,
-            content: true, status: true, rank: true, isLocked: true, isPublished: true,
-            parentPageId: true, mainFileId: true, authorId: true,
-          },
-          orderBy: { createdAt: 'asc' },
+    const [project, manuscriptDocs] = await Promise.all([
+      this.prisma.project.findUnique({
+        where: { id: projectId },
+        include: {
+          members: { select: { userId: true, role: true } },
+          labels: { include: { label: true } },
+          projectStates: true,
         },
-      },
-    });
+      }),
+      this.prisma.manuscriptDoc.findMany({
+        where: { projectId, deleted: false },
+        select: {
+          id: true,
+          path: true,
+          lines: true,
+          rev: true,
+          version: true,
+          ranges: true,
+          hash: true,
+          sizeBytes: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+    ]);
+    if (!project) return null;
+    return {
+      ...project,
+      manuscriptDocs,
+    };
   }
 
   async findByIdentifier(identifier: string) {

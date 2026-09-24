@@ -171,15 +171,15 @@ export class ChatService {
       return formatChat(raw);
     }
 
-    const page = await this.prisma.page.findUnique({
+    const doc = await this.prisma.manuscriptDoc.findUnique({
       where: { id: pageId },
-      select: { title: true, projectId: true },
+      select: { path: true, projectId: true },
     });
 
-    const title = page?.title
-      ? `${sanitizeChatTitle(page.title)} Discussion`
-      : 'Page Chat';
-    const effectiveProjectId = projectId || page?.projectId || null;
+    const title = doc?.path
+      ? `${sanitizeChatTitle(doc.path)} Discussion`
+      : 'Manuscript Chat';
+    const effectiveProjectId = projectId || doc?.projectId || null;
 
     const created = await this.chatRepo.createChat({
       userId,
@@ -234,30 +234,31 @@ export class ChatService {
       }
     }
 
-    // Verify page access if specified
+    // Verify document access if specified
     if (dto.pageId) {
-      const page = await this.prisma.page.findFirst({
-        where: { id: dto.pageId, deletedAt: null },
-        include: {
-          project: {
-            select: {
-              id: true,
-              identifier: true,
-              createdById: true,
-              members: { where: { userId }, select: { userId: true } },
-            },
-          },
+      const doc = await this.prisma.manuscriptDoc.findFirst({
+        where: { id: dto.pageId, deleted: false },
+        select: { id: true, projectId: true },
+      });
+      if (!doc) {
+        throw new NotFoundException('Manuscript doc not found');
+      }
+      const project = await this.prisma.project.findFirst({
+        where: { id: doc.projectId },
+        select: {
+          id: true,
+          identifier: true,
+          createdById: true,
+          members: { where: { userId }, select: { userId: true } },
         },
       });
-      if (!page) {
-        throw new NotFoundException('Page not found');
-      }
       const canAccess =
-        page.authorId === userId ||
-        page.project?.createdById === userId ||
-        (page.project?.members && page.project.members.length > 0);
+        project?.createdById === userId ||
+        (project?.members && project.members.length > 0);
       if (!canAccess) {
-        throw new ForbiddenException('User does not have access to this page');
+        throw new ForbiddenException(
+          'User does not have access to this manuscript document',
+        );
       }
     }
 

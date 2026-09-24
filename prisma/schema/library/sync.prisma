@@ -34,7 +34,7 @@ model SyncSequence {
   userId          String?  @unique @map("user_id") @db.Uuid
   projectId       String?  @unique @map("project_id") @db.Uuid
   currentSequence BigInt   @default(0) @map("current_sequence")
-  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@map("sync_sequences")
 }

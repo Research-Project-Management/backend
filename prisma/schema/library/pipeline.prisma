@@ -45,7 +45,7 @@ model IngestionRun {
   reviewData      Json?           @map("review_data") @db.JsonB
   startedAt       DateTime        @default(now()) @map("started_at") @db.Timestamptz(6)
   completedAt     DateTime?       @map("completed_at") @db.Timestamptz(6)
-  updatedAt       DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedAt       DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   // 1. Atomic Idempotency Constraint at Database Engine Level
   @@unique([userId, idempotencyKey])

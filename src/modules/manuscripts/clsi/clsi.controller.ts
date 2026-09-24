@@ -35,7 +35,13 @@ import {
 export class ClsiController {
   constructor(private readonly clsiService: ClsiService) {}
 
-  @Post(['manuscripts/compile', 'clsi/compile', 'compiler/compile', 'latex/compile'])
+  @Post([
+    'v1/manuscripts/compile',
+    'manuscripts/compile',
+    'clsi/compile',
+    'compiler/compile',
+    'latex/compile',
+  ])
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Compile LaTeX manuscript source to PDF via Overleaf-parity CLSI',
@@ -47,7 +53,13 @@ export class ClsiController {
     return this.clsiService.compile(dto, userId);
   }
 
-  @Post(['manuscripts/word-count', 'clsi/word-count', 'compiler/word-count', 'latex/word-count'])
+  @Post([
+    'v1/manuscripts/word-count',
+    'manuscripts/word-count',
+    'clsi/word-count',
+    'compiler/word-count',
+    'latex/word-count',
+  ])
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Calculate academic word count and metrics (texcount parity)',
@@ -57,6 +69,7 @@ export class ClsiController {
   }
 
   @Post([
+    'v1/manuscripts/synctex/forward',
     'synctex/forward',
     'manuscripts/synctex/forward',
     'clsi/synctex/forward',
@@ -74,6 +87,7 @@ export class ClsiController {
   }
 
   @Post([
+    'v1/manuscripts/synctex/reverse',
     'synctex/reverse',
     'manuscripts/synctex/reverse',
     'clsi/synctex/reverse',
@@ -91,7 +105,11 @@ export class ClsiController {
     return this.clsiService.reverseSync(dto);
   }
 
-  @Get([':projectId/clsi/artifacts', ':projectId/compiler/artifacts'])
+  @Get([
+    'v1/manuscripts/projects/:projectId/artifacts',
+    ':projectId/clsi/artifacts',
+    ':projectId/compiler/artifacts',
+  ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
@@ -101,7 +119,11 @@ export class ClsiController {
     return this.clsiService.listAuxFiles(projectId);
   }
 
-  @Get([':projectId/clsi/artifacts/:filename', ':projectId/compiler/artifacts/:filename'])
+  @Get([
+    'v1/manuscripts/projects/:projectId/artifacts/:filename',
+    ':projectId/clsi/artifacts/:filename',
+    ':projectId/compiler/artifacts/:filename',
+  ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Download a specific auxiliary file' })

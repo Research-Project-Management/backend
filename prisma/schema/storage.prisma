@@ -39,38 +39,38 @@ enum FileAuditAction {
 // -------------------------
 
 model File {
-  id           String         @id @default(uuid()) @db.Uuid
-  filename     String
-  size         BigInt         @default(0)
-  mimeType     String         @default("application/octet-stream") @map("mime_type")
-  url          String         @default("")
-  key          String?
-  hash         String?
-  thumbnail    String?
-  isFolder     Boolean        @default(false) @map("is_folder")
-  starred      Boolean        @default(false)
-  metaData     Json?          @default("{}") @map("meta_data")
-  parentId     String?        @map("parent_id") @db.Uuid
-  parent       File?          @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
-  children     File[]         @relation("FolderHierarchy")
+  id        String  @id @default(uuid()) @db.Uuid
+  filename  String
+  size      BigInt  @default(0)
+  mimeType  String  @default("application/octet-stream") @map("mime_type")
+  url       String  @default("")
+  key       String?
+  hash      String?
+  thumbnail String?
+  isFolder  Boolean @default(false) @map("is_folder")
+  starred   Boolean @default(false)
+  metaData  Json?   @default("{}") @map("meta_data")
+  parentId  String? @map("parent_id") @db.Uuid
+  parent    File?   @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children  File[]  @relation("FolderHierarchy")
 
   // Storage Isolation (Two-Tier Scope: Personal Drive vs Project / Page Scope)
-  linkedToType String?        @map("linked_to_type")
-  linkedToId   String?        @map("linked_to_id")
+  linkedToType String? @map("linked_to_type")
+  linkedToId   String? @map("linked_to_id")
 
   // CAS Physical Blob Link
-  blobId       String?        @map("blob_id") @db.Uuid
-  blob         StorageBlob?   @relation(fields: [blobId], references: [id], onDelete: Restrict)
+  blobId String?      @map("blob_id") @db.Uuid
+  blob   StorageBlob? @relation(fields: [blobId], references: [id], onDelete: Restrict)
 
   // Ownership & Sharing
-  authorId     String         @map("author_id") @db.Uuid
-  author       User           @relation("UserFiles", fields: [authorId], references: [id], onDelete: Restrict)
-  sharedWith   FileShare[]
-  versions     FileVersion[]
+  authorId   String        @map("author_id") @db.Uuid
+  author     User          @relation("UserFiles", fields: [authorId], references: [id], onDelete: Restrict)
+  sharedWith FileShare[]
+  versions   FileVersion[]
 
-  trashedAt    DateTime?      @map("trashed_at") @db.Timestamptz(6)
-  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  trashedAt DateTime? @map("trashed_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([authorId])
   @@index([parentId])
@@ -101,20 +101,20 @@ model FileShare {
 // -------------------------
 
 model StorageBlob {
-  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  contentHash   Bytes          @map("content_hash")
-  hashAlgorithm String         @default("SHA256") @map("hash_algorithm") @db.VarChar(16)
-  sizeBytes     BigInt         @map("size_bytes")
-  s3Key         String         @map("s3_key") @db.VarChar(512)
-  s3Bucket      String         @map("s3_bucket") @db.VarChar(63)
-  storageClass  String         @default("STANDARD") @map("storage_class") @db.VarChar(32)
-  refCount      Int            @default(1) @map("ref_count")
-  status        BlobStatus     @default(PENDING)
-  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
-  tombstoneAt   DateTime?      @map("tombstone_at") @db.Timestamptz(6)
+  id            String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  contentHash   Bytes      @map("content_hash")
+  hashAlgorithm String     @default("SHA256") @map("hash_algorithm") @db.VarChar(16)
+  sizeBytes     BigInt     @map("size_bytes")
+  s3Key         String     @map("s3_key") @db.VarChar(512)
+  s3Bucket      String     @map("s3_bucket") @db.VarChar(63)
+  storageClass  String     @default("STANDARD") @map("storage_class") @db.VarChar(32)
+  refCount      Int        @default(1) @map("ref_count")
+  status        BlobStatus @default(PENDING)
+  createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  tombstoneAt   DateTime?  @map("tombstone_at") @db.Timestamptz(6)
 
-  files         File[]
-  versions      FileVersion[]
+  files    File[]
+  versions FileVersion[]
 
   @@unique([contentHash], map: "uq_blobs_content_hash")
   @@index([tombstoneAt], map: "idx_blobs_tombstone")
@@ -127,16 +127,16 @@ model StorageBlob {
 // -------------------------
 
 model FileVersion {
-  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  fileId        String       @map("file_id") @db.Uuid
-  blobId        String       @map("blob_id") @db.Uuid
-  versionNumber Int          @map("version_number")
-  changeComment String?      @map("change_comment") @db.VarChar(500)
-  createdById   String       @map("created_by_id") @db.Uuid
-  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fileId        String   @map("file_id") @db.Uuid
+  blobId        String   @map("blob_id") @db.Uuid
+  versionNumber Int      @map("version_number")
+  changeComment String?  @map("change_comment") @db.VarChar(500)
+  createdById   String   @map("created_by_id") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  file          File         @relation(fields: [fileId], references: [id], onDelete: Cascade)
-  blob          StorageBlob  @relation(fields: [blobId], references: [id], onDelete: Restrict)
+  file File        @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  blob StorageBlob @relation(fields: [blobId], references: [id], onDelete: Restrict)
 
   @@unique([fileId, versionNumber], map: "uq_file_version")
   @@map("file_versions")
@@ -166,7 +166,7 @@ model UploadSession {
   createdAt    DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  parts        UploadPart[]
+  parts UploadPart[]
 
   @@index([status, expiresAt], map: "idx_upload_sessions_cleanup")
   @@index([userId], map: "idx_upload_sessions_user")
@@ -175,13 +175,13 @@ model UploadSession {
 }
 
 model UploadPart {
-  sessionId  String        @map("session_id") @db.Uuid
-  partNumber Int           @map("part_number")
-  etag       String        @db.VarChar(64)
-  sizeBytes  Int           @map("size_bytes")
-  uploadedAt DateTime      @default(now()) @map("uploaded_at") @db.Timestamptz(6)
+  sessionId  String   @map("session_id") @db.Uuid
+  partNumber Int      @map("part_number")
+  etag       String   @db.VarChar(64)
+  sizeBytes  Int      @map("size_bytes")
+  uploadedAt DateTime @default(now()) @map("uploaded_at") @db.Timestamptz(6)
 
-  session    UploadSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session UploadSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@id([sessionId, partNumber])
   @@map("upload_parts")

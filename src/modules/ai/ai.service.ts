@@ -89,27 +89,26 @@ export class AiService {
     }
 
     if (pageId) {
-      const page = await this.prisma.page.findFirst({
-        where: { id: pageId, deletedAt: null },
-        include: {
-          project: {
-            select: {
-              createdById: true,
-              members: { where: { userId }, select: { userId: true } },
-            },
-          },
+      const doc = await this.prisma.manuscriptDoc.findFirst({
+        where: { id: pageId, deleted: false },
+        select: { id: true, projectId: true },
+      });
+      if (!doc) {
+        throw new NotFoundException('Manuscript doc not found');
+      }
+      const project = await this.prisma.project.findFirst({
+        where: { id: doc.projectId },
+        select: {
+          createdById: true,
+          members: { where: { userId }, select: { userId: true } },
         },
       });
-      if (!page) {
-        throw new NotFoundException('Document page not found');
-      }
       const canAccess =
-        page.authorId === userId ||
-        page.project?.createdById === userId ||
-        (page.project?.members && page.project.members.length > 0);
+        project?.createdById === userId ||
+        (project?.members && project.members.length > 0);
       if (!canAccess) {
         throw new ForbiddenException(
-          'You do not have access to this document page',
+          'You do not have access to this manuscript document',
         );
       }
     }

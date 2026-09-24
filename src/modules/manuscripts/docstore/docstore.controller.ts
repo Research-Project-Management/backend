@@ -34,8 +34,9 @@ import {
 
 @ApiTags('Manuscripts - Docstore')
 @Controller([
-  'manuscripts/projects/:projectId/docs',
+  'api/v1/manuscripts/projects/:projectId/docs',
   'api/manuscripts/projects/:projectId/docs',
+  'manuscripts/projects/:projectId/docs',
   'api/projects/:projectId/pages',
   'projects/:projectId/pages',
   'docstore/project/:projectId',

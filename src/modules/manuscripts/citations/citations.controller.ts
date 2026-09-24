@@ -34,7 +34,11 @@ import { DuplicateCitationKeyException } from './core/domain/exceptions/duplicat
 import { InvalidBibtexException } from './core/domain/exceptions/invalid-bibtex.exception';
 
 @ApiTags('Manuscripts - Citations & Bibliography')
-@Controller(['manuscripts/projects/:projectId/citations', 'projects/:projectId/citations'])
+@Controller([
+  'api/v1/manuscripts/projects/:projectId/citations',
+  'manuscripts/projects/:projectId/citations',
+  'projects/:projectId/citations',
+])
 export class CitationsController {
   constructor(private readonly citationsService: CitationsService) {}
 
@@ -111,7 +115,7 @@ export class CitationsController {
 }
 
 @ApiTags('Manuscripts - Citations & Bibliography')
-@Controller(['manuscripts/citations', 'citations'])
+@Controller(['api/v1/manuscripts/citations', 'manuscripts/citations', 'citations'])
 export class CitationsUtilityController {
   constructor(private readonly citationsService: CitationsService) {}
 

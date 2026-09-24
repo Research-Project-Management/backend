@@ -40,60 +40,55 @@ enum ThemePreference {
 }
 
 model User {
-  id         String     @id @default(uuid(7)) @db.Uuid
-  email      String     @unique
-  password   String?    @map("password_hash")
-  status     UserStatus @default(pending_verification)
-  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt  DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
-  deletedAt  DateTime?  @map("deleted_at") @db.Timestamptz(6)
+  id        String     @id @default(uuid(7)) @db.Uuid
+  email     String     @unique
+  password  String?    @map("password_hash")
+  status    UserStatus @default(pending_verification)
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime?  @map("deleted_at") @db.Timestamptz(6)
 
   // Identity Internal Relations (100% Isolated)
-  profile             UserProfile?
-  settings            UserSettings?
-  accounts            UserAccount[]
-  refreshTokens       RefreshToken[]
-  verificationTokens  VerificationToken[]
-  auditLogs           AuditLog[]            @relation("AuditActor")
+  profile            UserProfile?
+  settings           UserSettings?
+  accounts           UserAccount[]
+  refreshTokens      RefreshToken[]
+  verificationTokens VerificationToken[]
+  auditLogs          AuditLog[]          @relation("AuditActor")
 
   // Collaborative Project Relations (Clean & Two-Tier)
-  createdProjects     Project[]             @relation("ProjectCreator")
-  projectMembers      ProjectMember[]       @relation("UserProjectMemberships")
-  projectFavorites    ProjectFavorite[]     @relation("UserProjectFavorites")
-  labels              Label[]               @relation("UserLabels")
-  assignedProjectLabels ProjectLabel[]      @relation("ProjectLabelAssigner")
-  projectTemplates    ProjectTemplate[]     @relation("UserProjectTemplates")
-  projectUpdates      ProjectUpdate[]       @relation("UserProjectUpdates")
+  createdProjects       Project[]         @relation("ProjectCreator")
+  projectMembers        ProjectMember[]   @relation("UserProjectMemberships")
+  projectFavorites      ProjectFavorite[] @relation("UserProjectFavorites")
+  labels                Label[]           @relation("UserLabels")
+  assignedProjectLabels ProjectLabel[]    @relation("ProjectLabelAssigner")
+  projectTemplates      ProjectTemplate[] @relation("UserProjectTemplates")
+  projectUpdates        ProjectUpdate[]   @relation("UserProjectUpdates")
 
   // Storage Relations (Personal Scope & File Sharing)
-  authoredFiles       File[]                @relation("UserFiles")
-  sharedFiles         FileShare[]           @relation("UserSharedFiles")
+  authoredFiles File[]      @relation("UserFiles")
+  sharedFiles   FileShare[] @relation("UserSharedFiles")
 
   // Work-Item Relations (Collaborative Issue Tracking)
-  authoredCycles      Cycle[]
-  userActivityEvents  ActivityEvent[]       @relation("UserActivityEvents")
-  createdWorkItems    WorkItem[]            @relation("WorkItemAuthor")
-  assignedWorkItems   WorkItem[]            @relation("WorkItemAssignee")
-  workItemComments    WorkItemComment[]
-  createdViews        WorkItemView[]        @relation("ViewAuthor")
-  viewFavorites       ViewFavorite[]
-  userProperties      ProjectUserProperty[]
-  userDrafts          WorkItemDraft[]       @relation("UserDrafts")
-  userTemplates       WorkItemTemplate[]    @relation("UserTemplates")
-  userAttachments     EntityAttachment[]    @relation("UserAttachments")
-  createdWorkItemLabels WorkItemLabel[]     @relation("UserCreatedWorkItemLabels")
-  workItemCoAssignments WorkItemAssignee[]  @relation("WorkItemCoAssignees")
+  authoredCycles        Cycle[]
+  userActivityEvents    ActivityEvent[]       @relation("UserActivityEvents")
+  createdWorkItems      WorkItem[]            @relation("WorkItemAuthor")
+  assignedWorkItems     WorkItem[]            @relation("WorkItemAssignee")
+  workItemComments      WorkItemComment[]
+  createdViews          WorkItemView[]        @relation("ViewAuthor")
+  viewFavorites         ViewFavorite[]
+  userProperties        ProjectUserProperty[]
+  userDrafts            WorkItemDraft[]       @relation("UserDrafts")
+  userTemplates         WorkItemTemplate[]    @relation("UserTemplates")
+  userAttachments       EntityAttachment[]    @relation("UserAttachments")
+  createdWorkItemLabels WorkItemLabel[]       @relation("UserCreatedWorkItemLabels")
+  workItemCoAssignments WorkItemAssignee[]    @relation("WorkItemCoAssignees")
 
   // AI & Intelligence Relations (Unified Copilot & Chat History)
-  aiChats             AiChat[]              @relation("UserAiChats")
+  aiChats AiChat[] @relation("UserAiChats")
 
   // Sticky Notes & Canvas Relations
-  stickies            Sticky[]              @relation("UserStickies")
-
-  // Document Relations (Page & Document Collaboration)
-  authoredPages           Page[]           @relation("PageAuthor")
-  authoredPageComments    PageComment[]    @relation("PageCommentAuthor")
-  authoredPageSuggestions PageSuggestion[] @relation("PageSuggestionAuthor")
+  stickies Sticky[] @relation("UserStickies")
 
   @@index([email])
   @@index([status, deletedAt])
@@ -101,13 +96,13 @@ model User {
 }
 
 model UserProfile {
-  userId         String    @id @map("user_id") @db.Uuid
-  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name           String    @default("User")
-  avatar         String?   @map("avatar_url")
-  institution    String?
-  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  userId      String   @id @map("user_id") @db.Uuid
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String   @default("User")
+  avatar      String?  @map("avatar_url")
+  institution String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([name])
   @@index([institution])
@@ -115,13 +110,13 @@ model UserProfile {
 }
 
 model UserSettings {
-  userId          String          @id @map("user_id") @db.Uuid
-  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  theme           ThemePreference @default(system)
-  locale          String          @default("en")
-  editorConfig    Json            @default("{}") @map("editor_config")
-  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  userId       String          @id @map("user_id") @db.Uuid
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  theme        ThemePreference @default(system)
+  locale       String          @default("en")
+  editorConfig Json            @default("{}") @map("editor_config")
+  createdAt    DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@map("user_settings")
 }

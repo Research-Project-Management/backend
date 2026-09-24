@@ -4,6 +4,8 @@
 # Note: Frontend (Next.js) is deployed on Vercel and excluded from this stack.
 # ==============================================================================
 
+name: flux
+
 services:
   # ----------------------------------------------------------------------------
   # 1. PostgreSQL Database Service
@@ -61,11 +63,11 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 60s
+      start_period: 120s
     deploy:
       resources:
         limits:
-          memory: 1200M
+          memory: 2048M
         reservations:
           memory: 256M
     logging:
@@ -165,23 +167,26 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-      HOST: 0.0.0.0
-      DATABASE_URL: ${DATABASE_URL:-postgresql://${DB_USER:-postgres}:${DB_PASSWORD}@db:5432/${DB_NAME:-flux-db}?schema=public}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      DATABASE_URL: "postgresql://${DB_USER:-postgres}:${DB_PASSWORD}@db:5432/${DB_NAME:-flux-db}?schema=public"
+      DIRECT_URL: "postgresql://${DB_USER:-postgres}:${DB_PASSWORD}@db:5432/${DB_NAME:-flux-db}?schema=public"
+      REDIS_URL: "redis://redis:6379"
+      REDIS_CACHE_URL: "redis://redis:6379"
+      REDIS_QUEUE_URL: "redis://redis:6379"
       GROBID_URL: http://grobid:8070
-      CLSI_URL: ${CLSI_URL:-http://flux_clsi:2918}
-      LATEX_URL: ${LATEX_URL:-http://flux_clsi:2918}
+      ZOTERO_TRANSLATOR_URL: http://translator:1969
+      CLSI_URL: http://flux_clsi:3013
+      FLUX_AI_URL: http://flux-ai:8000
       CLIENT_URL: ${CLIENT_URL}
       ORIGINS: ${ORIGINS}
     depends_on:
       db:
         condition: service_healthy
-      grobid:
-        condition: service_healthy
-      translator:
-        condition: service_healthy
       redis:
         condition: service_healthy
+      grobid:
+        condition: service_started
+      translator:
+        condition: service_started
     deploy:
       resources:
         limits:
@@ -198,6 +203,62 @@ services:
         aliases:
           - be
           - backend
+
+  # ----------------------------------------------------------------------------
+  # 6. Dedicated BullMQ Background Worker Service
+  # ----------------------------------------------------------------------------
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+    image: ghcr.io/research-project-management/backend:latest
+    container_name: flux_backend_worker
+    restart: unless-stopped
+    command: ["node", "dist/worker.js"]
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: "postgresql://${DB_USER:-postgres}:${DB_PASSWORD}@db:5432/${DB_NAME:-flux-db}?schema=public"
+      DIRECT_URL: "postgresql://${DB_USER:-postgres}:${DB_PASSWORD}@db:5432/${DB_NAME:-flux-db}?schema=public"
+      REDIS_URL: "redis://redis:6379"
+      REDIS_CACHE_URL: "redis://redis:6379"
+      REDIS_QUEUE_URL: "redis://redis:6379"
+      GROBID_URL: http://grobid:8070
+      ZOTERO_TRANSLATOR_URL: http://translator:1969
+      CLSI_URL: http://flux_clsi:3013
+      FLUX_AI_URL: http://flux-ai:8000
+      SKIP_MIGRATIONS: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      be:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'dist/worker.js' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+        reservations:
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      flux_network:
+        aliases:
+          - worker
+          - flux_worker
 
 volumes:
   postgres_data:

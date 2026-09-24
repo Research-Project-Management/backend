@@ -29,7 +29,7 @@ const isUuid = (val?: string | null): boolean =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
 
 @ApiTags('Manuscripts - Pages Compatibility Bridge')
-@Controller('api')
+@Controller(['api/v1/manuscripts', 'api'])
 export class PagesBridgeController {
   constructor(
     private readonly docstoreService: DocstoreService,
@@ -39,9 +39,10 @@ export class PagesBridgeController {
   // ─── 1. CORE DOCUMENT CONTENT & METADATA ──────────────────────────────────────
 
   /**
+   * GET /api/v1/manuscripts/docs/:pageId
    * GET /api/pages/:pageId
    */
-  @Get('pages/:pageId')
+  @Get(['docs/:pageId', 'pages/:pageId'])
   @ApiOperation({ summary: 'Get document by pageId with fallback' })
   async getPageById(@Param('pageId') pageId: string) {
     try {
@@ -111,9 +112,10 @@ export class PagesBridgeController {
   }
 
   /**
+   * PUT /api/v1/manuscripts/docs/:pageId
    * PUT /api/pages/:pageId
    */
-  @Put('pages/:pageId')
+  @Put(['docs/:pageId', 'pages/:pageId'])
   @ApiOperation({ summary: 'Update document content by pageId' })
   async updatePageContent(
     @Param('pageId') pageId: string,
@@ -189,9 +191,10 @@ export class PagesBridgeController {
   }
 
   /**
+   * PUT /api/v1/manuscripts/docs/:pageId/thumbnail
    * PUT /api/pages/:pageId/thumbnail
    */
-  @Put('pages/:pageId/thumbnail')
+  @Put(['docs/:pageId/thumbnail', 'pages/:pageId/thumbnail'])
   @HttpCode(HttpStatus.OK)
   async updateThumbnail(
     @Param('pageId') pageId: string,
@@ -206,9 +209,10 @@ export class PagesBridgeController {
   }
 
   /**
+   * GET /api/v1/manuscripts/docs/:pageId/files
    * GET /api/pages/:pageId/files
    */
-  @Get('pages/:pageId/files')
+  @Get(['docs/:pageId/files', 'pages/:pageId/files'])
   async getPageFiles(@Param('pageId') pageId: string) {
     try {
       if (!isUuid(pageId)) return { files: [] };
@@ -246,9 +250,10 @@ export class PagesBridgeController {
   // ─── 2. INLINE COMMENTS & THREADS ─────────────────────────────────────────────
 
   /**
+   * GET /api/v1/manuscripts/docs/:pageId/comments
    * GET /api/pages/:pageId/comments
    */
-  @Get('pages/:pageId/comments')
+  @Get(['docs/:pageId/comments', 'pages/:pageId/comments'])
   async getComments(@Param('pageId') pageId: string) {
     if (!isUuid(pageId)) return { comments: [] };
     try {
@@ -292,9 +297,10 @@ export class PagesBridgeController {
   }
 
   /**
+   * POST /api/v1/manuscripts/docs/:pageId/comments
    * POST /api/pages/:pageId/comments
    */
-  @Post('pages/:pageId/comments')
+  @Post(['docs/:pageId/comments', 'pages/:pageId/comments'])
   @HttpCode(HttpStatus.CREATED)
   async createComment(
     @Param('pageId') pageId: string,
@@ -365,9 +371,10 @@ export class PagesBridgeController {
   }
 
   /**
+   * PATCH /api/v1/manuscripts/docs/:pageId/comments/:commentId
    * PATCH /api/pages/:pageId/comments/:commentId
    */
-  @Patch('pages/:pageId/comments/:commentId')
+  @Patch(['docs/:pageId/comments/:commentId', 'pages/:pageId/comments/:commentId'])
   async updateComment(
     @Param('commentId') commentId: string,
     @Body() body: { content?: string; status?: 'open' | 'resolved' },
@@ -426,9 +433,10 @@ export class PagesBridgeController {
   }
 
   /**
+   * DELETE /api/v1/manuscripts/docs/:pageId/comments/:commentId
    * DELETE /api/pages/:pageId/comments/:commentId
    */
-  @Delete('pages/:pageId/comments/:commentId')
+  @Delete(['docs/:pageId/comments/:commentId', 'pages/:pageId/comments/:commentId'])
   @HttpCode(HttpStatus.OK)
   async deleteComment(@Param('commentId') commentId: string) {
     if (isUuid(commentId)) {
@@ -440,9 +448,15 @@ export class PagesBridgeController {
   }
 
   /**
+   * POST /api/v1/manuscripts/docs/:pageId/comments/:commentId/reply
    * POST /api/pages/:pageId/comments/:commentId/reply
    */
-  @Post(['pages/:pageId/comments/:commentId/reply', 'pages/:pageId/comments/:commentId/replies'])
+  @Post([
+    'docs/:pageId/comments/:commentId/reply',
+    'docs/:pageId/comments/:commentId/replies',
+    'pages/:pageId/comments/:commentId/reply',
+    'pages/:pageId/comments/:commentId/replies',
+  ])
   @HttpCode(HttpStatus.CREATED)
   async addCommentReply(
     @Param('commentId') commentId: string,
@@ -502,9 +516,13 @@ export class PagesBridgeController {
   }
 
   /**
+   * DELETE /api/v1/manuscripts/docs/:pageId/comments/:commentId/replies/:replyId
    * DELETE /api/pages/:pageId/comments/:commentId/replies/:replyId
    */
-  @Delete('pages/:pageId/comments/:commentId/replies/:replyId')
+  @Delete([
+    'docs/:pageId/comments/:commentId/replies/:replyId',
+    'pages/:pageId/comments/:commentId/replies/:replyId',
+  ])
   @HttpCode(HttpStatus.OK)
   async deleteCommentReply(
     @Param('commentId') commentId: string,
@@ -519,9 +537,13 @@ export class PagesBridgeController {
   }
 
   /**
+   * PATCH /api/v1/manuscripts/docs/:pageId/comments/:commentId/resolve
    * PATCH /api/pages/:pageId/comments/:commentId/resolve
    */
-  @Patch('pages/:pageId/comments/:commentId/resolve')
+  @Patch([
+    'docs/:pageId/comments/:commentId/resolve',
+    'pages/:pageId/comments/:commentId/resolve',
+  ])
   async resolveComment(
     @Param('commentId') commentId: string,
     @Body() body: { resolved?: boolean },
@@ -565,9 +587,10 @@ export class PagesBridgeController {
   // ─── 3. TRACK CHANGES / REVIEW SUGGESTIONS ───────────────────────────────────
 
   /**
+   * GET /api/v1/manuscripts/docs/:pageId/suggestions
    * GET /api/pages/:pageId/suggestions
    */
-  @Get('pages/:pageId/suggestions')
+  @Get(['docs/:pageId/suggestions', 'pages/:pageId/suggestions'])
   async getSuggestions(
     @Param('pageId') pageId: string,
     @Query('status') status?: 'pending' | 'accepted' | 'rejected',
@@ -613,9 +636,10 @@ export class PagesBridgeController {
   }
 
   /**
+   * POST /api/v1/manuscripts/docs/:pageId/suggestions
    * POST /api/pages/:pageId/suggestions
    */
-  @Post('pages/:pageId/suggestions')
+  @Post(['docs/:pageId/suggestions', 'pages/:pageId/suggestions'])
   @HttpCode(HttpStatus.CREATED)
   async createSuggestion(
     @Param('pageId') pageId: string,
@@ -697,9 +721,13 @@ export class PagesBridgeController {
   }
 
   /**
+   * POST /api/v1/manuscripts/docs/:pageId/suggestions/:suggestionId/accept
    * POST /api/pages/:pageId/suggestions/:suggestionId/accept
    */
-  @Post('pages/:pageId/suggestions/:suggestionId/accept')
+  @Post([
+    'docs/:pageId/suggestions/:suggestionId/accept',
+    'pages/:pageId/suggestions/:suggestionId/accept',
+  ])
   @HttpCode(HttpStatus.OK)
   async acceptSuggestion(
     @Param('pageId') pageId: string,
@@ -720,9 +748,13 @@ export class PagesBridgeController {
   }
 
   /**
+   * POST /api/v1/manuscripts/docs/:pageId/suggestions/:suggestionId/reject
    * POST /api/pages/:pageId/suggestions/:suggestionId/reject
    */
-  @Post('pages/:pageId/suggestions/:suggestionId/reject')
+  @Post([
+    'docs/:pageId/suggestions/:suggestionId/reject',
+    'pages/:pageId/suggestions/:suggestionId/reject',
+  ])
   @HttpCode(HttpStatus.OK)
   async rejectSuggestion(
     @Param('pageId') pageId: string,
@@ -743,9 +775,13 @@ export class PagesBridgeController {
   }
 
   /**
+   * POST /api/v1/manuscripts/docs/:pageId/suggestions/accept-all
    * POST /api/pages/:pageId/suggestions/accept-all
    */
-  @Post('pages/:pageId/suggestions/accept-all')
+  @Post([
+    'docs/:pageId/suggestions/accept-all',
+    'pages/:pageId/suggestions/accept-all',
+  ])
   @HttpCode(HttpStatus.OK)
   async acceptAllSuggestions(@Param('pageId') pageId: string) {
     let acceptedCount = 0;
@@ -764,9 +800,13 @@ export class PagesBridgeController {
   }
 
   /**
+   * POST /api/v1/manuscripts/docs/:pageId/suggestions/reject-all
    * POST /api/pages/:pageId/suggestions/reject-all
    */
-  @Post('pages/:pageId/suggestions/reject-all')
+  @Post([
+    'docs/:pageId/suggestions/reject-all',
+    'pages/:pageId/suggestions/reject-all',
+  ])
   @HttpCode(HttpStatus.OK)
   async rejectAllSuggestions(@Param('pageId') pageId: string) {
     let rejectedCount = 0;
@@ -787,9 +827,10 @@ export class PagesBridgeController {
   // ─── 4. VERSION HISTORY & SNAPSHOTS ──────────────────────────────────────────
 
   /**
+   * GET /api/v1/manuscripts/docs/:pageId/versions
    * GET /api/pages/:pageId/versions
    */
-  @Get('pages/:pageId/versions')
+  @Get(['docs/:pageId/versions', 'pages/:pageId/versions'])
   async getVersions(@Param('pageId') pageId: string) {
     if (!isUuid(pageId)) return { versions: [] };
     try {
@@ -821,9 +862,10 @@ export class PagesBridgeController {
   }
 
   /**
+   * GET /api/v1/manuscripts/docs/:pageId/versions/:versionId
    * GET /api/pages/:pageId/versions/:versionId
    */
-  @Get('pages/:pageId/versions/:versionId')
+  @Get(['docs/:pageId/versions/:versionId', 'pages/:pageId/versions/:versionId'])
   async getVersionById(
     @Param('pageId') pageId: string,
     @Param('versionId') versionId: string,
@@ -852,9 +894,10 @@ export class PagesBridgeController {
   }
 
   /**
+   * POST /api/v1/manuscripts/docs/:pageId/versions
    * POST /api/pages/:pageId/versions
    */
-  @Post('pages/:pageId/versions')
+  @Post(['docs/:pageId/versions', 'pages/:pageId/versions'])
   @HttpCode(HttpStatus.CREATED)
   async createVersion(
     @Param('pageId') pageId: string,
@@ -915,18 +958,26 @@ export class PagesBridgeController {
   }
 
   /**
+   * POST /api/v1/manuscripts/docs/:pageId/versions/:versionId/restore
    * POST /api/pages/:pageId/versions/:versionId/restore
    */
-  @Post('pages/:pageId/versions/:versionId/restore')
+  @Post([
+    'docs/:pageId/versions/:versionId/restore',
+    'pages/:pageId/versions/:versionId/restore',
+  ])
   @HttpCode(HttpStatus.OK)
   async restoreVersion() {
     return { success: true };
   }
 
   /**
+   * POST /api/v1/manuscripts/docs/:pageId/versions/:versionId/label
    * POST /api/pages/:pageId/versions/:versionId/label
    */
-  @Post('pages/:pageId/versions/:versionId/label')
+  @Post([
+    'docs/:pageId/versions/:versionId/label',
+    'pages/:pageId/versions/:versionId/label',
+  ])
   @HttpCode(HttpStatus.OK)
   async labelVersion(
     @Param('versionId') versionId: string,
@@ -943,9 +994,10 @@ export class PagesBridgeController {
   }
 
   /**
+   * GET /api/v1/manuscripts/docs/:pageId/versions/diff
    * GET /api/pages/:pageId/versions/diff
    */
-  @Get('pages/:pageId/versions/diff')
+  @Get(['docs/:pageId/versions/diff', 'pages/:pageId/versions/diff'])
   async getDiff(
     @Param('pageId') pageId: string,
     @Query('from') from: string,
@@ -961,25 +1013,28 @@ export class PagesBridgeController {
   }
 
   /**
+   * GET /api/v1/manuscripts/docs/:pageId/timeline
    * GET /api/pages/:pageId/timeline
    */
-  @Get('pages/:pageId/timeline')
+  @Get(['docs/:pageId/timeline', 'pages/:pageId/timeline'])
   async getTimeline() {
     return { entries: [], oldestMs: Date.now() - 3600000, newestMs: Date.now() };
   }
 
   /**
+   * GET /api/v1/manuscripts/docs/:pageId/at
    * GET /api/pages/:pageId/at
    */
-  @Get('pages/:pageId/at')
+  @Get(['docs/:pageId/at', 'pages/:pageId/at'])
   async getAt() {
     return { content: '', timestamp: Date.now() };
   }
 
   /**
+   * GET /api/v1/manuscripts/projects/:projectId/history
    * GET /api/pages/:projectId/history
    */
-  @Get('pages/:projectId/history')
+  @Get(['projects/:projectId/history', 'pages/:projectId/history'])
   async getProjectHistory() {
     return { events: [], history: [] };
   }
@@ -987,9 +1042,10 @@ export class PagesBridgeController {
   // ─── 5. COMPILER INCREMENTAL SYNC ─────────────────────────────────────────────
 
   /**
+   * POST /api/v1/manuscripts/docs/:rootPageId/sync-incremental
    * POST /api/pages/:rootPageId/sync-incremental
    */
-  @Post('pages/:rootPageId/sync-incremental')
+  @Post(['docs/:rootPageId/sync-incremental', 'pages/:rootPageId/sync-incremental'])
   @HttpCode(HttpStatus.OK)
   async syncIncremental(
     @Param('rootPageId') rootPageId: string,
@@ -1002,36 +1058,43 @@ export class PagesBridgeController {
   // ─── 6. REAL-TIME COLLABORATION HTTP FALLBACKS ───────────────────────────────
 
   /**
+   * GET /api/v1/manuscripts/docs/:pageId/collaboration/presence
    * GET /api/pages/:pageId/collaboration/presence
    */
-  @Get('pages/:pageId/collaboration/presence')
+  @Get(['docs/:pageId/collaboration/presence', 'pages/:pageId/collaboration/presence'])
   async getPresence() {
     return { activeUsers: [], presence: [] };
   }
 
   /**
+   * POST /api/v1/manuscripts/docs/:pageId/collaboration/heartbeat
    * POST /api/pages/:pageId/collaboration/heartbeat
    */
-  @Post('pages/:pageId/collaboration/heartbeat')
+  @Post(['docs/:pageId/collaboration/heartbeat', 'pages/:pageId/collaboration/heartbeat'])
   @HttpCode(HttpStatus.OK)
   async sendHeartbeat() {
     return { success: true };
   }
 
   /**
+   * POST /api/v1/manuscripts/docs/:pageId/collaboration/leave
    * POST /api/pages/:pageId/collaboration/leave
    */
-  @Post('pages/:pageId/collaboration/leave')
+  @Post(['docs/:pageId/collaboration/leave', 'pages/:pageId/collaboration/leave'])
   @HttpCode(HttpStatus.OK)
   async leaveRoom() {
     return { success: true };
   }
 
   /**
+   * GET /api/v1/manuscripts/docs/:pageId/collaboration/stream
+   * GET /api/v1/manuscripts/projects/:projectId/docs/:pageId/collaboration/stream
    * GET /api/pages/:pageId/collaboration/stream
    * GET /api/projects/:projectId/pages/:pageId/collaboration/stream
    */
   @Get([
+    'docs/:pageId/collaboration/stream',
+    'projects/:projectId/docs/:pageId/collaboration/stream',
     'pages/:pageId/collaboration/stream',
     'projects/:projectId/pages/:pageId/collaboration/stream',
   ])
@@ -1050,9 +1113,10 @@ export class PagesBridgeController {
   // ─── 7. DOCUMENT EXPORT ──────────────────────────────────────────────────────
 
   /**
+   * POST /api/v1/manuscripts/docs/:pageId/export
    * POST /api/pages/:pageId/export
    */
-  @Post('pages/:pageId/export')
+  @Post(['docs/:pageId/export', 'pages/:pageId/export'])
   @HttpCode(HttpStatus.OK)
   async exportDocument(
     @Param('pageId') pageId: string,
@@ -1088,9 +1152,10 @@ export class PagesBridgeController {
   // ─── 8. PROJECT DOCUMENT SEARCH & REPLACE ────────────────────────────────────
 
   /**
+   * POST /api/v1/manuscripts/projects/:projectId/search
    * POST /api/projects/:projectId/documents/search
    */
-  @Post('projects/:projectId/documents/search')
+  @Post(['projects/:projectId/search', 'projects/:projectId/documents/search'])
   @HttpCode(HttpStatus.OK)
   async searchDocuments(
     @Param('projectId') projectId: string,
@@ -1167,9 +1232,10 @@ export class PagesBridgeController {
   }
 
   /**
+   * POST /api/v1/manuscripts/projects/:projectId/replace
    * POST /api/projects/:projectId/documents/replace
    */
-  @Post('projects/:projectId/documents/replace')
+  @Post(['projects/:projectId/replace', 'projects/:projectId/documents/replace'])
   @HttpCode(HttpStatus.OK)
   async replaceDocuments(
     @Param('projectId') projectId: string,
@@ -1182,5 +1248,141 @@ export class PagesBridgeController {
       totalOccurrencesReplaced: 0,
       affectedFileIds: [],
     };
+  }
+
+  // ─── 9. PROJECT DOCS CRUD & LABELS ──────────────────────────────────────────
+
+  /**
+   * POST /api/v1/manuscripts/projects/:projectId/docs
+   * POST /api/projects/:projectId/pages
+   */
+  @Post(['projects/:projectId/docs', 'projects/:projectId/pages'])
+  @HttpCode(HttpStatus.CREATED)
+  async createProjectPage(
+    @Param('projectId') projectId: string,
+    @Body() body: { title?: string; content?: string; status?: string },
+    @Req() req: any,
+  ) {
+    const title = body?.title || 'main.tex';
+    const content = body?.content || '';
+    const userId = req?.user?.id || req?.user?.sub || null;
+
+    if (isUuid(projectId)) {
+      try {
+        const doc = await this.docstoreService.createDoc(projectId, {
+          path: title,
+          text: content,
+          version: 1,
+        });
+        return {
+          page: {
+            id: doc._id,
+            title: doc.path,
+            content,
+            status: body?.status || 'draft',
+            projectId,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+          mainFile: { id: doc._id, title: doc.path },
+          rootPageId: doc._id,
+          mainFileId: doc._id,
+        };
+      } catch {
+        // Fallback
+      }
+    }
+
+    const mockId = `page-${Date.now()}`;
+    return {
+      page: {
+        id: mockId,
+        title,
+        content,
+        status: body?.status || 'draft',
+        projectId,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      mainFile: { id: mockId, title },
+      rootPageId: mockId,
+      mainFileId: mockId,
+    };
+  }
+
+  /**
+   * GET /api/v1/manuscripts/projects/:projectId/docs
+   * GET /api/projects/:projectId/pages
+   */
+  @Get(['projects/:projectId/docs', 'projects/:projectId/pages'])
+  async getProjectPages(
+    @Param('projectId') projectId: string,
+    @Query('status') _status?: string,
+    @Query('search') _search?: string,
+  ) {
+    if (!isUuid(projectId)) return { pages: [] };
+    try {
+      const docs = await this.docstoreService.getAllDocs(projectId);
+      const pages = docs.map((d) => ({
+        id: d._id,
+        title: d.path || 'document.tex',
+        content: Array.isArray(d.lines) ? d.lines.join('\n') : '',
+        status: 'published',
+        projectId,
+        version: d.version,
+        rev: d.rev,
+      }));
+      return { pages };
+    } catch {
+      return { pages: [] };
+    }
+  }
+
+  /**
+   * DELETE /api/v1/manuscripts/docs/:pageId
+   * DELETE /api/pages/:pageId
+   */
+  @Delete(['docs/:pageId', 'pages/:pageId'])
+  @HttpCode(HttpStatus.OK)
+  async deletePage(@Param('pageId') pageId: string) {
+    if (isUuid(pageId)) {
+      try {
+        const doc = await this.prisma.manuscriptDoc.findUnique({
+          where: { id: pageId },
+        });
+        if (doc) {
+          await this.docstoreService.patchDoc(doc.projectId, pageId, { deleted: true });
+        }
+      } catch {
+        // Fallback
+      }
+    }
+    return { success: true };
+  }
+
+  /**
+   * Label management routes
+   */
+  @Get(['projects/:projectId/docs/:pageId/labels', 'projects/:projectId/pages/:pageId/labels'])
+  async getPageLabels() {
+    return { labels: [] };
+  }
+
+  @Post(['projects/:projectId/docs/:pageId/labels', 'projects/:projectId/pages/:pageId/labels'])
+  async assignPageLabels(@Body() _body: any) {
+    return { labels: [] };
+  }
+
+  @Put(['projects/:projectId/docs/:pageId/labels', 'projects/:projectId/pages/:pageId/labels'])
+  async replacePageLabels(@Body() _body: any) {
+    return { labels: [] };
+  }
+
+  @Delete([
+    'projects/:projectId/docs/:pageId/labels/:labelId',
+    'projects/:projectId/pages/:pageId/labels/:labelId',
+  ])
+  async removePageLabel() {
+    return { labels: [] };
   }
 }

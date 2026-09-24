@@ -20,7 +20,7 @@ import {
 } from './dto/template.dto';
 
 @ApiTags('Manuscripts - Templates')
-@Controller(['manuscripts/templates', 'templates'])
+@Controller(['api/v1/manuscripts/templates', 'manuscripts/templates', 'templates'])
 export class TemplatesController {
   constructor(private readonly templatesService: TemplatesService) {}
 

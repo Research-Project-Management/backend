@@ -29,7 +29,11 @@ import { UnsupportedLanguageException } from './core/domain/exceptions/unsupport
 import { InvalidWordException } from './core/domain/exceptions/invalid-word.exception';
 
 @ApiTags('Manuscripts - Spelling & Dictionaries')
-@Controller(['manuscripts/projects/:projectId/spelling', 'projects/:projectId/spelling'])
+@Controller([
+  'api/v1/manuscripts/projects/:projectId/spelling',
+  'manuscripts/projects/:projectId/spelling',
+  'projects/:projectId/spelling',
+])
 export class SpellingController {
   constructor(private readonly spellingService: SpellingService) {}
 
@@ -94,7 +98,7 @@ export class SpellingController {
 }
 
 @ApiTags('Manuscripts - Spelling & Dictionaries')
-@Controller(['manuscripts/spelling', 'spelling'])
+@Controller(['api/v1/manuscripts/spelling', 'manuscripts/spelling', 'spelling'])
 export class SpellingUtilityController {
   constructor(private readonly spellingService: SpellingService) {}
 

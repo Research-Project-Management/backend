@@ -33,6 +33,7 @@ import { TemplateNotFoundException } from './core/domain/exceptions/template-not
 
 @ApiTags('Manuscripts - Project Archive & Templates')
 @Controller([
+  'api/v1/manuscripts/projects',
   'manuscripts/projects',
   'projects',
 ])

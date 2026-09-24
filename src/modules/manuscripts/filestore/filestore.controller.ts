@@ -19,6 +19,7 @@ import {
   HttpStatus,
   HttpCode,
 } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -31,7 +32,12 @@ import { ManuscriptFileResponseDto } from './dto/file-response.dto';
 import { FileNotFoundException } from './core/domain/exceptions/file-not-found.exception';
 import { InvalidByteRangeException } from './core/domain/exceptions/invalid-byte-range.exception';
 
-@Controller('project/:projectId/file')
+@ApiTags('Manuscripts - Filestore & Assets')
+@Controller([
+  'api/v1/manuscripts/projects/:projectId/files',
+  'manuscripts/projects/:projectId/files',
+  'project/:projectId/file',
+])
 export class FilestoreController {
   constructor(
     private readonly uploadUseCase: UploadManuscriptFileUseCase,

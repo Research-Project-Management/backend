@@ -7,23 +7,22 @@ enum MessageRole {
 }
 
 model AiChat {
-  id            String      @id @default(uuid()) @db.Uuid
-  userId        String      @map("user_id") @db.Uuid
-  user          User        @relation("UserAiChats", fields: [userId], references: [id], onDelete: Cascade)
-  projectId     String?     @map("project_id") @db.Uuid
-  project       Project?    @relation("ProjectAiChats", fields: [projectId], references: [id], onDelete: Cascade)
-  pageId        String?     @map("page_id") @db.Uuid
-  page          Page?       @relation("PageAiChats", fields: [pageId], references: [id], onDelete: SetNull)
-  title         String      @default("New Chat")
-  summary       String?     @default("")
-  keyFacts      String[]    @default([]) @map("key_facts")
-  openQuestions String[]    @default([]) @map("open_questions")
-  documentIds   String[]    @default([]) @map("document_ids")
-  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  user          User     @relation("UserAiChats", fields: [userId], references: [id], onDelete: Cascade)
+  projectId     String?  @map("project_id") @db.Uuid
+  project       Project? @relation("ProjectAiChats", fields: [projectId], references: [id], onDelete: Cascade)
+  pageId        String?  @map("page_id") @db.Uuid
+  title         String   @default("New Chat")
+  summary       String?  @default("")
+  keyFacts      String[] @default([]) @map("key_facts")
+  openQuestions String[] @default([]) @map("open_questions")
+  documentIds   String[] @default([]) @map("document_ids")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   // Relations
-  messages      AiMessage[]
+  messages AiMessage[]
 
   @@index([userId, updatedAt])
   @@index([projectId, userId, updatedAt])

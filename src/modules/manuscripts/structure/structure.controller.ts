@@ -31,8 +31,9 @@ import {
 
 @ApiTags('Manuscripts - Project Structure & File Tree')
 @Controller([
-  'manuscripts/projects/:projectId/structure',
+  'api/v1/manuscripts/projects/:projectId/structure',
   'api/manuscripts/projects/:projectId/structure',
+  'manuscripts/projects/:projectId/structure',
   'projects/:projectId/structure',
   'api/projects/:projectId/structure',
 ])

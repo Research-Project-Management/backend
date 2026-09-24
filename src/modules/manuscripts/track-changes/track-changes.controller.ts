@@ -32,6 +32,7 @@ import { ResolvedThreadException } from './core/domain/exceptions/resolved-threa
 
 @ApiTags('Manuscripts - Review Mode (Track Changes & Comments)')
 @Controller([
+  'api/v1/manuscripts/projects/:projectId/docs/:docId/review',
   'manuscripts/projects/:projectId/docs/:docId/review',
   'projects/:projectId/docs/:docId/review',
 ])

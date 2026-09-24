@@ -35,7 +35,11 @@ import { DuplicateLabelException } from './core/domain/exceptions/duplicate-labe
 import { EmptyProjectException } from './core/domain/exceptions/empty-project.exception';
 
 @ApiTags('Manuscripts - Project History & Snapshots')
-@Controller(['manuscripts/projects/:projectId/history', 'projects/:projectId/history'])
+@Controller([
+  'api/v1/manuscripts/projects/:projectId/history',
+  'manuscripts/projects/:projectId/history',
+  'projects/:projectId/history',
+])
 export class ProjectHistoryController {
   constructor(private readonly historyService: ProjectHistoryService) {}
 
