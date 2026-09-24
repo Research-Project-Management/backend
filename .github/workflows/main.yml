@@ -96,14 +96,20 @@ jobs:
     name: Deploy to VPS Server
     needs: [test, build-and-push]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && needs.test.result == 'success' && !cancelled()
-    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     steps:
       - name: Execute Remote SSH Deployment on VPS
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          DOCKER_PASSWORD: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
+          DOCKER_USER: ${{ github.actor }}
         with:
           host: ${{ secrets.HOST }}
           username: ${{ secrets.USERNAME }}
           password: ${{ secrets.PASSWORD }}
+          envs: DOCKER_PASSWORD,DOCKER_USER
           script: |
             set -e
             echo "Starting deployment on VPS..."
@@ -114,13 +120,11 @@ jobs:
             BRANCH=$(git rev-parse --abbrev-ref HEAD || echo "main")
             git pull origin "$BRANCH"
 
-            # Login to GitHub Container Registry if PAT_TOKEN is available
-            if [ -n "${{ secrets.PAT_TOKEN }}" ]; then
-              echo "${{ secrets.PAT_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin || true
-            fi
+            # Login to GitHub Container Registry
+            echo "$DOCKER_PASSWORD" | docker login ghcr.io -u "$DOCKER_USER" --password-stdin
 
-            # Pull latest image from GHCR (fallback to local compose build if pull fails)
-            docker pull ghcr.io/${{ env.IMAGE_NAME }}:latest || docker compose build be
+            # Pull latest image from GHCR
+            docker pull ghcr.io/${{ env.IMAGE_NAME }}:latest
 
             # Recreate backend container cleanly
             docker compose up -d be
@@ -132,6 +136,6 @@ jobs:
             docker image prune -f
 
             # Health verification
-            sleep 3
+            sleep 5
             curl -sf http://127.0.0.1:3000/health/liveness || exit 1
             echo "Deployment successfully verified!"

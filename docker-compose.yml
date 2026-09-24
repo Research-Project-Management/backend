@@ -4,7 +4,7 @@
 # Note: Frontend (Next.js) is deployed on Vercel and excluded from this stack.
 # ==============================================================================
 
-name: flux
+name: backend
 
 services:
   # ----------------------------------------------------------------------------
