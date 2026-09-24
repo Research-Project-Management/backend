@@ -3,7 +3,7 @@
  * Main Injectable Service orchestrating Manuscript Project History use cases.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { CreateSnapshotUseCase } from './core/use-cases/create-snapshot.use-case';
 import { GetVersionListUseCase } from './core/use-cases/get-version-list.use-case';
 import { GetSnapshotByVersionUseCase } from './core/use-cases/get-snapshot-by-version.use-case';
@@ -20,6 +20,7 @@ import {
   VersionLabelDto,
   DiffResponseDto,
 } from './dto/history.dto';
+import { RealtimeService } from '@/modules/realtime/realtime.service';
 
 @Injectable()
 export class ProjectHistoryService {
@@ -33,6 +34,7 @@ export class ProjectHistoryService {
     private readonly labelVersionUseCase: LabelVersionUseCase,
     private readonly deleteLabelUseCase: DeleteLabelUseCase,
     private readonly restoreVersionUseCase: RestoreVersionUseCase,
+    @Optional() private readonly realtimeService?: RealtimeService,
   ) {}
 
   public async createSnapshot(
@@ -46,6 +48,11 @@ export class ProjectHistoryService {
       createdById: userId,
       isAutomatic: dto.isAutomatic ?? false,
       label: dto.label,
+    });
+    this.realtimeService?.broadcastSnapshotCreated(projectId, {
+      version: snapshot.version,
+      summary: snapshot.summary,
+      label: dto.label || (snapshot.labels.length > 0 ? snapshot.labels[0].label : null),
     });
     return this.toDetailDto(snapshot);
   }

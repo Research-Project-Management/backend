@@ -57,20 +57,19 @@ export class NotesController {
   );
   constructor(
     @Optional() private readonly createNoteUseCase?: any,
-    @Optional() private readonly getNoteUseCase?: any,
-    @Optional() private readonly listNotesUseCase?: any,
-    @Optional() private readonly updateNoteUseCase?: any,
-    @Optional() private readonly deleteNoteUseCase?: any,
-    @Optional() private readonly extractNotesUseCase?: any,
+    @Optional() private readonly getNoteUseCase?: GetNoteUseCase,
+    @Optional() private readonly listNotesUseCase?: ListNotesUseCase,
+    @Optional() private readonly updateNoteUseCase?: UpdateNoteUseCase,
+    @Optional() private readonly deleteNoteUseCase?: DeleteNoteUseCase,
+    @Optional()
+    private readonly extractNotesUseCase?: ExtractNotesFromAnnotationsUseCase,
     @Optional() private readonly notesService?: NotesService,
   ) {
     const isLegacyService =
-      createNoteUseCase &&
-      (typeof createNoteUseCase.listNotes === 'function' ||
-        typeof createNoteUseCase.getNote === 'function');
+      createNoteUseCase && !('execute' in (createNoteUseCase as any));
 
     if (isLegacyService) {
-      this.notesServiceInstance = createNoteUseCase;
+      this.notesServiceInstance = createNoteUseCase as any;
     } else {
       this.createNoteUseCaseInstance = createNoteUseCase;
       this.getNoteUseCaseInstance = getNoteUseCase;

@@ -82,14 +82,34 @@ export class ChatService {
     });
   }
 
+  private sanitizeProjectId(projectId?: string | null): string | null {
+    if (!projectId) return null;
+    const trimmed = projectId.trim();
+    if (
+      trimmed === 'me' ||
+      trimmed === 'user' ||
+      trimmed === 'all' ||
+      trimmed === 'null' ||
+      trimmed === 'undefined'
+    ) {
+      return null;
+    }
+    const isUuid =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        trimmed,
+      );
+    return isUuid ? trimmed : null;
+  }
+
   async getChats(
     userId: string,
     projectId?: string | null,
   ): Promise<FormattedChatSession[]> {
-    if (projectId) {
+    const cleanProjectId = this.sanitizeProjectId(projectId);
+    if (cleanProjectId) {
       const project = await this.prisma.project.findFirst({
         where: {
-          id: projectId,
+          id: cleanProjectId,
           deletedAt: null,
           OR: [{ createdById: userId }, { members: { some: { userId } } }],
         },
@@ -102,7 +122,7 @@ export class ChatService {
       }
     }
 
-    const cacheKey = AI_REDIS_KEYS.userChats(userId, projectId);
+    const cacheKey = AI_REDIS_KEYS.userChats(userId, cleanProjectId);
     if (this.cache) {
       const cached = await this.cache.get<FormattedChatSession[]>(cacheKey);
       if (cached) return cached;
@@ -196,11 +216,12 @@ export class ChatService {
     userId: string,
     dto: CreateChatDto,
   ): Promise<FormattedChatSession> {
+    const cleanProjectId = this.sanitizeProjectId(dto.projectId);
     // Verify project access if specified
-    if (dto.projectId) {
+    if (cleanProjectId) {
       const project = await this.prisma.project.findFirst({
         where: {
-          id: dto.projectId,
+          id: cleanProjectId,
           deletedAt: null,
           OR: [{ createdById: userId }, { members: { some: { userId } } }],
         },
@@ -238,14 +259,11 @@ export class ChatService {
       if (!canAccess) {
         throw new ForbiddenException('User does not have access to this page');
       }
-      if (!dto.projectId && page.projectId) {
-        dto.projectId = page.projectId;
-      }
     }
 
     const created = await this.chatRepo.createChat({
       userId,
-      projectId: dto.projectId,
+      projectId: cleanProjectId,
       pageId: dto.pageId,
       title: sanitizeChatTitle(dto.title),
       documentIds: dto.documentIds,
@@ -265,12 +283,12 @@ export class ChatService {
         dto.documentIds,
       );
       const result = formatChat(updated);
-      await this.invalidateChatCache(userId, created.id, dto.projectId);
+      await this.invalidateChatCache(userId, created.id, cleanProjectId);
       return result;
     }
 
     const result = formatChat(created);
-    await this.invalidateChatCache(userId, created.id, dto.projectId);
+    await this.invalidateChatCache(userId, created.id, cleanProjectId);
     return result;
   }
 

@@ -56,6 +56,9 @@ model Item {
   publications        UserPublication[]
 
   @@index([projectId, deletedAt])
+  @@index([projectId, deletedAt, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([userId, deletedAt, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([userId, deletedAt, year(sort: Desc), id(sort: Desc)])
   @@index([userId, deletedAt, year(sort: Desc), createdAt(sort: Desc)])
   @@index([userId, itemType])
   @@index([userId, hasFile, deletedAt])

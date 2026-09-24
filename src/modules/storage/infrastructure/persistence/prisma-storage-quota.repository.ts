@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@/core/database/prisma.service';
 import { IStorageQuotaRepository } from '../../domain/ports/storage-quota.repository.port';
 import { StorageQuota } from '../../domain/entities/storage-quota.entity';
@@ -49,11 +49,18 @@ export class PrismaStorageQuotaRepository implements IStorageQuotaRepository {
     const existing = await this.findByScope(userId, projectId);
 
     if (existing) {
+      if (existing.usedBytes + bytes > existing.maxBytes) {
+        throw new BadRequestException('Storage quota exceeded');
+      }
       const updated = await this.prisma.storageQuota.update({
         where: { id: existing.id },
         data: { usedBytes: { increment: bytes } },
       });
       return updated.usedBytes;
+    }
+
+    if (bytes > DEFAULT_LIMIT) {
+      throw new BadRequestException('Storage quota exceeded');
     }
 
     const created = await this.prisma.storageQuota.create({

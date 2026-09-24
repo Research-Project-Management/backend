@@ -34,16 +34,40 @@ export class AiService {
     return this.engineService.health();
   }
 
+  private isValidUuid(id?: string | null): boolean {
+    if (!id) return false;
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      id.trim(),
+    );
+  }
+
+  private sanitizeProjectId(projectId?: string | null): string | undefined {
+    if (!projectId) return undefined;
+    const trimmed = projectId.trim();
+    if (
+      trimmed === 'me' ||
+      trimmed === 'user' ||
+      trimmed === 'all' ||
+      trimmed === 'null' ||
+      trimmed === 'undefined' ||
+      !this.isValidUuid(trimmed)
+    ) {
+      return undefined;
+    }
+    return trimmed;
+  }
+
   private async validateAccess(
     userId: string,
     projectId?: string,
     chatId?: string,
     pageId?: string,
   ): Promise<void> {
-    if (projectId) {
+    const cleanProjectId = this.sanitizeProjectId(projectId);
+    if (cleanProjectId) {
       const project = await this.prisma.project.findFirst({
         where: {
-          id: projectId,
+          id: cleanProjectId,
           deletedAt: null,
           OR: [{ members: { some: { userId } } }, { createdById: userId }],
         },
@@ -53,7 +77,7 @@ export class AiService {
       }
     }
 
-    if (chatId) {
+    if (chatId && this.isValidUuid(chatId)) {
       const chat = await this.prisma.aiChat.findFirst({
         where: { id: chatId },
       });
@@ -502,8 +526,21 @@ export class AiService {
       tags?: string;
     },
   ) {
-    const scopeId = options?.scopeId || options?.projectId || userId;
-    await this.validateAccess(userId, options?.projectId, options?.chatId);
+    const cleanProjectId = this.sanitizeProjectId(options?.projectId);
+    const cleanChatId =
+      options?.chatId && this.isValidUuid(options.chatId)
+        ? options.chatId
+        : undefined;
+
+    const rawScope = options?.scopeId;
+    const isPersonalScope =
+      !rawScope ||
+      rawScope === 'me' ||
+      rawScope === 'user' ||
+      rawScope === 'all';
+    const scopeId = isPersonalScope ? cleanProjectId || userId : rawScope;
+
+    await this.validateAccess(userId, cleanProjectId, cleanChatId);
     return this.engineService.uploadDocument(
       fileBuffer,
       contentType,
@@ -511,8 +548,8 @@ export class AiService {
       {
         userId,
         scopeId,
-        projectId: options?.projectId,
-        chatId: options?.chatId,
+        projectId: cleanProjectId,
+        chatId: cleanChatId,
         title: options?.title,
         tags: options?.tags,
       },
@@ -520,28 +557,35 @@ export class AiService {
   }
 
   async getDocumentsBulk(userId: string, ids: string[], projectId?: string) {
-    await this.validateAccess(userId, projectId);
-    const scopeId = projectId || userId;
+    const cleanProjectId = this.sanitizeProjectId(projectId);
+    await this.validateAccess(userId, cleanProjectId);
+    const scopeId = cleanProjectId || userId;
     return this.engineService.getDocumentsBulk(ids, {
       userId,
       scopeId,
-      projectId,
+      projectId: cleanProjectId,
     });
   }
 
   async getDocument(userId: string, docId: string, projectId?: string) {
-    await this.validateAccess(userId, projectId);
-    const scopeId = projectId || userId;
+    const cleanProjectId = this.sanitizeProjectId(projectId);
+    await this.validateAccess(userId, cleanProjectId);
+    const scopeId = cleanProjectId || userId;
     return this.engineService.getDocument(docId, {
       userId,
       scopeId,
-      projectId,
+      projectId: cleanProjectId,
     });
   }
 
   async getDocuments(userId: string, projectId?: string) {
-    await this.validateAccess(userId, projectId);
-    const scopeId = projectId || userId;
-    return this.engineService.getDocuments({ userId, scopeId, projectId });
+    const cleanProjectId = this.sanitizeProjectId(projectId);
+    await this.validateAccess(userId, cleanProjectId);
+    const scopeId = cleanProjectId || userId;
+    return this.engineService.getDocuments({
+      userId,
+      scopeId,
+      projectId: cleanProjectId,
+    });
   }
 }

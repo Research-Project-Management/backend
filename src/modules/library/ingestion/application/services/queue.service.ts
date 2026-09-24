@@ -111,6 +111,12 @@ export class QueueService implements OnModuleInit {
       return false;
     }
 
+    const isFastPath =
+      envelope?.payload?.kind === 'IDENTIFIER' ||
+      envelope?.payload?.kind === 'RECORD' ||
+      envelope?.payload?.kind === 'URL';
+    const jobPriority = isFastPath ? 1 : 5;
+
     if (this.bullQueue) {
       try {
         await this.bullQueue.add(
@@ -118,6 +124,7 @@ export class QueueService implements OnModuleInit {
           { runId, projectId, envelope },
           {
             jobId: `ingest-${runId}`,
+            priority: jobPriority,
             attempts: 3,
             backoff: {
               type: 'exponential',
@@ -129,7 +136,7 @@ export class QueueService implements OnModuleInit {
         );
         this.queuedRunIds.add(runId);
         this.logger.log(
-          `[BullMQ] Enqueued run ${runId} for project ${projectId} into Redis queue ${LIBRARY_INGESTION_QUEUE}`,
+          `[BullMQ] Enqueued run ${runId} (priority=${jobPriority}, fastPath=${isFastPath}) for project ${projectId} into Redis queue ${LIBRARY_INGESTION_QUEUE}`,
         );
         return true;
       } catch (err: any) {
@@ -140,9 +147,21 @@ export class QueueService implements OnModuleInit {
     }
 
     this.queuedRunIds.add(runId);
-    this.queue.push({ runId, projectId, envelope });
+    if (isFastPath) {
+      // Prioritize fast path jobs ahead of heavy file OCR/GROBID jobs to prevent head-of-line blocking
+      const insertIdx = this.queue.findIndex(
+        (j) => j.envelope?.payload?.kind === 'FILE',
+      );
+      if (insertIdx !== -1) {
+        this.queue.splice(insertIdx, 0, { runId, projectId, envelope });
+      } else {
+        this.queue.push({ runId, projectId, envelope });
+      }
+    } else {
+      this.queue.push({ runId, projectId, envelope });
+    }
     this.logger.log(
-      `[In-Memory] Enqueued run ${runId} for project ${projectId} (queue length: ${this.queue.length}, active: ${this.activeCount}/${this.maxConcurrency})`,
+      `[In-Memory] Enqueued run ${runId} (fastPath=${isFastPath}) for project ${projectId} (queue length: ${this.queue.length}, active: ${this.activeCount}/${this.maxConcurrency})`,
     );
 
     this.pump();

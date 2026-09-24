@@ -7,10 +7,10 @@ import { CitationFacade, CITATION_FACADE } from './citation.facade';
 import { CitationController } from './presentation/citation.controller';
 import { ExportsController } from './presentation/exports.controller';
 
-// Application
 import { CitationService } from './application/services/citation.service';
 import { DoiContentNegotiationService } from './application/services/doi-content-negotiation.service';
 import { CslEngineService } from './application/services/csl-engine.service';
+import { CslRepositoryService } from './application/services/csl-repository.service';
 import { CslStyleRegistry } from './application/formatters/csl-style-registry';
 import { ExportsService } from './application/services/exports.service';
 import { PdfBakerService } from './application/services/pdf-baker.service';
@@ -27,7 +27,8 @@ import { ExportsRepository } from './infrastructure/repositories/exports.reposit
  *
  * Dedicated strictly to Academic Citation & Publishing:
  * - CSL (Citation Style Language) Execution Engine
- * - Citation Formatting across 7000+ Journal Styles (APA, IEEE, Nature, Harvard...)
+ * - Citation Formatting across 10,000+ Journal Styles (APA, IEEE, Nature, Harvard...)
+ * - Dynamic CSL Repository & Style Catalog Fetcher
  * - DOI Content Negotiation
  * - Bibliography & Library Exporting (BibTeX, RIS, CSV, CSL-JSON)
  * - PDF Annotation Baking
@@ -41,6 +42,7 @@ import { ExportsRepository } from './infrastructure/repositories/exports.reposit
       provide: CITATION_FACADE,
       useExisting: CitationFacade,
     },
+    CslRepositoryService,
     CitationService,
     DoiContentNegotiationService,
     CslEngineService,
@@ -61,6 +63,7 @@ import { ExportsRepository } from './infrastructure/repositories/exports.reposit
   exports: [
     CitationFacade,
     CITATION_FACADE,
+    CslRepositoryService,
     CitationService,
     ExportsService,
     ExportsRepository,

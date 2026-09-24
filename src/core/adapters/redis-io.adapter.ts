@@ -59,7 +59,23 @@ export class RedisIoAdapter extends IoAdapter {
   }
 
   createIOServer(port: number, options?: ServerOptions): any {
-    const server = super.createIOServer(port, options);
+    const serverOptions: any = {
+      ...options,
+      cors: options?.cors ?? {
+        origin: true,
+        credentials: true,
+      },
+      transports: ['websocket', 'polling'],
+      pingTimeout: 60000,
+      pingInterval: 25000,
+      maxHttpBufferSize: 1e7, // 10MB
+      connectTimeout: 45000,
+      allowUpgrades: true,
+    };
+    if (serverOptions.path === undefined) {
+      delete serverOptions.path;
+    }
+    const server = super.createIOServer(port, serverOptions);
     if (this.adapterConstructor) {
       server.adapter(this.adapterConstructor);
     }

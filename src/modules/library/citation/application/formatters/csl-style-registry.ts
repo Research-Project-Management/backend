@@ -98,14 +98,29 @@ export class CslStyleRegistry {
   }
 
   has(styleId: string): boolean {
+    if (!styleId) return false;
     return this.styleMap.has(styleId as CitationStyleId);
   }
 
-  getStyle(styleId: CitationStyleId): CitationStyleDefinition | undefined {
+  registerStyle(style: StyleSummary): void {
+    this.styleMap.set(style.id, style);
+  }
+
+  getStyle(styleId: CitationStyleId): CitationStyleDefinition {
     const meta = this.styleMap.get(styleId);
-    if (!meta) return undefined;
+    if (meta) {
+      return {
+        ...meta,
+        format: (item: CitationItemInput, index?: number) =>
+          this.formatFallback(item, styleId, index),
+      };
+    }
+
+    // Dynamic on-demand style definition
     return {
-      ...meta,
+      id: styleId,
+      name: styleId,
+      category: 'author-date',
       format: (item: CitationItemInput, index?: number) =>
         this.formatFallback(item, styleId, index),
     };

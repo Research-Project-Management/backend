@@ -11,6 +11,7 @@ import { CreateProjectInvitationDto } from './dto/create-invitation.dto';
 import { Role, InvitationStatus } from '@prisma/client';
 import type { AuthenticatedUser } from '@/modules/identity/identity.facade';
 import { RedisCacheService } from '@/core/cache/redis.service';
+import { NotificationsService } from '@/modules/notifications/notifications.service';
 import { CACHE_KEYS } from '../core/constants/cache.constant';
 import { PROJECT_ACCESS_REDIS_KEYS } from '../access/constants/redis.constant';
 
@@ -19,6 +20,7 @@ export class InvitationService {
   constructor(
     private readonly repository: InvitationRepository,
     @Optional() private readonly cache?: RedisCacheService,
+    @Optional() private readonly notificationsService?: NotificationsService,
   ) {}
 
   /**
@@ -126,6 +128,13 @@ export class InvitationService {
       InvitationStatus.accepted,
     );
 
+    // Overleaf Parity: Dismiss invite notification for this user and project
+    if (this.notificationsService) {
+      await this.notificationsService
+        .deleteByKey(`project_invite_${invitation.projectId}_${user.id}`)
+        .catch(() => {});
+    }
+
     // SSOT: Invalidate Redis caches so caller immediately sees their new permissions and project list
     await this.invalidateInvitationCaches(invitation.projectId, user.id);
 
@@ -156,6 +165,13 @@ export class InvitationService {
       invitation.id,
       InvitationStatus.declined,
     );
+
+    // Overleaf Parity: Dismiss invite notification for this user and project
+    if (this.notificationsService) {
+      await this.notificationsService
+        .deleteByKey(`project_invite_${invitation.projectId}_${user.id}`)
+        .catch(() => {});
+    }
 
     return {
       message: 'Invitation declined',
@@ -302,6 +318,32 @@ export class InvitationService {
       invitedById: inviterId,
       expiresAt,
     });
+
+    // Overleaf Parity: Dispatch project_invite notification to invited user
+    if (this.notificationsService && existingUser) {
+      try {
+        const inviter = await this.repository.findUserById(inviterId);
+        await this.notificationsService.createNotification({
+          userId: existingUser.id,
+          key: `project_invite_${projectId}_${existingUser.id}`,
+          templateKey: 'project_invite',
+          type: 'project_invite',
+          projectId,
+          actorId: inviterId,
+          messageOpts: {
+            projectId,
+            projectName: project.name || 'Manuscript',
+            inviterName: inviter?.name || inviter?.email || 'A collaborator',
+            inviterEmail: inviter?.email,
+            role: invitation.role,
+            token: rawToken,
+          },
+          expiresAt,
+        });
+      } catch {
+        // Non-blocking notification dispatch
+      }
+    }
 
     return {
       message: 'Invitation sent successfully',

@@ -167,8 +167,24 @@ export class AiController {
       throw new BadRequestException('File is required');
     }
 
-    const projectId = fields.projectId || fields.project_id;
-    const scopeId = projectId || fields.scopeId || userId;
+    const rawProjectId = fields.projectId || fields.project_id;
+    const isPersonalProject =
+      !rawProjectId ||
+      rawProjectId === 'me' ||
+      rawProjectId === 'user' ||
+      rawProjectId === 'all' ||
+      rawProjectId === 'null' ||
+      rawProjectId === 'undefined';
+    const projectId = isPersonalProject ? undefined : String(rawProjectId);
+
+    const rawScope = fields.scopeId;
+    const isPersonalScope =
+      !rawScope ||
+      rawScope === 'me' ||
+      rawScope === 'user' ||
+      rawScope === 'all';
+    const scopeId = isPersonalScope ? projectId || userId : String(rawScope);
+
     const title = fields.title;
     const tags = fields.tags;
     const chatId = fields.chatId || fields.chat_id;

@@ -31,9 +31,10 @@ export class StorageAccessPolicy {
     userId: string,
     nodeId: string,
     action: StorageAction,
+    options?: { allowTrashed?: boolean },
   ): Promise<StorageNode> {
     const node = await this.nodeRepo.findById(nodeId);
-    if (!node || node.isTrashed()) {
+    if (!node || (!options?.allowTrashed && node.isTrashed())) {
       throw new NotFoundException(
         'File or folder not found or has been trashed',
       );
@@ -66,13 +67,18 @@ export class StorageAccessPolicy {
       });
 
       if (membership) {
+        const role = String(membership.role || '').toLowerCase();
         if (action === 'read') return node;
         if (
           action === 'write' &&
-          ['owner', 'coordinator', 'contributor'].includes(membership.role)
+          ['owner', 'coordinator', 'contributor'].includes(role)
         )
           return node;
-        if (action === 'delete' && membership.role === 'owner') return node;
+        if (
+          (action === 'delete' || action === 'share') &&
+          ['owner', 'coordinator'].includes(role)
+        )
+          return node;
         throw new ForbiddenException(
           `Project role ${membership.role} cannot perform ${action}`,
         );

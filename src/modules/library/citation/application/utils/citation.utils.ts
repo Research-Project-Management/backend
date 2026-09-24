@@ -16,12 +16,15 @@ const SUPPORTED_STYLES = new Set<string>([
 ]);
 
 /**
- * Validates whether a given citation style identifier is supported by the engine.
+ * Validates whether a given citation style identifier is a valid slug or recognized style.
+ * Accepts standard names as well as 10,000+ CSL repository journal slugs.
  */
 export function isSupportedCitationStyle(
   styleId: string,
 ): styleId is CitationStyleId {
-  return SUPPORTED_STYLES.has(styleId?.toLowerCase());
+  if (!styleId || typeof styleId !== 'string') return false;
+  const clean = styleId.toLowerCase().trim();
+  return /^[a-z0-9_-]+$/.test(clean);
 }
 
 /**

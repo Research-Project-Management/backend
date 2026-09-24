@@ -16,6 +16,7 @@ export abstract class IRealtimeNotifierPort {
     docId: string,
     threadId: string,
     reply: CommentReply,
+    threadOwnerId?: string | null,
   ): void;
   abstract notifyCommentResolved(projectId: string, docId: string, thread: CommentThread): void;
 }

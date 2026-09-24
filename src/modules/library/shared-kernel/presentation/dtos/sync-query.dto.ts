@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsInt, Min, Max } from 'class-validator';
+import { IsOptional, IsString, IsInt, Min, Max, Matches } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -10,6 +10,7 @@ export class SyncQueryDto {
   })
   @IsOptional()
   @IsString()
+  @Matches(/^\d+$/, { message: 'since sequence must be a numeric integer string' })
   since?: string;
 
   @ApiPropertyOptional({

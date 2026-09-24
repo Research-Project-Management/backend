@@ -48,7 +48,10 @@ export class CreateItemUseCase {
     });
 
     // 2. Persist aggregate via domain repository port
-    await this.itemRepo.save(aggregate);
+    await this.itemRepo.save(aggregate, {
+      idempotencyKey: command.idempotencyKey,
+      correlationId: command.correlationId,
+    });
 
     // 3. Return application result DTO
     return toItemResultDto(aggregate);

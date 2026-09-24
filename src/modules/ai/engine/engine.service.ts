@@ -98,14 +98,33 @@ export class EngineService {
   ): Promise<void> {
     reply.hijack();
     const rawRes = reply.raw;
+    const req = reply.request;
+    const origin = (req?.headers?.origin as string) || '';
 
-    rawRes.writeHead(200, {
+    const existingHeaders = reply.getHeaders ? reply.getHeaders() : {};
+    const sseHeaders: Record<string, string | string[]> = {
       'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-cache, no-transform',
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
       'Transfer-Encoding': 'chunked',
-    });
+    };
+
+    for (const [key, value] of Object.entries(existingHeaders)) {
+      if (value !== undefined) {
+        sseHeaders[key] = value as string | string[];
+      }
+    }
+
+    if (origin) {
+      sseHeaders['Access-Control-Allow-Origin'] = origin;
+      sseHeaders['Access-Control-Allow-Credentials'] = 'true';
+      sseHeaders['Vary'] = 'Origin';
+      sseHeaders['Access-Control-Expose-Headers'] =
+        'Content-Type, Content-Length, X-Accel-Buffering';
+    }
+
+    rawRes.writeHead(200, sseHeaders);
 
     if (rawRes.socket) {
       rawRes.socket.setNoDelay(true);

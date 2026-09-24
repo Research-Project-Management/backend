@@ -47,6 +47,15 @@ export interface UploadFileOutput {
 
 export interface IStoragePort {
   readOwnedFile(input: ReadOwnedFileInput): Promise<ReadOwnedFileOutput>;
+  getOwnedFileStream?(input: ReadOwnedFileInput & {
+    range?: { start: number; end: number };
+  }): Promise<{
+    stream: NodeJS.ReadableStream;
+    mimeType: string;
+    size: number;
+    filename: string;
+    contentRange?: string;
+  }>;
   linkFile(input: LinkFileInput): Promise<void>;
   uploadFile(input: UploadFileInput): Promise<UploadFileOutput>;
   deleteFile?(fileId: string): Promise<void>;

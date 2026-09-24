@@ -33,7 +33,13 @@ import {
 } from './core/domain/doc-errors';
 
 @ApiTags('Manuscripts - Docstore')
-@Controller(['manuscripts/projects/:projectId/docs', 'docstore/project/:projectId'])
+@Controller([
+  'manuscripts/projects/:projectId/docs',
+  'api/manuscripts/projects/:projectId/docs',
+  'api/projects/:projectId/pages',
+  'projects/:projectId/pages',
+  'docstore/project/:projectId',
+])
 export class DocstoreController {
   constructor(private readonly docstoreService: DocstoreService) {}
 

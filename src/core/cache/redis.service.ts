@@ -60,7 +60,9 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
     }
 
     const redisUrl =
+      this.configService.get<string>('REDIS_CACHE_URL') ||
       this.configService.get<string>('REDIS_URL') ||
+      process.env.REDIS_CACHE_URL ||
       process.env.REDIS_URL ||
       'redis://localhost:6379';
 

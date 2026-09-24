@@ -1,37 +1,34 @@
 export type SupportedCitationStyle =
-  'apa' | 'harvard' | 'vancouver' | 'ieee' | 'chicago' | 'nature' | 'science';
+  | 'apa'
+  | 'harvard'
+  | 'vancouver'
+  | 'ieee'
+  | 'chicago'
+  | 'nature'
+  | 'science'
+  | (string & {});
 
 /**
  * CitationStyle Value Object validating academic citation styles.
+ * Supports any valid style slug from the 10,000+ CSL repository.
  */
 export class CitationStyleVo {
-  private readonly _value: SupportedCitationStyle;
+  private readonly _value: string;
 
-  private static readonly SUPPORTED: Set<string> = new Set([
-    'apa',
-    'harvard',
-    'vancouver',
-    'ieee',
-    'chicago',
-    'nature',
-    'science',
-  ]);
-
-  private constructor(value: SupportedCitationStyle) {
+  private constructor(value: string) {
     this._value = value;
   }
 
   public static create(rawStyle?: string | null): CitationStyleVo {
     if (!rawStyle) return new CitationStyleVo('apa');
-    const cleaned = rawStyle.trim().toLowerCase();
-    if (!CitationStyleVo.SUPPORTED.has(cleaned)) {
-      // Default to apa if unsupported style requested
+    const cleaned = rawStyle.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+    if (!cleaned) {
       return new CitationStyleVo('apa');
     }
-    return new CitationStyleVo(cleaned as SupportedCitationStyle);
+    return new CitationStyleVo(cleaned);
   }
 
-  public get value(): SupportedCitationStyle {
+  public get value(): string {
     return this._value;
   }
 

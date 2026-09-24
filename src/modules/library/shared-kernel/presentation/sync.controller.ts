@@ -13,6 +13,17 @@ import { TransactionService } from '../outbox/transaction.service';
 import { ChangeLogRepository } from '../outbox/repositories/changelog.repository';
 import { SyncQueryDto } from './dtos/sync-query.dto';
 
+function parseSafeBigInt(val?: string): bigint | undefined {
+  if (!val) return undefined;
+  const trimmed = val.trim();
+  if (!/^\d+$/.test(trimmed)) return undefined;
+  try {
+    return BigInt(trimmed);
+  } catch {
+    return undefined;
+  }
+}
+
 @ApiTags('Library Sync')
 @ApiBearerAuth('JWT-auth')
 @Controller(['api/v1/library/sync', 'api/v1/projects/:projectId/library/sync'])
@@ -61,7 +72,7 @@ export class SyncController {
   ) {
     const projectId = routeProjectId ?? queryProjectId;
     const scope = projectId ? { projectId } : { userId };
-    const sinceSeq = query.since ? BigInt(query.since) : BigInt(0);
+    const sinceSeq = parseSafeBigInt(query.since) ?? 0n;
     const limit = query.limit ?? 100;
 
     const changes = await this.transactionService.getChangesSince(
@@ -104,7 +115,7 @@ export class SyncController {
   ) {
     const projectId = routeProjectId ?? queryProjectId;
     const scope = projectId ? { projectId } : { userId };
-    const sinceSeq = query.since ? BigInt(query.since) : undefined;
+    const sinceSeq = parseSafeBigInt(query.since);
     const limit = query.limit ?? 100;
 
     const tombstones = await this.transactionService.getTombstonesSince(

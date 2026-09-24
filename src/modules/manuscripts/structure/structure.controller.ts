@@ -30,7 +30,12 @@ import {
 } from './core/domain/structure-errors';
 
 @ApiTags('Manuscripts - Project Structure & File Tree')
-@Controller(['manuscripts/projects/:projectId/structure', 'projects/:projectId/structure'])
+@Controller([
+  'manuscripts/projects/:projectId/structure',
+  'api/manuscripts/projects/:projectId/structure',
+  'projects/:projectId/structure',
+  'api/projects/:projectId/structure',
+])
 export class StructureController {
   constructor(private readonly structureService: StructureService) {}
 

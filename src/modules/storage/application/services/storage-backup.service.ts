@@ -11,6 +11,8 @@ import { IStorageNodeRepository } from '../../domain/ports/storage-node.reposito
 import { IStorageBlobRepository } from '../../domain/ports/storage-blob.repository.port';
 import { ZipPackager } from '../../infrastructure/utils/zip-packager';
 import { StorageNode } from '../../domain/entities/storage-node.entity';
+import { StorageBlob } from '../../domain/entities/storage-blob.entity';
+import { sanitizeFilename } from '../../domain/value-objects/file-validator.util';
 
 export interface ProjectBackupResult {
   backupKey: string;
@@ -67,23 +69,50 @@ export class StorageBackupService {
       path: string;
     }> = [];
 
+    // Algorithmic Optimization: Pre-index nodes by parentId for O(N) in-memory tree traversal
+    const childrenByParent = new Map<string, StorageNode[]>();
+    const rootNodes: StorageNode[] = [];
+    const blobCache = new Map<string, StorageBlob | null>();
+
+    for (const node of result.nodes) {
+      if (node.isTrashed()) continue;
+      if (!node.parentId) {
+        rootNodes.push(node);
+      } else {
+        const list = childrenByParent.get(node.parentId) || [];
+        list.push(node);
+        childrenByParent.set(node.parentId, list);
+      }
+    }
+
     const addNodeToArchive = async (node: StorageNode, currentPath = '') => {
       if (node.isTrashed()) return;
 
       if (node.isFolder) {
+        const cleanFolder = sanitizeFilename(node.name);
         const folderPath = currentPath
-          ? `${currentPath}/${node.name}`
-          : node.name;
-        const children = await this.nodeRepo.list({
-          projectId,
-          parentId: node.id,
-          limit: 1000,
-        });
-        for (const child of children.nodes) {
+          ? `${currentPath}/${cleanFolder}`
+          : cleanFolder;
+
+        let children = childrenByParent.get(node.id);
+        if (!children || children.length === 0) {
+          const childResult = await this.nodeRepo.list({
+            projectId,
+            parentId: node.id,
+            limit: 1000,
+          });
+          children = childResult.nodes;
+        }
+
+        for (const child of children) {
           await addNodeToArchive(child, folderPath);
         }
       } else if (node.blobId) {
-        const blob = await this.blobRepo.findById(node.blobId);
+        let blob = blobCache.get(node.blobId);
+        if (blob === undefined) {
+          blob = await this.blobRepo.findById(node.blobId);
+          blobCache.set(node.blobId, blob);
+        }
         if (blob) {
           try {
             const { stream } = await this.driver.getStream(blob.s3Key.value());
@@ -92,13 +121,14 @@ export class StorageBackupService {
               chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
             }
             const buf = Buffer.concat(chunks);
+            const cleanFileName = sanitizeFilename(node.name);
             const entryPath = currentPath
-              ? `${currentPath}/${node.name}`
-              : node.name;
+              ? `${currentPath}/${cleanFileName}`
+              : cleanFileName;
             packager.addFile(entryPath, buf, node.updatedAt);
             manifest.push({
               id: node.id,
-              name: node.name,
+              name: cleanFileName,
               size: node.size.toString(),
               mimeType: node.mimeType,
               path: entryPath,
@@ -114,7 +144,11 @@ export class StorageBackupService {
     };
 
     // Process all root nodes for project
-    for (const node of result.nodes.filter((n) => !n.parentId)) {
+    const roots =
+      rootNodes.length > 0
+        ? rootNodes
+        : result.nodes.filter((n) => !n.parentId);
+    for (const node of roots) {
       await addNodeToArchive(node);
     }
 

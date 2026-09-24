@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional, Inject } from '@nestjs/common';
 import { CslItemData } from '../../domain/types/csl-json.types';
 import {
   IEEE_CSL,
@@ -6,6 +6,7 @@ import {
   CHICAGO_CSL,
   MLA_CSL,
 } from '../../infrastructure/data/official-styles.data';
+import { CslRepositoryService } from './csl-repository.service';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { Cite, plugins } = require('@citation-js/core');
@@ -28,9 +29,61 @@ export interface EngineCitationResult {
 export class CslEngineService implements OnModuleInit {
   private readonly logger = new Logger(CslEngineService.name);
   private templatesInitialized = false;
+  private readonly citationCache = new Map<string, EngineCitationResult>();
+  private readonly maxCacheEntries = 2000;
+
+  constructor(
+    @Optional()
+    @Inject(CslRepositoryService)
+    private readonly cslRepo?: CslRepositoryService,
+  ) {}
+
+  private getCacheKey(cslItem: CslItemData, style: string): string {
+    const rawId = cslItem.id || cslItem.DOI || cslItem.title || '';
+    const date = cslItem.issued?.['date-parts']?.[0]?.[0] || '';
+    return `${rawId}::${style}::${date}`;
+  }
+
+  private setCache(key: string, result: EngineCitationResult): EngineCitationResult {
+    if (this.citationCache.size >= this.maxCacheEntries) {
+      const oldestKey = this.citationCache.keys().next().value;
+      if (oldestKey) this.citationCache.delete(oldestKey);
+    }
+    this.citationCache.set(key, result);
+    return result;
+  }
 
   onModuleInit() {
     this.initTemplates();
+  }
+
+  /**
+   * Dynamically loads and registers a CSL stylesheet template into Citation.js engine.
+   */
+  public async ensureTemplate(styleId: string): Promise<boolean> {
+    this.initTemplates();
+    const normalized = this.normalizeStyle(styleId);
+    if (normalized === 'bibtex' || normalized === 'ris') return true;
+
+    try {
+      const csl = plugins.config.get('@csl');
+      if (csl && csl.templates && csl.templates.has(normalized)) {
+        return true;
+      }
+
+      if (this.cslRepo) {
+        const xml = await this.cslRepo.fetchCslXml(normalized);
+        if (xml && csl && csl.templates) {
+          csl.templates.add(normalized, xml);
+          this.logger.log(`Dynamically registered on-demand CSL template: "${normalized}"`);
+          return true;
+        }
+      }
+    } catch (err: any) {
+      this.logger.warn(`Could not dynamically load CSL template for "${normalized}": ${err?.message || err}`);
+    }
+
+    return false;
   }
 
   /**
@@ -84,6 +137,29 @@ export class CslEngineService implements OnModuleInit {
   }
 
   /**
+   * Asynchronously ensures the CSL stylesheet is loaded before formatting.
+   */
+  public async formatAsync(
+    cslItem: CslItemData,
+    styleId: string = 'apa',
+    index: number = 1,
+  ): Promise<EngineCitationResult> {
+    await this.ensureTemplate(styleId);
+    return this.format(cslItem, styleId, index);
+  }
+
+  /**
+   * Asynchronously ensures the CSL stylesheet is loaded before batch formatting.
+   */
+  public async formatBatchAsync(
+    cslItems: CslItemData[],
+    styleId: string = 'apa',
+  ) {
+    await this.ensureTemplate(styleId);
+    return this.formatBatch(cslItems, styleId);
+  }
+
+  /**
    * Formats a single CSL-JSON item in the requested international style.
    */
   public format(
@@ -94,28 +170,37 @@ export class CslEngineService implements OnModuleInit {
     this.initTemplates();
     const normalizedStyle = this.normalizeStyle(styleId);
 
+    // O(1) LRU In-Memory Cache Lookup
+    const cacheKey = this.getCacheKey(cslItem, normalizedStyle);
+    const cached = this.citationCache.get(cacheKey);
+    if (cached) {
+      this.citationCache.delete(cacheKey);
+      this.citationCache.set(cacheKey, cached);
+      return cached;
+    }
+
     // 1. BibTeX
     if (normalizedStyle === 'bibtex') {
       const bibtex = this.formatBibtex(cslItem);
-      return {
+      return this.setCache(cacheKey, {
         styleId: 'bibtex',
         inText: `\\cite{${cslItem.id}}`,
         bibliography: bibtex,
         bibliographyHtml: `<pre class="font-mono text-xs whitespace-pre-wrap">${this.escapeHtml(bibtex)}</pre>`,
         source: 'csl-engine',
-      };
+      });
     }
 
     // 2. RIS
     if (normalizedStyle === 'ris') {
       const ris = this.formatRis(cslItem);
-      return {
+      return this.setCache(cacheKey, {
         styleId: 'ris',
         inText: cslItem.title,
         bibliography: ris,
         bibliographyHtml: `<pre class="font-mono text-xs whitespace-pre-wrap">${this.escapeHtml(ris)}</pre>`,
         source: 'csl-engine',
-      };
+      });
     }
 
     // 3. CSL Styles (APA, IEEE, Nature, Chicago, MLA, Harvard, Vancouver)
@@ -155,20 +240,20 @@ export class CslEngineService implements OnModuleInit {
         inText = `(${cslItem.author?.[0]?.family || 'Anonymous'}, ${cslItem.issued?.['date-parts']?.[0]?.[0] || 'n.d.'})`;
       }
 
-      return {
+      return this.setCache(cacheKey, {
         styleId: normalizedStyle,
         inText,
         bibliography,
         bibliographyHtml,
         source: 'csl-engine',
-      };
+      });
     } catch (err: any) {
       this.logger.warn(
         `Failed to render CSL template ${normalizedStyle}: ${err?.message || err}. Falling back to APA.`,
       );
       // Resilient fallback to APA
       const cite = new Cite(cslItem);
-      return {
+      return this.setCache(cacheKey, {
         styleId: 'apa',
         inText: cite
           .format('citation', {
@@ -188,7 +273,7 @@ export class CslEngineService implements OnModuleInit {
           })
           .trim(),
         source: 'csl-engine',
-      };
+      });
     }
   }
 

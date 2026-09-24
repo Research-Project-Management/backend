@@ -18,8 +18,10 @@ import { ListDriveUseCase } from '../../application/use-cases/drive/list-drive.u
 import { SoftDeleteUseCase } from '../../application/use-cases/trash/soft-delete.use-case';
 import { RestoreNodeUseCase } from '../../application/use-cases/trash/restore-node.use-case';
 import { PermanentDeleteUseCase } from '../../application/use-cases/trash/permanent-delete.use-case';
+import { StorageAccessPolicy } from '../../application/policies/storage-access.policy';
 import { StorageNode } from '../../domain/entities/storage-node.entity';
 import { BatchFileIdsDto } from '../dto/file.dto';
+import { Optional } from '@nestjs/common';
 
 @ApiTags('Storage & Trash')
 @ApiBearerAuth('JWT-auth')
@@ -31,6 +33,8 @@ export class TrashController {
     private readonly softDeleteUseCase: SoftDeleteUseCase,
     private readonly restoreNodeUseCase: RestoreNodeUseCase,
     private readonly permanentDeleteUseCase: PermanentDeleteUseCase,
+    @Optional()
+    private readonly accessPolicy?: StorageAccessPolicy,
   ) {}
 
   private mapNodeToDto(node: StorageNode) {
@@ -101,7 +105,13 @@ export class TrashController {
   @Post(':id/trash')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Soft-delete file to trash' })
-  async moveToTrash(@Param('id') id: string) {
+  async moveToTrash(
+    @Param('id') id: string,
+    @CurrentUser('id') userId?: string,
+  ) {
+    if (this.accessPolicy && userId) {
+      await this.accessPolicy.assertCanAccess(userId, id, 'delete');
+    }
     const count = await this.softDeleteUseCase.execute(id);
     return { success: true, count };
   }
@@ -110,7 +120,15 @@ export class TrashController {
   @Put(':id/restore')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Restore file from trash' })
-  async restoreFile(@Param('id') id: string) {
+  async restoreFile(
+    @Param('id') id: string,
+    @CurrentUser('id') userId?: string,
+  ) {
+    if (this.accessPolicy && userId) {
+      await this.accessPolicy.assertCanAccess(userId, id, 'delete', {
+        allowTrashed: true,
+      });
+    }
     const count = await this.restoreNodeUseCase.execute(id);
     return { success: true, count };
   }
@@ -118,7 +136,15 @@ export class TrashController {
   @Delete(':id/permanent')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Permanently delete file and reclaim quota' })
-  async permanentDelete(@Param('id') id: string) {
+  async permanentDelete(
+    @Param('id') id: string,
+    @CurrentUser('id') userId?: string,
+  ) {
+    if (this.accessPolicy && userId) {
+      await this.accessPolicy.assertCanAccess(userId, id, 'delete', {
+        allowTrashed: true,
+      });
+    }
     await this.permanentDeleteUseCase.execute(id);
     return { success: true };
   }
@@ -126,10 +152,18 @@ export class TrashController {
   @Post('batch/restore')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Batch restore files from trash' })
-  async batchRestore(@Body() dto: BatchFileIdsDto) {
+  async batchRestore(
+    @CurrentUser('id') userId: string,
+    @Body() dto: BatchFileIdsDto,
+  ) {
     let count = 0;
     for (const id of dto.ids) {
       try {
+        if (this.accessPolicy && userId) {
+          await this.accessPolicy.assertCanAccess(userId, id, 'delete', {
+            allowTrashed: true,
+          });
+        }
         await this.restoreNodeUseCase.execute(id);
         count++;
       } catch {
@@ -143,10 +177,18 @@ export class TrashController {
   @Delete('batch/permanent')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Batch permanently delete files from trash' })
-  async batchPermanentDelete(@Body() dto: BatchFileIdsDto) {
+  async batchPermanentDelete(
+    @CurrentUser('id') userId: string,
+    @Body() dto: BatchFileIdsDto,
+  ) {
     let count = 0;
     for (const id of dto.ids) {
       try {
+        if (this.accessPolicy && userId) {
+          await this.accessPolicy.assertCanAccess(userId, id, 'delete', {
+            allowTrashed: true,
+          });
+        }
         await this.permanentDeleteUseCase.execute(id);
         count++;
       } catch {

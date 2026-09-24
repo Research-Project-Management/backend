@@ -1,6 +1,28 @@
+import { isUUID } from 'class-validator';
 import { AiQueryDto } from '../dto/ai.dto';
 import { AiEnginePayload } from '../types/ai.types';
 import { AiMessageDto } from '../engine/types/engine.types';
+
+const NON_PROJECT_KEYWORDS = new Set([
+  'me',
+  'user',
+  'personal',
+  'undefined',
+  'null',
+  'default',
+]);
+
+/**
+ * Validates and normalizes project ID, ignoring personal scope keywords like 'me', 'personal'.
+ */
+export function toValidProjectId(value: unknown): string | undefined {
+  if (!value || typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (!trimmed || NON_PROJECT_KEYWORDS.has(trimmed.toLowerCase())) {
+    return undefined;
+  }
+  return isUUID(trimmed) ? trimmed : undefined;
+}
 
 /**
  * Sanitizes chat thread titles by stripping HTML tags, scripts,
@@ -80,8 +102,9 @@ export function buildAiPayload(
 ): AiEnginePayload {
   const messages = normalizeMessages(dto);
   const documentIds = extractDocIds(dto);
-  const scopeId = dto.project_id || dto.projectId || userId;
-  const projectId = dto.project_id || dto.projectId || '';
+  const validProjectId = toValidProjectId(dto.project_id || dto.projectId);
+  const scopeId = validProjectId || userId;
+  const projectId = validProjectId || '';
   const chatId = dto.chat_id || dto.chatId || '';
 
   return {

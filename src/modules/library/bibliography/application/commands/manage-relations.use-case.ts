@@ -98,6 +98,7 @@ export class ManageRelationsUseCase {
         targetItemId: targetId,
         relationType: type,
         note: data.note,
+        description: data.note || (data as any).description || '',
         linkedAt: now,
       };
 

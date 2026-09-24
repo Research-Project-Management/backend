@@ -112,13 +112,13 @@ export class SearchRepository implements OnModuleInit {
     // Collection and tag filters via subquery
     if (options.collectionId) {
       baseFilters.push(
-        `EXISTS (SELECT 1 FROM "collection_items" ci WHERE ci.item_id = "papers".id AND ci.collection_id = $${paramIdx++}::uuid)`,
+        `EXISTS (SELECT 1 FROM "collection_items" ci WHERE ci.item_id = "items".id AND ci.collection_id = $${paramIdx++}::uuid)`,
       );
       params.push(options.collectionId);
     }
     if (options.tagId) {
       baseFilters.push(
-        `EXISTS (SELECT 1 FROM "item_tags" it WHERE it.item_id = "papers".id AND it.tag_id = $${paramIdx++}::uuid)`,
+        `EXISTS (SELECT 1 FROM "item_tags" it WHERE it.item_id = "items".id AND it.tag_id = $${paramIdx++}::uuid)`,
       );
       params.push(options.tagId);
     }
@@ -152,7 +152,7 @@ export class SearchRepository implements OnModuleInit {
     const rows: any[] = await this.prisma.$queryRawUnsafe(
       `WITH search_results AS (
          SELECT id, ROW_NUMBER() OVER (ORDER BY ${orderExpr}) AS _row_num
-         FROM "papers"
+         FROM "items"
          WHERE ${whereClause}
        )${cursorCte}
        SELECT id FROM search_results
@@ -211,12 +211,12 @@ export class SearchRepository implements OnModuleInit {
       ...(q ? this.buildTextWhereIlike(q) : {}),
     };
 
-    const orderBy: Prisma.ItemOrderByWithRelationInput =
+    const orderBy: Prisma.ItemOrderByWithRelationInput[] =
       options.sortBy === 'year'
-        ? { year: options.sortOrder || 'desc' }
+        ? [{ year: options.sortOrder || 'desc' }, { id: 'desc' }]
         : options.sortBy === 'title'
-          ? { title: options.sortOrder || 'asc' }
-          : { createdAt: options.sortOrder || 'desc' };
+          ? [{ title: options.sortOrder || 'asc' }, { id: 'desc' }]
+          : [{ createdAt: options.sortOrder || 'desc' }, { id: 'desc' }];
 
     const items = await client.item.findMany({
       where,

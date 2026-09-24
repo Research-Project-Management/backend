@@ -158,10 +158,17 @@ export class TagsRepository {
     userId: string,
     id: string,
     tx?: Prisma.TransactionClient,
+    projectId?: string,
   ): Promise<boolean> {
     const client = this.getClient(tx);
+    const where: Prisma.TagWhereInput = {
+      id,
+      ...(projectId && projectId !== 'user'
+        ? { projectId }
+        : { userId, projectId: null }),
+    };
     const result = await client.tag.deleteMany({
-      where: { id, userId },
+      where,
     });
     return result.count > 0;
   }
@@ -169,13 +176,17 @@ export class TagsRepository {
   async deleteAutomatic(
     userId: string,
     tx?: Prisma.TransactionClient,
+    projectId?: string,
   ): Promise<string[]> {
     const client = this.getClient(tx);
+    const where: Prisma.TagWhereInput = {
+      ...(projectId && projectId !== 'user'
+        ? { projectId }
+        : { userId, projectId: null }),
+      type: { in: [TagType.automatic, TagType.ai] },
+    };
     const automaticTags = await client.tag.findMany({
-      where: {
-        userId,
-        type: { in: [TagType.automatic, TagType.ai] },
-      },
+      where,
       select: { id: true },
     });
     if (automaticTags.length === 0) return [];

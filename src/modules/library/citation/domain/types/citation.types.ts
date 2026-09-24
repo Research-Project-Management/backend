@@ -10,7 +10,8 @@ export type CitationStyleId =
   | 'mla-9th'
   | 'vancouver'
   | 'bibtex'
-  | 'ris';
+  | 'ris'
+  | (string & {});
 
 export interface CitationCreator {
   firstName?: string | null;

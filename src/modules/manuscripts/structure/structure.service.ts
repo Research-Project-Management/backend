@@ -3,7 +3,7 @@
  * Main Injectable Service orchestrating Manuscript Project File Tree use cases.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { GetFileTreeUseCase } from './core/use-cases/get-file-tree.use-case';
 import { CreateNodeUseCase } from './core/use-cases/create-node.use-case';
 import { MoveNodeUseCase } from './core/use-cases/move-node.use-case';
@@ -14,6 +14,7 @@ import { BuildCompilerFilesUseCase, CompilationPayload } from './core/use-cases/
 import { IStructureRepository } from './core/ports/structure-repository.port';
 import { ManuscriptNodeEntity } from './core/domain/manuscript-node.entity';
 import { CreateNodeDto, MoveNodeDto, RenameNodeDto, TreeNodeDto } from './dto/node.dto';
+import { RealtimeService } from '@/modules/realtime/realtime.service';
 
 @Injectable()
 export class StructureService {
@@ -27,7 +28,8 @@ export class StructureService {
     private readonly renameNodeUseCase: RenameNodeUseCase,
     private readonly deleteNodeUseCase: DeleteNodeUseCase,
     private readonly resolveRootDocUseCase: ResolveRootDocUseCase,
-    private readonly buildCompilerFilesUseCase: BuildCompilerFilesUseCase
+    private readonly buildCompilerFilesUseCase: BuildCompilerFilesUseCase,
+    @Optional() private readonly realtimeService?: RealtimeService,
   ) {}
 
   public async getFileTree(projectId: string): Promise<TreeNodeDto[]> {
@@ -47,23 +49,33 @@ export class StructureService {
   }
 
   public async createNode(projectId: string, dto: CreateNodeDto): Promise<ManuscriptNodeEntity> {
-    return await this.createNodeUseCase.execute(projectId, dto);
+    const node = await this.createNodeUseCase.execute(projectId, dto);
+    this.realtimeService?.broadcastFileTreeChange(projectId, { action: 'create', node });
+    return node;
   }
 
   public async mkdirp(projectId: string, dirPath: string): Promise<ManuscriptNodeEntity> {
-    return await this.createNodeUseCase.mkdirp(projectId, dirPath);
+    const node = await this.createNodeUseCase.mkdirp(projectId, dirPath);
+    this.realtimeService?.broadcastFileTreeChange(projectId, { action: 'mkdirp', node });
+    return node;
   }
 
   public async moveNode(projectId: string, nodeId: string, dto: MoveNodeDto): Promise<ManuscriptNodeEntity> {
-    return await this.moveNodeUseCase.execute(projectId, nodeId, dto);
+    const node = await this.moveNodeUseCase.execute(projectId, nodeId, dto);
+    this.realtimeService?.broadcastFileTreeChange(projectId, { action: 'move', node });
+    return node;
   }
 
   public async renameNode(projectId: string, nodeId: string, dto: RenameNodeDto): Promise<ManuscriptNodeEntity> {
-    return await this.renameNodeUseCase.execute(projectId, nodeId, dto.name);
+    const node = await this.renameNodeUseCase.execute(projectId, nodeId, dto.name);
+    this.realtimeService?.broadcastFileTreeChange(projectId, { action: 'rename', node });
+    return node;
   }
 
   public async deleteNode(projectId: string, nodeId: string): Promise<ManuscriptNodeEntity[]> {
-    return await this.deleteNodeUseCase.execute(projectId, nodeId);
+    const deletedNodes = await this.deleteNodeUseCase.execute(projectId, nodeId);
+    this.realtimeService?.broadcastFileTreeChange(projectId, { action: 'delete', node: { id: nodeId } });
+    return deletedNodes;
   }
 
   public async getRootDoc(projectId: string): Promise<ManuscriptNodeEntity | null> {
@@ -71,7 +83,9 @@ export class StructureService {
   }
 
   public async setRootDoc(projectId: string, nodeId: string): Promise<ManuscriptNodeEntity> {
-    return await this.resolveRootDocUseCase.setRootDoc(projectId, nodeId);
+    const node = await this.resolveRootDocUseCase.setRootDoc(projectId, nodeId);
+    this.realtimeService?.broadcastFileTreeChange(projectId, { action: 'set-root', node });
+    return node;
   }
 
   public async autoDetectRootDoc(

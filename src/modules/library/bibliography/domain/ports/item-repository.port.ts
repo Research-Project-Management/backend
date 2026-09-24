@@ -30,7 +30,10 @@ export interface IItemRepositoryPort {
   /**
    * Save an aggregate (insert or update based on version).
    */
-  save(aggregate: ItemAggregate): Promise<void>;
+  save(
+    aggregate: ItemAggregate,
+    options?: { idempotencyKey?: string; correlationId?: string },
+  ): Promise<void>;
 
   /**
    * Find an aggregate by ID within a tenant/project scope.
@@ -39,6 +42,7 @@ export interface IItemRepositoryPort {
     userId: string,
     itemId: string,
     projectId?: string,
+    includeDeleted?: boolean,
   ): Promise<ItemAggregate | null>;
 
   /**

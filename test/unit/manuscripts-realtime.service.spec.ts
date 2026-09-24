@@ -35,34 +35,34 @@
  *      - Message subscriptions (project:join, doc:join, doc:update, doc:cursor)
  */
 
-import { RealtimeService } from '@/modules/manuscripts/realtime/realtime.service';
-import { ManuscriptRealtimeGateway } from '@/modules/manuscripts/realtime/realtime.gateway';
+import { RealtimeService } from '@/modules/realtime/realtime.service';
+import { ManuscriptRealtimeGateway } from '@/modules/realtime/manuscripts/manuscripts-realtime.gateway';
 
 // Use Cases
-import { JoinProjectUseCase } from '@/modules/manuscripts/realtime/core/use-cases/join-project.use-case';
-import { LeaveProjectUseCase } from '@/modules/manuscripts/realtime/core/use-cases/leave-project.use-case';
-import { JoinDocUseCase } from '@/modules/manuscripts/realtime/core/use-cases/join-doc.use-case';
-import { LeaveDocUseCase } from '@/modules/manuscripts/realtime/core/use-cases/leave-doc.use-case';
-import { SendDocUpdateUseCase } from '@/modules/manuscripts/realtime/core/use-cases/send-doc-update.use-case';
-import { BroadcastCursorUseCase } from '@/modules/manuscripts/realtime/core/use-cases/broadcast-cursor.use-case';
-import { BroadcastProjectEventUseCase } from '@/modules/manuscripts/realtime/core/use-cases/broadcast-project-event.use-case';
+import { JoinProjectUseCase } from '@/modules/realtime/manuscripts/core/use-cases/join-project.use-case';
+import { LeaveProjectUseCase } from '@/modules/realtime/manuscripts/core/use-cases/leave-project.use-case';
+import { JoinDocUseCase } from '@/modules/realtime/manuscripts/core/use-cases/join-doc.use-case';
+import { LeaveDocUseCase } from '@/modules/realtime/manuscripts/core/use-cases/leave-doc.use-case';
+import { SendDocUpdateUseCase } from '@/modules/realtime/manuscripts/core/use-cases/send-doc-update.use-case';
+import { BroadcastCursorUseCase } from '@/modules/realtime/manuscripts/core/use-cases/broadcast-cursor.use-case';
+import { BroadcastProjectEventUseCase } from '@/modules/realtime/manuscripts/core/use-cases/broadcast-project-event.use-case';
 
 // Domain
-import { CursorPositionVo } from '@/modules/manuscripts/realtime/core/domain/value-objects/cursor-position.vo';
-import { ClientUpdatePayloadVo } from '@/modules/manuscripts/realtime/core/domain/value-objects/client-update-payload.vo';
-import { UserPresenceVo } from '@/modules/manuscripts/realtime/core/domain/value-objects/user-presence.vo';
-import { PresenceSession } from '@/modules/manuscripts/realtime/core/domain/entities/presence-session.entity';
-import { DocRoom } from '@/modules/manuscripts/realtime/core/domain/entities/doc-room.entity';
-import { UnauthorizedProjectException } from '@/modules/manuscripts/realtime/core/domain/exceptions/unauthorized-project.exception';
-import { InvalidRoomException } from '@/modules/manuscripts/realtime/core/domain/exceptions/invalid-room.exception';
+import { CursorPositionVo } from '@/modules/realtime/manuscripts/core/domain/value-objects/cursor-position.vo';
+import { ClientUpdatePayloadVo } from '@/modules/realtime/manuscripts/core/domain/value-objects/client-update-payload.vo';
+import { UserPresenceVo } from '@/modules/realtime/manuscripts/core/domain/value-objects/user-presence.vo';
+import { PresenceSession } from '@/modules/realtime/manuscripts/core/domain/entities/presence-session.entity';
+import { DocRoom } from '@/modules/realtime/manuscripts/core/domain/entities/doc-room.entity';
+import { UnauthorizedProjectException } from '@/modules/realtime/manuscripts/core/domain/exceptions/unauthorized-project.exception';
+import { InvalidRoomException } from '@/modules/realtime/manuscripts/core/domain/exceptions/invalid-room.exception';
 
 // Ports & Adapters
-import { IRoomManagerPort } from '@/modules/manuscripts/realtime/core/ports/room-manager.port';
-import { IDocumentUpdaterBridgePort, BridgeUpdateResult } from '@/modules/manuscripts/realtime/core/ports/document-updater-bridge.port';
-import { IProjectAccessVerifierPort, ProjectAccessResult } from '@/modules/manuscripts/realtime/core/ports/project-access-verifier.port';
-import { IRealtimeBroadcasterPort } from '@/modules/manuscripts/realtime/core/ports/realtime-broadcaster.port';
-import { InMemoryRoomManagerAdapter } from '@/modules/manuscripts/realtime/core/adapters/storage/in-memory-room-manager.adapter';
-import { SocketIoBroadcasterAdapter } from '@/modules/manuscripts/realtime/core/adapters/broadcast/socket-io-broadcaster.adapter';
+import { IRoomManagerPort } from '@/modules/realtime/manuscripts/core/ports/room-manager.port';
+import { IDocumentUpdaterBridgePort, BridgeUpdateResult } from '@/modules/realtime/manuscripts/core/ports/document-updater-bridge.port';
+import { IProjectAccessVerifierPort, ProjectAccessResult } from '@/modules/realtime/manuscripts/core/ports/project-access-verifier.port';
+import { IRealtimeBroadcasterPort } from '@/modules/realtime/manuscripts/core/ports/realtime-broadcaster.port';
+import { InMemoryRoomManagerAdapter } from '@/modules/realtime/manuscripts/core/adapters/storage/in-memory-room-manager.adapter';
+import { SocketIoBroadcasterAdapter } from '@/modules/realtime/manuscripts/core/adapters/broadcast/socket-io-broadcaster.adapter';
 
 // ---------------------------------------------------------------------------
 // Mock Test Doubles

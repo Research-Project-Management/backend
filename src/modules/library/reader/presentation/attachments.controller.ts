@@ -100,18 +100,14 @@ export class AttachmentsController {
     @Optional()
     private readonly attachmentsService?: AttachmentsService,
   ) {
-    // Detect legacy/unit-test manual constructor invocation where 1st param is AttachmentsService
     const isLegacyService =
-      createAttachmentUseCase &&
-      (typeof createAttachmentUseCase.getItemAttachment === 'function' ||
-        typeof createAttachmentUseCase.getItemAttachments === 'function' ||
-        typeof createAttachmentUseCase.deleteAttachment === 'function' ||
-        typeof createAttachmentUseCase.getThumbnail === 'function');
+      createAttachmentUseCase instanceof AttachmentsService ||
+      (createAttachmentUseCase && !('execute' in (createAttachmentUseCase as any)));
 
     if (isLegacyService) {
-      this.attachmentsServiceInstance = createAttachmentUseCase;
-      this.webSnapshotServiceInstance = getAttachmentUseCase;
-      this.storagePortInstance = getItemAttachmentsUseCase;
+      this.attachmentsServiceInstance = createAttachmentUseCase as AttachmentsService;
+      this.webSnapshotServiceInstance = getAttachmentUseCase as WebSnapshotService;
+      this.storagePortInstance = getItemAttachmentsUseCase as IStoragePort;
     } else {
       this.attachmentsServiceInstance = attachmentsService;
       this.webSnapshotServiceInstance = webSnapshotService;
@@ -385,27 +381,58 @@ export class AttachmentsController {
     @Param('fileId') fileId: string,
     @CurrentUser('id') userId: string,
     @Res() res: FastifyReply,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
   ) {
-    if (!this.effectiveStoragePort?.readOwnedFile) {
+    if (!this.effectiveStoragePort) {
       throw new NotFoundException('Storage port unavailable');
     }
 
-    const fileRecord = await this.effectiveStoragePort.readOwnedFile({
-      fileId,
-      userId,
-    });
+    const effectiveProjectId = toValidProjectId(
+      paramProjectId || queryProjectId,
+    );
 
-    res.header('Content-Type', fileRecord.mimeType || 'application/pdf');
-    res.header(
-      'Content-Disposition',
-      `inline; filename="${encodeURIComponent(fileRecord.filename)}"`,
-    );
-    res.header('Content-Length', fileRecord.size);
-    res.header(
-      'Cache-Control',
-      'public, max-age=86400, stale-while-revalidate=604800',
-    );
-    return res.send(fileRecord.buffer);
+    if (this.effectiveStoragePort.getOwnedFileStream) {
+      const fileRecord = await this.effectiveStoragePort.getOwnedFileStream({
+        fileId,
+        userId,
+        projectId: effectiveProjectId,
+      });
+
+      res.header('Content-Type', fileRecord.mimeType || 'application/pdf');
+      res.header(
+        'Content-Disposition',
+        `inline; filename="${encodeURIComponent(fileRecord.filename)}"`,
+      );
+      res.header('Content-Length', fileRecord.size);
+      res.header(
+        'Cache-Control',
+        'public, max-age=86400, stale-while-revalidate=604800',
+      );
+      return res.send(fileRecord.stream);
+    }
+
+    if (this.effectiveStoragePort.readOwnedFile) {
+      const fileRecord = await this.effectiveStoragePort.readOwnedFile({
+        fileId,
+        userId,
+        projectId: effectiveProjectId,
+      });
+
+      res.header('Content-Type', fileRecord.mimeType || 'application/pdf');
+      res.header(
+        'Content-Disposition',
+        `inline; filename="${encodeURIComponent(fileRecord.filename)}"`,
+      );
+      res.header('Content-Length', fileRecord.size);
+      res.header(
+        'Cache-Control',
+        'public, max-age=86400, stale-while-revalidate=604800',
+      );
+      return res.send(fileRecord.buffer);
+    }
+
+    throw new NotFoundException('Storage port read capability unavailable');
   }
 
   /**

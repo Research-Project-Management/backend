@@ -27,6 +27,7 @@ import { FileScope } from '../../domain/value-objects/file-scope.vo';
 import { PrismaService } from '@/core/database/prisma.service';
 import { FilePermission } from '@prisma/client';
 import { StorageNodeMapper } from '../../infrastructure/persistence/mappers/storage-node.mapper';
+import { StorageAccessPolicy } from '../../application/policies/storage-access.policy';
 import {
   CreateFolderDto,
   MoveFileDto,
@@ -50,6 +51,8 @@ export class DriveController {
     private readonly nodeRepo: IStorageNodeRepository,
     @Optional()
     private readonly prisma?: PrismaService,
+    @Optional()
+    private readonly accessPolicy?: StorageAccessPolicy,
   ) {}
 
   private mapNodeToDto(node: StorageNode) {
@@ -293,8 +296,14 @@ export class DriveController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Get file metadata by ID' })
-  async getFileById(@Param('id') id: string) {
-    const node = await this.nodeRepo.findById(id);
+  async getFileById(
+    @Param('id') id: string,
+    @CurrentUser('id') userId?: string,
+  ) {
+    const node =
+      this.accessPolicy && userId
+        ? await this.accessPolicy.assertCanAccess(userId, id, 'read')
+        : await this.nodeRepo.findById(id);
     if (!node || node.isTrashed()) {
       throw new NotFoundException('File not found');
     }
@@ -304,8 +313,14 @@ export class DriveController {
   @Put(':id/star')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Toggle star status on a file or folder' })
-  async toggleStar(@Param('id') id: string) {
-    const node = await this.nodeRepo.findById(id);
+  async toggleStar(
+    @Param('id') id: string,
+    @CurrentUser('id') userId?: string,
+  ) {
+    const node =
+      this.accessPolicy && userId
+        ? await this.accessPolicy.assertCanAccess(userId, id, 'read')
+        : await this.nodeRepo.findById(id);
     if (!node || node.isTrashed()) {
       throw new NotFoundException('Node not found');
     }
@@ -320,12 +335,16 @@ export class DriveController {
   @ApiOperation({ summary: 'Share a file with another user' })
   async shareFile(
     @Param('id') id: string,
-    @CurrentUser('id') _currentUserId: string,
     @Body() dto: ShareFileDto,
+    @CurrentUser('id') currentUserId?: string,
   ) {
-    const node = await this.nodeRepo.findById(id);
-    if (!node || node.isTrashed()) {
-      throw new NotFoundException('File not found');
+    if (this.accessPolicy && currentUserId) {
+      await this.accessPolicy.assertCanAccess(currentUserId, id, 'share');
+    } else {
+      const node = await this.nodeRepo.findById(id);
+      if (!node || node.isTrashed()) {
+        throw new NotFoundException('File not found');
+      }
     }
 
     if (!this.prisma) {
@@ -416,9 +435,18 @@ export class DriveController {
   @Post('move')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Move a file or folder' })
-  async moveNode(@Body() dto: MoveFileDto & { fileId?: string; id?: string }) {
+  async moveNode(
+    @Body() dto: MoveFileDto & { fileId?: string; id?: string },
+    @CurrentUser('id') userId?: string,
+  ) {
     const targetId = dto.fileId || dto.id;
     if (!targetId) throw new NotFoundException('fileId is required');
+    if (this.accessPolicy && userId) {
+      await this.accessPolicy.assertCanAccess(userId, targetId, 'write');
+      if (dto.parentId) {
+        await this.accessPolicy.assertCanAccess(userId, dto.parentId, 'write');
+      }
+    }
     const updated = await this.moveNodeUseCase.execute(
       targetId,
       dto.parentId || null,
@@ -432,9 +460,16 @@ export class DriveController {
   async moveNodeById(
     @Param('id') id: string,
     @Body() dto: { parentId?: string | null; targetFolderId?: string | null },
+    @CurrentUser('id') userId?: string,
   ) {
     const targetFolderId =
       dto.parentId !== undefined ? dto.parentId : (dto.targetFolderId ?? null);
+    if (this.accessPolicy && userId) {
+      await this.accessPolicy.assertCanAccess(userId, id, 'write');
+      if (targetFolderId) {
+        await this.accessPolicy.assertCanAccess(userId, targetFolderId, 'write');
+      }
+    }
     const updated = await this.moveNodeUseCase.execute(id, targetFolderId);
     return this.mapNodeToDto(updated);
   }
@@ -442,8 +477,15 @@ export class DriveController {
   @Put(':id/rename')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Rename a file or folder' })
-  async renameNode(@Param('id') id: string, @Body() dto: RenameFileDto) {
-    const node = await this.nodeRepo.findById(id);
+  async renameNode(
+    @Param('id') id: string,
+    @Body() dto: RenameFileDto,
+    @CurrentUser('id') userId?: string,
+  ) {
+    const node =
+      this.accessPolicy && userId
+        ? await this.accessPolicy.assertCanAccess(userId, id, 'write')
+        : await this.nodeRepo.findById(id);
     if (!node || node.isTrashed()) {
       throw new NotFoundException('Node not found');
     }
@@ -460,8 +502,12 @@ export class DriveController {
   async updateNodeMetadata(
     @Param('id') id: string,
     @Body() dto: { metaData?: Record<string, any>; description?: string },
+    @CurrentUser('id') userId?: string,
   ) {
-    const node = await this.nodeRepo.findById(id);
+    const node =
+      this.accessPolicy && userId
+        ? await this.accessPolicy.assertCanAccess(userId, id, 'write')
+        : await this.nodeRepo.findById(id);
     if (!node || node.isTrashed()) {
       throw new NotFoundException('Node not found');
     }
@@ -482,17 +528,29 @@ export class DriveController {
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Move file to trash' })
-  async deleteFile(@Param('id') id: string) {
+  async deleteFile(
+    @Param('id') id: string,
+    @CurrentUser('id') userId?: string,
+  ) {
+    if (this.accessPolicy && userId) {
+      await this.accessPolicy.assertCanAccess(userId, id, 'delete');
+    }
     return this.softDeleteUseCase.execute(id);
   }
 
   @Post('batch/delete')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Batch move files to trash' })
-  async batchDelete(@Body() dto: BatchFileIdsDto) {
+  async batchDelete(
+    @Body() dto: BatchFileIdsDto,
+    @CurrentUser('id') userId?: string,
+  ) {
     let count = 0;
     for (const id of dto.ids) {
       try {
+        if (this.accessPolicy && userId) {
+          await this.accessPolicy.assertCanAccess(userId, id, 'delete');
+        }
         await this.softDeleteUseCase.execute(id);
         count++;
       } catch {
@@ -505,14 +563,24 @@ export class DriveController {
   @Post('batch/star')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Batch star/unstar files' })
-  async batchStar(@Body() dto: BatchStarDto) {
+  async batchStar(
+    @Body() dto: BatchStarDto,
+    @CurrentUser('id') userId?: string,
+  ) {
     for (const id of dto.ids) {
-      const node = await this.nodeRepo.findById(id);
-      if (node) {
-        if (dto.starred !== node.starred) {
-          node.toggleStar();
-          await this.nodeRepo.update(node);
+      try {
+        const node =
+          this.accessPolicy && userId
+            ? await this.accessPolicy.assertCanAccess(userId, id, 'read')
+            : await this.nodeRepo.findById(id);
+        if (node) {
+          if (dto.starred !== node.starred) {
+            node.toggleStar();
+            await this.nodeRepo.update(node);
+          }
         }
+      } catch {
+        // Best-effort star
       }
     }
     return { success: true };
@@ -528,13 +596,20 @@ export class DriveController {
       parentId?: string | null;
       targetFolderId?: string | null;
     },
+    @CurrentUser('id') userId?: string,
   ) {
     const targetFolderId =
       dto.parentId !== undefined ? dto.parentId : (dto.targetFolderId ?? null);
+    if (this.accessPolicy && userId && targetFolderId) {
+      await this.accessPolicy.assertCanAccess(userId, targetFolderId, 'write');
+    }
     const ids = dto.ids || [];
     let count = 0;
     for (const id of ids) {
       try {
+        if (this.accessPolicy && userId) {
+          await this.accessPolicy.assertCanAccess(userId, id, 'write');
+        }
         await this.moveNodeUseCase.execute(id, targetFolderId);
         count++;
       } catch {

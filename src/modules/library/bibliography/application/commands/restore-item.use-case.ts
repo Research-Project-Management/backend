@@ -32,6 +32,7 @@ export class RestoreItemUseCase {
       command.userId,
       command.itemId,
       command.projectId ?? undefined,
+      true,
     );
 
     if (!aggregate) {

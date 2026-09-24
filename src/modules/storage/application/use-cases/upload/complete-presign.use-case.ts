@@ -30,6 +30,7 @@ import { FileUploadedEvent } from '../../../domain/events/file-uploaded.event';
 import {
   isBlockedExtension,
   sanitizeFilename,
+  validateMagicBytes,
 } from '../../../domain/value-objects/file-validator.util';
 import { StorageQueueProducer } from '../../queues/storage-queue.producer';
 
@@ -98,6 +99,30 @@ export class CompletePresignUseCase {
       }
     }
 
+    // 1.1 Verify binary magic bytes to prevent MIME spoofing & executable upload bypass (SEC-003)
+    try {
+      const streamRes = await this.driver.getStream(input.storageKey, {
+        start: 0,
+        end: 511,
+      });
+      if (streamRes && streamRes.stream) {
+        const chunks: Buffer[] = [];
+        for await (const chunk of streamRes.stream) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        const headerBuffer = Buffer.concat(chunks);
+        if (headerBuffer.length > 0) {
+          validateMagicBytes(headerBuffer, actualMime, cleanFilename);
+        }
+      }
+    } catch (err: any) {
+      if (err instanceof BadRequestException) {
+        // Immediate cleanup of malicious payload from physical storage
+        this.driver.delete(input.storageKey).catch(() => {});
+        throw err;
+      }
+    }
+
     const scopeKey = input.projectId ?? input.userId;
 
     // 2. Check and consume Quota
@@ -124,6 +149,14 @@ export class CompletePresignUseCase {
       existingBlob.incrementRef();
       await this.blobRepo.update(existingBlob);
       blobId = existingBlob.id;
+
+      // Cost Optimization: Immediately reclaim redundant physical S3/R2 object
+      // to eliminate orphan storage cost leaks when identical blob already exists.
+      if (input.storageKey !== existingBlob.s3Key.value()) {
+        this.driver.delete(input.storageKey).catch((err: any) => {
+          // Non-blocking catch to prevent failing the response
+        });
+      }
     } else {
       blobId = crypto.randomUUID();
       const blob = new StorageBlob({

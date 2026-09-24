@@ -65,8 +65,10 @@ export class IngestionController {
     ingestionService?: IngestionService,
   );
   constructor(
-    @Optional() private readonly submitIngestionUseCase?: any,
-    @Optional() private readonly getIngestionStatusUseCase?: any,
+    @Optional()
+    private readonly submitIngestionUseCase?: any,
+    @Optional()
+    private readonly getIngestionStatusUseCase?: any,
     @Optional()
     private readonly getIngestionProgressUseCase?: GetIngestionProgressUseCase,
     @Optional()
@@ -83,10 +85,10 @@ export class IngestionController {
   ) {
     if (
       submitIngestionUseCase &&
-      typeof submitIngestionUseCase.ingest === 'function'
+      !('execute' in (submitIngestionUseCase as any))
     ) {
-      this.unifiedServiceInstance = submitIngestionUseCase;
-      this.ingestionServiceInstance = getIngestionStatusUseCase;
+      this.unifiedServiceInstance = submitIngestionUseCase as any;
+      this.ingestionServiceInstance = getIngestionStatusUseCase as any;
     } else {
       this.unifiedServiceInstance = unifiedService;
       this.ingestionServiceInstance = ingestionService;

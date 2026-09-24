@@ -448,5 +448,262 @@ describe('Storage & File Security Suite', () => {
 
       expect(headers['Content-Disposition']).toContain('attachment');
     });
+
+    it('should block path traversal attempts in streamR2File (SEC-002)', async () => {
+      const mockReq: any = {
+        url: '/api/files/r2/..%2F..%2Fetc%2Fpasswd',
+        headers: {},
+        params: { '*': '../../etc/passwd' },
+      };
+      const mockRes: any = {
+        status: jest.fn().mockReturnThis(),
+        header: jest.fn().mockReturnThis(),
+        send: jest.fn(),
+      };
+
+      await controller.streamR2File(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(403);
+      expect(mockRes.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          statusCode: 403,
+          message: 'Access to restricted storage path is forbidden',
+        }),
+      );
+    });
+
+    it('should block access to sensitive prefixes like backups/ or private/ in streamR2File (SEC-002)', async () => {
+      const mockReq: any = {
+        url: '/api/files/r2/backups%2Fproject-backup.zip',
+        headers: {},
+        params: { '*': 'backups/project-backup.zip' },
+      };
+      const mockRes: any = {
+        status: jest.fn().mockReturnThis(),
+        header: jest.fn().mockReturnThis(),
+        send: jest.fn(),
+      };
+
+      await controller.streamR2File(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(403);
+      expect(mockRes.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          statusCode: 403,
+          message: 'Access to restricted storage path is forbidden',
+        }),
+      );
+    });
+
+    it('should block unauthenticated requests to private research files in streamFile (SEC-004)', async () => {
+      mockNodeRepo.findById.mockResolvedValue(
+        new StorageNode({
+          id: 'private-doc-id',
+          name: 'confidential_research.pdf',
+          isFolder: false,
+          size: 1024n,
+          authorId: 'scientist-1',
+          scope: FileScope.Personal,
+          metadata: { isPublic: false },
+        }),
+      );
+
+      const mockAccessPolicy = {
+        assertCanAccess: jest.fn(),
+      };
+      const securedController = new StreamController(
+        mockStreamBinaryUseCase,
+        mockR2Service,
+        mockNodeRepo,
+        mockBlobRepo,
+        mockDriver,
+        mockEventEmitter,
+        mockAccessPolicy as any,
+      );
+
+      const mockReq: any = {
+        url: '/api/files/private-doc-id/content',
+        headers: {},
+        query: {},
+        ip: '127.0.0.1',
+        user: undefined, // Unauthenticated
+      };
+      const mockRes: any = {
+        status: jest.fn().mockReturnThis(),
+        header: jest.fn().mockReturnThis(),
+        send: jest.fn(),
+      };
+
+      await securedController.streamFile('private-doc-id', mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(403);
+      expect(mockRes.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          statusCode: 403,
+          message: 'Authentication required to access private research file',
+        }),
+      );
+    });
+
+    it('should allow unauthenticated requests if the research file is explicitly public (SEC-004)', async () => {
+      mockNodeRepo.findById.mockResolvedValue(
+        new StorageNode({
+          id: 'public-doc-id',
+          name: 'open_access_paper.pdf',
+          isFolder: false,
+          size: 2048n,
+          authorId: 'scientist-1',
+          scope: FileScope.Personal,
+          metadata: { isPublic: true },
+        }),
+      );
+      mockStreamBinaryUseCase.execute.mockResolvedValue({
+        statusCode: 200,
+        mimeType: 'application/pdf',
+        contentLength: 2048,
+        filename: 'open_access_paper.pdf',
+        stream: Readable.from(['open-access-content']),
+      });
+
+      const mockAccessPolicy = {
+        assertCanAccess: jest.fn(),
+      };
+      const securedController = new StreamController(
+        mockStreamBinaryUseCase,
+        mockR2Service,
+        mockNodeRepo,
+        mockBlobRepo,
+        mockDriver,
+        mockEventEmitter,
+        mockAccessPolicy as any,
+      );
+
+      const mockReq: any = {
+        url: '/api/files/public-doc-id/content',
+        headers: {},
+        query: {},
+        ip: '127.0.0.1',
+        user: undefined,
+      };
+      const mockRes: any = {
+        status: jest.fn().mockReturnThis(),
+        header: jest.fn().mockReturnThis(),
+        send: jest.fn(),
+      };
+
+      await securedController.streamFile('public-doc-id', mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(200);
+      expect(mockStreamBinaryUseCase.execute).toHaveBeenCalledWith('public-doc-id', undefined);
+    });
+  });
+
+  describe('StorageAccessPolicy - Extended Edge Cases & Actions (SEC-001)', () => {
+    let accessPolicy: StorageAccessPolicy;
+    let mockPrisma: any;
+    let mockNodeRepo: any;
+
+    beforeEach(() => {
+      mockPrisma = {
+        fileShare: { findUnique: jest.fn() },
+        projectMember: { findUnique: jest.fn() },
+      };
+      mockNodeRepo = { findById: jest.fn() };
+      accessPolicy = new StorageAccessPolicy(mockPrisma, mockNodeRepo);
+    });
+
+    it('should forbid "share" action for regular project members without coordinator or owner role', async () => {
+      const fileId = 'project-file-01';
+      const projectId = 'proj-lab';
+      const memberUserId = 'regular-member';
+
+      mockNodeRepo.findById.mockResolvedValue(
+        new StorageNode({
+          id: fileId,
+          projectId,
+          name: 'dataset.csv',
+          isFolder: false,
+          size: 1024n,
+          authorId: 'pi-owner',
+          scope: FileScope.Project,
+        }),
+      );
+
+      mockPrisma.fileShare.findUnique.mockResolvedValue(null);
+      mockPrisma.projectMember.findUnique.mockResolvedValue({
+        projectId,
+        userId: memberUserId,
+        role: 'MEMBER',
+      });
+
+      await expect(
+        accessPolicy.assertCanAccess(memberUserId, fileId, 'share'),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should allow "share" action for project coordinator or owner', async () => {
+      const fileId = 'project-file-01';
+      const projectId = 'proj-lab';
+      const coordinatorUserId = 'coord-user';
+
+      mockNodeRepo.findById.mockResolvedValue(
+        new StorageNode({
+          id: fileId,
+          projectId,
+          name: 'dataset.csv',
+          isFolder: false,
+          size: 1024n,
+          authorId: 'pi-owner',
+          scope: FileScope.Project,
+        }),
+      );
+
+      mockPrisma.fileShare.findUnique.mockResolvedValue(null);
+      mockPrisma.projectMember.findUnique.mockResolvedValue({
+        projectId,
+        userId: coordinatorUserId,
+        role: 'COORDINATOR',
+      });
+
+      const node = await accessPolicy.assertCanAccess(
+        coordinatorUserId,
+        fileId,
+        'share',
+      );
+      expect(node.id).toBe(fileId);
+    });
+
+    it('should allow access to trashed node when allowTrashed is explicitly enabled', async () => {
+      const fileId = 'trashed-file-01';
+      const ownerId = 'file-owner';
+
+      const trashedNode = new StorageNode({
+        id: fileId,
+        name: 'old_draft.pdf',
+        isFolder: false,
+        size: 512n,
+        authorId: ownerId,
+        scope: FileScope.Personal,
+        trashedAt: new Date(),
+      });
+
+      mockNodeRepo.findById.mockResolvedValue(trashedNode);
+
+      // Default should throw NotFoundException
+      await expect(
+        accessPolicy.assertCanAccess(ownerId, fileId, 'delete'),
+      ).rejects.toThrow(NotFoundException);
+
+      // With allowTrashed: true, it should succeed
+      const node = await accessPolicy.assertCanAccess(
+        ownerId,
+        fileId,
+        'delete',
+        { allowTrashed: true },
+      );
+      expect(node.id).toBe(fileId);
+      expect(node.isTrashed()).toBe(true);
+    });
   });
 });
+

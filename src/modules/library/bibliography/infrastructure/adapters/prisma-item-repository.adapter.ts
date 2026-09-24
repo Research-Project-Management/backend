@@ -28,6 +28,7 @@ export class PrismaItemRepositoryAdapter implements IItemRepositoryPort {
     userId: string,
     itemId: string,
     projectId?: string,
+    includeDeleted: boolean = false,
   ): Promise<ItemAggregate | null> {
     const raw = await this.queryRepo.findById(
       userId,
@@ -35,6 +36,7 @@ export class PrismaItemRepositoryAdapter implements IItemRepositoryPort {
       projectId,
       undefined,
       true,
+      includeDeleted,
     );
     if (!raw) return null;
 
@@ -63,7 +65,10 @@ export class PrismaItemRepositoryAdapter implements IItemRepositoryPort {
     });
   }
 
-  async save(aggregate: ItemAggregate): Promise<void> {
+  async save(
+    aggregate: ItemAggregate,
+    options?: { idempotencyKey?: string; correlationId?: string },
+  ): Promise<void> {
     const domainEvents = aggregate.pullDomainEvents();
 
     await this.libraryTx.executeInTransaction(async (tx, helpers) => {
@@ -320,6 +325,12 @@ export class PrismaItemRepositoryAdapter implements IItemRepositoryPort {
             userId: aggregate.userId,
             projectId: aggregate.projectId,
             version: aggregate.version,
+            ...(options?.correlationId
+              ? { correlationId: options.correlationId }
+              : {}),
+            ...(options?.idempotencyKey
+              ? { idempotencyKey: options.idempotencyKey }
+              : {}),
           },
         );
       }

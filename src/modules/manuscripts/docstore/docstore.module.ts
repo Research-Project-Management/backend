@@ -7,6 +7,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from '@/core/database/prisma.module';
 import { DocstoreController } from './docstore.controller';
+import { PagesBridgeController } from './pages-bridge.controller';
 import { DocstoreService } from './docstore.service';
 
 // Use Cases
@@ -29,7 +30,7 @@ import { IDocHasher } from './core/ports/doc-hasher.port';
 
 @Module({
   imports: [ConfigModule, PrismaModule],
-  controllers: [DocstoreController],
+  controllers: [DocstoreController, PagesBridgeController],
   providers: [
     DocstoreService,
     GetDocUseCase,

@@ -29,11 +29,15 @@ export class QueryRepository {
     projectId?: string,
     tx?: Prisma.TransactionClient,
     includeContent: boolean = true,
+    includeDeleted: boolean = false,
   ) {
     if (!isUuid(id) || !isUuid(userId)) return null;
     const client = this.getClient(tx);
     const item = await client.item.findFirst({
-      where: { id, deletedAt: null },
+      where: {
+        id,
+        ...(includeDeleted ? {} : { deletedAt: null }),
+      },
       include: {
         contributors: {
           orderBy: { orderIndex: 'asc' },
@@ -322,6 +326,7 @@ export class QueryRepository {
       fromYear?: number;
       toYear?: number;
       readStatus?: string;
+      includeNotes?: boolean;
     },
     tx?: Prisma.TransactionClient,
   ): Promise<any[]> {
@@ -342,10 +347,33 @@ export class QueryRepository {
       itemTags: {
         include: { tag: true },
       },
-      attachments: true,
-      notesList: {
-        where: { deletedAt: null },
+      attachments: {
+        select: {
+          id: true,
+          itemId: true,
+          linkMode: true,
+          attachmentType: true,
+          filename: true,
+          url: true,
+          fileHash: true,
+          fileId: true,
+          storageKey: true,
+          mimeType: true,
+          size: true,
+          pageCount: true,
+          extractionStatus: true,
+          createdAt: true,
+          updatedAt: true,
+          deletedAt: true,
+        },
       },
+      ...(options.includeNotes
+        ? {
+            notesList: {
+              where: { deletedAt: null },
+            },
+          }
+        : {}),
       states: effectiveUserId
         ? {
             where: { userId: effectiveUserId },

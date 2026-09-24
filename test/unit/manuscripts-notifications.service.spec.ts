@@ -24,9 +24,9 @@ import {
   NotificationsService,
   NotificationsController,
   OverleafNotificationsParityController,
-} from '@/modules/manuscripts/notifications';
+} from '@/modules/notifications';
 
-describe('Manuscripts Notifications & Mentions Subsystem', () => {
+describe('Global Notifications & Mentions Subsystem', () => {
   // =========================================================================
   // 1. DOMAIN LAYER: VALUE OBJECTS & ENTITIES
   // =========================================================================
@@ -662,4 +662,129 @@ describe('Manuscripts Notifications & Mentions Subsystem', () => {
       });
     });
   });
+
+  // =========================================================================
+  // 5. DOMAIN SUBMODULES: MANUSCRIPTS & PROJECTS SPECIALIZED SERVICES
+  // =========================================================================
+  describe('Domain Submodules: Manuscripts & Projects Services', () => {
+    let repo: InMemoryNotificationAdapter;
+    let notifier: EventRealtimeNotifierAdapter;
+    let parser: RegexMentionParserAdapter;
+    let service: NotificationsService;
+
+    beforeEach(() => {
+      repo = new InMemoryNotificationAdapter();
+      notifier = new EventRealtimeNotifierAdapter();
+      parser = new RegexMentionParserAdapter();
+
+      const createUseCase = new CreateNotificationUseCase(repo, notifier);
+      const getUserNotifsUseCase = new GetUserNotificationsUseCase(repo);
+      const getUnreadCountUseCase = new GetUnreadCountUseCase(repo);
+      const markReadUseCase = new MarkNotificationReadUseCase(repo, notifier);
+      const markAllReadUseCase = new MarkAllReadUseCase(repo, notifier);
+      const deleteUseCase = new DeleteNotificationUseCase(repo, notifier);
+      const parseAndNotifyUseCase = new ParseAndNotifyMentionsUseCase(parser, createUseCase);
+
+      service = new NotificationsService(
+        createUseCase,
+        getUserNotifsUseCase,
+        getUnreadCountUseCase,
+        markReadUseCase,
+        markAllReadUseCase,
+        deleteUseCase,
+        parseAndNotifyUseCase,
+        parser
+      );
+    });
+
+    describe('ManuscriptsNotificationsService', () => {
+      it('should dispatch comment mention via specialized submodule service', async () => {
+        const notif = await service.manuscripts.notifyCommentMention({
+          recipientUserId: 'target-author',
+          actorId: 'commenter-1',
+          actorName: 'Bob',
+          projectId: 'p-1',
+          projectName: 'Quantum Paper',
+          docId: 'doc-main',
+          threadId: 'th-1',
+          commentId: 'c-1',
+          snippet: 'Please verify lemma 1',
+        });
+
+        expect(notif.userId).toBe('target-author');
+        expect(notif.type).toBe('mention');
+        expect(notif.messageOpts.snippet).toBe('Please verify lemma 1');
+        expect(notif.key).toBe('comment-mention-c-1-target-author');
+      });
+
+      it('should dispatch comment reply via specialized submodule service', async () => {
+        const notif = await service.manuscripts.notifyCommentReply({
+          recipientUserId: 'thread-starter',
+          actorId: 'replier-1',
+          actorName: 'Alice',
+          projectId: 'p-1',
+          docId: 'doc-main',
+          threadId: 'th-1',
+          replyId: 'rep-9',
+          snippet: 'I have updated the proof',
+        });
+
+        expect(notif.userId).toBe('thread-starter');
+        expect(notif.type).toBe('comment_reply');
+        expect(notif.key).toBe('comment-reply-rep-9-thread-starter');
+      });
+
+      it('should dispatch thread resolved and dismiss notifications', async () => {
+        // Create a mention first
+        await service.manuscripts.notifyCommentMention({
+          recipientUserId: 'target-author',
+          actorId: 'commenter-1',
+          actorName: 'Bob',
+          projectId: 'p-1',
+          threadId: 'th-resolve-test',
+          snippet: 'test',
+        });
+
+        const notif = await service.manuscripts.notifyThreadResolved({
+          recipientUserId: 'thread-starter',
+          actorId: 'resolver-1',
+          actorName: 'Professor',
+          projectId: 'p-1',
+          docId: 'doc-main',
+          threadId: 'th-resolve-test',
+          quote: 'Formula 2.1',
+        });
+
+        expect(notif.type).toBe('thread_resolved');
+
+        // Dismiss thread mentions
+        const dismissedCount = await service.manuscripts.dismissThreadNotifications('th-resolve-test');
+        expect(dismissedCount).toBe(1);
+      });
+    });
+
+    describe('ProjectsNotificationsService', () => {
+      it('should dispatch and dismiss project invitations via specialized submodule service', async () => {
+        const notif = await service.projects.notifyProjectInvitation({
+          recipientUserId: 'invitee-1',
+          projectId: 'proj-invite-1',
+          projectName: 'Deep Learning',
+          inviterId: 'inviter-1',
+          inviterName: 'Lead Researcher',
+          role: 'collaborator',
+          token: 'token-abc',
+          expiresAt: new Date(Date.now() + 86400000),
+        });
+
+        expect(notif.userId).toBe('invitee-1');
+        expect(notif.type).toBe('project_invite');
+        expect(notif.key).toBe('project_invite_proj-invite-1_invitee-1');
+
+        // Dismiss invitation
+        const dismissed = await service.projects.dismissProjectInvitation('proj-invite-1', 'invitee-1');
+        expect(dismissed).toBe(1);
+      });
+    });
+  });
 });
+

@@ -666,10 +666,10 @@ export class DuplicateService {
   }
 
   /**
-   * Automatically resolves a detected duplicate cluster into a single primary item.
-   * Ranks candidate items according to chosen strategy ('most_complete' | 'newest' | 'first_created'),
-   * constructs a non-destructive fieldSelection borrowing missing fields from duplicate candidates,
-   * and dispatches an atomic merge operation.
+   * @deprecated Decommissioned per Zotero Human-in-the-Loop compliance.
+   * Automated batch merging poses severe false-positive risks for academic citations
+   * and distinct publication versions (e.g. conference vs journal).
+   * All duplicate merging must proceed through `mergeDuplicates` with explicit human review.
    */
   async autoResolveCluster(
     userId: UserId | string,

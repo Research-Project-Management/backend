@@ -438,6 +438,7 @@ export class ItemsController {
         expectedVersion,
         retainUnmappedInExtra: body?.retainUnmappedInExtra ?? true,
       },
+      projectId: toValidProjectId(projectId),
     });
 
     return {

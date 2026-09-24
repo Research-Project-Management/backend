@@ -3,6 +3,7 @@ import { TagsService } from '../services/tags.service';
 
 export interface DeleteAutomaticTagsCommand {
   userId: string;
+  projectId?: string;
 }
 
 /**
@@ -20,6 +21,9 @@ export class DeleteAutomaticTagsUseCase {
     this.logger.debug(
       `Executing DeleteAutomaticTagsUseCase for user ${command.userId}`,
     );
-    return this.tagsService.deleteAutomaticTags(command.userId);
+    return this.tagsService.deleteAutomaticTags(
+      command.userId,
+      command.projectId,
+    );
   }
 }

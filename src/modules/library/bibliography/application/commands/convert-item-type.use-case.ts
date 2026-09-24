@@ -19,6 +19,7 @@ export interface ConvertItemTypeCommand {
   itemId: string;
   targetType: string;
   options?: ConvertTypeOptions;
+  projectId?: string;
 }
 
 export interface ConvertItemTypeResult {
@@ -52,10 +53,11 @@ export class ConvertItemTypeUseCase {
     const aggregate = await this.itemRepo.findById(
       command.userId,
       command.itemId,
+      command.projectId,
     );
     if (!aggregate) {
       throw new NotFoundException(
-        `Item ${command.itemId} not found in user library`,
+        `Item ${command.itemId} not found in library`,
       );
     }
 

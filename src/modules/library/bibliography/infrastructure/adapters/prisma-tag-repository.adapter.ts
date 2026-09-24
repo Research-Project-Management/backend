@@ -113,16 +113,27 @@ export class PrismaTagRepositoryAdapter implements ITagRepositoryPort {
           row = existing;
         }
       } else {
-        row = await this.prisma.tag.create({
-          data: {
-            userId,
-            createdById: userId,
-            name,
-            color,
-            type: resolvedType,
-            projectId: effectiveProjectId,
-          },
-        });
+        try {
+          row = await this.prisma.tag.create({
+            data: {
+              userId,
+              createdById: userId,
+              name,
+              color,
+              type: resolvedType,
+              projectId: effectiveProjectId,
+            },
+          });
+        } catch (err: any) {
+          if (err?.code === 'P2002' || err?.message?.includes('Unique constraint')) {
+            row = await this.prisma.tag.findFirst({
+              where: { projectId: effectiveProjectId, name },
+            });
+            if (!row) throw err;
+          } else {
+            throw err;
+          }
+        }
       }
     } else {
       const existing = await this.prisma.tag.findFirst({
@@ -142,16 +153,31 @@ export class PrismaTagRepositoryAdapter implements ITagRepositoryPort {
           row = existing;
         }
       } else {
-        row = await this.prisma.tag.create({
-          data: {
-            userId,
-            createdById: userId,
-            name,
-            color,
-            type: resolvedType,
-            projectId: null,
-          },
-        });
+        try {
+          row = await this.prisma.tag.create({
+            data: {
+              userId,
+              createdById: userId,
+              name,
+              color,
+              type: resolvedType,
+              projectId: null,
+            },
+          });
+        } catch (err: any) {
+          if (err?.code === 'P2002' || err?.message?.includes('Unique constraint')) {
+            row = await this.prisma.tag.findFirst({
+              where: {
+                userId,
+                name,
+                projectId: null,
+              },
+            });
+            if (!row) throw err;
+          } else {
+            throw err;
+          }
+        }
       }
     }
 

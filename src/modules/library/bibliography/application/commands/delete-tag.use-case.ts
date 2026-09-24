@@ -4,6 +4,7 @@ import { TagsService } from '../services/tags.service';
 export interface DeleteTagCommand {
   userId: string;
   tagId: string;
+  projectId?: string;
 }
 
 /**
@@ -17,6 +18,10 @@ export class DeleteTagUseCase {
 
   async execute(command: DeleteTagCommand): Promise<boolean> {
     this.logger.debug(`Executing DeleteTagUseCase for tag ${command.tagId}`);
-    return this.tagsService.deleteTag(command.userId, command.tagId);
+    return this.tagsService.deleteTag(
+      command.userId,
+      command.tagId,
+      command.projectId,
+    );
   }
 }

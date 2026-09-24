@@ -158,6 +158,17 @@ export class CollectionsController {
       throw new BadRequestException('Invalid project ID');
     }
     const effectiveProjectId = toValidProjectId(rawProjectId || undefined);
+    if (this.createCollectionUseCase) {
+      return this.createCollectionUseCase.execute({
+        userId,
+        name: dto.name,
+        description: dto.description,
+        color: dto.color,
+        icon: dto.icon,
+        parentId: dto.parentId,
+        projectId: effectiveProjectId || undefined,
+      });
+    }
     return this.collectionsService!.createCollection(
       userId,
       dto,

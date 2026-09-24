@@ -222,7 +222,16 @@ async function bootstrap() {
         return callback(null, true);
       }
 
-      // 2. Dynamic match for Vercel preview / production deployments (*.vercel.app)
+      // 2. Allow any localhost / 127.0.0.1 / private LAN IP origins
+      const isLocalOrigin =
+        /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?$/.test(
+          normalizedOrigin,
+        );
+      if (isLocalOrigin) {
+        return callback(null, true);
+      }
+
+      // 3. Dynamic match for Vercel preview / production deployments (*.vercel.app)
       const isVercelOrigin =
         /^https:\/\/[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*\.vercel\.app$/.test(
           normalizedOrigin,

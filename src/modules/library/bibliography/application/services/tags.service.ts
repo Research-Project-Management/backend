@@ -125,7 +125,12 @@ export class TagsService {
 
     const result = await this.libraryTx.executeInTransaction(
       async (tx, helpers) => {
-        const deleted = await this.repo.delete(userId, tagId, tx);
+        const deleted = await this.repo.delete(
+          userId,
+          tagId,
+          tx,
+          effectiveProjectId,
+        );
         if (deleted) {
           await helpers.recordTombstone(eventScope, {
             entityType: 'Tag',
@@ -151,25 +156,42 @@ export class TagsService {
     return result;
   }
 
-  async deleteAutomaticTags(userId: UserId | string) {
+  async deleteAutomaticTags(
+    userId: UserId | string,
+    projectId?: ProjectId | string,
+  ) {
+    const effectiveProjectId =
+      projectId &&
+      projectId !== 'user' &&
+      projectId !== 'me' &&
+      projectId !== 'personal'
+        ? projectId
+        : undefined;
+    const eventScope = { userId, projectId: effectiveProjectId };
+
     const result = await this.libraryTx.executeInTransaction(
       async (tx, helpers) => {
-        const deletedTagIds = await this.repo.deleteAutomatic(userId, tx);
+        const deletedTagIds = await this.repo.deleteAutomatic(
+          userId,
+          tx,
+          effectiveProjectId,
+        );
         for (const tagId of deletedTagIds) {
-          await helpers.recordTombstone(userId, {
+          await helpers.recordTombstone(eventScope, {
             entityType: 'Tag',
             entityId: tagId,
           });
-          await helpers.publishOutbox(userId, tagId, 'library.tag.deleted', {
+          await helpers.publishOutbox(eventScope, tagId, 'library.tag.deleted', {
             id: tagId,
             deletedAt: new Date(),
+            projectId: effectiveProjectId,
           });
         }
         return { count: deletedTagIds.length };
       },
     );
 
-    await this.invalidateTagsCache(userId);
+    await this.invalidateTagsCache(userId, effectiveProjectId);
     return result;
   }
 

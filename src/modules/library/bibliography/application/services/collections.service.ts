@@ -55,7 +55,9 @@ export class CollectionsService {
         LIBRARY_REDIS_KEYS.collectionsPattern(userId),
       );
       if (projectId) {
-        await this.cache.delPattern(`flux:lib:collections:proj:${projectId}*`);
+        await this.cache.delPattern(
+          LIBRARY_REDIS_KEYS.collectionsPattern(projectId),
+        );
       }
     }
   }
@@ -75,9 +77,10 @@ export class CollectionsService {
       };
     };
 
-    if (this.cache && !projectId) {
+    if (this.cache) {
+      const scopeId = projectId || userId;
       return this.cache.wrap(
-        LIBRARY_REDIS_KEYS.collections(userId),
+        LIBRARY_REDIS_KEYS.collections(scopeId),
         fetchCollections,
         300,
       );
@@ -95,9 +98,10 @@ export class CollectionsService {
       return { tree: this.tree.buildTree(collections) };
     };
 
-    if (this.cache && !projectId) {
+    if (this.cache) {
+      const scopeId = projectId || userId;
       return this.cache.wrap(
-        LIBRARY_REDIS_KEYS.collectionTree(userId),
+        LIBRARY_REDIS_KEYS.collectionTree(scopeId),
         fetchTree,
         300,
       );

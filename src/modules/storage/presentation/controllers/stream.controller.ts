@@ -10,7 +10,9 @@ import {
   UseGuards,
   HttpStatus,
   NotFoundException,
+  ForbiddenException,
   Inject,
+  Optional,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { FastifyRequest, FastifyReply } from 'fastify';
@@ -29,8 +31,12 @@ import { IStorageDriver } from '../../domain/ports/storage-driver.port';
 import { ZipPackager } from '../../infrastructure/utils/zip-packager';
 import { StorageNode } from '../../domain/entities/storage-node.entity';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { isDangerousInlineMime } from '../../domain/value-objects/file-validator.util';
+import {
+  isDangerousInlineMime,
+  sanitizeFilename,
+} from '../../domain/value-objects/file-validator.util';
 import { FileDownloadedEvent } from '../../domain/events/file-downloaded.event';
+import { StorageAccessPolicy } from '../../application/policies/storage-access.policy';
 
 @ApiTags('Storage & Streaming')
 @Controller(['api/v1/storage/files', 'api/files', 'api/file'])
@@ -45,6 +51,8 @@ export class StreamController {
     @Inject(STORAGE_DRIVER)
     private readonly driver: IStorageDriver,
     private readonly eventEmitter: EventEmitter2,
+    @Optional()
+    private readonly accessPolicy?: StorageAccessPolicy,
   ) {}
 
   @Get([
@@ -66,6 +74,43 @@ export class StreamController {
     const rangeHeader = req.headers?.range;
 
     try {
+      // Access control check (SEC-004)
+      const currentUserId = (req as any).user?.id;
+      if (this.accessPolicy && currentUserId) {
+        await this.accessPolicy.assertCanAccess(currentUserId, fileId, 'read');
+      } else if (this.accessPolicy && !currentUserId) {
+        // Unauthenticated request: allow only if the file is explicitly marked public and not embargoed
+        const node = await this.nodeRepo.findById(fileId);
+        if (!node || node.isTrashed()) {
+          return res
+            .status(HttpStatus.NOT_FOUND)
+            .send({ statusCode: 404, message: 'File not found or has been trashed' });
+        }
+        const metadata = (node.metadata || {}) as {
+          isPublic?: boolean;
+          embargoUntil?: string;
+        };
+        if (!metadata.isPublic) {
+          return res
+            .status(HttpStatus.FORBIDDEN)
+            .send({
+              statusCode: 403,
+              message: 'Authentication required to access private research file',
+            });
+        }
+        if (
+          metadata.embargoUntil &&
+          new Date(metadata.embargoUntil) > new Date()
+        ) {
+          return res
+            .status(HttpStatus.FORBIDDEN)
+            .send({
+              statusCode: 403,
+              message: 'File is currently under academic embargo',
+            });
+        }
+      }
+
       const result = await this.streamBinaryUseCase.execute(
         fileId,
         rangeHeader,
@@ -122,6 +167,11 @@ export class StreamController {
           .status(HttpStatus.NOT_FOUND)
           .send({ statusCode: 404, message: err.message });
       }
+      if (err instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .send({ statusCode: 403, message: err.message });
+      }
       return res
         .status(HttpStatus.INTERNAL_SERVER_ERROR)
         .send({ statusCode: 500, message: err.message });
@@ -149,6 +199,24 @@ export class StreamController {
     }
 
     const key = decodeURIComponent(rawKey);
+    const normalizedKey = key.replace(/\\/g, '/');
+
+    // Path traversal & restricted storage path security check (SEC-002)
+    if (
+      normalizedKey.includes('..') ||
+      normalizedKey.startsWith('/') ||
+      normalizedKey.startsWith('backups/') ||
+      normalizedKey.startsWith('private/') ||
+      normalizedKey.startsWith('config/')
+    ) {
+      return res
+        .status(HttpStatus.FORBIDDEN)
+        .send({
+          statusCode: 403,
+          message: 'Access to restricted storage path is forbidden',
+        });
+    }
+
     const rangeHeader = req.headers?.range;
 
     try {
@@ -250,9 +318,10 @@ export class StreamController {
       visited.add(node.id);
 
       if (node.isFolder) {
+        const cleanFolder = sanitizeFilename(node.name);
         const folderPath = currentPath
-          ? `${currentPath}/${node.name}`
-          : node.name;
+          ? `${currentPath}/${cleanFolder}`
+          : cleanFolder;
         const children = await this.nodeRepo.list({
           userId: node.authorId,
           projectId: node.projectId,
@@ -271,9 +340,10 @@ export class StreamController {
             chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
           }
           const buf = Buffer.concat(chunks);
+          const cleanFileName = sanitizeFilename(node.name);
           const entryName = currentPath
-            ? `${currentPath}/${node.name}`
-            : node.name;
+            ? `${currentPath}/${cleanFileName}`
+            : cleanFileName;
           zip.addFile(entryName, buf, node.updatedAt);
         }
       }

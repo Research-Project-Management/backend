@@ -7,6 +7,7 @@ import {
   Query,
   Body,
   UseGuards,
+  ForbiddenException,
 } from '@nestjs/common';
 import { RetractionService } from '../application/services/retraction.service';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
@@ -32,7 +33,16 @@ export class RetractionController {
 
   @Post('database/seed')
   @ProjectRoles('owner')
-  async seedDatabase(@Body('force') force?: boolean) {
+  async seedDatabase(
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role' as any) role?: string,
+    @Body('force') force?: boolean,
+  ) {
+    if (role !== 'admin' && role !== 'superadmin' && role !== 'system') {
+      throw new ForbiddenException(
+        'System administrator privilege is required to seed the global retraction database',
+      );
+    }
     return this.service.seedDatabase(Boolean(force));
   }
 

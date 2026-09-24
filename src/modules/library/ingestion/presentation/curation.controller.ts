@@ -11,7 +11,6 @@ import { DuplicateService } from '../application/services/duplicate.service';
 import { QualityService } from '../application/services/quality.service';
 import {
   MergeDuplicatesDto,
-  AutoResolveClusterDto,
 } from '../application/dtos/curation.dto';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
@@ -38,24 +37,11 @@ export class CurationController {
     return this.duplicateService.detectDuplicates(userId, effectiveProjectId);
   }
 
-  @Post('duplicates/auto-resolve')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
-  async autoResolveCluster(
-    @CurrentUser('id') userId: string,
-    @Body() dto: AutoResolveClusterDto,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
-  ) {
-    const effectiveProjectId =
-      paramProjectId || queryProjectId || dto.projectId;
-    return this.duplicateService.autoResolveCluster(
-      userId,
-      dto.clusterId,
-      dto.strategy ?? 'most_complete',
-      effectiveProjectId,
-    );
-  }
-
+  /**
+   * Zotero-Compliant Human-in-the-Loop Merge:
+   * Merging requires explicit review and confirmation from the user.
+   * Automated batch merging has been decommissioned to guarantee 0% data corruption risk.
+   */
   @Post('merge')
   @ProjectRoles('owner', 'coordinator', 'contributor')
   async mergeDuplicates(

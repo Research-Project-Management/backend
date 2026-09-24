@@ -37,12 +37,39 @@ export class CitationController {
   }
 
   /**
+   * Search across the 10,000+ official CSL Style repository.
+   */
+  @Get('styles/search')
+  async searchStyles(
+    @Query('q') query?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const numLimit = limit ? parseInt(limit, 10) : 30;
+    const styles = await this.citationService.searchStyles(query || '', numLimit);
+    return {
+      total: styles.length,
+      styles,
+    };
+  }
+
+  /**
+   * Upload and register a custom CSL XML stylesheet.
+   */
+  @Post('styles/custom')
+  async uploadCustomStyle(
+    @Body('xml') xml: string,
+    @Body('title') title?: string,
+  ) {
+    return this.citationService.registerCustomStyle(xml, title);
+  }
+
+  /**
    * Format a raw item object (not persisted) into a citation string.
    * Use GET /citation/items/:itemId/citation for persisted items.
    */
   @Post('format')
   format(@Body() dto: FormatCitationDto) {
-    return this.citationService.formatItem(
+    return this.citationService.formatItemAsync(
       dto.item,
       dto.styleId || 'apa-7th',
       dto.index || 1,

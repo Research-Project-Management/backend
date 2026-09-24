@@ -28,6 +28,8 @@ import {
   getAcademicUserAgent,
 } from '../../../shared-kernel/core/constants/academic-client.constants';
 
+import { CslRepositoryService } from './csl-repository.service';
+
 export type { ReferenceData };
 
 @Injectable()
@@ -42,13 +44,45 @@ export class CitationService {
     @Optional() private readonly doiService?: DoiContentNegotiationService,
     @Optional() private readonly cslEngine?: CslEngineService,
     @Optional() private readonly metadataPort?: any,
+    @Optional()
+    @Inject(CslRepositoryService)
+    private readonly cslRepo?: CslRepositoryService,
   ) {
     if (!this.doiService) {
       this.doiService = new DoiContentNegotiationService();
     }
     if (!this.cslEngine) {
-      this.cslEngine = new CslEngineService();
+      this.cslEngine = new CslEngineService(this.cslRepo);
     }
+  }
+
+  /**
+   * Search across 10,000+ CSL styles from official repository.
+   */
+  async searchStyles(query: string = '', limit: number = 30) {
+    if (this.cslRepo) {
+      return this.cslRepo.searchStyles(query, limit);
+    }
+    return this.registry.listStyles();
+  }
+
+  /**
+   * Registers an uploaded custom CSL XML stylesheet.
+   */
+  async registerCustomStyle(cslXml: string, title?: string) {
+    if (!this.cslRepo) {
+      throw new BadRequestException('CSL repository service unavailable');
+    }
+    const meta = await this.cslRepo.registerCustomStyle(cslXml, title);
+    if (this.cslEngine) {
+      await this.cslEngine.ensureTemplate(meta.id);
+    }
+    this.registry.registerStyle({
+      id: meta.id,
+      name: meta.title,
+      category: meta.category as any,
+    });
+    return meta;
   }
 
   /**
@@ -66,10 +100,10 @@ export class CitationService {
     styleId: CitationStyleId = 'apa-7th',
     index: number = 1,
   ): FormattedCitationResult {
-    const style = this.registry.getStyle(styleId);
-    if (!style) {
+    if (!this.registry.has(styleId)) {
       throw new BadRequestException(`Unsupported citation style: ${styleId}`);
     }
+    const style = this.registry.getStyle(styleId);
 
     if (this.cslEngine) {
       try {
@@ -90,6 +124,20 @@ export class CitationService {
     }
 
     return style.format(item, index);
+  }
+
+  /**
+   * Asynchronously formats a single citation item, ensuring dynamic CSL templates are loaded on-demand.
+   */
+  async formatItemAsync(
+    item: CitationItemInput,
+    styleId: CitationStyleId = 'apa-7th',
+    index: number = 1,
+  ): Promise<FormattedCitationResult> {
+    if (this.cslEngine) {
+      await this.cslEngine.ensureTemplate(styleId);
+    }
+    return this.formatItem(item, styleId, index);
   }
 
   /**
@@ -490,6 +538,7 @@ export class CitationService {
     // Tier 1: Official In-Process CSL Engine (Instant, Offline-capable, Consistent with library metadata)
     if (this.cslEngine) {
       try {
+        await this.cslEngine.ensureTemplate(styleId);
         const cslItem = CslJsonMapper.toCsl(item);
         const engineRes = this.cslEngine.format(cslItem, styleId, index);
         if (engineRes && engineRes.bibliography) {
@@ -575,6 +624,10 @@ export class CitationService {
     const items = this.catalogFacade
       ? await this.catalogFacade.findByIds(userId, itemIds, projectId)
       : [];
+
+    if (this.cslEngine) {
+      await this.cslEngine.ensureTemplate(styleId);
+    }
 
     const citationMap = new Map<string, FormattedCitationResult>();
     for (let index = 0; index < items.length; index++) {

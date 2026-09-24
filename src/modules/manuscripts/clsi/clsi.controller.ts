@@ -35,7 +35,7 @@ import {
 export class ClsiController {
   constructor(private readonly clsiService: ClsiService) {}
 
-  @Post(['manuscripts/compile', 'clsi/compile'])
+  @Post(['manuscripts/compile', 'clsi/compile', 'compiler/compile', 'latex/compile'])
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Compile LaTeX manuscript source to PDF via Overleaf-parity CLSI',
@@ -47,7 +47,7 @@ export class ClsiController {
     return this.clsiService.compile(dto, userId);
   }
 
-  @Post(['manuscripts/word-count', 'clsi/word-count'])
+  @Post(['manuscripts/word-count', 'clsi/word-count', 'compiler/word-count', 'latex/word-count'])
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Calculate academic word count and metrics (texcount parity)',
@@ -57,8 +57,10 @@ export class ClsiController {
   }
 
   @Post([
+    'synctex/forward',
     'manuscripts/synctex/forward',
     'clsi/synctex/forward',
+    'latex/synctex/forward',
     'projects/:projectId/clsi/synctex/forward',
   ])
   @UseGuards(ProjectRoleGuard)
@@ -72,8 +74,10 @@ export class ClsiController {
   }
 
   @Post([
+    'synctex/reverse',
     'manuscripts/synctex/reverse',
     'clsi/synctex/reverse',
+    'latex/synctex/reverse',
     'projects/:projectId/clsi/synctex/reverse',
   ])
   @UseGuards(ProjectRoleGuard)
@@ -87,7 +91,7 @@ export class ClsiController {
     return this.clsiService.reverseSync(dto);
   }
 
-  @Get(':projectId/clsi/artifacts')
+  @Get([':projectId/clsi/artifacts', ':projectId/compiler/artifacts'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({
@@ -97,7 +101,7 @@ export class ClsiController {
     return this.clsiService.listAuxFiles(projectId);
   }
 
-  @Get(':projectId/clsi/artifacts/:filename')
+  @Get([':projectId/clsi/artifacts/:filename', ':projectId/compiler/artifacts/:filename'])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Download a specific auxiliary file' })

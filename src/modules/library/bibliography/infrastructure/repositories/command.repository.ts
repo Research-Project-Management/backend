@@ -513,10 +513,10 @@ export class CommandRepository {
         sourceItemId: itemId,
         targetItemId,
         relationType,
-        description: relation.description || '',
+        description: relation.description || relation.note || '',
       },
       update: {
-        description: relation.description || '',
+        description: relation.description || relation.note || '',
       },
     });
   }

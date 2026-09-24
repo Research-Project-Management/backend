@@ -65,6 +65,61 @@ export class ProjectAccessGuard implements CanActivate {
     // 4. Resolve Project ID
     const projectId = await this.resolveProjectId(request);
     if (!projectId) {
+      // If client explicitly requested a project context but it couldn't be resolved, reject
+      const rawRequestedProject =
+        request.headers?.['x-project-id'] ||
+        request.query?.projectId ||
+        request.body?.projectId;
+
+      const hasExplicitProjectTarget =
+        rawRequestedProject &&
+        rawRequestedProject !== 'undefined' &&
+        rawRequestedProject !== 'null' &&
+        rawRequestedProject !== 'me' &&
+        rawRequestedProject !== 'user' &&
+        rawRequestedProject !== 'personal' &&
+        rawRequestedProject !== 'global' &&
+        rawRequestedProject !== 'default';
+
+      if (hasExplicitProjectTarget) {
+        throw new ForbiddenException(
+          'Project context is invalid or project not found',
+        );
+      }
+
+      // Check if the route is an explicit project route or has sub-resources requiring project context
+      const url = request.url || request.raw?.url || '';
+      const rawParamProject = request.params?.projectId;
+      const isParamProjectPersonal =
+        !rawParamProject ||
+        rawParamProject === 'undefined' ||
+        rawParamProject === 'null' ||
+        rawParamProject === 'me' ||
+        rawParamProject === 'user' ||
+        rawParamProject === 'personal' ||
+        rawParamProject === 'global' ||
+        rawParamProject === 'default';
+
+      const isUrlPersonalProject =
+        url.includes('/projects/personal') ||
+        url.includes('/projects/user') ||
+        url.includes('/projects/me') ||
+        url.includes('/project/personal') ||
+        url.includes('/project/user') ||
+        url.includes('/project/me');
+
+      const isExplicitProjectRoute =
+        (!isParamProjectPersonal && rawParamProject !== undefined) ||
+        request.params?.cycleId !== undefined ||
+        request.params?.workItemId !== undefined ||
+        (url.includes('/projects/') && !isUrlPersonalProject) ||
+        (url.includes('/project/') && !isUrlPersonalProject);
+
+      if (!isExplicitProjectRoute || isParamProjectPersonal || isUrlPersonalProject) {
+        // Dual-context endpoint accessed in personal/user scope (e.g. personal library)
+        return true;
+      }
+
       throw new ForbiddenException(
         'Project context is required to enforce project permissions',
       );

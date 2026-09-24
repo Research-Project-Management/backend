@@ -14,7 +14,6 @@ import {
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 import { RedisCacheService } from '@/core/cache/redis.service';
-import { DOCUMENT_REDIS_KEYS } from '@/modules/document/page/constants/page-redis-keys.constant';
 import {
   CompileManuscriptDto,
   ClsiWordCountDto,
@@ -49,6 +48,7 @@ import { DiskUsageCleaner, DiskUsageOptions } from './core/adapters/workspace/di
 import { ClsiHealthCheck } from './core/adapters/engines/health-check';
 import { ClsiMetrics } from './core/adapters/telemetry/clsi.metrics';
 import { buildZipArchive, ZipFileEntry } from './core/adapters/artifacts/zip.util';
+import { RealtimeService } from '@/modules/realtime/realtime.service';
 
 export type ClsiCompileResult =
   | {
@@ -85,7 +85,8 @@ export class ClsiService {
 
   constructor(
     private readonly configService: ConfigService,
-    @Optional() private readonly cache?: RedisCacheService
+    @Optional() private readonly cache?: RedisCacheService,
+    @Optional() private readonly realtimeService?: RealtimeService,
   ) {
     const scratchDir =
       this.configService.get<string>('SCRATCH_DIR') || '/tmp/clsi-scratch';
@@ -146,7 +147,7 @@ export class ClsiService {
     const sourceHash = this.hashSource(
       `${source}:${JSON.stringify(files)}:${engine}:${dto.draft ?? false}`
     );
-    const cacheKey = DOCUMENT_REDIS_KEYS.latex(sourceHash);
+    const cacheKey = `flux:clsi:compile:${sourceHash}`;
 
     // 1. Check Redis Cache
     if (dto.use_cache && this.cache && source) {
@@ -196,6 +197,7 @@ export class ClsiService {
     }
 
     // 3. Execute compilation through Hexagonal Pipeline (Local)
+    this.realtimeService?.broadcastCompileProgress(projectId, { status: 'compiling' });
     const effectiveTimeoutMs = dto.timeout_ms ?? dto.timeoutMs ?? 30000;
     const pipelineResult: CompilePipelineResult = await this.pipeline.execute({
       projectId,
@@ -229,6 +231,12 @@ export class ClsiService {
     ) {
       await this.cache.set(cacheKey, pipelineResult, 300);
     }
+
+    // 5. Broadcast live compile completion status over WebSocket
+    this.realtimeService?.broadcastCompileProgress(projectId, {
+      status: pipelineResult.success ? 'success' : 'failed',
+      logs: pipelineResult.logs ? [pipelineResult.logs] : [],
+    });
 
     return pipelineResult;
   }

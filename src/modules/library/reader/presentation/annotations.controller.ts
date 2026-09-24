@@ -75,11 +75,15 @@ export class AnnotationsController {
     annotationsService?: AnnotationsService,
   );
   constructor(
-    @Optional() private readonly createAnnotationUseCase?: any,
+    @Optional()
+    private readonly createAnnotationUseCase?: any,
     @Optional() private readonly listAnnotationsUseCase?: any,
-    @Optional() private readonly updateAnnotationUseCase?: any,
-    @Optional() private readonly deleteAnnotationUseCase?: any,
-    @Optional() private readonly batchUpsertAnnotationsUseCase?: any,
+    @Optional()
+    private readonly updateAnnotationUseCase?: UpdateAnnotationUseCase,
+    @Optional()
+    private readonly deleteAnnotationUseCase?: DeleteAnnotationUseCase,
+    @Optional()
+    private readonly batchUpsertAnnotationsUseCase?: BatchUpsertAnnotationsUseCase,
     @Optional()
     private readonly pdfAnnotationImporterService?: PdfAnnotationImporterService,
     @Optional() private readonly getAnnotationUseCase?: GetAnnotationUseCase,
@@ -87,12 +91,11 @@ export class AnnotationsController {
   ) {
     const isLegacyService =
       createAnnotationUseCase &&
-      (typeof createAnnotationUseCase.getAnnotationsByAttachment === 'function' ||
-        typeof createAnnotationUseCase.createAnnotation === 'function');
+      !('execute' in (createAnnotationUseCase as any));
 
     if (isLegacyService) {
-      this.annotationsServiceInstance = createAnnotationUseCase;
-      this.pdfAnnotationImporterServiceInstance = listAnnotationsUseCase;
+      this.annotationsServiceInstance = createAnnotationUseCase as any;
+      this.pdfAnnotationImporterServiceInstance = listAnnotationsUseCase as any;
     } else {
       this.createAnnotationUseCaseInstance = createAnnotationUseCase;
       this.listAnnotationsUseCaseInstance = listAnnotationsUseCase;

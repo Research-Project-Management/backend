@@ -70,6 +70,21 @@ export class PresignUploadUseCase {
       );
     }
 
+    // 0. Strict Quota Pre-check: Block upload URL generation if user/project quota exceeded
+    const requestedBytes = BigInt(input.sizeBytes);
+    if (this.quotaRepo) {
+      const quota = await this.quotaRepo.findByScope(
+        input.userId,
+        input.projectId ?? null,
+      );
+      const DEFAULT_LIMIT = 5n * 1024n * 1024n * 1024n; // 5 GB
+      const maxBytes = quota ? quota.maxBytes : DEFAULT_LIMIT;
+      const usedBytes = quota ? quota.usedBytes : 0n;
+      if (usedBytes + requestedBytes > maxBytes) {
+        throw new BadRequestException('Storage quota exceeded');
+      }
+    }
+
     // 1. Instant CAS Deduplication Check:
     // If client pre-computed SHA-256 and identical blob exists, create reference immediately (Zero-byte transfer)
     if (input.contentHash && this.blobRepo && this.nodeRepo) {

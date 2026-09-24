@@ -75,6 +75,18 @@ export class MultipartUploadUseCase {
   async initiate(input: InitiateMultipartInput) {
     const totalSizeBytes = BigInt(input.totalSize);
 
+    // Strict Quota Pre-check: Reject if remaining quota is insufficient before initiating S3 multipart session
+    const quota = await this.quotaRepo.findByScope(
+      input.userId,
+      input.projectId ?? null,
+    );
+    const DEFAULT_LIMIT = 5n * 1024n * 1024n * 1024n; // 5 GB
+    const maxBytes = quota ? quota.maxBytes : DEFAULT_LIMIT;
+    const usedBytes = quota ? quota.usedBytes : 0n;
+    if (usedBytes + totalSizeBytes > maxBytes) {
+      throw new BadRequestException('Storage quota exceeded');
+    }
+
     // Dynamic chunk sizing formula: 10MB base, scaled up for multi-GB files
     const MIN_PART_SIZE = 10 * 1024 * 1024; // 10MB
     const MAX_PARTS = 8000;

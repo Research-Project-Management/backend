@@ -17,4 +17,16 @@ export class PrismaProjectAccessAdapter implements IProjectAccessPort {
       project.members.some((m: any) => m.userId === userId)
     );
   }
+
+  async isProjectOwner(userId: string, projectId: string): Promise<boolean> {
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      include: { members: true },
+    });
+    if (!project) return false;
+    return (
+      project.createdById === userId ||
+      project.members.some((m: any) => m.userId === userId && m.role === 'owner')
+    );
+  }
 }

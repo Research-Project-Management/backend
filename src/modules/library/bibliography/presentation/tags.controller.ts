@@ -99,11 +99,16 @@ export class TagsController {
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete automatic tags' })
-  async deleteAutomaticTags(@CurrentUser('id') userId: string) {
+  async deleteAutomaticTags(
+    @CurrentUser('id') userId: string,
+    @Param('projectId') routeProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
+  ) {
+    const projectId = routeProjectId ?? queryProjectId;
     if (this.deleteAutomaticTagsUseCase) {
-      return this.deleteAutomaticTagsUseCase.execute({ userId });
+      return this.deleteAutomaticTagsUseCase.execute({ userId, projectId });
     }
-    return this.tagsService!.deleteAutomaticTags(userId);
+    return this.tagsService!.deleteAutomaticTags(userId, projectId);
   }
 
   @Delete(':tagId')
@@ -113,10 +118,13 @@ export class TagsController {
   async deleteTag(
     @CurrentUser('id') userId: string,
     @Param('tagId') tagId: string,
+    @Param('projectId') routeProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
+    const projectId = routeProjectId ?? queryProjectId;
     const deleted = this.deleteTagUseCase
-      ? await this.deleteTagUseCase.execute({ userId, tagId })
-      : await this.tagsService!.deleteTag(userId, tagId);
+      ? await this.deleteTagUseCase.execute({ userId, tagId, projectId })
+      : await this.tagsService!.deleteTag(userId, tagId, projectId);
     if (!deleted) {
       throw new NotFoundException(`Tag ${tagId} not found`);
     }
