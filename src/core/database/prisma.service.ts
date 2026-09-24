@@ -25,11 +25,14 @@ export class PrismaService
       'postgresql://localhost:5432/rpm';
 
     const isProd = process.env.NODE_ENV === 'production';
+    const poolMax = process.env.DATABASE_POOL_MAX
+      ? parseInt(process.env.DATABASE_POOL_MAX, 10)
+      : (isProd ? 25 : 20);
     const pool = new Pool({
       connectionString,
-      max: isProd ? 20 : 5,
+      max: poolMax,
       idleTimeoutMillis: isProd ? 30000 : 10000,
-      connectionTimeoutMillis: 10000,
+      connectionTimeoutMillis: 20000,
     });
     pool.on('error', (err) => {
       console.warn('[Prisma pg pool error]:', err.message);

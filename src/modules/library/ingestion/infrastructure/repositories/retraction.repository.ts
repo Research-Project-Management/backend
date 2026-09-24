@@ -281,13 +281,13 @@ export class RetractionRepository {
 
   async findRetractionRecord(where: any) {
     return this.prisma.retraction.findFirst({
-      where,
+      where: where?.where ?? where,
     });
   }
 
   async findRetraction(where: any) {
     return this.prisma.retraction.findFirst({
-      where,
+      where: where?.where ?? where,
     });
   }
 

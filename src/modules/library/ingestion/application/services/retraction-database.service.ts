@@ -219,12 +219,10 @@ export class RetractionDatabaseService implements OnModuleInit {
     // 3. PostgreSQL RetractionRecord Lookup
     if (cleanDoi || cleanPmid) {
       const record = await this.repo.findRetractionRecord({
-        where: {
-          OR: [
-            ...(cleanDoi ? [{ doi: cleanDoi }] : []),
-            ...(cleanPmid ? [{ pmid: cleanPmid }] : []),
-          ],
-        },
+        OR: [
+          ...(cleanDoi ? [{ doi: cleanDoi }] : []),
+          ...(cleanPmid ? [{ pmid: cleanPmid }] : []),
+        ],
       });
 
       if (record) {

@@ -110,6 +110,8 @@ jobs:
           host: ${{ secrets.HOST }}
           username: ${{ secrets.USERNAME }}
           password: ${{ secrets.PASSWORD }}
+          timeout: 30m
+          command_timeout: 30m
           envs: DOCKER_PASSWORD,DOCKER_USER
           script: |
             set -e
