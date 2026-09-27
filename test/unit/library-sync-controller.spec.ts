@@ -98,7 +98,7 @@ describe('SyncController (Library Distributed Sync API)', () => {
       expect(transactionServiceMock.getChangesSince).toHaveBeenCalledWith(
         { userId: 'user-123' },
         BigInt(4),
-        50,
+        51,
       );
     });
 
@@ -113,8 +113,30 @@ describe('SyncController (Library Distributed Sync API)', () => {
       expect(transactionServiceMock.getChangesSince).toHaveBeenCalledWith(
         { userId: 'user-123' },
         BigInt(0),
-        100,
+        101,
       );
+    });
+
+    it('should set hasMore to true and slice excess item when changes exceed limit', async () => {
+      const mockItems = Array.from({ length: 3 }, (_, i) => ({
+        id: `change-${i}`,
+        seq: BigInt(i + 1),
+        userId: 'user-123',
+        projectId: null,
+        entityType: 'item',
+        entityId: `item-${i}`,
+        action: 'create',
+        version: 1,
+        data: {},
+        createdAt: new Date(),
+      }));
+
+      transactionServiceMock.getChangesSince.mockResolvedValue(mockItems as any);
+
+      const result = await controller.getChanges('user-123', { limit: 2 });
+      expect(result.count).toBe(2);
+      expect(result.hasMore).toBe(true);
+      expect(result.changes).toHaveLength(2);
     });
   });
 
@@ -149,8 +171,30 @@ describe('SyncController (Library Distributed Sync API)', () => {
       expect(transactionServiceMock.getTombstonesSince).toHaveBeenCalledWith(
         { userId: 'user-123' },
         BigInt(5),
-        20,
+        21,
       );
+    });
+
+    it('should set hasMore to true for tombstones when exceeding limit', async () => {
+      const mockTombstones = Array.from({ length: 3 }, (_, i) => ({
+        id: `tomb-${i}`,
+        seq: BigInt(i + 1),
+        userId: 'user-123',
+        projectId: null,
+        entityType: 'item',
+        entityId: `deleted-item-${i}`,
+        deletedById: 'user-123',
+        deletedAt: new Date(),
+      }));
+
+      transactionServiceMock.getTombstonesSince.mockResolvedValue(
+        mockTombstones as any,
+      );
+
+      const result = await controller.getTombstones('user-123', { limit: 2 });
+      expect(result.count).toBe(2);
+      expect(result.hasMore).toBe(true);
+      expect(result.tombstones).toHaveLength(2);
     });
   });
 });

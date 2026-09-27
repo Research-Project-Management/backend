@@ -78,14 +78,17 @@ export class SyncController {
     const changes = await this.transactionService.getChangesSince(
       scope,
       sinceSeq,
-      limit,
+      limit + 1,
     );
+
+    const hasMore = changes.length > limit;
+    const pagedChanges = hasMore ? changes.slice(0, limit) : changes;
 
     return {
       since: sinceSeq.toString(),
-      count: changes.length,
-      hasMore: changes.length >= limit,
-      changes: changes.map((c) => ({
+      count: pagedChanges.length,
+      hasMore,
+      changes: pagedChanges.map((c) => ({
         id: c.id,
         seq: c.seq.toString(),
         userId: c.userId,
@@ -121,14 +124,17 @@ export class SyncController {
     const tombstones = await this.transactionService.getTombstonesSince(
       scope,
       sinceSeq,
-      limit,
+      limit + 1,
     );
+
+    const hasMore = tombstones.length > limit;
+    const pagedTombstones = hasMore ? tombstones.slice(0, limit) : tombstones;
 
     return {
       since: sinceSeq !== undefined ? sinceSeq.toString() : '0',
-      count: tombstones.length,
-      hasMore: tombstones.length >= limit,
-      tombstones: tombstones.map((t) => ({
+      count: pagedTombstones.length,
+      hasMore,
+      tombstones: pagedTombstones.map((t) => ({
         id: t.id,
         seq: t.seq.toString(),
         userId: t.userId,

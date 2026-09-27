@@ -89,24 +89,35 @@ export class AiService {
     }
 
     if (pageId) {
-      const doc = await this.prisma.manuscriptDoc.findFirst({
-        where: { id: pageId, deleted: false },
-        select: { id: true, projectId: true },
-      });
+      const doc =
+        (await (this.prisma as any).manuscriptDoc?.findFirst?.({
+          where: { id: pageId, deleted: false },
+          select: { id: true, projectId: true, authorId: true },
+        })) ||
+        (await (this.prisma as any).page?.findFirst?.({
+          where: { id: pageId },
+          select: { id: true, projectId: true, authorId: true },
+        }));
       if (!doc) {
         throw new NotFoundException('Manuscript doc not found');
       }
-      const project = await this.prisma.project.findFirst({
-        where: { id: doc.projectId },
-        select: {
-          createdById: true,
-          members: { where: { userId }, select: { userId: true } },
-        },
-      });
-      const canAccess =
-        project?.createdById === userId ||
-        (project?.members && project.members.length > 0);
-      if (!canAccess) {
+      if (doc.projectId) {
+        const project = await this.prisma.project.findFirst({
+          where: { id: doc.projectId },
+          select: {
+            createdById: true,
+            members: { where: { userId }, select: { userId: true } },
+          },
+        });
+        const canAccess =
+          project?.createdById === userId ||
+          (project?.members && project.members.length > 0);
+        if (!canAccess) {
+          throw new ForbiddenException(
+            'You do not have access to this manuscript document',
+          );
+        }
+      } else if (doc.authorId && doc.authorId !== userId) {
         throw new ForbiddenException(
           'You do not have access to this manuscript document',
         );
@@ -180,7 +191,10 @@ export class AiService {
       targetChatId = pageSession.id;
       effectiveTitle = pageSession.title;
     } else if (!targetChatId) {
-      effectiveTitle = sanitizeChatTitle(lastUserMsg.content);
+      effectiveTitle = this.deriveInitialChatTitle(
+        lastUserMsg.content,
+        payload.document_ids,
+      );
       const newSession = await this.chatService.createChat(userId, {
         projectId: targetProjectId,
         title: effectiveTitle,
@@ -222,6 +236,16 @@ export class AiService {
             `Could not persist assistant stream response: ${String(err)}`,
           );
         }
+
+        // Auto-generate conversation title based on exchange
+        void this.generateAndSaveConversationTitle(
+          targetChatId,
+          userId,
+          lastUserMsg.content,
+          accumulatedText,
+          effectiveTitle,
+          payload.document_ids,
+        );
       }
     };
 
@@ -271,7 +295,10 @@ export class AiService {
       targetChatId = pageSession.id;
       effectiveTitle = pageSession.title;
     } else if (!targetChatId) {
-      effectiveTitle = sanitizeChatTitle(lastUserMsg.content);
+      effectiveTitle = this.deriveInitialChatTitle(
+        lastUserMsg.content,
+        payload.document_ids,
+      );
       const newSession = await this.chatService.createChat(userId, {
         projectId: targetProjectId,
         title: effectiveTitle,
@@ -314,6 +341,16 @@ export class AiService {
           `Could not persist assistant sync response: ${String(err)}`,
         );
       }
+
+      // Auto-generate conversation title based on exchange
+      void this.generateAndSaveConversationTitle(
+        targetChatId,
+        userId,
+        lastUserMsg.content,
+        result.content,
+        effectiveTitle,
+        payload.document_ids,
+      );
     }
 
     return { ...result, chatId: targetChatId, title: effectiveTitle };
@@ -586,5 +623,145 @@ export class AiService {
       scopeId,
       projectId: cleanProjectId,
     });
+  }
+
+  /**
+   * Derive initial title when session starts, avoiding raw greetings or generic phrases.
+   */
+  private deriveInitialChatTitle(
+    content: string,
+    documentIds?: string[],
+  ): string {
+    const trimmed = (content || '').trim();
+    const lower = trimmed.toLowerCase();
+
+    // Check if user content is a pure greeting or generic trigger
+    const GREETING_REGEX =
+      /^(xin chào|chào bạn|chào|hello|hi|hey|alo|good morning|good afternoon|good evening|tóm tắt tôi file này|tóm tắt file này|tóm tắt paper này)[!.,? ]*$/i;
+
+    if (!trimmed || GREETING_REGEX.test(lower)) {
+      if (documentIds && documentIds.length > 0) {
+        return 'Tài liệu đính kèm';
+      }
+      return 'New Chat';
+    }
+
+    return sanitizeChatTitle(trimmed);
+  }
+
+  /**
+   * Auto-generate a concise, meaningful title (3 to 6 words) based on the actual
+   * conversation topic, updating the chat session in background.
+   */
+  private async generateAndSaveConversationTitle(
+    chatId: string,
+    userId: string,
+    userText: string,
+    assistantText: string,
+    currentTitle?: string,
+    documentIds?: string[],
+  ): Promise<void> {
+    try {
+      // Determine if title needs summarization
+      const isGeneric =
+        !currentTitle ||
+        currentTitle.trim() === 'New Chat' ||
+        currentTitle.trim() === 'Tài liệu đính kèm' ||
+        /^(xin chào|chào bạn|chào|hello|hi|hey|alo|tóm tắt tôi file này|tóm tắt file này|tóm tắt paper này)[!.,? ]*$/i.test(
+          currentTitle.trim(),
+        );
+
+      if (!isGeneric) return;
+
+      // 1. If documentIds exist, try to name after the first document
+      if (documentIds && documentIds.length > 0) {
+        const file = await this.prisma.file.findFirst({
+          where: { id: { in: documentIds } },
+          select: { filename: true },
+        });
+        const docName = file?.filename;
+        if (docName) {
+          const cleanDocTitle = sanitizeChatTitle(docName).slice(0, 45);
+          const newTitle = `Tài liệu: ${cleanDocTitle}`;
+          await this.chatService.renameChat(chatId, userId, {
+            title: newTitle,
+          });
+          return;
+        }
+      }
+
+      // 2. Call LLM to summarize conversation topic into a clean 3-6 word title
+      const prompt = `Generate a concise, professional title (3 to 6 words maximum, in the same language as the conversation, no quotes, no trailing punctuation) summarizing the main topic of this conversation:\n\nUser: ${userText.slice(0, 400)}\nAssistant: ${assistantText.slice(0, 600)}`;
+
+      const response = await this.engineService.syncChat({
+        messages: [{ role: 'user', content: prompt }],
+      });
+
+      if (response && response.content) {
+        let clean = response.content
+          .replace(/^["'`“”«»]+|["'`“”«»]+$/g, '')
+          .replace(/[.!?:;]+$/, '')
+          .trim();
+        clean = clean
+          .replace(/^[#*\-•\s]+/, '')
+          .replace(/[*_~`]/g, '')
+          .trim();
+
+        if (
+          clean.length > 0 &&
+          clean.length <= 60 &&
+          !clean.toLowerCase().includes('offline') &&
+          !clean.toLowerCase().includes('flux-ai')
+        ) {
+          await this.chatService.renameChat(chatId, userId, {
+            title: clean,
+          });
+          return;
+        }
+      }
+
+      // 3. Heuristic fallback
+      const heuristicTitle = this.extractHeuristicTitle(
+        userText,
+        assistantText,
+      );
+      if (heuristicTitle && heuristicTitle !== currentTitle) {
+        await this.chatService.renameChat(chatId, userId, {
+          title: heuristicTitle,
+        });
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Could not auto-generate conversation title: ${String(err)}`,
+      );
+    }
+  }
+
+  private extractHeuristicTitle(
+    userText: string,
+    assistantText: string,
+  ): string {
+    const cleanUser = (userText || '')
+      .replace(
+        /^(xin chào|chào bạn|chào|hello|hi|hey|alo|cho tôi hỏi|hãy cho tôi biết|hãy|bạn có thể)\s+/i,
+        '',
+      )
+      .trim();
+
+    if (cleanUser.length >= 5) {
+      return sanitizeChatTitle(cleanUser).slice(0, 50);
+    }
+
+    if (assistantText && assistantText.length > 10) {
+      const firstLine = assistantText
+        .split('\n')[0]
+        .replace(/^[#*\-•\s]+/, '')
+        .trim();
+      if (firstLine.length >= 5) {
+        return sanitizeChatTitle(firstLine).slice(0, 50);
+      }
+    }
+
+    return 'Cuộc trò chuyện mới';
   }
 }

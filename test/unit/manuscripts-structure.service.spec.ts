@@ -25,6 +25,7 @@ import {
   InvalidNodeNameError,
   NodeNotFoundError,
   RootDocNotFoundError,
+  MaxProjectFilesExceededError,
 } from '@/modules/manuscripts/structure/core/domain/structure-errors';
 
 /**
@@ -170,6 +171,10 @@ class InMemoryStructureRepository implements IStructureRepository {
     if (node && node.projectId === projectId) {
       (node as any).props.sortOrder = sortOrder;
     }
+  }
+
+  public async countNodes(projectId: string): Promise<number> {
+    return Array.from(this.nodes.values()).filter((n) => n.projectId === projectId).length;
   }
 }
 
@@ -330,6 +335,19 @@ describe('Manuscripts - Structure Subsystem (Overleaf Parity & Materialized Path
       expect(tree[1].isRootDoc).toBe(true);
 
       expect(tree[2].name).toBe('appendix.tex');
+    });
+
+    it('should throw MaxProjectFilesExceededError when project reaches 2,000 nodes limit', async () => {
+      // Mock repository.countNodes to simulate reaching 2,000 files limit
+      jest.spyOn(repository, 'countNodes').mockResolvedValueOnce(2000);
+
+      await expect(
+        service.createNode(PROJECT_ID, {
+          name: 'overflow.tex',
+          type: 'DOC',
+          path: '/overflow.tex',
+        })
+      ).rejects.toThrow(MaxProjectFilesExceededError);
     });
   });
 

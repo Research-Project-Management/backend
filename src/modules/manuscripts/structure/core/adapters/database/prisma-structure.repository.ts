@@ -214,4 +214,10 @@ export class PrismaStructureRepository implements IStructureRepository {
       data: { sortOrder },
     });
   }
+
+  public async countNodes(projectId: string): Promise<number> {
+    return await this.prisma.manuscriptNode.count({
+      where: { projectId },
+    });
+  }
 }

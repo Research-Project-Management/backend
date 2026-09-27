@@ -108,14 +108,15 @@ export class ProjectAccessGuard implements CanActivate {
         url.includes('/project/user') ||
         url.includes('/project/me');
 
-      const isExplicitProjectRoute =
-        (!isParamProjectPersonal && rawParamProject !== undefined) ||
-        request.params?.cycleId !== undefined ||
-        request.params?.workItemId !== undefined ||
-        (url.includes('/projects/') && !isUrlPersonalProject) ||
-        (url.includes('/project/') && !isUrlPersonalProject);
+      // Only dual-context library endpoints (which support both personal and project scopes)
+      // are permitted to proceed in personal scope when no projectId is provided.
+      const isDualContextLibraryRoute =
+        (url.includes('/library') ||
+          url.includes('/attachments') ||
+          url.includes('/files')) &&
+        (isParamProjectPersonal || isUrlPersonalProject || (!url.includes('/projects/') && !url.includes('/project/')));
 
-      if (!isExplicitProjectRoute || isParamProjectPersonal || isUrlPersonalProject) {
+      if (isDualContextLibraryRoute) {
         // Dual-context endpoint accessed in personal/user scope (e.g. personal library)
         return true;
       }

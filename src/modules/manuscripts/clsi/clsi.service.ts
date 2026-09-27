@@ -14,6 +14,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 import { RedisCacheService } from '@/core/cache/redis.service';
+import { PrismaService } from '@/core/database/prisma.service';
 import {
   CompileManuscriptDto,
   ClsiWordCountDto,
@@ -87,6 +88,7 @@ export class ClsiService {
     private readonly configService: ConfigService,
     @Optional() private readonly cache?: RedisCacheService,
     @Optional() private readonly realtimeService?: RealtimeService,
+    @Optional() private readonly prisma?: PrismaService,
   ) {
     const scratchDir =
       this.configService.get<string>('SCRATCH_DIR') || '/tmp/clsi-scratch';
@@ -101,7 +103,7 @@ export class ClsiService {
 
     this.remoteClsiUrl =
       this.configService.get<string>('CLSI_URL') ||
-      this.configService.get<string>('LATEX_URL');
+      'http://localhost:3013';
 
     // Initialize Hexagonal Adapters
     this.workspace = new OverleafIncrementalWorkspace(scratchDir);
@@ -140,9 +142,26 @@ export class ClsiService {
   ): Promise<ClsiCompileResult> {
     const projectId = dto.projectId || dto.project_id || 'default';
     const mainFile = dto.main_file || 'main.tex';
-    const source = dto.source || '';
+    let source = dto.source || '';
     const files = dto.files || {};
     const engine = dto.engine || 'pdflatex';
+
+    // Auto-fetch source from Docstore / Prisma if not provided
+    if (!source && (dto.pageId || dto.page_id) && this.prisma) {
+      const pageId = (dto.pageId || dto.page_id)!;
+      try {
+        const record = await this.prisma.manuscriptDoc.findUnique({
+          where: { id: pageId },
+        });
+        if (record && record.lines) {
+          source = Array.isArray(record.lines)
+            ? (record.lines as string[]).join('\n')
+            : String(record.lines);
+        }
+      } catch (err: any) {
+        this.logger.debug(`Could not auto-fetch page ${pageId}: ${err.message}`);
+      }
+    }
 
     const sourceHash = this.hashSource(
       `${source}:${JSON.stringify(files)}:${engine}:${dto.draft ?? false}`
@@ -171,15 +190,48 @@ export class ClsiService {
     if (this.remoteClsiUrl) {
       try {
         const baseUrl = this.remoteClsiUrl.replace(/\/+$/, '');
-        const response = await fetch(`${baseUrl}/api/clsi/compile`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(dto),
-          signal: AbortSignal.timeout(dto.timeout_ms ?? dto.timeoutMs ?? 60000),
-        });
+        // Support Overleaf-parity CLSI routes (/api/clsi/compile, /project/:id/compile, /compile)
+        const endpoints = baseUrl.endsWith('/api/clsi')
+          ? [`${baseUrl}/compile`]
+          : [
+              `${baseUrl}/api/clsi/compile`,
+              `${baseUrl}/project/${projectId}/compile`,
+              `${baseUrl}/compile`,
+            ];
 
-        if (response.ok) {
-          const result = (await response.json()) as ClsiCompileResult;
+        let response: Response | null = null;
+        let lastError: Error | null = null;
+
+        for (const endpoint of endpoints) {
+          try {
+            const res = await fetch(endpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                ...dto,
+                source,
+                files,
+              }),
+              signal: AbortSignal.timeout(dto.timeout_ms ?? dto.timeoutMs ?? 60000),
+            });
+            if (res.status !== 404) {
+              response = res;
+              break;
+            }
+          } catch (err: any) {
+            lastError = err;
+          }
+        }
+
+        if (response && response.ok) {
+          const rawResult = (await response.json()) as any;
+          const result: ClsiCompileResult = {
+            ...rawResult,
+            durationMs:
+              rawResult.durationMs ??
+              rawResult.timing?.totalMs ??
+              0,
+          };
           if (
             result.success &&
             this.cache &&
@@ -190,7 +242,11 @@ export class ClsiService {
           }
           return result;
         }
-        this.logger.warn(`Remote CLSI responded with HTTP ${response.status}. Falling back to local pipeline.`);
+        if (response) {
+          this.logger.warn(`Remote CLSI responded with HTTP ${response.status}. Falling back to local pipeline.`);
+        } else if (lastError) {
+          this.logger.warn(`Remote CLSI compile failed: ${lastError.message}. Falling back to local pipeline.`);
+        }
       } catch (err: any) {
         this.logger.warn(`Remote CLSI compile failed: ${err.message}. Falling back to local pipeline.`);
       }
@@ -198,7 +254,7 @@ export class ClsiService {
 
     // 3. Execute compilation through Hexagonal Pipeline (Local)
     this.realtimeService?.broadcastCompileProgress(projectId, { status: 'compiling' });
-    const effectiveTimeoutMs = dto.timeout_ms ?? dto.timeoutMs ?? 30000;
+    const effectiveTimeoutMs = dto.timeout_ms ?? dto.timeoutMs ?? 240000;
     const pipelineResult: CompilePipelineResult = await this.pipeline.execute({
       projectId,
       mainFile,

@@ -296,6 +296,46 @@ export class PipelineService {
                 status: 'SUCCEEDED',
                 itemId: created.id,
               });
+
+              // Materialize metadata.notes[] → Note DB records (C2 fix)
+              // BibTeX `annote` / `note` fields land here as metadata.notes[]
+              const importedNotes = (itemDecision.proposedItem as any)?.notes;
+              if (
+                Array.isArray(importedNotes) &&
+                importedNotes.length > 0 &&
+                this.contentFacade
+              ) {
+                for (const noteItem of importedNotes) {
+                  const rawContent =
+                    typeof noteItem === 'object' && noteItem !== null
+                      ? (noteItem as Record<string, unknown>).content
+                      : undefined;
+                  const noteSource =
+                    typeof noteItem === 'object' && noteItem !== null
+                      ? String((noteItem as Record<string, unknown>).source ?? '')
+                      : '';
+                  const noteContent =
+                    typeof noteItem === 'string'
+                      ? noteItem
+                      : typeof rawContent === 'string'
+                        ? rawContent
+                        : '';
+                  if (!noteContent.trim()) continue;
+                  try {
+                    await this.contentFacade.createNote(resolvedScope.userId, {
+                      itemId: created.id,
+                      contentMd: noteContent.trim(),
+                      title: noteSource || 'Imported Note',
+                      projectId: resolvedScope.projectId,
+                      createdById: resolvedScope.userId,
+                    });
+                  } catch (noteErr: any) {
+                    this.logger.warn(
+                      `[BATCH] Failed to create note for item ${created.id}: ${noteErr?.message}`,
+                    );
+                  }
+                }
+              }
             } else {
               failed++;
               progressItems.push({
@@ -529,10 +569,10 @@ export class PipelineService {
                     filename: uploadedFilename,
                     url: getFileContentPath(uploadedFileIdentifier),
                     mimeType: 'application/pdf',
-                    size: 0,
+                    size: (envelope.payload as any)?.size || 0,
                     userId: resolvedScope.userId,
                   },
-                  resolvedScope.projectId || resolvedScope.userId,
+                  resolvedScope.projectId || undefined,
                 );
                 this.logger.log(
                   `[EXACT_MERGE] Attached file ${uploadedFileIdentifier} to item ${matchResult.targetItemId}`,
@@ -558,6 +598,10 @@ export class PipelineService {
                   typeof noteItem === 'object' && noteItem !== null
                     ? (noteItem as Record<string, unknown>).content
                     : undefined;
+                const noteSource =
+                  typeof noteItem === 'object' && noteItem !== null
+                    ? String((noteItem as Record<string, unknown>).source ?? '')
+                    : '';
                 const noteContent =
                   typeof noteItem === 'string'
                     ? noteItem
@@ -565,15 +609,22 @@ export class PipelineService {
                       ? rawContent
                       : '';
                 if (!noteContent.trim()) continue;
-                await this.contentFacade.createNote(resolvedScope.userId, {
-                  itemId: matchResult.targetItemId,
-                  contentMd: noteContent.trim(),
-                  title: 'Literature Note',
-                  projectId: resolvedScope.projectId,
-                });
-                this.logger.log(
-                  `[EXACT_MERGE] Added literature note to item ${matchResult.targetItemId}`,
-                );
+                try {
+                  await this.contentFacade.createNote(resolvedScope.userId, {
+                    itemId: matchResult.targetItemId,
+                    contentMd: noteContent.trim(),
+                    title: noteSource || 'Imported Note',
+                    projectId: resolvedScope.projectId,
+                    createdById: resolvedScope.userId,
+                  });
+                  this.logger.log(
+                    `[EXACT_MERGE] Added imported note to item ${matchResult.targetItemId}`,
+                  );
+                } catch (noteErr: any) {
+                  this.logger.warn(
+                    `[EXACT_MERGE] Failed to create note for item ${matchResult.targetItemId}: ${noteErr?.message}`,
+                  );
+                }
               }
             }
           }
@@ -724,6 +775,86 @@ export class PipelineService {
         },
       },
     );
+
+    const uploadedFileIdentifier =
+      envelope.payload.kind === 'FILE'
+        ? envelope.payload.fileId
+        : (decision.proposedItem as any)?.fileId;
+    const uploadedFilename =
+      envelope.payload.kind === 'FILE'
+        ? envelope.payload.filename || 'document.pdf'
+        : (decision.proposedItem as any)?.filename || 'document.pdf';
+
+    if (createdItem?.id && uploadedFileIdentifier && this.contentFacade) {
+      try {
+        await this.contentFacade.createAttachment(
+          {
+            itemId: createdItem.id,
+            fileId: uploadedFileIdentifier,
+            filename: uploadedFilename,
+            url: getFileContentPath(uploadedFileIdentifier),
+            mimeType: 'application/pdf',
+            size: (envelope.payload as any)?.size || 0,
+            userId: resolvedScope.userId,
+          },
+          resolvedScope.projectId || undefined,
+        );
+        this.logger.log(
+          `[COMMIT] Attached file ${uploadedFileIdentifier} to new item ${createdItem.id}`,
+        );
+      } catch (attachmentError: unknown) {
+        const errorMessage =
+          attachmentError instanceof Error
+            ? attachmentError.message
+            : String(attachmentError);
+        this.logger.warn(
+          `[COMMIT] Failed to attach file ${uploadedFileIdentifier} to new item ${createdItem.id}: ${errorMessage}`,
+        );
+      }
+    }
+
+    // Materialize metadata.notes[] → Note DB records (C2 fix)
+    // Handles BibTeX `annote` / `note` / RIS `N1` / `AB` annotation fields
+    // that survive through IdentifyStage → metadata.notes[]
+    if (createdItem?.id && this.contentFacade) {
+      const importedNotes = (decision.proposedItem as any)?.notes;
+      if (Array.isArray(importedNotes) && importedNotes.length > 0) {
+        for (const noteItem of importedNotes) {
+          const rawContent =
+            typeof noteItem === 'object' && noteItem !== null
+              ? (noteItem as Record<string, unknown>).content
+              : undefined;
+          const noteSource =
+            typeof noteItem === 'object' && noteItem !== null
+              ? String((noteItem as Record<string, unknown>).source ?? '')
+              : '';
+          const noteContent =
+            typeof noteItem === 'string'
+              ? noteItem
+              : typeof rawContent === 'string'
+                ? rawContent
+                : '';
+          if (!noteContent.trim()) continue;
+          try {
+            await this.contentFacade.createNote(resolvedScope.userId, {
+              itemId: createdItem.id,
+              contentMd: noteContent.trim(),
+              // Use the source field (e.g. 'annote', 'note', 'abstract') as title
+              title: noteSource || 'Imported Note',
+              projectId: resolvedScope.projectId,
+              createdById: resolvedScope.userId,
+            });
+            this.logger.log(
+              `[COMMIT] Created imported note for new item ${createdItem.id} (source: ${noteSource || 'unknown'})`,
+            );
+          } catch (noteErr: any) {
+            this.logger.warn(
+              `[COMMIT] Failed to create note for item ${createdItem.id}: ${noteErr?.message}`,
+            );
+          }
+        }
+      }
+    }
 
     try {
       const commitSourceLabel =

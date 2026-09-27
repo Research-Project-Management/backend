@@ -118,14 +118,15 @@ export class AuthGuard implements CanActivate {
         ? authHeader.split(' ')[1]
         : null;
 
-    // Security: Query parameter token is restricted to streaming/SSE endpoints to prevent token leakage in access logs
+    // Security: Query parameter token is restricted to streaming/SSE endpoints and artifact downloads to prevent token leakage in access logs
     if (!token && request.query?.token) {
       const url = request.raw?.url || request.url || '';
-      const isAllowedStreamingPath =
+      const isAllowedDownloadOrStreamPath =
         url.includes('/stream') ||
         url.includes('/events') ||
-        url.includes('/sse');
-      if (isAllowedStreamingPath) {
+        url.includes('/sse') ||
+        url.includes('/artifacts');
+      if (isAllowedDownloadOrStreamPath) {
         token = String(request.query.token);
       }
     }

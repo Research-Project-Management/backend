@@ -74,6 +74,12 @@ export class CoreController {
     return this.projectService.create(userId, dto);
   }
 
+  @Get('trash')
+  @ApiOperation({ summary: 'List soft-deleted (trashed) projects for current user' })
+  async getTrashedProjects(@CurrentUser('id') userId: string) {
+    return this.projectService.getTrashedProjects(userId);
+  }
+
   @Get(':projectId')
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
@@ -147,12 +153,6 @@ export class CoreController {
     @CurrentUser('id') userId: string,
   ) {
     return this.projectService.duplicateProject(projectId, userId);
-  }
-
-  @Get('trash')
-  @ApiOperation({ summary: 'List soft-deleted (trashed) projects for current user' })
-  async getTrashedProjects(@CurrentUser('id') userId: string) {
-    return this.projectService.getTrashedProjects(userId);
   }
 
   @Delete(':projectId/permanent')

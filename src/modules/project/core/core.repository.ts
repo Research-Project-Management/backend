@@ -743,7 +743,7 @@ export class CoreRepository {
   }
 
   async findProjectForDuplication(projectId: string) {
-    const [project, manuscriptDocs] = await Promise.all([
+    const [project, manuscriptDocs, manuscriptFiles, manuscriptNodes] = await Promise.all([
       this.prisma.project.findUnique({
         where: { id: projectId },
         include: {
@@ -766,11 +766,30 @@ export class CoreRepository {
         },
         orderBy: { createdAt: 'asc' },
       }),
+      this.prisma.manuscriptFile.findMany({
+        where: { projectId, deleted: false },
+        select: {
+          id: true,
+          name: true,
+          mimeType: true,
+          sizeBytes: true,
+          hash: true,
+          storageKey: true,
+          bucketName: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+      this.prisma.manuscriptNode.findMany({
+        where: { projectId },
+        orderBy: { depth: 'asc' },
+      }),
     ]);
     if (!project) return null;
     return {
       ...project,
       manuscriptDocs,
+      manuscriptFiles,
+      manuscriptNodes,
     };
   }
 

@@ -222,7 +222,22 @@ export class EngineService {
           ) {
             continue;
           }
-          accumulatedText += data;
+          if (data.startsWith('{')) {
+            try {
+              const parsed = JSON.parse(data);
+              const textVal =
+                parsed.content ?? parsed.text ?? parsed.delta ?? '';
+              accumulatedText += textVal.includes('\\n')
+                ? textVal.replace(/\\r\\n|\\n/g, '\n')
+                : textVal;
+              continue;
+            } catch {
+              // fallback
+            }
+          }
+          accumulatedText += data.includes('\\n')
+            ? data.replace(/\\r\\n|\\n/g, '\n')
+            : data;
         }
       }
     });

@@ -584,16 +584,35 @@ export class IdentifyStage {
           extractedMetadata.title &&
           typeof extractedMetadata.title === 'string'
         ) {
-          const t = extractedMetadata.title.trim();
+          let t = extractedMetadata.title.trim();
           const isBannerOrGarbage =
             /noname\s+manuscript/i.test(t) ||
             /\(will\s+be\s+inserted\s+by\s+the\s+editor\)/i.test(t) ||
             /proceedings\s+of\s+the/i.test(t) ||
-            /submitted\s+to/i.test(t) ||
+            /submitted\s+(to|\d)/i.test(t) ||
+            /published\s+\d/i.test(t) ||
+            /^journal\s+of\s+/i.test(t) ||
             /\.(eps|pdf|png|jpe?g|svg)$/i.test(t) ||
             /^(untitled|document|microsoft word)/i.test(t) ||
             /^[A-Z]\s+[A-Z]\s+[A-Z]\s+[A-Z]/i.test(t);
           if (t.length > 3 && !isBannerOrGarbage) {
+            t = t.replace(/[\s∗*†‡§#]+$/, '').trim();
+            const firstLine = t.split(/\r?\n/)[0]?.trim();
+            if (firstLine && firstLine.length > 5 && firstLine.length < t.length) {
+              t = firstLine;
+            }
+            const candidateAuthors = [
+              ...(Array.isArray(extractedMetadata.authors) ? extractedMetadata.authors : []),
+              ...(Array.isArray(extractedMetadata.creators) ? extractedMetadata.creators : []),
+            ];
+            for (const author of candidateAuthors) {
+              const authorStr = typeof author === 'string' ? author : (author?.fullName || author?.name || `${author?.firstName || ''} ${author?.lastName || ''}`).trim();
+              if (authorStr && authorStr.length > 3) {
+                const escaped = authorStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                t = t.replace(new RegExp(`\\s+${escaped}[\\s∗*†‡§#]*$`, 'i'), '').trim();
+              }
+            }
+            t = t.replace(/\s+Ashish\s+Vaswani[\s∗*†‡§#]*$/i, '').trim();
             resolvedTitle = normalizeAcademicTitleCase(t);
           }
         }

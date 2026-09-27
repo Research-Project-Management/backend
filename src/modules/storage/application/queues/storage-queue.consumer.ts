@@ -123,6 +123,17 @@ export class StorageQueueConsumer
         `Completed processing job [${job.id}] for file ${data.fileId}`,
       );
     } catch (err: any) {
+      if (
+        err?.name === 'NoSuchKey' ||
+        err?.Code === 'NoSuchKey' ||
+        err?.message?.includes('NoSuchKey') ||
+        err?.message?.includes('The specified key does not exist')
+      ) {
+        this.logger.warn(
+          `Storage job [${job.id}] skipped for ${data.fileId}: S3 key "${data.s3Key}" not found. File may have been removed or incomplete upload.`,
+        );
+        return;
+      }
       this.logger.error(
         `Failed processing storage job [${job.id}] for ${data.fileId}: ${err?.message}`,
         err?.stack,

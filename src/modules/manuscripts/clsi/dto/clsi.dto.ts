@@ -74,7 +74,7 @@ export class CompileManuscriptDto {
   @IsOptional()
   syntaxOnly?: boolean;
 
-  @ApiPropertyOptional({ description: 'Compilation timeout in milliseconds', default: 30000 })
+  @ApiPropertyOptional({ description: 'Compilation timeout in milliseconds', default: 240000 })
   @IsNumber()
   @IsOptional()
   timeout_ms?: number;

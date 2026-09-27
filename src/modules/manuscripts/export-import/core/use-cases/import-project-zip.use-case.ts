@@ -8,6 +8,7 @@ import { IZipEnginePort } from '../ports/zip-engine.port';
 import { IManuscriptHydratorPort } from '../ports/manuscript-hydrator.port';
 import { ImportSummaryVo } from '../domain/value-objects/import-summary.vo';
 import { InvalidZipArchiveException } from '../domain/exceptions/invalid-zip-archive.exception';
+import { BadRequestException } from '@nestjs/common';
 
 export interface ImportProjectZipInput {
   projectId: string;
@@ -32,6 +33,10 @@ export class ImportProjectZipUseCase {
 
     if (entries.length === 0) {
       throw new InvalidZipArchiveException('Provided ZIP archive contains no usable file entries.');
+    }
+
+    if (entries.length > 2000) {
+      throw new BadRequestException('ZIP archive exceeds the maximum project file limit of 2,000 files.');
     }
 
     return await this.hydrator.hydrateProjectEntries(projectId, entries, userId, preferredRootDoc);

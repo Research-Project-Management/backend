@@ -27,6 +27,7 @@ import {
   InvalidNodeNameError,
   CannotDeleteRootFolderError,
   RootDocNotFoundError,
+  MaxProjectFilesExceededError,
 } from './core/domain/structure-errors';
 
 @ApiTags('Manuscripts - Project Structure & File Tree')
@@ -50,7 +51,8 @@ export class StructureController {
     if (
       error instanceof CyclicMoveError ||
       error instanceof InvalidNodeNameError ||
-      error instanceof CannotDeleteRootFolderError
+      error instanceof CannotDeleteRootFolderError ||
+      error instanceof MaxProjectFilesExceededError
     ) {
       throw new BadRequestException(error.message);
     }
@@ -126,6 +128,7 @@ export class StructureController {
   }
 
   @Patch('nodes/:nodeId/rename')
+  @Post('nodes/:nodeId/rename')
   @ApiOperation({ summary: 'Rename node (cascades path updates to all children if folder)' })
   async renameNode(
     @Param('projectId') projectId: string,

@@ -325,7 +325,7 @@ describe('Manuscripts - Filestore Subsystem (Overleaf Parity & CAS)', () => {
       ).toThrow();
     });
 
-    it('should throw StorageQuotaExceededException if file exceeds MAX_FILE_SIZE_BYTES (1GB)', () => {
+    it('should throw StorageQuotaExceededException if file exceeds MAX_FILE_SIZE_BYTES (50MB)', () => {
       expect(() =>
         ManuscriptFile.create({
           projectId: PROJECT_ID,

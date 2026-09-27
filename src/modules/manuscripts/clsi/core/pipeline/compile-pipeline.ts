@@ -204,7 +204,7 @@ export class CompilePipeline {
           }
 
           // Step 4: Run Compilation
-          const timeoutMs = dto.timeoutMs || 30000;
+          const timeoutMs = dto.timeoutMs || 240000;
           const stopOnFirstError = dto.stopOnFirstError ?? false;
 
           let engineResult;

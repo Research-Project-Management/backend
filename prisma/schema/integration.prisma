@@ -1,0 +1,70 @@
+// ============================================================================
+// Third-Party Integrations Domain (Identity & Research Connectors)
+// ============================================================================
+
+enum IntegrationProvider {
+  zotero
+  mendeley
+  orcid
+}
+
+enum IntegrationStatus {
+  connected
+  expired
+  revoked
+  error
+}
+
+model UserIntegration {
+  id              String              @id @default(uuid(7)) @db.Uuid
+  userId          String              @map("user_id") @db.Uuid
+  user            User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider        IntegrationProvider
+  status          IntegrationStatus   @default(connected)
+
+  // Tokens encrypted with AES-256-GCM (iv:authTag:ciphertext)
+  accessToken     String              @map("access_token") @db.Text
+  refreshToken    String?             @map("refresh_token") @db.Text
+  tokenExpiresAt  DateTime?           @map("token_expires_at") @db.Timestamptz(6)
+
+  // Third-party account metadata
+  providerUserId  String              @map("provider_user_id") @db.VarChar(255)
+  accountName     String?             @map("account_name") @db.VarChar(255)
+  accountEmail    String?             @map("account_email") @db.VarChar(255)
+  metadata        Json?               @db.JsonB
+
+  // Twenty CRM pattern: when auth breaks, flag timestamp instead of crashing
+  authFailedAt    DateTime?           @map("auth_failed_at") @db.Timestamptz(6)
+
+  connectedAt     DateTime            @default(now()) @map("connected_at") @db.Timestamptz(6)
+  lastSyncedAt    DateTime?           @map("last_synced_at") @db.Timestamptz(6)
+  updatedAt       DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  projectLinks    ProjectIntegrationLink[]
+
+  @@unique([userId, provider])
+  @@index([userId])
+  @@index([provider])
+  @@map("user_integrations")
+}
+
+model ProjectIntegrationLink {
+  id                String              @id @default(uuid(7)) @db.Uuid
+  projectId         String              @map("project_id") @db.Uuid
+  project           Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userIntegrationId String              @map("user_integration_id") @db.Uuid
+  userIntegration   UserIntegration     @relation(fields: [userIntegrationId], references: [id], onDelete: Cascade)
+
+  // Remote collection mapping for BibTeX export
+  collectionId      String              @map("collection_id") @db.VarChar(255)
+  collectionName    String              @map("collection_name") @db.VarChar(255)
+  targetBibFile     String              @default("references.bib") @map("target_bib_file") @db.VarChar(255)
+
+  lastSyncedAt      DateTime?           @map("last_synced_at") @db.Timestamptz(6)
+  createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([projectId, userIntegrationId, collectionId])
+  @@index([projectId])
+  @@map("project_integration_links")
+}

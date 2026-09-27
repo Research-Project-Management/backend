@@ -41,4 +41,5 @@ export abstract class IStructureRepository {
   ): Promise<ManuscriptNodeEntity>;
   abstract deleteSubtree(projectId: string, path: string): Promise<ManuscriptNodeEntity[]>;
   abstract updateSortOrder(projectId: string, nodeId: string, sortOrder: number): Promise<void>;
+  abstract countNodes(projectId: string): Promise<number>;
 }

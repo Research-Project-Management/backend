@@ -135,7 +135,11 @@ export class ClsiController {
     return this.clsiService.downloadAuxFile(projectId, filename, res);
   }
 
-  @Get(':projectId/clsi/artifacts-zip')
+  @Get([
+    'v1/manuscripts/projects/:projectId/artifacts-zip',
+    ':projectId/clsi/artifacts-zip',
+    ':projectId/compiler/artifacts-zip',
+  ])
   @UseGuards(ProjectRoleGuard)
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   @ApiOperation({ summary: 'Download all project output artifacts packaged as a ZIP archive' })

@@ -316,8 +316,11 @@ export class AttachmentsController {
   ])
   @ProjectRoles('owner', 'coordinator', 'contributor')
   async getMultipartPartUrl(
+    @CurrentUser('id') userId: string,
     @Param('sessionId') sessionId: string,
     @Query('partNumber') partNumberStr: string,
+    @Param('projectId') paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
     if (!this.effectiveStoragePort?.getMultipartPartUrl) {
       throw new BadRequestException('Multipart part URL unavailable');
@@ -328,9 +331,14 @@ export class AttachmentsController {
       throw new BadRequestException('Invalid partNumber query parameter');
     }
 
+    const effectiveProjectId = toValidProjectId(
+      paramProjectId || queryProjectId,
+    );
+
     const partUrl = await this.effectiveStoragePort.getMultipartPartUrl(
       sessionId,
       partNumber,
+      { userId, projectId: effectiveProjectId },
     );
     return { partNumber, partUrl };
   }
@@ -341,19 +349,27 @@ export class AttachmentsController {
   @Post(['attachments/multipart/complete', 'multipart/complete'])
   @ProjectRoles('owner', 'coordinator', 'contributor')
   async completeMultipart(
+    @CurrentUser('id') userId: string,
     @Body()
     dto: {
       sessionId: string;
       parts: { partNumber: number; eTag: string }[];
     },
+    @Param('projectId') paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
   ) {
     if (!this.effectiveStoragePort?.completeMultipartUpload) {
       throw new BadRequestException('Multipart completion unavailable');
     }
 
+    const effectiveProjectId = toValidProjectId(
+      paramProjectId || queryProjectId,
+    );
+
     return this.effectiveStoragePort.completeMultipartUpload({
       sessionId: dto.sessionId,
       parts: dto.parts,
+      actor: { userId, projectId: effectiveProjectId },
     });
   }
 
@@ -365,9 +381,20 @@ export class AttachmentsController {
     'multipart/:sessionId/abort',
   ])
   @ProjectRoles('owner', 'coordinator', 'contributor')
-  async abortMultipart(@Param('sessionId') sessionId: string) {
+  async abortMultipart(
+    @CurrentUser('id') userId: string,
+    @Param('sessionId') sessionId: string,
+    @Param('projectId') paramProjectId?: string,
+    @Query('projectId') queryProjectId?: string,
+  ) {
     if (this.effectiveStoragePort?.abortMultipartUpload) {
-      await this.effectiveStoragePort.abortMultipartUpload(sessionId);
+      const effectiveProjectId = toValidProjectId(
+        paramProjectId || queryProjectId,
+      );
+      await this.effectiveStoragePort.abortMultipartUpload(sessionId, {
+        userId,
+        projectId: effectiveProjectId,
+      });
     }
     return { success: true };
   }
@@ -407,8 +434,9 @@ export class AttachmentsController {
       res.header('Content-Length', fileRecord.size);
       res.header(
         'Cache-Control',
-        'public, max-age=86400, stale-while-revalidate=604800',
+        'private, no-cache, no-store, must-revalidate',
       );
+      res.header('Vary', 'Authorization');
       return res.send(fileRecord.stream);
     }
 
@@ -427,8 +455,9 @@ export class AttachmentsController {
       res.header('Content-Length', fileRecord.size);
       res.header(
         'Cache-Control',
-        'public, max-age=86400, stale-while-revalidate=604800',
+        'private, no-cache, no-store, must-revalidate',
       );
+      res.header('Vary', 'Authorization');
       return res.send(fileRecord.buffer);
     }
 
@@ -474,22 +503,54 @@ export class AttachmentsController {
       throw new NotFoundException(`Attachment ${attachmentId} not found`);
     }
 
-    if (attachment.fileId && this.effectiveStoragePort?.readOwnedFile) {
-      const fileRecord = await this.effectiveStoragePort.readOwnedFile({
-        fileId: attachment.fileId,
-        userId,
-      });
+    if (attachment.fileId && this.effectiveStoragePort) {
+      if (this.effectiveStoragePort.getOwnedFileStream) {
+        const fileRecord = await this.effectiveStoragePort.getOwnedFileStream({
+          fileId: attachment.fileId,
+          userId,
+          projectId: effectiveProjectId,
+        });
 
-      res.header(
-        'Content-Type',
-        fileRecord.mimeType || attachment.mimeType || 'application/pdf',
-      );
-      res.header(
-        'Content-Disposition',
-        `inline; filename="${encodeURIComponent(attachment.filename || fileRecord.filename)}"`,
-      );
-      res.header('Content-Length', fileRecord.size);
-      return res.send(fileRecord.buffer);
+        res.header(
+          'Content-Type',
+          fileRecord.mimeType || attachment.mimeType || 'application/pdf',
+        );
+        res.header(
+          'Content-Disposition',
+          `inline; filename="${encodeURIComponent(attachment.filename || fileRecord.filename)}"`,
+        );
+        res.header('Content-Length', fileRecord.size);
+        res.header(
+          'Cache-Control',
+          'private, no-cache, no-store, must-revalidate',
+        );
+        res.header('Vary', 'Authorization');
+        return res.send(fileRecord.stream);
+      }
+
+      if (this.effectiveStoragePort.readOwnedFile) {
+        const fileRecord = await this.effectiveStoragePort.readOwnedFile({
+          fileId: attachment.fileId,
+          userId,
+          projectId: effectiveProjectId,
+        });
+
+        res.header(
+          'Content-Type',
+          fileRecord.mimeType || attachment.mimeType || 'application/pdf',
+        );
+        res.header(
+          'Content-Disposition',
+          `inline; filename="${encodeURIComponent(attachment.filename || fileRecord.filename)}"`,
+        );
+        res.header('Content-Length', fileRecord.size);
+        res.header(
+          'Cache-Control',
+          'private, no-cache, no-store, must-revalidate',
+        );
+        res.header('Vary', 'Authorization');
+        return res.send(fileRecord.buffer);
+      }
     }
 
     if (attachment.url) {
@@ -503,7 +564,7 @@ export class AttachmentsController {
 
   /**
    * Stream / serve attachment thumbnail by attachment ID.
-   * Cached in browser for 24h (Cache-Control: public, max-age=86400).
+   * Cached in browser privately for 24h with Vary: Authorization.
    */
   @Get([
     'attachments/:attachmentId/thumbnail',
@@ -537,7 +598,8 @@ export class AttachmentsController {
     }
 
     res.header('Content-Type', thumbnail.mimeType || 'image/webp');
-    res.header('Cache-Control', 'public, max-age=86400');
+    res.header('Cache-Control', 'private, max-age=86400');
+    res.header('Vary', 'Authorization');
     res.header('Content-Length', thumbnail.buffer.length);
     return res.send(thumbnail.buffer);
   }

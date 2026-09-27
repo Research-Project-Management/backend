@@ -336,31 +336,44 @@ export class UploadController {
   @Get('multipart/:sessionId/part-url')
   @ApiOperation({ summary: 'Get presigned part upload URL' })
   async getPartUrl(
+    @CurrentUser('id') userId: string,
     @Param('sessionId') sessionId: string,
     @Query('partNumber') partNumber: number,
   ) {
+    const parsedPartNumber = Number(partNumber);
+    if (!Number.isInteger(parsedPartNumber) || parsedPartNumber < 1) {
+      throw new BadRequestException('Invalid partNumber query parameter');
+    }
     const url = await this.multipartUploadUseCase.getPartUrl(
       sessionId,
-      Number(partNumber),
+      parsedPartNumber,
+      { userId },
     );
-    return { partNumber: Number(partNumber), uploadUrl: url };
+    return { partNumber: parsedPartNumber, uploadUrl: url };
   }
 
   @Post('multipart/complete')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Complete multipart upload and assemble file' })
-  async completeMultipart(@Body() dto: CompleteMultipartDto) {
+  async completeMultipart(
+    @CurrentUser('id') userId: string,
+    @Body() dto: CompleteMultipartDto,
+  ) {
     return this.multipartUploadUseCase.complete({
       sessionId: dto.sessionId,
       parts: dto.parts,
+      actor: { userId },
     });
   }
 
   @Delete('multipart/:sessionId')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Abort multipart upload session' })
-  async abortMultipart(@Param('sessionId') sessionId: string) {
-    await this.multipartUploadUseCase.abort(sessionId);
+  async abortMultipart(
+    @CurrentUser('id') userId: string,
+    @Param('sessionId') sessionId: string,
+  ) {
+    await this.multipartUploadUseCase.abort(sessionId, { userId });
     return { success: true };
   }
 }

@@ -8,7 +8,7 @@ import { IStructureRepository } from '../ports/structure-repository.port';
 import { ITreePublisher } from '../ports/tree-publisher.port';
 import { ManuscriptNodeEntity, ManuscriptNodeType } from '../domain/manuscript-node.entity';
 import { NodePathVo } from '../domain/node-path.vo';
-import { DuplicateNodePathError, NodeNotFoundError } from '../domain/structure-errors';
+import { DuplicateNodePathError, NodeNotFoundError, MaxProjectFilesExceededError } from '../domain/structure-errors';
 import { CreateNodeDto } from '../../dto/node.dto';
 
 @Injectable()
@@ -20,6 +20,12 @@ export class CreateNodeUseCase {
 
   public async execute(projectId: string, dto: CreateNodeDto): Promise<ManuscriptNodeEntity> {
     NodePathVo.validateFilename(dto.name);
+
+    // Enforce Overleaf parity project files limit (max 2,000 files/nodes)
+    const currentCount = await this.structureRepository.countNodes(projectId);
+    if (currentCount >= 2000) {
+      throw new MaxProjectFilesExceededError(2000);
+    }
 
     // 1. Resolve full virtual path and parent node
     let parentNode: ManuscriptNodeEntity | null = null;

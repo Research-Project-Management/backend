@@ -40,7 +40,7 @@ export class Watchdog {
 
   constructor(
     private readonly child: ChildProcess,
-    private readonly timeoutMs: number = 30000,
+    private readonly timeoutMs: number = 240000,
     private readonly gracePeriodMs: number = 2000
   ) {}
 

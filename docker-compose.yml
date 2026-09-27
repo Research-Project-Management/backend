@@ -153,6 +153,9 @@ services:
   # 5. NestJS Fastify Backend Application Service (Production Target: runner)
   # ----------------------------------------------------------------------------
   be:
+    profiles:
+      - prod
+      - app
     build:
       context: .
       dockerfile: Dockerfile
@@ -175,7 +178,6 @@ services:
       GROBID_URL: http://grobid:8070
       ZOTERO_TRANSLATOR_URL: http://translator:1969
       CLSI_URL: http://flux_clsi:3013
-      FLUX_AI_URL: http://flux-ai:8000
       CLIENT_URL: ${CLIENT_URL}
       ORIGINS: ${ORIGINS}
     depends_on:
@@ -216,6 +218,8 @@ services:
     container_name: flux_backend_worker
     restart: unless-stopped
     command: ["node", "dist/worker.js"]
+    volumes:
+      - ./dist:/app/dist
     env_file:
       - .env
     environment:
@@ -228,15 +232,12 @@ services:
       GROBID_URL: http://grobid:8070
       ZOTERO_TRANSLATOR_URL: http://translator:1969
       CLSI_URL: http://flux_clsi:3013
-      FLUX_AI_URL: http://flux-ai:8000
       SKIP_MIGRATIONS: "true"
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
-      be:
-        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "pgrep -f 'dist/worker.js' || exit 1"]
       interval: 30s
@@ -260,6 +261,36 @@ services:
           - worker
           - flux_worker
 
+  # ----------------------------------------------------------------------------
+  # 7. Common LaTeX Service Interface (CLSI) Microservice
+  # ----------------------------------------------------------------------------
+  clsi:
+    image: ghcr.io/research-project-management/clsi:latest
+    container_name: flux_clsi
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${CLSI_PORT:-3013}:3013"
+    environment:
+      PORT: 3013
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+        reservations:
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    volumes:
+      - flux_latex_tectonic_cache:/root/.cache/Tectonic
+    networks:
+      flux_network:
+        aliases:
+          - clsi
+          - flux_clsi
+
 volumes:
   postgres_data:
     name: flux_postgres_data
@@ -267,6 +298,8 @@ volumes:
   redis_data:
     name: flux_redis_data
     driver: local
+  flux_latex_tectonic_cache:
+    external: true
 
 networks:
   flux_network:

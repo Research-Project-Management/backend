@@ -150,8 +150,14 @@ describe('Reader, Ingestion, Search & Citation Bounded Contexts - Clean Architec
       const apa = CitationStyleVo.create('APA');
       expect(apa.value).toBe('apa');
 
+      // CitationStyleVo uses open CSL model: any valid slug is accepted as-is
+      // (10,000+ CSL repository styles). Fallback to 'apa' only on null/empty.
       const unsupported = CitationStyleVo.create('unsupported-style');
-      expect(unsupported.value).toBe('apa'); // Fallback
+      expect(unsupported.value).toBe('unsupported-style');
+
+      // Null/empty → fallback 'apa'
+      expect(CitationStyleVo.create(null).value).toBe('apa');
+      expect(CitationStyleVo.create('').value).toBe('apa');
     });
 
     it('FormatCitationUseCase should delegate to citation engine port', async () => {

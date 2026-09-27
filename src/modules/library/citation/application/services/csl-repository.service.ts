@@ -79,10 +79,9 @@ export class CslRepositoryService implements OnModuleInit {
   ) {}
 
   onModuleInit() {
-    // Asynchronously warm up the 10,000+ styles catalog in background
-    this.refreshStylesCatalog().catch((err) => {
-      this.logger.debug(`Background CSL styles catalog warm-up skipped/deferred: ${err?.message || err}`);
-    });
+    this.logger.log(
+      `CSL Repository initialized with ${POPULAR_ACADEMIC_STYLES.length} popular academic styles (remote 10,000+ catalog lazy-loaded on demand).`,
+    );
   }
 
   /**
@@ -108,6 +107,11 @@ export class CslRepositoryService implements OnModuleInit {
         s.name.toLowerCase().includes(q) ||
         (s.titleShort && s.titleShort.toLowerCase().includes(q)),
     );
+
+    // Fast-path: If local popular matches satisfy the limit, return immediately without loading 10,000 remote styles
+    if (localMatches.length >= limit) {
+      return localMatches.slice(0, limit);
+    }
 
     // 4. Search in the 10,000+ remote styles catalog
     const catalog = await this.getStylesCatalog();
@@ -305,11 +309,16 @@ export class CslRepositoryService implements OnModuleInit {
       }
     }
 
-    // Trigger background refresh if not in progress
+    // Trigger on-demand refresh if not in progress
     if (!this.isIndexLoading) {
-      this.refreshStylesCatalog().catch((e) => {
-        this.logger.debug(`Background refresh error: ${e?.message}`);
-      });
+      try {
+        await this.refreshStylesCatalog();
+        if (this.remoteStylesIndex && this.remoteStylesIndex.length > 0) {
+          return this.remoteStylesIndex;
+        }
+      } catch (e: any) {
+        this.logger.debug(`On-demand CSL refresh error: ${e?.message}`);
+      }
     }
 
     return [...POPULAR_ACADEMIC_STYLES];

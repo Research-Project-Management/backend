@@ -199,23 +199,43 @@ export class ChangeLogRepository {
     const userId = typeof scope === 'object' ? scope.userId : scope;
     const projectId = typeof scope === 'object' ? scope.projectId : undefined;
 
+    let seqFromSync: bigint = BigInt(0);
     if (projectId) {
       const seq = await this.prisma.syncSequence.findUnique({
         where: { projectId },
         select: { currentSequence: true },
       });
-      return seq?.currentSequence ?? BigInt(0);
-    }
-
-    if (userId) {
+      seqFromSync = seq?.currentSequence ?? BigInt(0);
+    } else if (userId) {
       const seq = await this.prisma.syncSequence.findUnique({
         where: { userId },
         select: { currentSequence: true },
       });
-      return seq?.currentSequence ?? BigInt(0);
+      seqFromSync = seq?.currentSequence ?? BigInt(0);
     }
 
-    return BigInt(0);
+    const scopeWhere = projectId ? { projectId } : { userId };
+    const [latestChange, latestTombstone] = await Promise.all([
+      this.prisma.libraryChange.findFirst({
+        where: scopeWhere,
+        orderBy: { seq: 'desc' },
+        select: { seq: true },
+      }),
+      this.prisma.tombstone.findFirst({
+        where: scopeWhere,
+        orderBy: { seq: 'desc' },
+        select: { seq: true },
+      }),
+    ]);
+
+    const maxCommittedSeq = BigInt(
+      Math.max(
+        Number(latestChange?.seq ?? 0n),
+        Number(latestTombstone?.seq ?? 0n),
+      ),
+    );
+
+    return maxCommittedSeq > seqFromSync ? maxCommittedSeq : seqFromSync;
   }
 
   /**

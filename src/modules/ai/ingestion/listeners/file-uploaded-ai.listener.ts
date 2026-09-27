@@ -38,6 +38,18 @@ export class FileUploadedAiListener {
       return;
     }
 
+    const isAiEnabled =
+      process.env.FLUX_AI_ENABLED === 'true' ||
+      (Boolean(process.env.FLUX_AI_URL) && process.env.FLUX_AI_ENABLED !== 'false') ||
+      process.env.NODE_ENV === 'test';
+
+    if (!isAiEnabled) {
+      this.logger.debug(
+        `AI vector engine is disabled (FLUX_AI_ENABLED !== 'true'). Skipping AI vector ingestion for file ${event.fileId}.`,
+      );
+      return;
+    }
+
     this.logger.log(
       `Received 'file.uploaded' event for scientific document ${event.filename} (${event.fileId}). Dispatching to AI ingestion pipeline.`,
     );

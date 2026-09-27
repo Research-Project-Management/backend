@@ -280,14 +280,22 @@ export class RetractionRepository {
   }
 
   async findRetractionRecord(where: any) {
+    let filter = where;
+    while (filter && typeof filter === 'object' && 'where' in filter && filter.where) {
+      filter = filter.where;
+    }
     return this.prisma.retraction.findFirst({
-      where: where?.where ?? where,
+      where: filter,
     });
   }
 
   async findRetraction(where: any) {
+    let filter = where;
+    while (filter && typeof filter === 'object' && 'where' in filter && filter.where) {
+      filter = filter.where;
+    }
     return this.prisma.retraction.findFirst({
-      where: where?.where ?? where,
+      where: filter,
     });
   }
 

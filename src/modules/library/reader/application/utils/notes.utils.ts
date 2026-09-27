@@ -99,11 +99,26 @@ export function stripNoteHtml(content: string): string {
 
 /**
  * Builds standard TipTap ProseMirror document JSON structure from markdown/text.
+ * TipTap paragraph nodes require `content: [{ type: 'text', text: '...' }]`,
+ * NOT a bare `text` string property on the paragraph node itself.
  */
 export function buildTipTapDocFromText(text: string): Record<string, unknown> {
+  const trimmed = (text || '').trim();
+  if (!trimmed) {
+    return { type: 'doc', content: [{ type: 'paragraph', content: [] }] };
+  }
+  // Split on double newlines to create separate paragraph nodes
+  const paragraphs = trimmed
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+
   return {
     type: 'doc',
-    content: [{ type: 'paragraph', text: text || '' }],
+    content: paragraphs.map((block) => ({
+      type: 'paragraph',
+      content: [{ type: 'text', text: block }],
+    })),
   };
 }
 

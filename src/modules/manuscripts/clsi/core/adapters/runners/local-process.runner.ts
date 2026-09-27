@@ -33,7 +33,7 @@ export class LocalProcessRunner implements ISandboxRunner {
         shell: false,
       });
 
-      const watchdog = new Watchdog(child, options.timeoutMs ?? 30000);
+      const watchdog = new Watchdog(child, options.timeoutMs ?? 240000);
       watchdog.arm(options.signal);
 
       child.stdout?.on('data', (data) => {

@@ -7,7 +7,7 @@ import { ContentHash } from '../value-objects/content-hash.vo';
 import { StorageKey } from '../value-objects/storage-key.vo';
 import { StorageQuotaExceededException } from '../exceptions/storage-quota-exceeded.exception';
 
-export const MAX_FILE_SIZE_BYTES = 1024 * 1024 * 1024; // 1 GB (Overleaf Parity)
+export const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB (Overleaf Parity)
 
 export interface CreateManuscriptFileProps {
   id?: string;

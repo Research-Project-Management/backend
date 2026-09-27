@@ -21,7 +21,10 @@ import { IStorageNodeRepository } from '../../../domain/ports/storage-node.repos
 import { IStorageBlobRepository } from '../../../domain/ports/storage-blob.repository.port';
 import { IUploadSessionRepository } from '../../../domain/ports/upload-session.repository.port';
 import { IStorageQuotaRepository } from '../../../domain/ports/storage-quota.repository.port';
-import { UploadSession } from '../../../domain/entities/upload-session.entity';
+import {
+  UploadSession,
+  UploadSessionStatus,
+} from '../../../domain/entities/upload-session.entity';
 import {
   StorageBlob,
   BlobStatus,
@@ -34,6 +37,11 @@ import { FileUploadedEvent } from '../../../domain/events/file-uploaded.event';
 import { StorageRedisCacheService } from '../../../infrastructure/cache/storage-redis-cache.service';
 import { Optional } from '@nestjs/common';
 import { StorageQueueProducer } from '../../queues/storage-queue.producer';
+
+export interface MultipartActorContext {
+  userId: string;
+  projectId?: string | null;
+}
 
 export interface InitiateMultipartInput {
   userId: string;
@@ -49,6 +57,7 @@ export interface InitiateMultipartInput {
 export interface CompleteMultipartInput {
   sessionId: string;
   parts: CompletedPart[];
+  actor?: MultipartActorContext;
 }
 
 @Injectable()
@@ -135,13 +144,53 @@ export class MultipartUploadUseCase {
     };
   }
 
+  private verifySessionAccess(
+    session: UploadSession,
+    actor?: MultipartActorContext,
+  ): void {
+    if (!actor) return;
+    if (session.userId === actor.userId) return;
+    if (
+      session.projectId &&
+      actor.projectId &&
+      session.projectId === actor.projectId
+    ) {
+      return;
+    }
+    // Return 404 to avoid leaking existence of upload session across users/projects (anti-BOLA)
+    throw new NotFoundException('Upload session not found');
+  }
+
   /**
    * Phase 2: Presign Part Upload URL
    */
-  async getPartUrl(sessionId: string, partNumber: number): Promise<string> {
+  async getPartUrl(
+    sessionId: string,
+    partNumber: number,
+    actor?: MultipartActorContext,
+  ): Promise<string> {
     const session = await this.sessionRepo.findById(sessionId);
     if (!session || session.isExpired()) {
       throw new NotFoundException('Upload session not found or expired');
+    }
+
+    this.verifySessionAccess(session, actor);
+
+    if (session.status === UploadSessionStatus.COMPLETED) {
+      throw new BadRequestException('Upload session has already been completed');
+    }
+    if (session.status === UploadSessionStatus.ABORTED) {
+      throw new BadRequestException('Upload session has been aborted');
+    }
+
+    if (
+      !Number.isInteger(partNumber) ||
+      partNumber < 1 ||
+      partNumber > session.totalParts
+    ) {
+      throw new BadRequestException(
+        `Invalid partNumber: must be an integer between 1 and ${session.totalParts}`,
+      );
     }
 
     session.markUploading();
@@ -160,8 +209,25 @@ export class MultipartUploadUseCase {
    */
   async complete(input: CompleteMultipartInput) {
     const session = await this.sessionRepo.findById(input.sessionId);
-    if (!session) {
-      throw new NotFoundException('Upload session not found');
+    if (!session || session.isExpired()) {
+      throw new NotFoundException('Upload session not found or expired');
+    }
+
+    this.verifySessionAccess(session, input.actor);
+
+    if (session.status === UploadSessionStatus.COMPLETED) {
+      throw new BadRequestException('Upload session has already been completed');
+    }
+    if (session.status === UploadSessionStatus.ABORTED) {
+      throw new BadRequestException('Upload session has been aborted');
+    }
+
+    if (
+      !input.parts ||
+      !Array.isArray(input.parts) ||
+      input.parts.length === 0
+    ) {
+      throw new BadRequestException('Parts array cannot be empty');
     }
 
     // 1. Tell S3 to concatenate all uploaded parts
@@ -269,12 +335,28 @@ export class MultipartUploadUseCase {
     };
   }
 
-  async abort(sessionId: string): Promise<void> {
+  async abort(
+    sessionId: string,
+    actor?: MultipartActorContext,
+  ): Promise<void> {
     const session = await this.sessionRepo.findById(sessionId);
-    if (session) {
-      await this.driver.abortMultipartUpload(session.s3Key, session.s3UploadId);
-      session.markAborted();
-      await this.sessionRepo.update(session);
+    if (!session) {
+      throw new NotFoundException('Upload session not found');
     }
+
+    this.verifySessionAccess(session, actor);
+
+    if (session.status === UploadSessionStatus.COMPLETED) {
+      throw new BadRequestException(
+        'Cannot abort an already completed upload session',
+      );
+    }
+    if (session.status === UploadSessionStatus.ABORTED) {
+      return;
+    }
+
+    await this.driver.abortMultipartUpload(session.s3Key, session.s3UploadId);
+    session.markAborted();
+    await this.sessionRepo.update(session);
   }
 }

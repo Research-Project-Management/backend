@@ -666,10 +666,11 @@ export class CoreService {
       stateIdMap.set(state.id, newState.id);
     }
 
-    // 5. Clone Manuscript Documents
+    // 5. Clone Manuscript Documents (map oldDocId -> newDocId)
+    const docIdMap = new Map<string, string>();
     if (source.manuscriptDocs && source.manuscriptDocs.length > 0) {
       for (const doc of source.manuscriptDocs) {
-        await this.prisma.manuscriptDoc.create({
+        const newDoc = await this.prisma.manuscriptDoc.create({
           data: {
             projectId: newProject.id,
             path: doc.path,
@@ -681,7 +682,54 @@ export class CoreService {
             sizeBytes: doc.sizeBytes,
           },
         });
+        docIdMap.set(doc.id, newDoc.id);
       }
+    }
+
+    // 6. Clone Manuscript Files (map oldFileId -> newFileId, reusing CAS blob storageKey)
+    const fileIdMap = new Map<string, string>();
+    const manuscriptFiles = (source as any).manuscriptFiles || [];
+    for (const file of manuscriptFiles) {
+      const newFile = await this.prisma.manuscriptFile.create({
+        data: {
+          projectId: newProject.id,
+          name: file.name,
+          mimeType: file.mimeType,
+          sizeBytes: file.sizeBytes,
+          hash: file.hash,
+          storageKey: file.storageKey,
+          bucketName: file.bucketName,
+          rev: 0,
+        },
+      });
+      fileIdMap.set(file.id, newFile.id);
+    }
+
+    // 7. Clone Manuscript Nodes (file tree hierarchy)
+    const nodeIdMap = new Map<string, string>();
+    const manuscriptNodes = (source as any).manuscriptNodes || [];
+    for (const node of manuscriptNodes) {
+      const newParentId = node.parentId ? nodeIdMap.get(node.parentId) || null : null;
+      const newDocId = node.docId ? docIdMap.get(node.docId) || null : null;
+      const newFileId = node.fileId ? fileIdMap.get(node.fileId) || null : null;
+
+      const newNode = await this.prisma.manuscriptNode.create({
+        data: {
+          projectId: newProject.id,
+          parentId: newParentId,
+          type: node.type,
+          name: node.name,
+          path: node.path,
+          depth: node.depth,
+          docId: newDocId,
+          fileId: newFileId,
+          isRootDoc: node.isRootDoc,
+          sizeBytes: node.sizeBytes,
+          hash: node.hash,
+          sortOrder: node.sortOrder,
+        },
+      });
+      nodeIdMap.set(node.id, newNode.id);
     }
 
     await this.invalidateProjectCache(newProject.id, [userId]);

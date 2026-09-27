@@ -41,18 +41,34 @@ export class TectonicEngine implements ILatexEngine {
       '--synctex',
       '--outdir',
       options.cwd,
-      '-o',
-      'output.pdf',
       options.mainFile,
     ];
 
     const execResult = await this.runner.run(this.binaryPath, args, {
       cwd: options.cwd,
-      timeoutMs: options.timeoutMs ?? 30000,
+      timeoutMs: options.timeoutMs ?? 240000,
       signal: options.signal,
     });
 
     const durationMs = Date.now() - startTime;
+
+    // Normalize output artifact filenames to Overleaf CLSI standards (output.pdf & output.synctex.gz)
+    const baseName = options.mainFile.replace(/\.[^/.]+$/, '');
+    const generatedPdf = path.join(options.cwd, `${baseName}.pdf`);
+    const targetPdf = path.join(options.cwd, 'output.pdf');
+    try {
+      if (await this.fileExists(generatedPdf) && generatedPdf !== targetPdf) {
+        await fs.copyFile(generatedPdf, targetPdf);
+      }
+    } catch {}
+
+    const generatedSynctex = path.join(options.cwd, `${baseName}.synctex.gz`);
+    const targetSynctex = path.join(options.cwd, 'output.synctex.gz');
+    try {
+      if (await this.fileExists(generatedSynctex) && generatedSynctex !== targetSynctex) {
+        await fs.copyFile(generatedSynctex, targetSynctex);
+      }
+    } catch {}
 
     const pdfPath = path.join(options.cwd, 'output.pdf');
     const synctexGzPath = path.join(options.cwd, 'output.synctex.gz');

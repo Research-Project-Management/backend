@@ -62,7 +62,7 @@ export class LatexmkEngine implements ILatexEngine {
 
     const execResult = await this.runner.run(this.binaryPath, args, {
       cwd: options.cwd,
-      timeoutMs: options.timeoutMs ?? 30000,
+      timeoutMs: options.timeoutMs ?? 240000,
       signal: options.signal,
     });
 

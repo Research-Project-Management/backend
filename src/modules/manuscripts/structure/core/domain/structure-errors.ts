@@ -45,3 +45,9 @@ export class RootDocNotFoundError extends StructureError {
     super(`No valid root document (main.tex) could be resolved for project ${projectId}`);
   }
 }
+
+export class MaxProjectFilesExceededError extends StructureError {
+  constructor(limit = 2000) {
+    super(`Project file limit of ${limit.toLocaleString()} files exceeded. Please remove unused files.`);
+  }
+}

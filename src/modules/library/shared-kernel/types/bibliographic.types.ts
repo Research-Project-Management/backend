@@ -136,6 +136,9 @@ export interface CreateItemData {
   year?: number | null;
   doi?: string;
   abstract?: string;
+  /** Zotero alias for abstract. Either field may be provided; they are kept
+   *  in sync throughout the stack. Stored in the single DB `abstract` column. */
+  abstractNote?: string;
   itemType?: string;
   editors?: string[];
   journal?: string;

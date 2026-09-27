@@ -309,7 +309,8 @@ export class ItemsMapper {
         it.abstract || extraFields.abstract || extraFields.abstractNote;
       it.abstract = cleanAbstractText(rawAbstract) ?? (it.abstract || null);
     }
-    it.abstractNote = it.abstractNote || it.abstract || null;
+    // abstractNote is the Zotero alias for abstract; keep them in sync from the cleaned value.
+    it.abstractNote = it.abstract ?? null;
     it.date =
       it.date || it.publicationDate || (it.year ? String(it.year) : null);
     if (it.volume !== undefined && it.volume !== null) {
@@ -735,8 +736,9 @@ export class ItemsMapper {
     it.publicationDate =
       it.publicationDate || it.date || (it.year ? String(it.year) : '');
     it.date = it.date || it.publicationDate || (it.year ? String(it.year) : '');
-    it.abstractNote = it.abstractNote || it.abstract || '';
+    // Keep Zotero abstract/abstractNote alias pair in sync ('' = no abstract)
     it.abstract = it.abstract || it.abstractNote || '';
+    it.abstractNote = it.abstract; // mirror — always identical after this point
     it.journalAbbreviation = it.journalAbbreviation || it.journalAbbr || '';
     it.journalAbbr = it.journalAbbr || it.journalAbbreviation || '';
     it.accessDate =

@@ -318,7 +318,7 @@ export class S3StorageDriver implements IStorageDriver {
       const ruleDef: any = {
         ID: r.id,
         Status: r.status,
-        Filter: r.prefix ? { Prefix: r.prefix } : {},
+        Filter: { Prefix: r.prefix ?? '' },
       };
       if (r.expirationDays !== undefined) {
         ruleDef.Expiration = { Days: r.expirationDays };

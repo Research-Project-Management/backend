@@ -25,6 +25,7 @@ import {
   UpdateItemDto,
   ParseCitationsDto,
 } from '../application/dtos/items.dto';
+import { ItemsService } from '../application/services/items.service';
 import { CreateItemUseCase } from '../application/commands/create-item.use-case';
 import { UpdateItemUseCase } from '../application/commands/update-item.use-case';
 import { DeleteItemUseCase } from '../application/commands/delete-item.use-case';
@@ -48,7 +49,6 @@ import { PurgeItemUseCase } from '../application/commands/purge-item.use-case';
 import { SetMyPublicationUseCase } from '../application/commands/set-my-publication.use-case';
 import { ManageRelationsUseCase } from '../application/commands/manage-relations.use-case';
 import { PreviewTypeConversionUseCase } from '../application/queries/preview-type-conversion.use-case';
-import { ItemsService } from '../application/services/items.service';
 
 const toValidProjectId = (val?: string): string | undefined =>
   val && val !== 'me' && val !== 'user' && val !== 'personal' && isUUID(val)
@@ -258,21 +258,11 @@ export class ItemsController {
       ...otherFields
     } = cleanBody as any;
 
-    const parsedExtra = extra
-      ? typeof extra === 'string' && extra.trim().startsWith('{')
-        ? (() => {
-            try {
-              return JSON.parse(extra);
-            } catch {
-              return { extra };
-            }
-          })()
-        : { extra }
-      : {};
-
+    // `extra` is always a Zotero plain-text key:value string (e.g. "arXiv: 2103.00020 [cs.CV]").
+    // Never JSON-parse it — the mapper's parseExtraToObject() handles structured extraction.
     const combinedFields = {
       ...otherFields,
-      ...parsedExtra,
+      ...(extra !== undefined ? { extra: String(extra) } : {}),
     };
 
     try {

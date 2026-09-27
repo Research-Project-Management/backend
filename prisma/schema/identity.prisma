@@ -52,6 +52,7 @@ model User {
   profile            UserProfile?
   settings           UserSettings?
   accounts           UserAccount[]
+  integrations       UserIntegration[]
   refreshTokens      RefreshToken[]
   verificationTokens VerificationToken[]
   auditLogs          AuditLog[]          @relation("AuditActor")

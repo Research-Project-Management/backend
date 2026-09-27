@@ -49,6 +49,10 @@ export type LibraryCreatorInput = CreatorInput;
 export interface ItemMetadata {
   doi?: string;
   arxivId?: string;
+  /** arXiv primary subject category, e.g. 'cs.CV', 'physics.hep-th'.
+   *  Preserved through the pipeline and used to build the Zotero-native
+   *  `arXiv: <id> [cs.CV]` extra field line.  */
+  primaryCategory?: string;
   pmid?: string;
   pmcid?: string;
   isbn?: string;

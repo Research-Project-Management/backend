@@ -26,7 +26,8 @@ import { FormattedChatSession } from './types/chat.type';
 export type { FormattedChatSession };
 
 function formatChat(chat: any): FormattedChatSession {
-  const msgs = chat.messages || [];
+  if (!chat) return null as any;
+  const msgs = Array.isArray(chat.messages) ? chat.messages : [];
   const lastMsg = msgs.length > 0 ? msgs[msgs.length - 1].content || '' : '';
 
   return {
@@ -88,17 +89,14 @@ export class ChatService {
     if (
       trimmed === 'me' ||
       trimmed === 'user' ||
+      trimmed === 'personal' ||
       trimmed === 'all' ||
       trimmed === 'null' ||
       trimmed === 'undefined'
     ) {
       return null;
     }
-    const isUuid =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-        trimmed,
-      );
-    return isUuid ? trimmed : null;
+    return trimmed;
   }
 
   async getChats(
@@ -171,13 +169,19 @@ export class ChatService {
       return formatChat(raw);
     }
 
-    const doc = await this.prisma.manuscriptDoc.findUnique({
-      where: { id: pageId },
-      select: { path: true, projectId: true },
-    });
+    const doc =
+      (await (this.prisma as any).manuscriptDoc?.findUnique?.({
+        where: { id: pageId },
+        select: { path: true, projectId: true },
+      })) ||
+      (await (this.prisma as any).page?.findUnique?.({
+        where: { id: pageId },
+        select: { title: true, projectId: true },
+      }));
 
-    const title = doc?.path
-      ? `${sanitizeChatTitle(doc.path)} Discussion`
+    const docTitle = doc?.path || doc?.title;
+    const title = docTitle
+      ? `${sanitizeChatTitle(docTitle)} Discussion`
       : 'Manuscript Chat';
     const effectiveProjectId = projectId || doc?.projectId || null;
 
@@ -219,11 +223,22 @@ export class ChatService {
     const cleanProjectId = this.sanitizeProjectId(dto.projectId);
     // Verify project access if specified
     if (cleanProjectId) {
+      const isUuid =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          cleanProjectId,
+        );
       const project = await this.prisma.project.findFirst({
         where: {
-          id: cleanProjectId,
+          OR: [
+            ...(isUuid ? [{ id: cleanProjectId }] : []),
+            { identifier: cleanProjectId },
+          ],
           deletedAt: null,
-          OR: [{ createdById: userId }, { members: { some: { userId } } }],
+          AND: [
+            {
+              OR: [{ createdById: userId }, { members: { some: { userId } } }],
+            },
+          ],
         },
         select: { id: true, identifier: true },
       });
@@ -236,10 +251,15 @@ export class ChatService {
 
     // Verify document access if specified
     if (dto.pageId) {
-      const doc = await this.prisma.manuscriptDoc.findFirst({
-        where: { id: dto.pageId, deleted: false },
-        select: { id: true, projectId: true },
-      });
+      const doc =
+        (await (this.prisma as any).manuscriptDoc?.findFirst?.({
+          where: { id: dto.pageId, deleted: false },
+          select: { id: true, projectId: true },
+        })) ||
+        (await (this.prisma as any).page?.findFirst?.({
+          where: { id: dto.pageId },
+          select: { id: true, projectId: true },
+        }));
       if (!doc) {
         throw new NotFoundException('Manuscript doc not found');
       }

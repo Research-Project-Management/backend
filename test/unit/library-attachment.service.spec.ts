@@ -554,8 +554,9 @@ describe('Library Attachments & Storage Integration Suite', () => {
       expect(mockRes.header).toHaveBeenCalledWith('Content-Type', 'image/webp');
       expect(mockRes.header).toHaveBeenCalledWith(
         'Cache-Control',
-        'public, max-age=86400',
+        'private, max-age=86400',
       );
+      expect(mockRes.header).toHaveBeenCalledWith('Vary', 'Authorization');
       expect(mockRes.send).toHaveBeenCalledWith(
         Buffer.from('WEBP_STREAM_DATA'),
       );

@@ -132,10 +132,15 @@ export interface IStoragePort {
     partSize: number;
     totalParts: number;
   }>;
-  getMultipartPartUrl?(sessionId: string, partNumber: number): Promise<string>;
+  getMultipartPartUrl?(
+    sessionId: string,
+    partNumber: number,
+    actor?: { userId: string; projectId?: string | null },
+  ): Promise<string>;
   completeMultipartUpload?(input: {
     sessionId: string;
     parts: { partNumber: number; eTag: string }[];
+    actor?: { userId: string; projectId?: string | null };
   }): Promise<{
     fileId: string;
     blobId: string;
@@ -143,7 +148,10 @@ export interface IStoragePort {
     filename: string;
     size: number;
   }>;
-  abortMultipartUpload?(sessionId: string): Promise<void>;
+  abortMultipartUpload?(
+    sessionId: string,
+    actor?: { userId: string; projectId?: string | null },
+  ): Promise<void>;
   checkQuota?(
     userId?: string | null,
     projectId?: string | null,

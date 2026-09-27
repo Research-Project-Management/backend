@@ -242,6 +242,7 @@ export function toItemData(
     type: metadata.type,
     doi: metadata.doi,
     arxivId: metadata.arxivId,
+    primaryCategory: metadata.primaryCategory,
     pmid: metadata.pmid,
     pmcid: metadata.pmcid,
     issn: metadata.issn,

@@ -413,16 +413,18 @@ export class StorageFacade implements IStoragePort {
   async getMultipartPartUrl(
     sessionId: string,
     partNumber: number,
+    actor?: { userId: string; projectId?: string | null },
   ): Promise<string> {
     if (!this.multipartUploadUseCase) {
       throw new Error('MultipartUploadUseCase is not available');
     }
-    return this.multipartUploadUseCase.getPartUrl(sessionId, partNumber);
+    return this.multipartUploadUseCase.getPartUrl(sessionId, partNumber, actor);
   }
 
   async completeMultipartUpload(input: {
     sessionId: string;
     parts: { partNumber: number; eTag: string }[];
+    actor?: { userId: string; projectId?: string | null };
   }): Promise<{
     fileId: string;
     blobId: string;
@@ -436,9 +438,12 @@ export class StorageFacade implements IStoragePort {
     return this.multipartUploadUseCase.complete(input);
   }
 
-  async abortMultipartUpload(sessionId: string): Promise<void> {
+  async abortMultipartUpload(
+    sessionId: string,
+    actor?: { userId: string; projectId?: string | null },
+  ): Promise<void> {
     if (this.multipartUploadUseCase) {
-      await this.multipartUploadUseCase.abort(sessionId);
+      await this.multipartUploadUseCase.abort(sessionId, actor);
     }
   }
 

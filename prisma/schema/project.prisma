@@ -79,9 +79,10 @@ model Project {
   userProperties ProjectUserProperty[]
   drafts         WorkItemDraft[]
   templates      WorkItemTemplate[]
-  activityEvents ActivityEvent[]
-  aiChats        AiChat[]              @relation("ProjectAiChats")
-  updates        ProjectUpdate[]
+  activityEvents   ActivityEvent[]
+  aiChats          AiChat[]                 @relation("ProjectAiChats")
+  updates          ProjectUpdate[]
+  integrationLinks ProjectIntegrationLink[]
 
   @@index([createdById], map: "idx_projects_created_by_id")
   @@index([stateId], map: "idx_projects_state_id")

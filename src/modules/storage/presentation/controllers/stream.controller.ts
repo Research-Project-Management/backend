@@ -131,6 +131,11 @@ export class StreamController {
       res.header('Accept-Ranges', 'bytes');
       res.header('X-Content-Type-Options', 'nosniff');
       res.header('X-Frame-Options', 'SAMEORIGIN');
+      res.header(
+        'Cache-Control',
+        'private, no-cache, no-store, must-revalidate',
+      );
+      res.header('Vary', 'Authorization, Cookie');
 
       if (isDangerous) {
         res.header('Content-Security-Policy', "default-src 'none'; sandbox");
