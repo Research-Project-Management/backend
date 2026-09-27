@@ -57,7 +57,7 @@ export class ReindexItemUseCase {
     }
 
     const effectiveProjectId =
-      command.projectId ?? (item as any).projectId ?? undefined;
+      command.projectId ?? item.projectId ?? undefined;
     const eventScope = {
       userId: command.userId,
       projectId: effectiveProjectId,

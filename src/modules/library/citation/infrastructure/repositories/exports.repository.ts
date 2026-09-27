@@ -82,11 +82,15 @@ export class ExportsRepository {
   }
 
   async findItemById(userId: string, itemId: string, projectId?: string) {
+    const scopeWhere =
+      projectId && projectId !== 'user'
+        ? { projectId }
+        : { userId, projectId: null };
     return this.prisma.item.findFirst({
       where: {
         id: itemId,
         deletedAt: null,
-        ...(projectId ? { projectId } : { userId }),
+        ...scopeWhere,
       },
       include: {
         contributors: { orderBy: { orderIndex: 'asc' } },

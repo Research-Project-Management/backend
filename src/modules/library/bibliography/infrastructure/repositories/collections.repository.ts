@@ -44,10 +44,14 @@ export class CollectionsRepository {
     projectId?: string,
   ) {
     const client = this.getClient(tx);
+    const scopeWhere: Prisma.CollectionWhereInput =
+      projectId && projectId !== 'user' && isUUID(projectId)
+        ? { projectId }
+        : { userId, projectId: null };
     const where: Prisma.CollectionWhereInput = {
       id,
       deletedAt: null,
-      ...(projectId && projectId !== 'user' ? { projectId } : { userId }),
+      ...scopeWhere,
     };
     return client.collection.findFirst({
       where,
@@ -83,7 +87,7 @@ export class CollectionsRepository {
     );
     const where: Prisma.CollectionWhereInput = projectId
       ? { projectId, deletedAt: null }
-      : { userId, deletedAt: null };
+      : { userId, projectId: null, deletedAt: null };
 
     return client.collection.findMany({
       where,
@@ -218,8 +222,10 @@ export class CollectionsRepository {
     const strategy = typeof strategyOrTx === 'string' ? strategyOrTx : 'orphan';
 
     const client = this.getClient(clientTx);
-    const scopeWhere =
-      projectId && projectId !== 'user' ? { projectId } : { userId };
+    const scopeWhere: Prisma.CollectionWhereInput =
+      projectId && projectId !== 'user' && isUUID(projectId)
+        ? { projectId }
+        : { userId, projectId: null };
 
     if (strategy === 'cascade') {
       // Find all child collections and delete recursively

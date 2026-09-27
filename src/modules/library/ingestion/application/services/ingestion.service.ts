@@ -50,6 +50,7 @@ export class IngestionService implements IngestionPort {
    */
   async submit(
     envelope: IngestionSubmissionEnvelope,
+    options?: { enqueue?: boolean },
   ): Promise<IngestionAcceptedResult> {
     const projectId = envelope.projectId ?? '';
     const idempotencyKey = envelope.idempotencyKey?.trim();
@@ -131,8 +132,11 @@ export class IngestionService implements IngestionPort {
     const statusUrl = `/api/v1/library/ingestion/status/${runId}`;
 
     // 3. Return the durable run immediately and dispatch to IngestionQueueService
-    // for bounded concurrency and worker resilience.
-    void this.queue.enqueue(runId, projectId, envelope);
+    // for bounded concurrency and worker resilience (unless direct synchronous execution is requested).
+    const shouldEnqueue = options?.enqueue ?? true;
+    if (shouldEnqueue) {
+      void this.queue.enqueue(runId, projectId, envelope);
+    }
 
     return {
       runId,
@@ -325,7 +329,7 @@ export class IngestionService implements IngestionPort {
     const projectId = command.projectId || command.userId || '';
     const envelope = this.mapCommandToEnvelope(projectId, command);
 
-    const submissionRes = await this.submit(envelope);
+    const submissionRes = await this.submit(envelope, { enqueue: false });
     const runId = submissionRes.runId;
 
     if (submissionRes.deduplicated && submissionRes.existingItemId) {

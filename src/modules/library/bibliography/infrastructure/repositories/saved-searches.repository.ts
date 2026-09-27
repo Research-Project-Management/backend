@@ -31,10 +31,14 @@ export class SavedSearchesRepository {
   }
 
   async findById(userId: string, id: string, projectId?: string) {
+    const scopeWhere =
+      projectId && projectId !== 'user'
+        ? { projectId }
+        : { userId, projectId: null };
     const where: Prisma.SavedSearchWhereInput = {
       id,
       deletedAt: null,
-      ...(projectId ? { projectId } : { userId }),
+      ...scopeWhere,
     };
     return this.prisma.savedSearch.findFirst({
       where,
@@ -42,9 +46,13 @@ export class SavedSearchesRepository {
   }
 
   async findAll(userId: string, projectId?: string) {
+    const scopeWhere =
+      projectId && projectId !== 'user'
+        ? { projectId }
+        : { userId, projectId: null };
     const where: Prisma.SavedSearchWhereInput = {
       deletedAt: null,
-      ...(projectId ? { projectId } : { userId }),
+      ...scopeWhere,
     };
     return this.prisma.savedSearch.findMany({
       where,
@@ -58,10 +66,14 @@ export class SavedSearchesRepository {
     dto: UpdateSavedSearchDto,
     projectId?: string,
   ) {
+    const scopeWhere =
+      projectId && projectId !== 'user'
+        ? { projectId }
+        : { userId, projectId: null };
     const where: Prisma.SavedSearchWhereInput = {
       id,
       deletedAt: null,
-      ...(projectId ? { projectId } : { userId }),
+      ...scopeWhere,
     };
     return this.prisma.savedSearch.updateMany({
       where,
@@ -97,10 +109,14 @@ export class SavedSearchesRepository {
   }
 
   async softDelete(userId: string, id: string, projectId?: string) {
+    const scopeWhere =
+      projectId && projectId !== 'user'
+        ? { projectId }
+        : { userId, projectId: null };
     const where: Prisma.SavedSearchWhereInput = {
       id,
       deletedAt: null,
-      ...(projectId ? { projectId } : { userId }),
+      ...scopeWhere,
     };
     return this.prisma.savedSearch.updateMany({
       where,

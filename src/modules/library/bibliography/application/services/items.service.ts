@@ -920,7 +920,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     limit?: number,
     projectId?: string,
   ): Promise<QualityAuditCandidateItem[]> {
-    return (await this.query.findQualityAuditItems(userId, limit)) as unknown as QualityAuditCandidateItem[];
+    return (await this.query.findQualityAuditItems(userId, limit, projectId)) as unknown as QualityAuditCandidateItem[];
   }
 
   async findDuplicateCandidateItems(
@@ -928,7 +928,7 @@ export class ItemsService implements IItemReadPort, IItemExistencePort {
     limit?: number,
     projectId?: string,
   ): Promise<DuplicateCandidateItem[]> {
-    return (await this.query.findDuplicateCandidateItems(userId, limit)) as unknown as DuplicateCandidateItem[];
+    return (await this.query.findDuplicateCandidateItems(userId, limit, projectId)) as unknown as DuplicateCandidateItem[];
   }
 
   /**

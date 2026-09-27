@@ -2,69 +2,36 @@ import {
   AnnotationType,
   RectCoords,
 } from '../../domain/types/annotations.types';
+import {
+  AnnotationNormalizer,
+  DEFAULT_ANNOTATION_COLOR,
+} from '../normalizers/annotation.normalizer';
 
-export const DEFAULT_ANNOTATION_COLOR = '#ffeb3b';
-const HEX_COLOR_REGEX = /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/;
+const normalizer = new AnnotationNormalizer();
 
-/**
- * Validates and normalizes hex color strings.
- */
+export { DEFAULT_ANNOTATION_COLOR };
+
 export function normalizeAnnotationColor(color?: string | null): string {
-  if (!color || typeof color !== 'string') {
-    return DEFAULT_ANNOTATION_COLOR;
-  }
-  const clean = color.trim();
-  return HEX_COLOR_REGEX.test(clean)
-    ? clean.toLowerCase()
-    : DEFAULT_ANNOTATION_COLOR;
+  return normalizer.normalizeColor(color);
 }
 
-/**
- * Validates whether rectCoords matches standard PDF rectangle format: [x1, y1, x2, y2].
- */
 export function normalizeRectCoords(coords: unknown): RectCoords | null {
-  if (!Array.isArray(coords) || coords.length !== 4) {
-    return null;
-  }
-  const numeric = coords.map((c) => Number(c));
-  if (numeric.some((n) => isNaN(n) || !isFinite(n))) {
-    return null;
-  }
-  return numeric as RectCoords;
+  return normalizer.normalizeCoords(coords);
 }
 
-/**
- * Normalizes annotation quote text, removing excessive whitespace.
- */
 export function normalizeQuoteText(text?: string | null): string {
-  if (!text || typeof text !== 'string') return '';
-  return text.trim().replace(/\r\n/g, '\n');
+  return normalizer.normalizeQuote(text);
 }
 
-/**
- * Normalizes annotation comment string.
- */
 export function normalizeComment(comment?: string | null): string {
-  if (!comment || typeof comment !== 'string') return '';
-  return comment.trim();
+  return normalizer.normalizeComment(comment);
 }
 
-/**
- * Safely parses and normalizes annotation type string into AnnotationType enum.
- */
 export function parseAnnotationType(type?: string | null): AnnotationType {
-  if (!type || typeof type !== 'string') {
-    return AnnotationType.highlight;
-  }
-  const normalized = type.trim().toLowerCase();
-  const validTypes = Object.values(AnnotationType) as string[];
-  if (validTypes.includes(normalized)) {
-    return normalized as AnnotationType;
-  }
-  return AnnotationType.highlight;
+  return normalizer.parseType(type);
 }
 
-// Abstract, concise, direct aliases
+// Canonical aliases
 export const normalizeColor = normalizeAnnotationColor;
 export const normalizeCoords = normalizeRectCoords;
 export const normalizeQuote = normalizeQuoteText;

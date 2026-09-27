@@ -16,6 +16,7 @@ import { WorkItemModule } from './modules/work-item/work-item.module';
 import { AiModule } from './modules/ai/ai.module';
 import { RealtimeModule } from './modules/realtime/realtime.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -98,6 +99,7 @@ import { AppService } from './app.service';
     AiModule,
     RealtimeModule,
     NotificationsModule,
+    IntegrationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

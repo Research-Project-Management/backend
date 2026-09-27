@@ -426,18 +426,12 @@ export class AttachmentsController {
         projectId: effectiveProjectId,
       });
 
-      res.header('Content-Type', fileRecord.mimeType || 'application/pdf');
-      res.header(
-        'Content-Disposition',
-        `inline; filename="${encodeURIComponent(fileRecord.filename)}"`,
-      );
-      res.header('Content-Length', fileRecord.size);
-      res.header(
-        'Cache-Control',
-        'private, no-cache, no-store, must-revalidate',
-      );
-      res.header('Vary', 'Authorization');
-      return res.send(fileRecord.stream);
+      return this.sendAttachmentPayload(res, {
+        content: fileRecord.stream,
+        filename: fileRecord.filename,
+        size: fileRecord.size,
+        mimeType: fileRecord.mimeType,
+      });
     }
 
     if (this.effectiveStoragePort.readOwnedFile) {
@@ -447,18 +441,12 @@ export class AttachmentsController {
         projectId: effectiveProjectId,
       });
 
-      res.header('Content-Type', fileRecord.mimeType || 'application/pdf');
-      res.header(
-        'Content-Disposition',
-        `inline; filename="${encodeURIComponent(fileRecord.filename)}"`,
-      );
-      res.header('Content-Length', fileRecord.size);
-      res.header(
-        'Cache-Control',
-        'private, no-cache, no-store, must-revalidate',
-      );
-      res.header('Vary', 'Authorization');
-      return res.send(fileRecord.buffer);
+      return this.sendAttachmentPayload(res, {
+        content: fileRecord.buffer,
+        filename: fileRecord.filename,
+        size: fileRecord.size,
+        mimeType: fileRecord.mimeType,
+      });
     }
 
     throw new NotFoundException('Storage port read capability unavailable');
@@ -504,6 +492,9 @@ export class AttachmentsController {
     }
 
     if (attachment.fileId && this.effectiveStoragePort) {
+      const defaultFilename = attachment.filename || 'attachment.pdf';
+      const defaultMimeType = attachment.mimeType;
+
       if (this.effectiveStoragePort.getOwnedFileStream) {
         const fileRecord = await this.effectiveStoragePort.getOwnedFileStream({
           fileId: attachment.fileId,
@@ -511,21 +502,12 @@ export class AttachmentsController {
           projectId: effectiveProjectId,
         });
 
-        res.header(
-          'Content-Type',
-          fileRecord.mimeType || attachment.mimeType || 'application/pdf',
-        );
-        res.header(
-          'Content-Disposition',
-          `inline; filename="${encodeURIComponent(attachment.filename || fileRecord.filename)}"`,
-        );
-        res.header('Content-Length', fileRecord.size);
-        res.header(
-          'Cache-Control',
-          'private, no-cache, no-store, must-revalidate',
-        );
-        res.header('Vary', 'Authorization');
-        return res.send(fileRecord.stream);
+        return this.sendAttachmentPayload(res, {
+          content: fileRecord.stream,
+          filename: attachment.filename || fileRecord.filename || defaultFilename,
+          size: fileRecord.size,
+          mimeType: fileRecord.mimeType || defaultMimeType,
+        });
       }
 
       if (this.effectiveStoragePort.readOwnedFile) {
@@ -535,21 +517,12 @@ export class AttachmentsController {
           projectId: effectiveProjectId,
         });
 
-        res.header(
-          'Content-Type',
-          fileRecord.mimeType || attachment.mimeType || 'application/pdf',
-        );
-        res.header(
-          'Content-Disposition',
-          `inline; filename="${encodeURIComponent(attachment.filename || fileRecord.filename)}"`,
-        );
-        res.header('Content-Length', fileRecord.size);
-        res.header(
-          'Cache-Control',
-          'private, no-cache, no-store, must-revalidate',
-        );
-        res.header('Vary', 'Authorization');
-        return res.send(fileRecord.buffer);
+        return this.sendAttachmentPayload(res, {
+          content: fileRecord.buffer,
+          filename: attachment.filename || fileRecord.filename || defaultFilename,
+          size: fileRecord.size,
+          mimeType: fileRecord.mimeType || defaultMimeType,
+        });
       }
     }
 
@@ -902,5 +875,28 @@ export class AttachmentsController {
     return this.effectiveAttachmentsService!.resolveAttachmentItemId(
       attachmentId,
     );
+  }
+
+  private sendAttachmentPayload(
+    res: FastifyReply,
+    payload: {
+      content: any;
+      filename: string;
+      size: number;
+      mimeType?: string;
+    },
+  ) {
+    res.header('Content-Type', payload.mimeType || 'application/pdf');
+    res.header(
+      'Content-Disposition',
+      `inline; filename="${encodeURIComponent(payload.filename)}"`,
+    );
+    res.header('Content-Length', payload.size);
+    res.header(
+      'Cache-Control',
+      'private, no-cache, no-store, must-revalidate',
+    );
+    res.header('Vary', 'Authorization');
+    return res.send(payload.content);
   }
 }

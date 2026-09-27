@@ -128,7 +128,9 @@ export class CollectionsController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    const effectiveProjectId = paramProjectId || queryProjectId;
+    const effectiveProjectId = toValidProjectId(
+      paramProjectId || queryProjectId,
+    );
     if (this.reorderCollectionsUseCase) {
       return this.reorderCollectionsUseCase.execute({
         userId,
@@ -214,7 +216,9 @@ export class CollectionsController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    const effectiveProjectId = paramProjectId || queryProjectId;
+    const effectiveProjectId = toValidProjectId(
+      paramProjectId || queryProjectId,
+    );
     if (this.updateCollectionUseCase) {
       return this.updateCollectionUseCase.execute({
         userId,
@@ -241,7 +245,9 @@ export class CollectionsController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    const effectiveProjectId = paramProjectId || queryProjectId;
+    const effectiveProjectId = toValidProjectId(
+      paramProjectId || queryProjectId,
+    );
     if (this.deleteCollectionUseCase) {
       return this.deleteCollectionUseCase.execute({
         userId,
@@ -269,7 +275,9 @@ export class CollectionsController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    const effectiveProjectId = paramProjectId || queryProjectId;
+    const effectiveProjectId = toValidProjectId(
+      paramProjectId || queryProjectId,
+    );
     if (this.moveItemsUseCase) {
       return this.moveItemsUseCase.execute({
         userId,
@@ -297,7 +305,9 @@ export class CollectionsController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    const effectiveProjectId = paramProjectId || queryProjectId;
+    const effectiveProjectId = toValidProjectId(
+      paramProjectId || queryProjectId,
+    );
     if (this.assignItemsUseCase) {
       return this.assignItemsUseCase.execute({
         userId,
@@ -324,7 +334,9 @@ export class CollectionsController {
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
   ) {
-    const effectiveProjectId = paramProjectId || queryProjectId;
+    const effectiveProjectId = toValidProjectId(
+      paramProjectId || queryProjectId,
+    );
     if (this.detachItemUseCase) {
       return this.detachItemUseCase.execute({
         userId,

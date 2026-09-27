@@ -122,12 +122,20 @@ export class UpdateAnnotationDto {
 
 export class UpsertAnnotationItemDto {
   /** If present → update existing annotation, otherwise create new */
-  @IsUUID('4')
+  @IsUUID('all')
   @IsOptional()
   id?: string;
 
   @IsEnum(AnnotationType)
   @IsOptional()
+  @Transform(({ value }) => {
+    if (typeof value !== 'string') return value;
+    const lower = value.toLowerCase();
+    if (lower === 'box' || lower === 'area') return AnnotationType.rect;
+    if (lower === 'strikethrough') return AnnotationType.strike;
+    if (lower === 'freetext') return AnnotationType.text;
+    return lower as AnnotationType;
+  })
   type?: AnnotationType;
 
   @IsInt()
@@ -192,6 +200,6 @@ export class BatchAnnotationsDto {
   @IsArray()
   @ArrayMinSize(0)
   @ArrayMaxSize(200)
-  @IsUUID('4', { each: true })
+  @IsUUID('all', { each: true })
   deletes!: string[];
 }

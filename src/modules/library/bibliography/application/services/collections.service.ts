@@ -312,7 +312,9 @@ export class CollectionsService {
 
     // Verify items belong to the requesting user or project scope before moving
     const scopeWhere =
-      projectId && projectId !== 'user' ? { projectId } : { userId };
+      projectId && projectId !== 'user'
+        ? { projectId }
+        : { userId, projectId: null };
     const ownedItemIds = await this.repo.findOwnedItemIds(itemIds, scopeWhere);
 
     if (ownedItemIds.length === 0) {
@@ -371,7 +373,9 @@ export class CollectionsService {
 
     // 1. Verify all itemIds belong to this user or project scope
     const scopeWhere =
-      projectId && projectId !== 'user' ? { projectId } : { userId };
+      projectId && projectId !== 'user'
+        ? { projectId }
+        : { userId, projectId: null };
 
     const validItemIds = await this.repo.findValidItemIds(ids, scopeWhere);
     const validIdSet = new Set(validItemIds);

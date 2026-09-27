@@ -32,6 +32,7 @@ export class TagsRepository {
           }
         : {
             userId,
+            projectId: null,
             ...(options?.includeInactive
               ? {}
               : {
@@ -64,12 +65,17 @@ export class TagsRepository {
     userId: string,
     name: string,
     tx?: Prisma.TransactionClient,
+    projectId?: string,
   ) {
     const client = this.getClient(tx);
+    const scopeWhere =
+      projectId && projectId !== 'user'
+        ? { projectId }
+        : { userId, projectId: null };
     return client.tag.findFirst({
       where: {
-        userId,
         name,
+        ...scopeWhere,
       },
     });
   }

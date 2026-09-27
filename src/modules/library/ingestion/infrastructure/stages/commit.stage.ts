@@ -138,7 +138,10 @@ function mergeCreators(metadata: ItemMetadata, primaryRole: string = 'author') {
   return creators.length > 0 ? creators : undefined;
 }
 
-function generateBibtexCitationKey(metadata: ItemMetadata): string | undefined {
+function generateBibtexCitationKey(
+  metadata: ItemMetadata,
+  existingKeys?: Set<string>,
+): string | undefined {
   if (metadata.citationKey && metadata.citationKey.trim()) {
     return metadata.citationKey.trim().replace(/\s+/g, '');
   }
@@ -182,7 +185,22 @@ function generateBibtexCitationKey(metadata: ItemMetadata): string | undefined {
       }
     }
   }
-  return `${authorPart || 'ref'}${yearPart}${titlePart || 'paper'}`;
+  const baseKey = `${authorPart || 'ref'}${yearPart}${titlePart || 'paper'}`;
+  if (!existingKeys || !existingKeys.has(baseKey)) {
+    return baseKey;
+  }
+  const letters = 'abcdefghijklmnopqrstuvwxyz';
+  for (let i = 0; i < letters.length; i++) {
+    const candidate = `${baseKey}${letters[i]}`;
+    if (!existingKeys.has(candidate)) {
+      return candidate;
+    }
+  }
+  let counter = 2;
+  while (existingKeys.has(`${baseKey}_${counter}`)) {
+    counter++;
+  }
+  return `${baseKey}_${counter}`;
 }
 
 /** Converts reconciled provider metadata to the Item persistence contract.

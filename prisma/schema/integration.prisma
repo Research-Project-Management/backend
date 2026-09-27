@@ -6,6 +6,7 @@ enum IntegrationProvider {
   zotero
   mendeley
   orcid
+  github
 }
 
 enum IntegrationStatus {

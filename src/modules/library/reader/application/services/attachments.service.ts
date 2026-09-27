@@ -385,7 +385,7 @@ export class AttachmentsService {
     const scopeItemWhere =
       projectId && projectId !== 'user'
         ? { projectId, deletedAt: null }
-        : { userId, deletedAt: null };
+        : { userId, projectId: null, deletedAt: null };
     const attachment = await this.repo.findFirst({
       id: attachmentId,
       item: scopeItemWhere,

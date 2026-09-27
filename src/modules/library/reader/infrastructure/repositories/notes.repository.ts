@@ -45,6 +45,7 @@ export class NotesRepository {
         }
       : {
           userId,
+          projectId: null,
           ...(itemId !== undefined ? { itemId } : {}),
           deletedAt: null,
         };
@@ -69,7 +70,7 @@ export class NotesRepository {
       projectId !== 'personal' &&
       isUuid(projectId)
         ? { projectId }
-        : { userId };
+        : { userId, projectId: null };
     return client.note.findFirst({
       where: { id, ...scopeWhere, deletedAt: null },
     });

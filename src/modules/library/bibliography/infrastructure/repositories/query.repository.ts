@@ -63,25 +63,23 @@ export class QueryRepository {
 
     if (!item) return null;
 
-    if (item.userId === userId) {
-      if (projectId && isUuid(projectId) && item.projectId !== projectId) {
-        return null;
-      }
-      return item;
-    }
+    const isProjectScope = Boolean(projectId && isUuid(projectId));
 
-    if (item.projectId) {
-      if (projectId && isUuid(projectId) && item.projectId !== projectId) {
-        return null;
-      }
-      // Check project membership
+    if (isProjectScope) {
+      if (item.projectId !== projectId) return null;
+      if (item.userId === userId) return item;
       const member = await client.projectMember.findFirst({
         where: {
-          projectId: item.projectId,
+          projectId,
           userId,
         },
       });
       if (member) return item;
+      return null;
+    }
+
+    if (item.userId === userId && !item.projectId) {
+      return item;
     }
 
     return null;
@@ -100,7 +98,9 @@ export class QueryRepository {
     const client = this.getClient(tx);
 
     const scopeWhere: Prisma.ItemWhereInput =
-      projectId && isUuid(projectId) ? { projectId } : { userId };
+      projectId && isUuid(projectId)
+        ? { projectId }
+        : { userId, projectId: null };
 
     return client.item.findMany({
       where: {
@@ -211,8 +211,10 @@ export class QueryRepository {
   ) {
     if (!isUuid(userId)) return null;
     const client = this.getClient(tx);
-    const scopeWhere =
-      projectId && projectId !== 'user' ? { projectId } : { userId };
+    const scopeWhere: Prisma.ItemWhereInput =
+      projectId && projectId !== 'user' && isUuid(projectId)
+        ? { projectId }
+        : { userId, projectId: null };
     return client.item.findFirst({
       where: {
         ...scopeWhere,
@@ -408,7 +410,7 @@ export class QueryRepository {
           item: {
             ...(options.projectId
               ? { projectId: options.projectId }
-              : { userId }),
+              : { userId, projectId: null }),
             deletedAt: null,
             ...(options.search
               ? {
@@ -448,9 +450,22 @@ export class QueryRepository {
         }));
     }
 
-    const sortField = options.orderBy || 'createdAt';
+    let sortField = options.orderBy || 'createdAt';
+    if (sortField === 'authors') {
+      sortField = 'firstAuthor';
+    } else if (sortField === 'publication') {
+      sortField = 'publicationTitle';
+    }
     const sortDir = options.orderDirection === 'asc' ? 'asc' : 'desc';
-    const allowedSortFields = ['title', 'year', 'createdAt', 'updatedAt', 'citationKey'];
+    const allowedSortFields = [
+      'title',
+      'year',
+      'createdAt',
+      'updatedAt',
+      'citationKey',
+      'publicationTitle',
+      'firstAuthor',
+    ];
     const safeSortField = allowedSortFields.includes(sortField) ? sortField : 'createdAt';
     const orderByClause: any[] = [
       { [safeSortField]: sortDir },
@@ -505,6 +520,8 @@ export class QueryRepository {
       ? { projectId: options.projectId }
       : { userId, projectId: null };
 
+    const andConditions: Prisma.ItemWhereInput[] = [];
+
     if (view === 'trash') {
       where.deletedAt = { not: null };
     } else {
@@ -512,10 +529,12 @@ export class QueryRepository {
       if (view === 'unfiled') {
         where.collectionItems = { none: {} };
       } else if (view === 'my-publications' || view === 'publications') {
-        where.OR = [
-          { metadata: { path: ['isMyPublication'], equals: true } },
-          { publications: { some: { userId } } },
-        ];
+        andConditions.push({
+          OR: [
+            { metadata: { path: ['isMyPublication'], equals: true } },
+            { publications: { some: { userId } } },
+          ],
+        });
       } else if (view === 'starred') {
         where.states = { some: { userId, isStarred: true } };
       }
@@ -551,16 +570,28 @@ export class QueryRepository {
     }
 
     if (options.readStatus && options.readStatus !== 'all') {
-      where.states = {
-        some: {
-          userId,
-          readStatus: options.readStatus,
-        },
-      };
+      const statuses = options.readStatus
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (statuses.length > 0) {
+        where.states = {
+          some: {
+            userId,
+            readStatus: statuses.length > 1 ? { in: statuses as any } : (statuses[0] as any),
+          },
+        };
+      }
     }
 
     if (options.search) {
-      where.OR = this.buildSearchCondition(options.search);
+      andConditions.push({
+        OR: this.buildSearchCondition(options.search),
+      });
+    }
+
+    if (andConditions.length > 0) {
+      where.AND = andConditions;
     }
 
     return where as Prisma.ItemWhereInput;
@@ -718,7 +749,7 @@ export class QueryRepository {
       projectId && projectId !== 'user' && isUuid(projectId)
         ? { projectId }
         : isUuid(userId)
-          ? { userId }
+          ? { userId, projectId: null }
           : null;
     if (!scopeWhere) {
       for (const id of itemIds) result.set(id, false);
@@ -750,7 +781,7 @@ export class QueryRepository {
       projectId && projectId !== 'user' && isUuid(projectId)
         ? { projectId }
         : isUuid(userId)
-          ? { userId }
+          ? { userId, projectId: null }
           : null;
     if (!scopeWhere) return null;
     const item = await client.item.findFirst({
@@ -792,15 +823,26 @@ export class QueryRepository {
   async findSummariesByIds(
     userId: string,
     itemIds: string[],
+    projectIdOrTx?: string | Prisma.TransactionClient,
     tx?: Prisma.TransactionClient,
   ): Promise<ItemSummary[]> {
     if (!itemIds || itemIds.length === 0 || !isUuid(userId)) return [];
     const validIds = itemIds.filter(isUuid);
     if (validIds.length === 0) return [];
 
-    const client = this.getClient(tx);
+    const projectId =
+      typeof projectIdOrTx === 'string' && isUuid(projectIdOrTx)
+        ? projectIdOrTx
+        : undefined;
+    const client = this.getClient(
+      typeof projectIdOrTx === 'object' ? projectIdOrTx : tx,
+    );
+    const scopeWhere: Prisma.ItemWhereInput = projectId
+      ? { projectId }
+      : { userId, projectId: null };
+
     const items = await client.item.findMany({
-      where: { id: { in: validIds }, userId, deletedAt: null },
+      where: { id: { in: validIds }, ...scopeWhere, deletedAt: null },
       select: {
         id: true,
         userId: true,
@@ -954,12 +996,23 @@ export class QueryRepository {
   async findQualityAuditItems(
     userId: string,
     limit: number = 2000,
+    projectIdOrTx?: string | Prisma.TransactionClient,
     tx?: Prisma.TransactionClient,
   ) {
     if (!isUuid(userId)) return [];
-    const client = this.getClient(tx);
+    const projectId =
+      typeof projectIdOrTx === 'string' && isUuid(projectIdOrTx)
+        ? projectIdOrTx
+        : undefined;
+    const client = this.getClient(
+      typeof projectIdOrTx === 'object' ? projectIdOrTx : tx,
+    );
+    const scopeWhere: Prisma.ItemWhereInput = projectId
+      ? { projectId, deletedAt: null }
+      : { userId, projectId: null, deletedAt: null };
+
     return client.item.findMany({
-      where: { userId, deletedAt: null },
+      where: scopeWhere,
       take: limit,
       orderBy: { createdAt: 'desc' },
       select: {
@@ -980,12 +1033,23 @@ export class QueryRepository {
   async findDuplicateCandidateItems(
     userId: string,
     limit: number = 2000,
+    projectIdOrTx?: string | Prisma.TransactionClient,
     tx?: Prisma.TransactionClient,
   ) {
     if (!isUuid(userId)) return [];
-    const client = this.getClient(tx);
+    const projectId =
+      typeof projectIdOrTx === 'string' && isUuid(projectIdOrTx)
+        ? projectIdOrTx
+        : undefined;
+    const client = this.getClient(
+      typeof projectIdOrTx === 'object' ? projectIdOrTx : tx,
+    );
+    const scopeWhere: Prisma.ItemWhereInput = projectId
+      ? { projectId, deletedAt: null }
+      : { userId, projectId: null, deletedAt: null };
+
     return client.item.findMany({
-      where: { userId, deletedAt: null },
+      where: scopeWhere,
       select: {
         id: true,
         title: true,
@@ -1012,12 +1076,22 @@ export class QueryRepository {
   async getFulltext(
     userId: string,
     itemId: string,
+    projectIdOrTx?: string | Prisma.TransactionClient,
     tx?: Prisma.TransactionClient,
   ) {
     if (!isUuid(itemId) || !isUuid(userId)) return null;
-    const client = this.getClient(tx);
+    const projectId =
+      typeof projectIdOrTx === 'string' && isUuid(projectIdOrTx)
+        ? projectIdOrTx
+        : undefined;
+    const client = this.getClient(
+      typeof projectIdOrTx === 'object' ? projectIdOrTx : tx,
+    );
+    const scopeWhere: Prisma.ItemWhereInput = projectId
+      ? { projectId }
+      : { userId, projectId: null };
     const item = await client.item.findFirst({
-      where: { id: itemId, userId, deletedAt: null },
+      where: { id: itemId, ...scopeWhere, deletedAt: null },
       select: { id: true },
     });
     if (!item) return null;

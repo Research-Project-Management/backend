@@ -32,6 +32,49 @@ export class ItemLifecycleSubscriber implements OnModuleInit {
           },
         },
       );
+      this.outboxWorker.registerHandler('library.item.purged', {
+        handle: async (event: OutboxEvent) => {
+          await this.handleItemPurged(event.payload as any);
+        },
+      });
+    }
+  }
+
+  @OnEvent('library.item.purged', { async: true })
+  async handleItemPurged(event: any): Promise<void> {
+    const itemId = event?.id || event?.payload?.id;
+    if (!itemId) return;
+
+    this.logger.log(
+      `[ContentSubscriber] Purging attachments, notes, and annotations for purged item ${itemId}`,
+    );
+
+    try {
+      if (this.prisma?.annotation?.deleteMany) {
+        await this.prisma.annotation
+          .deleteMany({
+            where: { attachment: { itemId } },
+          })
+          .catch(() => {});
+      }
+      if (this.prisma?.attachment?.deleteMany) {
+        await this.prisma.attachment
+          .deleteMany({
+            where: { itemId },
+          })
+          .catch(() => {});
+      }
+      if (this.prisma?.note?.deleteMany) {
+        await this.prisma.note
+          .deleteMany({
+            where: { itemId },
+          })
+          .catch(() => {});
+      }
+    } catch (err: any) {
+      this.logger.warn(
+        `[ContentSubscriber] Content cascade purge error for item ${itemId}: ${err?.message || err}`,
+      );
     }
   }
 

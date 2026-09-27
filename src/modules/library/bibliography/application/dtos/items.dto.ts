@@ -6,6 +6,8 @@ import {
   IsBoolean,
   IsObject,
   ValidateNested,
+  Min,
+  Max,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PartialType, ApiProperty } from '@nestjs/swagger';
@@ -447,6 +449,8 @@ export class CursorPaginationQueryDto {
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
+  @Min(1)
+  @Max(100)
   limit?: number = 50;
 
   @IsOptional()
@@ -457,6 +461,10 @@ export class CursorPaginationQueryDto {
     | 'createdAt'
     | 'updatedAt'
     | 'citationKey'
+    | 'publicationTitle'
+    | 'firstAuthor'
+    | 'authors'
+    | 'publication'
     | (string & {});
 
   @IsOptional()
