@@ -30,6 +30,8 @@ import {
   ICatalogFacade,
 } from '../../../bibliography/bibliography.facade';
 import { createHash, randomUUID } from 'crypto';
+import zlib from 'zlib';
+import { IStoragePort, STORAGE_PORT } from '@/modules/storage/storage.port';
 
 @Injectable()
 export class IngestionService implements IngestionPort {
@@ -43,6 +45,9 @@ export class IngestionService implements IngestionPort {
     @Optional()
     @Inject(CATALOG_FACADE)
     private readonly catalogFacade?: ICatalogFacade,
+    @Optional()
+    @Inject(STORAGE_PORT)
+    private readonly storagePort?: IStoragePort,
   ) {}
 
   /**
@@ -87,13 +92,59 @@ export class IngestionService implements IngestionPort {
       }
     }
 
+    // Claim Check Pattern: If record payload exceeds 32KB, offload compressed payload to Storage
+    let effectivePayload = envelope.payload;
+    if (
+      envelope.payload.kind === 'RECORD' &&
+      envelope.payload.content &&
+      envelope.payload.content.length > 32 * 1024 &&
+      typeof this.storagePort?.uploadFile === 'function'
+    ) {
+      try {
+        const rawBuffer = Buffer.from(envelope.payload.content, 'utf-8');
+        const compressed = zlib.gzipSync(rawBuffer);
+        const uploadResult = await this.storagePort.uploadFile({
+          userId: envelope.userId || 'system',
+          projectId: envelope.projectId || undefined,
+          filename: `ingest_${envelope.payload.format.toLowerCase()}_${randomUUID().slice(0, 8)}.json.gz`,
+          buffer: compressed,
+          mimeType: 'application/gzip',
+          source: 'ingestion.claim_check',
+        });
+
+        if (uploadResult?.fileId) {
+          effectivePayload = {
+            kind: 'RECORD',
+            format: envelope.payload.format,
+            isOffloaded: true,
+            fileId: uploadResult.fileId,
+            storageKey: uploadResult.path,
+            byteSize: compressed.length,
+            uncompressedSize: rawBuffer.length,
+          };
+          this.logger.log(
+            `[ClaimCheck] Offloaded large ${envelope.payload.format} record payload (${rawBuffer.length}B -> ${compressed.length}B compressed) to storage fileId=${uploadResult.fileId}`,
+          );
+        }
+      } catch (offloadErr: any) {
+        this.logger.warn(
+          `[ClaimCheck] Failed to offload record payload to storage: ${offloadErr?.message}. Falling back to inline.`,
+        );
+      }
+    }
+
+    const envelopeToPersist: IngestionSubmissionEnvelope = {
+      ...envelope,
+      payload: effectivePayload,
+    };
+
     // 2. Create IngestionRun Record with Race Condition Protection (P2002)
     let run: IngestionRun;
     try {
       run = await this.repo.createRun(
         { userId: envelope.userId, projectId },
         {
-          inputParams: envelope as unknown as Prisma.InputJsonValue,
+          inputParams: envelopeToPersist as unknown as Prisma.InputJsonValue,
           inputHash: requestHash,
           idempotencyKey,
           contractVersion: envelope.contractVersion || '1.0.0',
@@ -135,7 +186,7 @@ export class IngestionService implements IngestionPort {
     // for bounded concurrency and worker resilience (unless direct synchronous execution is requested).
     const shouldEnqueue = options?.enqueue ?? true;
     if (shouldEnqueue) {
-      void this.queue.enqueue(runId, projectId, envelope);
+      void this.queue.enqueue(runId, projectId, envelopeToPersist);
     }
 
     return {

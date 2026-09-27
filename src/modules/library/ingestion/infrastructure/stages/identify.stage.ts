@@ -1,4 +1,5 @@
-import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional, BadRequestException } from '@nestjs/common';
+import zlib from 'zlib';
 import { SubmissionPayload } from '../../domain/types/submission.types';
 import { MetadataCandidate } from '../../domain/types/metadata-candidate.types';
 import { DoiParser } from '../parsers/doi.parser';
@@ -158,8 +159,32 @@ export class IdentifyStage {
       }
 
       case 'RECORD': {
+        let recordContent = payload.content || '';
+        if (
+          payload.isOffloaded &&
+          payload.fileId &&
+          typeof this.storagePort?.readOwnedFile === 'function'
+        ) {
+          try {
+            const file = await this.storagePort.readOwnedFile({
+              fileId: payload.fileId,
+            });
+            if (file?.buffer) {
+              const decompressed = zlib.gunzipSync(file.buffer);
+              recordContent = decompressed.toString('utf-8');
+            }
+          } catch (err: any) {
+            this.logger.error(
+              `[ClaimCheck] Failed to hydrate offloaded record payload ${payload.fileId}: ${err?.message}`,
+            );
+            throw new BadRequestException(
+              `Failed to hydrate offloaded record content: ${err?.message}`,
+            );
+          }
+        }
+
         if (payload.format === 'BIBTEX') {
-          const parsedList = this.bibtexParser.parse(payload.content);
+          const parsedList = this.bibtexParser.parse(recordContent);
           for (const item of parsedList) {
             const rawMetadata = {
               title: item.title,
@@ -212,7 +237,7 @@ export class IdentifyStage {
             });
           }
         } else if (payload.format === 'RIS') {
-          const parsedList = this.risParser.parse(payload.content);
+          const parsedList = this.risParser.parse(recordContent);
           for (const item of parsedList) {
             const normalized = this.normalizer.normalize(item);
             candidates.push({
@@ -235,9 +260,9 @@ export class IdentifyStage {
           let items: any[] = [];
           try {
             const parsed =
-              typeof payload.content === 'string'
-                ? JSON.parse(payload.content)
-                : payload.content;
+              typeof recordContent === 'string'
+                ? JSON.parse(recordContent)
+                : recordContent;
             items = Array.isArray(parsed) ? parsed : [parsed];
           } catch {
             items = [];

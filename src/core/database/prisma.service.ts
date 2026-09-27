@@ -25,9 +25,12 @@ export class PrismaService
       'postgresql://localhost:5432/rpm';
 
     const isProd = process.env.NODE_ENV === 'production';
+    // Bulkhead safety headroom: Background workers (Outbox: 5, Ingest: 3, Retraction: 3, OCR: 2)
+    // require at least 13 connections. We allocate at least 15 extra connections for real-time web users.
+    const defaultPoolMax = isProd ? 35 : 25;
     const poolMax = process.env.DATABASE_POOL_MAX
       ? parseInt(process.env.DATABASE_POOL_MAX, 10)
-      : (isProd ? 25 : 20);
+      : defaultPoolMax;
     const pool = new Pool({
       connectionString,
       max: poolMax,

@@ -354,20 +354,32 @@ export class PipelineService {
           });
         } finally {
           processed++;
-          try {
-            await this.repo.updateRunProgress(scopeId, runId, {
-              total,
-              processed,
-              succeeded,
-              duplicates,
-              failed,
-              percentage: Math.round((processed / total) * 100),
-              currentTitle: itemTitle,
-              status: 'PROCESSING',
-              items: progressItems.slice(-30),
-            });
-          } catch {
-            // Checkpoint error is non-fatal to the ingestion pipeline
+          // Leaky Bucket / Throttle Checkpoints:
+          // Avoid flooding the database with hundreds of UPDATE queries in large batches.
+          // Checkpoint every 5 items, or every item if total <= 10, or at the final item.
+          const isFinal = processed === total;
+          const shouldCheckpoint =
+            isFinal ||
+            total <= 10 ||
+            processed % 5 === 0 ||
+            (total > 50 && processed % 10 === 0);
+
+          if (shouldCheckpoint) {
+            try {
+              await this.repo.updateRunProgress(scopeId, runId, {
+                total,
+                processed,
+                succeeded,
+                duplicates,
+                failed,
+                percentage: Math.round((processed / total) * 100),
+                currentTitle: itemTitle,
+                status: 'PROCESSING',
+                items: progressItems.slice(-30),
+              });
+            } catch {
+              // Checkpoint error is non-fatal to the ingestion pipeline
+            }
           }
         }
       }

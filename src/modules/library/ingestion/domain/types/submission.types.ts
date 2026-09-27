@@ -18,7 +18,12 @@ export interface IdentifierSubmissionInput {
 export interface RecordSubmissionInput {
   kind: 'RECORD';
   format: RecordFormat;
-  content: string;
+  content?: string;
+  isOffloaded?: boolean;
+  fileId?: string;
+  storageKey?: string;
+  byteSize?: number;
+  uncompressedSize?: number;
 }
 
 export interface UrlSubmissionInput {
