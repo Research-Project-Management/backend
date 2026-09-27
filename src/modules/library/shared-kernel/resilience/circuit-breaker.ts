@@ -62,6 +62,10 @@ export class CircuitBreaker {
     return this.state;
   }
 
+  public getFailures(): number {
+    return this.consecutiveFailures;
+  }
+
   public canExecute(): boolean {
     const currentState = this.getState();
 

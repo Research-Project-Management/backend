@@ -62,6 +62,27 @@ export class ResilienceRegistryService {
   }
 
   /**
+   * Diagnostic observability: exports real-time status of all circuit breakers.
+   */
+  public getAllBreakerStatuses(): Record<
+    string,
+    { state: string; failureCount: number; canExecute: boolean }
+  > {
+    const statuses: Record<
+      string,
+      { state: string; failureCount: number; canExecute: boolean }
+    > = {};
+    for (const [name, breaker] of this.breakers.entries()) {
+      statuses[name] = {
+        state: breaker.getState(),
+        failureCount: breaker.getFailures(),
+        canExecute: breaker.canExecute(),
+      };
+    }
+    return statuses;
+  }
+
+  /**
    * Executes an asynchronous task protected by both Rate Limiter and Circuit Breaker.
    */
   public async execute<T>(

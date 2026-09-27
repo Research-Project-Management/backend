@@ -12,6 +12,9 @@ import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 import { TransactionService } from '../outbox/transaction.service';
 import { ChangeLogRepository } from '../outbox/repositories/changelog.repository';
 import { SyncQueryDto } from './dtos/sync-query.dto';
+import { ResilienceRegistryService } from '../resilience/resilience-registry.service';
+import { OutboxWorker } from '../outbox/outbox.worker';
+import { OutboxMetrics } from '../outbox/outbox.metrics';
 
 function parseSafeBigInt(val?: string): bigint | undefined {
   if (!val) return undefined;
@@ -32,6 +35,9 @@ export class SyncController {
   constructor(
     private readonly transactionService: TransactionService,
     @Optional() private readonly changeLogRepo?: ChangeLogRepository,
+    @Optional() private readonly resilienceRegistry?: ResilienceRegistryService,
+    @Optional() private readonly outboxWorker?: OutboxWorker,
+    @Optional() private readonly outboxMetrics?: OutboxMetrics,
   ) {}
 
   @Get('version')
@@ -144,6 +150,27 @@ export class SyncController {
         deletedById: t.deletedById,
         deletedAt: t.deletedAt,
       })),
+    };
+  }
+
+  @Get('diagnostics')
+  @ProjectRoles('owner', 'coordinator')
+  @ApiOperation({
+    summary: 'Library Subsystem Diagnostics & Observability',
+    description:
+      'Returns real-time telemetry including Circuit Breaker states, Outbox worker status, and metrics.',
+  })
+  async getDiagnostics() {
+    return {
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      resilience: this.resilienceRegistry?.getAllBreakerStatuses() ?? {},
+      outbox: {
+        workerId: this.outboxWorker?.getWorkerId() ?? 'disabled',
+        metrics: {
+          dispatches: this.outboxMetrics?.getCounter('outbox_dispatches') ?? 0,
+        },
+      },
     };
   }
 }
