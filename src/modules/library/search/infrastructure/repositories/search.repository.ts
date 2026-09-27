@@ -90,7 +90,9 @@ export class SearchRepository implements OnModuleInit {
         options.projectId !== 'personal',
     );
     const baseFilters: string[] = [
-      hasProject ? `project_id = $1::uuid` : `user_id = $1::uuid`,
+      hasProject
+        ? `project_id = $1::uuid`
+        : `user_id = $1::uuid AND project_id IS NULL`,
       `deleted_at IS NULL`,
       `search_vector @@ plainto_tsquery('english', $2)`,
     ];
@@ -411,7 +413,7 @@ export class SearchRepository implements OnModuleInit {
       const res: any[] = await this.prisma.$queryRaw`
         SELECT 1 FROM pg_attribute a
         JOIN pg_class c ON c.oid = a.attrelid
-        WHERE c.relname = 'papers'
+        WHERE c.relname IN ('items', 'papers')
           AND a.attname = 'search_vector'
           AND NOT a.attisdropped
         LIMIT 1
@@ -423,7 +425,7 @@ export class SearchRepository implements OnModuleInit {
         );
       } else {
         this.logger.warn(
-          'PostgreSQL FTS: search_vector column not found on table "papers" — run migration "add_catalog_item_fts" to enable. Falling back to ILIKE.',
+          'PostgreSQL FTS: search_vector column not found on table "items" — run migration "add_catalog_item_fts" to enable. Falling back to ILIKE.',
         );
       }
     } catch (err: any) {
