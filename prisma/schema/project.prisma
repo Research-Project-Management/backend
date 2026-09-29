@@ -52,7 +52,7 @@ model Project {
 
   createdById String   @map("created_by_id") @db.Uuid
   createdBy   User     @relation("ProjectCreator", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_projects_created_by_id")
-  modules     String[] @default(["overview", "work_items", "cycles", "views", "pages"])
+  modules     String[] @default(["overview", "work_items", "pages"])
   settings    Json?    @default("{}")
 
   // Template liên kết (nếu được tạo từ Project Template)
@@ -72,13 +72,9 @@ model Project {
   labels         ProjectLabel[]
   favorites      ProjectFavorite[]
   states         WorkItemState[]
-  cycles         Cycle[]
   workItems      WorkItem[]
   workItemLabels WorkItemLabel[]       @relation("ProjectWorkItemLabels")
-  views          WorkItemView[]
-  userProperties ProjectUserProperty[]
   drafts         WorkItemDraft[]
-  templates      WorkItemTemplate[]
   activityEvents   ActivityEvent[]
   aiChats          AiChat[]                 @relation("ProjectAiChats")
   updates          ProjectUpdate[]
@@ -183,7 +179,7 @@ model ProjectTemplate {
   createdBy   User    @relation("UserProjectTemplates", fields: [createdById], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_project_templates_created_by_id")
 
   // Cấu hình dự án mẫu (Features / Modules)
-  defaultModules String[] @default(["overview", "work_items", "cycles", "views", "pages"]) @map("default_modules")
+  defaultModules String[] @default(["overview", "work_items", "pages"]) @map("default_modules")
   settings       Json?    @default("{}")
 
   // Cấu hình khởi tạo khi sinh Project từ Template

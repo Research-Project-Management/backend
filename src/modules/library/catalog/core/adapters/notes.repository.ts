@@ -13,7 +13,7 @@ const isUuid = (val: unknown): val is string =>
   typeof val === 'string' && isUUID(val);
 
 @Injectable()
-export class NotesRepository {
+export class NoteRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   private getClient(tx?: Prisma.TransactionClient) {
@@ -242,3 +242,6 @@ export class NotesRepository {
     });
   }
 }
+
+export const NotesRepository = NoteRepository;
+export type NotesRepository = NoteRepository;

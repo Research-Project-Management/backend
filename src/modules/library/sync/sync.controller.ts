@@ -15,6 +15,7 @@ import { SyncQueryDto } from './dto/sync-query.dto';
 import { ResilienceRegistryService } from '../shared-kernel/resilience/resilience-registry.service';
 import { OutboxWorker } from './core/adapters/outbox.worker';
 import { OutboxMetrics } from './core/adapters/outbox.metrics';
+import { compactLibraryChanges } from './core/domain/outbox.utils';
 
 function parseSafeBigInt(val?: string): bigint | undefined {
   if (!val) return undefined;
@@ -88,11 +89,14 @@ export class SyncController {
     );
 
     const hasMore = changes.length > limit;
-    const pagedChanges = hasMore ? changes.slice(0, limit) : changes;
+    const rawPaged = hasMore ? changes.slice(0, limit) : changes;
+    const pagedChanges =
+      query.compact !== false ? compactLibraryChanges(rawPaged) : rawPaged;
 
     return {
       since: sinceSeq.toString(),
       count: pagedChanges.length,
+      compacted: query.compact !== false,
       hasMore,
       changes: pagedChanges.map((c) => ({
         id: c.id,

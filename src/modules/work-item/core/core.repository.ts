@@ -8,7 +8,6 @@ import {
   WorkItemFilterOptions,
   WorkItemAttachments,
   USER_MINIMAL_SELECT,
-  CYCLE_SELECT,
   STATE_MINIMAL_SELECT,
   CHILD_WORK_ITEM_SELECT,
 } from './types/work-item.types';
@@ -28,7 +27,6 @@ export const BASE_WORK_ITEM_INCLUDE = {
       label: { select: { id: true, name: true, color: true } },
     },
   },
-  cycle: { select: CYCLE_SELECT },
   parentWorkItem: { select: { id: true, title: true, identifier: true } },
   childWorkItems: {
     where: { deletedAt: null },
@@ -134,13 +132,7 @@ export class CoreRepository implements IWorkItemRepository {
     let take: number | undefined;
     let skip: number | undefined;
 
-    if (typeof filter === 'string') {
-      if (filter === 'none' || filter === 'null' || filter === 'unassigned') {
-        where.cycleId = null;
-      } else if (isUuid(filter)) {
-        where.cycleId = filter;
-      }
-    } else if (filter) {
+    if (filter && typeof filter === 'object') {
       const normalizeArray = (val: unknown): string[] => {
         if (val === undefined || val === null) return [];
         if (Array.isArray(val))
@@ -230,37 +222,6 @@ export class CoreRepository implements IWorkItemRepository {
           where.assigneeId = specificAssigneeIds[0];
         } else if (specificAssigneeIds.length > 1) {
           where.assigneeId = { in: specificAssigneeIds };
-        }
-      }
-
-      // Cycles
-      const cycleFilters = normalizeArray(filter.cycleId || filter.cycle);
-      if (cycleFilters.length > 0) {
-        const hasNoCycle = cycleFilters.some(
-          (id) =>
-            id === 'none' ||
-            id === 'null' ||
-            id === 'unassigned' ||
-            id === '__no_cycle__' ||
-            id === 'no_cycle',
-        );
-        const specificCycleIds = cycleFilters.filter(
-          (id) =>
-            isUuid(id) &&
-            id !== 'none' &&
-            id !== 'null' &&
-            id !== 'unassigned' &&
-            id !== '__no_cycle__' &&
-            id !== 'no_cycle',
-        );
-        if (hasNoCycle && specificCycleIds.length > 0) {
-          where.OR = [{ cycleId: { in: specificCycleIds } }, { cycleId: null }];
-        } else if (hasNoCycle) {
-          where.cycleId = null;
-        } else if (specificCycleIds.length === 1) {
-          where.cycleId = specificCycleIds[0];
-        } else if (specificCycleIds.length > 1) {
-          where.cycleId = { in: specificCycleIds };
         }
       }
 
@@ -635,7 +596,6 @@ export class CoreRepository implements IWorkItemRepository {
       createData.project?.connect ||
       createData.author?.connect ||
       createData.assignee?.connect ||
-      createData.cycle?.connect ||
       createData.parentWorkItem?.connect ||
       createData.state?.connect,
     );
@@ -754,8 +714,6 @@ export class CoreRepository implements IWorkItemRepository {
     const hasRelationConnect = Boolean(
       updateData.assignee?.connect ||
       updateData.assignee?.disconnect ||
-      updateData.cycle?.connect ||
-      updateData.cycle?.disconnect ||
       updateData.parentWorkItem?.connect ||
       updateData.parentWorkItem?.disconnect ||
       updateData.state?.connect,
@@ -1273,20 +1231,6 @@ export class CoreRepository implements IWorkItemRepository {
         sequence: true,
         isDefault: true,
         projectId: true,
-      },
-    });
-  }
-
-  async findCycleById(cycleId: string) {
-    if (!isUuid(cycleId)) return null;
-    return this.prismaService.cycle.findUnique({
-      where: { id: cycleId },
-      select: {
-        id: true,
-        name: true,
-        projectId: true,
-        deletedAt: true,
-        status: true,
       },
     });
   }

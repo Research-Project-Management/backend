@@ -71,16 +71,11 @@ model User {
   sharedFiles   FileShare[] @relation("UserSharedFiles")
 
   // Work-Item Relations (Collaborative Issue Tracking)
-  authoredCycles        Cycle[]
   userActivityEvents    ActivityEvent[]       @relation("UserActivityEvents")
   createdWorkItems      WorkItem[]            @relation("WorkItemAuthor")
   assignedWorkItems     WorkItem[]            @relation("WorkItemAssignee")
   workItemComments      WorkItemComment[]
-  createdViews          WorkItemView[]        @relation("ViewAuthor")
-  viewFavorites         ViewFavorite[]
-  userProperties        ProjectUserProperty[]
   userDrafts            WorkItemDraft[]       @relation("UserDrafts")
-  userTemplates         WorkItemTemplate[]    @relation("UserTemplates")
   userAttachments       EntityAttachment[]    @relation("UserAttachments")
   createdWorkItemLabels WorkItemLabel[]       @relation("UserCreatedWorkItemLabels")
   workItemCoAssignments WorkItemAssignee[]    @relation("WorkItemCoAssignees")

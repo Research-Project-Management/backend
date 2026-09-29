@@ -17,7 +17,7 @@ import {
 import {
   TransactionService,
   TransactionHelpers,
-} from '@/modules/library/shared-kernel/outbox/transaction.service';
+} from '@/modules/library/sync/core/adapters/transaction.service';
 import { ITEM_EXISTENCE_PORT } from '@/modules/library/catalog/core/ports/items.ports';
 import { PrismaService } from '@/core/database/prisma.service';
 

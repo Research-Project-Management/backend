@@ -27,14 +27,13 @@ export class BulkUpdateWorkItemDto {
 
   @ApiProperty({
     description: 'Bulk update payload data',
-    example: { columnId: 'done', priority: 'high', cycleId: 'cycle-1' },
+    example: { columnId: 'done', priority: 'high' },
   })
   @IsObject()
   data!: {
     columnId?: string;
     assigneeId?: string | null;
     priority?: WorkItemPriority | (string & {});
-    cycleId?: string | null;
     dueDate?: string | null;
     startDate?: string | null;
     [key: string]: any;

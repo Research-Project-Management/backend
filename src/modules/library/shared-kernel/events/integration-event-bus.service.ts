@@ -1,6 +1,6 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { TransactionService } from '../outbox/transaction.service';
+import { TransactionService } from '../../sync/core/adapters/transaction.service';
 import { BaseIntegrationEvent } from './integration-events';
 
 export const INTEGRATION_EVENT_BUS = Symbol('INTEGRATION_EVENT_BUS');
@@ -30,7 +30,7 @@ export class IntegrationEventBusService implements IIntegrationEventBus {
     );
 
     // 1. Transactionally persist to Outbox for durable relay
-    await this.libraryTx.executeInTransaction(async (tx, helpers) => {
+    await this.libraryTx.executeInTransaction(async (tx: any, helpers: any) => {
       await helpers.publishOutbox(
         {
           userId: event.scope.userId,

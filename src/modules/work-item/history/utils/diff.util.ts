@@ -37,9 +37,6 @@ export function summarizeDiff(
     case 'labels':
       return `Updated labels: from ${oldVal} to ${newVal}`;
 
-    case 'cycle':
-      return `Moved to cycle: "${newVal}" (was "${oldVal}")`;
-
     case 'module':
       return `Updated module: "${newVal}" (was "${oldVal}")`;
 

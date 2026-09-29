@@ -11,7 +11,7 @@ import { AttachmentsService } from '@/modules/library/extraction/core/use-cases/
 import {
   TransactionService,
   TransactionHelpers,
-} from '@/modules/library/shared-kernel/outbox/transaction.service';
+} from '@/modules/library/sync/core/adapters/transaction.service';
 import { PrismaService } from '@/core/database/prisma.service';
 import { BIBLIOGRAPHY_FACADE } from '@/modules/library/catalog/catalog.facade';
 

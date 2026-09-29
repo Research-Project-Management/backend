@@ -8,5 +8,8 @@ export {
   extractContributorAuthors,
   generateDedupeBucketKey,
   calculateTitleSimilarity,
+  calculateTokenSortRatio,
+  tokenizeTitleWords,
+  jaroWinkler,
   firstAuthorMatches,
 } from '../domain/deduplication.utils';

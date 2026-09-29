@@ -1,4 +1,4 @@
-import { IdempotentConsumerService } from '../../src/modules/library/shared-kernel/outbox/services/idempotent-consumer.service';
+import { IdempotentConsumerService } from '../../src/modules/library/sync/core/adapters/idempotent-consumer.service';
 import { ExtractionHandler } from '@/modules/library/extraction/core/adapters/extraction.handler';
 import { fromPartial } from '@total-typescript/shoehorn';
 import { OutboxEvent } from '@prisma/client';

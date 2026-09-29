@@ -1,9 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { LIBRARY_EVENT_TYPES } from '../../../shared-kernel/outbox/outbox.events';
+import { LIBRARY_EVENT_TYPES, DomainEventEnvelope } from '../../../sync';
 import { FullTextProvider } from './full-text.provider';
 import { SearchRepository } from './search.repository';
-import { DomainEventEnvelope } from '../../../shared-kernel/outbox/ports/event-publisher.port';
 
 @Injectable()
 export class EventHandler {

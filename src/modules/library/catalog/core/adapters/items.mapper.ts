@@ -14,7 +14,7 @@ import {
   cleanSingleTag,
 } from '../../../shared-kernel/utils/tag.utils';
 
-export class ItemsMapper {
+export class ItemMapper {
   /**
    * Normalizes a single Item record or payload to the canonical domain shape.
    * Resolves primary PDF attachment priority and ensures all internal file attachments
@@ -1017,3 +1017,6 @@ export class ItemsMapper {
     };
   }
 }
+
+export const ItemsMapper = ItemMapper;
+export type ItemsMapper = ItemMapper;

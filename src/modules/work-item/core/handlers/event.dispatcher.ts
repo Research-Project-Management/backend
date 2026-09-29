@@ -152,19 +152,6 @@ export class EventDispatcher {
       });
     }
 
-    if (
-      updateDto.cycleId !== undefined &&
-      updateDto.cycleId !== existing.cycleId
-    ) {
-      this.eventEmitter.emit('work-item.cycle.changed', {
-        ...baseEvent,
-        verb: 'updated',
-        field: 'cycle',
-        oldValue: existing.cycleId || '',
-        newValue: updateDto.cycleId || '',
-      });
-    }
-
     this.eventEmitter.emit('work-item.updated', {
       ...baseEvent,
       verb: 'updated',

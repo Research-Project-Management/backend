@@ -3,24 +3,48 @@ import { CoreModule } from '../../../core/core.module';
 import { SyncModule } from '../sync/sync.module';
 
 // Controllers
-import { ItemsController } from './items.controller';
-import { CollectionsController } from './collections.controller';
-import { TagsController } from './tags.controller';
-import { TypesController } from './types.controller';
+import { ItemController, ItemsController } from './items.controller';
+import {
+  CollectionController,
+  CollectionsController,
+} from './collections.controller';
+import { TagController, TagsController } from './tags.controller';
+import { TypeController, TypesController } from './types.controller';
 import { StateController, StateBatchController } from './state.controller';
-import { SavedSearchesController } from './saved-searches.controller';
-import { NotesController } from './notes.controller';
+import {
+  SavedSearchesController,
+  SavedSearchesController as SavedSearchController,
+} from './saved-searches.controller';
+import { NoteController, NotesController } from './notes.controller';
 
-// Services
-import { ItemsService } from './core/use-cases/items.service';
-import { ItemSyncDelegate } from './core/use-cases/item-sync.delegate';
-import { CollectionsService } from './core/use-cases/collections.service';
-import { TagsService } from './core/use-cases/tags.service';
-import { TypesService } from './core/use-cases/types.service';
-import { StateService } from './core/use-cases/state.service';
-import { SavedSearchesService } from './core/use-cases/saved-searches.service';
-import { ZoteroSchemaValidatorService } from './core/use-cases/zotero-schema-validator.service';
-import { NotesService } from './core/use-cases/notes.service';
+// Services (Application & Domain Services)
+import {
+  ItemService,
+  ItemService as ItemsService,
+} from './core/services/item.service';
+import { ItemSyncDelegate } from './core/services/item-sync.delegate';
+import {
+  CollectionService,
+  CollectionService as CollectionsService,
+} from './core/services/collection.service';
+import {
+  TagService,
+  TagService as TagsService,
+} from './core/services/tag.service';
+import {
+  TypeService,
+  TypeService as TypesService,
+} from './core/services/type.service';
+import { StateService } from './core/services/state.service';
+import {
+  SavedSearchService,
+  SavedSearchService as SavedSearchesService,
+} from './core/services/saved-search.service';
+import { ZoteroSchemaValidatorService } from './core/services/zotero-schema-validator.service';
+import {
+  NoteService,
+  NoteService as NotesService,
+} from './core/services/note.service';
 
 // Search Indexing Gateway
 import { SEARCH_INDEXING_PORT } from './core/ports/search-indexing.port';
@@ -29,17 +53,26 @@ import { InProcessSearchIndexingAdapter } from './core/adapters/in-process-searc
 // Engines & Mappers
 import { TreeEngine } from './core/adapters/tree.engine';
 import { ConditionEvaluatorEngine } from './core/adapters/condition-evaluator.engine';
-import { ItemsMapper } from './core/adapters/items.mapper';
+import { ItemMapper, ItemsMapper } from './core/adapters/items.mapper';
 import { ItemTransformer } from './core/adapters/item.transformer';
 
 // Repositories
 import { ItemCommandRepository } from './core/adapters/command.repository';
 import { ItemQueryRepository } from './core/adapters/query.repository';
-import { CollectionsRepository } from './core/adapters/collections.repository';
+import {
+  CollectionRepository,
+  CollectionsRepository,
+} from './core/adapters/collections.repository';
 import { TagsRepository } from './core/adapters/tags.repository';
 import { StateRepository } from './core/adapters/state.repository';
-import { SavedSearchesRepository } from './core/adapters/saved-searches.repository';
-import { NotesRepository } from './core/adapters/notes.repository';
+import {
+  SavedSearchRepository,
+  SavedSearchesRepository,
+} from './core/adapters/saved-searches.repository';
+import {
+  NoteRepository,
+  NotesRepository,
+} from './core/adapters/notes.repository';
 
 // Ports & Adapters
 import { ITEM_REPOSITORY_PORT } from './core/ports/item-repository.port';
@@ -128,14 +161,14 @@ import {
 @Module({
   imports: [CoreModule, SyncModule],
   controllers: [
-    ItemsController,
-    CollectionsController,
-    TagsController,
-    TypesController,
+    ItemController,
+    CollectionController,
+    TagController,
+    TypeController,
     StateController,
     StateBatchController,
-    SavedSearchesController,
-    NotesController,
+    SavedSearchController,
+    NoteController,
   ],
   providers: [
     // Facades

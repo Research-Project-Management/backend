@@ -17,16 +17,6 @@ export const WORK_ITEM_REDIS_KEYS = {
   workItem: (workItemId: string) => `flux:wi:work-item:${workItemId}`,
 
   /**
-   * Project sprint cycles list (String/JSON array, TTL 1h)
-   */
-  projectCycles: (projectId: string) => `flux:wi:cycles:${projectId}`,
-
-  /**
-   * Sprint cycle aggregate details by ID (String/JSON, TTL 30m)
-   */
-  cycle: (cycleId: string) => `flux:wi:cycle:${cycleId}`,
-
-  /**
    * User / Scope labels list (JSON array, TTL 1h)
    */
   labels: (scopeId: string) => `flux:wi:labels:${scopeId}`,

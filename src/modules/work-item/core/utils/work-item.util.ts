@@ -110,13 +110,6 @@ export const formatWorkItem = (
           ? [record.assigneeId]
           : [];
 
-  const cycle = record.cycle
-    ? {
-        id: record.cycle.id,
-        name: record.cycle.name,
-      }
-    : record.cycleId || null;
-
   const isCompleted = record.state?.group
     ? record.state.group === 'completed'
     : record.columnId === 'done' || Boolean(record.completed);
@@ -205,7 +198,6 @@ export const formatWorkItem = (
     assignee,
     assignees,
     assigneeIds,
-    cycle,
     completed: isCompleted,
     relations,
     labels,

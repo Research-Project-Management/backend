@@ -10,11 +10,9 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
     let mockGetAttachmentUseCase: { execute: jest.Mock };
     let mockGetItemAttachmentsUseCase: { execute: jest.Mock };
     let mockDeleteAttachmentUseCase: { execute: jest.Mock };
-    let mockAddRevisionUseCase: { execute: jest.Mock };
     let mockSetPrimaryAttachmentUseCase: { execute: jest.Mock };
     let mockRenameAttachmentUseCase: { execute: jest.Mock };
     let mockBatchRenameAttachmentsUseCase: { execute: jest.Mock };
-    let mockGetAttachmentRevisionsUseCase: { execute: jest.Mock };
     let mockGetThumbnailUseCase: { execute: jest.Mock };
     let mockWebSnapshotService: { captureAndAttach: jest.Mock };
 
@@ -37,9 +35,6 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
       mockDeleteAttachmentUseCase = {
         execute: jest.fn().mockResolvedValue({ success: true }),
       };
-      mockAddRevisionUseCase = {
-        execute: jest.fn().mockResolvedValue({ id: 'att-1', version: 2 }),
-      };
       mockSetPrimaryAttachmentUseCase = {
         execute: jest.fn().mockResolvedValue({ success: true }),
       };
@@ -51,9 +46,6 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
       };
       mockBatchRenameAttachmentsUseCase = {
         execute: jest.fn().mockResolvedValue({ renamedCount: 1, results: [] }),
-      };
-      mockGetAttachmentRevisionsUseCase = {
-        execute: jest.fn().mockResolvedValue([{ revisionNumber: 1 }]),
       };
       mockGetThumbnailUseCase = {
         execute: jest.fn().mockResolvedValue({
@@ -70,11 +62,9 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
         mockGetAttachmentUseCase as any,
         mockGetItemAttachmentsUseCase as any,
         mockDeleteAttachmentUseCase as any,
-        mockAddRevisionUseCase as any,
         mockSetPrimaryAttachmentUseCase as any,
         mockRenameAttachmentUseCase as any,
         mockBatchRenameAttachmentsUseCase as any,
-        mockGetAttachmentRevisionsUseCase as any,
         mockGetThumbnailUseCase as any,
         mockWebSnapshotService as any,
       );
@@ -130,25 +120,6 @@ describe('Library CQRS Controllers Specification (Hexagonal Driver Adapters)', (
         projectId: 'proj-1',
       });
       expect(res).toEqual({ success: true });
-    });
-
-    it('should add revision by delegating to AddAttachmentRevisionUseCase', async () => {
-      const dto: any = { url: 'https://storage/v2.pdf', sizeBytes: 2048 };
-      const res = await controller.addRevision(
-        'user-1',
-        'att-1',
-        dto,
-        undefined,
-        'proj-1',
-      );
-
-      expect(mockAddRevisionUseCase.execute).toHaveBeenCalledWith({
-        userId: 'user-1',
-        attachmentId: 'att-1',
-        input: dto,
-        projectId: 'proj-1',
-      });
-      expect(res).toEqual({ id: 'att-1', version: 2 });
     });
 
     it('should set primary attachment by delegating to SetPrimaryAttachmentUseCase', async () => {

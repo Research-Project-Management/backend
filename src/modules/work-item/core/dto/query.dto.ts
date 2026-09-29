@@ -41,16 +41,6 @@ export class QueryWorkItemDto {
   @IsString()
   projectId?: string;
 
-  @ApiPropertyOptional({ description: 'Filter by cycle ID(s)' })
-  @IsOptional()
-  @Transform(toArrayOrString)
-  cycleId?: string | string[];
-
-  @ApiPropertyOptional({ description: 'Alias for cycleId' })
-  @IsOptional()
-  @Transform(toArrayOrString)
-  cycle?: string | string[];
-
   @ApiPropertyOptional({ description: 'Filter by state/column ID(s)' })
   @IsOptional()
   @Transform(toArrayOrString)

@@ -579,9 +579,7 @@ export class CoreRepository {
       this.prisma.projectMember.count({
         where: { projectId },
       }),
-      this.prisma.cycle.count({
-        where: { projectId },
-      }),
+      Promise.resolve(0),
     ]);
 
     const completionPercentage =

@@ -105,7 +105,7 @@ export class CreateProjectTemplateDto {
   @ApiPropertyOptional({
     description:
       'Enabled feature modules in projects spawned from this template',
-    example: ['work_items', 'cycles', 'views', 'pages'],
+    example: ['overview', 'work_items', 'pages'],
   })
   @IsArray()
   @IsString({ each: true })

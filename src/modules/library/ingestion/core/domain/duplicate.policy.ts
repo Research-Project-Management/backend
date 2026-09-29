@@ -48,14 +48,11 @@ export class DuplicatePolicy {
     }
 
     // 2. Probable match by Title and Year / Authors
-    const proposedTitle = this.normalizeTitle(proposed.title);
-    if (proposedTitle && proposedTitle.length > 5) {
+    if (proposed.title && proposed.title.trim().length > 5) {
       for (const item of existingItems) {
-        const itemTitle = this.normalizeTitle(item.title);
-        if (
-          itemTitle &&
-          this.calculateTitleSimilarity(proposedTitle, itemTitle) > 0.9
-        ) {
+        if (!item.title) continue;
+        const sim = this.calculateTitleSimilarity(proposed.title, item.title);
+        if (sim >= 0.88) {
           // Same title! Check secondary signals (year or first author)
           const yearMatch =
             proposed.year && item.year && proposed.year === item.year;

@@ -18,7 +18,6 @@ export interface WorkItemSummary {
   projectId: string;
   authorId: string;
   assigneeId: string | null;
-  cycleId: string | null;
   dueDate: Date | null;
   completed: boolean;
   createdAt: Date;
@@ -59,7 +58,6 @@ export class WorkItemFacade implements IWorkItemFacade {
       projectId: workItem.projectId,
       authorId: workItem.authorId,
       assigneeId: workItem.assigneeId,
-      cycleId: workItem.cycleId,
       dueDate: workItem.dueDate,
       completed: workItem.completed,
       createdAt: workItem.createdAt,

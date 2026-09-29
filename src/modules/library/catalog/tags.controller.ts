@@ -28,7 +28,7 @@ import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 @ApiBearerAuth('JWT-auth')
 @Controller(['api/v1/library/tags', 'api/v1/projects/:projectId/library/tags'])
 @UseGuards(JwtAuthGuard, ProjectRoleGuard)
-export class TagsController {
+export class TagController {
   constructor(
     @Optional() private readonly tagsService?: TagsService,
     @Optional() private readonly listTagsUseCase?: ListTagsUseCase,
@@ -162,3 +162,6 @@ export class TagsController {
     await this.tagsService!.removeTag(userId, tagId, itemId);
   }
 }
+
+export const TagsController = TagController;
+export type TagsController = TagController;

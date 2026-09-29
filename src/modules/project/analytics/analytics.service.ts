@@ -76,7 +76,7 @@ export class ProjectAnalyticsService {
       backlogWorkItems: backlog + unstarted,
       completionPercentage,
       totalMembers: project._count.members,
-      totalCycles: project._count.cycles,
+      totalCycles: 0,
       activeCycle,
     };
   }

@@ -7,7 +7,7 @@ import {
 } from '../domain/saved-search.types';
 
 @Injectable()
-export class ConditionEvaluatorEngine {
+export class ConditionEvaluatorService {
   /**
    * Translates a SavedSearchConditionGroup AST into a Prisma ItemWhereInput query.
    * Scopes to projectId when specified (collaborative library) or userId (personal library).
@@ -582,3 +582,6 @@ export class ConditionEvaluatorEngine {
     return null;
   }
 }
+
+export const ConditionEvaluatorEngine = ConditionEvaluatorService;
+export type ConditionEvaluatorEngine = ConditionEvaluatorService;

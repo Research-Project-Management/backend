@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { IAttachmentRepositoryPort } from '../ports/attachment-repository.port';
 import { AttachmentAggregate } from '../domain/attachment.aggregate';
 import { PrismaService } from '../../../../../core/database/prisma.service';
-import { TransactionService } from '../../../shared-kernel/outbox/transaction.service';
+import { TransactionService } from '../../../sync/core/adapters/transaction.service';
 
 /**
  * Infrastructure Adapter implementing IAttachmentRepositoryPort using Prisma.

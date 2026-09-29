@@ -35,9 +35,8 @@ export class TemplateRepository {
         isPublic: dto.isPublic ?? false,
         createdById: userId,
         defaultModules: dto.defaultModules || [
+          'overview',
           'work_items',
-          'cycles',
-          'views',
           'pages',
         ],
         initialStates: (dto.initialStates ||

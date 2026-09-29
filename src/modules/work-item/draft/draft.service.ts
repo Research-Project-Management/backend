@@ -104,7 +104,6 @@ export class DraftService {
         assigneeIds: Array.isArray(draft.assigneeIds)
           ? (draft.assigneeIds as string[])
           : undefined,
-        cycleId: publishDraftDto.cycleId || undefined,
       },
     );
 

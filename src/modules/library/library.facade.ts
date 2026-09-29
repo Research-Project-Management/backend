@@ -8,7 +8,7 @@ import {
   ExtractionFacade,
 } from './extraction/extraction.facade';
 import { CslJsonMapper } from './citation/core/adapters/csl-json.mapper';
-import { TransactionService } from './shared-kernel/outbox/transaction.service';
+import { TransactionService } from './sync/core/adapters/transaction.service';
 import { LibraryChange, Tombstone } from '@prisma/client';
 
 import { ExtractedPdfDocument } from './extraction/core/adapters/pdf.provider';

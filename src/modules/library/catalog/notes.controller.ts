@@ -36,7 +36,7 @@ import { ListNotesUseCase } from './core/use-cases/list-notes.use-case';
   'api/v1/projects/:projectId/library/notes',
 ])
 @UseGuards(JwtAuthGuard, ProjectRoleGuard)
-export class NotesController {
+export class NoteController {
   private notesServiceInstance?: NotesService;
   private createNoteUseCaseInstance?: CreateNoteUseCase;
   private getNoteUseCaseInstance?: GetNoteUseCase;
@@ -318,3 +318,6 @@ export class NotesController {
     return { deleted, id };
   }
 }
+
+export const NotesController = NoteController;
+export type NotesController = NoteController;

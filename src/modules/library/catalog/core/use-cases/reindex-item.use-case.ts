@@ -13,7 +13,7 @@ import {
   SEARCH_INDEXING_PORT,
   ISearchIndexingPort,
 } from '../ports/search-indexing.port';
-import { TransactionService } from '../../../shared-kernel/outbox/transaction.service';
+import { TransactionService } from '../../../sync';
 
 export interface ReindexItemCommand {
   userId: string;
@@ -66,18 +66,20 @@ export class ReindexItemUseCase {
     };
 
     // 1. Transactionally publish domain event for external listeners (e.g. AI / Vector module)
-    await this.libraryTx.executeInTransaction(async (_tx, helpers) => {
-      await helpers.publishOutbox(
-        eventScope,
-        command.itemId,
-        'library.item.reindexed',
-        {
-          itemId: command.itemId,
-          userId: command.userId,
-          projectId: effectiveProjectId,
-        },
-      );
-    });
+    await this.libraryTx.executeInTransaction(
+      async (_tx: any, helpers: any) => {
+        await helpers.publishOutbox(
+          eventScope,
+          command.itemId,
+          'library.item.reindexed',
+          {
+            itemId: command.itemId,
+            userId: command.userId,
+            projectId: effectiveProjectId,
+          },
+        );
+      },
+    );
 
     // 2. Refresh local search indexing if present
     if (this.searchIndexer) {

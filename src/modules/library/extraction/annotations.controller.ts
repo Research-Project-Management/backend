@@ -350,3 +350,5 @@ export class AnnotationsController {
     );
   }
 }
+
+export { AnnotationsController as AnnotationController };

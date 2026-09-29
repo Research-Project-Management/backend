@@ -34,13 +34,11 @@ import { ProjectRoleGuard, ProjectRoles } from '@/modules/project/access';
 // CQRS Use Cases
 import { CreateAttachmentUseCase } from './core/use-cases/create-attachment.use-case';
 import { DeleteAttachmentUseCase } from './core/use-cases/delete-attachment.use-case';
-import { AddAttachmentRevisionUseCase } from './core/use-cases/add-attachment-revision.use-case';
 import { SetPrimaryAttachmentUseCase } from './core/use-cases/set-primary-attachment.use-case';
 import { RenameAttachmentUseCase } from './core/use-cases/rename-attachment.use-case';
 import { BatchRenameAttachmentsUseCase } from './core/use-cases/batch-rename-attachments.use-case';
 import { GetAttachmentUseCase } from './core/use-cases/get-attachment.use-case';
 import { GetItemAttachmentsUseCase } from './core/use-cases/get-item-attachments.use-case';
-import { GetAttachmentRevisionsUseCase } from './core/use-cases/get-attachment-revisions.use-case';
 import { GetAttachmentThumbnailUseCase } from './core/use-cases/get-attachment-thumbnail.use-case';
 
 const toValidProjectId = (val?: string): string | undefined =>
@@ -50,7 +48,7 @@ const toValidProjectId = (val?: string): string | undefined =>
 
 @Controller(['api/v1/library', 'api/v1/projects/:projectId/library'])
 @UseGuards(JwtAuthGuard, ProjectRoleGuard)
-export class AttachmentsController {
+export class AttachmentController {
   private attachmentsServiceInstance?: AttachmentsService;
   private webSnapshotServiceInstance?: WebSnapshotService;
   private storagePortInstance?: IStoragePort;
@@ -65,11 +63,9 @@ export class AttachmentsController {
     getAttachmentUseCase: GetAttachmentUseCase,
     getItemAttachmentsUseCase: GetItemAttachmentsUseCase,
     deleteAttachmentUseCase: DeleteAttachmentUseCase,
-    addRevisionUseCase: AddAttachmentRevisionUseCase,
     setPrimaryAttachmentUseCase: SetPrimaryAttachmentUseCase,
     renameAttachmentUseCase: RenameAttachmentUseCase,
     batchRenameAttachmentsUseCase: BatchRenameAttachmentsUseCase,
-    getAttachmentRevisionsUseCase: GetAttachmentRevisionsUseCase,
     getThumbnailUseCase: GetAttachmentThumbnailUseCase,
     webSnapshotService: WebSnapshotService,
     storagePort?: IStoragePort,
@@ -82,15 +78,11 @@ export class AttachmentsController {
     @Optional()
     private readonly deleteAttachmentUseCase?: DeleteAttachmentUseCase,
     @Optional()
-    private readonly addRevisionUseCase?: AddAttachmentRevisionUseCase,
-    @Optional()
     private readonly setPrimaryAttachmentUseCase?: SetPrimaryAttachmentUseCase,
     @Optional()
     private readonly renameAttachmentUseCase?: RenameAttachmentUseCase,
     @Optional()
     private readonly batchRenameAttachmentsUseCase?: BatchRenameAttachmentsUseCase,
-    @Optional()
-    private readonly getAttachmentRevisionsUseCase?: GetAttachmentRevisionsUseCase,
     @Optional()
     private readonly getThumbnailUseCase?: GetAttachmentThumbnailUseCase,
     @Optional() private readonly webSnapshotService?: WebSnapshotService,
@@ -457,11 +449,84 @@ export class AttachmentsController {
   /**
    * Stream / serve attachment content by attachment ID.
    */
+  /**
+   * Generates a direct Presigned GET URL for zero-copy streaming via S3 / CDN.
+   * Allows PDF.js and browsers to download/stream chunks directly from Object Storage.
+   */
+  @Get('attachments/:attachmentId/presigned-url')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  async getAttachmentPresignedUrl(
+    @CurrentUser('id') userId: string,
+    @Param('attachmentId') attachmentId: string,
+    @Query('projectId') queryProjectId?: string,
+    @Param('projectId') paramProjectId?: string,
+  ) {
+    const effectiveProjectId = toValidProjectId(
+      paramProjectId || queryProjectId,
+    );
+
+    let result: any;
+    if (this.getAttachmentUseCase?.execute) {
+      result = await this.getAttachmentUseCase.execute(
+        userId,
+        undefined,
+        attachmentId,
+        effectiveProjectId,
+      );
+    } else if (this.effectiveAttachmentsService) {
+      result = await this.effectiveAttachmentsService.getItemAttachment(
+        userId,
+        undefined,
+        attachmentId,
+        effectiveProjectId,
+      );
+    }
+
+    const attachment = result?.attachment || result;
+    if (!attachment) {
+      throw new NotFoundException(`Attachment ${attachmentId} not found`);
+    }
+
+    if (
+      attachment.fileId &&
+      this.effectiveStoragePort?.getPresignedDownloadUrl
+    ) {
+      const presignedUrl =
+        await this.effectiveStoragePort.getPresignedDownloadUrl(
+          attachment.fileId,
+          3600,
+        );
+      return {
+        url: presignedUrl,
+        expiresIn: 3600,
+        filename: attachment.filename || 'attachment.pdf',
+        mimeType: attachment.mimeType || 'application/pdf',
+      };
+    }
+
+    if (attachment.url) {
+      return {
+        url: attachment.url,
+        expiresIn: 3600,
+        filename: attachment.filename || 'attachment.pdf',
+        mimeType: attachment.mimeType || 'application/pdf',
+      };
+    }
+
+    throw new BadRequestException(
+      'Presigned download URL unavailable for this attachment',
+    );
+  }
+
+  /**
+   * Stream / serve attachment content by attachment ID with HTTP 206 Byte-Range support.
+   */
   @Get('attachments/:attachmentId/content')
   @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
   async streamAttachmentContent(
     @CurrentUser('id') userId: string,
     @Param('attachmentId') attachmentId: string,
+    @Req() req: FastifyRequest,
     @Res() res: FastifyReply,
     @Query('projectId') queryProjectId?: string,
     @Param('projectId') paramProjectId?: string,
@@ -497,11 +562,28 @@ export class AttachmentsController {
       const defaultFilename = attachment.filename || 'attachment.pdf';
       const defaultMimeType = attachment.mimeType;
 
+      // Parse HTTP Range header if present (e.g. bytes=0-1048576)
+      const rangeHeader = (req as any)?.headers?.range;
+      let range: { start: number; end: number } | undefined;
+      if (
+        rangeHeader &&
+        typeof rangeHeader === 'string' &&
+        /^bytes=\d+-\d*$/.test(rangeHeader)
+      ) {
+        const parts = rangeHeader.replace(/bytes=/, '').split('-');
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : undefined;
+        if (!isNaN(start)) {
+          range = { start, end: end ?? -1 };
+        }
+      }
+
       if (this.effectiveStoragePort.getOwnedFileStream) {
         const fileRecord = await this.effectiveStoragePort.getOwnedFileStream({
           fileId: attachment.fileId,
           userId,
           projectId: effectiveProjectId,
+          ...(range ? { range } : {}),
         });
 
         return this.sendAttachmentPayload(res, {
@@ -510,6 +592,7 @@ export class AttachmentsController {
             attachment.filename || fileRecord.filename || defaultFilename,
           size: fileRecord.size,
           mimeType: fileRecord.mimeType || defaultMimeType,
+          contentRange: fileRecord.contentRange,
         });
       }
 
@@ -657,59 +740,6 @@ export class AttachmentsController {
         userId,
         itemId,
       },
-      effectiveProjectId,
-    );
-  }
-
-  @Get('attachments/:attachmentId/revisions')
-  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
-  async getRevisions(
-    @CurrentUser('id') userId: string,
-    @Param('attachmentId') attachmentId: string,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
-  ) {
-    const effectiveProjectId = paramProjectId || queryProjectId;
-    let revisions: any[];
-    if (this.getAttachmentRevisionsUseCase?.execute) {
-      revisions = await this.getAttachmentRevisionsUseCase.execute({
-        userId,
-        attachmentId,
-        projectId: effectiveProjectId,
-      });
-    } else {
-      revisions = await this.effectiveAttachmentsService!.getRevisions(
-        userId,
-        attachmentId,
-        effectiveProjectId,
-      );
-    }
-    return { revisions };
-  }
-
-  @Post('attachments/:attachmentId/revisions')
-  @ProjectRoles('owner', 'coordinator', 'contributor')
-  @HttpCode(HttpStatus.CREATED)
-  async addRevision(
-    @CurrentUser('id') userId: string,
-    @Param('attachmentId') attachmentId: string,
-    @Body() dto: ReplaceAttachmentFileDto,
-    @Query('projectId') queryProjectId?: string,
-    @Param('projectId') paramProjectId?: string,
-  ) {
-    const effectiveProjectId = paramProjectId || queryProjectId;
-    if (this.addRevisionUseCase?.execute) {
-      return this.addRevisionUseCase.execute({
-        userId,
-        attachmentId,
-        input: dto,
-        projectId: effectiveProjectId,
-      });
-    }
-    return this.effectiveAttachmentsService!.addRevision(
-      userId,
-      attachmentId,
-      dto,
       effectiveProjectId,
     );
   }
@@ -888,6 +918,7 @@ export class AttachmentsController {
       filename: string;
       size: number;
       mimeType?: string;
+      contentRange?: string;
     },
   ) {
     res.header('Content-Type', payload.mimeType || 'application/pdf');
@@ -895,9 +926,19 @@ export class AttachmentsController {
       'Content-Disposition',
       `inline; filename="${encodeURIComponent(payload.filename)}"`,
     );
-    res.header('Content-Length', payload.size);
+    res.header('Accept-Ranges', 'bytes');
     res.header('Cache-Control', 'private, no-cache, no-store, must-revalidate');
-    res.header('Vary', 'Authorization');
+    res.header('Vary', 'Authorization, Range');
+
+    if (payload.contentRange) {
+      res.status(206);
+      res.header('Content-Range', payload.contentRange);
+    }
+
+    res.header('Content-Length', payload.size);
     return res.send(payload.content);
   }
 }
+
+export const AttachmentsController = AttachmentController;
+export type AttachmentsController = AttachmentController;

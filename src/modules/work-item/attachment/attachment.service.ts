@@ -348,7 +348,6 @@ export class AttachmentService {
             },
           },
         },
-        cycle: { select: { id: true, name: true } },
         parentWorkItem: { select: { id: true, title: true, identifier: true } },
         childWorkItems: {
           select: {

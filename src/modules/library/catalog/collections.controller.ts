@@ -50,7 +50,7 @@ const toValidProjectId = (val?: string): string | undefined =>
   'api/v1/projects/:projectId/library/collections',
 ])
 @UseGuards(JwtAuthGuard, ProjectRoleGuard)
-export class CollectionsController {
+export class CollectionController {
   constructor(
     @Optional() private readonly collectionsService?: CollectionsService,
     @Optional()
@@ -353,3 +353,6 @@ export class CollectionsController {
     );
   }
 }
+
+export const CollectionsController = CollectionController;
+export type CollectionsController = CollectionController;

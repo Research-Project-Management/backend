@@ -41,7 +41,6 @@ export class RelationService {
   private async invalidateWorkItemCache(
     projectId: string,
     workItemId?: string,
-    cycleId?: string | null,
   ) {
     if (!this.cache) return;
     const deletions: Promise<any>[] = [
@@ -50,12 +49,6 @@ export class RelationService {
     ];
     if (workItemId) {
       deletions.push(this.cache.del(WORK_ITEM_REDIS_KEYS.workItem(workItemId)));
-    }
-    if (cycleId) {
-      deletions.push(
-        this.cache.del(WORK_ITEM_REDIS_KEYS.cycle(cycleId)),
-        this.cache.del(WORK_ITEM_REDIS_KEYS.projectCycles(projectId)),
-      );
     }
     await Promise.all(deletions).catch(() => null);
   }
@@ -334,16 +327,8 @@ export class RelationService {
       });
     });
 
-    await this.invalidateWorkItemCache(
-      sourceItem.projectId,
-      sourceItem.id,
-      sourceItem.cycleId,
-    );
-    await this.invalidateWorkItemCache(
-      targetItem.projectId,
-      targetItem.id,
-      targetItem.cycleId,
-    );
+    await this.invalidateWorkItemCache(sourceItem.projectId, sourceItem.id);
+    await this.invalidateWorkItemCache(targetItem.projectId, targetItem.id);
 
     if (this.eventEmitter) {
       const relationPayload = {
@@ -425,17 +410,9 @@ export class RelationService {
       });
     });
 
-    await this.invalidateWorkItemCache(
-      sourceItem.projectId,
-      sourceItem.id,
-      sourceItem.cycleId,
-    );
+    await this.invalidateWorkItemCache(sourceItem.projectId, sourceItem.id);
     if (targetItem) {
-      await this.invalidateWorkItemCache(
-        targetItem.projectId,
-        targetItem.id,
-        targetItem.cycleId,
-      );
+      await this.invalidateWorkItemCache(targetItem.projectId, targetItem.id);
     }
 
     if (this.eventEmitter) {

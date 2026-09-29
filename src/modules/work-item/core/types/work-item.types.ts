@@ -6,7 +6,6 @@
  */
 
 import { WorkItem, WorkItemPriority, Prisma } from '@prisma/client';
-import type { WorkItemUpdate } from '../../update/types/update.types';
 
 export { WorkItemPriority };
 
@@ -19,11 +18,6 @@ export const USER_MINIMAL_SELECT = {
       avatar: true,
     },
   },
-} as const;
-
-export const CYCLE_SELECT = {
-  id: true,
-  name: true,
 } as const;
 
 export const STATE_MINIMAL_SELECT = {
@@ -62,11 +56,6 @@ export interface StateMinimal {
   group: string;
   sequence: number;
   isDefault: boolean;
-}
-
-export interface CycleMinimal {
-  id: string;
-  name: string;
 }
 
 export interface ChildWorkItemMinimal {
@@ -153,7 +142,6 @@ export type WorkItemWithRelations = Prisma.WorkItemGetPayload<{
         label: { select: { id: true; name: true; color: true } };
       };
     };
-    cycle: { select: typeof CYCLE_SELECT };
     parentWorkItem: { select: { id: true; title: true; identifier: true } };
     childWorkItems: {
       select: typeof CHILD_WORK_ITEM_SELECT;
@@ -189,22 +177,17 @@ export interface WorkItemResponse {
   assigneeIds?: string[];
   assignees?: UserMinimal[];
   subscriberIds?: string[];
-  cycleId?: string | null;
   parentWorkItemId?: string | null;
   parentWorkItem?: ParentWorkItemMinimal | null;
   childWorkItems?: ChildWorkItemMinimal[];
   childWorkItemCount?: number;
   childWorkItemCompletedCount?: number;
   assignee?: UserMinimal | null;
-  cycle?: CycleMinimal | string | null;
-  updates?: WorkItemUpdate[];
   createdAt: string;
   updatedAt: string;
 }
 
 export interface WorkItemFilterOptions {
-  cycleId?: string | string[] | null;
-  cycle?: string | string[] | null;
   columnId?: string | string[];
   state?: string | string[];
   stateGroup?: string | string[];
@@ -255,7 +238,6 @@ export interface IWorkItemRepository {
     workItemIds: string[],
     data: Prisma.WorkItemUpdateManyMutationInput & {
       assigneeId?: string | null;
-      cycleId?: string | null;
     },
   ): Promise<{ count: number }>;
   updateWorkItemsRank(

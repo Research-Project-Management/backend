@@ -1,6 +1,6 @@
-import { SyncController } from '@/modules/library/shared-kernel/presentation/sync.controller';
-import { TransactionService } from '@/modules/library/shared-kernel/outbox/transaction.service';
-import { SyncQueryDto } from '@/modules/library/shared-kernel/presentation/dtos/sync-query.dto';
+import { SyncController } from '@/modules/library/sync/sync.controller';
+import { TransactionService } from '@/modules/library/sync/core/adapters/transaction.service';
+import { SyncQueryDto } from '@/modules/library/sync/dto/sync-query.dto';
 
 describe('SyncController (Library Distributed Sync API)', () => {
   let controller: SyncController;

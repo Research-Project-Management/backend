@@ -3,7 +3,7 @@ import { CommandRepository } from '@/modules/library/catalog/core/adapters/comma
 import { PrismaItemRepositoryAdapter } from '@/modules/library/catalog/core/adapters/prisma-item-repository.adapter';
 import { PrismaService } from '@/core/database/prisma.service';
 import { QueryRepository } from '@/modules/library/catalog/core/adapters/query.repository';
-import { TransactionService } from '@/modules/library/shared-kernel/outbox/transaction.service';
+import { TransactionService } from '@/modules/library/sync/core/adapters/transaction.service';
 import { VersionMismatchException } from '@/modules/library/shared-kernel/core/errors/version-mismatch.exception';
 import { ItemConcurrencyDomainException } from '@/modules/library/catalog/core/domain/item-domain.exception';
 import { ItemAggregate } from '@/modules/library/catalog/core/domain/item.aggregate';

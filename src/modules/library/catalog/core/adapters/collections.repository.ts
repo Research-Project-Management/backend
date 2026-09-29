@@ -25,8 +25,8 @@ export interface UpdateCollectionInput {
 }
 
 @Injectable()
-export class CollectionsRepository {
-  private readonly logger = new Logger(CollectionsRepository.name);
+export class CollectionRepository {
+  private readonly logger = new Logger(CollectionRepository.name);
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -433,3 +433,6 @@ export class CollectionsRepository {
     return Boolean(item);
   }
 }
+
+export const CollectionsRepository = CollectionRepository;
+export type CollectionsRepository = CollectionRepository;

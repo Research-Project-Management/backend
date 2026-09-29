@@ -118,27 +118,6 @@ export class ActivityListener {
     }
   }
 
-  @OnEvent('cycle.*', { async: true })
-  async handleCycleEvents(event: any) {
-    if (event instanceof DomainActivityEvent) {
-      return this.handleGenericActivity(event);
-    }
-    const entityId = event?.entityId || event?.cycleId;
-    if (entityId) {
-      const activityEvent = new DomainActivityEvent({
-        entityType: 'cycle',
-        entityId,
-        verb: event.verb || 'updated',
-        actorId: event.actorId || event.userId || '',
-        projectId: event.projectId,
-        field: event.field,
-        oldValue: event.oldValue,
-        newValue: event.newValue,
-      });
-      await this.handleGenericActivity(activityEvent);
-    }
-  }
-
   private async invalidateAnalyticsCache(
     projectId?: string | null,
     userId?: string | null,

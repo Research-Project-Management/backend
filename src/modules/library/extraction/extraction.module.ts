@@ -2,10 +2,13 @@ import { Module, OnModuleInit, forwardRef } from '@nestjs/common';
 import { CoreModule } from '../../../core/core.module';
 import { StorageModule } from '../../storage/storage.module';
 import { SyncModule } from '../sync/sync.module';
-import { OutboxWorker } from '../shared-kernel/outbox/outbox.worker';
+import { OutboxWorker } from '../sync/core/adapters/outbox.worker';
 
 // Presentation
-import { AttachmentsController } from './attachments.controller';
+import {
+  AttachmentController,
+  AttachmentsController,
+} from './attachments.controller';
 
 // Facades
 import {
@@ -18,7 +21,10 @@ import {
 } from './extraction.facade';
 
 // Services & Infrastructure
-import { AttachmentsService } from './core/use-cases/attachments.service';
+import {
+  AttachmentService,
+  AttachmentsService,
+} from './core/use-cases/attachments.service';
 import { AttachmentsRepository } from './core/adapters/attachments.repository';
 import { ExtractionRepository } from './core/adapters/extraction.repository';
 import { PdfProvider } from './core/adapters/pdf.provider';
@@ -37,19 +43,25 @@ import { ATTACHMENT_REPOSITORY_PORT } from './core/ports/attachment-repository.p
 import { PrismaAttachmentRepositoryAdapter } from './core/adapters/prisma-attachment-repository.adapter';
 import { CreateAttachmentUseCase } from './core/use-cases/create-attachment.use-case';
 import { DeleteAttachmentUseCase } from './core/use-cases/delete-attachment.use-case';
-import { AddAttachmentRevisionUseCase } from './core/use-cases/add-attachment-revision.use-case';
+
 import { SetPrimaryAttachmentUseCase } from './core/use-cases/set-primary-attachment.use-case';
 import { RenameAttachmentUseCase } from './core/use-cases/rename-attachment.use-case';
 import { BatchRenameAttachmentsUseCase } from './core/use-cases/batch-rename-attachments.use-case';
 import { GetAttachmentUseCase } from './core/use-cases/get-attachment.use-case';
 import { GetItemAttachmentsUseCase } from './core/use-cases/get-item-attachments.use-case';
-import { GetAttachmentRevisionsUseCase } from './core/use-cases/get-attachment-revisions.use-case';
+
 import { GetAttachmentThumbnailUseCase } from './core/use-cases/get-attachment-thumbnail.use-case';
 import { ItemLifecycleSubscriber } from './core/adapters/item-lifecycle.subscriber';
 
 // Annotation domain
-import { AnnotationsController } from './annotations.controller';
-import { AnnotationsService } from './core/use-cases/annotations.service';
+import {
+  AnnotationController,
+  AnnotationsController,
+} from './annotations.controller';
+import {
+  AnnotationService,
+  AnnotationsService,
+} from './core/use-cases/annotations.service';
 import { AnnotationsRepository } from './core/adapters/annotations.repository';
 import { AnnotationNormalizer } from './core/adapters/annotation.normalizer';
 import { ANNOTATION_REPOSITORY_PORT } from './core/ports/annotation-repository.port';
@@ -78,7 +90,7 @@ import { InProcessCatalogGatewayAdapter } from './core/adapters/in-process-catal
  */
 @Module({
   imports: [CoreModule, StorageModule, SyncModule],
-  controllers: [AttachmentsController, AnnotationsController],
+  controllers: [AttachmentController, AnnotationController],
   providers: [
     // Facades
     ExtractionFacade,
@@ -112,13 +124,11 @@ import { InProcessCatalogGatewayAdapter } from './core/adapters/in-process-catal
     },
     CreateAttachmentUseCase,
     DeleteAttachmentUseCase,
-    AddAttachmentRevisionUseCase,
     SetPrimaryAttachmentUseCase,
     RenameAttachmentUseCase,
     BatchRenameAttachmentsUseCase,
     GetAttachmentUseCase,
     GetItemAttachmentsUseCase,
-    GetAttachmentRevisionsUseCase,
     GetAttachmentThumbnailUseCase,
     ItemLifecycleSubscriber,
 

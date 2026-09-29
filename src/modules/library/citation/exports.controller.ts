@@ -140,3 +140,6 @@ export class ExportsController {
     return this.exportsService!.exportBundle(userId, collectionId);
   }
 }
+
+export const ExportController = ExportsController;
+export type ExportController = ExportsController;

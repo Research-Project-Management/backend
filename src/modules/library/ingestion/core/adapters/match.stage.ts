@@ -6,6 +6,7 @@ import {
   DuplicatePolicy,
   ExistingItemSummary,
 } from '../domain/duplicate.policy';
+import { tokenizeTitleWords } from '../domain/deduplication.utils';
 import { isUUID } from 'class-validator';
 
 @Injectable()
@@ -169,20 +170,31 @@ export class MatchStage {
       return { matchType: 'NO_MATCH', confidence: 0.0, matchReason: 'NONE' };
     }
 
-    // Extract first significant word to use as a DB pre-filter,
-    // reducing the candidate set before running in-memory similarity.
-    const firstSignificantWord =
-      proposedTitle
-        .toLowerCase()
-        .split(/\s+/)
-        .find((w) => w.length > 2 && !MatchStage.STOPWORDS.has(w)) ??
-      proposedTitle.toLowerCase().split(/\s+/)[0];
+    // Extract top significant words to use as a resilient DB pre-filter,
+    // avoiding false negatives caused by leading words like "Towards", "A Study of", etc.
+    const significantWords = tokenizeTitleWords(proposedTitle)
+      .filter((w) => w.length >= 3)
+      .slice(0, 3);
+
+    const titleFilter =
+      significantWords.length > 0
+        ? {
+            OR: significantWords.map((word) => ({
+              title: { contains: word, mode: 'insensitive' as const },
+            })),
+          }
+        : {
+            title: {
+              contains: proposedTitle.substring(0, 10),
+              mode: 'insensitive' as const,
+            },
+          };
 
     const candidateItems = await this.prisma.item.findMany({
       where: {
         ...scopeFilter,
         deletedAt: null,
-        title: { contains: firstSignificantWord, mode: 'insensitive' },
+        ...titleFilter,
       },
       select: {
         id: true,
@@ -192,7 +204,7 @@ export class MatchStage {
         citationKey: true,
         contributors: { select: { fullName: true } },
       },
-      take: 500, // generous upper bound after DB pre-filter
+      take: 200, // resilient upper bound after multi-token filter
     });
 
     if (candidateItems.length === 0) {

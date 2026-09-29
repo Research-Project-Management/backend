@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { OutboxWorker } from '../../../shared-kernel/outbox/outbox.worker';
+import { OutboxWorker } from '../../../sync/core/adapters/outbox.worker';
 import { OutboxEvent } from '@prisma/client';
 import {
   INTEGRATION_EVENT_TOPICS,

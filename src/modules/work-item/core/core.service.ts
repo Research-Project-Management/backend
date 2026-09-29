@@ -42,7 +42,6 @@ export class CoreService {
   private async invalidateWorkItemCache(
     projectId: string,
     workItemId?: string,
-    cycleId?: string | null,
   ) {
     if (!this.cache) return;
     const deletions: Promise<any>[] = [
@@ -51,12 +50,6 @@ export class CoreService {
     ];
     if (workItemId)
       deletions.push(this.cache.del(WORK_ITEM_REDIS_KEYS.workItem(workItemId)));
-    if (cycleId) {
-      deletions.push(
-        this.cache.del(WORK_ITEM_REDIS_KEYS.cycle(cycleId)),
-        this.cache.del(WORK_ITEM_REDIS_KEYS.projectCycles(projectId)),
-      );
-    }
     await Promise.all(deletions).catch(() => null);
   }
 
@@ -78,46 +71,36 @@ export class CoreService {
 
   // ── Queries ─────────────────────────────────────────────────────────────────
 
-  async getProjectWorkItems(
-    projectId: string,
-    filter?: string | QueryWorkItemDto,
-  ) {
-    const isSimpleCycle = typeof filter === 'string';
+  async getProjectWorkItems(projectId: string, filter?: QueryWorkItemDto) {
     const isUnfiltered =
       !filter ||
       (typeof filter === 'object' && Object.keys(filter).length === 0);
-    const cacheKey = isSimpleCycle
-      ? `${WORK_ITEM_REDIS_KEYS.projectWorkItems(projectId)}:cycle:${filter}`
-      : WORK_ITEM_REDIS_KEYS.projectWorkItems(projectId);
+    const cacheKey = WORK_ITEM_REDIS_KEYS.projectWorkItems(projectId);
 
     const fetchWorkItems = async () => {
-      const filterOptions =
-        typeof filter === 'string'
-          ? filter
-          : filter
-            ? {
-                cycleId: filter.cycleId || filter.cycle,
-                columnId: filter.columnId || filter.state,
-                stateGroup: filter.stateGroup,
-                priority: filter.priority,
-                assigneeId: filter.assigneeId || filter.assignees,
-                labels: filter.labels,
-                createdById: filter.createdById || filter.authorId,
-                parentWorkItemId: filter.parentWorkItemId,
-                dueDate: filter.dueDate,
-                startDate: filter.startDate,
-                orderBy: filter.orderBy,
-                orderDirection: filter.orderDirection,
-                completed: filter.completed,
-                archived: filter.archived,
-                search: filter.search,
-                limit: filter.limit,
-                offset:
-                  filter.page && filter.limit
-                    ? (filter.page - 1) * filter.limit
-                    : undefined,
-              }
-            : undefined;
+      const filterOptions = filter
+        ? {
+            columnId: filter.columnId || filter.state,
+            stateGroup: filter.stateGroup,
+            priority: filter.priority,
+            assigneeId: filter.assigneeId || filter.assignees,
+            labels: filter.labels,
+            createdById: filter.createdById || filter.authorId,
+            parentWorkItemId: filter.parentWorkItemId,
+            dueDate: filter.dueDate,
+            startDate: filter.startDate,
+            orderBy: filter.orderBy,
+            orderDirection: filter.orderDirection,
+            completed: filter.completed,
+            archived: filter.archived,
+            search: filter.search,
+            limit: filter.limit,
+            offset:
+              filter.page && filter.limit
+                ? (filter.page - 1) * filter.limit
+                : undefined,
+          }
+        : undefined;
 
       const records = await this.workItemRepository.findProjectWorkItems(
         projectId,
@@ -128,7 +111,7 @@ export class CoreService {
       return records.map((r) => formatWorkItem(r, labelLookup)).filter(Boolean);
     };
 
-    if (this.cache && (isUnfiltered || isSimpleCycle)) {
+    if (this.cache && isUnfiltered) {
       const workItems = await this.cache.wrap(cacheKey, fetchWorkItems, 300);
       return { workItems };
     }
@@ -266,16 +249,6 @@ export class CoreService {
       }
     }
 
-    let validCycleId: string | null = null;
-    if (createWorkItemDto.cycleId && isUuid(createWorkItemDto.cycleId)) {
-      const cycle = await this.workItemRepository.findCycleById(
-        createWorkItemDto.cycleId,
-      );
-      if (cycle && cycle.projectId === rawProject.id && !cycle.deletedAt) {
-        validCycleId = cycle.id;
-      }
-    }
-
     const rawAssigneeIds = Array.isArray(createWorkItemDto.assigneeIds)
       ? createWorkItemDto.assigneeIds
       : createWorkItemDto.assigneeId
@@ -323,7 +296,6 @@ export class CoreService {
       ...(validAssigneeId
         ? { assignee: { connect: { id: validAssigneeId } } }
         : {}),
-      ...(validCycleId ? { cycle: { connect: { id: validCycleId } } } : {}),
       ...(validParentId
         ? { parentWorkItem: { connect: { id: validParentId } } }
         : {}),
@@ -338,11 +310,7 @@ export class CoreService {
       );
     }
 
-    await this.invalidateWorkItemCache(
-      projectId,
-      workItem.id,
-      createWorkItemDto.cycleId,
-    );
+    await this.invalidateWorkItemCache(projectId, workItem.id);
     this.eventDispatcher.emitWorkItemCreated({
       workItemId: workItem.id,
       actorId: authorId,
@@ -380,7 +348,6 @@ export class CoreService {
     return this.createWorkItem(parent.projectId, authorId, {
       ...createWorkItemDto,
       parentWorkItemId,
-      cycleId: createWorkItemDto.cycleId || parent.cycleId || undefined,
     });
   }
 
@@ -465,26 +432,6 @@ export class CoreService {
         targetIsCompleted = false;
       } else {
         targetIsCompleted = updateWorkItemDto.completed;
-      }
-    }
-
-    let cycleUpdate: Prisma.WorkItemUpdateInput['cycle'] | undefined;
-    if (updateWorkItemDto.cycleId !== undefined) {
-      if (!updateWorkItemDto.cycleId) {
-        cycleUpdate = { disconnect: true };
-      } else if (isUuid(updateWorkItemDto.cycleId)) {
-        const cycle = await this.workItemRepository.findCycleById(
-          updateWorkItemDto.cycleId,
-        );
-        if (
-          cycle &&
-          cycle.projectId === existing.projectId &&
-          !cycle.deletedAt
-        ) {
-          cycleUpdate = { connect: { id: cycle.id } };
-        } else {
-          cycleUpdate = { disconnect: true };
-        }
       }
     }
 
@@ -616,7 +563,6 @@ export class CoreService {
         timeSpent: updateWorkItemDto.timeSpent,
       }),
       ...(assigneeUpdate !== undefined && { assignee: assigneeUpdate }),
-      ...(cycleUpdate !== undefined && { cycle: cycleUpdate }),
       ...(parentUpdate !== undefined && { parentWorkItem: parentUpdate }),
       ...(validAssigneeIds !== undefined && {
         assigneeIds: validAssigneeIds,
@@ -634,11 +580,7 @@ export class CoreService {
       }
     }
 
-    await this.invalidateWorkItemCache(
-      existing.projectId,
-      existing.id,
-      existing.cycleId,
-    );
+    await this.invalidateWorkItemCache(existing.projectId, existing.id);
 
     this.eventDispatcher.dispatchUpdateEvents(
       existing,
@@ -658,7 +600,7 @@ export class CoreService {
     if (!item) throw new NotFoundException('WorkItem not found');
 
     await this.workItemRepository.softDeleteWorkItem(item.id);
-    await this.invalidateWorkItemCache(item.projectId, item.id, item.cycleId);
+    await this.invalidateWorkItemCache(item.projectId, item.id);
     this.eventDispatcher.emitWorkItemDeleted({
       workItemId: item.id,
       actorId: userId,
@@ -697,7 +639,7 @@ export class CoreService {
     );
 
     await this.workItemRepository.updateWorkItemsRank(updates);
-    await this.invalidateWorkItemCache(item.projectId, item.id, item.cycleId);
+    await this.invalidateWorkItemCache(item.projectId, item.id);
     this.eventDispatcher.emitWorkItemReordered({
       workItemId: item.id,
       projectId: item.projectId,
@@ -822,23 +764,6 @@ export class CoreService {
     if (payload.priority !== undefined)
       data.priority = mapPriority(payload.priority);
 
-    if (payload.cycleId !== undefined) {
-      if (!payload.cycleId) {
-        data.cycleId = null;
-      } else if (isUuid(payload.cycleId)) {
-        const cycle = await this.workItemRepository.findCycleById(
-          payload.cycleId,
-        );
-        if (
-          cycle &&
-          cycle.projectId === canonicalProjectId &&
-          !cycle.deletedAt
-        ) {
-          data.cycleId = cycle.id;
-        }
-      }
-    }
-
     if (payload.dueDate !== undefined)
       data.dueDate = payload.dueDate ? new Date(payload.dueDate) : null;
 
@@ -858,7 +783,7 @@ export class CoreService {
       rawIds,
       data,
     );
-    await this.invalidateWorkItemCache(projectId, undefined, payload.cycleId);
+    await this.invalidateWorkItemCache(projectId);
     this.eventDispatcher.emitBulkUpdated(projectId, userId);
     return {
       message: `${result.count} work items updated successfully`,
@@ -922,11 +847,7 @@ export class CoreService {
         destinationProjectId,
       );
     const cloned = await this.workItemRepository.createWorkItem(cloneData);
-    await this.invalidateWorkItemCache(
-      targetProjectId,
-      cloned.id,
-      cloned.cycleId,
-    );
+    await this.invalidateWorkItemCache(targetProjectId, cloned.id);
 
     this.eventDispatcher.emitWorkItemDuplicated({
       workItemId: cloned.id,
@@ -950,7 +871,7 @@ export class CoreService {
       item.id,
     );
 
-    await this.invalidateWorkItemCache(item.projectId, item.id, item.cycleId);
+    await this.invalidateWorkItemCache(item.projectId, item.id);
     const formatted = formatWorkItem(updated);
     return {
       message: 'WorkItem converted to root work item successfully',

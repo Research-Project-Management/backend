@@ -13,7 +13,7 @@ import { JwtAuthGuard } from '@/modules/identity/auth';
 
 @Controller(['api/v1/library/item-types'])
 @UseGuards(JwtAuthGuard)
-export class TypesController {
+export class TypeController {
   constructor(
     private readonly typesService: TypesService,
     private readonly validator: ZoteroSchemaValidatorService,
@@ -118,3 +118,6 @@ export class TypesController {
     };
   }
 }
+
+export const TypesController = TypeController;
+export type TypesController = TypeController;

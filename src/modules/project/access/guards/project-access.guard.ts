@@ -239,19 +239,7 @@ export class ProjectAccessGuard implements CanActivate {
 
     // 2. Sub-resource lookup from URL parameters
     if (!resolvedProjectId) {
-      if (
-        request.params?.cycleId &&
-        isUUID(request.params.cycleId) &&
-        prismaAny.cycle?.findUnique
-      ) {
-        const cycle = await Promise.resolve(
-          prismaAny.cycle.findUnique({
-            where: { id: request.params.cycleId },
-            select: { projectId: true },
-          }),
-        ).catch(() => null);
-        if (cycle?.projectId) resolvedProjectId = cycle.projectId;
-      } else if (request.params?.workItemId && prismaAny.workItem?.findFirst) {
+      if (request.params?.workItemId && prismaAny.workItem?.findFirst) {
         const workItemId = request.params.workItemId;
         const where = isUUID(workItemId)
           ? { id: workItemId }

@@ -4,7 +4,7 @@ import { fromPartial } from '@total-typescript/shoehorn';
 import { ItemsService } from '@/modules/library/catalog/core/use-cases/items.service';
 import { QueryRepository } from '@/modules/library/catalog/core/adapters/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/core/adapters/command.repository';
-import { TransactionService } from '@/modules/library/shared-kernel/outbox/transaction.service';
+import { TransactionService } from '@/modules/library/sync/core/adapters/transaction.service';
 import { PrismaService } from '@/core/database/prisma.service';
 import { TagsService } from '@/modules/library/catalog/core/use-cases/tags.service';
 import { TypesService } from '@/modules/library/catalog/core/use-cases/types.service';

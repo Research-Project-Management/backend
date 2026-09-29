@@ -8,7 +8,7 @@ import {
 import { ExecuteSavedSearchOptions } from '../domain/saved-search.types';
 
 @Injectable()
-export class SavedSearchesRepository {
+export class SavedSearchRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(userId: string, dto: CreateSavedSearchDto, projectId?: string) {
@@ -168,3 +168,6 @@ export class SavedSearchesRepository {
     return { items, nextCursor, hasNextPage };
   }
 }
+
+export const SavedSearchesRepository = SavedSearchRepository;
+export type SavedSearchesRepository = SavedSearchRepository;

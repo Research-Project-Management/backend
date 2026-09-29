@@ -90,16 +90,6 @@ export class CreateWorkItemDto {
   @IsOptional()
   rank?: number;
 
-  @ApiPropertyOptional({ description: 'Cycle / Sprint identifier' })
-  @IsString()
-  @IsOptional()
-  cycle?: string;
-
-  @ApiPropertyOptional({ description: 'Cycle / Sprint UUID' })
-  @IsString()
-  @IsOptional()
-  cycleId?: string;
-
   @ApiPropertyOptional({
     description: 'Parent work item ID for hierarchical decomposition',
   })

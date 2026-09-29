@@ -34,4 +34,14 @@ export class SyncQueryDto {
   @Min(1)
   @Max(500)
   limit?: number = 100;
+
+  @ApiPropertyOptional({
+    description:
+      'Whether to run sliding-window compaction to squash redundant intermediate mutations',
+    default: true,
+    example: true,
+  })
+  @IsOptional()
+  @Type(() => Boolean)
+  compact?: boolean = true;
 }

@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { CycleStatus } from '@prisma/client';
 import { PrismaService } from '@/core/database/prisma.service';
 
 @Injectable()
@@ -107,54 +106,17 @@ export class OverviewRepository {
     });
   }
 
-  async getActiveCycle(projectId: string) {
-    const now = new Date();
-    const activeCycle = await this.prisma.cycle.findFirst({
-      where: {
-        projectId,
-        deletedAt: null,
-        OR: [
-          { status: CycleStatus.active },
-          {
-            startDate: { lte: now },
-            endDate: { gte: now },
-          },
-        ],
-      },
-      select: {
-        id: true,
-        name: true,
-        startDate: true,
-        endDate: true,
-        _count: {
-          select: {
-            workItems: {
-              where: { deletedAt: null },
-            },
-          },
-        },
-      },
-      orderBy: { startDate: 'desc' },
-    });
-
-    if (!activeCycle) {
-      return null;
-    }
-
-    const completedIssues = await this.prisma.workItem.count({
-      where: {
-        cycleId: activeCycle.id,
-        deletedAt: null,
-        state: {
-          group: 'completed',
-        },
-      },
-    });
-
-    return {
-      activeCycle,
-      completedIssues,
+  async getActiveCycle(_projectId: string): Promise<{
+    activeCycle: {
+      id: string;
+      name: string;
+      startDate: Date | null;
+      endDate: Date | null;
+      _count?: { workItems: number };
     };
+    completedIssues: number;
+  } | null> {
+    return null;
   }
 
   async getRecentActivities(projectId: string, limit = 10) {

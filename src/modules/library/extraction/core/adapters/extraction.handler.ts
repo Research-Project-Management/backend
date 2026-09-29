@@ -5,10 +5,10 @@ import { ExtractionRepository } from './extraction.repository';
 import { PdfProvider } from './pdf.provider';
 import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
 import { OutboxEvent, Prisma } from '@prisma/client';
-import { OutboxDispatchHandler } from '../../../shared-kernel/outbox/types/outbox.types';
-import { AttachmentStorageException } from '../domain/attachments.errors';
+import { OutboxDispatchHandler } from '../../../sync/core/domain/outbox.types';
+import { AttachmentStorageException } from '../domain/attachments.types';
 import { parseCreatorString } from '../../../shared-kernel/utils/bibliographic.utils';
-import { IdempotentConsumerService } from '../../../shared-kernel/outbox/services/idempotent-consumer.service';
+import { IdempotentConsumerService } from '../../../sync/core/adapters/idempotent-consumer.service';
 
 export const EXTRACTION_EVENT_TYPES = {
   EXTRACTION_REQUESTED: 'library.attachment.extraction_requested',

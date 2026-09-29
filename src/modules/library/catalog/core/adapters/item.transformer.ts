@@ -12,7 +12,7 @@ import {
   FIELD_ALIASES,
   REVERSE_FIELD_ALIASES,
 } from '../domain/items.constants';
-import { ItemFieldDefinition } from '../domain/types.types';
+import { ItemFieldDefinition } from '../../../shared-kernel/types/schema.types';
 import { IItemTransformerPort } from '../ports/item-transformer.port';
 
 /**
@@ -355,7 +355,7 @@ export class ItemTransformer implements IItemTransformerPort {
           } else {
             droppedFields.push({
               field: sField,
-              label: sourceLabelMap.get(sField) || sField,
+              label: String(sourceLabelMap.get(sField) || sField),
               value: val,
             });
             unmappedRetained[sField] = val;

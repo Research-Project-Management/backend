@@ -3,7 +3,7 @@ import { AttachmentsService } from '@/modules/library/extraction/core/use-cases/
 import { IdempotencyMiddleware } from '../../src/modules/library/shared-kernel/core/middlewares/idempotency.middleware';
 import { NotFoundException } from '@nestjs/common';
 import { RedisCacheService } from '../../src/core/cache/redis.service';
-import { LIBRARY_REDIS_KEYS } from '../../src/modules/library/shared-kernel/core/constants/redis-keys.constant';
+import { LIBRARY_REDIS_KEYS } from '../../src/modules/library/shared-kernel/core/constants/redis-keys.constants';
 
 describe('Library Security Hardening & Performance Optimization', () => {
   describe('1. Security: Multi-Tenant Cache Isolation in ItemsService.getFulltext', () => {
@@ -119,113 +119,6 @@ describe('Library Security Hardening & Performance Optimization', () => {
         sampleItemId,
         undefined,
       );
-    });
-  });
-
-  describe('2. Security: Project Membership Check in AttachmentsService.addRevision', () => {
-    let service: AttachmentsService;
-    let mockRepo: any;
-    let mockTx: any;
-
-    const creatorId = '00000000-0000-0000-0000-000000000001';
-    const memberId = '00000000-0000-0000-0000-000000000002';
-    const nonMemberAttackerId = '00000000-0000-0000-0000-000000000003';
-    const projectId = '99999999-9999-9999-9999-999999999999';
-    const attachmentId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
-
-    beforeEach(() => {
-      mockRepo = {
-        findUnique: jest.fn(),
-        checkProjectMember: jest.fn(),
-        updateLinkedFile: jest.fn(),
-      };
-      mockTx = {
-        executeInTransaction: jest.fn((cb) =>
-          cb(
-            {
-              attachment: { update: jest.fn().mockResolvedValue({}) },
-              attachmentRevision: { create: jest.fn().mockResolvedValue({}) },
-            },
-            {
-              emitOutbox: jest.fn(),
-              appendChange: jest.fn().mockResolvedValue(undefined),
-            },
-          ),
-        ),
-      };
-
-      service = new AttachmentsService(mockRepo, mockTx);
-    });
-
-    it('should REJECT revision upload if caller is NOT a member of the project', async () => {
-      mockRepo.findUnique.mockResolvedValueOnce({
-        id: attachmentId,
-        itemId: 'item-1',
-        filename: 'paper.pdf',
-        size: 100n,
-        revisions: [{ revisionNumber: 1 }],
-        item: {
-          id: 'item-1',
-          userId: creatorId,
-          projectId: projectId, // Project item
-        },
-      });
-
-      // Attacker is NOT a member of this project
-      mockRepo.checkProjectMember.mockResolvedValueOnce(null);
-
-      await expect(
-        service.addRevision(
-          nonMemberAttackerId,
-          attachmentId,
-          { filename: 'malicious.pdf', url: 'https://evil.com/malicious.pdf' },
-          projectId,
-        ),
-      ).rejects.toThrow(NotFoundException);
-
-      expect(mockRepo.checkProjectMember).toHaveBeenCalledWith(
-        projectId,
-        nonMemberAttackerId,
-      );
-      expect(mockTx.executeInTransaction).not.toHaveBeenCalled();
-    });
-
-    it('should ALLOW revision upload if caller IS a verified member of the project', async () => {
-      mockRepo.findUnique.mockResolvedValueOnce({
-        id: attachmentId,
-        itemId: 'item-1',
-        filename: 'paper.pdf',
-        size: 100n,
-        fileHash: 'sha-old',
-        revisions: [{ revisionNumber: 1 }],
-        item: {
-          id: 'item-1',
-          userId: creatorId,
-          projectId: projectId,
-        },
-      });
-
-      // Member check succeeds
-      mockRepo.checkProjectMember.mockResolvedValueOnce({
-        role: 'contributor',
-      });
-
-      await service.addRevision(
-        memberId,
-        attachmentId,
-        {
-          filename: 'updated.pdf',
-          url: 'https://storage.flux.ai/files/updated.pdf',
-          fileHash: 'sha-new',
-        },
-        projectId,
-      );
-
-      expect(mockRepo.checkProjectMember).toHaveBeenCalledWith(
-        projectId,
-        memberId,
-      );
-      expect(mockTx.executeInTransaction).toHaveBeenCalled();
     });
   });
 

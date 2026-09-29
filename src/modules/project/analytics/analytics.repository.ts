@@ -18,7 +18,6 @@ export class ProjectAnalyticsRepository {
         _count: {
           select: {
             members: true,
-            cycles: true,
           },
         },
       },
@@ -59,39 +58,10 @@ export class ProjectAnalyticsRepository {
     return counts;
   }
 
-  async getActiveCycle(projectId: string) {
-    const now = new Date();
-    const cycle = await this.prisma.cycle.findFirst({
-      where: {
-        projectId,
-        startDate: { lte: now },
-        endDate: { gte: now },
-      },
-      include: {
-        workItems: {
-          select: {
-            state: {
-              select: { group: true },
-            },
-          },
-        },
-      },
-    });
-
-    if (!cycle) return null;
-
-    const total = cycle.workItems.length;
-    const completed = cycle.workItems.filter(
-      (w) => w.state?.group === 'completed',
-    ).length;
-    const progressPercentage =
-      total > 0 ? Math.round((completed / total) * 100) : 0;
-
-    return {
-      id: cycle.id,
-      name: cycle.name,
-      progressPercentage,
-    };
+  async getActiveCycle(
+    _projectId: string,
+  ): Promise<{ id: string; name: string; progressPercentage: number } | null> {
+    return null;
   }
 
   async getWorkItemsDetailed(projectId: string) {

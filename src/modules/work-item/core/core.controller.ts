@@ -97,10 +97,6 @@ export class CoreController {
       this.eventEmitter,
       'work-item.content.changed',
     );
-    const cycleChanged$ = fromEvent(
-      this.eventEmitter,
-      'work-item.cycle.changed',
-    );
     const duplicated$ = fromEvent(this.eventEmitter, 'work-item.duplicated');
     const archived$ = fromEvent(this.eventEmitter, 'work-item.archived');
     const restored$ = fromEvent(this.eventEmitter, 'work-item.restored');
@@ -118,7 +114,6 @@ export class CoreController {
       priorityChanged$,
       titleChanged$,
       contentChanged$,
-      cycleChanged$,
       duplicated$,
       archived$,
       restored$,

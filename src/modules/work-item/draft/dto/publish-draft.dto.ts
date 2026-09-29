@@ -17,11 +17,6 @@ export class PublishDraftDto {
   @IsString()
   columnId?: string;
 
-  @ApiPropertyOptional({ description: 'Override cycle ID upon publishing' })
-  @IsOptional()
-  @IsString()
-  cycleId?: string;
-
   @ApiPropertyOptional({ description: 'Override title upon publishing' })
   @IsOptional()
   @IsString()

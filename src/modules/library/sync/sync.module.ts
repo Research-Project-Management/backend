@@ -112,5 +112,5 @@ export class SyncModule implements OnModuleInit {
   }
 }
 
-export * from '../shared-kernel/presentation/dtos/sync-query.dto';
+export * from './dto/sync-query.dto';
 export { SyncController };

@@ -5,7 +5,7 @@ import { CitationFacade, CITATION_FACADE } from './citation.facade';
 
 // Presentation
 import { CitationController } from './citation.controller';
-import { ExportsController } from './exports.controller';
+import { ExportController, ExportsController } from './exports.controller';
 
 import { CitationService } from './core/use-cases/citation.service';
 import { DoiContentNegotiationService } from './core/adapters/doi-content-negotiation.service';
@@ -37,7 +37,7 @@ import { InProcessCatalogGatewayAdapter } from './core/adapters/in-process-catal
  */
 @Module({
   imports: [CoreModule, CatalogModule],
-  controllers: [CitationController, ExportsController],
+  controllers: [CitationController, ExportController],
   providers: [
     CitationFacade,
     {

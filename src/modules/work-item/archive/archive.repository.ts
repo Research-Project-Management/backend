@@ -3,10 +3,7 @@ import { PrismaService } from '@/core/database/prisma.service';
 
 import { isUuid } from '@/core/utils/uuid.util';
 import { Prisma } from '@prisma/client';
-import {
-  USER_MINIMAL_SELECT,
-  CYCLE_SELECT,
-} from '../core/types/work-item.types';
+import { USER_MINIMAL_SELECT } from '../core/types/work-item.types';
 
 @Injectable()
 export class ArchiveRepository {
@@ -44,7 +41,6 @@ export class ArchiveRepository {
           },
         },
         assignee: { select: USER_MINIMAL_SELECT },
-        cycle: { select: CYCLE_SELECT },
       },
     });
   }
@@ -147,7 +143,6 @@ export class ArchiveRepository {
         where,
         include: {
           assignee: { select: USER_MINIMAL_SELECT },
-          cycle: { select: CYCLE_SELECT },
           project: {
             select: { id: true, identifier: true },
           },

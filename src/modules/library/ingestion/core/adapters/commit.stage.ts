@@ -5,7 +5,7 @@ import {
 } from '../ports/catalog-gateway.port';
 import { ItemMetadata } from '../domain/metadata.types';
 import { CreateItemData } from '../../../shared-kernel/types/bibliographic.types';
-import { LibraryItemSource } from '../../../shared-kernel/outbox/outbox.events';
+import { LibraryItemSource } from '../../../sync';
 import {
   splitAuthorString,
   cleanAbstractText,

@@ -69,9 +69,7 @@ export class AnalyticsRepository {
         },
       }),
       Promise.resolve(0),
-      this.prisma.cycle.count({
-        where: { projectId: canonicalProjectId, deletedAt: null },
-      }),
+      Promise.resolve(0),
       this.prisma.item.count({
         where: { projectId: canonicalProjectId, deletedAt: null },
       }),
@@ -187,17 +185,10 @@ export class AnalyticsRepository {
     }));
   }
 
-  async findCycleWorkItems(cycleId: string) {
-    if (!isUUID(cycleId)) return [];
-    return this.prisma.workItem.findMany({
-      where: { cycleId },
-      select: {
-        id: true,
-        columnId: true,
-        completed: true,
-        priority: true,
-      },
-    });
+  async findCycleWorkItems(
+    _cycleId: string,
+  ): Promise<Array<{ id: string; completed: boolean }>> {
+    return [];
   }
 
   /** Label distribution: count work items per label string in a project */
@@ -232,25 +223,18 @@ export class AnalyticsRepository {
   }
 
   /** Cycle burndown: work items with dates for daily completion tracking */
-  async findCycleWorkItemsWithDates(cycleId: string) {
-    if (!isUUID(cycleId)) return [];
-    return this.prisma.workItem.findMany({
-      where: { cycleId, deletedAt: null },
-      select: {
-        id: true,
-        completed: true,
-        updatedAt: true,
-        createdAt: true,
-      },
-    });
+  async findCycleWorkItemsWithDates(
+    _cycleId: string,
+  ): Promise<Array<{ id: string; updatedAt: Date; completed: boolean }>> {
+    return [];
   }
 
   /** Cycle start and end dates for burndown axis */
-  async findCycleById(cycleId: string) {
-    if (!isUUID(cycleId)) return null;
-    return this.prisma.cycle.findUnique({
-      where: { id: cycleId },
-      select: { id: true, startDate: true, endDate: true, name: true },
-    });
+  async findCycleById(_cycleId: string): Promise<{
+    id: string;
+    startDate: Date | null;
+    endDate: Date | null;
+  } | null> {
+    return null;
   }
 }

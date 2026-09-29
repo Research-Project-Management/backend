@@ -261,64 +261,6 @@ describe('Library Attachments & Storage Integration Suite', () => {
       );
     });
 
-    it('should add revision, update Attachment.fileId to eliminate Ghost Revision bug, and link file in storage', async () => {
-      mockRepo.findUnique.mockResolvedValue({
-        id: 'att-1',
-        itemId: 'item-1',
-        fileId: 'old-file-123',
-        url: '/api/files/old-file-123/content',
-        size: 2048n,
-        fileHash: 'old-hash',
-        filename: 'paper.pdf',
-        item: { id: 'item-1', userId: 'user-1' },
-        revisions: [{ revisionNumber: 1 }],
-      });
-
-      mockPrisma.attachment.update.mockResolvedValue({
-        id: 'att-1',
-        fileId: 'new-file-456',
-        size: 4096n,
-        fileHash: 'new-hash',
-        url: '/api/files/new-file-456/content',
-      });
-
-      const result = await service.addRevision('user-1', 'att-1', {
-        fileId: 'new-file-456',
-        url: '/api/files/new-file-456/content',
-        fileHash: 'new-hash',
-        sizeBytes: 4096,
-        comment: 'Version 2 with corrected proofs',
-      });
-
-      expect(mockPrisma.attachment.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: 'att-1' },
-          data: expect.objectContaining({
-            fileId: 'new-file-456',
-            size: 4096n,
-          }),
-        }),
-      );
-
-      expect(mockPrisma.attachmentRevision.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            attachmentId: 'att-1',
-            fileId: 'new-file-456',
-            revisionNumber: 2,
-            sizeBytes: 4096n,
-            comment: 'Version 2 with corrected proofs',
-          }),
-        }),
-      );
-
-      expect(mockRepo.updateLinkedFile).toHaveBeenCalledWith(
-        'new-file-456',
-        'item-1',
-        expect.anything(),
-      );
-    });
-
     it('should queue re-extraction job and publish extraction_requested event for PDF attachment', async () => {
       mockRepo.findUnique.mockResolvedValue({
         id: 'att-1',

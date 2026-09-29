@@ -63,7 +63,7 @@ const toValidProjectId = (val?: string): string | undefined =>
   'api/v1/projects/:projectId/library/items',
 ])
 @UseGuards(JwtAuthGuard, ProjectRoleGuard)
-export class ItemsController {
+export class ItemController {
   constructor(
     private readonly createItemUseCase: CreateItemUseCase,
     private readonly updateItemUseCase: UpdateItemUseCase,
@@ -648,3 +648,6 @@ export class ItemsController {
     return { success: true, data: item, item };
   }
 }
+
+export const ItemsController = ItemController;
+export type ItemsController = ItemController;

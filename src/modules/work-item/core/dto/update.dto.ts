@@ -72,11 +72,6 @@ export class UpdateWorkItemDto {
   @IsOptional()
   rank?: number;
 
-  @ApiPropertyOptional({ description: 'Cycle / Sprint UUID' })
-  @IsString()
-  @IsOptional()
-  cycleId?: string | null;
-
   @ApiPropertyOptional({
     description: 'Parent work item ID for hierarchical decomposition',
   })

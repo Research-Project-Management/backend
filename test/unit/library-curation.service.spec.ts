@@ -7,7 +7,7 @@ import { PrismaService } from '@/core/database/prisma.service';
 import {
   TransactionService,
   TransactionHelpers,
-} from '@/modules/library/shared-kernel/outbox/transaction.service';
+} from '@/modules/library/sync/core/adapters/transaction.service';
 import {
   CATALOG_GATEWAY_PORT,
   ICatalogGatewayPort,
